@@ -4,6 +4,32 @@
 
 ## Session Log
 
+### Session 10 (2026-05-03)
+- **Done**: Overview 视图升级——LLM 自动 topic label + zoom-based LoD（"缩略不再糊"）
+  - 用户痛点：全局 canvas 下卡片 zoom 0.3 时是糊像素，只能靠 Outline 索引。诊断为认知层级错配——overview 需要"索引页"不是"缩印版书"
+  - 方向 1：自动 topic label
+    - migration: `nodes` 加 `topic_label TEXT`（idempotent ALTER）
+    - 新增 `lib/llm/topic.ts:generateTopicLabel`：spawn 短 haiku（`--tools "" --no-session-persistence` + 专用 system prompt + cwd tmpdir），8s timeout，cleanup 引号/句号 + 14 字截断
+    - `app/api/chat/route.ts`：stream 自然结束 + finalize 后，若 `done && provider !== mock && aggregated.trim()`，await 一次 `generateTopicLabel(question, aggregated.slice(0,800))`，写 DB 并 SSE `{type:"topic_label",nodeId,label}`，再 close stream（同一个 SSE 连接持有 ≤8s）
+    - `repo.ts`：`setNodeTopicLabel`，SELECT 全加 `topic_label`，`ApiNode.topicLabel` + `rowToNode`
+    - `lib/types.ts`：`ChatNode.topicLabel: string | null`
+    - `stores/sessionStore.ts`：handleStreamEvent 加 `topic_label` 分支，patch 已 done 节点的 label
+  - 方向 2：LoD（zoom < 0.9 → 极简卡片）
+    - `components/ChatNode.tsx`：`useStore(s => s.transform[2] < 0.9)` 拿布尔（selector 浅比较，跨 threshold 才 re-render）
+    - 新增 `showCompact = isCompact && !isStreaming && !isError` 分支：26px 大字 label + 状态绿点 + token 数 + 可选 anchor mini badge；保留 600px 宽边框/active ring；click 整个卡片 → goFullScreen
+    - 全模式 layout 不变（zoom ≥ 0.9 时回到完整 ReactMarkdown）
+    - streaming / error 节点强制 full（用户需要看进度 / retry 按钮）
+  - 顺手改：`components/Outline.tsx` + `components/NodeTreeOverlay.tsx` 优先用 `topicLabel ?? truncate(question, N)`
+  - 验证：build 通过；topic.ts 用法跟之前 cli 实测过的 flag 一致
+- **Caveats**:
+  - **mock 跳过 label**：UI fallback 到 question 前 14 字
+  - **label 在 done 后才有，stream 多挂 ≤8s 不 close**：客户端 `streaming` 状态在 done 事件后已切换；topic_label 到达悄悄 patch，不显示流式光标。流式 UX 不受影响
+  - **历史节点没 label**：DB 列默认 NULL，UI 走 fallback。未主动回填
+  - **lean 模式也调 haiku 生成 label**：lean 初衷是省钱，但 label ~20 token 输出 + cache 命中后极便宜。先不加开关
+  - **dagre 不针对 LoD 重排**：~~compact 卡片矮（~80px）但占位仍按之前 dagre 估算的 480px——节点间有空隙，反而助于扫读，故保留~~ **已修复（用户反馈"太稀疏"）**：`lib/layout.ts:layoutNodes` 加 `compact` 参数 (280×90 + 36/24 sep)；导出 `COMPACT_ZOOM_THRESHOLD`；Canvas 用 `useFlowStore` 监听 zoom 跨阈值，写入 layoutKey 触发 dagre 重排；ChatNode compact 卡片宽 280px，字号 18px。zoom 跨阈值瞬间整棵树自动 reflow，fit-view 自然给出更高 zoom。
+- **Next**: 用户实测——cli-single/cli-multi 模式下问问题，等几秒看 topic label 出现；缩小 canvas 看是否变成大字 label；zoom > 0.9 看是否切回完整渲染
+
+
 ### Session 9 (2026-05-03)
 - **Done**: 三态 mode toggle + cli-multi 走真多轮 claude session
   - 用户决策：CLI 多轮模式下，整棵 trellis 树共享一个 claude session（树形分支退化为 UI 形态，上下文是平的）。1 个 jsonl 文件 per trellis session，不是 per node

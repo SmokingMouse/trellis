@@ -75,6 +75,12 @@ type State = {
   // pulses to draw the eye. Set by requestScrollToAnchor; consumed and
   // cleared by NodeFullView's ResponseBody.
   pendingScrollAnchor: { nodeId: string; childId: string } | null;
+  // Toasts emitted when a node finishes streaming AND the user is not
+  // currently focused on it (activeNodeId !== that node). Lets the user
+  // know "#7 完成" is ready to read without context-switching mid-flow.
+  // DoneToast component renders these in the bottom-right and auto-clears
+  // each entry after the toast component's timer fires.
+  doneToasts: Array<{ nodeId: string; emittedAt: number }>;
 };
 
 type Actions = {
@@ -126,6 +132,8 @@ type Actions = {
   // sees it on the next render, then flips activeNodeId.
   jumpToParentAtAnchor: (parentId: string, childId: string) => void;
   clearScrollAnchor: () => void;
+  // Remove a single done toast (timer expiry or user dismiss/click).
+  dismissDoneToast: (nodeId: string) => void;
 };
 
 // Module-level so identity survives store updates and is never serialized
@@ -148,6 +156,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   fullScreen: false,
   fetchProgress: {},
   pendingScrollAnchor: null,
+  doneToasts: [],
 
   hydrate: async (sessionId) => {
     set({ provider: loadProvider(), mode: loadMode() });
@@ -513,6 +522,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   clearScrollAnchor: () => set({ pendingScrollAnchor: null }),
 
+  dismissDoneToast: (nodeId) =>
+    set((s) => ({
+      doneToasts: s.doneToasts.filter((t) => t.nodeId !== nodeId),
+    })),
+
   markNodeRead: async (nodeId) => {
     const existing = get().nodes[nodeId];
     if (!existing || existing.readAt) return;
@@ -695,6 +709,19 @@ function handleStreamEvent(
       set((s) => {
         const n = s.nodes[id];
         if (!n) return s;
+        // Toast the user when something finished out of focus. We compare
+        // against the activeNodeId at the moment the done event fires
+        // (rather than at toast-render time) so a fast-scrolling user who
+        // moves on before done still gets a toast for what they kicked
+        // off and walked away from. De-dupe by id in case retry / branch
+        // cycles emit twice.
+        const shouldToast = s.activeNodeId !== id;
+        const nextToasts = shouldToast
+          ? [
+              ...s.doneToasts.filter((t) => t.nodeId !== id),
+              { nodeId: id, emittedAt: Date.now() },
+            ]
+          : s.doneToasts;
         return {
           nodes: {
             ...s.nodes,
@@ -705,6 +732,7 @@ function handleStreamEvent(
               tokenCount: usage,
             },
           },
+          doneToasts: nextToasts,
         };
       });
     } else if (event.type === "error" && currentNodeId) {

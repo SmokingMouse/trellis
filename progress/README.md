@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-节点定位三件套（序号 + 已读未读 + 跳父滚到 mark）落地。等用户实测 outline "X 条未读" / 只看未读 toggle 的体感。
+节点定位完整工具链：序号 + 已读未读 + 跳父滚 mark + J/K 跳未读 + compact dot 视觉分级 + done toast。等用户浏览器实测整套体感。
 
 ## Goals
 ### Short-term (MVP)
@@ -16,6 +16,7 @@
   - [x] 父节点高亮回显（parentAnchor badge，`ChatNode.tsx:70`、`NodeFullView.tsx:130`）
   - [x] 节点序号 + 已读未读（`lib/node-index.ts`、`read_at` 列、`/api/nodes/[id]/read`、Outline 顶部计数 + 只看未读）
   - [x] 跳回父节点滚到 mark + pulse（`pendingScrollAnchor` store state、`.anchor-pulse` 动画）
+  - [x] 进阶定位三件：J/K 跳未读（`hooks/useUnreadNavigation.ts`）+ compact dot 颜色编码已读未读 + done toast（`components/DoneToast.tsx`）
   - [ ] Dagre 布局微调（实测后再判断是否真有痛点）
 - [x] Stage 7 P0: 移动端全屏卡片 + 顶栏 + 分支条
 - [x] Stage 8: 三层视图统一 — Layer 1 图 / Layer 2 聚焦 / Layer 3 全屏；桌面手机共享全屏组件
@@ -29,6 +30,30 @@
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 15 (2026-05-05)
+- **Done**: 节点定位进阶三件 — J/K 跳未读、compact 状态圆点视觉分级、流完成 toast
+  - **进阶 1 — J/K 跳未读**：`hooks/useUnreadNavigation.ts` 新建。全局 keydown 监听 J / K（vim/Gmail 惯例：J 下一未读、K 上一未读），过滤 input/textarea/contentEditable focus + 修饰键。算法：按 createdAt 排序所有节点，从当前 active 起步走 ±i 步（含 wrap-around），返回首个 status==="done" && !readAt 的节点。在 page.tsx 顶层挂载 `useUnreadNavigation()`，canvas 和 fullscreen 都生效。Canvas 已有 auto-pan-to-active effect（line 109-120），J/K 切完会自动滚到节点。
+  - **进阶 2 — Canvas compact 状态圆点视觉分级**：原状态圆点逻辑 `done → emerald, else → stone`。新逻辑：未读 done = amber-500，已读 done = emerald-500，非 done = stone。zoom out 时未读节点 amber dot 在画布上扎堆易扫，已读 emerald 退到背景。配套移除 compact 模式下序号旁的 amber 蓝点（与状态圆点重复，三点距离过近视觉嘈杂）。Full 模式下序号旁的 dot 保留（无状态圆点）。
+  - **进阶 3 — done toast**：当节点流完成时若 `activeNodeId !== currentNodeId` push toast。
+    - store: 加 `doneToasts: { nodeId; emittedAt }[]` state + `dismissDoneToast(nodeId)` action。`handleStreamEvent` done 分支判断 `s.activeNodeId !== id` 才 push（同一节点重 toast 时 dedupe by id —— retry/branch 周期可能 emit 两次）。
+    - `components/DoneToast.tsx` 新建：fixed bottom-right，每个 toast 有 emerald 圆点 + #N + "已完成" + 节点 topicLabel/question 前缀 + × 关闭。点击主体 → `setActiveNode + setFullScreen(true) + dismiss`（NodeFullView 的 1s mark-read effect 自动接管）。每个 toast 6s auto-dismiss（参考 macOS notification / Material 4-10s 区间，留够时间让用户决定是否打断当前流）。
+    - 在 page.tsx 挂 `<DoneToast />`，全局可见。
+    - 不 toast reference 抓取：reference SSE done 路径走另一个分支（`handleRefStreamEvent`），且 createReference 触发时 server 已经把 activeNodeId 设到新节点 → 用户主动建的，不需要打扰。
+  - 验证：build ✓ 1 次（一次过，所有 TypeScript 类型对齐）。
+- **Decisions**:
+  - **J/K 不切 fullScreen**：保留用户当前 layer。canvas mode 下 J/K = 在画布内导航；fullScreen mode 下 J/K = 翻读未读队列。两种工作流都自然。如果想强制读，按 J 后再点全屏按钮 / 双击节点。
+  - **compact dot 替代而非新增**：原本想"加个未读小点"在状态圆点旁，但发现与序号旁的 amber dot 视觉重复（三点扎堆）。改为状态圆点本身做 unread/read 编码，移除冗余的序号 dot（只在 compact 移除）。
+  - **toast 点击进 fullScreen**：用户从 toast 跳过去多半是要读，全屏直接读最顺。canvas mode 下保持的人不会用 toast 跳（他们能直接看到画布上节点 streaming）。
+  - **toast 6s 而非 3-4s**：常见的"问完一个问题、branch 出去、读别的"流程里，6s 给用户足够时间判断"现在打断 vs 读完手头的"。Material 上限 10s，macOS 通知 5-10s 都比 4s 接近，6s 是中间值。
+  - **不 toast reference 抓取完成**：用户主动添加的 reference 在 SSE created 事件里就把 activeNodeId 设到新节点了，已经自带"导航过去"语义。再 toast 是冗余打扰。
+- **Caveats**:
+  - **toast 不 markRead**：6s 自动消失只是去掉提示，节点仍然 unread。点击进 fullScreen 才会触发 1s mark-read。这是有意：toast 闪过去 ≠ 用户读了。
+  - **toast 没 i18n**：固定中文 "已完成"。和项目其它 UI 一致。
+  - **多个 toast 堆叠**：上限没设。如果用户开 10 个分支同时跑，会出现 10 个 toast。视觉上挤但不会 overflow（max-w-sm + flex-col + 自动 6s 退场）。极端场景再加 maxItems=5 截断。
+  - **K 在 cli-multi confirm dialog 期间**：不冲突——dialog 是 window.confirm，原生模态会接管键盘。但若以后改成自定义 dialog 要重新审视。
+  - **J/K 不区分 reference/qa**：参考卡片也算"未读" → 也会被 J/K 跳到。这正确——用户加的 reference 也是要消化的内容。
+- **Next**: 用户实测三件 — 按 J/K 看跳转流畅度（特别是 wrap-around 时是否突兀）、缩远 canvas 看 unread amber dot 是否真的"跳出来"、跑长 prompt 然后切去看别的卡看 toast 是否在恰好时机出现。
+
 ### Session 14 (2026-05-05)
 - **Done**: 节点定位三件套 — 序号 + 已读未读 + 跳父滚到 mark
   - **Phase A — 节点序号**：`lib/node-index.ts` 新增 `buildNodeIndex(nodes)` helper，session 内按 `createdAt` 升序产出 1-based map。Canvas flowNodes useMemo 里把 index 算好放进 ChatNode/ReferenceCard 的 data；Outline 和 NodeFullView SubBar 各自调一次 useMemo。展示位置：ChatNode 头部"你"圆点旁、ReferenceCard 标题前、Outline 行首、SubBar 面包屑里。统一 mono + stone-400 弱化色，不抢主体。
@@ -241,31 +266,7 @@
   - `controller.close()` try/catch 是防御性的——Next.js App Router 下 client abort 时 ReadableStream controller 可能已 closed。如果实测发现 server 端日志有 unhandled，再追。
 - **Next**: 浏览器验证 spec 用例（Enter 不发 / Cmd+Enter 发 / Shift+Enter 换行 / 流式 ⏹ 中止 / Esc 中止 / partial 保留 / 重发 / 并发 streaming Esc 只中 active）。验证通过后开 Stage 12。
 
-### Session 10 (2026-05-03)
-- **Done**: Overview 视图升级——LLM 自动 topic label + zoom-based LoD（"缩略不再糊"）
-  - 用户痛点：全局 canvas 下卡片 zoom 0.3 时是糊像素，只能靠 Outline 索引。诊断为认知层级错配——overview 需要"索引页"不是"缩印版书"
-  - 方向 1：自动 topic label
-    - migration: `nodes` 加 `topic_label TEXT`（idempotent ALTER）
-    - 新增 `lib/llm/topic.ts:generateTopicLabel`：spawn 短 haiku（`--tools "" --no-session-persistence` + 专用 system prompt + cwd tmpdir），8s timeout，cleanup 引号/句号 + 14 字截断
-    - `app/api/chat/route.ts`：stream 自然结束 + finalize 后，若 `done && provider !== mock && aggregated.trim()`，await 一次 `generateTopicLabel(question, aggregated.slice(0,800))`，写 DB 并 SSE `{type:"topic_label",nodeId,label}`，再 close stream（同一个 SSE 连接持有 ≤8s）
-    - `repo.ts`：`setNodeTopicLabel`，SELECT 全加 `topic_label`，`ApiNode.topicLabel` + `rowToNode`
-    - `lib/types.ts`：`ChatNode.topicLabel: string | null`
-    - `stores/sessionStore.ts`：handleStreamEvent 加 `topic_label` 分支，patch 已 done 节点的 label
-  - 方向 2：LoD（zoom < 0.9 → 极简卡片）
-    - `components/ChatNode.tsx`：`useStore(s => s.transform[2] < 0.9)` 拿布尔（selector 浅比较，跨 threshold 才 re-render）
-    - 新增 `showCompact = isCompact && !isStreaming && !isError` 分支：26px 大字 label + 状态绿点 + token 数 + 可选 anchor mini badge；保留 600px 宽边框/active ring；click 整个卡片 → goFullScreen
-    - 全模式 layout 不变（zoom ≥ 0.9 时回到完整 ReactMarkdown）
-    - streaming / error 节点强制 full（用户需要看进度 / retry 按钮）
-  - 顺手改：`components/Outline.tsx` + `components/NodeTreeOverlay.tsx` 优先用 `topicLabel ?? truncate(question, N)`
-  - 验证：build 通过；topic.ts 用法跟之前 cli 实测过的 flag 一致
-- **Caveats**:
-  - **mock 跳过 label**：UI fallback 到 question 前 14 字
-  - **label 在 done 后才有，stream 多挂 ≤8s 不 close**：客户端 `streaming` 状态在 done 事件后已切换；topic_label 到达悄悄 patch，不显示流式光标。流式 UX 不受影响
-  - **历史节点没 label**：DB 列默认 NULL，UI 走 fallback。未主动回填
-  - **lean 模式也调 haiku 生成 label**：lean 初衷是省钱，但 label ~20 token 输出 + cache 命中后极便宜。先不加开关
-  - **dagre 不针对 LoD 重排**：~~compact 卡片矮（~80px）但占位仍按之前 dagre 估算的 480px——节点间有空隙，反而助于扫读，故保留~~ **已修复（用户反馈"太稀疏"）**：`lib/layout.ts:layoutNodes` 加 `compact` 参数 (280×90 + 36/24 sep)；导出 `COMPACT_ZOOM_THRESHOLD`；Canvas 用 `useFlowStore` 监听 zoom 跨阈值，写入 layoutKey 触发 dagre 重排；ChatNode compact 卡片宽 280px，字号 18px。zoom 跨阈值瞬间整棵树自动 reflow，fit-view 自然给出更高 zoom。
-- **Next**: 用户实测——cli-single/cli-multi 模式下问问题，等几秒看 topic label 出现；缩小 canvas 看是否变成大字 label；zoom > 0.9 看是否切回完整渲染
 
 
 
-（Session 1–9 已归档，见 `archive.md`）
+（Session 1–10 已归档，见 `archive.md`）

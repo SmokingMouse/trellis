@@ -114,20 +114,24 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         <div className="px-4 py-3 flex items-center gap-2.5">
           <span
             className={`shrink-0 w-2.5 h-2.5 rounded-full ${
-              n.status === "done" ? "bg-emerald-500" : "bg-stone-300 dark:bg-stone-600"
+              n.status !== "done"
+                ? "bg-stone-300 dark:bg-stone-600"
+                : isUnread
+                  ? "bg-amber-500"
+                  : "bg-emerald-500"
             }`}
             aria-hidden
+            title={
+              n.status === "done"
+                ? isUnread
+                  ? "未读"
+                  : "已读"
+                : undefined
+            }
           />
           {indexLabel && (
-            <span className="shrink-0 text-[11px] font-mono text-stone-400 dark:text-stone-500 tabular-nums flex items-center gap-1">
+            <span className="shrink-0 text-[11px] font-mono text-stone-400 dark:text-stone-500 tabular-nums">
               {indexLabel}
-              {isUnread && (
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-amber-500"
-                  aria-label="未读"
-                  title="未读"
-                />
-              )}
             </span>
           )}
           <div className="flex-1 min-w-0">
