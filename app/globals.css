@@ -1,26 +1,256 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+@import "highlight.js/styles/github.css" layer(hljs-light);
+@import "highlight.js/styles/github-dark.css" layer(hljs-dark);
+
+/* Tailwind v4: enable class-based dark variant.
+   <html class="dark"> activates `dark:` utilities. ThemeScript in
+   layout.tsx sets it before paint to avoid FOUC. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Highlight.js: github.css and github-dark.css both target `.hljs`
+   wrapped in pre/code. Layer them so the dark variant can override. */
+@layer hljs-light, hljs-dark;
+:where(.dark) .hljs { /* re-export dark layer rules unconditionally */ }
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafaf9;
+  --foreground: #1c1917;
+}
+.dark {
+  --background: #0c0a09;
+  --foreground: #e7e5e4;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
+html, body {
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Helvetica Neue", "Segoe UI", sans-serif;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Prevent iOS rubber-banding on body */
+  overscroll-behavior: none;
 }
+
+/* React Flow tweaks: lighter grid + softer edges */
+.react-flow__background {
+  background: #fafaf9;
+}
+.dark .react-flow__background {
+  background: #0c0a09;
+}
+.react-flow__edge-path {
+  stroke: #a8a29e;
+  stroke-width: 2;
+}
+.dark .react-flow__edge-path {
+  stroke: #57534e;
+}
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* React Flow's controls in dark mode (zoom +/-, fit, etc) */
+.dark .react-flow__controls {
+  background: #1c1917;
+  border-color: #292524;
+}
+.dark .react-flow__controls-button {
+  background: #1c1917;
+  border-bottom-color: #292524;
+  color: #e7e5e4;
+}
+.dark .react-flow__controls-button:hover {
+  background: #292524;
+}
+.dark .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+/* React Flow disables text selection on nodes by default (to keep dragging smooth).
+   Re-enable it inside the response container so users can select text to branch. */
+[data-chat-node-id],
+[data-chat-node-id] * {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  user-select: text !important;
+  cursor: text;
+}
+[data-chat-node-id] pre,
+[data-chat-node-id] code {
+  cursor: text;
+}
+
+/* Markdown body inside chat nodes */
+.md-body p { margin: 0.55em 0; line-height: 1.7; }
+.md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; }
+.md-body li { margin: 0.25em 0; }
+.md-body strong { color: #1c1917; font-weight: 600; }
+.dark .md-body strong { color: #f5f5f4; }
+.md-body code:not(pre code) {
+  background: #f5f5f4;
+  color: #be185d;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: "JetBrains Mono", "Menlo", monospace;
+}
+.dark .md-body code:not(pre code) {
+  background: #292524;
+  color: #f9a8d4;
+}
+.md-body pre {
+  background: #1c1917 !important;
+  color: #e7e5e4;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.7em 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.dark .md-body pre {
+  background: #0c0a09 !important;
+  border: 1px solid #292524;
+}
+.md-body pre code {
+  background: transparent !important;
+  color: inherit;
+  padding: 0;
+  font-family: "JetBrains Mono", "Menlo", monospace;
+}
+.md-body h1, .md-body h2, .md-body h3 {
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  color: #1c1917;
+}
+.dark .md-body h1, .dark .md-body h2, .dark .md-body h3 {
+  color: #f5f5f4;
+}
+.md-body h1 { font-size: 1.2em; }
+.md-body h2 { font-size: 1.1em; }
+.md-body h3 { font-size: 1.0em; }
+.md-body mark[data-child-id] { cursor: pointer; transition: background-color 120ms; }
+.md-body mark[data-child-id]:hover { background-color: #fde68a; }
+.md-body mark {
+  background: #fde68a;
+  color: inherit;
+  padding: 1px 3px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #fbbf24;
+}
+.dark .md-body mark {
+  background: #78350f;
+  color: #fef3c7;
+  box-shadow: 0 0 0 1px #b45309;
+}
+.dark .md-body mark[data-child-id]:hover { background-color: #92400e; }
+
+/* Tables — wrapped in a horizontally-scrollable div by MD_COMPONENTS so
+   wide tables (5+ cols, common in feishu wiki dumps) don't bust out of
+   the 600px canvas card. The wrapper carries the visual frame; the
+   table inside is borderless (cells have their own borders). */
+.md-body .md-table-wrap {
+  overflow-x: auto;
+  margin: 0.85em 0;
+  border: 1px solid #e7e5e4;
+  border-radius: 6px;
+  background: #fff;
+  /* tasteful subtle scrollbar */
+  scrollbar-width: thin;
+}
+.dark .md-body .md-table-wrap {
+  background: #1c1917;
+  border-color: #292524;
+}
+.md-body .md-table-wrap::-webkit-scrollbar { height: 8px; }
+.md-body .md-table-wrap::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 4px;
+}
+.dark .md-body .md-table-wrap::-webkit-scrollbar-thumb {
+  background: #44403c;
+}
+.md-body table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.55;
+  width: max-content;
+  min-width: 100%;
+}
+.md-body th, .md-body td {
+  padding: 7px 11px;
+  border-bottom: 1px solid #e7e5e4;
+  border-right: 1px solid #f1ede8;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+  max-width: 360px;
+}
+.dark .md-body th, .dark .md-body td {
+  border-bottom-color: #292524;
+  border-right-color: #292524;
+}
+.md-body th:last-child, .md-body td:last-child { border-right: none; }
+.md-body tr:last-child td { border-bottom: none; }
+.md-body thead th {
+  background: #f5f5f4;
+  font-weight: 600;
+  color: #1c1917;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.dark .md-body thead th {
+  background: #292524;
+  color: #f5f5f4;
+}
+.md-body tbody tr:nth-child(even) td {
+  background: #fafaf9;
+}
+.dark .md-body tbody tr:nth-child(even) td {
+  background: #1c1917;
+}
+
+/* Blockquote */
+.md-body blockquote {
+  border-left: 3px solid #d6d3d1;
+  background: #fafaf9;
+  margin: 0.7em 0;
+  padding: 0.4em 0.9em;
+  color: #57534e;
+}
+.dark .md-body blockquote {
+  border-left-color: #44403c;
+  background: #1c1917;
+  color: #a8a29e;
+}
+.md-body blockquote p { margin: 0.3em 0; }
+
+/* Horizontal rule */
+.md-body hr {
+  border: 0;
+  border-top: 1px solid #e7e5e4;
+  margin: 1.2em 0;
+}
+.dark .md-body hr {
+  border-top-color: #292524;
+}
+
+.streaming-cursor::after {
+  content: "▋";
+  color: #6366f1;
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+}
+.dark .streaming-cursor::after {
+  color: #818cf8;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

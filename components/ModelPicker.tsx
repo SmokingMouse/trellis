@@ -1,0 +1,68 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { useSessionStore } from "@/stores/sessionStore";
+import { PROVIDERS, type ProviderId } from "@/lib/llm";
+
+export function ModelPicker() {
+  const provider = useSessionStore((s) => s.provider);
+  const setProvider = useSessionStore((s) => s.setProvider);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const current = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="px-2.5 py-1 text-xs rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 flex items-center gap-1.5 hover:bg-stone-800 dark:hover:bg-stone-300"
+      >
+        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+        {current.shortLabel}
+        <span className="text-stone-400 dark:text-stone-500">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1.5 w-56 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg shadow-xl overflow-hidden text-sm">
+          {PROVIDERS.map((p) => {
+            const active = p.id === provider;
+            return (
+              <button
+                key={p.id}
+                onClick={() => {
+                  setProvider(p.id as ProviderId);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 flex items-start gap-2 ${
+                  active ? "bg-stone-50 dark:bg-stone-800/60" : ""
+                }`}
+              >
+                <span
+                  className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                    active ? "bg-emerald-500" : "bg-stone-300 dark:bg-stone-600"
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-stone-900 dark:text-stone-100 text-[13px]">{p.label}</div>
+                  {p.note && (
+                    <div className="text-[11px] text-stone-400 dark:text-stone-500 mt-0.5">
+                      {p.note}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

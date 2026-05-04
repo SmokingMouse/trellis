@@ -1,0 +1,406 @@
+"use client";
+import { memo, useMemo, useRef, useState, useEffect } from "react";
+import {
+  Handle,
+  Position,
+  useStore,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeHighlight from "rehype-highlight";
+import { useSessionStore } from "@/stores/sessionStore";
+import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
+import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
+import { MD_COMPONENTS } from "@/lib/md-components";
+import type { ChatNode as ChatNodeData } from "@/lib/types";
+
+// Plugin arrays at module scope so identity is stable across renders.
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
+
+export type ChildAnchor = { text: string; childId: string };
+
+export type ChatFlowNode = Node<
+  {
+    node: ChatNodeData;
+    isActive: boolean;
+    childAnchors: ChildAnchor[];
+  },
+  "chat"
+>;
+
+function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
+  const n = data.node;
+  const isStreaming = n.status === "streaming";
+  const isError = n.status === "error";
+  const isActive = data.isActive;
+  // ReactFlow viewport zoom: transform = [x, y, zoom]. Selector returns a
+  // boolean so re-renders only fire when crossing the threshold.
+  const isCompact = useStore((s) => s.transform[2] < COMPACT_ZOOM_THRESHOLD);
+
+  const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const retryNode = useSessionStore((s) => s.retryNode);
+  const onMarkClick = (e: React.MouseEvent) => {
+    const target = (e.target as HTMLElement).closest("[data-child-id]");
+    if (!target) return;
+    const childId = target.getAttribute("data-child-id");
+    if (!childId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+    // ReactFlow's onNodeClick fires on the same click and would override
+    // activeNodeId to the parent's id. Defer to win the race.
+    window.setTimeout(() => setActiveNode(childId), 0);
+  };
+  const goFullScreen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveNode(n.id);
+    setFullScreen(true);
+  };
+  const responseWithMarks = useMemo(
+    () => injectHighlights(n.response, data.childAnchors),
+    [n.response, data.childAnchors],
+  );
+
+  // While streaming, deltas land on the stream-bus (not in React state).
+  // We attach a textContent-only sink to a <pre> ref so each token is one
+  // tiny DOM mutation, no React render, no ReactFlow diff. When the stream
+  // finishes, sessionStore commits the full text and React re-renders this
+  // node once with the full ReactMarkdown pipeline.
+  const streamRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isStreaming) return;
+    const el = streamRef.current;
+    if (!el) return;
+    el.textContent = n.response + getStreamPending(n.id);
+    return subscribeStream(n.id, (delta) => {
+      el.textContent = (el.textContent ?? "") + delta;
+    });
+    // n.response intentionally excluded from deps: it doesn't change while
+    // streaming (deltas bypass the store), and re-running this effect on
+    // every render would clobber the DOM-direct text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming, n.id]);
+
+  const labelText = n.topicLabel ?? truncate(n.question, 14);
+  // Compact mode: streaming / error nodes always render full so user can see
+  // progress and act. Done nodes at low zoom collapse to a topic card.
+  const showCompact = isCompact && !isStreaming && !isError;
+
+  if (showCompact) {
+    return (
+      <div
+        className={`nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
+          isActive
+            ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
+            : "border-stone-200 dark:border-stone-800"
+        }`}
+        onClick={goFullScreen}
+        title={n.question}
+      >
+        <Handle type="target" position={Position.Top} />
+        <div className="px-4 py-3 flex items-center gap-2.5">
+          <span
+            className={`shrink-0 w-2.5 h-2.5 rounded-full ${
+              n.status === "done" ? "bg-emerald-500" : "bg-stone-300 dark:bg-stone-600"
+            }`}
+            aria-hidden
+          />
+          <div className="flex-1 min-w-0">
+            <div className="text-[18px] font-semibold text-stone-900 dark:text-stone-100 leading-tight truncate">
+              {labelText}
+            </div>
+            {n.parentAnchor && (
+              <div className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-400 truncate">
+                ↳ {truncate(n.parentAnchor.selectedText, 22)}
+              </div>
+            )}
+          </div>
+          <div className="shrink-0 text-[10px] text-stone-400 dark:text-stone-500 font-medium tabular-nums">
+            {n.tokenCount.input + n.tokenCount.output}
+          </div>
+        </div>
+        <Handle type="source" position={Position.Bottom} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
+        isStreaming
+          ? "border-indigo-300 dark:border-indigo-700 ring-4 ring-indigo-100 dark:ring-indigo-900/40"
+          : isActive
+            ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
+            : "border-stone-200 dark:border-stone-800"
+      }`}
+    >
+      <Handle type="target" position={Position.Top} />
+
+      {n.parentAnchor && (
+        <div className="px-4 py-2 border-b border-stone-100 dark:border-stone-800 bg-amber-50 dark:bg-amber-950/40 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-1.5 rounded-t-xl">
+          <span className="text-amber-600 dark:text-amber-400">↳</span>
+          <span>
+            从「
+            <span className="font-medium">
+              {truncate(n.parentAnchor.selectedText, 40)}
+            </span>
+            」分叉
+          </span>
+        </div>
+      )}
+
+      <div
+        className={`px-5 py-3 border-b border-stone-100 dark:border-stone-800 flex items-start gap-2.5 ${
+          n.parentAnchor ? "" : "bg-indigo-50/60 dark:bg-indigo-950/30 rounded-t-xl"
+        }`}
+      >
+        <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center mt-0.5 shrink-0 font-medium">
+          你
+        </div>
+        <div className="flex-1 text-[14.5px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium">
+          {n.question}
+        </div>
+        <button
+          onClick={goFullScreen}
+          title="全屏阅读"
+          aria-label="全屏阅读"
+          className="shrink-0 mt-0.5 px-2 h-7 rounded-md bg-white dark:bg-stone-900 border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-95 flex items-center gap-1 text-[11px] font-medium transition-colors shadow-sm"
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+          全屏
+        </button>
+      </div>
+
+      <div
+        data-chat-node-id={n.id}
+        onClick={onMarkClick}
+        className="px-5 py-4 md-body text-[13.5px] text-stone-700 dark:text-stone-300 max-h-[420px] overflow-y-auto nodrag nowheel nopan"
+      >
+        {isStreaming ? (
+          <>
+            <div
+              ref={streamRef}
+              className="whitespace-pre-wrap break-words leading-relaxed"
+            />
+            <span className="streaming-cursor" />
+          </>
+        ) : n.response ? (
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_FULL}
+            components={MD_COMPONENTS}
+          >
+            {responseWithMarks}
+          </ReactMarkdown>
+        ) : (
+          <div className="text-stone-400 dark:text-stone-500 italic flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+            正在生成…
+          </div>
+        )}
+        {isError &&
+          (n.errorMessage === "aborted" ? (
+            <div className="mt-3 p-2 bg-stone-50 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 rounded text-stone-600 dark:text-stone-300 text-xs flex items-start gap-2">
+              <div className="flex-1">已停止生成</div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  retryNode(n.id);
+                }}
+                className="shrink-0 px-2 py-0.5 rounded bg-stone-700 dark:bg-stone-600 text-white text-[11px] hover:bg-stone-900 dark:hover:bg-stone-500 active:scale-95 transition-transform"
+              >
+                ↻ 重新发送
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 p-2 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
+              <div className="flex-1">出错：{n.errorMessage}</div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  retryNode(n.id);
+                }}
+                className="shrink-0 px-2 py-0.5 rounded bg-rose-600 text-white text-[11px] hover:bg-rose-700 active:scale-95 transition-transform"
+              >
+                ↻ 重新生成
+              </button>
+            </div>
+          ))}
+      </div>
+
+      <NodeFooter node={n} isStreaming={isStreaming} />
+
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+}
+
+// React.memo with custom comparison so streaming a single node doesn't
+// re-render every other node on every token. Hot path: handleStreamEvent
+// in sessionStore preserves identity for non-streaming nodes (only the
+// streaming node's object is replaced), so `prev.node === next.node`
+// catches them. childAnchors is rebuilt by the Canvas selector on every
+// nodeMap change but is small per-parent — value-compare it.
+export const ChatNode = memo(ChatNodeImpl, (prev, next) => {
+  if (prev.data.node !== next.data.node) return false;
+  if (prev.data.isActive !== next.data.isActive) return false;
+  const a = prev.data.childAnchors;
+  const b = next.data.childAnchors;
+  if (a !== b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].childId !== b[i].childId || a[i].text !== b[i].text) return false;
+    }
+  }
+  return true;
+});
+
+function NodeFooter({
+  node,
+  isStreaming,
+}: {
+  node: ChatNodeData;
+  isStreaming: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const abortStream = useSessionStore((s) => s.abortStream);
+
+  if (open) {
+    return <FollowupInput node={node} onClose={() => setOpen(false)} />;
+  }
+
+  return (
+    <div className="px-5 py-2 border-t border-stone-100 dark:border-stone-800 flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+      {isStreaming ? (
+        <>
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+          <span>正在生成…</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              abortStream(node.id);
+            }}
+            className="ml-2 px-2 py-0.5 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-95 transition-colors flex items-center gap-1"
+            title="停止生成 (Esc)"
+            aria-label="停止生成"
+          >
+            <span className="inline-block w-2 h-2 bg-current rounded-[1px]" />
+            停止
+          </button>
+        </>
+      ) : (
+        <>
+          <span>{node.tokenCount.input + node.tokenCount.output} tokens</span>
+          <button
+            onClick={() => setOpen(true)}
+            className="ml-2 px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+          >
+            + 追问
+          </button>
+        </>
+      )}
+      <span className="ml-auto text-stone-400 dark:text-stone-500 italic text-[11px]">
+        或选中文字 → ⌘K 提问
+      </span>
+    </div>
+  );
+}
+
+function FollowupInput({
+  node,
+  onClose,
+}: {
+  node: ChatNodeData;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const streamBranch = useSessionStore((s) => s.streamBranch);
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  const submit = async () => {
+    const text = q.trim();
+    if (!text) return;
+    onClose();
+    streamBranch(node.id, text, null);
+  };
+
+  return (
+    <div className="border-t border-stone-100 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-900/60">
+      <textarea
+        ref={ref}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+          }
+        }}
+        placeholder="对整段回复继续追问…（⌘↩ 提交）"
+        rows={2}
+        className="w-full px-5 py-3 outline-none resize-none text-sm bg-transparent text-stone-800 dark:text-stone-200 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+      />
+      <div className="px-3 py-1.5 flex items-center justify-end gap-2 text-xs">
+        <button
+          onClick={onClose}
+          className="px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100"
+        >
+          取消
+        </button>
+        <button
+          onClick={submit}
+          disabled={!q.trim()}
+          className="px-2.5 py-0.5 rounded bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 disabled:opacity-40 hover:bg-stone-800 dark:hover:bg-stone-300"
+        >
+          提问
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function truncate(s: string, n: number) {
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function injectHighlights(
+  md: string,
+  anchors: { text: string; childId: string }[],
+): string {
+  if (anchors.length === 0 || !md) return md;
+  let out = md;
+  const seen = new Set<string>();
+  for (const a of anchors) {
+    if (!a.text || seen.has(a.text)) continue;
+    seen.add(a.text);
+    const escaped = a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(
+      new RegExp(escaped),
+      `<mark data-child-id="${a.childId}">$&</mark>`,
+    );
+  }
+  return out;
+}
