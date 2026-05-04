@@ -252,5 +252,23 @@ html, body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* Anchor pulse: applied on a <mark> when user jumps back to the parent
+   from a child node (badge "↳ 从「xxx」分叉"). Fades a deeper-orange
+   highlight in/out 3 times so the eye latches onto the source sentence. */
+@keyframes anchor-pulse {
+  0%, 100% { background-color: #fde68a; box-shadow: 0 0 0 1px #fbbf24; }
+  50%      { background-color: #fbbf24; box-shadow: 0 0 0 3px #f59e0b; }
+}
+@keyframes anchor-pulse-dark {
+  0%, 100% { background-color: #78350f; box-shadow: 0 0 0 1px #b45309; }
+  50%      { background-color: #b45309; box-shadow: 0 0 0 3px #d97706; }
+}
+.md-body mark.anchor-pulse {
+  animation: anchor-pulse 0.5s ease-in-out 3;
+}
+.dark .md-body mark.anchor-pulse {
+  animation: anchor-pulse-dark 0.5s ease-in-out 3;
+}
+
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

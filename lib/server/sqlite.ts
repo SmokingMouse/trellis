@@ -94,6 +94,18 @@ function migrate(db: Database.Database) {
     if (!has) db.exec(c.sql);
   }
 
+  // Idempotent: per-node read marker. NULL = unread; ms-since-epoch =
+  // timestamp the user first kept the node open long enough to count as
+  // read (1s gate, set client-side, persisted via POST /api/nodes/[id]/read).
+  const hasReadAt = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'read_at'",
+    )
+    .get();
+  if (!hasReadAt) {
+    db.exec("ALTER TABLE nodes ADD COLUMN read_at INTEGER");
+  }
+
   // Reap dangling streams from a previous server crash, exactly once on boot.
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted'

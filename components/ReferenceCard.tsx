@@ -14,6 +14,8 @@ export type RefFlowNode = Node<
   {
     node: ChatNodeData;
     isActive: boolean;
+    // 1-based session-scoped index (createdAt order). 0 if unknown.
+    index: number;
   },
   "reference"
 >;
@@ -22,6 +24,8 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
   const n = data.node;
   const ref = n.reference;
   const isActive = data.isActive;
+  const indexLabel = data.index ? `#${data.index}` : "";
+  const isUnread = n.status === "done" && !n.readAt;
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const refreshReference = useSessionStore((s) => s.refreshReference);
@@ -97,6 +101,18 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 leading-tight truncate">
+            {indexLabel && (
+              <span className="mr-1.5 font-mono text-[11px] text-stone-400 dark:text-stone-500 tabular-nums font-normal inline-flex items-center gap-1 align-middle">
+                {indexLabel}
+                {isUnread && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                    aria-label="未读"
+                    title="未读"
+                  />
+                )}
+              </span>
+            )}
             {labelText}
           </div>
           <div className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400 truncate">

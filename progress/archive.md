@@ -4,6 +4,30 @@
 
 ## Session Log
 
+### Session 9 (2026-05-03)
+- **Done**: 三态 mode toggle + cli-multi 走真多轮 claude session
+  - 用户决策：CLI 多轮模式下，整棵 trellis 树共享一个 claude session（树形分支退化为 UI 形态，上下文是平的）。1 个 jsonl 文件 per trellis session，不是 per node
+  - 实测确认 stdin stream-json 不能"喂历史"——claude 把每条 user 视为新 turn 自己回应，忽略喂入的 assistant 消息。真多轮只能走 `--resume`
+  - 端到端 resume 实测：第一轮无 session-id → claude 自生 `af8573db-...` → 写到 `~/.claude/projects/-Users-smokingmouse/<id>.jsonl` → 第二轮 `--resume` 正确答出之前提到的"绿色"，cache_read 45769 tokens
+  - 改动：
+    - `lib/server/sqlite.ts`：idempotent ALTER TABLE sessions ADD COLUMN claude_session_id
+    - `lib/server/repo.ts`：`getSessionClaudeId` / `setSessionClaudeId`，`deleteSession` 取 claude_session_id 后 `unlinkSync(claudeSessionPath(...))`；路径 `os.homedir().replace(/\//g,"-")`
+    - `lib/llm/types.ts`：`Mode = "lean" | "cli-single" | "cli-multi"`，`StreamRequest` 加 `claudeSessionId`，`StreamEvent` 加 `session_init`
+    - `lib/llm/server.ts`：`getProvider(id, { mode })` 替代 cliMode
+    - `lib/llm/claude.ts`：三模式分支，cli-multi 用 `buildCliMultiPrompt`（仅当前 question + 可选 anchor preface）+ 移除 `--no-session-persistence` + 可选 `--resume`；parser 加 `system/init` 解析 yield `session_init`
+    - `app/api/chat/route.ts`：保留 trellis sessionId；cli-multi 时 `history = []`；监听 `session_init` 首次绑定 `setSessionClaudeId`
+    - `stores/sessionStore.ts`：cliMode → mode；localStorage key `trellis-mode`；`loadMode` 自动迁移老 boolean
+    - `components/ModePicker.tsx` 新增（替代 CliModeToggle）：三态 segment control，stone/amber/rose 配色，切到 cli-multi 时 confirm 提示"之前对话不会继承"
+    - `components/Header.tsx`：换用 ModePicker
+  - 验证：build 通过 + 端到端 resume 实测 OK
+- **Caveats**:
+  - **跨模式切换**：lean / cli-single 期间产生的节点对 cli-multi claude session 不可见（实测证明 stdin 不能喂历史）；toggle confirm 已提示
+  - **retry 在 cli-multi**：spawn 时 `--resume` 把 retry question 当新 turn 发——claude 视角是"用户又问一遍"，session 多一轮
+  - **jsonl 清理**：trellis 删 session 时自动 unlink；启动**没有**孤儿扫描——进程崩溃可能留孤儿，后续可加 reap
+  - **tool_use 仍不展示**：cli-single / cli-multi 调工具时静默吞掉。下一刀候选
+- **Next**: 用户实测三态切换——cli-multi 跨节点问"还记得 X 吗"看是否真有跨 turn 记忆；删 session 后 ls `~/.claude/projects/-Users-smokingmouse/` 看 jsonl 是否被清
+
+
 ### Session 8 (2026-05-03)
 - **Done**: CLI 模式开关——一键打平终端 `claude` CLI 的能力栈
   - 用户问：卡片回复时上下文为啥不含 skills？发现 `claude.ts` 用三个 flag 把 CLI 阉割（`--system-prompt` 覆盖默认 prompt / `--tools ""` 禁用工具 / `cwd: tmpdir` 屏蔽 CLAUDE.md）。

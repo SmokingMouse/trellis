@@ -21,6 +21,7 @@ import {
   type SelectionInfo,
 } from "@/hooks/useSelectionWithin";
 import { layoutNodes, COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
+import { buildNodeIndex } from "@/lib/node-index";
 
 const nodeTypes = { chat: ChatNode, reference: ReferenceCard };
 const NODE_WIDTH = 600;
@@ -163,10 +164,13 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
     return map;
   }, [nodeMap]);
 
+  const nodeIndices = useMemo(() => buildNodeIndex(nodeMap), [nodeMap]);
+
   const flowNodes: Node[] = useMemo(
     () =>
       Object.values(nodeMap).map((n) => {
         const isReference = n.kind === "reference";
+        const index = nodeIndices[n.id] ?? 0;
         return {
           id: n.id,
           type: isReference ? "reference" : "chat",
@@ -175,17 +179,19 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
             ? {
                 node: n,
                 isActive: n.id === activeNodeId,
+                index,
               }
             : {
                 node: n,
                 isActive: n.id === activeNodeId,
                 childAnchors:
                   childAnchorsByParent.get(n.id) ?? EMPTY_ANCHORS,
+                index,
               },
           draggable: false,
         };
       }),
-    [nodeMap, activeNodeId, childAnchorsByParent],
+    [nodeMap, activeNodeId, childAnchorsByParent, nodeIndices],
   );
 
   const flowEdges: Edge[] = useMemo(

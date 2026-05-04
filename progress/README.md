@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Codex provider 与 Claude provider 完全解耦——选 Codex 时不再依赖任何 claude CLI。chat 三档 mode + URL fetch 全部跑过端到端。等用户在浏览器里切到 Codex 实测 UI。
+节点定位三件套（序号 + 已读未读 + 跳父滚到 mark）落地。等用户实测 outline "X 条未读" / 只看未读 toggle 的体感。
 
 ## Goals
 ### Short-term (MVP)
@@ -14,6 +14,8 @@ Codex provider 与 Claude provider 完全解耦——选 Codex 时不再依赖�
   - [x] 大纲（`components/Outline.tsx`）
   - [x] 持久化恢复（hydrate from `/api/sessions`，`stores/sessionStore.ts:70-91`）
   - [x] 父节点高亮回显（parentAnchor badge，`ChatNode.tsx:70`、`NodeFullView.tsx:130`）
+  - [x] 节点序号 + 已读未读（`lib/node-index.ts`、`read_at` 列、`/api/nodes/[id]/read`、Outline 顶部计数 + 只看未读）
+  - [x] 跳回父节点滚到 mark + pulse（`pendingScrollAnchor` store state、`.anchor-pulse` 动画）
   - [ ] Dagre 布局微调（实测后再判断是否真有痛点）
 - [x] Stage 7 P0: 移动端全屏卡片 + 顶栏 + 分支条
 - [x] Stage 8: 三层视图统一 — Layer 1 图 / Layer 2 聚焦 / Layer 3 全屏；桌面手机共享全屏组件
@@ -27,6 +29,39 @@ Codex provider 与 Claude provider 完全解耦——选 Codex 时不再依赖�
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 14 (2026-05-05)
+- **Done**: 节点定位三件套 — 序号 + 已读未读 + 跳父滚到 mark
+  - **Phase A — 节点序号**：`lib/node-index.ts` 新增 `buildNodeIndex(nodes)` helper，session 内按 `createdAt` 升序产出 1-based map。Canvas flowNodes useMemo 里把 index 算好放进 ChatNode/ReferenceCard 的 data；Outline 和 NodeFullView SubBar 各自调一次 useMemo。展示位置：ChatNode 头部"你"圆点旁、ReferenceCard 标题前、Outline 行首、SubBar 面包屑里。统一 mono + stone-400 弱化色，不抢主体。
+  - **Phase B — read 数据层 + API + store**：
+    - `lib/server/sqlite.ts`：idempotent ALTER 加 `read_at INTEGER` 列（NULL = 未读）。
+    - `lib/server/repo.ts`：`NODE_COLS` 补 `read_at`，rowToNode 解析为 `readAt`，新增 `markNodeRead(nodeId, now)` —— 已有 read_at 就返回原值（true idempotent）。
+    - 新建 `app/api/nodes/[id]/read/route.ts` POST 端点。
+    - `lib/types.ts` ChatNode 加 `readAt: number | null`；server `ApiNode` 同步。
+    - `stores/sessionStore.ts:markNodeRead` action 乐观 patch + POST，失败回滚（仅在 timestamp 匹配时回滚，避免覆盖另一 tab 的写入）。
+    - `NodeFullView` mount/active 切换 useEffect：当 `node.status === "done"` 且 `!node.readAt` 时启 1s 计时器，到点调 markNodeRead。streaming/error 不计；流式 done 转换会 re-fire effect 自动开始计时。
+  - **Phase C — UI 表达**：
+    - ChatNode 卡片：`isUnread = status==="done" && !readAt`，全/紧凑两态都加 amber-300 边框（与 streaming indigo / active stone ring 不冲突）；序号旁多一个 1.5×1.5 amber-500 圆点。
+    - ReferenceCard 同等待遇。
+    - `Outline.tsx` 顶部：`unreadCount` 计算后渲染 amber 标签 "N 未读"，点击 toggle `unreadOnly` 本地 state。`unreadOnly` 模式下：纯已读叶子隐藏；有未读后代的已读父节点渲染但 dim 灰色（保留 hierarchy）。
+  - **Phase D — 跳父滚到 mark + pulse**：
+    - store 新增 `pendingScrollAnchor: { nodeId, childId } | null` state + `jumpToParentAtAnchor(parentId, childId)` action（一次 set 同时设 anchor 和 activeNodeId）。
+    - NodeFullView 的"↳ 从「xxx」分叉"badge onClick 改成调 `jumpToParentAtAnchor(parent.id, node.id)`。
+    - `ResponseBody` useEffect 监听 `pendingScrollAnchor`：当 anchor.nodeId === 当前节点且非 streaming 时，rAF 后 `querySelector('mark[data-child-id=...]')` + `scrollIntoView({block:"center", behavior:"smooth"})` + 加 `.anchor-pulse` className 1.5s 后清除并 `clearScrollAnchor()`。CSS 加 `@keyframes anchor-pulse` / `anchor-pulse-dark`，3 个周期约 1.5s 总时长。Mark 不在 DOM 里时再 rAF 一次兜底（markdown 慢挂载场景）。
+  - 验证：`npm run build` ✓ 4 次。端到端 curl：POST /api/chat 创建节点（response 含 `readAt: null`）→ POST /api/nodes/<id>/read 返回 `{readAt: <now>}` → 第二次调用返回相同 timestamp（idempotent ✓）→ 不存在节点 404 ✓ → GET /api/sessions/<id> 路径 readAt 字段也正确返回（hydrate 通路 OK）。
+- **Decisions**:
+  - **read 1s gate 在客户端**：服务端不验证 dwell time，纯凭 client POST 触发。简单且足够；恶意刷 read 状态没什么意义（私有产品）。
+  - **streaming/error 不可标记已读**：避免用户在 abort 后被错误标 read。流式 done 转换时 effect re-fire 自动启动 1s 计时器，无缝。
+  - **Unread 视觉强度刻意低**：amber-300 边框 + 1.5×1.5 dot，比 streaming indigo ring 弱、比 active stone ring 弱。三态视觉层级：streaming > active > unread > read。
+  - **Outline unread-only 不彻底隐藏 read**：有 unread 后代的 read 行 dim 渲染 —— 保留树形结构，避免出现"未读节点孤悬"的视觉噪音。
+  - **mark scrollIntoView 用 smooth + center**：center 而非 start，让 mark 真的在屏幕中间显眼；smooth 比 instant 体感好（用户能看到滚动方向，建立位置感）。
+  - **anchor-pulse 用 keyframes 而非 transition**：更易写 3-cycle 的循环效果；1.5s 总时长够引起注意又不烦人。
+- **Caveats**:
+  - **mark 跳转只在 fullscreen mode**：canvas mode 下点 ChatNode 卡片头的 amber badge（line 144）只是显示，没绑 onClick。若用户期望 canvas mode 也能跳父并定位，再加。
+  - **read 标记不区分"扫一眼"和"读完"**：1s 算粗糙判定。极快滑动浏览所有节点会全标 read。如果体感不准再考虑滚动距离 / dwell-extension 加权。
+  - **read_at 一旦标记就不能撤销**：UI 没暴露"标记未读"动作。如果用户想"再读一遍"找不到入口。先观察是否有真需求再加。
+  - **multi-tab 写竞争**：标记 read 是 last-writer-wins by id，但 markNodeRead repo 函数已经是 "如果有 read_at 就返回原值"，所以两个 tab 同时点开同一节点不会刷新 timestamp。
+- **Next**: 用户浏览器实测 — 序号是否方便记位、Outline "X 未读 / 只看未读 toggle" 体感、跳父 pulse 是否够显眼又不刺眼。可能的进阶：J 键跳下一未读、Canvas 节点边框分级（high-LoD 可视化）、流式 done 时若用户不在该节点弹气泡。
+
 ### Session 13 (2026-05-04)
 - **Done**: Codex provider 从 SDK 切换到 spawn CLI，三档 mode + URL fetch 与 Claude 路径完全对称解耦
   - **lib/llm/codex.ts 重写**：丢弃 `@openai/codex-sdk`（注入 22k tokens 系统 prompt 无法关闭、不识别 mode），改 spawn `codex exec` / `codex exec resume`。三档：lean (`--ephemeral --sandbox read-only`，DEFAULT_SYSTEM_PROMPT 拼到 prompt 头) / cli-single (`--ephemeral --dangerously-bypass-approvals-and-sandbox`) / cli-multi（首轮非 ephemeral 持久化 + 后续 `exec resume <thread_id>`）。`@openai/codex-sdk` 依赖从 package.json 移除。
@@ -231,28 +266,6 @@ Codex provider 与 Claude provider 完全解耦——选 Codex 时不再依赖�
   - **dagre 不针对 LoD 重排**：~~compact 卡片矮（~80px）但占位仍按之前 dagre 估算的 480px——节点间有空隙，反而助于扫读，故保留~~ **已修复（用户反馈"太稀疏"）**：`lib/layout.ts:layoutNodes` 加 `compact` 参数 (280×90 + 36/24 sep)；导出 `COMPACT_ZOOM_THRESHOLD`；Canvas 用 `useFlowStore` 监听 zoom 跨阈值，写入 layoutKey 触发 dagre 重排；ChatNode compact 卡片宽 280px，字号 18px。zoom 跨阈值瞬间整棵树自动 reflow，fit-view 自然给出更高 zoom。
 - **Next**: 用户实测——cli-single/cli-multi 模式下问问题，等几秒看 topic label 出现；缩小 canvas 看是否变成大字 label；zoom > 0.9 看是否切回完整渲染
 
-### Session 9 (2026-05-03)
-- **Done**: 三态 mode toggle + cli-multi 走真多轮 claude session
-  - 用户决策：CLI 多轮模式下，整棵 trellis 树共享一个 claude session（树形分支退化为 UI 形态，上下文是平的）。1 个 jsonl 文件 per trellis session，不是 per node
-  - 实测确认 stdin stream-json 不能"喂历史"——claude 把每条 user 视为新 turn 自己回应，忽略喂入的 assistant 消息。真多轮只能走 `--resume`
-  - 端到端 resume 实测：第一轮无 session-id → claude 自生 `af8573db-...` → 写到 `~/.claude/projects/-Users-smokingmouse/<id>.jsonl` → 第二轮 `--resume` 正确答出之前提到的"绿色"，cache_read 45769 tokens
-  - 改动：
-    - `lib/server/sqlite.ts`：idempotent ALTER TABLE sessions ADD COLUMN claude_session_id
-    - `lib/server/repo.ts`：`getSessionClaudeId` / `setSessionClaudeId`，`deleteSession` 取 claude_session_id 后 `unlinkSync(claudeSessionPath(...))`；路径 `os.homedir().replace(/\//g,"-")`
-    - `lib/llm/types.ts`：`Mode = "lean" | "cli-single" | "cli-multi"`，`StreamRequest` 加 `claudeSessionId`，`StreamEvent` 加 `session_init`
-    - `lib/llm/server.ts`：`getProvider(id, { mode })` 替代 cliMode
-    - `lib/llm/claude.ts`：三模式分支，cli-multi 用 `buildCliMultiPrompt`（仅当前 question + 可选 anchor preface）+ 移除 `--no-session-persistence` + 可选 `--resume`；parser 加 `system/init` 解析 yield `session_init`
-    - `app/api/chat/route.ts`：保留 trellis sessionId；cli-multi 时 `history = []`；监听 `session_init` 首次绑定 `setSessionClaudeId`
-    - `stores/sessionStore.ts`：cliMode → mode；localStorage key `trellis-mode`；`loadMode` 自动迁移老 boolean
-    - `components/ModePicker.tsx` 新增（替代 CliModeToggle）：三态 segment control，stone/amber/rose 配色，切到 cli-multi 时 confirm 提示"之前对话不会继承"
-    - `components/Header.tsx`：换用 ModePicker
-  - 验证：build 通过 + 端到端 resume 实测 OK
-- **Caveats**:
-  - **跨模式切换**：lean / cli-single 期间产生的节点对 cli-multi claude session 不可见（实测证明 stdin 不能喂历史）；toggle confirm 已提示
-  - **retry 在 cli-multi**：spawn 时 `--resume` 把 retry question 当新 turn 发——claude 视角是"用户又问一遍"，session 多一轮
-  - **jsonl 清理**：trellis 删 session 时自动 unlink；启动**没有**孤儿扫描——进程崩溃可能留孤儿，后续可加 reap
-  - **tool_use 仍不展示**：cli-single / cli-multi 调工具时静默吞掉。下一刀候选
-- **Next**: 用户实测三态切换——cli-multi 跨节点问"还记得 X 吗"看是否真有跨 turn 记忆；删 session 后 ls `~/.claude/projects/-Users-smokingmouse/` 看 jsonl 是否被清
 
 
-（Session 1–8 已归档，见 `archive.md`）
+（Session 1–9 已归档，见 `archive.md`）

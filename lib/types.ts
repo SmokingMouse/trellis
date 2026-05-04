@@ -57,6 +57,9 @@ export type ChatNode = {
   kind: NodeKind;
   // Non-null only when kind === "reference".
   reference: ReferencePayload | null;
+  // null = unread; ms timestamp = first time the user kept the node
+  // open >=1s. Drives the unread badge / "X 条未读" counter.
+  readAt: number | null;
 };
 
 export type Session = {

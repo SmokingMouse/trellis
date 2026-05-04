@@ -28,6 +28,8 @@ export type ChatFlowNode = Node<
     node: ChatNodeData;
     isActive: boolean;
     childAnchors: ChildAnchor[];
+    // 1-based session-scoped index (createdAt order). 0 if unknown.
+    index: number;
   },
   "chat"
 >;
@@ -37,6 +39,10 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   const isStreaming = n.status === "streaming";
   const isError = n.status === "error";
   const isActive = data.isActive;
+  const indexLabel = data.index ? `#${data.index}` : "";
+  // Only "done" nodes can be unread — streaming / error states have their
+  // own visual treatment (indigo border / error states).
+  const isUnread = n.status === "done" && !n.readAt;
   // ReactFlow viewport zoom: transform = [x, y, zoom]. Selector returns a
   // boolean so re-renders only fire when crossing the threshold.
   const isCompact = useStore((s) => s.transform[2] < COMPACT_ZOOM_THRESHOLD);
@@ -97,7 +103,9 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         className={`nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
           isActive
             ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
-            : "border-stone-200 dark:border-stone-800"
+            : isUnread
+              ? "border-amber-300 dark:border-amber-700/70"
+              : "border-stone-200 dark:border-stone-800"
         }`}
         onClick={goFullScreen}
         title={n.question}
@@ -110,6 +118,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             }`}
             aria-hidden
           />
+          {indexLabel && (
+            <span className="shrink-0 text-[11px] font-mono text-stone-400 dark:text-stone-500 tabular-nums flex items-center gap-1">
+              {indexLabel}
+              {isUnread && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                  aria-label="未读"
+                  title="未读"
+                />
+              )}
+            </span>
+          )}
           <div className="flex-1 min-w-0">
             <div className="text-[18px] font-semibold text-stone-900 dark:text-stone-100 leading-tight truncate">
               {labelText}
@@ -136,7 +156,9 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           ? "border-indigo-300 dark:border-indigo-700 ring-4 ring-indigo-100 dark:ring-indigo-900/40"
           : isActive
             ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
-            : "border-stone-200 dark:border-stone-800"
+            : isUnread
+              ? "border-amber-300 dark:border-amber-700/70"
+              : "border-stone-200 dark:border-stone-800"
       }`}
     >
       <Handle type="target" position={Position.Top} />
@@ -163,6 +185,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           你
         </div>
         <div className="flex-1 text-[14.5px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium">
+          {indexLabel && (
+            <span className="mr-1.5 font-mono text-[12px] text-stone-400 dark:text-stone-500 tabular-nums font-normal inline-flex items-center gap-1">
+              {indexLabel}
+              {isUnread && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                  aria-label="未读"
+                  title="未读"
+                />
+              )}
+            </span>
+          )}
           {n.question}
         </div>
         <button

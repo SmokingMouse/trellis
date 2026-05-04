@@ -1,8 +1,21 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { refIcon } from "@/lib/ref-icon";
+import { buildNodeIndex } from "@/lib/node-index";
 import type { ChatNode } from "@/lib/types";
+
+function isUnreadNode(n: ChatNode): boolean {
+  return n.status === "done" && !n.readAt;
+}
+
+// Recursive: a tree node passes the "has any unread descendant or self" test
+// when filtering — keeps the parent visible even if it's been read, so the
+// hierarchy doesn't collapse into orphans.
+function subtreeHasUnread(t: TreeNode): boolean {
+  if (isUnreadNode(t)) return true;
+  return t.children.some(subtreeHasUnread);
+}
 
 type TreeNode = ChatNode & { children: TreeNode[] };
 
@@ -47,13 +60,35 @@ export function Outline() {
     () => (session ? buildForest(nodes, session.rootNodeId) : []),
     [session, nodes],
   );
+  const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
+  const unreadCount = useMemo(
+    () => Object.values(nodes).filter(isUnreadNode).length,
+    [nodes],
+  );
+  const [unreadOnly, setUnreadOnly] = useState(false);
 
   if (forest.length === 0) return null;
 
   return (
     <aside className="hidden md:block fixed left-3 top-[60px] w-60 bg-white/90 dark:bg-stone-900/90 backdrop-blur border border-stone-200 dark:border-stone-800 rounded-lg p-2 text-xs shadow-sm z-30 max-h-[calc(100vh-72px)] overflow-y-auto">
-      <div className="text-stone-400 dark:text-stone-500 uppercase tracking-wider text-[10px] mb-1.5 px-2 font-medium">
-        思维树
+      <div className="flex items-center justify-between mb-1.5 px-2">
+        <div className="text-stone-400 dark:text-stone-500 uppercase tracking-wider text-[10px] font-medium">
+          思维树
+        </div>
+        {unreadCount > 0 && (
+          <button
+            onClick={() => setUnreadOnly((v) => !v)}
+            className={`text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
+              unreadOnly
+                ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200"
+                : "text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+            }`}
+            title={unreadOnly ? "显示全部" : "只看未读"}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
+            {unreadCount} 未读
+          </button>
+        )}
       </div>
       {forest.map((t, i) => (
         <div
@@ -62,41 +97,86 @@ export function Outline() {
             i > 0 ? "mt-1.5 pt-1.5 border-t border-stone-100 dark:border-stone-800" : undefined
           }
         >
-          <TreeRow node={t} depth={0} />
+          <TreeRow
+            node={t}
+            depth={0}
+            indices={indices}
+            unreadOnly={unreadOnly}
+          />
         </div>
       ))}
     </aside>
   );
 }
 
-function TreeRow({ node, depth }: { node: TreeNode; depth: number }) {
+function TreeRow({
+  node,
+  depth,
+  indices,
+  unreadOnly,
+}: {
+  node: TreeNode;
+  depth: number;
+  indices: Record<string, number>;
+  unreadOnly: boolean;
+}) {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const isActive = activeNodeId === node.id;
   const isReference = node.kind === "reference";
+  const index = indices[node.id];
+  const unread = isUnreadNode(node);
+  // In "unread only" mode, hide read leaves entirely. A read row with at
+  // least one unread descendant stays visible (rendered dim) so the
+  // hierarchy doesn't lose context.
+  if (unreadOnly && !unread && !node.children.some(subtreeHasUnread)) {
+    return null;
+  }
+  const dimReadInUnreadMode = unreadOnly && !unread;
 
   return (
     <div>
       <button
         onClick={() => setActiveNode(node.id)}
-        className={`w-full text-left px-2 py-1 rounded text-[12px] truncate transition-colors ${
+        className={`w-full text-left px-2 py-1 rounded text-[12px] truncate transition-colors flex items-center gap-1 ${
           isActive
             ? "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 font-medium"
-            : "text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800/60"
+            : dimReadInUnreadMode
+              ? "text-stone-400 dark:text-stone-600 hover:bg-stone-50 dark:hover:bg-stone-800/60"
+              : "text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800/60"
         }`}
         style={{ paddingLeft: `${8 + depth * 12}px` }}
         title={isReference ? node.reference?.sourceUri ?? undefined : node.question}
       >
-        {depth > 0 && <span className="text-stone-400 dark:text-stone-500 mr-1">↳</span>}
+        {depth > 0 && <span className="text-stone-400 dark:text-stone-500">↳</span>}
+        {index ? (
+          <span className="font-mono text-[10.5px] text-stone-400 dark:text-stone-500 tabular-nums">
+            #{index}
+          </span>
+        ) : null}
+        {unread && (
+          <span
+            className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
+            aria-label="未读"
+          />
+        )}
         {isReference && (
-          <span className="mr-1" aria-hidden>
+          <span className="shrink-0" aria-hidden>
             {refIcon(node.reference)}
           </span>
         )}
-        {node.topicLabel ?? (isReference ? "参考材料" : truncate(node.question, 32))}
+        <span className="truncate">
+          {node.topicLabel ?? (isReference ? "参考材料" : truncate(node.question, 32))}
+        </span>
       </button>
       {node.children.map((c) => (
-        <TreeRow key={c.id} node={c} depth={depth + 1} />
+        <TreeRow
+          key={c.id}
+          node={c}
+          depth={depth + 1}
+          indices={indices}
+          unreadOnly={unreadOnly}
+        />
       ))}
     </div>
   );

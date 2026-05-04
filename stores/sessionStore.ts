@@ -69,6 +69,12 @@ type State = {
   // claude fetcher emits SSE `progress` events; cleared when the node
   // transitions to status=done. Transient — never persisted.
   fetchProgress: Record<string, string>;
+  // When user clicks "↳ 从「xxx」分叉 · 点击回到父节点" we need to (a) jump
+  // to the parent node and (b) scroll the parent's response body so the
+  // <mark data-child-id="..."> for this child sits in view + briefly
+  // pulses to draw the eye. Set by requestScrollToAnchor; consumed and
+  // cleared by NodeFullView's ResponseBody.
+  pendingScrollAnchor: { nodeId: string; childId: string } | null;
 };
 
 type Actions = {
@@ -111,6 +117,15 @@ type Actions = {
   createReference: (input: CreateReferenceInput) => Promise<ChatNode>;
   // Re-fetch a URL-backed reference. No-op for paste / file types.
   refreshReference: (nodeId: string) => Promise<void>;
+  // Mark a node as read. Idempotent. Optimistically patches the store
+  // before the server round-trip finishes — UI feedback is instant; if
+  // the POST fails (network glitch, etc.) we silently revert.
+  markNodeRead: (nodeId: string) => Promise<void>;
+  // Combined "go to parent + scroll its response to the mark for this
+  // child" action. Sets pendingScrollAnchor first so the consumer effect
+  // sees it on the next render, then flips activeNodeId.
+  jumpToParentAtAnchor: (parentId: string, childId: string) => void;
+  clearScrollAnchor: () => void;
 };
 
 // Module-level so identity survives store updates and is never serialized
@@ -132,6 +147,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   sessionsRevision: 0,
   fullScreen: false,
   fetchProgress: {},
+  pendingScrollAnchor: null,
 
   hydrate: async (sessionId) => {
     set({ provider: loadProvider(), mode: loadMode() });
@@ -486,6 +502,50 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         }
       })();
     });
+  },
+
+  jumpToParentAtAnchor: (parentId, childId) => {
+    set({
+      pendingScrollAnchor: { nodeId: parentId, childId },
+      activeNodeId: parentId,
+    });
+  },
+
+  clearScrollAnchor: () => set({ pendingScrollAnchor: null }),
+
+  markNodeRead: async (nodeId) => {
+    const existing = get().nodes[nodeId];
+    if (!existing || existing.readAt) return;
+    const optimisticAt = Date.now();
+    set((s) => {
+      const cur = s.nodes[nodeId];
+      if (!cur || cur.readAt) return s;
+      return {
+        nodes: { ...s.nodes, [nodeId]: { ...cur, readAt: optimisticAt } },
+      };
+    });
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/read`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { readAt } = (await res.json()) as { readAt: number };
+      // Reconcile with whatever the server actually persisted (idempotent —
+      // typically equals optimisticAt, but if user already marked it from
+      // another tab it'll be the older timestamp).
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        if (!cur) return s;
+        return { nodes: { ...s.nodes, [nodeId]: { ...cur, readAt } } };
+      });
+    } catch {
+      // Revert optimistic mark — best-effort, no user-facing error.
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        if (!cur || cur.readAt !== optimisticAt) return s;
+        return { nodes: { ...s.nodes, [nodeId]: { ...cur, readAt: null } } };
+      });
+    }
   },
 
   refreshReference: async (nodeId) => {

@@ -9,6 +9,7 @@ import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import type { ChatNode, ParentAnchor } from "@/lib/types";
+import { buildNodeIndex } from "@/lib/node-index";
 import { NodeTreeOverlay } from "./NodeTreeOverlay";
 
 const REMARK_PLUGINS = [remarkGfm];
@@ -68,11 +69,15 @@ export function NodeFullView() {
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const markNodeReadAction = useSessionStore((s) => s.markNodeRead);
+  const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const onShowCanvas = () => setFullScreen(false);
 
   // Default to root if nothing is active yet.
   const currentId = activeNodeId ?? session?.rootNodeId ?? null;
   const node = currentId ? nodes[currentId] : null;
+  const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
+  const currentIndex = currentId ? nodeIndices[currentId] ?? 0 : 0;
 
   const parent = node?.parentId ? nodes[node.parentId] : null;
   const children = useMemo(
@@ -99,6 +104,22 @@ export function NodeFullView() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [currentId]);
+
+  // Mark node as read after the user keeps it open for 1s. Streaming /
+  // error nodes don't count — only "done" nodes (qa replies that finished
+  // generating, references that finished fetching). The 1s gate avoids
+  // spurious marks from rapidly tabbing through nodes.
+  const nodeStatus = node?.status;
+  const nodeReadAt = node?.readAt;
+  useEffect(() => {
+    if (!currentId) return;
+    if (nodeStatus !== "done") return;
+    if (nodeReadAt) return;
+    const t = window.setTimeout(() => {
+      markNodeReadAction(currentId);
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [currentId, nodeStatus, nodeReadAt, markNodeReadAction]);
 
   // Mobile selection → bottom sheet. We cache once observed; iOS clearing
   // the DOM selection later shouldn't dismiss the bar.
@@ -130,6 +151,7 @@ export function NodeFullView() {
         onShowTree={() => setTreeOpen(true)}
         node={node}
         parent={parent}
+        nodeIndex={currentIndex}
       />
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-4">
@@ -139,7 +161,7 @@ export function NodeFullView() {
             <>
               {node.parentAnchor && parent && (
                 <button
-                  onClick={() => setActiveNode(parent.id)}
+                  onClick={() => jumpToParentAtAnchor(parent.id, node.id)}
                   className="w-full text-left mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[12px] text-amber-900 dark:text-amber-200 active:scale-[0.99] transition-transform"
                 >
                   <span className="text-amber-600 dark:text-amber-400 mr-1">↳</span>
@@ -191,11 +213,13 @@ function SubBar({
   onShowTree,
   node,
   parent,
+  nodeIndex,
 }: {
   onShowCanvas: () => void;
   onShowTree: () => void;
   node: ChatNode;
   parent: ChatNode | null;
+  nodeIndex: number;
 }) {
   return (
     <div className="px-2 py-1.5 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 flex items-center gap-1.5 text-xs shrink-0">
@@ -239,6 +263,11 @@ function SubBar({
           </>
         )}
         <span className="text-stone-800 dark:text-stone-200 font-medium">
+          {nodeIndex ? (
+            <span className="mr-1.5 font-mono text-[11px] text-stone-400 dark:text-stone-500 tabular-nums font-normal">
+              #{nodeIndex}
+            </span>
+          ) : null}
           {node.kind === "reference"
             ? truncate(node.topicLabel ?? "参考材料", 28)
             : truncate(node.question, 28)}
@@ -287,6 +316,9 @@ function ResponseBody({ node }: { node: ChatNode }) {
   const allNodes = useSessionStore((s) => s.nodes);
   const retryNode = useSessionStore((s) => s.retryNode);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const pendingScrollAnchor = useSessionStore((s) => s.pendingScrollAnchor);
+  const clearScrollAnchor = useSessionStore((s) => s.clearScrollAnchor);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const childAnchors = useMemo(
     () =>
       Object.values(allNodes)
@@ -328,8 +360,56 @@ function ResponseBody({ node }: { node: ChatNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, node.id]);
 
+  // Scroll-to-anchor: when user clicks "↳ 从「xxx」分叉" on a child, the
+  // store sets pendingScrollAnchor to {nodeId: parent.id, childId: child.id}
+  // and flips the active node to parent. We wait one rAF for the new
+  // markdown to commit, find the matching <mark>, scroll it into view, and
+  // briefly pulse it. Without this, jumping back to the parent leaves the
+  // user staring at the top of a long answer with no idea where the
+  // forked-from sentence lives.
+  useEffect(() => {
+    if (!pendingScrollAnchor) return;
+    if (pendingScrollAnchor.nodeId !== node.id) return;
+    if (isStreaming) return; // marks aren't injected during streaming
+    const childId = pendingScrollAnchor.childId;
+    let raf = 0;
+    let timer = 0;
+    raf = window.requestAnimationFrame(() => {
+      const root = bodyRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>(
+        `mark[data-child-id="${CSS.escape(childId)}"]`,
+      );
+      if (!target) {
+        // Mark not in DOM yet (rare — markdown still mounting). Try once
+        // more on the next frame.
+        raf = window.requestAnimationFrame(() => {
+          const t2 = root.querySelector<HTMLElement>(
+            `mark[data-child-id="${CSS.escape(childId)}"]`,
+          );
+          if (t2) flash(t2);
+        });
+        return;
+      }
+      flash(target);
+    });
+    function flash(el: HTMLElement) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("anchor-pulse");
+      timer = window.setTimeout(() => {
+        el.classList.remove("anchor-pulse");
+        clearScrollAnchor();
+      }, 1500);
+    }
+    return () => {
+      window.cancelAnimationFrame(raf);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [pendingScrollAnchor, node.id, isStreaming, clearScrollAnchor]);
+
   return (
     <div
+      ref={bodyRef}
       data-chat-node-id={node.id}
       onClick={onMarkClick}
       className="md-body text-[14.5px] text-stone-700 dark:text-stone-300 leading-relaxed"

@@ -37,6 +37,7 @@ export type ApiNode = {
   topicLabel: string | null;
   kind: NodeKind;
   reference: ReferencePayload | null;
+  readAt: number | null;
 };
 
 type NodeRow = {
@@ -59,12 +60,13 @@ type NodeRow = {
   ref_content_md: string | null;
   ref_fetched_at: number | null;
   ref_meta_json: string | null;
+  read_at: number | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
        status, error_message, sibling_index, token_input, token_output, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
-       ref_fetched_at, ref_meta_json`;
+       ref_fetched_at, ref_meta_json, read_at`;
 
 type SessionRow = {
   id: string;
@@ -124,6 +126,7 @@ function rowToNode(r: NodeRow): ApiNode {
     topicLabel: r.topic_label,
     kind,
     reference,
+    readAt: r.read_at,
   };
 }
 
@@ -232,6 +235,20 @@ export function setNodeTopicLabel(nodeId: string, label: string): void {
     label,
     nodeId,
   );
+}
+
+// Mark a node as read. Idempotent — repeated calls don't bump the timestamp.
+// Returns the persisted readAt (existing or newly set), or null if the node
+// doesn't exist.
+export function markNodeRead(nodeId: string, now: number): number | null {
+  const db = getDB();
+  const existing = db
+    .prepare("SELECT read_at FROM nodes WHERE id = ?")
+    .get(nodeId) as { read_at: number | null } | undefined;
+  if (!existing) return null;
+  if (existing.read_at) return existing.read_at;
+  db.prepare("UPDATE nodes SET read_at = ? WHERE id = ?").run(now, nodeId);
+  return now;
 }
 
 // Claude CLI stores session transcripts at
