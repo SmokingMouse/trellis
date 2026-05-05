@@ -4,6 +4,33 @@
 
 ## Session Log
 
+### Session 11 (2026-05-04)
+- **Done**: Stage 11 — 发送/取消 UX 全套
+  - **服务端 abort 兜底**（`app/api/chat/route.ts`）：finally 里查 `req.signal.aborted` → 强制 `stoppedWith="error" / errorMessage="aborted"`，覆盖 claude 子进程被 kill 后干净退出导致 stoppedWith 残留 "done" 的坑。`controller.close()` / `send()` 全部 try/catch（客户端可能已断开）。topic_label 仅在真 done 时才生成。
+  - **客户端 AbortController**（`stores/sessionStore.ts`）：
+    - module-level `STREAM_CONTROLLERS: Map<nodeId, AbortController>`（不放 store，避免 Zustand 序列化）
+    - `runStream` 接 `signal`，传给 `fetch`；mid-stream abort 时 `reader.read()` 抛错，catch 里区分 `signal.aborted` → 合成 `{type:"error",message:"aborted"}` 给 store
+    - `handleStreamEvent` 在 `created` 事件里登记 `(nodeId, controller)`；`done`/`error` 终止时清理
+    - retry 路径 nodeId 已知，eager 注册 + finally 兜底清理
+    - 新增 actions：`abortStream(nodeId)` / `hasStreamingNode()` / `latestStreamingNodeId()`
+  - **Cmd+Enter 替换 Enter**（4 处输入面）：QuestionInput / NodeFullView 两处 / ChatNode FollowupInput。条件 `e.key === "Enter" && (e.metaKey || e.ctrlKey)`。kbd 提示文案 + placeholder 同步更新（"⌘↩ 提交 · Enter 换行"）。
+  - **流式 ⏹ 按钮 + Esc 中止**：
+    - `ChatNode.tsx:NodeFooter`：streaming 时 "正在生成…" 旁加灰色边框"停止"按钮，hover 反白
+    - `NodeFullView.tsx:FollowupBar`：streaming 时整个输入框 pivot 成全宽"停止生成（Esc）"按钮（替代之前的 disabled "等待回复完成…"）。done 后恢复输入框
+    - `hooks/useEscapeAbort.ts` 新增：全局 keydown 监听，textarea/input/contentEditable 内不触发；优先 abort active streaming 节点，否则 abort 最近一个（`STREAM_CONTROLLERS` 插入序）。挂在 `app/page.tsx`
+  - **Aborted 视觉**：`status="error" + errorMessage==="aborted"` 走 stone/灰色"已停止生成"框（区别于红色 error），按钮文案"↻ 重新发送"。retry 路径不变（已有 `retryNode`）。
+  - 验证：`npm run build` ✓；mock SSE curl --max-time 0.4 → DB row `status=error / error_message=aborted / response 106 chars`（partial 落盘 ✓，状态正确 ✓）
+- **Decisions**:
+  - 不引入 `aborted` 新状态枚举——用 `errorMessage === "aborted"` 区分。少一个 migration，UI 一处分支判断即可。
+  - QuestionInput 不加 ⏹ 按钮：从 submit 到 created 事件回来是毫秒级，过度设计。created 后 page swap 到 Canvas/Fullview，由那边的 ⏹ 接管。
+  - FollowupBar pivot 而非附加按钮：streaming 时输入框本来就是 disabled 死状态，不如让那块空间真正能停止当前流。
+- **Caveats**:
+  - 浏览器 UI 未实测（ssr / hot reload 已生效在跑着的 dev server 3088）。需要用户跑一遍 spec 列出的用例。
+  - lint 残留 4 个错误都是 pre-existing（NodeFullView:110 / SessionPicker:24 setState-in-effect），非本次引入。
+  - `controller.close()` try/catch 是防御性的——Next.js App Router 下 client abort 时 ReadableStream controller 可能已 closed。如果实测发现 server 端日志有 unhandled，再追。
+- **Next**: 浏览器验证 spec 用例（Enter 不发 / Cmd+Enter 发 / Shift+Enter 换行 / 流式 ⏹ 中止 / Esc 中止 / partial 保留 / 重发 / 并发 streaming Esc 只中 active）。验证通过后开 Stage 12。
+
+
 ### Session 10 (2026-05-03)
 - **Done**: Overview 视图升级——LLM 自动 topic label + zoom-based LoD（"缩略不再糊"）
   - 用户痛点：全局 canvas 下卡片 zoom 0.3 时是糊像素，只能靠 Outline 索引。诊断为认知层级错配——overview 需要"索引页"不是"缩印版书"

@@ -47,7 +47,15 @@ export type ChatNode = {
   status: NodeStatus;
   errorMessage: string | null;
   position: { x: number; y: number };
-  tokenCount: { input: number; output: number };
+  // Four-bucket token accounting per turn. See lib/llm/types.ts:TokenUsage
+  // for semantics — split out so UI can surface cache leverage separately
+  // from net input/output cost.
+  tokenCount: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
   createdAt: number;
   siblingIndex: number;
   // Short LLM-generated topic for overview rendering. Null until done; falls

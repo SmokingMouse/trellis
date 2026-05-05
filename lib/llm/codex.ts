@@ -94,7 +94,7 @@ export function makeCodexProvider(
       try {
         let buffer = "";
         let yielded = false;
-        let usage = { input: 0, output: 0 };
+        let usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
         let sessionEmitted = false;
         // Tracks already-forwarded length for the current agent_message item,
         // so re-deliveries on later events (rare but possible) don't double-emit.
@@ -147,12 +147,26 @@ export function makeCodexProvider(
             }
 
             if (event.type === "turn.completed") {
+              // codex JSONL exposes input_tokens (current turn raw input,
+              // already inclusive of cached portion in older codex builds —
+              // we subtract cached_input_tokens to match Anthropic's
+              // semantic where input_tokens excludes cache hits) and
+              // cached_input_tokens. cacheCreation isn't reported by the
+              // codex CLI; default 0.
               const u = event.usage as
-                | { input_tokens?: number; output_tokens?: number }
+                | {
+                    input_tokens?: number;
+                    output_tokens?: number;
+                    cached_input_tokens?: number;
+                  }
                 | undefined;
+              const totalIn = u?.input_tokens ?? 0;
+              const cached = u?.cached_input_tokens ?? 0;
               usage = {
-                input: u?.input_tokens ?? 0,
+                input: Math.max(0, totalIn - cached),
                 output: u?.output_tokens ?? 0,
+                cacheRead: cached,
+                cacheCreation: 0,
               };
               yield { type: "done", usage };
               return;

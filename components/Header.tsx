@@ -5,14 +5,24 @@ import { SessionPicker } from "./SessionPicker";
 import { ExportMenu } from "./ExportMenu";
 import { ModePicker } from "./ModePicker";
 import { ThemeToggle } from "./ThemeToggle";
+import { formatTokens } from "@/lib/format-tokens";
 
 export function Header() {
   const session = useSessionStore((s) => s.session);
   const nodeCount = useSessionStore((s) => Object.keys(s.nodes).length);
-  const totalTokens = useSessionStore((s) =>
+  // Aggregate four buckets independently — total input vs total output vs
+  // total cache leverage. Collapsed into one number obscures whether the
+  // bill is from real prompts or cache replay.
+  const totals = useSessionStore((s) =>
     Object.values(s.nodes).reduce(
-      (sum, n) => sum + n.tokenCount.input + n.tokenCount.output,
-      0,
+      (acc, n) => {
+        acc.input += n.tokenCount.input;
+        acc.output += n.tokenCount.output;
+        acc.cacheRead += n.tokenCount.cacheRead;
+        acc.cacheCreation += n.tokenCount.cacheCreation;
+        return acc;
+      },
+      { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
     ),
   );
 
@@ -31,7 +41,25 @@ export function Header() {
           <>
             <span className="hidden md:inline">{nodeCount} 节点</span>
             <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
-            <span className="hidden md:inline">{totalTokens} tokens</span>
+            <span
+              className="hidden md:inline-flex items-center gap-1.5 tabular-nums"
+              title={`输入 ${totals.input} · 输出 ${totals.output} · 缓存命中 ${totals.cacheRead}${
+                totals.cacheCreation > 0
+                  ? ` · 缓存写入 ${totals.cacheCreation}`
+                  : ""
+              }`}
+            >
+              <span>↑{formatTokens(totals.input)}</span>
+              <span>↓{formatTokens(totals.output)}</span>
+              {(totals.cacheRead > 0 || totals.cacheCreation > 0) && (
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  ⚡{formatTokens(totals.cacheRead)}
+                  {totals.cacheCreation > 0
+                    ? `+${formatTokens(totals.cacheCreation)}`
+                    : ""}
+                </span>
+              )}
+            </span>
             <ExportMenu />
           </>
         )}

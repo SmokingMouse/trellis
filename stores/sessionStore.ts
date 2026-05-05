@@ -303,7 +303,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             response: "",
             status: "streaming",
             errorMessage: null,
-            tokenCount: { input: 0, output: 0 },
+            tokenCount: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
           },
         },
       };
@@ -646,7 +646,15 @@ type StreamEvent =
       node: ApiNode;
     }
   | { type: "delta"; text: string }
-  | { type: "done"; usage?: { input: number; output: number } }
+  | {
+      type: "done";
+      usage?: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheCreation: number;
+      };
+    }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string };
 
@@ -705,7 +713,12 @@ function handleStreamEvent(
       const fullText = getStreamPending(id);
       clearStreamPending(id);
       cleanupController(id);
-      const usage = event.usage ?? { input: 0, output: 0 };
+      const usage = event.usage ?? {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+      };
       set((s) => {
         const n = s.nodes[id];
         if (!n) return s;

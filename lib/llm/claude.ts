@@ -126,11 +126,10 @@ export function makeClaudeProvider(
               yield {
                 type: "done",
                 usage: {
-                  input:
-                    (u.input_tokens ?? 0) +
-                    (u.cache_creation_input_tokens ?? 0) +
-                    (u.cache_read_input_tokens ?? 0),
+                  input: u.input_tokens ?? 0,
                   output: u.output_tokens ?? 0,
+                  cacheRead: u.cache_read_input_tokens ?? 0,
+                  cacheCreation: u.cache_creation_input_tokens ?? 0,
                 },
               };
               return;
@@ -155,7 +154,10 @@ export function makeClaudeProvider(
             message: stderr || `claude exited with code ${proc.exitCode ?? "?"}`,
           };
         } else {
-          yield { type: "done", usage: { input: 0, output: 0 } };
+          yield {
+            type: "done",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+          };
         }
       } finally {
         signal?.removeEventListener("abort", onAbort);

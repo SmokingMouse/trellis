@@ -14,9 +14,21 @@ export type ChatMessage = {
 //                 session, cleaned up on session delete.
 export type Mode = "lean" | "cli-single" | "cli-multi";
 
+// Per-turn token accounting. We track four buckets so the UI can show
+// "actual cost" (input + output) separately from "cache leverage"
+// (cacheRead, often dominant in cli-multi where the trellis tree shares
+// one CLI session). cacheCreation is the first-write penalty when the
+// CLI persists a new prompt prefix; usually small after the first turn.
+export type TokenUsage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+};
+
 export type StreamEvent =
   | { type: "delta"; text: string }
-  | { type: "done"; usage?: { input: number; output: number } }
+  | { type: "done"; usage?: TokenUsage }
   | { type: "error"; message: string }
   // cli-multi only: emitted once per spawn after parsing system/init.
   // The route handler writes this back to sessions.claude_session_id.

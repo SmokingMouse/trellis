@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-节点定位完整工具链：序号 + 已读未读 + 跳父滚 mark + J/K 跳未读 + compact dot 视觉分级 + done toast。等用户浏览器实测整套体感。
+Token 细分到 input / output / cacheRead / cacheCreation 四桶。修了 claude provider 一直在把 cache 命中混进 input 字段的根因 bug —— 用户终于能看出"4 万 token 里 39k 是 cache 复用"。等浏览器实测体感。
 
 ## Goals
 ### Short-term (MVP)
@@ -30,6 +30,40 @@
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 16 (2026-05-05)
+- **Done**: token 细分到 4 桶（input / output / cacheRead / cacheCreation），全链路 + UI
+  - 用户反馈："这里的 token 量意义不大，最好显示每条回复 input / output / cache 数量"。诊断根因：`lib/llm/claude.ts` done 分支把 `input_tokens + cache_creation + cache_read` 全部 sum 进 `usage.input` 字段——cli-multi 模式下"输入 4 万 tokens"实际 95% 是 cache hit。三个数字混成一个数字的过程从 LLM provider 层就开始了，下游全是被污染的总和。
+  - **类型扩展**：`lib/llm/types.ts` 新增 `TokenUsage = { input, output, cacheRead, cacheCreation }`，StreamEvent.usage 用此。`lib/types.ts` ChatNode.tokenCount 同步成四字段。`lib/server/repo.ts` ApiNode 同步。
+  - **provider 拆分**：
+    - `claude.ts` done 分支不再 sum，分别映射 anthropic 字段：`input_tokens / output_tokens / cache_read_input_tokens / cache_creation_input_tokens`。lean / cli-single / cli-multi 都享受。
+    - `codex.ts` done 分支：codex 0.125 JSONL 的 `input_tokens` 在某些 build 是含 cache 的总和、`cached_input_tokens` 是命中数；用 `Math.max(0, totalIn - cached)` 还原 net input；cacheCreation 在 codex 没暴露，固定 0。
+    - `mock.ts` 提供 cacheRead/cacheCreation 的 0 占位，类型对齐。
+  - **DB schema**：`lib/server/sqlite.ts` idempotent ALTER 加 `token_cache_read` / `token_cache_creation`，DEFAULT 0。老数据 token_input 仍含被污染的 sum 不回填——历史误归属，不主动 migrate。
+  - **repo + API**：NodeRow + NODE_COLS 加两列；rowToNode 映射 cacheRead/cacheCreation；`finalizeNode` 入参加 tokenCacheRead/tokenCacheCreation；`resetNodeForRetry` UPDATE 把这两列也归零；`api/chat/route.ts` done 事件接收四字段透传。
+  - **store**：`StreamEvent.done.usage` 类型同步四字段；done 分支默认值兜底 0。
+  - **UI**：
+    - 新建 `lib/format-tokens.ts:formatTokens(n)`：<1k 直显 / 1k-10k 一位小数 (`1.2k`) / 10k+ 整数 k (`32k`)。
+    - 新建 `<TokenMeta />` 子组件（在 ChatNode.tsx 内）：`↑in ↓out ⚡cacheRead`（cacheCreation > 0 时附 `+N`）。compact 和 full 两种 size variant。零值时显示 `—`。tooltip 给出原始数字。⚡ 用 emerald 色让"我省了多少"凸显。
+    - ChatNode compact 卡片右上角的"总 token 数字"换 `<TokenMeta variant="compact" />`。
+    - ChatNode full footer 行内"X tokens"换 `<TokenMeta variant="full" />`。
+    - Header 顶栏总数：原 `totalTokens = sum(input+output)` 全局错误，改为四桶分别累加，渲染 `↑总入 ↓总出 ⚡总 cache`。tooltip 同样含原始数字。
+  - 验证：`npm run build` ✓ 2 次（一次 type 错被发现，retryNode optimistic patch 漏 cacheRead/cacheCreation 修了）。端到端 cli-multi 实测：
+    - R1（首轮）：`input:10, output:257, cacheRead:27615, cacheCreation:12916` —— 真正 prompt 才 10 token，27k cache 命中是 claude code skills+tools 默认 system prompt 的 read，12k cache_creation 是首轮新建。
+    - R2（resume）：`input:10, output:157, cacheRead:40531, cacheCreation:275` —— cache hit 涨到 40k（含 R1 对话历史），创建只增量 275。
+    - UI tooltip 完整呈现：`输入 10 · 输出 257 · 缓存命中 27615 · 缓存写入 12916`。
+- **Decisions**:
+  - **不回填老数据**：老 token_input 列含被污染的 sum，迁移要重新计算每个历史节点的真实细分（数据已丢失）—— 不值得。新行干净，UI 看老节点会偏高，可接受。
+  - **codex 的 input 减去 cached**：codex 文档没明说，但实测 R2 cli-multi `input_tokens` 数值上等于 anthropic 那边 input + cacheRead 的和，与 anthropic 语义不一致。统一成"input = 真正发去的 net prompt"语义后，UI 跨 provider 一致。
+  - **cacheCreation 仅在 >0 时显示**：cli-multi 第 2 轮起几乎全是 cache hit、creation 很小（几百 token）。把它合并进 cache 槽 `⚡40k+275`，避免常态下多一个数字干扰。
+  - **emerald 色 cache**：amber 已经被 unread 占了。emerald 表达"省了"是直觉。
+  - **format 用 1 位小数 + 10k+ 整数**：常见 cache 命中是 30-50k 范围，5 位数太长。`32k` 比 `32517` 更可读且不丢一位精度（误差 ±500）。
+- **Caveats**:
+  - **codex cacheCreation 永远 0**：codex CLI 不暴露这个字段。如果用户在 codex 上看不到 creation，正常。
+  - **cache hit 数字可能跨 turn 累计语义混淆**：anthropic 的 cache_read_input_tokens 是本 turn 命中的 cache token 数，不是累计跨 turn。Header 的 ⚡总和是把每个节点的 per-turn 命中加起来——同一段 cache 在 N 轮中被读 N 次，会被算 N 次。这是 anthropic 计费视角的"读取 token-times"，不是"独立 cache 大小"。tooltip 已隐含此语义（"缓存命中"），先不解释。如果用户疑问可以加 footnote。
+  - **mock provider 没有真实 cache**：永远 0。不影响调试，但用 mock 跑时看到的"⚡0"不是 bug。
+  - **lean 模式 claude 也走 cache**：claude code 的 lean 模式跑 `--system-prompt <SP>`，那段 SP 也会 cache，所以 lean 模式也能看到 cacheRead 几千 token。这是真实计费，不是误算。
+- **Next**: 用户实测 — Header 顶栏的 ↑/↓/⚡ 在窄屏（md 以下）会隐藏，看是否需要 mobile 也露一行；卡片的 emerald ⚡ 在 cli-multi 高 cache 场景下是否够醒目；如果觉得 ⚡ 图标体验欠佳可换 ↻ 或 ⊕。
+
 ### Session 15 (2026-05-05)
 - **Done**: 节点定位进阶三件 — J/K 跳未读、compact 状态圆点视觉分级、流完成 toast
   - **进阶 1 — J/K 跳未读**：`hooks/useUnreadNavigation.ts` 新建。全局 keydown 监听 J / K（vim/Gmail 惯例：J 下一未读、K 上一未读），过滤 input/textarea/contentEditable focus + 修饰键。算法：按 createdAt 排序所有节点，从当前 active 起步走 ±i 步（含 wrap-around），返回首个 status==="done" && !readAt 的节点。在 page.tsx 顶层挂载 `useUnreadNavigation()`，canvas 和 fullscreen 都生效。Canvas 已有 auto-pan-to-active effect（line 109-120），J/K 切完会自动滚到节点。
@@ -240,33 +274,8 @@
     - **图标按钮常驻不隐藏**：mobile 没 hover，opacity-40 默认值让按钮可见但不抢眼，hover/tap 时变实。
     - **不在 trigger 上做编辑**：trigger 只做"选 session"。重命名走 dropdown 内 row 的 inline edit——一个 component 干一件事。
 
-### Session 11 (2026-05-04)
-- **Done**: Stage 11 — 发送/取消 UX 全套
-  - **服务端 abort 兜底**（`app/api/chat/route.ts`）：finally 里查 `req.signal.aborted` → 强制 `stoppedWith="error" / errorMessage="aborted"`，覆盖 claude 子进程被 kill 后干净退出导致 stoppedWith 残留 "done" 的坑。`controller.close()` / `send()` 全部 try/catch（客户端可能已断开）。topic_label 仅在真 done 时才生成。
-  - **客户端 AbortController**（`stores/sessionStore.ts`）：
-    - module-level `STREAM_CONTROLLERS: Map<nodeId, AbortController>`（不放 store，避免 Zustand 序列化）
-    - `runStream` 接 `signal`，传给 `fetch`；mid-stream abort 时 `reader.read()` 抛错，catch 里区分 `signal.aborted` → 合成 `{type:"error",message:"aborted"}` 给 store
-    - `handleStreamEvent` 在 `created` 事件里登记 `(nodeId, controller)`；`done`/`error` 终止时清理
-    - retry 路径 nodeId 已知，eager 注册 + finally 兜底清理
-    - 新增 actions：`abortStream(nodeId)` / `hasStreamingNode()` / `latestStreamingNodeId()`
-  - **Cmd+Enter 替换 Enter**（4 处输入面）：QuestionInput / NodeFullView 两处 / ChatNode FollowupInput。条件 `e.key === "Enter" && (e.metaKey || e.ctrlKey)`。kbd 提示文案 + placeholder 同步更新（"⌘↩ 提交 · Enter 换行"）。
-  - **流式 ⏹ 按钮 + Esc 中止**：
-    - `ChatNode.tsx:NodeFooter`：streaming 时 "正在生成…" 旁加灰色边框"停止"按钮，hover 反白
-    - `NodeFullView.tsx:FollowupBar`：streaming 时整个输入框 pivot 成全宽"停止生成（Esc）"按钮（替代之前的 disabled "等待回复完成…"）。done 后恢复输入框
-    - `hooks/useEscapeAbort.ts` 新增：全局 keydown 监听，textarea/input/contentEditable 内不触发；优先 abort active streaming 节点，否则 abort 最近一个（`STREAM_CONTROLLERS` 插入序）。挂在 `app/page.tsx`
-  - **Aborted 视觉**：`status="error" + errorMessage==="aborted"` 走 stone/灰色"已停止生成"框（区别于红色 error），按钮文案"↻ 重新发送"。retry 路径不变（已有 `retryNode`）。
-  - 验证：`npm run build` ✓；mock SSE curl --max-time 0.4 → DB row `status=error / error_message=aborted / response 106 chars`（partial 落盘 ✓，状态正确 ✓）
-- **Decisions**:
-  - 不引入 `aborted` 新状态枚举——用 `errorMessage === "aborted"` 区分。少一个 migration，UI 一处分支判断即可。
-  - QuestionInput 不加 ⏹ 按钮：从 submit 到 created 事件回来是毫秒级，过度设计。created 后 page swap 到 Canvas/Fullview，由那边的 ⏹ 接管。
-  - FollowupBar pivot 而非附加按钮：streaming 时输入框本来就是 disabled 死状态，不如让那块空间真正能停止当前流。
-- **Caveats**:
-  - 浏览器 UI 未实测（ssr / hot reload 已生效在跑着的 dev server 3088）。需要用户跑一遍 spec 列出的用例。
-  - lint 残留 4 个错误都是 pre-existing（NodeFullView:110 / SessionPicker:24 setState-in-effect），非本次引入。
-  - `controller.close()` try/catch 是防御性的——Next.js App Router 下 client abort 时 ReadableStream controller 可能已 closed。如果实测发现 server 端日志有 unhandled，再追。
-- **Next**: 浏览器验证 spec 用例（Enter 不发 / Cmd+Enter 发 / Shift+Enter 换行 / 流式 ⏹ 中止 / Esc 中止 / partial 保留 / 重发 / 并发 streaming Esc 只中 active）。验证通过后开 Stage 12。
 
 
 
 
-（Session 1–10 已归档，见 `archive.md`）
+（Session 1–11 已归档，见 `archive.md`）

@@ -15,6 +15,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { formatTokens } from "@/lib/format-tokens";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 
 // Plugin arrays at module scope so identity is stable across renders.
@@ -144,9 +145,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               </div>
             )}
           </div>
-          <div className="shrink-0 text-[10px] text-stone-400 dark:text-stone-500 font-medium tabular-nums">
-            {n.tokenCount.input + n.tokenCount.output}
-          </div>
+          <TokenMeta tokenCount={n.tokenCount} variant="compact" />
         </div>
         <Handle type="source" position={Position.Bottom} />
       </div>
@@ -344,7 +343,7 @@ function NodeFooter({
         </>
       ) : (
         <>
-          <span>{node.tokenCount.input + node.tokenCount.output} tokens</span>
+          <TokenMeta tokenCount={node.tokenCount} variant="full" />
           <button
             onClick={() => setOpen(true)}
             className="ml-2 px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
@@ -422,6 +421,55 @@ function FollowupInput({
 
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// Inline token meter shared by the compact-card right side and the
+// fullscreen footer. Three buckets (↑ in, ↓ out, ⚡ cache hit). cache
+// creation is collapsed into the cache slot only when non-zero (rare —
+// happens on first cli-multi turn) by appending +N. We deliberately
+// omit fields that are zero to keep idle nodes uncluttered.
+function TokenMeta({
+  tokenCount,
+  variant,
+}: {
+  tokenCount: ChatNodeData["tokenCount"];
+  variant: "compact" | "full";
+}) {
+  const { input, output, cacheRead, cacheCreation } = tokenCount;
+  const hasAny =
+    input > 0 || output > 0 || cacheRead > 0 || cacheCreation > 0;
+  if (!hasAny) {
+    return (
+      <span
+        className={
+          variant === "compact"
+            ? "shrink-0 text-[10px] text-stone-400 dark:text-stone-500 tabular-nums"
+            : "text-stone-400 dark:text-stone-500 tabular-nums"
+        }
+      >
+        —
+      </span>
+    );
+  }
+  const baseCls = "tabular-nums whitespace-nowrap";
+  const sizeCls = variant === "compact" ? "text-[10px]" : "text-[11px]";
+  return (
+    <span
+      className={`shrink-0 inline-flex items-center gap-1.5 ${sizeCls} ${baseCls} text-stone-500 dark:text-stone-400`}
+      title={`输入 ${input} · 输出 ${output} · 缓存命中 ${cacheRead}${
+        cacheCreation > 0 ? ` · 缓存写入 ${cacheCreation}` : ""
+      }`}
+    >
+      <span>↑{formatTokens(input)}</span>
+      <span>↓{formatTokens(output)}</span>
+      {(cacheRead > 0 || cacheCreation > 0) && (
+        <span className="text-emerald-600 dark:text-emerald-400">
+          ⚡{formatTokens(cacheRead)}
+          {cacheCreation > 0 ? `+${formatTokens(cacheCreation)}` : ""}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function injectHighlights(

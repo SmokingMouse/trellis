@@ -35,6 +35,8 @@ export const mockProvider: LLMProvider = {
       usage: {
         input: Math.ceil(inputChars / 4),
         output: Math.ceil(outputChars / 4),
+        cacheRead: 0,
+        cacheCreation: 0,
       },
     };
   },

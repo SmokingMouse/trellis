@@ -106,6 +106,30 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN read_at INTEGER");
   }
 
+  // Idempotent: split out cache token tracking so the UI can distinguish
+  // net cost (input + output) from cache leverage (cache_read, often
+  // dominant in cli-multi). Existing token_input / token_output columns
+  // continue to mean "raw model input" / "model output" — old rows had
+  // cache buckets summed into token_input via claude.ts; that's a
+  // historical mis-attribution we accept (no migration to retroactively
+  // fix). New rows get clean separation.
+  const cacheCols: { name: string; sql: string }[] = [
+    {
+      name: "token_cache_read",
+      sql: "ALTER TABLE nodes ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0",
+    },
+    {
+      name: "token_cache_creation",
+      sql: "ALTER TABLE nodes ADD COLUMN token_cache_creation INTEGER NOT NULL DEFAULT 0",
+    },
+  ];
+  for (const c of cacheCols) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('nodes') WHERE name = ?")
+      .get(c.name);
+    if (!has) db.exec(c.sql);
+  }
+
   // Reap dangling streams from a previous server crash, exactly once on boot.
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted'

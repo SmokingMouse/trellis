@@ -157,7 +157,7 @@ export async function POST(req: Request) {
       send(createdEvent);
 
       let aggregated = "";
-      let usage = { input: 0, output: 0 };
+      let usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
       let stoppedWith: "done" | "error" = "done";
       let errorMessage: string | undefined;
 
@@ -225,6 +225,8 @@ export async function POST(req: Request) {
             errorMessage,
             tokenInput: usage.input,
             tokenOutput: usage.output,
+            tokenCacheRead: usage.cacheRead,
+            tokenCacheCreation: usage.cacheCreation,
             now: Date.now(),
           });
         } catch {

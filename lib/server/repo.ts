@@ -32,7 +32,12 @@ export type ApiNode = {
   status: "streaming" | "done" | "error";
   errorMessage: string | null;
   siblingIndex: number;
-  tokenCount: { input: number; output: number };
+  tokenCount: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
   createdAt: number;
   topicLabel: string | null;
   kind: NodeKind;
@@ -52,6 +57,8 @@ type NodeRow = {
   sibling_index: number;
   token_input: number;
   token_output: number;
+  token_cache_read: number;
+  token_cache_creation: number;
   created_at: number;
   topic_label: string | null;
   kind: string | null;
@@ -64,7 +71,8 @@ type NodeRow = {
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
-       status, error_message, sibling_index, token_input, token_output, created_at,
+       status, error_message, sibling_index, token_input, token_output,
+       token_cache_read, token_cache_creation, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at`;
 
@@ -121,7 +129,12 @@ function rowToNode(r: NodeRow): ApiNode {
     status: r.status as ApiNode["status"],
     errorMessage: r.error_message,
     siblingIndex: r.sibling_index,
-    tokenCount: { input: r.token_input, output: r.token_output },
+    tokenCount: {
+      input: r.token_input,
+      output: r.token_output,
+      cacheRead: r.token_cache_read,
+      cacheCreation: r.token_cache_creation,
+    },
     createdAt: r.created_at,
     topicLabel: r.topic_label,
     kind,
@@ -344,7 +357,9 @@ export function resetNodeForRetry(
   db.prepare(
     `UPDATE nodes
      SET response = '', status = 'streaming',
-         error_message = NULL, token_input = 0, token_output = 0
+         error_message = NULL,
+         token_input = 0, token_output = 0,
+         token_cache_read = 0, token_cache_creation = 0
      WHERE id = ?`,
   ).run(nodeId);
   return {
@@ -369,6 +384,8 @@ export function finalizeNode(args: {
   errorMessage?: string;
   tokenInput: number;
   tokenOutput: number;
+  tokenCacheRead: number;
+  tokenCacheCreation: number;
   now: number;
 }): void {
   const db = getDB();
@@ -379,13 +396,17 @@ export function finalizeNode(args: {
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE nodes
-       SET status = ?, error_message = ?, token_input = ?, token_output = ?
+       SET status = ?, error_message = ?,
+           token_input = ?, token_output = ?,
+           token_cache_read = ?, token_cache_creation = ?
        WHERE id = ?`,
     ).run(
       args.status,
       args.errorMessage ?? null,
       args.tokenInput,
       args.tokenOutput,
+      args.tokenCacheRead,
+      args.tokenCacheCreation,
       args.nodeId,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
