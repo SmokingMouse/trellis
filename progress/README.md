@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-笔记本功能落地：⌘D / 📌 摘录 → 右侧抽屉浏览 → ↗ 跳回原文。per-session 硬删，无备注字段；后续看用法决定要不要扩。等浏览器实测。
+笔记本 v2：跳回原文时滚到原句 + emerald pulse 高亮。复用 pendingScrollAnchor，把 anchor 升级成 union（child / note）。等浏览器实测匹配命中率。
 
 ## Goals
 ### Short-term (MVP)
@@ -32,6 +32,34 @@
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 18 (2026-05-05)
+- **Done**: 笔记本 v2 — 跳回原文滚到原句 + emerald pulse
+  - 用户反馈："最好增加一个高亮"。延续 v1 留的 follow-up（v1 跳回只切节点不滚句）。
+  - **anchor union**：`pendingScrollAnchor` 从 `{ nodeId, childId }` 改为 discriminated union `{ kind:"child", nodeId, childId } | { kind:"note", nodeId, noteId }`。store 行为：
+    - `jumpToParentAtAnchor` 仍 set kind="child"。
+    - 新 action `jumpToNoteSource(noteId)`: 从 notes 数组找 sourceNodeId → set anchor + activeNodeId + fullScreen + notesOpen=false 一次完成（之前 NotesDrawer 自己拼这堆 set，重叠责任）。
+  - **mark 注入串联**（`NodeFullView.tsx:ResponseBody`）：
+    - 新增 `injectNoteMarks(md, noteAnchors)` ：和 `injectHighlights` 同结构但 wrap `<mark data-note-id>`。`escaped` 之后用 `replace(/\s+/g, "\\s+")` 让正则跨行/多空白容错（getSelection 抓的文字有时换行被合并成单空格，markdown 源文里仍是 `\n`）。
+    - 注入顺序：**先 note 后 child**。当某段同时是分叉锚 + 笔记源时，child mark 包在外层、note mark 在内层 → DOM 里 closest("[data-child-id]") 仍能找到外层（保留点击跳子语义）；scroll 用 querySelector("[data-note-id]") 也能找到内层。语义不冲突。
+  - **scroll effect 多分支**：原 effect 写死 `mark[data-child-id="..."]`，改为按 `pendingScrollAnchor.kind` 选 selector。增加"二次 rAF 后还找不到 → clearScrollAnchor"兜底（之前会留挂着的 anchor 在下次 ResponseBody mount 时尝试，可能错位 pulse 别的节点）。
+  - **CSS**：
+    - 新规则 `mark[data-note-id]:not([data-child-id])` 用 emerald-100 / emerald-700 dark 替代默认 amber，cursor:default（无点击）。区分"我的标记"vs"分叉锚"。
+    - `@keyframes anchor-pulse` 拆成 amber / emerald 两套 + dark 各一套。`.md-body mark.anchor-pulse` 默认 amber 动画；`mark[data-note-id]:not([data-child-id]).anchor-pulse` 覆盖成 emerald 动画。视觉一眼区分跳源类型。
+  - **NotesDrawer 简化**：删掉 v1 留的"占位 setActiveNode + setFullScreen + setNotesOpen + void jumpToParentAtAnchor"那段权宜代码，onJump 现在就一行调 `jumpToNoteSource(note.id)`。
+  - 验证：build ✓ 一次过。
+- **Decisions**:
+  - **note 在内、child 在外**：因为 child mark 现有 click-to-jump 行为，必须能被 closest 取到外层；note mark 只是 scroll target 和视觉提示，无需在外层。
+  - **emerald 配色**：amber 已被 unread / 笔记 / reference 等 overload，再用 amber 区分笔记和分叉锚视觉混淆。emerald 在系统里只有"cache hit"用过、新意义"我手动标的"语义近"省下/收藏"也合理。
+  - **`\s+` flexible 匹配**：getSelection() 跨段 / 跨列表项 /  跨 markdown 渲染元素时，得到的 text 用单空格连接，但源 markdown 里是 `\n` / 多空格。统一用 `\s+` regex 在源文找。代价：偶尔会过度匹配（连续多个空格段被归并），实际影响小。
+  - **匹配失败兜底 clear anchor**：rAF 两次都找不到 mark 时主动 `clearScrollAnchor()`。否则 pendingScrollAnchor 会卡住，下次切到该节点（包括误切）会再触发寻找逻辑——视觉上一切都正常但用户感觉"为什么忽然有个高亮"。
+  - **不在抽屉里 pulse**：跳回时只在 source node body 里 pulse 引用句。抽屉里那条笔记卡片自己不闪，避免双重视觉噪音。
+- **Caveats**:
+  - **正则匹配脆弱**：仍有 fail 场景。例：摘录内容跨 code fence、跨表格、被 markdown 渲染时插入额外字符（如 list item bullet）。失败时跳到节点但不滚不 pulse —— 退化到 v1 体感，不会崩。如果用户高频遇到再考虑用 DOM textContent 索引而非源 markdown 正则。
+  - **重复文本歧义**：同一段话被摘两次，注入只 wrap 第一处（Set 去重）。两条 note 共享同一 mark 的 data-note-id 是其中之一—另一条的跳回会找不到 mark 退化成 v1。极端 corner，先不解决。
+  - **note mark 嵌套 child mark 视觉**：当两者重叠时 inner note 是 emerald 但被 outer amber child 包着 —— 显示成 amber（CSS 选择器 `:not([data-child-id])` 不命中 inner，所以 inner 退化默认 mark 样式 = amber）。这是有意—保留分叉锚的视觉优先级。如果要让 emerald 在嵌套时也显示，要更复杂的 CSS（`mark[data-child-id] mark[data-note-id]` 反向 override），先不做。
+  - **dark mode emerald 偏深**：`#064e3b` 在 dark theme 下接近背景，对比度低。如果实测看不清再调亮。
+- **Next**: 用户实测匹配命中率 — 摘短句（一句话内）几乎必中；摘跨段长文本 / code block 内 / list item 跨条目时观察是否有 fail 比例。若 >20% fail 考虑 textContent 索引方案（用 source node DOM textContent 加 prefix-suffix 锚定，而非源 markdown 正则）。
+
 ### Session 17 (2026-05-05)
 - **Done**: 笔记本功能 — 阅读时 ⌘D / 📌 摘录、右侧抽屉浏览、跳回原文
   - **数据层**：
@@ -165,31 +193,5 @@
   - **multi-tab 写竞争**：标记 read 是 last-writer-wins by id，但 markNodeRead repo 函数已经是 "如果有 read_at 就返回原值"，所以两个 tab 同时点开同一节点不会刷新 timestamp。
 - **Next**: 用户浏览器实测 — 序号是否方便记位、Outline "X 未读 / 只看未读 toggle" 体感、跳父 pulse 是否够显眼又不刺眼。可能的进阶：J 键跳下一未读、Canvas 节点边框分级（high-LoD 可视化）、流式 done 时若用户不在该节点弹气泡。
 
-### Session 13 (2026-05-04)
-- **Done**: Codex provider 从 SDK 切换到 spawn CLI，三档 mode + URL fetch 与 Claude 路径完全对称解耦
-  - **lib/llm/codex.ts 重写**：丢弃 `@openai/codex-sdk`（注入 22k tokens 系统 prompt 无法关闭、不识别 mode），改 spawn `codex exec` / `codex exec resume`。三档：lean (`--ephemeral --sandbox read-only`，DEFAULT_SYSTEM_PROMPT 拼到 prompt 头) / cli-single (`--ephemeral --dangerously-bypass-approvals-and-sandbox`) / cli-multi（首轮非 ephemeral 持久化 + 后续 `exec resume <thread_id>`）。`@openai/codex-sdk` 依赖从 package.json 移除。
-  - **codex login 检测**：`makeCodexProvider().stream` 入口先 `spawnSync codex login status` exit code 检测，未登录直接 `yield error("请先 codex login")`。
-  - **URL fetch 拆分**：
-    - 新建 `lib/server/fetch-prompt.ts`：抽出共用 `buildFetchPrompt(url, variant)` + `parseFetchOutput`。`variant: "claude"` 在尾部加 "AVOID WebFetch built-in" 提示，`variant: "codex"` 不加。
-    - 新建 `lib/server/fetch-via-codex.ts`：spawn `codex exec --json --skip-git-repo-check --ephemeral --dangerously-bypass-approvals-and-sandbox -m gpt-5.5`；JSONL 路由 `item.started(command_execution)` → 把 codex 跑的 bash 命令直接转 progress 给前端；`item.completed(agent_message)` → 用共享 parser 抽 frontmatter+body。
-    - `lib/server/fetch-via-claude.ts` 简化：去掉本地 PROMPT_TEMPLATE / parseClaudeOutput，全部改用 `fetch-prompt.ts` 的共享版本。
-    - `lib/server/fetch-url.ts` 改 dispatcher：导出 `fetchUrlEvents(url, provider, signal)` async generator + `fetchByUrl(url, provider, signal)` sync wrapper，按 provider 路由到 claude / codex 两条路。
-  - **API + store provider 透传**：`app/api/references/route.ts` 接收 `provider` 字段（`isProviderId` 校验，缺省走 DEFAULT_PROVIDER）；refresh route 同时支持 query string `?provider=codex` 和 body。`stores/sessionStore.ts` 的 createReference / refreshReference 自动从 store.provider 取当前选中的 provider 传给 server。
-  - **UI 文案 provider-aware**：`ModePicker.tsx` 加 `optionsFor(provider)` 切两套 tooltip（claude → "skills + ~/.claude/CLAUDE.md"；codex → "MCP servers + ~/.codex/config.toml"）；cli-multi 切换确认对话也用动态 cliName。`ReferencePicker.tsx` URL tab 描述根据 provider 切换。
-  - 验证：`npm run build` ✓ 三次。端到端 curl 测试：codex+lean → "2"（input 24256, output 54）；codex+cli-single → 跑 zsh echo 命令 + 拿 output；codex+cli-multi 双轮 → 第二轮记得第一轮的数字 73；codex URL fetch example.com → 拿到 "Example Domain" 标题 + verbatim body + 完整 progress 流（curl + python html-to-md fallback）。回归 claude-haiku+lean → 正常。
-- **Decisions**:
-  - **lean 模式 system prompt 用拼接而非 codex flag**：codex CLI 没有 `--system-prompt`，把 DEFAULT_SYSTEM_PROMPT 加在 user prompt 前面。read-only 沙箱保证就算模型想调工具也调不动。
-  - **不传 `--ignore-user-config`**：实测发现该 flag 让 codex 走 env 里的 `OPENAI_API_KEY`，而用户用的是 ChatGPT 订阅 auth。屏蔽全局配置反而打破登录态，得不偿失——lean 模式只靠 sandbox + system prompt 约束。
-  - **session_init / db column 复用 `claude_session_id`**：codex 的 thread_id 也写到这个 column。column 名不准但 schema 不动，技术债先记。后续如果给 provider-specific session 多种语义再拆。
-  - **URL fetch 也对接 codex**：意味着 trellis 不再 hard-require `claude` 在 PATH 上。选 codex 时所有外部抓取走 codex，feishu-cli/yt-dlp/curl 等本机 CLI 工具直接被 codex spawn——这些工具的 auth state 是用户机器级的，跟 LLM provider 无关。
-  - **codex JSONL 一次性给 agent_message**：no streaming delta，UX 是"spinner 然后整段一次性出现"。codex CLI 0.125 限制，非 trellis 问题；接受现状不绕。
-- **Caveats**:
-  - **codex stderr 偶现 "failed to record rollout items"**：非致命，已 swallow。
-  - **DB column 命名 `claude_session_id` 用于 codex thread_id**：技术债。
-  - **mock provider 选 codex 时**：codex provider 不会被走（mock 是另一支），但 fetch dispatcher 的"未知 provider 走 claude"兜底意味着 mock 用户加 reference 仍依赖 claude CLI。无解：mock 没有自己的 fetcher。
-  - **gpt-5.5 是默认 model**：用户确认。如果 OpenAI 后续改名要更新常量。
-  - **codex resume 不接受 `--sandbox` flag**：首轮 yolo 配置后续轮跟随，无法切。trellis cli-multi 在第二轮起仍传 `--dangerously-bypass-approvals-and-sandbox`，被 codex 接受。
-- **Next**: 用户在浏览器里切到 Codex 实测——三档 mode 切换 + Cmd+K 分叉 + URL 抓取（可以试 feishu / youtube 看 codex 是否真能 spawn 那些 CLI）。如果发现 progress 流体感差（一次性出整段而非流式），考虑加"思考中"占位文案优化。
 
-
-（Session 1–12 已归档，见 `archive.md`）
+（Session 1–13 已归档，见 `archive.md`）

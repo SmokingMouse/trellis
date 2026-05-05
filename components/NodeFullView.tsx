@@ -314,6 +314,7 @@ function QuestionBlock({ question }: { question: string }) {
 
 function ResponseBody({ node }: { node: ChatNode }) {
   const allNodes = useSessionStore((s) => s.nodes);
+  const allNotes = useSessionStore((s) => s.notes);
   const retryNode = useSessionStore((s) => s.retryNode);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const pendingScrollAnchor = useSessionStore((s) => s.pendingScrollAnchor);
@@ -329,10 +330,21 @@ function ResponseBody({ node }: { node: ChatNode }) {
         })),
     [allNodes, node.id],
   );
-  const responseWithMarks = useMemo(
-    () => injectHighlights(node.response, childAnchors),
-    [node.response, childAnchors],
+  const noteAnchors = useMemo(
+    () =>
+      allNotes
+        .filter((n) => n.sourceNodeId === node.id)
+        .map((n) => ({ text: n.quotedText, noteId: n.id })),
+    [allNotes, node.id],
   );
+  // Inject note marks first, child marks on top — so when both reference
+  // the same span, the (more frequently used) child mark wins for click
+  // targeting (closest("[data-child-id]") finds the outer wrapper).
+  // Note marks remain present in the DOM for scroll-to-anchor to find.
+  const responseWithMarks = useMemo(() => {
+    const withNotes = injectNoteMarks(node.response, noteAnchors);
+    return injectHighlights(withNotes, childAnchors);
+  }, [node.response, childAnchors, noteAnchors]);
 
   const onMarkClick = (e: React.MouseEvent) => {
     const target = (e.target as HTMLElement).closest("[data-child-id]");
@@ -360,34 +372,41 @@ function ResponseBody({ node }: { node: ChatNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, node.id]);
 
-  // Scroll-to-anchor: when user clicks "↳ 从「xxx」分叉" on a child, the
-  // store sets pendingScrollAnchor to {nodeId: parent.id, childId: child.id}
-  // and flips the active node to parent. We wait one rAF for the new
-  // markdown to commit, find the matching <mark>, scroll it into view, and
-  // briefly pulse it. Without this, jumping back to the parent leaves the
-  // user staring at the top of a long answer with no idea where the
-  // forked-from sentence lives.
+  // Scroll-to-anchor: handles both
+  //   kind="child" — user clicked "↳ 从「xxx」分叉" on a child to come
+  //                  back to the parent: highlight the source sentence
+  //                  (data-child-id).
+  //   kind="note"  — user clicked a notebook entry: highlight the
+  //                  quoted excerpt in the source node (data-note-id).
+  // Same scroll-into-center + 3-cycle pulse animation either way. We
+  // wait an rAF for the markdown to commit, retry once if the mark
+  // isn't in the DOM yet (slow markdown mount).
   useEffect(() => {
     if (!pendingScrollAnchor) return;
     if (pendingScrollAnchor.nodeId !== node.id) return;
     if (isStreaming) return; // marks aren't injected during streaming
-    const childId = pendingScrollAnchor.childId;
+    const selector =
+      pendingScrollAnchor.kind === "child"
+        ? `mark[data-child-id="${CSS.escape(pendingScrollAnchor.childId)}"]`
+        : `mark[data-note-id="${CSS.escape(pendingScrollAnchor.noteId)}"]`;
     let raf = 0;
     let timer = 0;
     raf = window.requestAnimationFrame(() => {
       const root = bodyRef.current;
       if (!root) return;
-      const target = root.querySelector<HTMLElement>(
-        `mark[data-child-id="${CSS.escape(childId)}"]`,
-      );
+      const target = root.querySelector<HTMLElement>(selector);
       if (!target) {
-        // Mark not in DOM yet (rare — markdown still mounting). Try once
-        // more on the next frame.
         raf = window.requestAnimationFrame(() => {
-          const t2 = root.querySelector<HTMLElement>(
-            `mark[data-child-id="${CSS.escape(childId)}"]`,
-          );
+          const t2 = root.querySelector<HTMLElement>(selector);
           if (t2) flash(t2);
+          else {
+            // Match failed even after second frame — the regex anchor
+            // didn't find the quoted text in the markdown (e.g. text
+            // crosses paragraph break, was edited). Clear so we don't
+            // re-enter on re-render. UX: user lands on the right node
+            // but no scroll/pulse — same as v1.
+            clearScrollAnchor();
+          }
         });
         return;
       }
@@ -884,6 +903,34 @@ function injectHighlights(
     out = out.replace(
       new RegExp(escaped),
       `<mark data-child-id="${a.childId}">$&</mark>`,
+    );
+  }
+  return out;
+}
+
+// Same shape as injectHighlights but data-note-id="<id>" — applied first
+// (before child anchors) so a span that's both quoted and forked-from
+// gets the child mark on the outside (closest("[data-child-id]") wins
+// for click handling), with the note mark still in the DOM as a scroll
+// target (queryable via mark[data-note-id]).
+function injectNoteMarks(
+  md: string,
+  anchors: { text: string; noteId: string }[],
+): string {
+  if (anchors.length === 0 || !md) return md;
+  let out = md;
+  const seen = new Set<string>();
+  for (const a of anchors) {
+    if (!a.text || seen.has(a.text)) continue;
+    seen.add(a.text);
+    const escaped = a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Whitespace inside the quoted text may differ from the source
+    // markdown (e.g. line wraps captured by getSelection() vs the raw
+    // \n in markdown). Match runs of whitespace flexibly.
+    const flexible = escaped.replace(/\s+/g, "\\s+");
+    out = out.replace(
+      new RegExp(flexible),
+      `<mark data-note-id="${a.noteId}">$&</mark>`,
     );
   }
   return out;

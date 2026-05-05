@@ -149,6 +149,22 @@ html, body {
 }
 .dark .md-body mark[data-child-id]:hover { background-color: #92400e; }
 
+/* Note marks (data-note-id) without a child-id wrapping them get an
+   emerald tint to visually separate "I bookmarked this" from "someone
+   forked from this". When both attributes are present (note + child on
+   the same span), the outer child mark wins — its amber dominates and
+   the inner note mark simply inherits, which is fine. */
+.md-body mark[data-note-id]:not([data-child-id]) {
+  background: #d1fae5;
+  box-shadow: 0 0 0 1px #34d399;
+  cursor: default;
+}
+.dark .md-body mark[data-note-id]:not([data-child-id]) {
+  background: #064e3b;
+  color: #d1fae5;
+  box-shadow: 0 0 0 1px #047857;
+}
+
 /* Tables — wrapped in a horizontally-scrollable div by MD_COMPONENTS so
    wide tables (5+ cols, common in feishu wiki dumps) don't bust out of
    the 600px canvas card. The wrapper carries the visual frame; the
@@ -252,22 +268,37 @@ html, body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* Anchor pulse: applied on a <mark> when user jumps back to the parent
-   from a child node (badge "↳ 从「xxx」分叉"). Fades a deeper-orange
-   highlight in/out 3 times so the eye latches onto the source sentence. */
-@keyframes anchor-pulse {
+/* Anchor pulse: applied on a <mark> when the user jumps to a target
+   mark — clicking "↳ 从「xxx」分叉" on a child (amber pulse) or a note
+   in NotesDrawer (emerald pulse). Three cycles, ~1.5s total, so the eye
+   latches onto the source sentence. Hue switches by mark kind. */
+@keyframes anchor-pulse-amber {
   0%, 100% { background-color: #fde68a; box-shadow: 0 0 0 1px #fbbf24; }
   50%      { background-color: #fbbf24; box-shadow: 0 0 0 3px #f59e0b; }
 }
-@keyframes anchor-pulse-dark {
+@keyframes anchor-pulse-amber-dark {
   0%, 100% { background-color: #78350f; box-shadow: 0 0 0 1px #b45309; }
   50%      { background-color: #b45309; box-shadow: 0 0 0 3px #d97706; }
 }
+@keyframes anchor-pulse-emerald {
+  0%, 100% { background-color: #d1fae5; box-shadow: 0 0 0 1px #34d399; }
+  50%      { background-color: #6ee7b7; box-shadow: 0 0 0 3px #10b981; }
+}
+@keyframes anchor-pulse-emerald-dark {
+  0%, 100% { background-color: #064e3b; box-shadow: 0 0 0 1px #047857; }
+  50%      { background-color: #047857; box-shadow: 0 0 0 3px #10b981; }
+}
 .md-body mark.anchor-pulse {
-  animation: anchor-pulse 0.5s ease-in-out 3;
+  animation: anchor-pulse-amber 0.5s ease-in-out 3;
 }
 .dark .md-body mark.anchor-pulse {
-  animation: anchor-pulse-dark 0.5s ease-in-out 3;
+  animation: anchor-pulse-amber-dark 0.5s ease-in-out 3;
+}
+.md-body mark[data-note-id]:not([data-child-id]).anchor-pulse {
+  animation: anchor-pulse-emerald 0.5s ease-in-out 3;
+}
+.dark .md-body mark[data-note-id]:not([data-child-id]).anchor-pulse {
+  animation: anchor-pulse-emerald-dark 0.5s ease-in-out 3;
 }
 
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }

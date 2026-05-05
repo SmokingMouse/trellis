@@ -16,9 +16,7 @@ export function NotesDrawer() {
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
   const notes = useSessionStore((s) => s.notes);
   const nodes = useSessionStore((s) => s.nodes);
-  const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
-  const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
+  const jumpToNoteSource = useSessionStore((s) => s.jumpToNoteSource);
   const deleteNote = useSessionStore((s) => s.deleteNote);
 
   const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
@@ -33,31 +31,11 @@ export function NotesDrawer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, setNotesOpen]);
 
-  const onJump = (note: Note) => {
-    // pendingScrollAnchor was originally built for "jump from child back
-    // to parent + highlight the source mark". Same machinery works for
-    // "jump from note → source node + highlight the same anchor", because
-    // the source node's ResponseBody also injects <mark data-child-id="X">
-    // for any of its children whose parentAnchor matches an anchor child.
-    //
-    // For notes, there's no child-id to anchor on — we use the note id as
-    // the marker. ResponseBody's existing scroll handler queries
-    // `mark[data-child-id="<id>"]`; for notes we'd need either:
-    //   (a) inject a separate <mark> for each note's quoted_text in the
-    //       source node's body, OR
-    //   (b) just navigate to the source node without scroll anchoring.
-    //
-    // For now go with (b) — simpler, still useful (you land on the right
-    // node, fullscreen). If users say "I lose the sentence" we wire (a)
-    // by extending injectHighlights to also overlay note marks.
-    setActiveNode(note.sourceNodeId);
-    setFullScreen(true);
-    setNotesOpen(false);
-    // Suppress lint — jumpToParentAtAnchor is intentionally unused here
-    // (kept imported for future option-(a) wiring). We close over it via
-    // a no-op call to make the linter happy.
-    void jumpToParentAtAnchor;
-  };
+  // Jump-to-source: store action handles activeNodeId + fullScreen +
+  // pendingScrollAnchor in one set(), and ResponseBody scrolls/pulses
+  // the matching mark[data-note-id]. Drawer self-closes via setNotesOpen
+  // inside the action.
+  const onJump = (note: Note) => jumpToNoteSource(note.id);
 
   return (
     <div

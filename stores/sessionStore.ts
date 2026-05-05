@@ -69,12 +69,15 @@ type State = {
   // claude fetcher emits SSE `progress` events; cleared when the node
   // transitions to status=done. Transient — never persisted.
   fetchProgress: Record<string, string>;
-  // When user clicks "↳ 从「xxx」分叉 · 点击回到父节点" we need to (a) jump
-  // to the parent node and (b) scroll the parent's response body so the
-  // <mark data-child-id="..."> for this child sits in view + briefly
-  // pulses to draw the eye. Set by requestScrollToAnchor; consumed and
-  // cleared by NodeFullView's ResponseBody.
-  pendingScrollAnchor: { nodeId: string; childId: string } | null;
+  // When user wants to land inside a node *and* highlight a specific
+  // span: clicking "↳ 从「xxx」分叉" on a child (kind="child", anchored
+  // by data-child-id), or jumping back from a note in NotesDrawer
+  // (kind="note", anchored by data-note-id). Consumed + cleared by
+  // NodeFullView's ResponseBody scroll effect.
+  pendingScrollAnchor:
+    | { nodeId: string; kind: "child"; childId: string }
+    | { nodeId: string; kind: "note"; noteId: string }
+    | null;
   // Toasts emitted when a node finishes streaming AND the user is not
   // currently focused on it (activeNodeId !== that node). Lets the user
   // know "#7 完成" is ready to read without context-switching mid-flow.
@@ -137,6 +140,10 @@ type Actions = {
   // child" action. Sets pendingScrollAnchor first so the consumer effect
   // sees it on the next render, then flips activeNodeId.
   jumpToParentAtAnchor: (parentId: string, childId: string) => void;
+  // "Open notebook entry": navigates to the note's source node and asks
+  // its ResponseBody to scroll the mark[data-note-id] into view + pulse.
+  // No-op (silent) if the note id isn't in the store (rare race).
+  jumpToNoteSource: (noteId: string) => void;
   clearScrollAnchor: () => void;
   // Remove a single done toast (timer expiry or user dismiss/click).
   dismissDoneToast: (nodeId: string) => void;
@@ -529,8 +536,23 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   jumpToParentAtAnchor: (parentId, childId) => {
     set({
-      pendingScrollAnchor: { nodeId: parentId, childId },
+      pendingScrollAnchor: { nodeId: parentId, kind: "child", childId },
       activeNodeId: parentId,
+    });
+  },
+
+  jumpToNoteSource: (noteId) => {
+    const note = get().notes.find((n) => n.id === noteId);
+    if (!note) return;
+    set({
+      pendingScrollAnchor: {
+        nodeId: note.sourceNodeId,
+        kind: "note",
+        noteId,
+      },
+      activeNodeId: note.sourceNodeId,
+      fullScreen: true,
+      notesOpen: false,
     });
   },
 
