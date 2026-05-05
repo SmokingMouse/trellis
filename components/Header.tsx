@@ -1,4 +1,5 @@
 "use client";
+import { useMemo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
 import { SessionPicker } from "./SessionPicker";
@@ -9,21 +10,27 @@ import { formatTokens } from "@/lib/format-tokens";
 
 export function Header() {
   const session = useSessionStore((s) => s.session);
-  const nodeCount = useSessionStore((s) => Object.keys(s.nodes).length);
+  const nodes = useSessionStore((s) => s.nodes);
+  const nodeCount = Object.keys(nodes).length;
   // Aggregate four buckets independently — total input vs total output vs
-  // total cache leverage. Collapsed into one number obscures whether the
-  // bill is from real prompts or cache replay.
-  const totals = useSessionStore((s) =>
-    Object.values(s.nodes).reduce(
-      (acc, n) => {
-        acc.input += n.tokenCount.input;
-        acc.output += n.tokenCount.output;
-        acc.cacheRead += n.tokenCount.cacheRead;
-        acc.cacheCreation += n.tokenCount.cacheCreation;
-        return acc;
-      },
-      { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-    ),
+  // total cache leverage. Computed via useMemo (NOT inside the Zustand
+  // selector) because returning a fresh object from a selector defeats
+  // its referential-equality bail-out and triggers an infinite render
+  // loop ("getSnapshot should be cached"). The selector returns the
+  // stable nodes map; useMemo only recomputes when that ref changes.
+  const totals = useMemo(
+    () =>
+      Object.values(nodes).reduce(
+        (acc, n) => {
+          acc.input += n.tokenCount.input;
+          acc.output += n.tokenCount.output;
+          acc.cacheRead += n.tokenCount.cacheRead;
+          acc.cacheCreation += n.tokenCount.cacheCreation;
+          return acc;
+        },
+        { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+      ),
+    [nodes],
   );
 
   return (
