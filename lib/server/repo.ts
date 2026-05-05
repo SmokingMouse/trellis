@@ -738,6 +738,88 @@ export function refreshReferenceNode(args: {
   return getNode(args.nodeId);
 }
 
+// ---------------------------------------------------------------------------
+// Notes (notebook — see progress/README.md current focus)
+// ---------------------------------------------------------------------------
+
+export type ApiNote = {
+  id: string;
+  sessionId: string;
+  sourceNodeId: string;
+  quotedText: string;
+  createdAt: number;
+};
+
+type NoteRow = {
+  id: string;
+  session_id: string;
+  source_node_id: string;
+  quoted_text: string;
+  created_at: number;
+};
+
+function rowToNote(r: NoteRow): ApiNote {
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    sourceNodeId: r.source_node_id,
+    quotedText: r.quoted_text,
+    createdAt: r.created_at,
+  };
+}
+
+export function listNotesBySession(sessionId: string): ApiNote[] {
+  const db = getDB();
+  // newest first — drawer typically reads top-down "what did I just capture"
+  const rows = db
+    .prepare(
+      "SELECT id, session_id, source_node_id, quoted_text, created_at FROM notes WHERE session_id = ? ORDER BY created_at DESC",
+    )
+    .all(sessionId) as NoteRow[];
+  return rows.map(rowToNote);
+}
+
+export function createNote(args: {
+  noteId: string;
+  sessionId: string;
+  sourceNodeId: string;
+  quotedText: string;
+  now: number;
+}): ApiNote {
+  const db = getDB();
+  // Validate session + source node exist before inserting — DB has FK on
+  // session_id but not source_node_id, so we need an explicit check
+  // (otherwise a stale client could create dangling notes).
+  const sourceOk = db
+    .prepare("SELECT 1 FROM nodes WHERE id = ? AND session_id = ?")
+    .get(args.sourceNodeId, args.sessionId);
+  if (!sourceOk) {
+    throw new Error("source node not found in this session");
+  }
+  db.prepare(
+    "INSERT INTO notes (id, session_id, source_node_id, quoted_text, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(
+    args.noteId,
+    args.sessionId,
+    args.sourceNodeId,
+    args.quotedText,
+    args.now,
+  );
+  return {
+    id: args.noteId,
+    sessionId: args.sessionId,
+    sourceNodeId: args.sourceNodeId,
+    quotedText: args.quotedText,
+    createdAt: args.now,
+  };
+}
+
+export function deleteNote(noteId: string): boolean {
+  const db = getDB();
+  const r = db.prepare("DELETE FROM notes WHERE id = ?").run(noteId);
+  return r.changes > 0;
+}
+
 // Cleanup leftover streaming nodes — call on server start. If the process
 // crashed mid-stream, those nodes get marked as errored.
 export function reapInterruptedStreams(): number {

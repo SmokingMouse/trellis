@@ -11,6 +11,8 @@ import { formatTokens } from "@/lib/format-tokens";
 export function Header() {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
+  const noteCount = useSessionStore((s) => s.notes.length);
+  const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
   const nodeCount = Object.keys(nodes).length;
   // Aggregate four buckets independently — total input vs total output vs
   // total cache leverage. Computed via useMemo (NOT inside the Zustand
@@ -67,6 +69,32 @@ export function Header() {
                 </span>
               )}
             </span>
+            <button
+              onClick={() => setNotesOpen(true)}
+              title="笔记"
+              aria-label="笔记"
+              className="px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center gap-1.5"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              {noteCount > 0 && (
+                <span className="tabular-nums text-[11px]">
+                  {noteCount}
+                </span>
+              )}
+            </button>
             <ExportMenu />
           </>
         )}

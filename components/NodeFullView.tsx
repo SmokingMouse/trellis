@@ -550,8 +550,24 @@ function SelectionBar({
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
+  const addNote = useSessionStore((s) => s.addNote);
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  const captureNote = async () => {
+    if (savingNote) return;
+    setSavingNote(true);
+    try {
+      await addNote(selection.nodeId, selection.text);
+      window.getSelection()?.removeAllRanges();
+      onClose();
+    } catch (err) {
+      console.error("addNote failed", err);
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   useEffect(() => {
     if (ref.current) {
@@ -586,6 +602,23 @@ function SelectionBar({
         </button>
       </div>
       <div className="px-3 py-2 flex items-end gap-2">
+        <button
+          onClick={captureNote}
+          disabled={savingNote}
+          className="shrink-0 h-[38px] w-[38px] rounded-lg bg-white dark:bg-stone-900 border border-amber-400 dark:border-amber-700 text-amber-700 dark:text-amber-300 flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+          aria-label="摘到笔记"
+          title="摘到笔记"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden
+          >
+            <path d="M12 2C9.243 2 7 4.243 7 7v6.5l-2.707 2.707A1 1 0 0 0 5 18h4v3a1 1 0 1 0 2 0v-3h2v3a1 1 0 1 0 2 0v-3h4a1 1 0 0 0 .707-1.707L17 13.5V7c0-2.757-2.243-5-5-5z" />
+          </svg>
+        </button>
         <textarea
           ref={ref}
           value={text}

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Mode, ProviderId } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId } from "@/lib/llm";
-import type { ChatNode, ParentAnchor, Session } from "@/lib/types";
+import type { ChatNode, Note, ParentAnchor, Session } from "@/lib/types";
 import {
   clearStreamPending,
   emitStream,
@@ -81,6 +81,12 @@ type State = {
   // DoneToast component renders these in the bottom-right and auto-clears
   // each entry after the toast component's timer fires.
   doneToasts: Array<{ nodeId: string; emittedAt: number }>;
+  // Notebook entries for the currently loaded session. Hydrated alongside
+  // nodes from /api/sessions/[id], mutated optimistically by addNote /
+  // deleteNote. Empty when no session loaded.
+  notes: Note[];
+  // Whether the right-side NotesDrawer is open. UI-only — not persisted.
+  notesOpen: boolean;
 };
 
 type Actions = {
@@ -134,6 +140,12 @@ type Actions = {
   clearScrollAnchor: () => void;
   // Remove a single done toast (timer expiry or user dismiss/click).
   dismissDoneToast: (nodeId: string) => void;
+  // Capture a quoted excerpt as a note. Optimistic: prepends a temp
+  // entry, swaps in the server's id once POST resolves; rolls back on
+  // failure. Returns the persisted note (or throws).
+  addNote: (sourceNodeId: string, quotedText: string) => Promise<Note>;
+  deleteNote: (noteId: string) => Promise<void>;
+  setNotesOpen: (open: boolean) => void;
 };
 
 // Module-level so identity survives store updates and is never serialized
@@ -157,6 +169,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   fetchProgress: {},
   pendingScrollAnchor: null,
   doneToasts: [],
+  notes: [],
+  notesOpen: false,
 
   hydrate: async (sessionId) => {
     set({ provider: loadProvider(), mode: loadMode() });
@@ -186,13 +200,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   newConversation: () => {
-    set({ session: null, nodes: {}, activeNodeId: null });
+    set({ session: null, nodes: {}, activeNodeId: null, notes: [] });
   },
 
   deleteSession: async (sessionId) => {
     await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
     if (get().session?.id === sessionId) {
-      set({ session: null, nodes: {}, activeNodeId: null });
+      set({ session: null, nodes: {}, activeNodeId: null, notes: [] });
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
@@ -527,6 +541,67 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       doneToasts: s.doneToasts.filter((t) => t.nodeId !== nodeId),
     })),
 
+  addNote: async (sourceNodeId, quotedText) => {
+    const session = get().session;
+    if (!session) throw new Error("no active session");
+    const trimmed = quotedText.trim();
+    if (!trimmed) throw new Error("quoted text is empty");
+    // Optimistic: prepend with a temp id so the drawer immediately shows
+    // the new note. Swap in the real id once the server responds; on
+    // failure, drop the optimistic row and rethrow so the trigger UI can
+    // surface a toast / inline error.
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const optimistic: Note = {
+      id: tempId,
+      sessionId: session.id,
+      sourceNodeId,
+      quotedText: trimmed,
+      createdAt: Date.now(),
+    };
+    set((s) => ({ notes: [optimistic, ...s.notes] }));
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.id,
+          sourceNodeId,
+          quotedText: trimmed,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || "create note failed"}`);
+      }
+      const { note } = (await res.json()) as { note: Note };
+      set((s) => ({
+        notes: s.notes.map((n) => (n.id === tempId ? note : n)),
+      }));
+      return note;
+    } catch (err) {
+      set((s) => ({ notes: s.notes.filter((n) => n.id !== tempId) }));
+      throw err;
+    }
+  },
+
+  deleteNote: async (noteId) => {
+    const before = get().notes;
+    // Optimistic removal — drawer reflects the click instantly.
+    set((s) => ({ notes: s.notes.filter((n) => n.id !== noteId) }));
+    try {
+      const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) {
+        // 404 is fine (already gone, double-tap, etc.)
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch {
+      // Rollback on network failure — the note is still on the server.
+      set({ notes: before });
+    }
+  },
+
+  setNotesOpen: (open) => set({ notesOpen: open }),
+
   markNodeRead: async (nodeId) => {
     const existing = get().nodes[nodeId];
     if (!existing || existing.readAt) return;
@@ -607,13 +682,14 @@ type Getter = () => State & Actions;
 async function loadSessionInternal(sessionId: string, set: Setter) {
   const res = await fetchWithTimeout(`/api/sessions/${sessionId}`, 5000);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const { session, nodes } = (await res.json()) as {
+  const { session, nodes, notes } = (await res.json()) as {
     session: Session;
     nodes: ApiNode[];
+    notes?: Note[];
   };
   const map: Record<string, ChatNode> = {};
   for (const n of nodes) map[n.id] = apiNodeToChatNode(n);
-  set({ session, nodes: map, activeNodeId: null });
+  set({ session, nodes: map, activeNodeId: null, notes: notes ?? [] });
 }
 
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {

@@ -3,6 +3,7 @@ import {
   getSessionNodes,
   deleteSession,
   renameSession,
+  listNotesBySession,
 } from "@/lib/server/repo";
 
 export const runtime = "nodejs";
@@ -16,7 +17,8 @@ export async function GET(
   const session = getSession(id);
   if (!session) return Response.json({ error: "not found" }, { status: 404 });
   const nodes = getSessionNodes(id);
-  return Response.json({ session, nodes });
+  const notes = listNotesBySession(id);
+  return Response.json({ session, nodes, notes });
 }
 
 export async function PATCH(

@@ -130,6 +130,21 @@ function migrate(db: Database.Database) {
     if (!has) db.exec(c.sql);
   }
 
+  // Notebook: per-session free-form excerpts the user collects while
+  // reading. Each row points back to its source node so the UI can offer
+  // a "jump to source + scroll to mark" return path.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      source_node_id TEXT NOT NULL,
+      quoted_text TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS notes_session ON notes(session_id);
+  `);
+
   // Reap dangling streams from a previous server crash, exactly once on boot.
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted'

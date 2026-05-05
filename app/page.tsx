@@ -6,6 +6,7 @@ import { Canvas } from "@/components/Canvas";
 import { Header } from "@/components/Header";
 import { NodeFullView } from "@/components/NodeFullView";
 import { DoneToast } from "@/components/DoneToast";
+import { NotesDrawer } from "@/components/NotesDrawer";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
@@ -57,6 +58,7 @@ export default function Home() {
         />
       )}
       <DoneToast />
+      <NotesDrawer />
     </>
   );
 }

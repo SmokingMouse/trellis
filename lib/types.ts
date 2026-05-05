@@ -77,3 +77,15 @@ export type Session = {
   createdAt: number;
   updatedAt: number;
 };
+
+// Notebook entry: a quoted excerpt the user captured from a node while
+// reading. Stays per-session (cascades when the session is deleted).
+// sourceNodeId carries the originating node so the UI can navigate back
+// + scroll to the matching <mark> on the source's response body.
+export type Note = {
+  id: string;
+  sessionId: string;
+  sourceNodeId: string;
+  quotedText: string;
+  createdAt: number;
+};
