@@ -1,38 +1,18 @@
 import "server-only";
 
-// Shared instructions sent to whichever CLI agent is fetching a URL on
-// behalf of a reference card. Both claude and codex consume this verbatim;
-// any tool-name restrictions go in provider-specific addenda below.
-const BASE = `You are a verbatim URL fetcher. The user added this URL as a "reference card" they want to READ — they need the original document, not your interpretation of it.
+// Goal-only prompt sent to whichever CLI agent is fetching a URL on behalf
+// of a reference card. We deliberately do NOT prescribe tools / skills /
+// CLIs — Claude (or codex) decides on its own which path is most reliable
+// for the given URL. The contract we hold them to is the output envelope
+// and the "verbatim, no editorializing" hard rules.
+export function buildFetchPrompt(url: string): string {
+  return `You are a verbatim URL fetcher. The user added this URL as a "reference card" they want to READ — they need the original document, not your interpretation of it.
 
-URL: {URL}
+URL: ${url}
 
 ## Your job
 
-1. Pick the most direct tool that returns raw content for this URL
-2. Run it
-3. Wrap the result in the frontmatter envelope (below)
-4. Return
-
-That's it. You are a pipe, not an editor.
-
-## Tool selection — prefer Bash with the right CLI
-
-\`\`\`
-*.feishu.cn / *.larksuite.com / *.larkoffice.com
-  → Bash: feishu-cli {doc|wiki} export <url> -o /tmp/<id>.md
-    then read /tmp/<id>.md
-  (DO NOT pass --front-matter; we add our own envelope)
-
-youtube.com / youtu.be    → yt-dlp + transcript extraction, or any YouTube CLI
-bilibili.com / b23.tv     → Bash: bilibili CLI of choice
-x.com / twitter.com       → x-api or any reverse-engineered fetcher
-*.pdf                     → pdftotext / pdfplumber / similar
-
-generic web page          → Bash: curl -sL '<url>' | <html-to-md tool>
-\`\`\`
-
-Tokens / OAuth for these CLIs should already be configured locally — don't ask the user.
+Get the raw content at this URL and return it as Markdown wrapped in the frontmatter envelope below. You decide which tool / skill / CLI to use — pick whatever gets the original content most reliably. Tokens / OAuth for any local CLI are already configured; don't ask the user.
 
 ## Output format
 
@@ -44,7 +24,7 @@ title: <document/page/video title>
 platform: <feishu|youtube|bilibili|x|github|pdf|generic|...>
 ---
 
-<the content as Markdown — VERBATIM from the tool>
+<the content as Markdown — VERBATIM from the source>
 \`\`\`
 
 If fetch fails (auth missing, doc not accessible, network error, content type unsupported):
@@ -62,29 +42,15 @@ fetch_error: <one short Chinese sentence the user can act on>
 ## Hard rules — verbatim means VERBATIM
 
 1. **Do NOT summarize, paraphrase, or "improve" the content.** Copy it.
-2. **Do NOT add section headings that aren't in the original.** No \`## Overview\`, no \`## Key Information\`, no \`**Summary**\` block at the end.
+2. **Do NOT add section headings that aren't in the original.** No \`## Overview\`, no \`**Summary**\` block at the end.
 3. **Do NOT reorder content.** Keep the original sequence of paragraphs / list items / sections.
 4. **Do NOT translate.** Keep the original language.
 5. **Do NOT invent content if fetch fails** — empty body is fine.
-6. Minimal cleanup is OK: drop nav chrome, cookie banners, subscription gates, repeated headers/footers, image-only blocks. But keep all sentences of actual content as-is.
+6. Minimal cleanup is OK: drop nav chrome, cookie banners, subscription gates, repeated headers/footers, image-only blocks. Keep all sentences of actual content as-is.
 7. Preserve markdown structure: headings, lists, code blocks, tables, links, emphasis.
 8. The output goes byte-for-byte into a reference card. No "I will now fetch..." narration. No commentary on what you did.
 
-If a tool returns content already wrapped in YAML frontmatter (like feishu-cli's \`--front-matter\` flag would), strip that wrapper before pasting into our envelope so we don't end up with nested frontmatters.`;
-
-// Claude-specific: warn off the built-in WebFetch which silently summarizes.
-const CLAUDE_ADDENDUM = `
-
-## Note for this run
-
-AVOID the built-in \`WebFetch\` tool — it silently summarizes the page, which is exactly what we don't want. Use the \`web-fetch\` skill or raw \`curl\` instead.`;
-
-export function buildFetchPrompt(
-  url: string,
-  variant: "claude" | "codex" = "claude",
-): string {
-  const filled = BASE.replace("{URL}", url);
-  return variant === "claude" ? filled + CLAUDE_ADDENDUM : filled;
+If your tool wraps output in YAML frontmatter, strip it before pasting into our envelope so we don't end up with nested frontmatters.`;
 }
 
 // Common shape parsed from the strict frontmatter+body envelope. Returned

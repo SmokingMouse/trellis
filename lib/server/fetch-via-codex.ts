@@ -47,7 +47,7 @@ export async function* fetchUrlViaCodex(
     return;
   }
 
-  const prompt = buildFetchPrompt(url, "codex");
+  const prompt = buildFetchPrompt(url);
   const args = [
     "exec",
     "--json",

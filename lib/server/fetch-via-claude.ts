@@ -28,7 +28,7 @@ export async function* fetchUrlViaClaude(
   url: string,
   signal?: AbortSignal,
 ): AsyncGenerator<FetchEvent> {
-  const prompt = buildFetchPrompt(url, "claude");
+  const prompt = buildFetchPrompt(url);
   const args = [
     "-p",
     prompt,
