@@ -8,6 +8,7 @@ import { getProvider } from "@/lib/llm/server";
 import { generateTopicLabel } from "@/lib/llm/topic";
 import {
   createSessionWithRoot,
+  createRootInSession,
   createBranchNode,
   appendNodeResponse,
   finalizeNode,
@@ -30,6 +31,10 @@ export const dynamic = "force-dynamic";
 type ChatRequestRoot = {
   kind: "root";
   question: string;
+  // When present, attach a parallel root (parent_id=NULL) to the existing
+  // session instead of creating a new session. Used by the canvas "新提问"
+  // entry — same investigation, fresh lineage.
+  sessionId?: string;
   provider?: ProviderId;
   mode?: Mode;
 };
@@ -85,16 +90,29 @@ export async function POST(req: Request) {
 
   try {
     if (body.kind === "root") {
-      trellisSessionId = nid();
-      nodeId = nid();
-      const { session, node } = createSessionWithRoot({
-        sessionId: trellisSessionId,
-        nodeId,
-        title: body.question.slice(0, 60),
-        question: body.question,
-        now,
-      });
-      createdEvent = { type: "created", session, node };
+      if (body.sessionId) {
+        // Parallel root inside an existing session.
+        trellisSessionId = body.sessionId;
+        nodeId = nid();
+        const node = createRootInSession({
+          sessionId: trellisSessionId,
+          nodeId,
+          question: body.question,
+          now,
+        });
+        createdEvent = { type: "created", node };
+      } else {
+        trellisSessionId = nid();
+        nodeId = nid();
+        const { session, node } = createSessionWithRoot({
+          sessionId: trellisSessionId,
+          nodeId,
+          title: body.question.slice(0, 60),
+          question: body.question,
+          now,
+        });
+        createdEvent = { type: "created", session, node };
+      }
       questionForLLM = body.question;
     } else if (body.kind === "branch") {
       if (!body.parentNodeId) {

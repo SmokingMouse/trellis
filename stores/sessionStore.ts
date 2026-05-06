@@ -103,8 +103,14 @@ type Actions = {
   setProvider: (provider: ProviderId) => void;
   setMode: (mode: Mode) => void;
   setFullScreen: (v: boolean) => void;
-  // Stream a new root question — creates session + root node on server, streams reply.
-  streamRoot: (question: string) => Promise<void>;
+  // Stream a new root question.
+  // - default (no opts): creates a brand-new session + root node.
+  // - attachToCurrentSession=true: adds a parallel root to the current session
+  //   (parent_id=NULL, fresh lineage but shares Session container).
+  streamRoot: (
+    question: string,
+    opts?: { attachToCurrentSession?: boolean },
+  ) => Promise<void>;
   // Stream a new branch from an existing parent.
   streamBranch: (
     parentId: string,
@@ -273,11 +279,12 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
-  streamRoot: async (question) => {
-    const { provider, mode } = get();
+  streamRoot: async (question, opts) => {
+    const { provider, mode, session } = get();
+    const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
     const controller = new AbortController();
     await runStream(
-      { kind: "root", question, provider, mode },
+      { kind: "root", question, provider, mode, sessionId },
       handleStreamEvent(set, get, { controller }),
       controller.signal,
     );
@@ -721,7 +728,13 @@ function fetchWithTimeout(url: string, ms: number): Promise<Response> {
 }
 
 type ChatRequestBody =
-  | { kind: "root"; question: string; provider: ProviderId; mode: Mode }
+  | {
+      kind: "root";
+      question: string;
+      provider: ProviderId;
+      mode: Mode;
+      sessionId?: string;
+    }
   | {
       kind: "branch";
       parentNodeId: string;

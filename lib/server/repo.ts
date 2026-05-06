@@ -300,6 +300,35 @@ export function createSessionWithRoot(args: {
   };
 }
 
+// Attach a parallel root (parent_id=NULL, kind=qa) to an existing session.
+// Used by the "新提问" canvas action: same session, fresh lineage. Mirrors
+// createReferenceNode's "session must already exist" precondition.
+export function createRootInSession(args: {
+  sessionId: string;
+  nodeId: string;
+  question: string;
+  now: number;
+}): ApiNode {
+  const db = getDB();
+  const session = db
+    .prepare("SELECT id FROM sessions WHERE id = ?")
+    .get(args.sessionId);
+  if (!session) throw new Error(`session ${args.sessionId} not found`);
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at)
+       VALUES (?, ?, NULL, NULL, ?, '', 'streaming', 0, ?)`,
+    ).run(args.nodeId, args.sessionId, args.question, args.now);
+    db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
+      args.now,
+      args.sessionId,
+    );
+  });
+  tx();
+  return getNode(args.nodeId)!;
+}
+
 export function createBranchNode(args: {
   nodeId: string;
   parentId: string;
