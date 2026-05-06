@@ -7,5 +7,19 @@
   "background_color": "#fafaf9",
   "theme_color": "#fafaf9",
   "orientation": "any",
-  "lang": "zh-CN"
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-icon",
+      "type": "image/png",
+      "sizes": "180x180",
+      "purpose": "any"
+    }
+  ]
 }

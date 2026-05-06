@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-笔记本 v2：跳回原文时滚到原句 + emerald pulse 高亮。复用 pendingScrollAnchor，把 anchor 升级成 union（child / note）。等浏览器实测匹配命中率。
+画布"新建"FAB 升级为 popover：新提问（当前 session 内的并行根）/ 参考卡片。链接抓取的 prompt 砍成 goal-only，让 Claude CLI 自己挑工具/skill。等浏览器实测两块体感。
 
 ## Goals
 ### Short-term (MVP)
@@ -26,12 +26,44 @@
 - [x] Stage 10: 选区分叉不切焦点 + mark 可点跳子 + 树 overlay 改右侧抽屉 + 上下文压缩（depth=2 + 锚点 excerpt）
 - [x] Stage 11: 发送/取消 UX — Cmd+Enter 发送 + 流式 ⏹/Esc 中止 + 保留 prompt → [spec](cancel-send-ux.md)
 - [x] Stage 12: 节点类型抽象 + 参考卡片（粘贴/URL）+ 画布凭空建节点 → [spec](reference-nodes.md)
+- [x] Stage 13: 画布 FAB 升级 popover（新提问 + 参考卡片）+ 链接抓取 prompt goal-only 化
 
 ### Mid-term
 - [x] 接真 LLM（Claude Sonnet/Opus/Haiku + Codex 半成品，default sonnet）
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 19 (2026-05-06)
+- **Done**: 两个独立小升级 — 链接抓取 prompt 砍到 goal-only + 画布"新建"FAB 升级 popover（新提问 / 参考卡片）。
+  - **链接抓取 prompt 简化**（`lib/server/fetch-prompt.ts`）：
+    - 用户反馈 winterresearch.com/tiezhu_liquidity 这类被 Cloudflare 拦的链接，prompt 里 "generic web page → curl + html2md" 的死路由会让 claude 优先走 curl 撞 403，绕不到 web-fetch skill 的浏览器/CDP 降级链。
+    - 砍掉整段 "Tool selection — prefer Bash with the right CLI" 表 + 删 `CLAUDE_ADDENDUM`（"AVOID WebFetch / use web-fetch skill or curl"）。Prompt 现在只剩 goal + frontmatter 契约 + verbatim 8 条硬规。"You decide which tool / skill / CLI to use" 一句把决策权交还给 Claude CLI 本身。
+    - `buildFetchPrompt(url, variant)` → `buildFetchPrompt(url)`：claude 和 codex 现在共用同一份 prompt（`fetch-via-claude.ts:31` / `fetch-via-codex.ts:50` 两处 call 一起改）。codex 那边失去"明确 curl 路径"提示——但 codex 没有 skills 体系，本来就只能选 Bash，影响不大。
+    - 验证：`npm run build` ✓。
+  - **画布 FAB popover**（`components/AddNodeFAB.tsx` 重写 + 新建 `NewQuestionPicker.tsx` + 后端/store 配套）：
+    - 用户反馈"画布里只能引用节点询问，没法直接新建询问节点"。`AddNodeFAB.tsx:6-8` 自己留的 `// "Once we add more node-creation flows ... we can swap this for a small popover menu"` 就是这个 follow-up。
+    - **后端**（`lib/server/repo.ts`）：新增 `createRootInSession({sessionId, nodeId, question, now})`——校验 session 存在 → INSERT nodes (parent_id=NULL, sibling_index=0)（mirror createReferenceNode 的"rootless 永远 0"约定）+ UPDATE sessions.updated_at。无 session 创建。
+    - **API**（`app/api/chat/route.ts`）：`ChatRequestRoot` 加可选 `sessionId` 字段。handler 在 `kind:"root"` 分支里 if 二选一：传了 sessionId → `createRootInSession`（created event 不带 session，store 走"已有 session 更新 updatedAt"分支）；没传 → 仍走老路 `createSessionWithRoot`。其他三个 kind 不动。
+    - **Store**（`stores/sessionStore.ts`）：`streamRoot(question)` → `streamRoot(question, opts?: { attachToCurrentSession?: boolean })`，opts.attachToCurrentSession=true 时从 `get().session?.id` 拿当前 session id 塞进 `runStream` 的 body。`ChatRequestBody` 的 root variant 加 `sessionId?`。`QuestionInput.tsx` 老调用 `streamRoot(trimmed)` 默认 falsy → 走旧路径 ✓。
+    - **UI**（`AddNodeFAB.tsx` 全重写 + 新建 `NewQuestionPicker.tsx`）：
+      - FAB 点击不再直接开 ReferencePicker，而是切换 `menuOpen`，弹出右下角小 popover 菜单两条：💬 新提问 / 📄 参考卡片。点菜单项 → `setPicker(kind)`，关菜单。outside-click + Escape 关菜单。FAB 图标在 menuOpen 时 +45° 变成 ×。
+      - `NewQuestionPicker.tsx` 镜像 `ReferencePicker` 的 modal 结构（fixed inset-0 半透蒙板 + max-w-xl 居中卡片 + Esc/outside-click close + ⌘↩ submit）。submit 调 `streamRoot(trimmed, { attachToCurrentSession: true })`，submit 后立即 onClose——用户能立刻在 canvas 看到新节点开始流。
+    - 验证：`npm run build` ✓。Canvas 已支持多 root（参考卡也是 parent_id=NULL），布局/Outline 不需要改。
+- **Decisions**:
+  - **prompt 砍到 goal-only 而非"换成 web-fetch skill"**：用户明确说"不需要指定工具，让 claude cli 自己决策，只给 goal 就行"。让 Claude 读到当前 URL 自己判断比 prompt 写死路由表更稳——后者一旦遇到 prompt 没覆盖的站点（比如带 anti-bot 的非主流网站），仍会回退到默认 curl 撞 403。
+  - **claude/codex 共用同一份 prompt**：variant 参数原本是为了 claude 加 "AVOID WebFetch" 提示。删了那个提示之后，两条路无差异，统一掉减少分叉。
+  - **新提问语义=同 session 平行根，不是新 session**：用户确认"先提问还是落在当前 session"。Trellis 的 session 是"一次探索"的容器，新提问是同次探索的另一个角度。开新 session 走 Header SessionPicker 已经能干，不重复造入口。
+  - **createRootInSession 没有 sibling_index 递增**：跟 `createReferenceNode` 保持对齐——所有 rootless 节点都 sibling_index=0，Canvas 渲染时按 createdAt 排序。
+  - **复用 streamRoot 而不是新增 action**：opts 参数附加比另起一个 streamNewRoot 干净。共用所有的 SSE handler / token bus / controller registry。
+  - **FAB 菜单两项而非 inline 切 tab**：参考 reference picker 已经是 modal，新提问也用 modal 一致；FAB → menu → modal 三级结构虽多一层但每层职责清晰。
+  - **NewQuestionPicker 提交后立即 close**：跟 BranchPopover 的 selection-anchored 分支一样——fire-and-forget，让用户看到节点出现在画布上立即开始流，不在 modal 里等 done。
+- **Caveats**:
+  - **cli-multi 模式下"新提问"会继承 prior history**：cli-multi 通过 resume 同一个 claude session 来跑后续节点，一个 session 内的所有节点共享 LLM 记忆。新加的"平行根"在 cli-multi 模式下其实不是真的"fresh context"——LLM 仍记得之前所有问答。lean 模式下 parent_id=NULL → 没祖先链 → 真 fresh。预期行为差异，先不解决，等用户实测再决定要不要加"清空 cli-multi 记忆"开关。
+  - **新提问不能在 Canvas 上指定位置**：Dagre 布局自动挑位置，多 root 互不冲突但没有 spatial intent。如果用户想"在画布右下角放这条新根"做空间分类，目前不支持——参考卡片也一样问题。看用法。
+  - **FAB popover 在 mobile 表现未测**：现有 right-3 / bottom-6 FAB 浮在 NodeFullView 之上时是否被键盘遮挡，没单独验证。先在桌面观察体感。
+  - **prompt 简化后 codex 路径可能选 curl 撞同样问题**：codex 没 web-fetch skill 退路。winterresearch 这类站点在 codex provider 下仍会失败。如果用户用 codex 抓这类站点频繁出问题，再考虑给 codex prompt 加"用 playwright/headless browser fallback"提示。
+- **Next**: 浏览器实测三件 — winterresearch 链接是否真能用 web-fetch 浏览器路径绕过 403、画布 FAB 菜单点击体感、新提问节点在 Canvas 上的位置是否符合预期（Dagre 自动 layout vs 手动调）。
+
 ### Session 18 (2026-05-05)
 - **Done**: 笔记本 v2 — 跳回原文滚到原句 + emerald pulse
   - 用户反馈："最好增加一个高亮"。延续 v1 留的 follow-up（v1 跳回只切节点不滚句）。
@@ -160,38 +192,5 @@
   - **J/K 不区分 reference/qa**：参考卡片也算"未读" → 也会被 J/K 跳到。这正确——用户加的 reference 也是要消化的内容。
 - **Next**: 用户实测三件 — 按 J/K 看跳转流畅度（特别是 wrap-around 时是否突兀）、缩远 canvas 看 unread amber dot 是否真的"跳出来"、跑长 prompt 然后切去看别的卡看 toast 是否在恰好时机出现。
 
-### Session 14 (2026-05-05)
-- **Done**: 节点定位三件套 — 序号 + 已读未读 + 跳父滚到 mark
-  - **Phase A — 节点序号**：`lib/node-index.ts` 新增 `buildNodeIndex(nodes)` helper，session 内按 `createdAt` 升序产出 1-based map。Canvas flowNodes useMemo 里把 index 算好放进 ChatNode/ReferenceCard 的 data；Outline 和 NodeFullView SubBar 各自调一次 useMemo。展示位置：ChatNode 头部"你"圆点旁、ReferenceCard 标题前、Outline 行首、SubBar 面包屑里。统一 mono + stone-400 弱化色，不抢主体。
-  - **Phase B — read 数据层 + API + store**：
-    - `lib/server/sqlite.ts`：idempotent ALTER 加 `read_at INTEGER` 列（NULL = 未读）。
-    - `lib/server/repo.ts`：`NODE_COLS` 补 `read_at`，rowToNode 解析为 `readAt`，新增 `markNodeRead(nodeId, now)` —— 已有 read_at 就返回原值（true idempotent）。
-    - 新建 `app/api/nodes/[id]/read/route.ts` POST 端点。
-    - `lib/types.ts` ChatNode 加 `readAt: number | null`；server `ApiNode` 同步。
-    - `stores/sessionStore.ts:markNodeRead` action 乐观 patch + POST，失败回滚（仅在 timestamp 匹配时回滚，避免覆盖另一 tab 的写入）。
-    - `NodeFullView` mount/active 切换 useEffect：当 `node.status === "done"` 且 `!node.readAt` 时启 1s 计时器，到点调 markNodeRead。streaming/error 不计；流式 done 转换会 re-fire effect 自动开始计时。
-  - **Phase C — UI 表达**：
-    - ChatNode 卡片：`isUnread = status==="done" && !readAt`，全/紧凑两态都加 amber-300 边框（与 streaming indigo / active stone ring 不冲突）；序号旁多一个 1.5×1.5 amber-500 圆点。
-    - ReferenceCard 同等待遇。
-    - `Outline.tsx` 顶部：`unreadCount` 计算后渲染 amber 标签 "N 未读"，点击 toggle `unreadOnly` 本地 state。`unreadOnly` 模式下：纯已读叶子隐藏；有未读后代的已读父节点渲染但 dim 灰色（保留 hierarchy）。
-  - **Phase D — 跳父滚到 mark + pulse**：
-    - store 新增 `pendingScrollAnchor: { nodeId, childId } | null` state + `jumpToParentAtAnchor(parentId, childId)` action（一次 set 同时设 anchor 和 activeNodeId）。
-    - NodeFullView 的"↳ 从「xxx」分叉"badge onClick 改成调 `jumpToParentAtAnchor(parent.id, node.id)`。
-    - `ResponseBody` useEffect 监听 `pendingScrollAnchor`：当 anchor.nodeId === 当前节点且非 streaming 时，rAF 后 `querySelector('mark[data-child-id=...]')` + `scrollIntoView({block:"center", behavior:"smooth"})` + 加 `.anchor-pulse` className 1.5s 后清除并 `clearScrollAnchor()`。CSS 加 `@keyframes anchor-pulse` / `anchor-pulse-dark`，3 个周期约 1.5s 总时长。Mark 不在 DOM 里时再 rAF 一次兜底（markdown 慢挂载场景）。
-  - 验证：`npm run build` ✓ 4 次。端到端 curl：POST /api/chat 创建节点（response 含 `readAt: null`）→ POST /api/nodes/<id>/read 返回 `{readAt: <now>}` → 第二次调用返回相同 timestamp（idempotent ✓）→ 不存在节点 404 ✓ → GET /api/sessions/<id> 路径 readAt 字段也正确返回（hydrate 通路 OK）。
-- **Decisions**:
-  - **read 1s gate 在客户端**：服务端不验证 dwell time，纯凭 client POST 触发。简单且足够；恶意刷 read 状态没什么意义（私有产品）。
-  - **streaming/error 不可标记已读**：避免用户在 abort 后被错误标 read。流式 done 转换时 effect re-fire 自动启动 1s 计时器，无缝。
-  - **Unread 视觉强度刻意低**：amber-300 边框 + 1.5×1.5 dot，比 streaming indigo ring 弱、比 active stone ring 弱。三态视觉层级：streaming > active > unread > read。
-  - **Outline unread-only 不彻底隐藏 read**：有 unread 后代的 read 行 dim 渲染 —— 保留树形结构，避免出现"未读节点孤悬"的视觉噪音。
-  - **mark scrollIntoView 用 smooth + center**：center 而非 start，让 mark 真的在屏幕中间显眼；smooth 比 instant 体感好（用户能看到滚动方向，建立位置感）。
-  - **anchor-pulse 用 keyframes 而非 transition**：更易写 3-cycle 的循环效果；1.5s 总时长够引起注意又不烦人。
-- **Caveats**:
-  - **mark 跳转只在 fullscreen mode**：canvas mode 下点 ChatNode 卡片头的 amber badge（line 144）只是显示，没绑 onClick。若用户期望 canvas mode 也能跳父并定位，再加。
-  - **read 标记不区分"扫一眼"和"读完"**：1s 算粗糙判定。极快滑动浏览所有节点会全标 read。如果体感不准再考虑滚动距离 / dwell-extension 加权。
-  - **read_at 一旦标记就不能撤销**：UI 没暴露"标记未读"动作。如果用户想"再读一遍"找不到入口。先观察是否有真需求再加。
-  - **multi-tab 写竞争**：标记 read 是 last-writer-wins by id，但 markNodeRead repo 函数已经是 "如果有 read_at 就返回原值"，所以两个 tab 同时点开同一节点不会刷新 timestamp。
-- **Next**: 用户浏览器实测 — 序号是否方便记位、Outline "X 未读 / 只看未读 toggle" 体感、跳父 pulse 是否够显眼又不刺眼。可能的进阶：J 键跳下一未读、Canvas 节点边框分级（high-LoD 可视化）、流式 done 时若用户不在该节点弹气泡。
+（Session 1–14 已归档，见 `archive.md`）
 
-
-（Session 1–13 已归档，见 `archive.md`）
