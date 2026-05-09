@@ -45,8 +45,10 @@ Trellis 的处理方式：每个回答都是一个**节点**，选中文字 → 
 ### 前置依赖
 
 - Node.js 20+ 和 npm
-- [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)（必需）：`npm i -g @anthropic-ai/claude-code` → `claude` 命令可用并已登录
-- [Codex CLI](https://github.com/openai/codex)（可选，给 codex 降级链用）：`codex login` 完成 ChatGPT/API 登录
+- 至少装一个 LLM CLI（Trellis 不直接打 API，是 spawn 本机 CLI）：
+  - [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)：`npm i -g @anthropic-ai/claude-code` → `claude` 可用并已登录
+  - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成 ChatGPT/API 登录
+- 完全不装 CLI 也能启动——provider picker 里选 `Mock`，只是返回固定假回复，仅用于看 UI
 
 ### 跑起来
 
@@ -67,6 +69,53 @@ npm run start -- -p 3088
 ```
 
 数据落 `~/.trellis/data.db`（SQLite，WAL 模式，自动迁移）。卸载只需删掉这个目录。
+
+---
+
+## 三种上下文模式
+
+顶栏 `lean / CLI 单轮 / CLI 多轮` 切换，**每个 session 独立保存**。三档差别在 prompt 怎么组装、CLI 走什么权限、跨节点要不要共享记忆，trade-off 是「成本/权限范围/上下文连续性」。
+
+| 模式 | 上下文来源 | Skills / Tools / MCP | 跨节点记忆 | 适合 |
+|---|---|---|---|---|
+| **lean** | Trellis 折叠的祖先链 + 系统提示 | 全关 | 无 | 默认日常问答、便宜、快 |
+| **CLI 单轮** | Trellis 折叠的祖先链 | 全开（`bypassPermissions`） | 无 | 单次问答需要联网/读文件/调 MCP |
+| **CLI 多轮** | 整棵树共享的真 CLI session | 全开 | 有，跨节点线性历史 | 需要 LLM 跨节点延续记忆 |
+
+### lean —— 最便宜的纯文本模式
+
+- Prompt：Trellis 自己组装"祖先链 → 当前问题"，用一个简短 system prompt
+- 执行：`claude --tools "" --system-prompt ... --no-session-persistence`
+- 不读 `~/.claude/CLAUDE.md`，不加载 skills / MCP / 任何 tool
+- **每条分支真正独立**——claude 看到的是 trellis 给它的折叠历史，没有任何外部副作用
+- 用法：默认就用这个。Token 主要花在你的祖先链上下文（`深度=2 + anchor excerpt`），response 里的 markdown 也是纯文字
+- 注意：claude 不能联网、不能跑 bash、不能读文件——这条问答如果需要外部信息，得切到下面两档
+
+### CLI 单轮 —— 全 toolset，但每节点独立
+
+- Prompt：和 lean 一样的"祖先链 → 当前问题"
+- 执行：`claude --permission-mode bypassPermissions`（cwd 是用户家目录）
+- **加载 ~/.claude/CLAUDE.md + 全部 skills + MCP servers + Bash/Write/Edit/WebFetch/WebSearch 全开**
+- 跨节点不共享 claude 内部记忆——只有 trellis 给的折叠上下文是连续的，CLI 自身每次 `--no-session-persistence`
+- 用法：当前节点要 claude 联网、跑命令、查看本地文件，又不希望把这些 tool call 历史污染下一个分支时
+- 注意：tool call 计数也算进 token；一次 web fetch 可能花掉好几百 input token
+
+### CLI 多轮 —— 整棵树共享一条 claude session
+
+- Prompt：**只发当前问题**给 claude（不带祖先链），让 claude 自己 resume 一个持久 session 找历史
+- 执行：第一次 `claude ...` 自动生成 session id，trellis 存进 `sessions.claude_session_id`；后续 `claude --resume <id>` 续上
+- Session JSONL 落在 `~/.claude/projects/<...>/`，删除 trellis session 时一起删
+- **跨节点共享 claude 的全部历史**——分支不再隔离，claude 看到的是树扁平化后的线性时间序
+- 用法：连续追问中希望 claude 自己积累记忆（之前查过的 doc、之前 cd 进的目录、之前算过的中间结果），cache hit 比例会很高（cli-multi 缓存命中通常占 input token 70%+）
+- ⚠️ 副作用：分叉的"独立思路"语义被打破，平行节点其实彼此知道对方说了啥；如果你需要"两条互不影响的探索"切回 lean / CLI 单轮
+
+### Codex 那边
+
+provider 切到 Codex 后，三档对应：
+
+- `lean` → codex sandbox `read-only`、tools 关
+- `CLI 单轮` → 加载 `~/.codex/config.toml` + MCP，YOLO sandbox（Bash/Write/Edit 自动放行）
+- `CLI 多轮` → 共享 `~/.codex/sessions/<id>` 的多轮 history
 
 ---
 

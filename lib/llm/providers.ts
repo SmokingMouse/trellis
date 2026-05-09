@@ -17,12 +17,7 @@ export const PROVIDERS: ProviderInfo[] = [
   { id: "claude-sonnet", label: "Claude Sonnet 4.6", shortLabel: "Sonnet" },
   { id: "claude-opus", label: "Claude Opus 4.7", shortLabel: "Opus" },
   { id: "claude-haiku", label: "Claude Haiku 4.5", shortLabel: "Haiku" },
-  {
-    id: "codex",
-    label: "Codex (GPT-5)",
-    shortLabel: "Codex",
-    note: "配额烧得快",
-  },
+  { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex" },
   { id: "mock", label: "Mock", shortLabel: "Mock", note: "调试用" },
 ];
 
