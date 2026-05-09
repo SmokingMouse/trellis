@@ -1,8 +1,48 @@
-# Trellis
+<p align="center">
+  <img src="docs/icon.svg" alt="Trellis" width="96" />
+</p>
 
-> 树状的 AI 对话 — 把"线性聊天"撕开成可分叉、可回跳、可以聚焦阅读的思维树。
+<h1 align="center">Trellis</h1>
 
-中文界面 · 单人本地部署
+<p align="center">
+  树状的 AI 对话 — 把"线性聊天"撕开成可分叉、可回跳、可以聚焦阅读的思维树。
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-teal.svg?style=for-the-badge" alt="License" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
+  <img src="https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <a href="https://github.com/SmokingMouse/trellis/stargazers"><img src="https://img.shields.io/github/stars/SmokingMouse/trellis?style=for-the-badge&color=f5a623" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
+  <a href="#它解决什么">介绍</a> · <a href="#核心特性">核心特性</a> · <a href="#quickstart">Quickstart</a> · <a href="#三种上下文模式详解">上下文模式</a> · <a href="#技术架构">技术架构</a> · <a href="#键盘快捷键">快捷键</a>
+</p>
+
+---
+
+| 树状画布 — 思维树概览 | 聚焦阅读 — 锚点回跳 | 参考材料 — 飞书 / YouTube / 网页通吃 |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/canvas-medium.png" width="320" /> | <img src="docs/screenshots/node-fullview.png" width="320" /> | <img src="docs/screenshots/reference-node.png" width="320" /> |
+
+<details>
+<summary>更多截图</summary>
+<br/>
+
+**选区分叉**：在任意回复里选一段 → ⌘K 长出子节点
+
+<img src="docs/screenshots/branch-popover.png" width="640" />
+
+**笔记本**：选中 → 📌 进抽屉，点笔记跳回原节点 + 闪烁定位
+
+<img src="docs/screenshots/notes-drawer.png" width="640" />
+
+**Wide tree**：55+ 节点的真实使用形态，深度学习 / 个股研究都能撑住
+
+<img src="docs/screenshots/canvas-tree.png" width="640" />
+
+</details>
 
 ---
 
@@ -21,20 +61,95 @@ Trellis 的处理方式：每个回答都是一个**节点**，选中文字 → 
 
 ## 核心特性
 
-- **选区分叉**：在任意回复里选中一段 → ⌘K → 输入追问，新节点带 anchor 出生；父节点正文里那段会变黄高亮，点击可跳子；子节点顶部 sticky 横幅一直露在屏顶，按 `B` 一键回到引用处。
-- **三层视图**：Layer 1 全局图 (ReactFlow + Dagre 布局) / Layer 2 单节点聚焦 / Layer 3 全屏阅读。子树可折叠，画布卡片右下角显示 `▶ N` 角标提示有多少后代被收起。
-- **参考材料**：粘贴文本或丢一个 URL（飞书 / B 站 / YouTube / 普通网页通吃），Trellis 把它做成参考节点，子节点继续用上面的选区分叉发问；URL 抓取由 Claude/Codex CLI 自己挑工具（不是 WebFetch hard-code）。
-- **三种上下文模式**：`lean`（折叠历史 + 系统提示，便宜）/ `cli-single`（每次启用 Claude Code 完整 skills + tools，单轮无记忆）/ `cli-multi`（resume 同一个 claude session，跨节点记忆）。模型可选 Sonnet / Opus / Haiku。
-- **未读跟踪**：节点编号 #N + 已读未读小圆点，`J/K` 键在未读节点之间跳，配合「只看未读」过滤。
-- **笔记本**：阅读时选中文字 + 📌 → 入侧边抽屉，点笔记跳回原节点 + emerald 闪烁定位。
-- **思维树导出**：JSON / Markdown，飞书友好。
-- **流式中止**：Cmd+Enter 发送，流式中按 Esc / 卡片上的 ⏹ 中止；中断的节点 in-place retry。
+### 树状画布
+
+- **三层视图**：Layer 1 全局画布（ReactFlow + Dagre 自动布局）/ Layer 2 单节点聚焦 / Layer 3 全屏阅读
+- **子树折叠**：每张卡片右下角 `▶ N` / `▼ N` 角标，一键收起后代节点；折叠状态按 session 持久化
+- **缩放分级渲染（LoD）**：低缩放显示紧凑卡片，高缩放展开完整内容；阈值穿越才重排，不每帧抖动
+- **Fit View / 自动居中**：`F` 一键 fit；切换 active 节点时画布平滑 pan 到目标，不动用户当前缩放级别
+- **大纲侧边栏**：左侧树形 outline，缩进表示父子关系，节点编号 `#N`，未读小圆点
+
+### 选区分叉与锚点
+
+- **⌘K 分叉**：任意回复里选一段文字 → 浮出 popover → 输入追问，新节点带 anchor 出生
+- **锚点高亮**：父节点正文里那段会变黄色 `<mark>`，点击直接跳到子节点
+- **Sticky 回跳横幅**：子节点全屏阅读时，顶部一直露着「从『...』分叉」横幅，按 `B` 一键回到父节点引用处，emerald 闪烁定位
+- **跨 markdown 结构**：代码块、表格、链接、加粗、列表都能正确包裹，不破坏原文渲染（实现走的不是改 markdown 源，而是 React 渲染完后对 textNode 直接 wrap `<mark>`）
+
+### 参考材料
+
+- **多种来源**：粘贴文本 / URL 抓取（飞书 / YouTube / GitHub / 普通网页通吃）
+- **抓取策略不 hard-code**：URL 内容由 Claude/Codex CLI 自己挑工具（飞书走 feishu-cli、YouTube 走字幕提取、普通网页走 web-fetch）
+- **抓取进度 ring**：fetch 中卡片边缘有进度环；失败可降级为手动粘贴
+- **重新拉取**：⟳ 按钮一键重抓最新内容
+- **同样的子节点能力**：参考节点上可以继续选区分叉发问，体验和 QA 节点一致
+
+### 三种 LLM 上下文模式
+
+每个 session 独立保存，顶栏 `lean / CLI 单轮 / CLI 多轮` 切换。详见 [下方专章](#三种上下文模式详解)。
+
+| 模式 | 上下文来源 | Tools / Skills / MCP | 跨节点记忆 | 适合 |
+|---|---|---|---|---|
+| **lean** | Trellis 折叠的祖先链 | 全关 | 无 | 默认日常问答、便宜、快 |
+| **CLI 单轮** | Trellis 折叠的祖先链 | 全开（bypassPermissions） | 无 | 单次问答需要联网/读文件/调 MCP |
+| **CLI 多轮** | 整棵树共享真 CLI session | 全开 | 有 | 跨节点延续记忆，cache 命中通常 70%+ |
+
+Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），三档语义对齐。
+
+### 笔记本
+
+- **选区入笔记**：阅读时选中 + 📌 → 当前 session 的笔记抽屉
+- **响应式抽屉**：桌面右侧 320px / 移动端底部 sheet
+- **回跳定位**：点笔记卡 → 跳回源节点 + scroll-to + emerald 闪烁
+- **per-session**：跟着 session 走，删 session 自动清理
+
+### 流式与中止
+
+- **Cmd+Enter 发送**：`Enter` 是换行（防误触）
+- **流式中按 Esc 中止**：全局监听，活跃节点优先；卡片上也有 ⏹ 按钮（和发送按钮同位，无 layout 抖动）
+- **保留半截响应**：中止后部分内容落库，状态置为 `aborted`（灰色样式区分于 `error`），原 prompt 文本回填到输入框便于编辑重试
+- **In-place retry**：失败/中止节点原地重试，不新增节点
+
+### 视觉与未读追踪
+
+- **节点编号**：`#N` 按 createdAt 顺序在 session 内编号
+- **未读小圆点**：`status=done` 但 `readAt=null` 的节点；停留 1s+ 自动标已读
+- **`J` / `K` 跳未读**：按时间序在未读节点之间跳跃，配合 outline 「只看未读」过滤
+- **Done Toast**：流式完成但当前不在视野内的节点，右下角累积通知，点击跳过去
+- **四桶 Token 计量**：每节点拆 input / output / cacheRead / cacheCreation；header 总览，节点卡 footer 紧凑显示，⚡ emerald 强调 cache 复用（cli-multi 模式特别有用）
+
+### 键盘快捷键
+
+| 键 | 行为 | 作用域 |
+|---|---|---|
+| `⌘K` | 选区分叉 popover | 文本选中时 |
+| `⌘D` | 选区入笔记本 | 文本选中时 |
+| `⌘↩` | 发送 / 提交分叉 | 任意 textarea |
+| `Enter` | 换行 | textarea |
+| `Esc` | 关 popover / 中止流 / 关弹窗 | 全局 |
+| `J` | 下一个未读节点 | 全局（环绕） |
+| `K` | 上一个未读节点 | 全局（环绕） |
+| `F` | Fit canvas to viewport | 画布 |
+| `B` | 回父节点的锚点引用处 | 全屏阅读且有父节点时 |
+
+### 导出与持久化
+
+- **JSON 导出**：`.trellis.json` 完整树结构 + token 计数 + 全部元数据
+- **Markdown 导出**：按深度生成层级标题（h1–h6），飞书友好
+- **本地落地**：SQLite 在 `~/.trellis/data.db`（WAL 模式，启动自迁移），全部 session / 节点 / 引用 / 笔记 / 节点位置都持久化
+- **session 管理**：picker 切换、改名、删除（带确认）；折叠状态走 sessionStorage（per-session，关 tab 重置）
+
+### 主题与移动端
+
+- **明暗主题切换**：header 一键切，localStorage 持久化，启动脚本预水合避免闪白
+- **iOS Safari 选区**：兼容 polled 选区检测 + selectionchange 双保险，移动端有专属 📌 按钮
+- **响应式**：outline 在 ≤ 640px 隐藏；笔记 / 树概览抽屉在移动端转底部 sheet；触屏支持画布缩放 / 拖动
 
 ---
 
 ## 它不是什么
 
-- 不是 SaaS。SQLite 落本地 (`~/.trellis/data.db`)，单人单机。
+- 不是 SaaS。SQLite 落本地（`~/.trellis/data.db`），单人单机。
 - 不是直接调 API。Trellis 把请求转交给本机的 `claude` 和 `codex` CLI 子进程——你的订阅 / 余额 / 模型权限完全跟着 CLI 走，Trellis 不存任何 API key。
 - 不是为了多人协作设计的。没有用户系统，没有同步机制。
 
@@ -72,15 +187,9 @@ npm run start -- -p 3088
 
 ---
 
-## 三种上下文模式
+## 三种上下文模式（详解）
 
 顶栏 `lean / CLI 单轮 / CLI 多轮` 切换，**每个 session 独立保存**。三档差别在 prompt 怎么组装、CLI 走什么权限、跨节点要不要共享记忆，trade-off 是「成本/权限范围/上下文连续性」。
-
-| 模式 | 上下文来源 | Skills / Tools / MCP | 跨节点记忆 | 适合 |
-|---|---|---|---|---|
-| **lean** | Trellis 折叠的祖先链 + 系统提示 | 全关 | 无 | 默认日常问答、便宜、快 |
-| **CLI 单轮** | Trellis 折叠的祖先链 | 全开（`bypassPermissions`） | 无 | 单次问答需要联网/读文件/调 MCP |
-| **CLI 多轮** | 整棵树共享的真 CLI session | 全开 | 有，跨节点线性历史 | 需要 LLM 跨节点延续记忆 |
 
 ### lean —— 最便宜的纯文本模式
 
@@ -119,19 +228,46 @@ provider 切到 Codex 后，三档对应：
 
 ---
 
-## 架构速览
+## 技术架构
 
-```
-┌─────────────┐   SSE    ┌──────────────────┐  spawn   ┌────────────────┐
-│ React (App  │ ───────▶ │ /api/chat (Node) │ ───────▶ │ claude / codex │
-│ Router) +   │          │ /api/references  │          │ CLI subprocess │
-│ Zustand +   │ ◀─────── │ /api/sessions    │ ◀─────── │ stream-json /  │
-│ ReactFlow   │   delta  │ /api/notes       │  stdout  │ jsonl events   │
-└─────┬───────┘          └────────┬─────────┘          └────────────────┘
-      │                           │
-      │ better-sqlite3 (server)   │
-      ▼                           ▼
-   ~/.trellis/data.db ◀───────────┘
+```mermaid
+flowchart LR
+    subgraph 浏览器["浏览器 (Next.js App Router)"]
+        UI["React + Zustand<br/>ReactFlow + Dagre 画布"]
+        DOM["DOM mark injector<br/>(textNode wrap)"]
+    end
+
+    subgraph 服务端["Next.js Route Handlers (Node runtime)"]
+        Chat["/api/chat<br/>SSE 推流"]
+        Refs["/api/references<br/>抓取调度"]
+        Sess["/api/sessions"]
+        Notes["/api/notes"]
+    end
+
+    subgraph CLI["CLI 子进程"]
+        Claude["claude<br/>(stream-json)"]
+        Codex["codex exec<br/>(jsonl)"]
+        Mock["mock<br/>(确定性)"]
+    end
+
+    DB[("~/.trellis/data.db<br/>SQLite WAL")]
+
+    UI -- "POST /api/chat" --> Chat
+    Chat -- "SSE delta" --> UI
+    UI -- "选区 / 笔记 / 锚点" --> DOM
+
+    Chat -- "spawn" --> Claude
+    Chat -- "spawn" --> Codex
+    Chat -- "spawn" --> Mock
+    Claude -- "stdout JSONL" --> Chat
+    Codex -- "stdout JSONL" --> Chat
+
+    Refs -- "spawn (URL fetch)" --> Claude
+
+    Chat <--> DB
+    Refs <--> DB
+    Sess <--> DB
+    Notes <--> DB
 ```
 
 - **前端**：Next.js 16 App Router，单页，所有"导航"都是 Zustand 状态。ReactFlow + Dagre 做画布，stream-bus 把 SSE delta 直接喂给 DOM `textContent`，绕开 React 重渲染热路径。
@@ -159,6 +295,7 @@ lib/
 stores/              Zustand session store（含折叠 / 流式控制器）
 progress/            开发阶段 README + 每次 session log + 各 feature 的 spec
 public/              icon / manifest
+docs/screenshots/    README 用截图
 ```
 
 ---
@@ -178,4 +315,12 @@ public/              icon / manifest
 
 ## License
 
-MIT（见 LICENSE）。底层依赖的 Claude Code / Codex CLI 各有自己的服务条款，自行确认。
+MIT（见 [LICENSE](LICENSE)）。底层依赖的 Claude Code / Codex CLI 各有自己的服务条款，自行确认。
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#SmokingMouse/trellis&Date">
+  <img src="https://api.star-history.com/svg?repos=SmokingMouse/trellis&type=Date" alt="Star History Chart" />
+</a>
