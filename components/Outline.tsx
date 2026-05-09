@@ -17,6 +17,12 @@ function subtreeHasUnread(t: TreeNode): boolean {
   return t.children.some(subtreeHasUnread);
 }
 
+function countDescendants(t: TreeNode): number {
+  let n = 0;
+  for (const c of t.children) n += 1 + countDescendants(c);
+  return n;
+}
+
 type TreeNode = ChatNode & { children: TreeNode[] };
 
 // Build a forest: the qa root tree, then each floating reference as its own
@@ -43,13 +49,12 @@ function buildForest(
   const roots: TreeNode[] = [];
   const qaRoot = nodes[qaRootId];
   if (qaRoot) roots.push(attach(qaRoot));
-  const floatingRefs = Object.values(nodes)
-    .filter(
-      (n) =>
-        n.parentId === null && n.id !== qaRootId && n.kind === "reference",
-    )
+  // Any other parentId=null node is a parallel root — both floating
+  // reference cards and "新提问" qa roots created via the canvas FAB.
+  const parallelRoots = Object.values(nodes)
+    .filter((n) => n.parentId === null && n.id !== qaRootId)
     .sort((a, b) => a.createdAt - b.createdAt);
-  for (const r of floatingRefs) roots.push(attach(r));
+  for (const r of parallelRoots) roots.push(attach(r));
   return roots;
 }
 
@@ -122,10 +127,13 @@ function TreeRow({
 }) {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
+  const collapsed = useSessionStore((s) => s.collapsedNodeIds.has(node.id));
+  const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
   const isActive = activeNodeId === node.id;
   const isReference = node.kind === "reference";
   const index = indices[node.id];
   const unread = isUnreadNode(node);
+  const hasChildren = node.children.length > 0;
   // In "unread only" mode, hide read leaves entirely. A read row with at
   // least one unread descendant stays visible (rendered dim) so the
   // hierarchy doesn't lose context.
@@ -133,51 +141,95 @@ function TreeRow({
     return null;
   }
   const dimReadInUnreadMode = unreadOnly && !unread;
+  const hiddenCount = collapsed ? countDescendants(node) : 0;
 
   return (
     <div>
-      <button
-        onClick={() => setActiveNode(node.id)}
-        className={`w-full text-left px-2 py-1 rounded text-[12px] truncate transition-colors flex items-center gap-1 ${
+      <div
+        className={`group w-full rounded transition-colors flex items-center ${
           isActive
-            ? "bg-indigo-50 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 font-medium"
-            : dimReadInUnreadMode
-              ? "text-stone-400 dark:text-stone-600 hover:bg-stone-50 dark:hover:bg-stone-800/60"
-              : "text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800/60"
+            ? "bg-indigo-50 dark:bg-indigo-950/50"
+            : "hover:bg-stone-50 dark:hover:bg-stone-800/60"
         }`}
-        style={{ paddingLeft: `${8 + depth * 12}px` }}
-        title={isReference ? node.reference?.sourceUri ?? undefined : node.question}
+        style={{ paddingLeft: `${4 + depth * 12}px` }}
       >
-        {depth > 0 && <span className="text-stone-400 dark:text-stone-500">↳</span>}
-        {index ? (
-          <span className="font-mono text-[10.5px] text-stone-400 dark:text-stone-500 tabular-nums">
-            #{index}
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleCollapse(node.id);
+            }}
+            className="shrink-0 w-4 h-5 flex items-center justify-center text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300"
+            title={collapsed ? "展开" : "折叠"}
+            aria-label={collapsed ? "展开" : "折叠"}
+          >
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 12 12"
+              className={`transition-transform ${collapsed ? "" : "rotate-90"}`}
+              fill="currentColor"
+              aria-hidden
+            >
+              <path d="M3 2 L9 6 L3 10 Z" />
+            </svg>
+          </button>
+        ) : (
+          <span className="shrink-0 w-4 h-5" aria-hidden />
+        )}
+        <button
+          onClick={() => setActiveNode(node.id)}
+          className={`flex-1 min-w-0 text-left pr-2 py-1 text-[12px] truncate transition-colors flex items-center gap-1 ${
+            isActive
+              ? "text-indigo-900 dark:text-indigo-200 font-medium"
+              : dimReadInUnreadMode
+                ? "text-stone-400 dark:text-stone-600"
+                : "text-stone-600 dark:text-stone-400"
+          }`}
+          title={
+            isReference ? node.reference?.sourceUri ?? undefined : node.question
+          }
+        >
+          {depth > 0 && (
+            <span className="text-stone-400 dark:text-stone-500">↳</span>
+          )}
+          {index ? (
+            <span className="font-mono text-[10.5px] text-stone-400 dark:text-stone-500 tabular-nums">
+              #{index}
+            </span>
+          ) : null}
+          {unread && (
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
+              aria-label="未读"
+            />
+          )}
+          {isReference && (
+            <span className="shrink-0" aria-hidden>
+              {refIcon(node.reference)}
+            </span>
+          )}
+          <span className="truncate">
+            {node.topicLabel ??
+              (isReference ? "参考材料" : truncate(node.question, 32))}
           </span>
-        ) : null}
-        {unread && (
-          <span
-            className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
-            aria-label="未读"
+          {hiddenCount > 0 && (
+            <span className="ml-auto shrink-0 font-mono text-[10px] text-stone-400 dark:text-stone-500 tabular-nums">
+              ({hiddenCount})
+            </span>
+          )}
+        </button>
+      </div>
+      {!collapsed &&
+        node.children.map((c) => (
+          <TreeRow
+            key={c.id}
+            node={c}
+            depth={depth + 1}
+            indices={indices}
+            unreadOnly={unreadOnly}
           />
-        )}
-        {isReference && (
-          <span className="shrink-0" aria-hidden>
-            {refIcon(node.reference)}
-          </span>
-        )}
-        <span className="truncate">
-          {node.topicLabel ?? (isReference ? "参考材料" : truncate(node.question, 32))}
-        </span>
-      </button>
-      {node.children.map((c) => (
-        <TreeRow
-          key={c.id}
-          node={c}
-          depth={depth + 1}
-          indices={indices}
-          unreadOnly={unreadOnly}
-        />
-      ))}
+        ))}
     </div>
   );
 }

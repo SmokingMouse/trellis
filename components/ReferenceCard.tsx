@@ -9,6 +9,7 @@ import {
 import { useSessionStore } from "@/stores/sessionStore";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { refIcon, refSourceLabel } from "@/lib/ref-icon";
+import { CollapseChip } from "./CollapseChip";
 
 export type RefFlowNode = Node<
   {
@@ -16,6 +17,8 @@ export type RefFlowNode = Node<
     isActive: boolean;
     // 1-based session-scoped index (createdAt order). 0 if unknown.
     index: number;
+    descendantCount: number;
+    collapsed: boolean;
   },
   "reference"
 >;
@@ -30,6 +33,8 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
   const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const refreshReference = useSessionStore((s) => s.refreshReference);
   const abortStream = useSessionStore((s) => s.abortStream);
+  const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
+  const showCollapseChip = data.descendantCount > 0;
   // Subscribe only to this node's progress slot — keeps re-renders to
   // when *our* progress changes.
   const fetchProgress = useSessionStore((s) => s.fetchProgress[n.id]);
@@ -82,7 +87,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
 
   return (
     <div
-      className={`nopan bg-amber-50/40 dark:bg-amber-950/30 border rounded-xl shadow-sm w-[280px] cursor-pointer transition-shadow ${
+      className={`relative nopan bg-amber-50/40 dark:bg-amber-950/30 border rounded-xl shadow-sm w-[280px] cursor-pointer transition-shadow ${
         isActive
           ? "border-amber-400 dark:border-amber-600 ring-2 ring-amber-200 dark:ring-amber-900/50 shadow-md"
           : isStreaming
@@ -95,6 +100,17 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
       title={ref.sourceUri ?? labelText}
     >
       <Handle type="target" position={Position.Top} />
+      {showCollapseChip && (
+        <CollapseChip
+          collapsed={data.collapsed}
+          count={data.descendantCount}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleCollapse(n.id);
+          }}
+          variant="compact"
+        />
+      )}
       <div className="px-4 py-3 flex items-start gap-2.5">
         <span className="shrink-0 text-[18px] leading-none mt-0.5" aria-hidden>
           {isStreaming ? <Spinner /> : refIcon(ref)}

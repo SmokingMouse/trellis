@@ -53,6 +53,18 @@ html, body {
   pointer-events: none;
 }
 
+/* Smooth re-layout: slide nodes between dagre positions instead of
+   snapping. Gated behind .canvas-layout-ready so first-mount nodes
+   (which start at origin before measurement) pop into place rather
+   than flying in. Edges are SVG paths whose `d` can't transition
+   cheaply; they re-route instantly, but the eye tracks the cards. */
+.canvas-layout-ready .react-flow__node {
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-layout-ready .react-flow__node { transition: none; }
+}
+
 /* React Flow's controls in dark mode (zoom +/-, fit, etc) */
 .dark .react-flow__controls {
   background: #1c1917;
@@ -151,9 +163,11 @@ html, body {
 
 /* Note marks (data-note-id) without a child-id wrapping them get an
    emerald tint to visually separate "I bookmarked this" from "someone
-   forked from this". When both attributes are present (note + child on
-   the same span), the outer child mark wins — its amber dominates and
-   the inner note mark simply inherits, which is fine. */
+   forked from this". When both attributes overlap, DOM injection nests
+   child marks *inside* note marks (note element wraps a region that may
+   contain child element(s)). Child's amber background paints over the
+   note's emerald in the overlap region — so a partial overlap shows
+   emerald edges + amber center, making the relationship visible. */
 .md-body mark[data-note-id]:not([data-child-id]) {
   background: #d1fae5;
   box-shadow: 0 0 0 1px #34d399;

@@ -147,28 +147,17 @@ export async function* fetchUrlViaCodex(
         }
 
         if (event.type === "turn.completed") {
-          const parsed = parseFetchOutput(assistantText);
-          if (!parsed) {
-            const tail = assistantText.trim().slice(0, 280);
-            yield {
-              type: "result",
-              contentMd: assistantText.trim(),
-              meta: {
-                fetchError: `codex 输出不符合 frontmatter 格式（前 280 字：${tail || "空"}）`,
-              },
-            };
-          } else {
-            yield {
-              type: "result",
-              contentMd: parsed.body,
-              meta: {
-                title: parsed.title || undefined,
-                platform: parsed.platform || undefined,
-                wordCount: parsed.body.length || undefined,
-                fetchError: parsed.fetchError || undefined,
-              },
-            };
-          }
+          const parsed = parseFetchOutput(assistantText, url);
+          yield {
+            type: "result",
+            contentMd: parsed.contentMd,
+            meta: {
+              title: parsed.title,
+              platform: parsed.platform,
+              wordCount: parsed.contentMd.length || undefined,
+              fetchError: parsed.fetchError,
+            },
+          };
           resultEmitted = true;
           return;
         }
@@ -202,25 +191,17 @@ export async function* fetchUrlViaCodex(
     if (signal?.aborted) {
       yield { type: "error", message: "已取消" };
     } else if (assistantText.trim()) {
-      const parsed = parseFetchOutput(assistantText);
-      if (parsed) {
-        yield {
-          type: "result",
-          contentMd: parsed.body,
-          meta: {
-            title: parsed.title || undefined,
-            platform: parsed.platform || undefined,
-            wordCount: parsed.body.length || undefined,
-            fetchError: parsed.fetchError || undefined,
-          },
-        };
-      } else {
-        yield {
-          type: "result",
-          contentMd: assistantText.trim(),
-          meta: { fetchError: "codex 提前退出，输出格式不完整" },
-        };
-      }
+      const parsed = parseFetchOutput(assistantText, url);
+      yield {
+        type: "result",
+        contentMd: parsed.contentMd,
+        meta: {
+          title: parsed.title,
+          platform: parsed.platform,
+          wordCount: parsed.contentMd.length || undefined,
+          fetchError: parsed.fetchError ?? "codex 提前退出，输出可能不完整",
+        },
+      };
     } else {
       const tail = stderr.slice(-400);
       yield {

@@ -7,6 +7,7 @@ import {
   emitStream,
   getStreamPending,
 } from "@/lib/stream-bus";
+import { ancestorsOf } from "@/lib/collapsed";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -16,6 +17,42 @@ export type CreateReferenceInput =
 
 const PROVIDER_KEY = "trellis-provider";
 const MODE_KEY = "trellis-mode";
+const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
+
+// Per-session collapsed-set persistence — sessionStorage so it survives
+// reload but doesn't leak across tabs or re-appear weeks later. Key is
+// scoped by sessionId; we never persist collapse state for a session
+// that hasn't been loaded yet.
+function loadCollapsed(sessionId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.sessionStorage.getItem(COLLAPSED_KEY(sessionId));
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function persistCollapsed(
+  sessionId: string | undefined,
+  ids: Set<string>,
+): void {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    if (ids.size === 0) {
+      window.sessionStorage.removeItem(COLLAPSED_KEY(sessionId));
+    } else {
+      window.sessionStorage.setItem(
+        COLLAPSED_KEY(sessionId),
+        JSON.stringify([...ids]),
+      );
+    }
+  } catch {
+    /* quota / private mode — non-fatal */
+  }
+}
 
 function loadProvider(): ProviderId {
   if (typeof window === "undefined") return DEFAULT_PROVIDER;
@@ -90,6 +127,12 @@ type State = {
   notes: Note[];
   // Whether the right-side NotesDrawer is open. UI-only — not persisted.
   notesOpen: boolean;
+  // Set of nodeIds whose subtree is currently folded — collapsed nodes
+  // themselves stay visible, but every descendant is hidden from the
+  // canvas (and the outline). Persisted to sessionStorage per-session
+  // so reload preserves the user's current focus posture without
+  // bleeding into the data model.
+  collapsedNodeIds: Set<string>;
 };
 
 type Actions = {
@@ -159,6 +202,15 @@ type Actions = {
   addNote: (sourceNodeId: string, quotedText: string) => Promise<Note>;
   deleteNote: (noteId: string) => Promise<void>;
   setNotesOpen: (open: boolean) => void;
+  // Toggle collapse on a node. No-op semantically meaningful even on
+  // leaves (allows "pre-collapse" before children exist) but UIs should
+  // hide the toggle when there are no descendants.
+  toggleCollapse: (nodeId: string) => void;
+  // Force-expand the entire ancestor chain of `nodeId` so the node is
+  // reachable on the canvas. Called whenever something navigates to a
+  // node (setActiveNode, jumpToParentAtAnchor, jumpToNoteSource) and
+  // when a new child is created underneath a collapsed parent.
+  expandAncestors: (nodeId: string) => void;
 };
 
 // Module-level so identity survives store updates and is never serialized
@@ -184,6 +236,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   doneToasts: [],
   notes: [],
   notesOpen: false,
+  collapsedNodeIds: new Set(),
 
   hydrate: async (sessionId) => {
     set({ provider: loadProvider(), mode: loadMode() });
@@ -213,13 +266,28 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   newConversation: () => {
-    set({ session: null, nodes: {}, activeNodeId: null, notes: [] });
+    set({
+      session: null,
+      nodes: {},
+      activeNodeId: null,
+      notes: [],
+      collapsedNodeIds: new Set(),
+    });
   },
 
   deleteSession: async (sessionId) => {
     await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(COLLAPSED_KEY(sessionId));
+    }
     if (get().session?.id === sessionId) {
-      set({ session: null, nodes: {}, activeNodeId: null, notes: [] });
+      set({
+        session: null,
+        nodes: {},
+        activeNodeId: null,
+        notes: [],
+        collapsedNodeIds: new Set(),
+      });
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
@@ -261,7 +329,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     });
   },
 
-  setActiveNode: (nodeId) => set({ activeNodeId: nodeId }),
+  setActiveNode: (nodeId) => {
+    if (nodeId) get().expandAncestors(nodeId);
+    set({ activeNodeId: nodeId });
+  },
 
   setFullScreen: (v) => set({ fullScreen: v }),
 
@@ -542,6 +613,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   jumpToParentAtAnchor: (parentId, childId) => {
+    get().expandAncestors(parentId);
     set({
       pendingScrollAnchor: { nodeId: parentId, kind: "child", childId },
       activeNodeId: parentId,
@@ -551,6 +623,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   jumpToNoteSource: (noteId) => {
     const note = get().notes.find((n) => n.id === noteId);
     if (!note) return;
+    get().expandAncestors(note.sourceNodeId);
     set({
       pendingScrollAnchor: {
         nodeId: note.sourceNodeId,
@@ -630,6 +703,30 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setNotesOpen: (open) => set({ notesOpen: open }),
+
+  toggleCollapse: (nodeId) => {
+    const { collapsedNodeIds, session } = get();
+    const next = new Set(collapsedNodeIds);
+    if (next.has(nodeId)) next.delete(nodeId);
+    else next.add(nodeId);
+    set({ collapsedNodeIds: next });
+    persistCollapsed(session?.id, next);
+  },
+
+  expandAncestors: (nodeId) => {
+    const { nodes, collapsedNodeIds, session } = get();
+    if (collapsedNodeIds.size === 0) return;
+    const ancestors = ancestorsOf(nodeId, nodes);
+    if (ancestors.length === 0) return;
+    let changed = false;
+    const next = new Set(collapsedNodeIds);
+    for (const a of ancestors) {
+      if (next.delete(a)) changed = true;
+    }
+    if (!changed) return;
+    set({ collapsedNodeIds: next });
+    persistCollapsed(session?.id, next);
+  },
 
   markNodeRead: async (nodeId) => {
     const existing = get().nodes[nodeId];
@@ -718,7 +815,26 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
   };
   const map: Record<string, ChatNode> = {};
   for (const n of nodes) map[n.id] = apiNodeToChatNode(n);
-  set({ session, nodes: map, activeNodeId: null, notes: notes ?? [] });
+  // Drop any persisted collapse-ids that no longer correspond to a node
+  // (e.g. server-side schema reset, race with delete) so the set never
+  // keeps growing with garbage. Re-persist if we trimmed anything.
+  const persisted = loadCollapsed(session.id);
+  let collapsed = persisted;
+  if (persisted.size > 0) {
+    const trimmed = new Set<string>();
+    for (const id of persisted) if (map[id]) trimmed.add(id);
+    if (trimmed.size !== persisted.size) {
+      persistCollapsed(session.id, trimmed);
+      collapsed = trimmed;
+    }
+  }
+  set({
+    session,
+    nodes: map,
+    activeNodeId: null,
+    notes: notes ?? [],
+    collapsedNodeIds: collapsed,
+  });
 }
 
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
@@ -771,7 +887,7 @@ type StreamEvent =
 
 function handleStreamEvent(
   set: Setter,
-  _get: Getter,
+  get: Getter,
   opts: {
     focusNew?: boolean;
     // Optional: register this controller against the nodeId when the
@@ -817,6 +933,10 @@ function handleStreamEvent(
         }
         return next;
       });
+      // Brand-new children must be reachable on the canvas. Expand any
+      // collapsed ancestor so the freshly streaming bubble shows up
+      // instead of silently appearing inside a folded subtree.
+      get().expandAncestors(node.id);
     } else if (event.type === "delta" && currentNodeId) {
       emitStream(currentNodeId, event.text);
     } else if (event.type === "done" && currentNodeId) {
@@ -910,7 +1030,7 @@ type RefStreamEvent =
 function handleRefStreamEvent(
   raw: unknown,
   set: Setter,
-  _get: Getter,
+  get: Getter,
   ctx: {
     controller: AbortController;
     onAssigned: (nodeId: string, local: ChatNode) => void;
@@ -933,6 +1053,7 @@ function handleRefStreamEvent(
       else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
       return next;
     });
+    get().expandAncestors(local.id);
     ctx.onAssigned(local.id, local);
   } else if (event.type === "progress") {
     set((s) => ({

@@ -5,7 +5,12 @@ import type { ChatNode } from "./types";
 // collapse to the compact "topic card" form and dagre re-runs with
 // tighter node dimensions, so fit-view yields a higher zoom and the
 // labels actually look big in overview.
-export const COMPACT_ZOOM_THRESHOLD = 0.9;
+// Set above Canvas's maxZoom (1.5) to effectively skip the inline
+// full-card preview tier — the canvas always shows compact topic
+// cards, and reading happens in NodeFullView instead. Lower it (e.g.
+// back to 0.9) to bring the on-canvas full-card tier back without
+// touching ChatNode / Canvas code.
+export const COMPACT_ZOOM_THRESHOLD = 999;
 
 // Full-mode dimensions (current behavior).
 const NODE_WIDTH_FULL = 600;

@@ -28,13 +28,12 @@ function buildForest(
   const roots: TreeNode[] = [];
   const qaRoot = nodes[qaRootId];
   if (qaRoot) roots.push(attach(qaRoot));
-  const floatingRefs = Object.values(nodes)
-    .filter(
-      (n) =>
-        n.parentId === null && n.id !== qaRootId && n.kind === "reference",
-    )
+  // Any other parentId=null node is a parallel root — both floating
+  // reference cards and "新提问" qa roots created via the canvas FAB.
+  const parallelRoots = Object.values(nodes)
+    .filter((n) => n.parentId === null && n.id !== qaRootId)
     .sort((a, b) => a.createdAt - b.createdAt);
-  for (const r of floatingRefs) roots.push(attach(r));
+  for (const r of parallelRoots) roots.push(attach(r));
   return roots;
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { memo, useMemo, useRef, useState, useEffect } from "react";
+import { memo, useRef, useState, useEffect } from "react";
 import {
   Handle,
   Position,
@@ -16,7 +16,9 @@ import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { formatTokens } from "@/lib/format-tokens";
+import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
+import { CollapseChip } from "./CollapseChip";
 
 // Plugin arrays at module scope so identity is stable across renders.
 const REMARK_PLUGINS = [remarkGfm];
@@ -31,6 +33,11 @@ export type ChatFlowNode = Node<
     childAnchors: ChildAnchor[];
     // 1-based session-scoped index (createdAt order). 0 if unknown.
     index: number;
+    // Total descendants (direct + indirect). Drives the "▶/▼ N" chip;
+    // 0 means the node is a leaf and the chip is suppressed.
+    descendantCount: number;
+    // Whether this node's subtree is currently folded.
+    collapsed: boolean;
   },
   "chat"
 >;
@@ -51,6 +58,8 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const retryNode = useSessionStore((s) => s.retryNode);
+  const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
+  const showCollapseChip = data.descendantCount > 0;
   const onMarkClick = (e: React.MouseEvent) => {
     const target = (e.target as HTMLElement).closest("[data-child-id]");
     if (!target) return;
@@ -68,11 +77,6 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
     setActiveNode(n.id);
     setFullScreen(true);
   };
-  const responseWithMarks = useMemo(
-    () => injectHighlights(n.response, data.childAnchors),
-    [n.response, data.childAnchors],
-  );
-
   // While streaming, deltas land on the stream-bus (not in React state).
   // We attach a textContent-only sink to a <pre> ref so each token is one
   // tiny DOM mutation, no React render, no ReactFlow diff. When the stream
@@ -93,6 +97,31 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, n.id]);
 
+  // Inject child <mark> on the rendered markdown DOM. Same approach as
+  // NodeFullView's ResponseBody — see lib/dom-mark-injector.ts.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isStreaming) return;
+    const root = bodyRef.current;
+    if (!root) return;
+    clearMarks(root);
+    if (data.childAnchors.length) {
+      const specs: MarkSpec[] = [
+        {
+          dataKey: "childId",
+          anchors: data.childAnchors.map((a) => ({
+            text: a.text,
+            id: a.childId,
+          })),
+        },
+      ];
+      injectMarks(root, specs);
+    }
+    return () => {
+      if (root) clearMarks(root);
+    };
+  }, [isStreaming, n.response, data.childAnchors]);
+
   const labelText = n.topicLabel ?? truncate(n.question, 14);
   // Compact mode: streaming / error nodes always render full so user can see
   // progress and act. Done nodes at low zoom collapse to a topic card.
@@ -101,7 +130,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   if (showCompact) {
     return (
       <div
-        className={`nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
+        className={`relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
           isActive
             ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
             : isUnread
@@ -112,6 +141,17 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         title={n.question}
       >
         <Handle type="target" position={Position.Top} />
+        {showCollapseChip && (
+          <CollapseChip
+            collapsed={data.collapsed}
+            count={data.descendantCount}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleCollapse(n.id);
+            }}
+            variant="compact"
+          />
+        )}
         <div className="px-4 py-3 flex items-center gap-2.5">
           <span
             className={`shrink-0 w-2.5 h-2.5 rounded-full ${
@@ -154,7 +194,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 
   return (
     <div
-      className={`nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
+      className={`relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
         isStreaming
           ? "border-indigo-300 dark:border-indigo-700 ring-4 ring-indigo-100 dark:ring-indigo-900/40"
           : isActive
@@ -165,6 +205,17 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       }`}
     >
       <Handle type="target" position={Position.Top} />
+      {showCollapseChip && (
+        <CollapseChip
+          collapsed={data.collapsed}
+          count={data.descendantCount}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleCollapse(n.id);
+          }}
+          variant="full"
+        />
+      )}
 
       {n.parentAnchor && (
         <div className="px-4 py-2 border-b border-stone-100 dark:border-stone-800 bg-amber-50 dark:bg-amber-950/40 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-1.5 rounded-t-xl">
@@ -225,6 +276,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       </div>
 
       <div
+        ref={bodyRef}
         data-chat-node-id={n.id}
         onClick={onMarkClick}
         className="px-5 py-4 md-body text-[13.5px] text-stone-700 dark:text-stone-300 max-h-[420px] overflow-y-auto nodrag nowheel nopan"
@@ -243,7 +295,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             rehypePlugins={REHYPE_FULL}
             components={MD_COMPONENTS}
           >
-            {responseWithMarks}
+            {n.response}
           </ReactMarkdown>
         ) : (
           <div className="text-stone-400 dark:text-stone-500 italic flex items-center gap-2">
@@ -297,6 +349,8 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 export const ChatNode = memo(ChatNodeImpl, (prev, next) => {
   if (prev.data.node !== next.data.node) return false;
   if (prev.data.isActive !== next.data.isActive) return false;
+  if (prev.data.collapsed !== next.data.collapsed) return false;
+  if (prev.data.descendantCount !== next.data.descendantCount) return false;
   const a = prev.data.childAnchors;
   const b = next.data.childAnchors;
   if (a !== b) {
@@ -472,21 +526,3 @@ function TokenMeta({
   );
 }
 
-function injectHighlights(
-  md: string,
-  anchors: { text: string; childId: string }[],
-): string {
-  if (anchors.length === 0 || !md) return md;
-  let out = md;
-  const seen = new Set<string>();
-  for (const a of anchors) {
-    if (!a.text || seen.has(a.text)) continue;
-    seen.add(a.text);
-    const escaped = a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(
-      new RegExp(escaped),
-      `<mark data-child-id="${a.childId}">$&</mark>`,
-    );
-  }
-  return out;
-}

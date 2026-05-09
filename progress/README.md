@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-画布"新建"FAB 升级为 popover：新提问（当前 session 内的并行根）/ 参考卡片。链接抓取的 prompt 砍成 goal-only，让 Claude CLI 自己挑工具/skill。等浏览器实测两块体感。
+mark 注入从源 markdown regex 改成渲染 DOM textContent + Range wrap，修代码块/表格/链接/加粗/列表/跨段所有富文本场景的命中率。等浏览器实测六类 case。
 
 ## Goals
 ### Short-term (MVP)
@@ -33,6 +33,43 @@
 - [x] 思维树导出（`lib/export.ts`：JSON + Markdown，Feishu 友好）
 
 ## Session Log
+### Session 20 (2026-05-06)
+- **Done**: 引用高亮 mark 注入从"源 markdown regex"切到"渲染 DOM textContent + Range wrap"，富文本场景全部命中。→ [spec](anchor-dom-inject.md)
+  - **根因**：`injectHighlights` / `injectNoteMarks`（`NodeFullView.tsx:892-937` / `ChatNode.tsx:475`）在源 markdown 字符串上 regex 匹配 anchor.text，但 anchor.text 来自 `selection.toString()` = 渲染后 DOM textContent。两者只在"纯文本段落"等价；遇到代码块（``` ``` ` 围栏）、行内代码（` 反引号）、表格（`|` 分隔）、链接（`[text](url)`）、加粗（`**`）、列表前缀（`- `）等 markdown 语法字符就匹配失败。还有第二层：`injectHighlights` 没做 `\s+` flex（只 `injectNoteMarks` 有），跨段选区 child 必挂。session 18 caveat 已记录。
+  - **核心算法**（新建 `lib/dom-mark-injector.ts`）：
+    - `clearMarks(root)`：querySelectorAll mark[data-child-id], mark[data-note-id] → 把每个 mark 的 children move 出去 + remove mark 本身 → root.normalize() 合并相邻 textNode。幂等 cleanup。
+    - `injectMarks(root, specs[])`：对每个 spec 的每个 anchor 独立处理：TreeWalker 收集 root 内所有 textNode → 拼出 `fullText` + 同步构建 `normText`（`\s+` 收缩成单空格）+ `mapBack[]`（normText offset → fullText offset 反查表）。anchor.text 也 normalize → `normText.indexOf(needle)` → 通过 mapBack 还原 fullText 的 [origStart, origEnd) → `locate()` 在 nodes 上线性找起止 textNode + offsetIn → `splitText` 在两端切开 → TreeWalker 从 startNode 走到 endNode 收集所有 textNode → per-textNode `parentNode.insertBefore(mark) + mark.appendChild(textNode)` wrap。每 anchor 完后**重建 index**（splitText 改了 node 结构，offset 缓存失效）。
+    - 不用 `Range.surroundContents`：iOS Safari 上跨多 element 的 Range 抛 InvalidStateError。per-textNode wrap 对所有跨度都稳健。
+  - **嵌套语义反转**（vs 今天）：
+    - 字符串注入"先 note 后 child" → child 字符串包在 note 字符串外 → DOM 上 child 外 note 内
+    - DOM 注入"先 note 后 child" → note 先把 textNode wrap → child 注入时，textNode.parentNode 是 note mark，新 child mark 插在 note 内 → child 内 note 外
+    - 视觉影响：CSS `mark[data-note-id]:not([data-child-id])` 命中外层 note → emerald；内层 child mark → amber。重叠区域子元素 background 覆盖父元素 → amber 显示（同今天）。**部分重叠**时 emerald-amber-emerald 三段反而比今天纯 amber 更能看出 child 是 note 的子区域。click 路由 closest("[data-child-id]") 不限层级，仍正确。
+  - **NodeFullView 改动**（`components/NodeFullView.tsx`）：
+    - 删 `responseWithMarks` useMemo + `injectHighlights` / `injectNoteMarks` 函数（共 ~60 行）
+    - markdown source 直接传 `node.response`
+    - 加新 effect：`isStreaming` false + `bodyRef` 拿到 markdown DOM 时跑 clearMarks → injectMarks。deps `[isStreaming, node.response, childAnchors, noteAnchors]`，cleanup return clearMarks。**effect 声明在 scroll-to-anchor effect 之前**，保证 React commit 时先注入再 scroll query。
+    - scroll-to-anchor effect：`querySelector` → `querySelectorAll`（一个 anchor 跨多 textNode 时有多个 mark element），`scrollIntoView` 仍只 first，`anchor-pulse` class 加给所有 mark 一起闪。retry 一次 rAF 兜底。
+  - **ChatNode 改动**（`components/ChatNode.tsx`）：
+    - 同 NodeFullView，但只有 childAnchors（无 noteAnchors）
+    - markdown body div 加 `ref={bodyRef}`
+    - 删 `responseWithMarks` useMemo + 底部 `injectHighlights` 函数 + 顶部 `useMemo` import（已不用）
+  - **CSS 注释更新**（`app/globals.css:152-158`）：嵌套描述从"outer child wins"改为"child marks land inside note marks; partial overlap shows emerald-amber-emerald"，配合新的 DOM 嵌套顺序。CSS 规则本身不变。
+  - 验证：`npm run build` ✓ 一次过。
+- **Decisions**:
+  - **anchor schema 不变**：不加 prefix/suffix 字段、不动 DB / API / store。同一句 quote 出现两次时仍只 wrap 第一处（同今天行为，session 18 caveat 已写）。如果未来重复文本歧义高频出现再升级 schema——平滑演进，不为可选场景背早期成本。
+  - **whitespace normalization + mapBack**：选区跨行 / 跨 list item 时 textContent 可能用单空格连接而源用 `\n`，反之亦然。normalize 双方再 indexOf 命中率最高；mapBack 把 normalize offset 还原成原 textContent offset，wrap 边界精确。
+  - **每 anchor 重建 index 而非维护**：splitText 改变 node 结构，维护增量更新成本高且易错。10 anchor × 200 textNode × 50KB 文本量级，每次 ~ms 级，性能不是瓶颈。
+  - **per-textNode wrap 而非 single Range**：Range.surroundContents iOS 跨 element 必抛；per-node wrap 对 nested 结构（textNode 在 hljs syntax span 内、在 note mark 内）天然兼容。
+  - **clearMarks 用 element.remove + normalize**：unwrap 后相邻 textNode 不合并会让下次 buildIndex 看到碎片化的 nodes 数组。`root.normalize()` 把它们合回去。
+  - **多 mark 同 ID 一起 pulse**：querySelectorAll → 全部加 anchor-pulse class。今天单 mark 单 pulse 是因为 anchor 不跨 element；新方案跨段 anchor 自然产生多 mark element，全部一起闪视觉更连贯。scrollIntoView 仍只 first。
+- **Caveats**:
+  - **重复文本仍只 wrap 第一处**：indexOf 取首个匹配。同今天，未升级 prefix/suffix 消歧前不解决。
+  - **嵌套结构反转**：今天 child 外 note 内 → 现在 child 内 note 外。视觉行为大体一致（amber 主导），但 partial overlap 时表现略不同（变得更有信息：能看出 child 是 note 子区域）。
+  - **流式期间不显示 mark**：同今天。注入 effect 跳过 isStreaming；done 那帧 ReactMarkdown 才渲染。
+  - **复制粘贴带 `<mark>`**：同今天。如未来需要可加 `user-select: none`，但同时影响二次划词。
+  - **scroll effect 时序依赖 effect 声明顺序**：注入 effect 必须声明在 scroll effect 前，React 才会按顺序 commit。代码组织已注意，但如果未来有人重构 ResponseBody 把 effect 顺序换了会导致 scroll 找不到 mark → fallback clearScrollAnchor 兜底（不 crash 但跳源句不闪）。
+- **Next**: 用户浏览器实测六类 case 命中：代码块（fenced）/ 行内代码 / 表格（含跨单元格）/ 链接 / 加粗 / 列表前缀 / 跨段。同时验证：分叉 mark 点击仍跳子节点、笔记跳回滚到原句 + emerald pulse、cli-multi 高 token 长回复下注入耗时无可感卡顿。
+
 ### Session 19 (2026-05-06)
 - **Done**: 两个独立小升级 — 链接抓取 prompt 砍到 goal-only + 画布"新建"FAB 升级 popover（新提问 / 参考卡片）。
   - **链接抓取 prompt 简化**（`lib/server/fetch-prompt.ts`）：
@@ -168,29 +205,5 @@
   - **lean 模式 claude 也走 cache**：claude code 的 lean 模式跑 `--system-prompt <SP>`，那段 SP 也会 cache，所以 lean 模式也能看到 cacheRead 几千 token。这是真实计费，不是误算。
 - **Next**: 用户实测 — Header 顶栏的 ↑/↓/⚡ 在窄屏（md 以下）会隐藏，看是否需要 mobile 也露一行；卡片的 emerald ⚡ 在 cli-multi 高 cache 场景下是否够醒目；如果觉得 ⚡ 图标体验欠佳可换 ↻ 或 ⊕。
 
-### Session 15 (2026-05-05)
-- **Done**: 节点定位进阶三件 — J/K 跳未读、compact 状态圆点视觉分级、流完成 toast
-  - **进阶 1 — J/K 跳未读**：`hooks/useUnreadNavigation.ts` 新建。全局 keydown 监听 J / K（vim/Gmail 惯例：J 下一未读、K 上一未读），过滤 input/textarea/contentEditable focus + 修饰键。算法：按 createdAt 排序所有节点，从当前 active 起步走 ±i 步（含 wrap-around），返回首个 status==="done" && !readAt 的节点。在 page.tsx 顶层挂载 `useUnreadNavigation()`，canvas 和 fullscreen 都生效。Canvas 已有 auto-pan-to-active effect（line 109-120），J/K 切完会自动滚到节点。
-  - **进阶 2 — Canvas compact 状态圆点视觉分级**：原状态圆点逻辑 `done → emerald, else → stone`。新逻辑：未读 done = amber-500，已读 done = emerald-500，非 done = stone。zoom out 时未读节点 amber dot 在画布上扎堆易扫，已读 emerald 退到背景。配套移除 compact 模式下序号旁的 amber 蓝点（与状态圆点重复，三点距离过近视觉嘈杂）。Full 模式下序号旁的 dot 保留（无状态圆点）。
-  - **进阶 3 — done toast**：当节点流完成时若 `activeNodeId !== currentNodeId` push toast。
-    - store: 加 `doneToasts: { nodeId; emittedAt }[]` state + `dismissDoneToast(nodeId)` action。`handleStreamEvent` done 分支判断 `s.activeNodeId !== id` 才 push（同一节点重 toast 时 dedupe by id —— retry/branch 周期可能 emit 两次）。
-    - `components/DoneToast.tsx` 新建：fixed bottom-right，每个 toast 有 emerald 圆点 + #N + "已完成" + 节点 topicLabel/question 前缀 + × 关闭。点击主体 → `setActiveNode + setFullScreen(true) + dismiss`（NodeFullView 的 1s mark-read effect 自动接管）。每个 toast 6s auto-dismiss（参考 macOS notification / Material 4-10s 区间，留够时间让用户决定是否打断当前流）。
-    - 在 page.tsx 挂 `<DoneToast />`，全局可见。
-    - 不 toast reference 抓取：reference SSE done 路径走另一个分支（`handleRefStreamEvent`），且 createReference 触发时 server 已经把 activeNodeId 设到新节点 → 用户主动建的，不需要打扰。
-  - 验证：build ✓ 1 次（一次过，所有 TypeScript 类型对齐）。
-- **Decisions**:
-  - **J/K 不切 fullScreen**：保留用户当前 layer。canvas mode 下 J/K = 在画布内导航；fullScreen mode 下 J/K = 翻读未读队列。两种工作流都自然。如果想强制读，按 J 后再点全屏按钮 / 双击节点。
-  - **compact dot 替代而非新增**：原本想"加个未读小点"在状态圆点旁，但发现与序号旁的 amber dot 视觉重复（三点扎堆）。改为状态圆点本身做 unread/read 编码，移除冗余的序号 dot（只在 compact 移除）。
-  - **toast 点击进 fullScreen**：用户从 toast 跳过去多半是要读，全屏直接读最顺。canvas mode 下保持的人不会用 toast 跳（他们能直接看到画布上节点 streaming）。
-  - **toast 6s 而非 3-4s**：常见的"问完一个问题、branch 出去、读别的"流程里，6s 给用户足够时间判断"现在打断 vs 读完手头的"。Material 上限 10s，macOS 通知 5-10s 都比 4s 接近，6s 是中间值。
-  - **不 toast reference 抓取完成**：用户主动添加的 reference 在 SSE created 事件里就把 activeNodeId 设到新节点了，已经自带"导航过去"语义。再 toast 是冗余打扰。
-- **Caveats**:
-  - **toast 不 markRead**：6s 自动消失只是去掉提示，节点仍然 unread。点击进 fullScreen 才会触发 1s mark-read。这是有意：toast 闪过去 ≠ 用户读了。
-  - **toast 没 i18n**：固定中文 "已完成"。和项目其它 UI 一致。
-  - **多个 toast 堆叠**：上限没设。如果用户开 10 个分支同时跑，会出现 10 个 toast。视觉上挤但不会 overflow（max-w-sm + flex-col + 自动 6s 退场）。极端场景再加 maxItems=5 截断。
-  - **K 在 cli-multi confirm dialog 期间**：不冲突——dialog 是 window.confirm，原生模态会接管键盘。但若以后改成自定义 dialog 要重新审视。
-  - **J/K 不区分 reference/qa**：参考卡片也算"未读" → 也会被 J/K 跳到。这正确——用户加的 reference 也是要消化的内容。
-- **Next**: 用户实测三件 — 按 J/K 看跳转流畅度（特别是 wrap-around 时是否突兀）、缩远 canvas 看 unread amber dot 是否真的"跳出来"、跑长 prompt 然后切去看别的卡看 toast 是否在恰好时机出现。
-
-（Session 1–14 已归档，见 `archive.md`）
+（Session 1–15 已归档，见 `archive.md`）
 

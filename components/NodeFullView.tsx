@@ -8,6 +8,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode, ParentAnchor } from "@/lib/types";
 import { buildNodeIndex } from "@/lib/node-index";
 import { NodeTreeOverlay } from "./NodeTreeOverlay";
@@ -136,6 +137,33 @@ export function NodeFullView() {
   // Tree overlay — quick "find anywhere" navigation without leaving fullscreen.
   const [treeOpen, setTreeOpen] = useState(false);
 
+  // `B` jumps back to the parent at the anchor mark — same target as the
+  // sticky banner click, just hands-on-keys. Only wires up when there's
+  // a parent + anchor to return to; ignores presses while typing into
+  // any input / textarea / contenteditable, and ignores modifier combos
+  // so it doesn't fight with browser shortcuts.
+  useEffect(() => {
+    if (!parent || !node?.parentAnchor) return;
+    const parentId = parent.id;
+    const childId = node.id;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "b" && e.key !== "B") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      jumpToParentAtAnchor(parentId, childId);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [parent, node?.id, node?.parentAnchor, jumpToParentAtAnchor]);
+
   if (!node) {
     return (
       <div className="fixed inset-0 pt-12 flex items-center justify-center text-stone-400 text-sm">
@@ -156,24 +184,40 @@ export function NodeFullView() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-4">
           {node.kind === "reference" ? (
-            <ReferenceFullBody node={node} />
+            <ReferenceFullBody key={node.id} node={node} />
           ) : (
             <>
               {node.parentAnchor && parent && (
                 <button
                   onClick={() => jumpToParentAtAnchor(parent.id, node.id)}
-                  className="w-full text-left mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[12px] text-amber-900 dark:text-amber-200 active:scale-[0.99] transition-transform"
+                  className="sticky top-0 z-10 w-full text-left -mx-1 mb-3 px-3 py-2 rounded-lg bg-amber-50/95 dark:bg-amber-950/70 border border-amber-200 dark:border-amber-900 text-[12px] text-amber-900 dark:text-amber-200 backdrop-blur active:scale-[0.99] transition-transform shadow-sm hover:bg-amber-100 dark:hover:bg-amber-950"
+                  title="回到父节点的引用处 (B)"
                 >
                   <span className="text-amber-600 dark:text-amber-400 mr-1">↳</span>
                   从「
                   <span className="font-medium">
                     {truncate(node.parentAnchor.selectedText, 60)}
                   </span>
-                  」分叉 · 点击回到父节点
+                  」分叉
+                  <span className="ml-1.5 text-amber-700/70 dark:text-amber-300/60">
+                    · 点击或按
+                    <kbd className="mx-1 px-1 py-px rounded bg-amber-100 dark:bg-amber-900/60 border border-amber-200 dark:border-amber-800 font-mono text-[10px]">
+                      B
+                    </kbd>
+                    回到引用处
+                  </span>
                 </button>
               )}
               <QuestionBlock question={node.question} />
-              <ResponseBody node={node} />
+              {/* key={node.id} forces a fresh ResponseBody fiber per node:
+                  the imperative <mark> injection inside react-markdown's
+                  output diverges from React's virtual tree, so when the
+                  node prop changes in-place React's reconciler tries to
+                  removeChild against DOM that was re-parented under our
+                  marks and throws NotFoundError. Unmounting cleanly lets
+                  the cleanup clearMarks() run before React touches the
+                  DOM. */}
+              <ResponseBody key={node.id} node={node} />
             </>
           )}
         </div>
@@ -195,11 +239,7 @@ export function NodeFullView() {
               childNodes={children}
               onPick={setActiveNode}
             />
-            {node.kind === "reference" ? (
-              <ReferenceFooterHint />
-            ) : (
-              <FollowupBar node={node} />
-            )}
+            <FollowupBar node={node} />
           </>
         )}
       </div>
@@ -312,39 +352,44 @@ function QuestionBlock({ question }: { question: string }) {
   );
 }
 
-function ResponseBody({ node }: { node: ChatNode }) {
+// Shared between qa ResponseBody and ReferenceFullBody — both render
+// markdown that may carry child anchors (qa kids forked from selection)
+// and note anchors (excerpts captured from this node). The hook owns
+// the imperative <mark> injection and the pendingScrollAnchor flash so
+// neither call site has to duplicate ~80 lines of effect code.
+//
+// Caller must pass `key={node.id}` on the rendered body (or a parent
+// component that owns the bodyRef DOM) — this avoids the React
+// reconciler tripping over the manually-injected <mark> wrappers when
+// the same fiber's content swaps to a new node. See the bug postmortem
+// in NotFoundError-removeChild diagnosis.
+function useMarkdownBodyMarks(opts: {
+  bodyRef: React.RefObject<HTMLDivElement | null>;
+  nodeId: string;
+  contentVersion: string;
+  suspended: boolean;
+}) {
+  const { bodyRef, nodeId, contentVersion, suspended } = opts;
   const allNodes = useSessionStore((s) => s.nodes);
   const allNotes = useSessionStore((s) => s.notes);
-  const retryNode = useSessionStore((s) => s.retryNode);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const pendingScrollAnchor = useSessionStore((s) => s.pendingScrollAnchor);
   const clearScrollAnchor = useSessionStore((s) => s.clearScrollAnchor);
-  const bodyRef = useRef<HTMLDivElement>(null);
+
   const childAnchors = useMemo(
     () =>
       Object.values(allNodes)
-        .filter((c) => c.parentId === node.id && c.parentAnchor?.selectedText)
-        .map((c) => ({
-          text: c.parentAnchor!.selectedText,
-          childId: c.id,
-        })),
-    [allNodes, node.id],
+        .filter((c) => c.parentId === nodeId && c.parentAnchor?.selectedText)
+        .map((c) => ({ text: c.parentAnchor!.selectedText, childId: c.id })),
+    [allNodes, nodeId],
   );
   const noteAnchors = useMemo(
     () =>
       allNotes
-        .filter((n) => n.sourceNodeId === node.id)
+        .filter((n) => n.sourceNodeId === nodeId)
         .map((n) => ({ text: n.quotedText, noteId: n.id })),
-    [allNotes, node.id],
+    [allNotes, nodeId],
   );
-  // Inject note marks first, child marks on top — so when both reference
-  // the same span, the (more frequently used) child mark wins for click
-  // targeting (closest("[data-child-id]") finds the outer wrapper).
-  // Note marks remain present in the DOM for scroll-to-anchor to find.
-  const responseWithMarks = useMemo(() => {
-    const withNotes = injectNoteMarks(node.response, noteAnchors);
-    return injectHighlights(withNotes, childAnchors);
-  }, [node.response, childAnchors, noteAnchors]);
 
   const onMarkClick = (e: React.MouseEvent) => {
     const target = (e.target as HTMLElement).closest("[data-child-id]");
@@ -356,8 +401,93 @@ function ResponseBody({ node }: { node: ChatNode }) {
     setActiveNode(childId);
   };
 
+  // Inject child + note <mark> on the rendered markdown DOM. Notes
+  // first, child second → child marks land *inside* note marks
+  // (visually amber inside emerald, which is what we want; click
+  // routing via closest still works).
+  useEffect(() => {
+    if (suspended) return;
+    const root = bodyRef.current;
+    if (!root) return;
+    clearMarks(root);
+    const specs: MarkSpec[] = [];
+    if (noteAnchors.length) {
+      specs.push({
+        dataKey: "noteId",
+        anchors: noteAnchors.map((a) => ({ text: a.text, id: a.noteId })),
+      });
+    }
+    if (childAnchors.length) {
+      specs.push({
+        dataKey: "childId",
+        anchors: childAnchors.map((a) => ({ text: a.text, id: a.childId })),
+      });
+    }
+    if (specs.length) injectMarks(root, specs);
+    return () => {
+      if (root) clearMarks(root);
+    };
+  }, [suspended, contentVersion, childAnchors, noteAnchors, bodyRef]);
+
+  // Scroll-to-anchor: handles both child-id (jump-back-to-parent) and
+  // note-id (jump-from-notebook). A single anchor may span multiple
+  // <mark> elements (one per textNode it crossed during DOM injection);
+  // querySelectorAll catches them all, scroll the first to center and
+  // pulse all. We still wait an rAF for markdown commit + injection
+  // effect, retrying once before clearing.
+  useEffect(() => {
+    if (!pendingScrollAnchor) return;
+    if (pendingScrollAnchor.nodeId !== nodeId) return;
+    if (suspended) return;
+    const selector =
+      pendingScrollAnchor.kind === "child"
+        ? `mark[data-child-id="${CSS.escape(pendingScrollAnchor.childId)}"]`
+        : `mark[data-note-id="${CSS.escape(pendingScrollAnchor.noteId)}"]`;
+    let raf = 0;
+    let timer = 0;
+    raf = window.requestAnimationFrame(() => {
+      const root = bodyRef.current;
+      if (!root) return;
+      const targets = root.querySelectorAll<HTMLElement>(selector);
+      if (!targets.length) {
+        raf = window.requestAnimationFrame(() => {
+          const t2 = root.querySelectorAll<HTMLElement>(selector);
+          if (t2.length) flash(t2);
+          else clearScrollAnchor();
+        });
+        return;
+      }
+      flash(targets);
+    });
+    function flash(els: NodeListOf<HTMLElement>) {
+      els[0].scrollIntoView({ block: "center", behavior: "smooth" });
+      els.forEach((el) => el.classList.add("anchor-pulse"));
+      timer = window.setTimeout(() => {
+        els.forEach((el) => el.classList.remove("anchor-pulse"));
+        clearScrollAnchor();
+      }, 1500);
+    }
+    return () => {
+      window.cancelAnimationFrame(raf);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [pendingScrollAnchor, nodeId, suspended, clearScrollAnchor, bodyRef]);
+
+  return { onMarkClick };
+}
+
+function ResponseBody({ node }: { node: ChatNode }) {
+  const retryNode = useSessionStore((s) => s.retryNode);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const isStreaming = node.status === "streaming";
   const isError = node.status === "error";
+
+  const { onMarkClick } = useMarkdownBodyMarks({
+    bodyRef,
+    nodeId: node.id,
+    contentVersion: node.response,
+    suspended: isStreaming,
+  });
 
   // DOM-direct streaming sink (same pattern as ChatNode); see lib/stream-bus.ts.
   const streamRef = useRef<HTMLDivElement>(null);
@@ -371,60 +501,6 @@ function ResponseBody({ node }: { node: ChatNode }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, node.id]);
-
-  // Scroll-to-anchor: handles both
-  //   kind="child" — user clicked "↳ 从「xxx」分叉" on a child to come
-  //                  back to the parent: highlight the source sentence
-  //                  (data-child-id).
-  //   kind="note"  — user clicked a notebook entry: highlight the
-  //                  quoted excerpt in the source node (data-note-id).
-  // Same scroll-into-center + 3-cycle pulse animation either way. We
-  // wait an rAF for the markdown to commit, retry once if the mark
-  // isn't in the DOM yet (slow markdown mount).
-  useEffect(() => {
-    if (!pendingScrollAnchor) return;
-    if (pendingScrollAnchor.nodeId !== node.id) return;
-    if (isStreaming) return; // marks aren't injected during streaming
-    const selector =
-      pendingScrollAnchor.kind === "child"
-        ? `mark[data-child-id="${CSS.escape(pendingScrollAnchor.childId)}"]`
-        : `mark[data-note-id="${CSS.escape(pendingScrollAnchor.noteId)}"]`;
-    let raf = 0;
-    let timer = 0;
-    raf = window.requestAnimationFrame(() => {
-      const root = bodyRef.current;
-      if (!root) return;
-      const target = root.querySelector<HTMLElement>(selector);
-      if (!target) {
-        raf = window.requestAnimationFrame(() => {
-          const t2 = root.querySelector<HTMLElement>(selector);
-          if (t2) flash(t2);
-          else {
-            // Match failed even after second frame — the regex anchor
-            // didn't find the quoted text in the markdown (e.g. text
-            // crosses paragraph break, was edited). Clear so we don't
-            // re-enter on re-render. UX: user lands on the right node
-            // but no scroll/pulse — same as v1.
-            clearScrollAnchor();
-          }
-        });
-        return;
-      }
-      flash(target);
-    });
-    function flash(el: HTMLElement) {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      el.classList.add("anchor-pulse");
-      timer = window.setTimeout(() => {
-        el.classList.remove("anchor-pulse");
-        clearScrollAnchor();
-      }, 1500);
-    }
-    return () => {
-      window.cancelAnimationFrame(raf);
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [pendingScrollAnchor, node.id, isStreaming, clearScrollAnchor]);
 
   return (
     <div
@@ -447,7 +523,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
           rehypePlugins={REHYPE_FULL}
           components={MD_COMPONENTS}
         >
-          {responseWithMarks}
+          {node.response}
         </ReactMarkdown>
       ) : (
         <div className="text-stone-400 dark:text-stone-500 italic flex items-center gap-2">
@@ -763,12 +839,19 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
   const fetchProgress = useSessionStore((s) => s.fetchProgress[node.id]);
   const [refreshing, setRefreshing] = useState(false);
   const ref = node.reference;
+  const isStreaming = node.status === "streaming";
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const { onMarkClick } = useMarkdownBodyMarks({
+    bodyRef,
+    nodeId: node.id,
+    contentVersion: ref?.contentMd ?? "",
+    suspended: isStreaming,
+  });
   if (!ref) {
     return (
       <div className="text-stone-400 italic text-sm">参考卡片数据缺失</div>
     );
   }
-  const isStreaming = node.status === "streaming";
   const canRefresh = ref.sourceType === "url" && !isStreaming;
   const onRefresh = async () => {
     if (refreshing) return;
@@ -854,7 +937,9 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
       )}
 
       <div
+        ref={bodyRef}
         data-chat-node-id={node.id}
+        onClick={onMarkClick}
         className="md-body text-[14.5px] text-stone-700 dark:text-stone-300 leading-relaxed"
       >
         {ref.contentMd ? (
@@ -877,61 +962,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
   );
 }
 
-function ReferenceFooterHint() {
-  return (
-    <div className="px-4 py-2.5 text-[11px] text-stone-500 dark:text-stone-400 italic">
-      选中正文中的任意片段 → 在选区浮条里追问，会创建一个 qa 子节点。
-    </div>
-  );
-}
-
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-function injectHighlights(
-  md: string,
-  anchors: { text: string; childId: string }[],
-): string {
-  if (anchors.length === 0 || !md) return md;
-  let out = md;
-  const seen = new Set<string>();
-  for (const a of anchors) {
-    if (!a.text || seen.has(a.text)) continue;
-    seen.add(a.text);
-    const escaped = a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(
-      new RegExp(escaped),
-      `<mark data-child-id="${a.childId}">$&</mark>`,
-    );
-  }
-  return out;
-}
-
-// Same shape as injectHighlights but data-note-id="<id>" — applied first
-// (before child anchors) so a span that's both quoted and forked-from
-// gets the child mark on the outside (closest("[data-child-id]") wins
-// for click handling), with the note mark still in the DOM as a scroll
-// target (queryable via mark[data-note-id]).
-function injectNoteMarks(
-  md: string,
-  anchors: { text: string; noteId: string }[],
-): string {
-  if (anchors.length === 0 || !md) return md;
-  let out = md;
-  const seen = new Set<string>();
-  for (const a of anchors) {
-    if (!a.text || seen.has(a.text)) continue;
-    seen.add(a.text);
-    const escaped = a.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Whitespace inside the quoted text may differ from the source
-    // markdown (e.g. line wraps captured by getSelection() vs the raw
-    // \n in markdown). Match runs of whitespace flexibly.
-    const flexible = escaped.replace(/\s+/g, "\\s+");
-    out = out.replace(
-      new RegExp(flexible),
-      `<mark data-note-id="${a.noteId}">$&</mark>`,
-    );
-  }
-  return out;
-}

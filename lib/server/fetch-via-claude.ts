@@ -123,28 +123,17 @@ export async function* fetchUrlViaClaude(
             yield { type: "error", message: msg };
             return;
           }
-          const parsed = parseFetchOutput(assistantTextBuffer);
-          if (!parsed) {
-            const tail = assistantTextBuffer.trim().slice(0, 280);
-            yield {
-              type: "result",
-              contentMd: assistantTextBuffer.trim(),
-              meta: {
-                fetchError: `claude 输出不符合 frontmatter 格式（前 280 字：${tail || "空"}）`,
-              },
-            };
-          } else {
-            yield {
-              type: "result",
-              contentMd: parsed.body,
-              meta: {
-                title: parsed.title || undefined,
-                platform: parsed.platform || undefined,
-                wordCount: parsed.body.length || undefined,
-                fetchError: parsed.fetchError || undefined,
-              },
-            };
-          }
+          const parsed = parseFetchOutput(assistantTextBuffer, url);
+          yield {
+            type: "result",
+            contentMd: parsed.contentMd,
+            meta: {
+              title: parsed.title,
+              platform: parsed.platform,
+              wordCount: parsed.contentMd.length || undefined,
+              fetchError: parsed.fetchError,
+            },
+          };
           resultEmitted = true;
           return;
         }
@@ -232,29 +221,20 @@ export async function* fetchUrlViaClaude(
     if (signal?.aborted) {
       yield { type: "error", message: "已取消" };
     } else if (assistantTextBuffer.trim()) {
-      // Claude exited without a result event but wrote text — try to
-      // parse what we have.
-      const parsed = parseFetchOutput(assistantTextBuffer);
-      if (parsed) {
-        yield {
-          type: "result",
-          contentMd: parsed.body,
-          meta: {
-            title: parsed.title || undefined,
-            platform: parsed.platform || undefined,
-            wordCount: parsed.body.length || undefined,
-            fetchError: parsed.fetchError || undefined,
-          },
-        };
-      } else {
-        yield {
-          type: "result",
-          contentMd: assistantTextBuffer.trim(),
-          meta: {
-            fetchError: "claude 提前退出，输出格式不完整",
-          },
-        };
-      }
+      // Claude exited without a result event but wrote text — parse what
+      // we have. New parser is total (no null path), so any partial
+      // output still becomes a usable card.
+      const parsed = parseFetchOutput(assistantTextBuffer, url);
+      yield {
+        type: "result",
+        contentMd: parsed.contentMd,
+        meta: {
+          title: parsed.title,
+          platform: parsed.platform,
+          wordCount: parsed.contentMd.length || undefined,
+          fetchError: parsed.fetchError ?? "claude 提前退出，输出可能不完整",
+        },
+      };
     } else {
       const tail = stderr.slice(-400);
       yield {

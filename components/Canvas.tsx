@@ -22,6 +22,7 @@ import {
 } from "@/hooks/useSelectionWithin";
 import { layoutNodes, COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { buildNodeIndex } from "@/lib/node-index";
+import { hiddenByCollapse } from "@/lib/collapsed";
 
 const nodeTypes = { chat: ChatNode, reference: ReferenceCard };
 const NODE_WIDTH = 600;
@@ -45,8 +46,24 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   const setNodePosition = useSessionStore((s) => s.setNodePosition);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const collapsedNodeIds = useSessionStore((s) => s.collapsedNodeIds);
   const sessionId = useSessionStore((s) => s.session?.id);
   const { setCenter, getViewport, fitView } = useReactFlow();
+
+  // Folded subtrees disappear from the canvas — collapsed roots stay
+  // visible (their "+N" badge invites re-expansion), but every
+  // descendant is excluded from layout, flowNodes, and flowEdges.
+  const hiddenIds = useMemo(
+    () => hiddenByCollapse(collapsedNodeIds, nodeMap),
+    [collapsedNodeIds, nodeMap],
+  );
+
+  // First-mount nodes start at (0,0) and snap to dagre output on the
+  // first layout pass — animating that flight from origin looks worse
+  // than just popping into place. Gate the transform transition behind
+  // this flag so subsequent re-layouts (collapse / streaming finish /
+  // LoD threshold) slide smoothly without that initial fly-in.
+  const [layoutReady, setLayoutReady] = useState(false);
 
   // LoD-aware: layout shrinks when zoom drops below the threshold so
   // overview cards (compact form) sit close together — selector returns a
@@ -64,15 +81,20 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       Object.values(nodeMap)
         .map((n) => `${n.id}:${n.parentId ?? "_"}:${n.status}`)
         .sort()
-        .join("|") + (isCompact ? ":c" : ":f"),
-    [nodeMap, isCompact],
+        .join("|") +
+      (isCompact ? ":c" : ":f") +
+      "|h=" +
+      [...hiddenIds].sort().join(","),
+    [nodeMap, isCompact, hiddenIds],
   );
 
   const { getNodes } = useReactFlow();
 
   useEffect(() => {
-    const nodes = Object.values(nodeMap);
-    if (nodes.length === 0) return;
+    const visibleNodes = Object.values(nodeMap).filter(
+      (n) => !hiddenIds.has(n.id),
+    );
+    if (visibleNodes.length === 0) return;
     // Wait one tick so React Flow has rendered + measured heights of any
     // newly-added/changed nodes before we re-run Dagre.
     const t = window.setTimeout(() => {
@@ -81,7 +103,9 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         const h = fn.measured?.height;
         if (typeof h === "number" && h > 0) heights.set(fn.id, h);
       }
-      const positions = layoutNodes(nodes, heights, { compact: isCompact });
+      const positions = layoutNodes(visibleNodes, heights, {
+        compact: isCompact,
+      });
       for (const [id, pos] of positions) {
         const cur = nodeMap[id];
         if (!cur) continue;
@@ -92,6 +116,10 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
           setNodePosition(id, pos);
         }
       }
+      // After the first real dagre pass with measured heights, allow
+      // subsequent transform changes to animate. Wait until the next
+      // frame so the new positions paint before transitions arm.
+      requestAnimationFrame(() => setLayoutReady(true));
     }, 60);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -120,8 +148,11 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   }, [activeNodeId]);
 
   // Re-fit view when switching sessions — fitView prop only fires on mount.
+  // Also drop the layout-ready flag so the new session's first dagre
+  // pass doesn't animate cards flying in from origin.
   useEffect(() => {
     if (!sessionId) return;
+    setLayoutReady(false);
     const t = window.setTimeout(
       () => fitView({ padding: 0.15, duration: 400 }),
       120,
@@ -166,45 +197,85 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
 
   const nodeIndices = useMemo(() => buildNodeIndex(nodeMap), [nodeMap]);
 
+  // Per-node descendant counts in one pass — drives the "▶ N" / "▼ N"
+  // chip on cards. Build a children map then DFS post-order so each id
+  // accumulates its subtree size in linear time.
+  const descendantCounts = useMemo(() => {
+    const childrenByParent = new Map<string, string[]>();
+    for (const n of Object.values(nodeMap)) {
+      if (!n.parentId) continue;
+      const arr = childrenByParent.get(n.parentId) ?? [];
+      arr.push(n.id);
+      childrenByParent.set(n.parentId, arr);
+    }
+    const counts: Record<string, number> = {};
+    const visit = (id: string): number => {
+      if (counts[id] !== undefined) return counts[id];
+      const kids = childrenByParent.get(id) ?? [];
+      let sum = 0;
+      for (const k of kids) sum += 1 + visit(k);
+      counts[id] = sum;
+      return sum;
+    };
+    for (const id of Object.keys(nodeMap)) visit(id);
+    return counts;
+  }, [nodeMap]);
+
   const flowNodes: Node[] = useMemo(
     () =>
-      Object.values(nodeMap).map((n) => {
-        const isReference = n.kind === "reference";
-        const index = nodeIndices[n.id] ?? 0;
-        return {
-          id: n.id,
-          type: isReference ? "reference" : "chat",
-          position: n.position,
-          data: isReference
-            ? {
-                node: n,
-                isActive: n.id === activeNodeId,
-                index,
-              }
-            : {
-                node: n,
-                isActive: n.id === activeNodeId,
-                childAnchors:
-                  childAnchorsByParent.get(n.id) ?? EMPTY_ANCHORS,
-                index,
-              },
-          draggable: false,
-        };
-      }),
-    [nodeMap, activeNodeId, childAnchorsByParent, nodeIndices],
+      Object.values(nodeMap)
+        .filter((n) => !hiddenIds.has(n.id))
+        .map((n) => {
+          const isReference = n.kind === "reference";
+          const index = nodeIndices[n.id] ?? 0;
+          const descendantCount = descendantCounts[n.id] ?? 0;
+          const collapsed = collapsedNodeIds.has(n.id);
+          return {
+            id: n.id,
+            type: isReference ? "reference" : "chat",
+            position: n.position,
+            data: isReference
+              ? {
+                  node: n,
+                  isActive: n.id === activeNodeId,
+                  index,
+                  descendantCount,
+                  collapsed,
+                }
+              : {
+                  node: n,
+                  isActive: n.id === activeNodeId,
+                  childAnchors:
+                    childAnchorsByParent.get(n.id) ?? EMPTY_ANCHORS,
+                  index,
+                  descendantCount,
+                  collapsed,
+                },
+            draggable: false,
+          };
+        }),
+    [
+      nodeMap,
+      activeNodeId,
+      childAnchorsByParent,
+      nodeIndices,
+      hiddenIds,
+      descendantCounts,
+      collapsedNodeIds,
+    ],
   );
 
   const flowEdges: Edge[] = useMemo(
     () =>
       Object.values(nodeMap)
-        .filter((n) => n.parentId)
+        .filter((n) => n.parentId && !hiddenIds.has(n.id))
         .map((n) => ({
           id: `e-${n.id}`,
           source: n.parentId!,
           target: n.id,
           type: "default",
         })),
-    [nodeMap],
+    [nodeMap, hiddenIds],
   );
 
   const liveSelection = useSelectionWithin();
@@ -231,7 +302,11 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
 
   return (
     <>
-      <div className="w-screen h-screen pt-12">
+      <div
+        className={`w-screen h-screen pt-12${
+          layoutReady ? " canvas-layout-ready" : ""
+        }`}
+      >
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
