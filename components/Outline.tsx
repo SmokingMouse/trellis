@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { refIcon } from "@/lib/ref-icon";
 import { buildNodeIndex } from "@/lib/node-index";
 import type { ChatNode } from "@/lib/types";
+import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
 function isUnreadNode(n: ChatNode): boolean {
   return n.status === "done" && !n.readAt;
@@ -129,11 +130,14 @@ function TreeRow({
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const collapsed = useSessionStore((s) => s.collapsedNodeIds.has(node.id));
   const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
+  const sessionRootId = useSessionStore((s) => s.session?.rootNodeId);
+  const confirmDelete = useConfirmDelete();
   const isActive = activeNodeId === node.id;
   const isReference = node.kind === "reference";
   const index = indices[node.id];
   const unread = isUnreadNode(node);
   const hasChildren = node.children.length > 0;
+  const canDelete = sessionRootId !== node.id;
   // In "unread only" mode, hide read leaves entirely. A read row with at
   // least one unread descendant stays visible (rendered dim) so the
   // hierarchy doesn't lose context.
@@ -219,6 +223,30 @@ function TreeRow({
             </span>
           )}
         </button>
+        {canDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              confirmDelete(node.id);
+            }}
+            title="删除节点（含子树）"
+            aria-label="删除节点"
+            className="shrink-0 w-5 h-5 mr-0.5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-opacity"
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M3 3 L9 9 M9 3 L3 9" />
+            </svg>
+          </button>
+        )}
       </div>
       {!collapsed &&
         node.children.map((c) => (

@@ -849,6 +849,67 @@ export function deleteNote(noteId: string): boolean {
   return r.changes > 0;
 }
 
+// Cascade-delete a node and every descendant qa node + every reference
+// node in that subtree, plus all notes whose source_node_id falls inside.
+// Refuses three cases: node missing, node is the session's qa root (use
+// deleteSession instead), and any node in the subtree is currently
+// streaming (caller should abort first). The delete runs as a single
+// transaction so partial failure can't orphan part of the tree.
+export type DeleteNodeResult =
+  | { ok: true; deletedNodeIds: string[]; deletedNoteIds: string[] }
+  | { ok: false; reason: "not_found" | "is_session_root" | "streaming" };
+
+export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
+  const db = getDB();
+  const node = getNode(nodeId);
+  if (!node) return { ok: false, reason: "not_found" };
+  const session = getSession(node.sessionId);
+  if (session?.rootNodeId === nodeId) {
+    return { ok: false, reason: "is_session_root" };
+  }
+  // Collect every id in the subtree (parent included) via recursive CTE.
+  const subtreeRows = db
+    .prepare(
+      `WITH RECURSIVE subtree(id) AS (
+         SELECT id FROM nodes WHERE id = ?
+         UNION ALL
+         SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id
+       )
+       SELECT id FROM subtree`,
+    )
+    .all(nodeId) as { id: string }[];
+  const ids = subtreeRows.map((r) => r.id);
+  if (ids.length === 0) return { ok: false, reason: "not_found" };
+  const placeholders = ids.map(() => "?").join(",");
+  const stillStreaming = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM nodes
+       WHERE id IN (${placeholders}) AND status = 'streaming'`,
+    )
+    .get(...ids) as { n: number };
+  if (stillStreaming.n > 0) return { ok: false, reason: "streaming" };
+  const noteRows = db
+    .prepare(
+      `SELECT id FROM notes WHERE source_node_id IN (${placeholders})`,
+    )
+    .all(...ids) as { id: string }[];
+  const noteIds = noteRows.map((r) => r.id);
+  const tx = db.transaction(() => {
+    if (noteIds.length) {
+      db.prepare(
+        `DELETE FROM notes WHERE id IN (${noteIds.map(() => "?").join(",")})`,
+      ).run(...noteIds);
+    }
+    db.prepare(`DELETE FROM nodes WHERE id IN (${placeholders})`).run(...ids);
+    db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(
+      Date.now(),
+      node.sessionId,
+    );
+  });
+  tx();
+  return { ok: true, deletedNodeIds: ids, deletedNoteIds: noteIds };
+}
+
 // Cleanup leftover streaming nodes — call on server start. If the process
 // crashed mid-stream, those nodes get marked as errored.
 export function reapInterruptedStreams(): number {

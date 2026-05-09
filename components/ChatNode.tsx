@@ -19,6 +19,7 @@ import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { CollapseChip } from "./CollapseChip";
+import { DeleteCardButton } from "./DeleteCardButton";
 
 // Plugin arrays at module scope so identity is stable across renders.
 const REMARK_PLUGINS = [remarkGfm];
@@ -130,7 +131,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   if (showCompact) {
     return (
       <div
-        className={`relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
+        className={`group relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
           isActive
             ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
             : isUnread
@@ -141,6 +142,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         title={n.question}
       >
         <Handle type="target" position={Position.Top} />
+        <DeleteCardButton nodeId={n.id} />
         {showCollapseChip && (
           <CollapseChip
             collapsed={data.collapsed}
@@ -194,7 +196,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 
   return (
     <div
-      className={`relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
+      className={`group relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
         isStreaming
           ? "border-indigo-300 dark:border-indigo-700 ring-4 ring-indigo-100 dark:ring-indigo-900/40"
           : isActive
@@ -205,6 +207,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       }`}
     >
       <Handle type="target" position={Position.Top} />
+      <DeleteCardButton nodeId={n.id} />
       {showCollapseChip && (
         <CollapseChip
           collapsed={data.collapsed}

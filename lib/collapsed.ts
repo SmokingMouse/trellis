@@ -62,3 +62,19 @@ export function descendantCount(
   walk(nodeId);
   return count;
 }
+
+// Self + every descendant id. Used by deleteNode for the optimistic
+// store update and the confirmation prompt's count.
+export function subtreeIds(
+  nodeId: string,
+  nodes: Record<string, ChatNode>,
+): string[] {
+  const idx = buildChildrenIndex(nodes);
+  const out: string[] = [];
+  const walk = (id: string) => {
+    out.push(id);
+    for (const k of idx.get(id) ?? []) walk(k);
+  };
+  if (nodes[nodeId]) walk(nodeId);
+  return out;
+}

@@ -10,6 +10,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { refIcon, refSourceLabel } from "@/lib/ref-icon";
 import { CollapseChip } from "./CollapseChip";
+import { DeleteCardButton } from "./DeleteCardButton";
 
 export type RefFlowNode = Node<
   {
@@ -87,7 +88,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
 
   return (
     <div
-      className={`relative nopan bg-amber-50/40 dark:bg-amber-950/30 border rounded-xl shadow-sm w-[280px] cursor-pointer transition-shadow ${
+      className={`group relative nopan bg-amber-50/40 dark:bg-amber-950/30 border rounded-xl shadow-sm w-[280px] cursor-pointer transition-shadow ${
         isActive
           ? "border-amber-400 dark:border-amber-600 ring-2 ring-amber-200 dark:ring-amber-900/50 shadow-md"
           : isStreaming
@@ -100,6 +101,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
       title={ref.sourceUri ?? labelText}
     >
       <Handle type="target" position={Position.Top} />
+      <DeleteCardButton nodeId={n.id} />
       {showCollapseChip && (
         <CollapseChip
           collapsed={data.collapsed}

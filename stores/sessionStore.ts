@@ -7,7 +7,7 @@ import {
   emitStream,
   getStreamPending,
 } from "@/lib/stream-bus";
-import { ancestorsOf } from "@/lib/collapsed";
+import { ancestorsOf, subtreeIds } from "@/lib/collapsed";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -205,6 +205,18 @@ type Actions = {
   // Toggle collapse on a node. No-op semantically meaningful even on
   // leaves (allows "pre-collapse" before children exist) but UIs should
   // hide the toggle when there are no descendants.
+  // Cascade-delete a node + every descendant (qa or reference) + every
+  // note attached to anything in the subtree. Optimistic: removes from
+  // local store immediately, posts to /api/nodes/:id, reverts on
+  // failure. Refuses (no-op) if the target is the session's qa root —
+  // the caller should redirect the user to delete-session in that case.
+  // Returns null on no-op, otherwise the count of what was removed.
+  deleteNode: (
+    nodeId: string,
+  ) => Promise<
+    | { deletedNodeIds: string[]; deletedNoteIds: string[] }
+    | null
+  >;
   toggleCollapse: (nodeId: string) => void;
   // Force-expand the entire ancestor chain of `nodeId` so the node is
   // reachable on the canvas. Called whenever something navigates to a
@@ -703,6 +715,78 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setNotesOpen: (open) => set({ notesOpen: open }),
+
+  deleteNode: async (nodeId) => {
+    const state = get();
+    const target = state.nodes[nodeId];
+    if (!target) return null;
+    if (state.session?.rootNodeId === nodeId) return null;
+    if (target.status === "streaming") return null;
+
+    const ids = subtreeIds(nodeId, state.nodes);
+    const idsSet = new Set(ids);
+    // If anything in the subtree is still streaming, abort first — the
+    // server would refuse and we'd thrash the optimistic state.
+    for (const id of ids) {
+      if (state.nodes[id]?.status === "streaming") return null;
+    }
+
+    const prevNodes = state.nodes;
+    const prevNotes = state.notes;
+    const prevActive = state.activeNodeId;
+    const prevCollapsed = state.collapsedNodeIds;
+
+    const nextNodes: Record<string, ChatNode> = {};
+    for (const [k, v] of Object.entries(state.nodes)) {
+      if (!idsSet.has(k)) nextNodes[k] = v;
+    }
+    const nextNotes = state.notes.filter((n) => !idsSet.has(n.sourceNodeId));
+    let nextCollapsed = state.collapsedNodeIds;
+    if ([...state.collapsedNodeIds].some((id) => idsSet.has(id))) {
+      nextCollapsed = new Set(
+        [...state.collapsedNodeIds].filter((id) => !idsSet.has(id)),
+      );
+    }
+    let nextActive = state.activeNodeId;
+    if (state.activeNodeId && idsSet.has(state.activeNodeId)) {
+      nextActive = target.parentId ?? null;
+    }
+
+    set({
+      nodes: nextNodes,
+      notes: nextNotes,
+      collapsedNodeIds: nextCollapsed,
+      activeNodeId: nextActive,
+    });
+    if (nextCollapsed !== prevCollapsed) {
+      persistCollapsed(state.session?.id, nextCollapsed);
+    }
+
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || "delete failed"}`);
+      }
+      const body = (await res.json()) as {
+        deletedNodeIds: string[];
+        deletedNoteIds: string[];
+      };
+      set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+      return body;
+    } catch (err) {
+      set({
+        nodes: prevNodes,
+        notes: prevNotes,
+        collapsedNodeIds: prevCollapsed,
+        activeNodeId: prevActive,
+      });
+      if (nextCollapsed !== prevCollapsed) {
+        persistCollapsed(state.session?.id, prevCollapsed);
+      }
+      throw err;
+    }
+  },
 
   toggleCollapse: (nodeId) => {
     const { collapsedNodeIds, session } = get();

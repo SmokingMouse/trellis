@@ -12,6 +12,7 @@ import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector"
 import type { ChatNode, ParentAnchor } from "@/lib/types";
 import { buildNodeIndex } from "@/lib/node-index";
 import { NodeTreeOverlay } from "./NodeTreeOverlay";
+import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
@@ -261,6 +262,9 @@ function SubBar({
   parent: ChatNode | null;
   nodeIndex: number;
 }) {
+  const sessionRootId = useSessionStore((s) => s.session?.rootNodeId);
+  const confirmDelete = useConfirmDelete();
+  const canDelete = sessionRootId !== node.id;
   return (
     <div className="px-2 py-1.5 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 flex items-center gap-1.5 text-xs shrink-0">
       <button
@@ -313,6 +317,30 @@ function SubBar({
             : truncate(node.question, 28)}
         </span>
       </button>
+      {canDelete && (
+        <button
+          onClick={() => confirmDelete(node.id)}
+          className="shrink-0 p-1.5 rounded text-stone-500 dark:text-stone-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400"
+          aria-label="删除节点"
+          title="删除节点（含子树）"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+            <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+          </svg>
+        </button>
+      )}
       <button
         onClick={onShowTree}
         className="shrink-0 p-1.5 rounded text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-800 dark:hover:text-stone-100"
