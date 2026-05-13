@@ -11,12 +11,15 @@ import { DEFAULT_SYSTEM_PROMPT, buildPrompt } from "./prompt";
 // Default model for all modes. User confirmed gpt-5.5; override via opts.model.
 const DEFAULT_MODEL = "gpt-5.5";
 
-// Three modes mirror the claude provider:
-//   lean       — folded history + system prompt prepended; --sandbox read-only
-//                + --ephemeral. No tools effectively reachable.
-//   cli-single — folded history; --dangerously-bypass-approvals-and-sandbox
+// Three modes mirror the claude provider (Stage 14):
+//   chat       — folded history + system prompt prepended; --sandbox read-only
+//                + --ephemeral. No tools effectively reachable. NB: codex CLI
+//                has no WebSearch equivalent — chat-on-codex is offline; see
+//                progress/mode-workspace-rebuild.md open question 1.
+//   workspace  — folded history; --dangerously-bypass-approvals-and-sandbox
 //                + --ephemeral. Each turn stateless, history folded by trellis.
-//   cli-multi  — only the current turn's question is sent; first turn spawns
+//                Bound to session.workspace_path.
+//   project    — only the current turn's question is sent; first turn spawns
 //                a fresh codex session and emits session_init with the
 //                thread_id; subsequent turns use `codex exec resume <id>`.
 //                Persistence kept on (no --ephemeral) so resume can find the
@@ -37,7 +40,7 @@ const DEFAULT_MODEL = "gpt-5.5";
 export function makeCodexProvider(
   opts: { mode?: Mode; model?: string } = {},
 ): LLMProvider {
-  const mode: Mode = opts.mode ?? "lean";
+  const mode: Mode = opts.mode ?? "chat";
   const model = opts.model ?? DEFAULT_MODEL;
 
   return {
@@ -47,6 +50,8 @@ export function makeCodexProvider(
       parentAnchor,
       signal,
       claudeSessionId,
+      cwd,
+      attachments,
     }: StreamRequest): AsyncGenerator<StreamEvent> {
       // Login check up front. Cheap (sync, ~50ms) and produces a clear
       // actionable error before we waste time on an LLM round-trip that
@@ -65,9 +70,9 @@ export function makeCodexProvider(
       }
 
       const promptText =
-        mode === "cli-multi"
-          ? buildCliMultiPrompt(question, parentAnchor)
-          : mode === "lean"
+        mode === "project"
+          ? buildProjectPrompt(question, parentAnchor)
+          : mode === "chat"
             ? prependSystemPrompt(buildPrompt(history, question, parentAnchor))
             : buildPrompt(history, question, parentAnchor);
 
@@ -75,11 +80,15 @@ export function makeCodexProvider(
         mode,
         model,
         prompt: promptText,
-        resumeId: mode === "cli-multi" ? claudeSessionId ?? null : null,
+        resumeId: mode === "project" ? claudeSessionId ?? null : null,
+        // Stage 15: codex takes images as repeatable --image FILE
+        // flags (not stdin, unlike claude).
+        imagePaths: (attachments ?? []).map((a) => a.path),
       });
 
+      const spawnCwd = mode === "chat" ? os.homedir() : (cwd ?? os.homedir());
       const proc = spawn("codex", args, {
-        cwd: mode === "lean" ? os.tmpdir() : os.homedir(),
+        cwd: spawnCwd,
         stdio: ["ignore", "pipe", "pipe"],
       });
 
@@ -223,9 +232,10 @@ type ArgsOpts = {
   model: string;
   prompt: string;
   resumeId: string | null;
+  imagePaths: string[];
 };
 
-function buildArgs({ mode, model, prompt, resumeId }: ArgsOpts): string[] {
+function buildArgs({ mode, model, prompt, resumeId, imagePaths }: ArgsOpts): string[] {
   const common = [
     "--json",
     "--skip-git-repo-check",
@@ -233,44 +243,56 @@ function buildArgs({ mode, model, prompt, resumeId }: ArgsOpts): string[] {
     model,
   ];
 
-  if (mode === "cli-multi" && resumeId) {
+  // codex takes images as `--image FILE` flags (repeatable). They have
+  // to come before the positional prompt argument; placing them inside
+  // common keeps all branches consistent.
+  const imageArgs: string[] = [];
+  for (const p of imagePaths) {
+    imageArgs.push("--image", p);
+  }
+
+  if (mode === "project" && resumeId) {
     return [
       "exec",
       "resume",
       resumeId,
       ...common,
       "--dangerously-bypass-approvals-and-sandbox",
+      ...imageArgs,
       prompt,
     ];
   }
 
-  // First turn (or non-multi mode).
-  if (mode === "lean") {
+  // First turn (or non-project mode).
+  if (mode === "chat") {
     return [
       "exec",
       ...common,
       "--ephemeral",
       "--sandbox",
       "read-only",
+      ...imageArgs,
       prompt,
     ];
   }
 
-  if (mode === "cli-single") {
+  if (mode === "workspace") {
     return [
       "exec",
       ...common,
       "--ephemeral",
       "--dangerously-bypass-approvals-and-sandbox",
+      ...imageArgs,
       prompt,
     ];
   }
 
-  // cli-multi first turn — no --ephemeral so the rollout persists for resume.
+  // project first turn — no --ephemeral so the rollout persists for resume.
   return [
     "exec",
     ...common,
     "--dangerously-bypass-approvals-and-sandbox",
+    ...imageArgs,
     prompt,
   ];
 }
@@ -282,7 +304,7 @@ function prependSystemPrompt(userPrompt: string): string {
   return `${DEFAULT_SYSTEM_PROMPT}\n\n---\n\n${userPrompt}`;
 }
 
-function buildCliMultiPrompt(
+function buildProjectPrompt(
   question: string,
   parentAnchor?: { selectedText: string } | null,
 ): string {

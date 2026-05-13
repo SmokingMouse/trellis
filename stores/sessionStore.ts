@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import type { Mode, ProviderId } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId } from "@/lib/llm";
-import type { ChatNode, Note, ParentAnchor, Session } from "@/lib/types";
+import type {
+  ChatNode,
+  NodeAttachment,
+  Note,
+  ParentAnchor,
+  Session,
+} from "@/lib/types";
 import {
   clearStreamPending,
   emitStream,
@@ -16,7 +22,11 @@ export type CreateReferenceInput =
   | { sourceType: "url"; url: string };
 
 const PROVIDER_KEY = "trellis-provider";
+// MODE_KEY semantics changed in Stage 14: was the runtime mode (globally
+// applied to all sessions); now it's only a hint for *new* sessions —
+// active sessions read their locked mode from the DB.
 const MODE_KEY = "trellis-mode";
+const WORKSPACE_KEY = "trellis-workspace";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 
 // Per-session collapsed-set persistence — sessionStorage so it survives
@@ -61,19 +71,28 @@ function loadProvider(): ProviderId {
 }
 
 function isMode(s: unknown): s is Mode {
-  return s === "lean" || s === "cli-single" || s === "cli-multi";
+  return s === "chat" || s === "workspace" || s === "project";
 }
 
-function loadMode(): Mode {
-  if (typeof window === "undefined") return "lean";
+function loadDraftMode(): Mode {
+  if (typeof window === "undefined") return "chat";
   const stored = window.localStorage.getItem(MODE_KEY);
-  // Migrate previous boolean cli-mode flag if present.
+  // Migrate previous values: boolean cli-mode flag, then Stage-13 names.
   if (stored === null) {
     const legacy = window.localStorage.getItem("trellis-cli-mode");
-    if (legacy === "1") return "cli-single";
-    return "lean";
+    if (legacy === "1") return "workspace";
+    return "chat";
   }
-  return isMode(stored) ? stored : "lean";
+  if (stored === "lean") return "chat";
+  if (stored === "cli-single") return "workspace";
+  if (stored === "cli-multi") return "project";
+  return isMode(stored) ? stored : "chat";
+}
+
+function loadDraftWorkspace(): string | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(WORKSPACE_KEY);
+  return stored && stored.trim() ? stored : null;
 }
 
 // API node → client node (add position field, drop nullable distinction)
@@ -92,9 +111,14 @@ type State = {
   hydrated: boolean;
   hydrateError: string | null;
   provider: ProviderId;
-  // Context mode: lean / cli-single / cli-multi. See lib/llm/types.ts:Mode
-  // for semantics. Persisted to localStorage; loaded on hydrate.
-  mode: Mode;
+  // Stage 14: mode is per-session and locked at creation. The runtime
+  // mode for the currently-loaded session is derived from `session.mode`
+  // (see ModeBadge). The store keeps two independent "draft" fields that
+  // only matter when starting a brand-new session — the QuestionInput
+  // mode bar reads + writes these, then the server locks them into the
+  // sessions row on first POST.
+  draftMode: Mode;
+  draftWorkspacePath: string | null;
   // Bumps every time the server's session list might have changed —
   // SessionPicker watches this to refetch.
   sessionsRevision: number;
@@ -114,6 +138,16 @@ type State = {
   pendingScrollAnchor:
     | { nodeId: string; kind: "child"; childId: string }
     | { nodeId: string; kind: "note"; noteId: string }
+    | {
+        nodeId: string;
+        kind: "search";
+        // Surface the FTS snippet (markers stripped) so the anchor
+        // injector can wrap it in <mark data-search-id>. matchKind
+        // narrows which DOM region — question vs response/reference —
+        // the consumer should target.
+        matchText: string;
+        matchKind: "question" | "response" | "reference";
+      }
     | null;
   // Toasts emitted when a node finishes streaming AND the user is not
   // currently focused on it (activeNodeId !== that node). Lets the user
@@ -127,12 +161,22 @@ type State = {
   notes: Note[];
   // Whether the right-side NotesDrawer is open. UI-only — not persisted.
   notesOpen: boolean;
+  // Stage 16: cross-session search modal visibility. Lifted into store so
+  // both the ⌘P global keydown listener and the Header 🔍 button (mobile
+  // entry point) can toggle the same modal.
+  searchOpen: boolean;
   // Set of nodeIds whose subtree is currently folded — collapsed nodes
   // themselves stay visible, but every descendant is hidden from the
   // canvas (and the outline). Persisted to sessionStorage per-session
   // so reload preserves the user's current focus posture without
   // bleeding into the data model.
   collapsedNodeIds: Set<string>;
+  // Most recently created / streamed / retried / refreshed node in the
+  // current session. Used to pan the canvas onto it whenever the user
+  // returns from NodeFullView, so they land on the freshest work
+  // instead of whatever the previous viewport was. In-memory only;
+  // on session load we seed from the highest createdAt as a proxy.
+  lastEditedNodeId: string | null;
 };
 
 type Actions = {
@@ -144,7 +188,10 @@ type Actions = {
   setNodePosition: (nodeId: string, pos: { x: number; y: number }) => void;
   setActiveNode: (nodeId: string | null) => void;
   setProvider: (provider: ProviderId) => void;
-  setMode: (mode: Mode) => void;
+  // Stage 14: only affects subsequent new-session creation. No-op for
+  // currently active session.
+  setDraftMode: (mode: Mode) => void;
+  setDraftWorkspacePath: (path: string | null) => void;
   setFullScreen: (v: boolean) => void;
   // Stream a new root question.
   // - default (no opts): creates a brand-new session + root node.
@@ -152,13 +199,17 @@ type Actions = {
   //   (parent_id=NULL, fresh lineage but shares Session container).
   streamRoot: (
     question: string,
-    opts?: { attachToCurrentSession?: boolean },
+    opts?: {
+      attachToCurrentSession?: boolean;
+      attachments?: NodeAttachment[];
+    },
   ) => Promise<void>;
   // Stream a new branch from an existing parent.
   streamBranch: (
     parentId: string,
     question: string,
     anchor: ParentAnchor | null,
+    opts?: { attachments?: NodeAttachment[] },
   ) => Promise<void>;
   // Re-run an existing node in place: server keeps the same id, wipes the
   // response/usage/error, and re-streams against the original question +
@@ -172,6 +223,12 @@ type Actions = {
   // True if any node currently has a registered stream controller. Used by
   // the global Esc handler to find a target without subscribing to nodes.
   hasStreamingNode: () => boolean;
+  // Stage 17: open GET /api/nodes/[id]/stream for every node in the
+  // current session that's still in streaming state but has no live SSE
+  // attached. Triggered by visibilitychange (mobile tab waking), online
+  // (network restored), and at the tail of loadSession. Idempotent —
+  // running it 3x in a row is the same as running it once.
+  reconnectStreamingNodes: () => void;
   // Most recently registered streaming nodeId (for Esc to find a target
   // when activeNodeId isn't itself streaming).
   latestStreamingNodeId: () => string | null;
@@ -193,6 +250,16 @@ type Actions = {
   // its ResponseBody to scroll the mark[data-note-id] into view + pulse.
   // No-op (silent) if the note id isn't in the store (rare race).
   jumpToNoteSource: (noteId: string) => void;
+  // Stage 16: navigate to a search result. Loads the target session if
+  // needed, focuses the node, switches to fullscreen, and (for q/r/ref
+  // hits) sets a pendingScrollAnchor for the inline pulse. Note hits
+  // delegate to jumpToNoteSource — call that directly from the UI.
+  jumpToSearchHit: (args: {
+    sessionId: string;
+    nodeId: string;
+    matchText: string;
+    matchKind: "question" | "response" | "reference";
+  }) => Promise<void>;
   clearScrollAnchor: () => void;
   // Remove a single done toast (timer expiry or user dismiss/click).
   dismissDoneToast: (nodeId: string) => void;
@@ -202,6 +269,7 @@ type Actions = {
   addNote: (sourceNodeId: string, quotedText: string) => Promise<Note>;
   deleteNote: (noteId: string) => Promise<void>;
   setNotesOpen: (open: boolean) => void;
+  setSearchOpen: (open: boolean) => void;
   // Toggle collapse on a node. No-op semantically meaningful even on
   // leaves (allows "pre-collapse" before children exist) but UIs should
   // hide the toggle when there are no descendants.
@@ -240,7 +308,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   hydrated: false,
   hydrateError: null,
   provider: DEFAULT_PROVIDER,
-  mode: "lean",
+  draftMode: "chat",
+  draftWorkspacePath: null,
   sessionsRevision: 0,
   fullScreen: false,
   fetchProgress: {},
@@ -248,10 +317,16 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   doneToasts: [],
   notes: [],
   notesOpen: false,
+  searchOpen: false,
   collapsedNodeIds: new Set(),
+  lastEditedNodeId: null,
 
   hydrate: async (sessionId) => {
-    set({ provider: loadProvider(), mode: loadMode() });
+    set({
+      provider: loadProvider(),
+      draftMode: loadDraftMode(),
+      draftWorkspacePath: loadDraftWorkspace(),
+    });
     try {
       let targetId = sessionId;
       if (!targetId) {
@@ -266,6 +341,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }
       await loadSessionInternal(targetId, set);
       set({ hydrated: true });
+      // Stage 17: any rows still status='streaming' after hydrate must
+      // be a stream that was alive when we last saw the page. Attach
+      // reconnect SSE to each so live deltas / terminal events resume.
+      get().reconnectStreamingNodes();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[trellis] hydrate failed:", err);
@@ -275,6 +354,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   loadSession: async (sessionId) => {
     await loadSessionInternal(sessionId, set);
+    get().reconnectStreamingNodes();
   },
 
   newConversation: () => {
@@ -284,6 +364,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       activeNodeId: null,
       notes: [],
       collapsedNodeIds: new Set(),
+      lastEditedNodeId: null,
     });
   },
 
@@ -299,6 +380,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         activeNodeId: null,
         notes: [],
         collapsedNodeIds: new Set(),
+        lastEditedNodeId: null,
       });
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
@@ -346,7 +428,24 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set({ activeNodeId: nodeId });
   },
 
-  setFullScreen: (v) => set({ fullScreen: v }),
+  setFullScreen: (v) => {
+    if (v) {
+      set({ fullScreen: true });
+      return;
+    }
+    // Returning to canvas: pan to the most-recently-edited node so the
+    // user lands on the freshest work, not whatever the previous
+    // viewport was. Falls back to whatever the user was reading if we
+    // have no edit record yet (e.g. straight after a page reload with
+    // no nodes touched since).
+    const { lastEditedNodeId, nodes, activeNodeId } = get();
+    const focus =
+      lastEditedNodeId && nodes[lastEditedNodeId]
+        ? lastEditedNodeId
+        : activeNodeId;
+    if (focus) get().expandAncestors(focus);
+    set({ fullScreen: false, activeNodeId: focus });
+  },
 
   setProvider: (provider) => {
     set({ provider });
@@ -355,33 +454,56 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
-  setMode: (mode) => {
-    set({ mode });
+  setDraftMode: (mode) => {
+    set({ draftMode: mode });
     if (typeof window !== "undefined") {
       window.localStorage.setItem(MODE_KEY, mode);
     }
   },
 
+  setDraftWorkspacePath: (path) => {
+    set({ draftWorkspacePath: path });
+    if (typeof window !== "undefined") {
+      if (path) window.localStorage.setItem(WORKSPACE_KEY, path);
+      else window.localStorage.removeItem(WORKSPACE_KEY);
+    }
+  },
+
   streamRoot: async (question, opts) => {
-    const { provider, mode, session } = get();
+    const { provider, draftMode, draftWorkspacePath, session } = get();
     const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
+    // Mode + workspace are only sent when creating a new session. When
+    // attaching to an existing session, the server reads them from the
+    // session row.
+    const modeFields = sessionId
+      ? {}
+      : { mode: draftMode, workspacePath: draftWorkspacePath };
+    const attachments = opts?.attachments;
     const controller = new AbortController();
     await runStream(
-      { kind: "root", question, provider, mode, sessionId },
+      {
+        kind: "root",
+        question,
+        provider,
+        sessionId,
+        ...modeFields,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      },
       handleStreamEvent(set, get, { controller }),
       controller.signal,
     );
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
 
-  streamBranch: async (parentId, question, anchor) => {
-    const { provider, mode } = get();
+  streamBranch: async (parentId, question, anchor, opts) => {
+    const { provider } = get();
     // For selection-anchored branches (anchor !== null), keep the user on the
     // parent so they can keep reading; the new child streams in the
     // background and is reachable via the inline <mark>. For plain
     // followups (anchor === null), behave like before — auto-focus the new
     // child so the user sees the response.
     const focusNew = anchor === null;
+    const attachments = opts?.attachments;
     const controller = new AbortController();
     await runStream(
       {
@@ -390,7 +512,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         question,
         parentAnchor: anchor,
         provider,
-        mode,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
       },
       handleStreamEvent(set, get, { focusNew, controller }),
       controller.signal,
@@ -399,7 +521,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   retryNode: async (nodeId) => {
-    const { provider, mode } = get();
+    const { provider } = get();
     // Optimistically reset the local node so the UI flips back to the
     // streaming state immediately. The server's "created" event will
     // overwrite this with the canonical reset row.
@@ -415,8 +537,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             status: "streaming",
             errorMessage: null,
             tokenCount: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+            // Retry wipes the panel — server clears tool_calls_json
+            // in resetNodeForRetry; mirror locally so the UI doesn't
+            // briefly show stale entries during the network round-trip.
+            toolCalls: [],
           },
         },
+        lastEditedNodeId: nodeId,
       };
     });
     // Retry knows the nodeId up front, so we can register the controller
@@ -425,7 +552,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     STREAM_CONTROLLERS.set(nodeId, controller);
     try {
       await runStream(
-        { kind: "retry", nodeId, provider, mode },
+        { kind: "retry", nodeId, provider },
         handleStreamEvent(set, get, { controller }),
         controller.signal,
       );
@@ -440,15 +567,44 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   abortStream: (nodeId) => {
+    // Stage 17: the SSE reader's local AbortController no longer kills
+    // the spawn — it only unsubscribes us from the bus. To actually
+    // stop the run we POST /api/chat/[id]/abort, which calls
+    // run-bus.abortRun(). The server-side terminal event then flows
+    // back through our subscription, drives handleStreamEvent's error
+    // branch, and unwinds STREAM_CONTROLLERS naturally.
+    //
+    // We still abort the local controller so the SSE reader winds down
+    // immediately even if the network path back from the server is
+    // slow. The synthesized "aborted" error event in runStream's catch
+    // gives instant UI feedback that matches the eventual server state.
+    void fetch(`/api/chat/${nodeId}/abort`, { method: "POST" }).catch(() => {
+      // Network gone — local abort still updates UI. Server-side will
+      // clean up via reapInterruptedStreams on next restart at worst.
+    });
     const ctrl = STREAM_CONTROLLERS.get(nodeId);
-    if (!ctrl) return;
-    ctrl.abort();
+    if (ctrl) ctrl.abort();
     // Don't delete here — the terminal branch in handleStreamEvent will,
     // once the SSE response actually winds down. Keeping it lets a
     // double-press of Esc be a no-op instead of finding a stale entry.
   },
 
   hasStreamingNode: () => STREAM_CONTROLLERS.size > 0,
+
+  reconnectStreamingNodes: () => {
+    const { nodes } = get();
+    for (const n of Object.values(nodes)) {
+      if (n.status !== "streaming") continue;
+      // attachReconnectStream is its own idempotency gate via
+      // RECONNECT_HANDLES; calling it for an id that already has a live
+      // POST controller is harmless because STREAM_CONTROLLERS is also
+      // gated. The race window (live POST hasn't yet errored out but
+      // user already went to background) opens a second SSE we'll close
+      // when the original POST's terminal arrives — non-fatal.
+      if (RECONNECT_HANDLES.has(n.id)) continue;
+      void attachReconnectStream(n.id, set, get);
+    }
+  },
 
   latestStreamingNodeId: () => {
     let last: string | null = null;
@@ -497,6 +653,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             : { ...s.nodes, [local.id]: local },
           activeNodeId: local.id,
           sessionsRevision: s.sessionsRevision + 1,
+          lastEditedNodeId: local.id,
         };
         if (session) next.session = session;
         else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
@@ -648,6 +805,22 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     });
   },
 
+  jumpToSearchHit: async ({ sessionId, nodeId, matchText, matchKind }) => {
+    const cur = get().session;
+    // Cross-session jump: load first, then focus. loadSessionInternal
+    // wipes activeNodeId etc., so any pre-set anchor would be clobbered
+    // — that's why we set the anchor *after* the load resolves.
+    if (cur?.id !== sessionId) {
+      await loadSessionInternal(sessionId, set);
+    }
+    get().expandAncestors(nodeId);
+    set({
+      activeNodeId: nodeId,
+      fullScreen: true,
+      pendingScrollAnchor: { nodeId, kind: "search", matchText, matchKind },
+    });
+  },
+
   clearScrollAnchor: () => set({ pendingScrollAnchor: null }),
 
   dismissDoneToast: (nodeId) =>
@@ -715,6 +888,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setNotesOpen: (open) => set({ notesOpen: open }),
+  setSearchOpen: (open) => set({ searchOpen: open }),
 
   deleteNode: async (nodeId) => {
     const state = get();
@@ -751,12 +925,22 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     if (state.activeNodeId && idsSet.has(state.activeNodeId)) {
       nextActive = target.parentId ?? null;
     }
+    // Drop lastEditedNodeId if it sits inside the cascade — otherwise
+    // setFullScreen(false) would later try to pan to a node that no
+    // longer exists. Fall back to the deleted subtree's parent if
+    // possible so the user still lands near where the edit happened.
+    const prevLastEdited = state.lastEditedNodeId;
+    let nextLastEdited = prevLastEdited;
+    if (prevLastEdited && idsSet.has(prevLastEdited)) {
+      nextLastEdited = target.parentId ?? null;
+    }
 
     set({
       nodes: nextNodes,
       notes: nextNotes,
       collapsedNodeIds: nextCollapsed,
       activeNodeId: nextActive,
+      lastEditedNodeId: nextLastEdited,
     });
     if (nextCollapsed !== prevCollapsed) {
       persistCollapsed(state.session?.id, nextCollapsed);
@@ -780,6 +964,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         notes: prevNotes,
         collapsedNodeIds: prevCollapsed,
         activeNodeId: prevActive,
+        lastEditedNodeId: prevLastEdited,
       });
       if (nextCollapsed !== prevCollapsed) {
         persistCollapsed(state.session?.id, prevCollapsed);
@@ -873,6 +1058,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       return {
         nodes: { ...s.nodes, [local.id]: merged },
         sessionsRevision: s.sessionsRevision + 1,
+        lastEditedNodeId: local.id,
       };
     });
   },
@@ -912,12 +1098,25 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
       collapsed = trimmed;
     }
   }
+  // No node-level updatedAt in storage, so use highest createdAt as a
+  // best-effort "most recently edited" anchor for fresh session loads.
+  // Subsequent live edits (stream done / retry / refresh) keep this
+  // accurate; reloads fall back to this snapshot.
+  let lastEditedNodeId: string | null = null;
+  let bestTs = -Infinity;
+  for (const n of Object.values(map)) {
+    if (n.createdAt > bestTs) {
+      bestTs = n.createdAt;
+      lastEditedNodeId = n.id;
+    }
+  }
   set({
     session,
     nodes: map,
     activeNodeId: null,
     notes: notes ?? [],
     collapsedNodeIds: collapsed,
+    lastEditedNodeId,
   });
 }
 
@@ -932,8 +1131,15 @@ type ChatRequestBody =
       kind: "root";
       question: string;
       provider: ProviderId;
-      mode: Mode;
       sessionId?: string;
+      // Only meaningful when sessionId is absent (i.e. creating a new
+      // session). Server ignores them and reads from the session row
+      // otherwise.
+      mode?: Mode;
+      workspacePath?: string | null;
+      // Stage 15: image attachments uploaded via /api/uploads. Server
+      // sanitizes + caps; omitted on retry (server re-reads from DB).
+      attachments?: NodeAttachment[];
     }
   | {
       kind: "branch";
@@ -941,13 +1147,12 @@ type ChatRequestBody =
       question: string;
       parentAnchor: ParentAnchor | null;
       provider: ProviderId;
-      mode: Mode;
+      attachments?: NodeAttachment[];
     }
   | {
       kind: "retry";
       nodeId: string;
       provider: ProviderId;
-      mode: Mode;
     };
 
 type StreamEvent =
@@ -967,7 +1172,38 @@ type StreamEvent =
       };
     }
   | { type: "error"; message: string }
-  | { type: "topic_label"; nodeId: string; label: string };
+  | { type: "topic_label"; nodeId: string; label: string }
+  // Stage 17 (durable streams): emitted by /api/nodes/[id]/stream when a
+  // reconnecting subscriber joins an in-flight run. The payload is the
+  // server's authoritative response-so-far + current status + tool call
+  // snapshot. Client hard-syncs to it (overwrite, not append) and clears
+  // the stream-bus accumulator so subsequent delta events extend from
+  // this baseline.
+  | {
+      type: "catchup";
+      response: string;
+      status: "streaming" | "done" | "error";
+      toolCalls: import("@/lib/types").ToolCall[];
+    }
+  // Stage 17 (tool visualization). Streams the lifecycle of every tool
+  // claude invokes mid-turn. start arrives with input + name; done
+  // arrives later with output + ok/error. Both modify the node's
+  // toolCalls array by id.
+  | {
+      type: "tool_call_start";
+      id: string;
+      name: string;
+      input: unknown;
+      startedAt: number;
+    }
+  | {
+      type: "tool_call_done";
+      id: string;
+      output: string | null;
+      stderr: string | null;
+      isError: boolean;
+      endedAt: number;
+    };
 
 function handleStreamEvent(
   set: Setter,
@@ -979,10 +1215,15 @@ function handleStreamEvent(
     // up front). Retry registers the controller eagerly outside this
     // function and passes it here only so the terminal cleanup matches.
     controller?: AbortController;
+    // Stage 17 reconnect path: nodeId is already known (the caller is
+    // GET /api/nodes/[id]/stream, which doesn't emit `created`). Seed
+    // currentNodeId so subsequent delta/done/error events bind to it
+    // without waiting for a `created` payload that never arrives.
+    seedNodeId?: string;
   } = {},
 ) {
   const focusNew = opts.focusNew ?? true;
-  let currentNodeId: string | null = null;
+  let currentNodeId: string | null = opts.seedNodeId ?? null;
   const cleanupController = (id: string) => {
     if (opts.controller && STREAM_CONTROLLERS.get(id) === opts.controller) {
       STREAM_CONTROLLERS.delete(id);
@@ -1008,6 +1249,7 @@ function handleStreamEvent(
       set((s) => {
         const next: Partial<State> = {
           nodes: { ...s.nodes, [node.id]: node },
+          lastEditedNodeId: node.id,
         };
         if (focusNew) next.activeNodeId = node.id;
         if (event.session) {
@@ -1061,6 +1303,7 @@ function handleStreamEvent(
             },
           },
           doneToasts: nextToasts,
+          lastEditedNodeId: id,
         };
       });
     } else if (event.type === "error" && currentNodeId) {
@@ -1092,6 +1335,85 @@ function handleStreamEvent(
         return {
           nodes: { ...s.nodes, [id]: { ...n, topicLabel: event.label } },
         };
+      });
+    } else if (event.type === "catchup" && currentNodeId) {
+      // Reconnect path: server-authoritative snapshot of where the run
+      // is right now. Overwrite the response + toolCalls and reset the
+      // stream-bus accumulator so future delta events from THIS
+      // connection don't double-append on top of anything stale that
+      // lived in the bus.
+      const id = currentNodeId;
+      clearStreamPending(id);
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n) return s;
+        return {
+          nodes: {
+            ...s.nodes,
+            [id]: {
+              ...n,
+              response: event.response,
+              toolCalls: event.toolCalls,
+            },
+          },
+        };
+      });
+      // The terminal event (done/error) for non-streaming catchups
+      // arrives in the very next iteration; nothing else to do here.
+    } else if (event.type === "tool_call_start" && currentNodeId) {
+      // New tool invocation. Append to node.toolCalls; if the id
+      // already exists (catchup gave us a copy that the bus then
+      // re-broadcast), skip — server-side de-dup is the source of
+      // truth.
+      const id = currentNodeId;
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n) return s;
+        if (n.toolCalls.some((c) => c.id === event.id)) return s;
+        return {
+          nodes: {
+            ...s.nodes,
+            [id]: {
+              ...n,
+              toolCalls: [
+                ...n.toolCalls,
+                {
+                  id: event.id,
+                  name: event.name,
+                  input: event.input,
+                  output: null,
+                  stderr: null,
+                  status: "running",
+                  durationMs: null,
+                  startedAt: event.startedAt,
+                  endedAt: null,
+                },
+              ],
+            },
+          },
+        };
+      });
+    } else if (event.type === "tool_call_done" && currentNodeId) {
+      // Merge the result onto the existing tool call by id. If the
+      // start event is missing (rare race or catchup edge), skip
+      // silently — UI is informational, not contractual.
+      const id = currentNodeId;
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n) return s;
+        const idx = n.toolCalls.findIndex((c) => c.id === event.id);
+        if (idx === -1) return s;
+        const cur = n.toolCalls[idx];
+        const next = n.toolCalls.slice();
+        next[idx] = {
+          ...cur,
+          output: event.output,
+          stderr: event.stderr,
+          status: event.isError ? "error" : "done",
+          endedAt: event.endedAt,
+          durationMs: Math.max(0, event.endedAt - cur.startedAt),
+        };
+        return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
       });
     }
   };
@@ -1132,6 +1454,7 @@ function handleRefStreamEvent(
           : { ...s.nodes, [local.id]: local },
         activeNodeId: local.id,
         sessionsRevision: s.sessionsRevision + 1,
+        lastEditedNodeId: local.id,
       };
       if (event.session) next.session = event.session;
       else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
@@ -1153,12 +1476,75 @@ function handleRefStreamEvent(
       return {
         nodes: { ...s.nodes, [local.id]: merged },
         sessionsRevision: s.sessionsRevision + 1,
+        lastEditedNodeId: local.id,
       };
     });
     ctx.onResolved();
   } else if (event.type === "error") {
     // Fatal stream-level error (server couldn't even create the row).
     ctx.onTerminalError(event.message);
+  }
+}
+
+// Stage 17: tracks reconnect SSE handles so visibility / online events
+// don't double-attach. Keyed by nodeId. Aborting an entry tears down
+// the SSE reader; the bus is server-side and unaffected.
+const RECONNECT_HANDLES = new Map<string, AbortController>();
+
+// Open GET /api/nodes/[id]/stream for a node that's still streaming in
+// the local store. Idempotent — if a reconnect SSE is already running
+// for this node, do nothing. The SSE handler shares handleStreamEvent
+// with the live POST /api/chat flow; the only difference is we seed
+// currentNodeId up front since the reconnect endpoint doesn't emit
+// `created`.
+async function attachReconnectStream(
+  nodeId: string,
+  set: Setter,
+  get: Getter,
+): Promise<void> {
+  if (RECONNECT_HANDLES.has(nodeId)) return;
+  const ctrl = new AbortController();
+  RECONNECT_HANDLES.set(nodeId, ctrl);
+  STREAM_CONTROLLERS.set(nodeId, ctrl);
+  const onEvent = handleStreamEvent(set, get, {
+    focusNew: false,
+    controller: ctrl,
+    seedNodeId: nodeId,
+  });
+  try {
+    const res = await fetch(`/api/nodes/${nodeId}/stream`, {
+      signal: ctrl.signal,
+    });
+    if (!res.ok || !res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (!raw.startsWith("data: ")) continue;
+        try {
+          const event = JSON.parse(raw.slice(6)) as StreamEvent;
+          onEvent(event);
+        } catch {
+          /* malformed — skip */
+        }
+      }
+    }
+  } catch {
+    /* network died again — next visibility/online event will retry */
+  } finally {
+    if (RECONNECT_HANDLES.get(nodeId) === ctrl) {
+      RECONNECT_HANDLES.delete(nodeId);
+    }
+    if (STREAM_CONTROLLERS.get(nodeId) === ctrl) {
+      STREAM_CONTROLLERS.delete(nodeId);
+    }
   }
 }
 
@@ -1212,17 +1598,23 @@ async function runStream(
       }
     }
   } catch (err) {
-    // Mid-stream abort throws on reader.read(). Synthesize an aborted error
-    // event so the UI clears its streaming state — the server already wrote
-    // the partial response + status="error"/errorMessage="aborted" before
-    // the connection dropped.
+    // Mid-stream abort: synthesize the terminal event so the UI exits
+    // its streaming state immediately. The server already received the
+    // /abort POST in abortStream and will write status='error' for us.
     if (signal?.aborted) {
       onEvent({ type: "error", message: "aborted" });
       return;
     }
-    onEvent({
-      type: "error",
-      message: err instanceof Error ? err.message : String(err),
-    });
+    // Network drop (tab backgrounded on mobile, wifi blip, server
+    // restart). Stage 17: don't fake a terminal — the server-side run
+    // may still be alive. Leave the node in streaming state; the
+    // reconnect listeners (visibilitychange / online / loadSession)
+    // will pick up via GET /api/nodes/[id]/stream and replay catchup +
+    // resume. The eventual terminal event will arrive through that
+    // path, not this one. We do log to console so misbehaving runs
+    // don't vanish silently.
+    if (typeof console !== "undefined") {
+      console.warn("[trellis] /api/chat SSE dropped:", err);
+    }
   }
 }

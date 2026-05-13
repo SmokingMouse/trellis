@@ -15,6 +15,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
@@ -187,6 +188,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               </div>
             )}
           </div>
+          <ToolCallBadge count={n.toolCalls.length} />
           <TokenMeta tokenCount={n.tokenCount} variant="compact" />
         </div>
         <Handle type="source" position={Position.Bottom} />
@@ -241,7 +243,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center mt-0.5 shrink-0 font-medium">
           你
         </div>
-        <div className="flex-1 text-[14.5px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium">
+        <div className="flex-1 text-[14.5px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium min-w-0">
           {indexLabel && (
             <span className="mr-1.5 font-mono text-[12px] text-stone-400 dark:text-stone-500 tabular-nums font-normal inline-flex items-center gap-1">
               {indexLabel}
@@ -255,6 +257,11 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             </span>
           )}
           {n.question}
+          {n.attachments.length > 0 && (
+            <div className="mt-2 font-normal">
+              <AttachmentPreview attachments={n.attachments} readOnly />
+            </div>
+          )}
         </div>
         <button
           onClick={goFullScreen}
@@ -400,6 +407,7 @@ function NodeFooter({
         </>
       ) : (
         <>
+          <ToolCallBadge count={node.toolCalls.length} />
           <TokenMeta tokenCount={node.tokenCount} variant="full" />
           <button
             onClick={() => setOpen(true)}
@@ -481,6 +489,23 @@ function truncate(s: string, n: number) {
 }
 
 // Inline token meter shared by the compact-card right side and the
+// Stage 17: small badge that surfaces tool-call count on the canvas
+// card + fullscreen footer. Hidden when count is 0 so chat-mode nodes
+// (which rarely invoke tools) don't grow extra clutter. Click is
+// non-interactive — drill-down lives in ToolCallsPanel inside the
+// fullscreen view.
+function ToolCallBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="shrink-0 inline-flex items-center gap-0.5 text-[10px] tabular-nums text-stone-500 dark:text-stone-400"
+      title={`本节点共调用 ${count} 个工具`}
+    >
+      🔧{count}
+    </span>
+  );
+}
+
 // fullscreen footer. Three buckets (↑ in, ↓ out, ⚡ cache hit). cache
 // creation is collapsed into the cache slot only when non-zero (rare —
 // happens on first cli-multi turn) by appending +N. We deliberately

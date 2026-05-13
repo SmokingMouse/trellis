@@ -1,0 +1,515 @@
+import "server-only";
+import {
+  appendNodeResponse,
+  appendToolCallStart,
+  finalizeNode,
+  markToolCallDone,
+  setNodeTopicLabel,
+  setRootClaudeIdForNode,
+} from "./repo";
+import type { ToolCall } from "@/lib/types";
+
+// Stage 17 (durable streams): a module-level pub/sub that decouples LLM
+// spawn lifecycles from HTTP requests. Before this, /api/chat held the
+// for-await over llm.stream() with `signal: req.signal` — client tab
+// hidden / network blip / refresh → req.signal aborted → child process
+// killed → DB row finalized with status='error', errorMessage='aborted'.
+//
+// After: /api/chat starts a Run via startRun() and itself just becomes a
+// subscriber. The Run owns its own AbortController; HTTP disconnect only
+// removes one subscriber from the set, doesn't touch the underlying
+// generator. Late subscribers (refresh, second tab, mobile waking up)
+// hit GET /api/nodes/[id]/stream which calls subscribe() to join.
+//
+// Persistence is unchanged: every delta still goes through
+// appendNodeResponse() so the DB row is authoritative even if every
+// subscriber unsubscribes mid-stream.
+
+// Event shape mirrors the StreamEvent on the client side; matchKind /
+// session_init are server-internal and never forwarded as SSE.
+export type RunEvent =
+  | { type: "delta"; text: string }
+  | {
+      type: "done";
+      usage: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheCreation: number;
+      };
+    }
+  | { type: "error"; message: string }
+  | { type: "topic_label"; nodeId: string; label: string }
+  // Stage 17: tool visualization. tool_call_start fires when claude
+  // emits a tool_use block; tool_call_done fires when the matching
+  // tool_result arrives. Both ride the same bus as deltas, so the
+  // chat-route SSE and the reconnect endpoint deliver them in order.
+  | {
+      type: "tool_call_start";
+      id: string;
+      name: string;
+      input: unknown;
+      startedAt: number;
+    }
+  | {
+      type: "tool_call_done";
+      id: string;
+      output: string | null;
+      stderr: string | null;
+      isError: boolean;
+      endedAt: number;
+    };
+
+// Special event delivered by subscribe() to fresh subscribers so they
+// can sync their UI to the current persisted state before live delta
+// events start arriving. Not produced by the runner itself.
+export type CatchupEvent = {
+  type: "catchup";
+  response: string;
+  status: "streaming" | "done" | "error";
+  // Stage 17: server-authoritative snapshot of every tool call observed
+  // so far. Client overwrites its local toolCalls list with this, then
+  // applies subsequent tool_call_start / tool_call_done events on top.
+  toolCalls: ToolCall[];
+  // When status !== "streaming", the terminal events follow immediately
+  // (so the subscriber can close out). For "streaming" status, the
+  // subscriber stays attached and waits for live RunEvents.
+};
+
+type Subscriber = {
+  onEvent: (event: RunEvent | CatchupEvent) => void;
+  onClose: () => void;
+};
+
+type RunState = {
+  nodeId: string;
+  // The runner's abort signal. abort(nodeId) flips this; the provider
+  // generator observes it via its `signal` arg and tears down cleanly.
+  controller: AbortController;
+  status: "streaming" | "done" | "error";
+  // Live mirror of the DB's response column for this run. Snapshotted
+  // and shipped as the catchup payload to new subscribers; ALSO grown
+  // before each delta broadcast so the snapshot can't lag a delta the
+  // subscriber would otherwise miss.
+  committedText: string;
+  // Stage 17: in-memory mirror of the tool_calls_json column. Same
+  // commit-before-broadcast discipline as committedText — a tool event
+  // updates this BEFORE going to subscribers, so a racing subscribe()
+  // snapshot can't miss a tool call that's already been persisted.
+  committedToolCalls: ToolCall[];
+  // Final-state cache so late subscribers (joining after the runner
+  // terminated but within the cleanup window) still get the right
+  // terminal event sequence.
+  finalEvent?:
+    | {
+        type: "done";
+        usage: {
+          input: number;
+          output: number;
+          cacheRead: number;
+          cacheCreation: number;
+        };
+      }
+    | { type: "error"; message: string };
+  topicLabel?: string;
+  subscribers: Set<Subscriber>;
+  // Drop the RunState 30s after terminal so memory doesn't accrete. New
+  // subscribers after that window go through /api/nodes/[id]/stream
+  // which falls back to a pure DB read.
+  cleanupTimer?: ReturnType<typeof setTimeout>;
+};
+
+const RUNS = new Map<string, RunState>();
+const CLEANUP_GRACE_MS = 30_000;
+
+// Provider event shape mirrors what llm.stream() yields. Importing the
+// type from the provider module would pull "server-only" into more
+// places; we redeclare here narrowly enough.
+export type ProviderEvent =
+  | { type: "delta"; text: string }
+  | {
+      type: "done";
+      usage?: {
+        input: number;
+        output: number;
+        cacheRead: number;
+        cacheCreation: number;
+      };
+    }
+  | { type: "error"; message: string }
+  | { type: "session_init"; sessionId: string }
+  | {
+      type: "tool_call_start";
+      id: string;
+      name: string;
+      input: unknown;
+      startedAt: number;
+    }
+  | {
+      type: "tool_call_done";
+      id: string;
+      output: string | null;
+      stderr: string | null;
+      isError: boolean;
+      endedAt: number;
+    };
+
+// Caller hands us:
+//   - the nodeId (where deltas accumulate via appendNodeResponse)
+//   - a factory that yields ProviderEvent given an AbortSignal
+//   - mode + (optional) topicLabel hook so we can do post-done work
+//     without the route handler holding a reference to anything
+//
+// We return immediately after kicking off the runner. The caller's only
+// responsibility is to subscribe() if it wants live events.
+export function startRun(args: {
+  nodeId: string;
+  // Set once the runner emits 'session_init' for project mode.
+  projectModeFirstTurn: boolean;
+  // Async generator factory. Receives the run's abort signal — the
+  // provider should plumb this into its child_process kill path so
+  // abort() actually tears the spawn down.
+  factory: (signal: AbortSignal) => AsyncIterable<ProviderEvent>;
+  // Optional post-done topic generator. Called with the aggregated
+  // text; if it returns a non-empty string we write the label and emit
+  // a topic_label event to subscribers. Errors are swallowed.
+  topicLabel?: (aggregated: string) => Promise<string | null>;
+}): void {
+  const existing = RUNS.get(args.nodeId);
+  if (existing && existing.status === "streaming") {
+    // Already running — startRun is idempotent for in-flight runs.
+    // (Retry path resets the row before calling startRun, so a
+    // second startRun for the same nodeId after a finalize is fine.)
+    return;
+  }
+  if (existing?.cleanupTimer) clearTimeout(existing.cleanupTimer);
+
+  const controller = new AbortController();
+  const state: RunState = {
+    nodeId: args.nodeId,
+    controller,
+    status: "streaming",
+    committedText: "",
+    committedToolCalls: [],
+    subscribers: new Set(),
+  };
+  RUNS.set(args.nodeId, state);
+
+  // Fire off the generator on the next microtask. Doing it inside the
+  // current sync call would mean startRun resolves before any subscribe
+  // could attach — that's fine because subscribers always see catchup
+  // first, but doing it lazily also lets the caller add its first
+  // subscriber before the first delta lands.
+  queueMicrotask(() => runLoop(state, args).catch(() => {
+    // runLoop has its own try/catch — this is a defense-in-depth no-op.
+  }));
+}
+
+async function runLoop(
+  state: RunState,
+  args: Parameters<typeof startRun>[0],
+): Promise<void> {
+  let aggregated = "";
+  let usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  let stoppedWith: "done" | "error" = "done";
+  let errorMessage: string | undefined;
+
+  try {
+    for await (const event of args.factory(state.controller.signal)) {
+      if (event.type === "delta") {
+        // Order matters: grow committedText BEFORE broadcasting, so a
+        // subscriber that races in concurrently can't snapshot pre-delta
+        // and then also miss the broadcast (JS is single-threaded so
+        // subscribe() can't interleave with this block, but committing
+        // first is the invariant readers rely on).
+        state.committedText += event.text;
+        aggregated += event.text;
+        try {
+          appendNodeResponse(args.nodeId, event.text);
+        } catch {
+          // best-effort; DB hiccup shouldn't kill the stream
+        }
+        broadcast(state, { type: "delta", text: event.text });
+      } else if (event.type === "done") {
+        usage = event.usage ?? usage;
+      } else if (event.type === "error") {
+        stoppedWith = "error";
+        errorMessage = event.message;
+        broadcast(state, { type: "error", message: event.message });
+      } else if (event.type === "session_init") {
+        if (args.projectModeFirstTurn) {
+          try {
+            setRootClaudeIdForNode(args.nodeId, event.sessionId);
+          } catch {
+            // best-effort — next turn will get a fresh session
+          }
+        }
+        // Not forwarded to subscribers — server-internal.
+      } else if (event.type === "tool_call_start") {
+        // Mirror to committedToolCalls + DB BEFORE broadcasting, same
+        // discipline as the delta path so a concurrent subscribe() can't
+        // catchup-snapshot pre-event then miss the broadcast.
+        const tc: ToolCall = {
+          id: event.id,
+          name: event.name,
+          input: event.input,
+          output: null,
+          stderr: null,
+          status: "running",
+          durationMs: null,
+          startedAt: event.startedAt,
+          endedAt: null,
+        };
+        // De-dup: if the CLI ever re-emits the same tool_use id (hasn't
+        // been observed, but cheap to guard) keep the first.
+        if (!state.committedToolCalls.some((c) => c.id === tc.id)) {
+          state.committedToolCalls.push(tc);
+          try {
+            appendToolCallStart({ nodeId: args.nodeId, call: tc });
+          } catch {
+            /* best-effort */
+          }
+          broadcast(state, {
+            type: "tool_call_start",
+            id: tc.id,
+            name: tc.name,
+            input: tc.input,
+            startedAt: tc.startedAt,
+          });
+        }
+      } else if (event.type === "tool_call_done") {
+        const idx = state.committedToolCalls.findIndex(
+          (c) => c.id === event.id,
+        );
+        if (idx !== -1) {
+          const cur = state.committedToolCalls[idx];
+          const next: ToolCall = {
+            ...cur,
+            output: event.output,
+            stderr: event.stderr,
+            status: event.isError ? "error" : "done",
+            endedAt: event.endedAt,
+            durationMs: Math.max(0, event.endedAt - cur.startedAt),
+          };
+          state.committedToolCalls[idx] = next;
+          try {
+            markToolCallDone({
+              nodeId: args.nodeId,
+              toolCallId: event.id,
+              output: event.output,
+              stderr: event.stderr,
+              status: event.isError ? "error" : "done",
+              endedAt: event.endedAt,
+            });
+          } catch {
+            /* best-effort */
+          }
+          broadcast(state, {
+            type: "tool_call_done",
+            id: event.id,
+            output: event.output,
+            stderr: event.stderr,
+            isError: event.isError,
+            endedAt: event.endedAt,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    stoppedWith = "error";
+    errorMessage = err instanceof Error ? err.message : String(err);
+    broadcast(state, { type: "error", message: errorMessage });
+  } finally {
+    if (state.controller.signal.aborted && stoppedWith === "done") {
+      // Generator returned without an explicit error event — the
+      // subprocess provider exits cleanly on SIGTERM. Surface as error
+      // so DB + late subscribers see the abort uniformly.
+      stoppedWith = "error";
+      errorMessage = errorMessage ?? "aborted";
+      broadcast(state, { type: "error", message: errorMessage });
+    }
+
+    try {
+      finalizeNode({
+        nodeId: args.nodeId,
+        status: stoppedWith,
+        errorMessage,
+        tokenInput: usage.input,
+        tokenOutput: usage.output,
+        tokenCacheRead: usage.cacheRead,
+        tokenCacheCreation: usage.cacheCreation,
+        now: Date.now(),
+      });
+    } catch {
+      /* best-effort */
+    }
+
+    state.status = stoppedWith;
+    if (stoppedWith === "done") {
+      state.finalEvent = { type: "done", usage };
+      broadcast(state, { type: "done", usage });
+    } else {
+      state.finalEvent = {
+        type: "error",
+        message: errorMessage ?? "stream ended without terminal event",
+      };
+      // Error event already broadcast above (in the catch/abort branch);
+      // don't double-emit. Subscribers joining LATER will see the
+      // finalEvent in the catchup path instead.
+    }
+
+    // Topic label runs out-of-band post-done. Only attempt on success
+    // with non-empty aggregated text. Late subscribers joining within
+    // the grace window will see topic_label as a live event; ones
+    // joining after won't get it (it's in the DB anyway).
+    if (
+      stoppedWith === "done" &&
+      args.topicLabel &&
+      aggregated.trim().length > 0
+    ) {
+      try {
+        const label = await args.topicLabel(aggregated);
+        if (label) {
+          try {
+            setNodeTopicLabel(args.nodeId, label);
+          } catch {
+            /* best-effort */
+          }
+          state.topicLabel = label;
+          broadcast(state, {
+            type: "topic_label",
+            nodeId: args.nodeId,
+            label,
+          });
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    // Close every still-attached subscriber and drop the state after a
+    // grace window. New subscribers in the grace window get the cached
+    // catchup + finalEvent without a fresh DB roundtrip.
+    closeAll(state);
+    state.cleanupTimer = setTimeout(() => {
+      // Only delete if no new run reused the slot (retry path).
+      const cur = RUNS.get(args.nodeId);
+      if (cur === state) RUNS.delete(args.nodeId);
+    }, CLEANUP_GRACE_MS);
+  }
+}
+
+function broadcast(state: RunState, event: RunEvent): void {
+  // Snapshot the set so subscribers added during iteration aren't
+  // re-notified for an event they'll already see via the next pass /
+  // their initial catchup.
+  for (const sub of [...state.subscribers]) {
+    try {
+      sub.onEvent(event);
+    } catch {
+      /* a subscriber that throws shouldn't break others */
+    }
+  }
+}
+
+function closeAll(state: RunState): void {
+  for (const sub of [...state.subscribers]) {
+    try {
+      sub.onClose();
+    } catch {
+      /* ignore */
+    }
+  }
+  state.subscribers.clear();
+}
+
+// Subscribe to a run. Always delivers a `catchup` event first (snapshot
+// of the response so far + current status), then live events. If the
+// run already terminated, fires the terminal event and onClose
+// synchronously after catchup. Returns an unsubscribe function — call
+// it on HTTP disconnect so the runner doesn't leak references.
+//
+// Returns null if there's no in-memory state for nodeId (e.g. run
+// finished and got cleaned up, or never started). Caller (the
+// reconnect endpoint) falls back to a pure DB read in that case.
+export function subscribe(
+  nodeId: string,
+  sub: Subscriber,
+): (() => void) | null {
+  const state = RUNS.get(nodeId);
+  if (!state) return null;
+
+  // Step order matters (see runLoop comment): snapshot committedText
+  // + committedToolCalls first, register sub second, send catchup
+  // third. This guarantees every committed event either appears in
+  // catchup OR arrives as a future broadcast — never neither, never
+  // both. The tool calls snapshot is a deep-ish copy so a subscriber
+  // can't accidentally see runner-side mutations of its slot.
+  const snapshot = state.committedText;
+  const snapshotStatus = state.status;
+  const snapshotTools = state.committedToolCalls.map((c) => ({ ...c }));
+  state.subscribers.add(sub);
+  try {
+    sub.onEvent({
+      type: "catchup",
+      response: snapshot,
+      status: snapshotStatus,
+      toolCalls: snapshotTools,
+    });
+  } catch {
+    /* ignore */
+  }
+
+  // Terminal? Replay the final event then close immediately. Don't
+  // remove the subscriber from the set first; the closeAll already ran
+  // when the runner finished, so the add above was strictly for
+  // bookkeeping symmetry — we close it ourselves here.
+  if (state.status !== "streaming" && state.finalEvent) {
+    try {
+      sub.onEvent(state.finalEvent);
+    } catch {
+      /* ignore */
+    }
+    if (state.topicLabel) {
+      try {
+        sub.onEvent({
+          type: "topic_label",
+          nodeId,
+          label: state.topicLabel,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      sub.onClose();
+    } catch {
+      /* ignore */
+    }
+    state.subscribers.delete(sub);
+    return () => {
+      // unsubscribe is idempotent; already cleaned up
+    };
+  }
+
+  return () => {
+    state.subscribers.delete(sub);
+  };
+}
+
+// Explicit abort. Used by POST /api/chat/[id]/abort (the ⏹/Esc path).
+// Idempotent — calling on an already-terminal run is a no-op.
+export function abortRun(nodeId: string): boolean {
+  const state = RUNS.get(nodeId);
+  if (!state || state.status !== "streaming") return false;
+  state.controller.abort();
+  return true;
+}
+
+// Returns true if we have a live in-memory run for this node (still
+// streaming). Used by the reconnect endpoint to decide between "join
+// the live bus" and "this is over — read DB and return".
+export function hasLiveRun(nodeId: string): boolean {
+  const s = RUNS.get(nodeId);
+  return !!s && s.status === "streaming";
+}

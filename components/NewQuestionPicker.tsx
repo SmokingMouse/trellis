@@ -9,7 +9,12 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const streamRoot = useSessionStore((s) => s.streamRoot);
+  const sessionMode = useSessionStore((s) => s.session?.mode);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // In project mode a new root also forks a fresh claude session id — the
+  // model loses its conversation memory of the existing tree. Call it out
+  // so users don't trip over the "wait, why doesn't it remember?" beat.
+  const isProject = sessionMode === "project";
 
   useEffect(() => {
     ref.current?.focus();
@@ -53,11 +58,18 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
       >
         <div className="px-5 py-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
           <div>
-            <div className="text-[15px] font-semibold text-stone-900 dark:text-stone-100">
+            <div className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 flex items-center gap-2">
               新提问
+              {isProject && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-200/60 dark:border-rose-900/60">
+                  🧹 全新上下文
+                </span>
+              )}
             </div>
             <div className="text-[12px] text-stone-500 dark:text-stone-400 mt-0.5">
-              在当前画布上起一条独立的根问答，不继承现有节点的上下文。
+              {isProject
+                ? "起一条独立的根问答；Project 模式下会同时开启全新的 Claude 会话记忆。"
+                : "在当前画布上起一条独立的根问答，不继承现有节点的上下文。"}
             </div>
           </div>
           <button

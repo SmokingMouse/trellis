@@ -37,6 +37,45 @@ export type ReferencePayload = {
   meta: ReferenceMeta;
 };
 
+// Stage 15: image attachment metadata. The actual bytes live at
+// ~/.trellis/blobs/<hash>.<ext> on the server (see lib/server/blobs.ts);
+// the client renders thumbnails via /api/uploads/<hash>. Hash is the
+// sha256 of the file content so duplicate uploads dedupe by storage.
+export type NodeAttachment = {
+  hash: string;        // sha256 hex (64 chars)
+  mime: string;        // image/png | image/jpeg | image/webp | image/gif
+  size: number;        // bytes
+  filename: string | null; // original filename; null when pasted from clipboard
+  width?: number;      // sniffed at upload time so thumbnails can compute aspect
+  height?: number;
+};
+
+// Stage 17 (tool visualization): one entry per LLM tool invocation
+// observed in the stream. Status flips running → done|error when the
+// matching tool_result block arrives. input/output stay as raw JSON or
+// string blobs — UI decides how to format (JSON pretty-print for
+// structured inputs, monospace block + scroll for Bash stdout, etc.).
+export type ToolCallStatus = "running" | "done" | "error";
+export type ToolCall = {
+  // The CLI's id (e.g. "toolu_017sqa1c..."). Stable across the start +
+  // result events so the UI can merge them.
+  id: string;
+  name: string;          // "Bash" | "Read" | "Edit" | "WebFetch" | ...
+  input: unknown;        // shape varies per tool; pretty-printed as JSON in UI
+  // null until the matching tool_result arrives. Often a multi-line
+  // string (Bash stdout); UI clamps display.
+  output: string | null;
+  // Captured separately from `content` for Bash since claude includes
+  // both in tool_use_result. UI shows stderr only when non-empty.
+  stderr: string | null;
+  status: ToolCallStatus;
+  // Wall-clock ms from start emit to done emit. null while running.
+  durationMs: number | null;
+  // Server-side timestamps for ordering + duration computation.
+  startedAt: number;
+  endedAt: number | null;
+};
+
 export type ChatNode = {
   id: string;
   sessionId: string;
@@ -68,6 +107,15 @@ export type ChatNode = {
   // null = unread; ms timestamp = first time the user kept the node
   // open >=1s. Drives the unread badge / "X 条未读" counter.
   readAt: number | null;
+  // Stage 15: optional image attachments belonging to this node's
+  // question. Empty array (not null) when none — keeps consumer code
+  // free of nullability checks.
+  attachments: NodeAttachment[];
+  // Stage 17: LLM tool invocations (Bash/Read/WebFetch/etc.) captured
+  // from the provider's stream. Ordered by start time. Empty when the
+  // model didn't call any tools (chat mode often, workspace/project
+  // when the prompt didn't need them).
+  toolCalls: ToolCall[];
 };
 
 export type Session = {
@@ -76,6 +124,12 @@ export type Session = {
   rootNodeId: string;
   createdAt: number;
   updatedAt: number;
+  // Stage 14: locked at session creation. Kept as string here (rather
+  // than the narrower Mode union from lib/llm/types) so this module
+  // doesn't pull a server-side dependency; callers narrow at use.
+  mode: string;
+  // null in chat mode (no cwd binding); absolute path otherwise.
+  workspacePath: string | null;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while

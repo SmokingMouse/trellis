@@ -11,12 +11,12 @@
 // rebuilt per anchor since each wrap mutates the DOM.
 
 type Anchor = { text: string; id: string };
-type DataKey = "childId" | "noteId";
+type DataKey = "childId" | "noteId" | "searchId";
 export type MarkSpec = { dataKey: DataKey; anchors: Anchor[] };
 
 export function clearMarks(root: HTMLElement): void {
   const marks = root.querySelectorAll<HTMLElement>(
-    "mark[data-child-id], mark[data-note-id]",
+    "mark[data-child-id], mark[data-note-id], mark[data-search-id]",
   );
   marks.forEach((m) => {
     const p = m.parentNode;

@@ -86,15 +86,23 @@ Trellis 的处理方式：每个回答都是一个**节点**，选中文字 → 
 
 ### 三种 LLM 上下文模式
 
-每个 session 独立保存，顶栏 `lean / CLI 单轮 / CLI 多轮` 切换。详见 [下方专章](#三种上下文模式详解)。
+session 创建时锁定，顶栏只读 badge 显示，换语境 = 开新 session。详见 [下方专章](#三种上下文模式详解)。
 
-| 模式 | 上下文来源 | Tools / Skills / MCP | 跨节点记忆 | 适合 |
-|---|---|---|---|---|
-| **lean** | Trellis 折叠的祖先链 | 全关 | 无 | 默认日常问答、便宜、快 |
-| **CLI 单轮** | Trellis 折叠的祖先链 | 全开（bypassPermissions） | 无 | 单次问答需要联网/读文件/调 MCP |
-| **CLI 多轮** | 整棵树共享真 CLI session | 全开 | 有 | 跨节点延续记忆，cache 命中通常 70%+ |
+| 模式 | 类比 | cwd | Tools / Skills / MCP | 跨节点记忆 | 适合 |
+|---|---|---|---|---|---|
+| **Chat** | GPT 网页客户端 | 无 | `WebSearch + WebFetch` | 无 | 默认日常问答、补认知、查信息 |
+| **Workspace** | 一次性 Claude Code CLI | session 绑定 | 全开（bypassPermissions） | 无 | 在某个仓库一次性操作、改 bug、查代码 |
+| **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有 | 跨节点延续记忆，cache 命中通常 70%+ |
 
 Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），三档语义对齐。
+
+### 图片输入（vision）
+
+- **粘贴 / 拖拽 / 选文件**：QuestionInput 和选区分叉 popover 都支持。截图直接 ⌘V 进来最快
+- **三档模式都能用**：Chat / Workspace / Project 通吃。Project 模式连续追问跨节点都能引用同一张图
+- **内容寻址存储**：blob 落 `~/.trellis/blobs/<sha256>.<ext>`，相同图片自动去重，不进 SQLite 不污染 WAL
+- **重试自动带回原图**：重试节点服务端从 DB 读 `attachments_json`，不需要你重新粘贴
+- **限制**：单图 ≤ 10MB，单节点 ≤ 6 张；支持 PNG / JPEG / WebP / GIF
 
 ### 笔记本
 
@@ -116,7 +124,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 - **未读小圆点**：`status=done` 但 `readAt=null` 的节点；停留 1s+ 自动标已读
 - **`J` / `K` 跳未读**：按时间序在未读节点之间跳跃，配合 outline 「只看未读」过滤
 - **Done Toast**：流式完成但当前不在视野内的节点，右下角累积通知，点击跳过去
-- **四桶 Token 计量**：每节点拆 input / output / cacheRead / cacheCreation；header 总览，节点卡 footer 紧凑显示，⚡ emerald 强调 cache 复用（cli-multi 模式特别有用）
+- **四桶 Token 计量**：每节点拆 input / output / cacheRead / cacheCreation；header 总览，节点卡 footer 紧凑显示，⚡ emerald 强调 cache 复用（Project 模式特别有用）
 
 ### 键盘快捷键
 
@@ -189,42 +197,43 @@ npm run start -- -p 3088
 
 ## 三种上下文模式（详解）
 
-顶栏 `lean / CLI 单轮 / CLI 多轮` 切换，**每个 session 独立保存**。三档差别在 prompt 怎么组装、CLI 走什么权限、跨节点要不要共享记忆，trade-off 是「成本/权限范围/上下文连续性」。
+session 创建时锁定 mode + workspace，整棵树共用。三档差别在 prompt 怎么组装、CLI 走什么权限、是否绑定 cwd、跨节点要不要共享记忆，trade-off 是「成本 / 权限范围 / 上下文连续性」。
 
-### lean —— 最便宜的纯文本模式
+### Chat —— GPT 网页客户端替代
 
 - Prompt：Trellis 自己组装"祖先链 → 当前问题"，用一个简短 system prompt
-- 执行：`claude --tools "" --system-prompt ... --no-session-persistence`
-- 不读 `~/.claude/CLAUDE.md`，不加载 skills / MCP / 任何 tool
+- 执行：`claude --tools "WebSearch,WebFetch" --system-prompt ... --no-session-persistence`，cwd `~`
+- 不读 `~/.claude/CLAUDE.md`，不加载 skills / MCP / Bash / Read / Write 等
+- 仅 WebSearch + WebFetch 联网能力——对标 GPT 网页客户端的"问点东西 + 联网"
 - **每条分支真正独立**——claude 看到的是 trellis 给它的折叠历史，没有任何外部副作用
-- 用法：默认就用这个。Token 主要花在你的祖先链上下文（`深度=2 + anchor excerpt`），response 里的 markdown 也是纯文字
-- 注意：claude 不能联网、不能跑 bash、不能读文件——这条问答如果需要外部信息，得切到下面两档
+- 用法：默认就用这个。Token 主要花在你的祖先链上下文（`深度=2 + anchor excerpt`），response 里的 markdown 也是纯文字 + 必要时的联网 fact-check
+- 注意：不能跑 bash、不能读本地文件——这条问答如果需要操作仓库，开新 session 选 Workspace
 
-### CLI 单轮 —— 全 toolset，但每节点独立
+### Workspace —— 一次性 Claude Code CLI
 
-- Prompt：和 lean 一样的"祖先链 → 当前问题"
-- 执行：`claude --permission-mode bypassPermissions`（cwd 是用户家目录）
-- **加载 ~/.claude/CLAUDE.md + 全部 skills + MCP servers + Bash/Write/Edit/WebFetch/WebSearch 全开**
+- Prompt：和 Chat 一样的"祖先链 → 当前问题"
+- 执行：`claude --permission-mode bypassPermissions`，**cwd 是 session 绑定的 workspace_path**（创建时通过 WorkspacePicker 选择）
+- **加载 ~/.claude/CLAUDE.md + 项目的 CLAUDE.md + 全部 skills + MCP servers + Bash/Write/Edit/WebFetch/WebSearch 全开**
 - 跨节点不共享 claude 内部记忆——只有 trellis 给的折叠上下文是连续的，CLI 自身每次 `--no-session-persistence`
-- 用法：当前节点要 claude 联网、跑命令、查看本地文件，又不希望把这些 tool call 历史污染下一个分支时
+- 用法：在某个仓库做一次性操作（看代码、改 bug、跑命令），又不希望把这些 tool call 历史污染下一个分支时
 - 注意：tool call 计数也算进 token；一次 web fetch 可能花掉好几百 input token
 
-### CLI 多轮 —— 整棵树共享一条 claude session
+### Project —— 长期协作 + 共享真 CLI session
 
 - Prompt：**只发当前问题**给 claude（不带祖先链），让 claude 自己 resume 一个持久 session 找历史
-- 执行：第一次 `claude ...` 自动生成 session id，trellis 存进 `sessions.claude_session_id`；后续 `claude --resume <id>` 续上
-- Session JSONL 落在 `~/.claude/projects/<...>/`，删除 trellis session 时一起删
+- 执行：第一次 `claude ...` 自动生成 session id，trellis 存进 `sessions.claude_session_id`；后续 `claude --resume <id>` 续上。cwd 同样绑定 workspace_path
+- Session JSONL 落在 `~/.claude/projects/<encoded-cwd>/`，删除 trellis session 时一起删
 - **跨节点共享 claude 的全部历史**——分支不再隔离，claude 看到的是树扁平化后的线性时间序
-- 用法：连续追问中希望 claude 自己积累记忆（之前查过的 doc、之前 cd 进的目录、之前算过的中间结果），cache hit 比例会很高（cli-multi 缓存命中通常占 input token 70%+）
-- ⚠️ 副作用：分叉的"独立思路"语义被打破，平行节点其实彼此知道对方说了啥；如果你需要"两条互不影响的探索"切回 lean / CLI 单轮
+- 用法：在某个仓库长期协作（持续开发 feature、debug、研究跟进），希望 claude 自己积累记忆。cache hit 比例会很高（Project 缓存命中通常占 input token 70%+）
+- ⚠️ 副作用：分叉的"独立思路"语义被打破，平行节点其实彼此知道对方说了啥；如果你需要"两条互不影响的探索"切回 Chat / Workspace
 
 ### Codex 那边
 
 provider 切到 Codex 后，三档对应：
 
-- `lean` → codex sandbox `read-only`、tools 关
-- `CLI 单轮` → 加载 `~/.codex/config.toml` + MCP，YOLO sandbox（Bash/Write/Edit 自动放行）
-- `CLI 多轮` → 共享 `~/.codex/sessions/<id>` 的多轮 history
+- `Chat` → codex sandbox `read-only`、tools 关，cwd `~`。**Codex 暂无 WebSearch 等价**，offline。
+- `Workspace` → 加载 `~/.codex/config.toml` + MCP，YOLO sandbox（Bash/Write/Edit 自动放行），cwd = workspace_path
+- `Project` → 共享 `~/.codex/sessions/<id>` 的多轮 history，cwd = workspace_path
 
 ---
 
@@ -307,7 +316,7 @@ docs/screenshots/    README 用截图
 - Dagre 布局在树宽 30+ 节点时偶尔需要手动 `F` 重 fitView
 - mobile（≤ 640px）的体验只做到能用，键盘快捷键和选区分叉在 iOS Safari 上偶有抖动
 - 没有用户/权限/同步——多人用法请自行加一层 reverse proxy auth
-- "新提问"在 cli-multi 模式下会继承上一节点的 LLM 记忆（不是真 fresh context）
+- "新提问"在 Project 模式下会继承上一节点的 LLM 记忆（不是真 fresh context）
 
 欢迎提 Issue / PR，但请理解定位是个人工具，不会为了泛用化把模型 / 路由抽象到框架级别。
 

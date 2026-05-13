@@ -7,9 +7,11 @@ import { Header } from "@/components/Header";
 import { NodeFullView } from "@/components/NodeFullView";
 import { DoneToast } from "@/components/DoneToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { SearchModal } from "@/components/SearchModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
+import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
@@ -21,6 +23,7 @@ export default function Home() {
   const isMobile = useIsMobile();
   useEscapeAbort();
   useUnreadNavigation();
+  useReconnectStreams();
 
   useEffect(() => {
     hydrate();
@@ -59,6 +62,7 @@ export default function Home() {
       )}
       <DoneToast />
       <NotesDrawer />
+      <SearchModal />
     </>
   );
 }

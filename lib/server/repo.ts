@@ -2,13 +2,16 @@ import "server-only";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import type Database from "better-sqlite3";
 import { getDB } from "./sqlite";
 import type { ChatMessage } from "@/lib/llm";
 import type {
   NodeKind,
+  NodeAttachment,
   RefSourceType,
   ReferenceMeta,
   ReferencePayload,
+  ToolCall,
 } from "@/lib/types";
 
 // Wire-format types — what gets sent over HTTP. Mirrors the client-side
@@ -20,6 +23,13 @@ export type ApiSession = {
   rootNodeId: string;
   createdAt: number;
   updatedAt: number;
+  // Stage 14: locked at session creation. Mode values are
+  // 'chat' | 'workspace' | 'project'. The type stays widened to string
+  // here while consumers migrate; the llm-layer Mode union narrows it
+  // at the boundary.
+  mode: string;
+  // null in 'chat' mode (no cwd binding); absolute path otherwise.
+  workspacePath: string | null;
 };
 
 export type ApiNode = {
@@ -43,6 +53,8 @@ export type ApiNode = {
   kind: NodeKind;
   reference: ReferencePayload | null;
   readAt: number | null;
+  attachments: NodeAttachment[];
+  toolCalls: ToolCall[];
 };
 
 type NodeRow = {
@@ -68,13 +80,15 @@ type NodeRow = {
   ref_fetched_at: number | null;
   ref_meta_json: string | null;
   read_at: number | null;
+  attachments_json: string | null;
+  tool_calls_json: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
        status, error_message, sibling_index, token_input, token_output,
        token_cache_read, token_cache_creation, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
-       ref_fetched_at, ref_meta_json, read_at`;
+       ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json`;
 
 type SessionRow = {
   id: string;
@@ -82,7 +96,12 @@ type SessionRow = {
   root_node_id: string;
   created_at: number;
   updated_at: number;
+  context_mode: string;
+  workspace_path: string | null;
 };
+
+const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
+       context_mode, workspace_path`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -117,6 +136,25 @@ function rowToNode(r: NodeRow): ApiNode {
       meta,
     };
   }
+  let attachments: NodeAttachment[] = [];
+  if (r.attachments_json) {
+    try {
+      const parsed = JSON.parse(r.attachments_json);
+      if (Array.isArray(parsed)) attachments = parsed as NodeAttachment[];
+    } catch {
+      // Malformed JSON — treat as empty rather than crash. Logged once
+      // upstream if it ever happens.
+    }
+  }
+  let toolCalls: ToolCall[] = [];
+  if (r.tool_calls_json) {
+    try {
+      const parsed = JSON.parse(r.tool_calls_json);
+      if (Array.isArray(parsed)) toolCalls = parsed as ToolCall[];
+    } catch {
+      /* malformed → empty */
+    }
+  }
   return {
     id: r.id,
     sessionId: r.session_id,
@@ -140,6 +178,8 @@ function rowToNode(r: NodeRow): ApiNode {
     kind,
     reference,
     readAt: r.read_at,
+    attachments,
+    toolCalls,
   };
 }
 
@@ -150,14 +190,62 @@ function rowToSession(r: SessionRow): ApiSession {
     rootNodeId: r.root_node_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    mode: r.context_mode,
+    workspacePath: r.workspace_path,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Stage 16: FTS5 sync helpers. Internal to repo — every public mutation that
+// touches indexable text calls one of these. We do NOT use SQL triggers so
+// that streaming deltas (high-frequency `appendNodeResponse`) skip the
+// inverted-index churn entirely. See progress/fts-search.md for the
+// per-mutation matrix.
+// ---------------------------------------------------------------------------
+
+type FtsKind = "node_question" | "node_response" | "node_reference" | "note";
+
+function ftsUpsert(
+  db: Database.Database,
+  kind: FtsKind,
+  sourceId: string,
+  sessionId: string,
+  text: string,
+): void {
+  db.prepare(
+    "DELETE FROM search_index WHERE source_id = ? AND source_kind = ?",
+  ).run(sourceId, kind);
+  if (text && text.length > 0) {
+    db.prepare(
+      `INSERT INTO search_index (text, source_kind, source_id, session_id)
+       VALUES (?, ?, ?, ?)`,
+    ).run(text, kind, sourceId, sessionId);
+  }
+}
+
+function ftsDeleteByIds(
+  db: Database.Database,
+  sourceIds: string[],
+): void {
+  if (sourceIds.length === 0) return;
+  const placeholders = sourceIds.map(() => "?").join(",");
+  db.prepare(
+    `DELETE FROM search_index WHERE source_id IN (${placeholders})`,
+  ).run(...sourceIds);
+}
+
+function ftsDeleteBySession(
+  db: Database.Database,
+  sessionId: string,
+): void {
+  db.prepare("DELETE FROM search_index WHERE session_id = ?").run(sessionId);
 }
 
 export function listSessions(): ApiSession[] {
   const db = getDB();
   const rows = db
     .prepare(
-      "SELECT id, title, root_node_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC",
+      `SELECT ${SESSION_COLS} FROM sessions ORDER BY updated_at DESC`,
     )
     .all() as SessionRow[];
   return rows.map(rowToSession);
@@ -167,10 +255,31 @@ export function getSession(id: string): ApiSession | null {
   const db = getDB();
   const row = db
     .prepare(
-      "SELECT id, title, root_node_id, created_at, updated_at FROM sessions WHERE id = ?",
+      `SELECT ${SESSION_COLS} FROM sessions WHERE id = ?`,
     )
     .get(id) as SessionRow | undefined;
   return row ? rowToSession(row) : null;
+}
+
+// Returns the workspace_path for a session, or null. Used by route +
+// claudeSessionPath to derive the encoded-cwd dir for jsonl lookup.
+export function getSessionWorkspacePath(sessionId: string): string | null {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT workspace_path FROM sessions WHERE id = ?")
+    .get(sessionId) as { workspace_path: string | null } | undefined;
+  return row?.workspace_path ?? null;
+}
+
+// Returns the locked context_mode for a session. Used by route to
+// override request-body mode (which is ignored except for the
+// session-creation root request).
+export function getSessionMode(sessionId: string): string | null {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT context_mode FROM sessions WHERE id = ?")
+    .get(sessionId) as { context_mode: string } | undefined;
+  return row?.context_mode ?? null;
 }
 
 export function getSessionNodes(sessionId: string): ApiNode[] {
@@ -193,32 +302,79 @@ export function getNode(id: string): ApiNode | null {
 
 export function deleteSession(id: string): void {
   const db = getDB();
-  // Look up bound claude session before DELETE so we can unlink the jsonl
-  // afterward. cli-multi sessions may have one; lean/cli-single don't.
-  const claudeId = getSessionClaudeId(id);
+  // Collect every claude session jsonl bound to any root in this trellis
+  // session — post per-root upgrade, a single trellis session can own
+  // multiple claude sessions (one per "新提问" fresh-context root). All
+  // share the same workspace_path so the encoded-cwd dir is identical.
+  const claudeIdRows = db
+    .prepare(
+      `SELECT claude_session_id FROM nodes
+       WHERE session_id = ? AND parent_id IS NULL
+         AND claude_session_id IS NOT NULL`,
+    )
+    .all(id) as { claude_session_id: string }[];
+  const workspacePath = getSessionWorkspacePath(id);
   db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  if (claudeId) {
+  // FK cascade nukes nodes/notes but the FTS virtual table isn't on the
+  // FK graph — do it explicitly.
+  ftsDeleteBySession(db, id);
+  for (const r of claudeIdRows) {
     try {
-      fs.unlinkSync(claudeSessionPath(claudeId));
+      fs.unlinkSync(claudeSessionPath(r.claude_session_id, workspacePath));
     } catch {
       // jsonl may have been moved/deleted manually — best effort.
     }
   }
 }
 
-export function getSessionClaudeId(sessionId: string): string | null {
+// Walk up the parent chain from `nodeId` until parent_id IS NULL (the root
+// of this branch's lineage), and return that root's claude_session_id.
+// In project mode this is the id that `claude --resume` should target so
+// the branch continues its root's conversation. Returns null when:
+//   - nodeId doesn't exist
+//   - the root's column is unset (first turn of a fresh-context root —
+//     spawn without --resume; session_init will populate it)
+export function getRootClaudeIdForNode(nodeId: string): string | null {
   const db = getDB();
-  const row = db
-    .prepare("SELECT claude_session_id FROM sessions WHERE id = ?")
-    .get(sessionId) as { claude_session_id: string | null } | undefined;
-  return row?.claude_session_id ?? null;
+  const stmt = db.prepare(
+    "SELECT parent_id, claude_session_id FROM nodes WHERE id = ?",
+  );
+  let cur: string | null = nodeId;
+  // Hard cap walk depth so a broken chain (shouldn't happen but DB-level
+  // cycles are technically possible after manual edits) can't spin.
+  for (let i = 0; i < 1000 && cur; i++) {
+    const row = stmt.get(cur) as
+      | { parent_id: string | null; claude_session_id: string | null }
+      | undefined;
+    if (!row) return null;
+    if (row.parent_id === null) return row.claude_session_id;
+    cur = row.parent_id;
+  }
+  return null;
 }
 
-export function setSessionClaudeId(sessionId: string, claudeId: string): void {
+// Walk up to the root and set its claude_session_id. Called from the chat
+// route on `session_init` so the freshly-spawned claude session id sticks
+// to whichever root this stream belongs to.
+export function setRootClaudeIdForNode(nodeId: string, claudeId: string): void {
   const db = getDB();
-  db.prepare(
-    "UPDATE sessions SET claude_session_id = ? WHERE id = ?",
-  ).run(claudeId, sessionId);
+  const stmt = db.prepare(
+    "SELECT parent_id FROM nodes WHERE id = ?",
+  );
+  let cur: string | null = nodeId;
+  for (let i = 0; i < 1000 && cur; i++) {
+    const row = stmt.get(cur) as
+      | { parent_id: string | null }
+      | undefined;
+    if (!row) return;
+    if (row.parent_id === null) {
+      db.prepare(
+        "UPDATE nodes SET claude_session_id = ? WHERE id = ?",
+      ).run(claudeId, cur);
+      return;
+    }
+    cur = row.parent_id;
+  }
 }
 
 // User-driven session rename. Bumps updated_at so the picker re-sorts the
@@ -267,10 +423,11 @@ export function markNodeRead(nodeId: string, now: number): number | null {
 // Claude CLI stores session transcripts at
 // ~/.claude/projects/<encoded-cwd>/<session_id>.jsonl, where encoded-cwd is
 // the absolute cwd path with "/" replaced by "-" (e.g. "/Users/foo" →
-// "-Users-foo"). We always spawn cli-multi from os.homedir(), so the encoded
-// dir is derived from there.
-function claudeSessionPath(sessionId: string): string {
-  const encodedCwd = os.homedir().replace(/\//g, "-");
+// "-Users-foo"). cwd is whatever we spawned claude from: workspace_path for
+// project sessions, os.homedir() as the chat/workspace fallback.
+function claudeSessionPath(sessionId: string, cwd: string | null): string {
+  const effectiveCwd = cwd ?? os.homedir();
+  const encodedCwd = effectiveCwd.replace(/\//g, "-");
   return path.join(os.homedir(), ".claude", "projects", encodedCwd, `${sessionId}.jsonl`);
 }
 
@@ -280,18 +437,46 @@ export function createSessionWithRoot(args: {
   title: string;
   question: string;
   now: number;
+  mode?: string;
+  workspacePath?: string | null;
+  attachments?: NodeAttachment[];
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
+  const mode = args.mode ?? "chat";
+  const workspacePath = args.workspacePath ?? null;
+  const attachmentsJson =
+    args.attachments && args.attachments.length > 0
+      ? JSON.stringify(args.attachments)
+      : null;
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(args.sessionId, args.title, args.nodeId, args.now, args.now);
+      `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
+                             context_mode, workspace_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      args.sessionId,
+      args.title,
+      args.nodeId,
+      args.now,
+      args.now,
+      mode,
+      workspacePath,
+    );
 
     db.prepare(
-      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at)
-       VALUES (?, ?, NULL, NULL, ?, '', 'streaming', 0, ?)`,
-    ).run(args.nodeId, args.sessionId, args.question, args.now);
+      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at, attachments_json)
+       VALUES (?, ?, NULL, NULL, ?, '', 'streaming', 0, ?, ?)`,
+    ).run(
+      args.nodeId,
+      args.sessionId,
+      args.question,
+      args.now,
+      attachmentsJson,
+    );
+    // Stage 16: index the user-typed question immediately so search hits
+    // it even before the response finishes streaming. response is empty
+    // here, indexed later by finalizeNode.
+    ftsUpsert(db, "node_question", args.nodeId, args.sessionId, args.question);
   });
   tx();
   return {
@@ -308,6 +493,7 @@ export function createRootInSession(args: {
   nodeId: string;
   question: string;
   now: number;
+  attachments?: NodeAttachment[];
 }): ApiNode {
   const db = getDB();
   const session = db
@@ -315,15 +501,27 @@ export function createRootInSession(args: {
     .get(args.sessionId);
   if (!session) throw new Error(`session ${args.sessionId} not found`);
 
+  const attachmentsJson =
+    args.attachments && args.attachments.length > 0
+      ? JSON.stringify(args.attachments)
+      : null;
+
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at)
-       VALUES (?, ?, NULL, NULL, ?, '', 'streaming', 0, ?)`,
-    ).run(args.nodeId, args.sessionId, args.question, args.now);
+      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at, attachments_json)
+       VALUES (?, ?, NULL, NULL, ?, '', 'streaming', 0, ?, ?)`,
+    ).run(
+      args.nodeId,
+      args.sessionId,
+      args.question,
+      args.now,
+      attachmentsJson,
+    );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
       args.now,
       args.sessionId,
     );
+    ftsUpsert(db, "node_question", args.nodeId, args.sessionId, args.question);
   });
   tx();
   return getNode(args.nodeId)!;
@@ -335,6 +533,7 @@ export function createBranchNode(args: {
   question: string;
   parentAnchor: { selectedText: string } | null;
   now: number;
+  attachments?: NodeAttachment[];
 }): ApiNode {
   const db = getDB();
   const parent = db
@@ -346,10 +545,15 @@ export function createBranchNode(args: {
     .prepare("SELECT COUNT(*) AS n FROM nodes WHERE parent_id = ?")
     .get(args.parentId) as { n: number };
 
+  const attachmentsJson =
+    args.attachments && args.attachments.length > 0
+      ? JSON.stringify(args.attachments)
+      : null;
+
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at)
-       VALUES (?, ?, ?, ?, ?, '', 'streaming', ?, ?)`,
+      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response, status, sibling_index, created_at, attachments_json)
+       VALUES (?, ?, ?, ?, ?, '', 'streaming', ?, ?, ?)`,
     ).run(
       args.nodeId,
       parent.session_id,
@@ -358,10 +562,18 @@ export function createBranchNode(args: {
       args.question,
       siblingCount.n,
       args.now,
+      attachmentsJson,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
       args.now,
       parent.session_id,
+    );
+    ftsUpsert(
+      db,
+      "node_question",
+      args.nodeId,
+      parent.session_id,
+      args.question,
     );
   });
   tx();
@@ -388,8 +600,16 @@ export function resetNodeForRetry(
      SET response = '', status = 'streaming',
          error_message = NULL,
          token_input = 0, token_output = 0,
-         token_cache_read = 0, token_cache_creation = 0
+         token_cache_read = 0, token_cache_creation = 0,
+         tool_calls_json = NULL
      WHERE id = ?`,
+  ).run(nodeId);
+  // The old response is gone; remove it from FTS so stale text doesn't
+  // surface in searches during the retry window. node_question survives
+  // (question text is preserved across retry). tool_calls cleared above
+  // so the retried run starts with an empty panel.
+  db.prepare(
+    "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'node_response'",
   ).run(nodeId);
   return {
     question: row.question,
@@ -397,6 +617,109 @@ export function resetNodeForRetry(
       ? { selectedText: row.parent_anchor_text }
       : null,
   };
+}
+
+// Read just the attachments column for a node. Used by /api/chat to
+// resolve the image hashes attached to a question without rebuilding
+// the whole ApiNode (retry / branch paths read this separately from
+// the user-supplied attachments because retry doesn't carry them).
+export function getNodeAttachments(nodeId: string): NodeAttachment[] {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT attachments_json FROM nodes WHERE id = ?")
+    .get(nodeId) as { attachments_json: string | null } | undefined;
+  if (!row?.attachments_json) return [];
+  try {
+    const parsed = JSON.parse(row.attachments_json);
+    return Array.isArray(parsed) ? (parsed as NodeAttachment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Stage 17: tool call mutations. Reads the tool_calls_json column,
+// patches it, writes it back. Each run-bus event triggers exactly one
+// of these. Serialising the whole array on every event is O(N) but N
+// per turn is tiny (a few dozen at most) and the column is bounded by
+// node lifetime, so the overhead is unmeasurable in practice.
+export function appendToolCallStart(args: {
+  nodeId: string;
+  call: ToolCall;
+}): void {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT tool_calls_json FROM nodes WHERE id = ?")
+    .get(args.nodeId) as { tool_calls_json: string | null } | undefined;
+  if (!row) return;
+  let list: ToolCall[] = [];
+  if (row.tool_calls_json) {
+    try {
+      const parsed = JSON.parse(row.tool_calls_json);
+      if (Array.isArray(parsed)) list = parsed as ToolCall[];
+    } catch {
+      /* malformed → reset */
+    }
+  }
+  // Defensive de-dup: if a tool_use_start event re-fires for the same
+  // id (e.g. provider replays), keep the first entry.
+  if (list.some((c) => c.id === args.call.id)) return;
+  list.push(args.call);
+  db.prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?").run(
+    JSON.stringify(list),
+    args.nodeId,
+  );
+}
+
+export function markToolCallDone(args: {
+  nodeId: string;
+  toolCallId: string;
+  output: string | null;
+  stderr: string | null;
+  status: "done" | "error";
+  endedAt: number;
+}): void {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT tool_calls_json FROM nodes WHERE id = ?")
+    .get(args.nodeId) as { tool_calls_json: string | null } | undefined;
+  if (!row?.tool_calls_json) return;
+  let list: ToolCall[];
+  try {
+    const parsed = JSON.parse(row.tool_calls_json);
+    if (!Array.isArray(parsed)) return;
+    list = parsed as ToolCall[];
+  } catch {
+    return;
+  }
+  const idx = list.findIndex((c) => c.id === args.toolCallId);
+  if (idx === -1) return;
+  const cur = list[idx];
+  list[idx] = {
+    ...cur,
+    output: args.output,
+    stderr: args.stderr,
+    status: args.status,
+    endedAt: args.endedAt,
+    durationMs: Math.max(0, args.endedAt - cur.startedAt),
+  };
+  db.prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?").run(
+    JSON.stringify(list),
+    args.nodeId,
+  );
+}
+
+export function getNodeToolCalls(nodeId: string): ToolCall[] {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT tool_calls_json FROM nodes WHERE id = ?")
+    .get(nodeId) as { tool_calls_json: string | null } | undefined;
+  if (!row?.tool_calls_json) return [];
+  try {
+    const parsed = JSON.parse(row.tool_calls_json);
+    return Array.isArray(parsed) ? (parsed as ToolCall[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function appendNodeResponse(nodeId: string, delta: string): void {
@@ -419,8 +742,8 @@ export function finalizeNode(args: {
 }): void {
   const db = getDB();
   const node = db
-    .prepare("SELECT session_id FROM nodes WHERE id = ?")
-    .get(args.nodeId) as { session_id: string } | undefined;
+    .prepare("SELECT session_id, response FROM nodes WHERE id = ?")
+    .get(args.nodeId) as { session_id: string; response: string } | undefined;
   if (!node) return;
   const tx = db.transaction(() => {
     db.prepare(
@@ -442,6 +765,21 @@ export function finalizeNode(args: {
       args.now,
       node.session_id,
     );
+    // Index the (final) response text only on success — errored streams
+    // leave behind partial / nonsensical text that's noise in search.
+    if (args.status === "done") {
+      ftsUpsert(
+        db,
+        "node_response",
+        args.nodeId,
+        node.session_id,
+        node.response,
+      );
+    } else {
+      db.prepare(
+        "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'node_response'",
+      ).run(args.nodeId);
+    }
   });
   tx();
 }
@@ -588,14 +926,27 @@ export function createSessionWithReference(args: {
   topicLabel: string | null;
   status?: "streaming" | "done" | "error";
   now: number;
+  mode?: string;
+  workspacePath?: string | null;
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
   const status = args.status ?? "done";
+  const mode = args.mode ?? "chat";
+  const workspacePath = args.workspacePath ?? null;
   const tx = db.transaction(() => {
     db.prepare(
-      `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(args.sessionId, args.title, args.nodeId, args.now, args.now);
+      `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
+                             context_mode, workspace_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      args.sessionId,
+      args.title,
+      args.nodeId,
+      args.now,
+      args.now,
+      mode,
+      workspacePath,
+    );
 
     db.prepare(
       `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text,
@@ -615,6 +966,13 @@ export function createSessionWithReference(args: {
       args.contentMd,
       args.now,
       JSON.stringify(args.meta),
+    );
+    ftsUpsert(
+      db,
+      "node_reference",
+      args.nodeId,
+      args.sessionId,
+      args.contentMd,
     );
   });
   tx();
@@ -671,6 +1029,13 @@ export function createReferenceNode(args: {
       args.now,
       args.sessionId,
     );
+    ftsUpsert(
+      db,
+      "node_reference",
+      args.nodeId,
+      args.sessionId,
+      args.contentMd,
+    );
   });
   tx();
   return getNode(args.nodeId)!;
@@ -725,6 +1090,13 @@ export function finalizeReferenceFetch(args: {
       args.now,
       row.session_id,
     );
+    ftsUpsert(
+      db,
+      "node_reference",
+      args.nodeId,
+      row.session_id,
+      args.contentMd,
+    );
   });
   tx();
   return getNode(args.nodeId);
@@ -761,6 +1133,13 @@ export function refreshReferenceNode(args: {
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
       args.now,
       row.session_id,
+    );
+    ftsUpsert(
+      db,
+      "node_reference",
+      args.nodeId,
+      row.session_id,
+      args.contentMd,
     );
   });
   tx();
@@ -834,6 +1213,7 @@ export function createNote(args: {
     args.quotedText,
     args.now,
   );
+  ftsUpsert(db, "note", args.noteId, args.sessionId, args.quotedText);
   return {
     id: args.noteId,
     sessionId: args.sessionId,
@@ -846,6 +1226,11 @@ export function createNote(args: {
 export function deleteNote(noteId: string): boolean {
   const db = getDB();
   const r = db.prepare("DELETE FROM notes WHERE id = ?").run(noteId);
+  if (r.changes > 0) {
+    db.prepare(
+      "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'note'",
+    ).run(noteId);
+  }
   return r.changes > 0;
 }
 
@@ -905,9 +1290,122 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
       Date.now(),
       node.sessionId,
     );
+    // FTS is a virtual table — no FK cascade. Wipe every row tied to a
+    // deleted node or note. source_id collisions between kinds are not
+    // possible (UUIDs), so a single IN clause covers all four kinds.
+    ftsDeleteByIds(db, [...ids, ...noteIds]);
   });
   tx();
   return { ok: true, deletedNodeIds: ids, deletedNoteIds: noteIds };
+}
+
+// ---------------------------------------------------------------------------
+// Stage 16: search API. One MATCH against search_index, JOIN sessions for
+// title / mode / workspace metadata, group hits by session JS-side. Snippet
+// is rendered server-side with FTS5's snippet() — UI receives both the
+// <mark>-highlighted html-safe snippet and the raw matchText for the
+// NodeFullView pulse injection.
+// ---------------------------------------------------------------------------
+
+export type SearchHit = {
+  sourceKind: "node_question" | "node_response" | "node_reference" | "note";
+  sourceId: string;
+  snippet: string;
+  matchText: string;
+};
+
+export type SearchResult = {
+  sessionId: string;
+  sessionTitle: string;
+  sessionMode: string;
+  sessionWorkspacePath: string | null;
+  hits: SearchHit[];
+};
+
+// trigram needs ≥ 3 chars per query token. Below that, FTS5 returns 0
+// rows; we short-circuit so callers can render a "type more" hint without
+// a round-trip.
+const MIN_QUERY_CHARS = 3;
+
+// Wrap the user's raw query as a single FTS5 phrase. trigram tokenization
+// makes phrase matching equivalent to substring matching — no boolean /
+// prefix operators needed. Double quotes inside the query get doubled
+// (FTS5's escape) so "a\"b" → "a""b". Lone double quotes that would break
+// syntax are similarly defanged.
+function buildFtsQuery(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length < MIN_QUERY_CHARS) return null;
+  const escaped = trimmed.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
+  const ftsQuery = buildFtsQuery(rawQuery);
+  if (!ftsQuery) return [];
+
+  const db = getDB();
+  type Row = {
+    source_kind: string;
+    source_id: string;
+    session_id: string;
+    snippet: string;
+    match_text: string;
+    title: string;
+    context_mode: string;
+    workspace_path: string | null;
+    rank: number;
+  };
+  // Two snippet() calls share FTS5's positional offsets: `snippet` is
+  // the display string with <mark> wrappers; `match_text` is the same
+  // window with markers + ellipsis stripped, suitable for handing to the
+  // DOM anchor injector (which needs an exact substring of the rendered
+  // markdown).
+  let rows: Row[];
+  try {
+    rows = db
+      .prepare(
+        `SELECT si.source_kind, si.source_id, si.session_id,
+                snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
+                snippet(search_index, 0, '', '', '', 12) AS match_text,
+                s.title, s.context_mode, s.workspace_path,
+                bm25(search_index) AS rank
+         FROM search_index si
+         JOIN sessions s ON s.id = si.session_id
+         WHERE search_index MATCH ?
+         ORDER BY rank
+         LIMIT ?`,
+      )
+      .all(ftsQuery, limit) as Row[];
+  } catch {
+    // Defensive: a malformed escape or rare FTS5 syntax edge case. Treat
+    // as "no results" rather than 500ing the route. The UI will show the
+    // empty state.
+    return [];
+  }
+
+  // Preserve bm25 order (already ASC) when grouping. Sessions surface in
+  // the order their best hit was ranked.
+  const groups = new Map<string, SearchResult>();
+  for (const r of rows) {
+    let g = groups.get(r.session_id);
+    if (!g) {
+      g = {
+        sessionId: r.session_id,
+        sessionTitle: r.title,
+        sessionMode: r.context_mode,
+        sessionWorkspacePath: r.workspace_path,
+        hits: [],
+      };
+      groups.set(r.session_id, g);
+    }
+    g.hits.push({
+      sourceKind: r.source_kind as SearchHit["sourceKind"],
+      sourceId: r.source_id,
+      snippet: r.snippet,
+      matchText: r.match_text,
+    });
+  }
+  return [...groups.values()];
 }
 
 // Cleanup leftover streaming nodes — call on server start. If the process

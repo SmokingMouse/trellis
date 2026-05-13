@@ -9,9 +9,11 @@ import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
-import type { ChatNode, ParentAnchor } from "@/lib/types";
+import type { ChatNode, NodeAttachment, ParentAnchor } from "@/lib/types";
 import { buildNodeIndex } from "@/lib/node-index";
 import { NodeTreeOverlay } from "./NodeTreeOverlay";
+import { AttachmentPreview } from "./AttachmentPreview";
+import { ToolCallsPanel } from "./ToolCallsPanel";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
 const REMARK_PLUGINS = [remarkGfm];
@@ -209,7 +211,11 @@ export function NodeFullView() {
                   </span>
                 </button>
               )}
-              <QuestionBlock question={node.question} />
+              <QuestionBlock
+                question={node.question}
+                attachments={node.attachments}
+              />
+              <ToolCallsPanel toolCalls={node.toolCalls} />
               {/* key={node.id} forces a fresh ResponseBody fiber per node:
                   the imperative <mark> injection inside react-markdown's
                   output diverges from React's virtual tree, so when the
@@ -367,14 +373,25 @@ function SubBar({
   );
 }
 
-function QuestionBlock({ question }: { question: string }) {
+function QuestionBlock({
+  question,
+  attachments,
+}: {
+  question: string;
+  attachments: NodeAttachment[];
+}) {
   return (
     <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-lg px-4 py-3 mb-4 flex items-start gap-2.5">
       <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center shrink-0 font-medium">
         你
       </div>
-      <div className="text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium whitespace-pre-wrap">
+      <div className="text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium whitespace-pre-wrap min-w-0">
         {question}
+        {attachments.length > 0 && (
+          <div className="mt-2 font-normal">
+            <AttachmentPreview attachments={attachments} readOnly />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -418,6 +435,19 @@ function useMarkdownBodyMarks(opts: {
         .map((n) => ({ text: n.quotedText, noteId: n.id })),
     [allNotes, nodeId],
   );
+  // Stage 16: transient search anchor injected only while the user is
+  // landing on this node from a search result. Cleared once clearScrollAnchor
+  // runs (after the pulse fades or the selector misses twice).
+  const searchAnchor = useMemo(() => {
+    if (!pendingScrollAnchor) return null;
+    if (pendingScrollAnchor.kind !== "search") return null;
+    if (pendingScrollAnchor.nodeId !== nodeId) return null;
+    // matchKind === "question" hits scroll to the QuestionBlock at the
+    // top of the view by default — no DOM injection on this body needed.
+    if (pendingScrollAnchor.matchKind === "question") return null;
+    if (!pendingScrollAnchor.matchText) return null;
+    return pendingScrollAnchor.matchText;
+  }, [pendingScrollAnchor, nodeId]);
 
   const onMarkClick = (e: React.MouseEvent) => {
     const target = (e.target as HTMLElement).closest("[data-child-id]");
@@ -451,11 +481,26 @@ function useMarkdownBodyMarks(opts: {
         anchors: childAnchors.map((a) => ({ text: a.text, id: a.childId })),
       });
     }
+    if (searchAnchor) {
+      // One search hit at a time → fixed id "current". Pushed last so it
+      // lands innermost (matches the note-vs-child layering convention).
+      specs.push({
+        dataKey: "searchId",
+        anchors: [{ text: searchAnchor, id: "current" }],
+      });
+    }
     if (specs.length) injectMarks(root, specs);
     return () => {
       if (root) clearMarks(root);
     };
-  }, [suspended, contentVersion, childAnchors, noteAnchors, bodyRef]);
+  }, [
+    suspended,
+    contentVersion,
+    childAnchors,
+    noteAnchors,
+    searchAnchor,
+    bodyRef,
+  ]);
 
   // Scroll-to-anchor: handles both child-id (jump-back-to-parent) and
   // note-id (jump-from-notebook). A single anchor may span multiple
@@ -470,7 +515,9 @@ function useMarkdownBodyMarks(opts: {
     const selector =
       pendingScrollAnchor.kind === "child"
         ? `mark[data-child-id="${CSS.escape(pendingScrollAnchor.childId)}"]`
-        : `mark[data-note-id="${CSS.escape(pendingScrollAnchor.noteId)}"]`;
+        : pendingScrollAnchor.kind === "note"
+          ? `mark[data-note-id="${CSS.escape(pendingScrollAnchor.noteId)}"]`
+          : `mark[data-search-id="current"]`;
     let raf = 0;
     let timer = 0;
     raf = window.requestAnimationFrame(() => {

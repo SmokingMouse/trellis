@@ -1,11 +1,18 @@
 "use client";
+import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { Mode, ProviderId } from "@/lib/llm";
+import { WorkspacePicker } from "./WorkspacePicker";
 
-// Inline SVG paths instead of emoji — emoji rendering varies across OS / font
-// stacks (variation selectors, color font fallback, baseline drift), and the
-// three were visually mismatched. SVG keeps everything aligned + uses
-// currentColor so the active-state coloring works.
+// Stage 14: the mode picker only appears in the new-session draft state
+// (the empty QuestionInput). It edits draftMode + draftWorkspacePath in
+// the store; on first submit these get locked into the session row and
+// the readonly ModeBadge in the header takes over.
+//
+// Selecting Workspace or Project without a workspace_path forces the
+// WorkspacePicker open (the user can't leave with an inconsistent draft).
+// Chat clears the workspace draft — chat has no cwd binding.
+
 function ChatIcon() {
   return (
     <svg
@@ -69,110 +76,155 @@ type Option = {
   title: string;
 };
 
-// Picker shows the same three modes regardless of provider, but the
-// tooltips reference whichever local CLI is actually being driven (claude
-// vs codex) — paths, capability names, and "session" semantics differ.
 function optionsFor(provider: ProviderId): Option[] {
   if (provider === "codex") {
     return [
       {
-        id: "lean",
-        label: "lean",
+        id: "chat",
+        label: "Chat",
         Icon: ChatIcon,
         title:
-          "Lean 模式：纯文本回复，沙箱 read-only，禁用所有 tools，不加载用户配置/MCP。最便宜。",
+          "Chat：纯文本回复，沙箱 read-only，禁用所有 tools / MCP。codex 暂无 WebSearch 等价，无联网。",
       },
       {
-        id: "cli-single",
-        label: "CLI 单轮",
+        id: "workspace",
+        label: "Workspace",
         Icon: TerminalIcon,
         title:
-          "CLI 单轮：加载 ~/.codex/config.toml + MCP servers/plugins，YOLO 沙箱工具自动放行（含 Bash/Write/Edit）。每次提问独立，trellis 自己折叠历史；分支上下文隔离。",
+          "Workspace：在所选 cwd 中加载 ~/.codex/config.toml + MCP servers/plugins，YOLO 沙箱（含 Bash/Write/Edit）。每次提问独立。",
       },
       {
-        id: "cli-multi",
-        label: "CLI 多轮",
+        id: "project",
+        label: "Project",
         Icon: LinkIcon,
         title:
-          "CLI 多轮：整棵 trellis 树共享一个 codex session（线性多轮历史）。MCP/tools 全开。分支不再隔离——codex 看到的是平铺的对话历史。session 持久化在 ~/.codex/sessions/ 下。",
+          "Project：整棵 trellis 树共享一个 codex session（线性多轮历史）。MCP/tools 全开。rollout 在 ~/.codex/sessions/。",
       },
     ];
   }
-  // Claude (default for sonnet/opus/haiku, also fallback for mock).
+  // Claude (default).
   return [
     {
-      id: "lean",
-      label: "lean",
+      id: "chat",
+      label: "Chat",
       Icon: ChatIcon,
       title:
-        "Lean 模式：纯文本回复，禁用所有 tools，不加载 skills/CLAUDE.md。最便宜。",
+        "Chat：纯文本 + WebSearch / WebFetch 联网。不加载 skills / CLAUDE.md。最便宜，对标 GPT 网页客户端。",
     },
     {
-      id: "cli-single",
-      label: "CLI 单轮",
+      id: "workspace",
+      label: "Workspace",
       Icon: TerminalIcon,
       title:
-        "CLI 单轮：加载 skills + ~/.claude/CLAUDE.md，工具自动放行（含 Bash/Write/Edit）。每次提问独立，trellis 自己折叠历史；分支上下文隔离。",
+        "Workspace：在所选仓库 cwd 中加载 skills + CLAUDE.md，工具自动放行（含 Bash/Write/Edit）。每次提问独立，分支上下文隔离。",
     },
     {
-      id: "cli-multi",
-      label: "CLI 多轮",
+      id: "project",
+      label: "Project",
       Icon: LinkIcon,
       title:
-        "CLI 多轮：整棵 trellis 树共享一个 claude session（线性多轮历史）。skills/tools 全开。分支不再隔离——claude 看到的是平铺的对话历史。删除 trellis session 时会自动清理 ~/.claude/projects 下的对应 jsonl。",
+        "Project：整棵 trellis 树共享一个 claude session（线性多轮历史）。skills/tools 全开。删除 trellis session 时清理对应 jsonl。",
     },
   ];
 }
 
 export function ModePicker() {
-  const mode = useSessionStore((s) => s.mode);
-  const setMode = useSessionStore((s) => s.setMode);
+  const mode = useSessionStore((s) => s.draftMode);
+  const setMode = useSessionStore((s) => s.setDraftMode);
+  const workspacePath = useSessionStore((s) => s.draftWorkspacePath);
+  const setWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const provider = useSessionStore((s) => s.provider);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const OPTIONS = optionsFor(provider);
-  const cliName = provider === "codex" ? "codex" : "claude";
+  const needsWorkspace = mode === "workspace" || mode === "project";
+
+  const handleSelect = (next: Mode) => {
+    if (next === mode) return;
+    setMode(next);
+    if (next === "chat") {
+      // Chat doesn't bind a cwd — clear any stale draft to keep the
+      // submit body coherent.
+      setWorkspacePath(null);
+    } else if (!workspacePath) {
+      // Workspace / Project need a path. Open picker; user can't leave
+      // it dangling because the submit gate also re-checks.
+      setPickerOpen(true);
+    }
+  };
 
   return (
-    <div
-      role="radiogroup"
-      aria-label="Context mode"
-      className="inline-flex h-7 rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden shrink-0"
-    >
-      {OPTIONS.map((opt) => {
-        const active = mode === opt.id;
-        const { Icon } = opt;
-        const activeColor =
-          opt.id === "cli-multi"
-            ? "bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200"
-            : opt.id === "cli-single"
-              ? "bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200"
-              : "bg-stone-100 dark:bg-stone-700 text-stone-900 dark:text-stone-100";
-        return (
-          <button
-            key={opt.id}
-            role="radio"
-            aria-checked={active}
-            title={opt.title}
-            onClick={() => {
-              if (mode === opt.id) return;
-              if (opt.id === "cli-multi" && mode !== "cli-multi") {
-                const ok = window.confirm(
-                  `切到 CLI 多轮模式？\n\n之前的对话不会被新模式继承——你的下一问会是 ${cliName} 视角的第一轮。后续此 trellis session 内所有节点共享一个 ${cliName} session（树形分支不再隔离上下文）。`,
-                );
-                if (!ok) return;
-              }
-              setMode(opt.id);
-            }}
-            className={`px-2 text-[11px] font-medium transition-colors inline-flex items-center gap-1.5 border-l border-stone-300 dark:border-stone-700 first:border-l-0 ${
-              active
-                ? activeColor
-                : "text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
-            }`}
-          >
-            <Icon />
-            <span className="hidden sm:inline">{opt.label}</span>
-          </button>
-        );
-      })}
+    <div className="inline-flex flex-wrap items-center gap-2">
+      <div
+        role="radiogroup"
+        aria-label="Context mode"
+        className="inline-flex h-7 rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden shrink-0"
+      >
+        {OPTIONS.map((opt) => {
+          const active = mode === opt.id;
+          const { Icon } = opt;
+          const activeColor =
+            opt.id === "project"
+              ? "bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200"
+              : opt.id === "workspace"
+                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200"
+                : // chat needs higher contrast against the white/stone-900
+                  // outer surface — stone-100 vs white was nearly invisible
+                  // in light mode. stone-200 + a 1px inset ring gives it
+                  // the same visual weight as amber/rose without departing
+                  // from its neutral identity.
+                  "bg-stone-200 dark:bg-stone-700 text-stone-900 dark:text-stone-100 ring-1 ring-inset ring-stone-400/40 dark:ring-stone-500/40";
+          return (
+            <button
+              key={opt.id}
+              role="radio"
+              aria-checked={active}
+              title={opt.title}
+              onClick={() => handleSelect(opt.id)}
+              className={`px-2 text-[11px] font-medium transition-colors inline-flex items-center gap-1.5 border-l border-stone-300 dark:border-stone-700 first:border-l-0 ${
+                active
+                  ? activeColor
+                  : "text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
+              }`}
+            >
+              <Icon />
+              <span className="hidden sm:inline">{opt.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {needsWorkspace && (
+        <button
+          onClick={() => setPickerOpen(true)}
+          title={workspacePath ?? "请选择工作区目录"}
+          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-[11px] font-medium transition-colors ${
+            workspacePath
+              ? "border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800"
+              : "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-200 animate-pulse"
+          }`}
+        >
+          <span aria-hidden>📁</span>
+          <span className="truncate max-w-[10rem] font-mono">
+            {workspacePath ? basename(workspacePath) : "选择工作区"}
+          </span>
+        </button>
+      )}
+
+      {pickerOpen && (
+        <WorkspacePicker
+          currentPath={workspacePath}
+          onPick={(p) => setWorkspacePath(p)}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
+}
+
+function basename(p: string): string {
+  if (!p) return "";
+  const stripped = p.replace(/\/+$/, "");
+  const idx = stripped.lastIndexOf("/");
+  return idx === -1 ? stripped : stripped.slice(idx + 1);
 }

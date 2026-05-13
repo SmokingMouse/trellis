@@ -11,7 +11,7 @@ export function getProvider(
   id: ProviderId,
   opts: { mode?: Mode } = {},
 ): LLMProvider {
-  const mode = opts.mode ?? "lean";
+  const mode = opts.mode ?? "chat";
   switch (id) {
     case "mock":
       return mockProvider;

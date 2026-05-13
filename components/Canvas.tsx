@@ -150,15 +150,45 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   // Re-fit view when switching sessions — fitView prop only fires on mount.
   // Also drop the layout-ready flag so the new session's first dagre
   // pass doesn't animate cards flying in from origin.
+  //
+  // When Canvas is remounting because the user just exited NodeFullView
+  // (fullScreen → false), activeNodeId is already pointing at the node
+  // we want to land on (set by setFullScreen). Skip the auto-land in that
+  // case so the activeNodeId effect can pan/zoom to that node without
+  // being overwritten by a global fit a few frames later.
+  //
+  // 80/20 landing: when activeNodeId is null at session load (fresh
+  // hydrate / page refresh / picker switch), pan to the freshest piece
+  // of work — store's lastEditedNodeId — instead of fitView'ing the
+  // whole tree. fitView with a deep tree drops the user at the root or
+  // a wide overview that's almost never what they came back for. We read
+  // store state inside the timeout (after dagre has laid out positions
+  // ~60ms in) and fall back to fitView only when there's no candidate.
   useEffect(() => {
     if (!sessionId) return;
     setLayoutReady(false);
-    const t = window.setTimeout(
-      () => fitView({ padding: 0.15, duration: 400 }),
-      120,
-    );
+    if (activeNodeId) return;
+    const t = window.setTimeout(() => {
+      const state = useSessionStore.getState();
+      const fresh =
+        state.lastEditedNodeId && state.nodes[state.lastEditedNodeId];
+      if (fresh && fresh.position) {
+        const { zoom: cur } = getViewport();
+        setCenter(
+          fresh.position.x + NODE_WIDTH / 2,
+          fresh.position.y + NODE_HEIGHT_ESTIMATE / 2,
+          { zoom: cur, duration: 400 },
+        );
+      } else {
+        fitView({ padding: 0.15, duration: 400 });
+      }
+    }, 120);
     return () => window.clearTimeout(t);
-  }, [sessionId, fitView]);
+    // activeNodeId is intentionally a snapshot read at session-change /
+    // mount time — we don't want every later setActiveNode to re-fire
+    // this layout reset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, fitView, setCenter, getViewport]);
 
   // F key → fit to overview. Skip when typing in inputs.
   useEffect(() => {

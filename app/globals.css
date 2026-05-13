@@ -168,6 +168,19 @@ html, body {
    contain child element(s)). Child's amber background paints over the
    note's emerald in the overlap region — so a partial overlap shows
    emerald edges + amber center, making the relationship visible. */
+/* Search marks (data-search-id) are transient — injected only while
+   the user is landing from the ⌘P modal. We give them the same emerald
+   tint as note marks but rely on the pulse animation alone to draw the
+   eye; the mark unmounts when clearScrollAnchor fires. */
+.md-body mark[data-search-id] {
+  background: #d1fae5;
+  box-shadow: 0 0 0 1px #34d399;
+}
+.dark .md-body mark[data-search-id] {
+  background: #064e3b;
+  color: #d1fae5;
+  box-shadow: 0 0 0 1px #047857;
+}
 .md-body mark[data-note-id]:not([data-child-id]) {
   background: #d1fae5;
   box-shadow: 0 0 0 1px #34d399;
@@ -312,6 +325,12 @@ html, body {
   animation: anchor-pulse-emerald 0.5s ease-in-out 3;
 }
 .dark .md-body mark[data-note-id]:not([data-child-id]).anchor-pulse {
+  animation: anchor-pulse-emerald-dark 0.5s ease-in-out 3;
+}
+.md-body mark[data-search-id].anchor-pulse {
+  animation: anchor-pulse-emerald 0.5s ease-in-out 3;
+}
+.dark .md-body mark[data-search-id].anchor-pulse {
   animation: anchor-pulse-emerald-dark 0.5s ease-in-out 3;
 }
 
