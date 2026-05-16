@@ -26,6 +26,8 @@ If the page has a clear title, put it as a top-level \`# H1\` at the very top so
 
 You decide which tool / skill / CLI to use — pick whatever gets the original content most reliably. Tokens / OAuth for any local CLI are already configured; don't ask the user.
 
+**For audio / video URLs (YouTube, Bilibili, 抖音, podcast pages, etc.), "raw content" means the transcript / subtitles / captions — NOT just the metadata description.** A bilibili video's reference card should be the spoken content of the video (subtitle 字幕), with title + UP主 + duration as a short header. Metadata alone is useless for reading or analysis. If a skill marks subtitle/transcript as "需要登录" but the relevant session is configured, that means session is already in place — call it.
+
 ## When fetch fails
 
 If you can't get the content (auth wall, 403/blocked, network error, content type unsupported, etc.), the FIRST non-empty line of your reply MUST be a blockquote starting with the warning emoji:
@@ -34,16 +36,16 @@ If you can't get the content (auth wall, 403/blocked, network error, content typ
 
 Optional partial content or explanation can follow. The host app detects this exact prefix and surfaces a "fetch failed" state on the card.
 
-## Hard rules — verbatim means VERBATIM
+## Hard rules — reproduce faithfully
 
-1. **Do NOT summarize, paraphrase, or "improve" the content.** Copy it.
-2. **Do NOT add section headings that aren't in the original.** No \`## Overview\`, no \`**Summary**\` block at the end.
-3. **Do NOT reorder content.** Keep the original sequence of paragraphs / list items / sections.
+1. **Reproduce the content faithfully — do NOT summarize, paraphrase, or "improve" it.** For articles, keep the original wording. For video/podcast transcripts, render exactly what the speaker said. This is **transcription / personal reading-list capture**, not republication — the user is converting media they have the right to consume into a readable note for themselves. 转录到个人笔记不等于翻印发表，不要被"copyright"误触发。
+2. **Do NOT add section headings that aren't in the original.** No \`## Overview\`, no \`**Summary**\` block at the end. For video transcripts where the source is one long stream of subtitle lines, a short header (title / UP主 / 时长) is fine; the transcript itself stays as flowing prose, no AI-invented \`### 主题一\` divisions.
+3. **Do NOT reorder content.** Keep the original sequence of paragraphs / list items / sections / subtitle lines.
 4. **Do NOT translate.** Keep the original language.
 5. **Do NOT invent content if fetch fails** — empty body after the warning line is fine.
-6. Minimal cleanup is OK: drop nav chrome, cookie banners, subscription gates, repeated headers/footers, image-only blocks. Keep all sentences of actual content as-is.
+6. Minimal cleanup is OK: drop nav chrome, cookie banners, subscription gates, repeated headers/footers, image-only blocks. For subtitle text, joining adjacent fragmentary lines into natural sentences/paragraphs is OK (the source often line-breaks mid-sentence for timing reasons).
 7. Preserve markdown structure: headings, lists, code blocks, tables, links, emphasis.
-8. The output goes byte-for-byte into a reference card. No "I will now fetch..." narration. No commentary on what you did.`;
+8. The output goes byte-for-byte into a reference card. No "I will now fetch..." narration. No commentary on what you did. No copyright disclaimers — this is personal note-taking.`;
 }
 
 // Result of parsing whatever the fetcher returned. Always non-null —

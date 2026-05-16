@@ -1119,15 +1119,29 @@ export function refreshReferenceNode(args: {
     | undefined;
   if (!row || row.kind !== "reference") return null;
 
+  // Status mirrors the fetch outcome so the UI flips out of the previous
+  // error state on a successful refresh. Without this, an old run that
+  // ended with `status='error'` (e.g. claude API blip after content was
+  // already written) leaves the card looking failed even though the
+  // content + meta have been replaced with a fresh good copy.
+  const hasContent = args.contentMd.length > 0;
+  const fetchError = args.meta.fetchError;
+  const nextStatus: "done" | "error" =
+    hasContent && !fetchError ? "done" : "error";
+  const nextErrorMessage = nextStatus === "error" ? fetchError ?? null : null;
+
   const tx = db.transaction(() => {
     db.prepare(
       `UPDATE nodes
-       SET ref_content_md = ?, ref_meta_json = ?, ref_fetched_at = ?
+       SET ref_content_md = ?, ref_meta_json = ?, ref_fetched_at = ?,
+           status = ?, error_message = ?
        WHERE id = ?`,
     ).run(
       args.contentMd,
       JSON.stringify(args.meta),
       args.now,
+      nextStatus,
+      nextErrorMessage,
       args.nodeId,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
