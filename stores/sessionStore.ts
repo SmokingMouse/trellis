@@ -301,6 +301,23 @@ const STREAM_CONTROLLERS = new Map<string, AbortController>();
 // Insertion-ordered list — last entry is the most recently started stream.
 // Map.keys() preserves insertion order so we don't need a separate array.
 
+// streamRoot/streamBranch register their controller inside handleStreamEvent's
+// `created` branch (nodeId isn't known until the server emits it), and the
+// terminal branches there clean up via cleanupController(). When the SSE
+// reader exits without ever delivering a terminal event — network drop,
+// Safari freezing a backgrounded fetch — the entry would otherwise leak.
+// reconnectStreamingNodes skips nodes that still have a controller registered
+// (to avoid double-subscribing the run-bus), so a stale entry blocks reconnect
+// forever. Call this in finally to drop whichever entry our controller owns.
+function releaseStreamController(controller: AbortController): void {
+  for (const [id, ctrl] of STREAM_CONTROLLERS) {
+    if (ctrl === controller) {
+      STREAM_CONTROLLERS.delete(id);
+      return;
+    }
+  }
+}
+
 export const useSessionStore = create<State & Actions>((set, get) => ({
   session: null,
   nodes: {},
@@ -480,18 +497,22 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       : { mode: draftMode, workspacePath: draftWorkspacePath };
     const attachments = opts?.attachments;
     const controller = new AbortController();
-    await runStream(
-      {
-        kind: "root",
-        question,
-        provider,
-        sessionId,
-        ...modeFields,
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      },
-      handleStreamEvent(set, get, { controller }),
-      controller.signal,
-    );
+    try {
+      await runStream(
+        {
+          kind: "root",
+          question,
+          provider,
+          sessionId,
+          ...modeFields,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        },
+        handleStreamEvent(set, get, { controller }),
+        controller.signal,
+      );
+    } finally {
+      releaseStreamController(controller);
+    }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
 
@@ -505,18 +526,22 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const focusNew = anchor === null;
     const attachments = opts?.attachments;
     const controller = new AbortController();
-    await runStream(
-      {
-        kind: "branch",
-        parentNodeId: parentId,
-        question,
-        parentAnchor: anchor,
-        provider,
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      },
-      handleStreamEvent(set, get, { focusNew, controller }),
-      controller.signal,
-    );
+    try {
+      await runStream(
+        {
+          kind: "branch",
+          parentNodeId: parentId,
+          question,
+          parentAnchor: anchor,
+          provider,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        },
+        handleStreamEvent(set, get, { focusNew, controller }),
+        controller.signal,
+      );
+    } finally {
+      releaseStreamController(controller);
+    }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
 
@@ -595,13 +620,16 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const { nodes } = get();
     for (const n of Object.values(nodes)) {
       if (n.status !== "streaming") continue;
-      // attachReconnectStream is its own idempotency gate via
-      // RECONNECT_HANDLES; calling it for an id that already has a live
-      // POST controller is harmless because STREAM_CONTROLLERS is also
-      // gated. The race window (live POST hasn't yet errored out but
-      // user already went to background) opens a second SSE we'll close
-      // when the original POST's terminal arrives — non-fatal.
       if (RECONNECT_HANDLES.has(n.id)) continue;
+      // A live POST /api/chat reader is still consuming the same server
+      // run-bus we'd attach to. Opening a second SSE here would make every
+      // delta arrive twice — both subscribers feed emitStream, so the bus
+      // pending buffer accumulates each chunk twice and the DOM streamRef
+      // writes each chunk twice (visible as "ABCAB" interleaved doubling).
+      // If the POST is actually dead, its reader will hit done/error and
+      // clear its STREAM_CONTROLLERS entry — the next visibilitychange or
+      // online event retries.
+      if (STREAM_CONTROLLERS.has(n.id)) continue;
       void attachReconnectStream(n.id, set, get);
     }
   },
