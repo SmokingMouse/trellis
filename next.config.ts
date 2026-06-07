@@ -11,7 +11,9 @@ const nextConfig: NextConfig = {
   // Codex SDK uses createRequire(import.meta.url) at runtime to resolve the
   // platform-specific CLI binary. Bundling breaks that resolution. Keep it
   // external so it runs from real node_modules.
-  serverExternalPackages: ["@openai/codex-sdk", "@openai/codex"],
+  // agent-gateway 是 server-only Node 包(spawn child_process),external 它从 node_modules
+  // 直接运行(dist 编译产物),不进 bundler。
+  serverExternalPackages: ["@openai/codex-sdk", "@openai/codex", "agent-gateway"],
   // Tunneled dev (Cloudflare CDN, etc.): some CDNs rewrite Next dev's
   // `Cache-Control: no-cache` into `max-age=14400`, so edits to globals.css
   // don't reach the browser for hours. `no-store` is one of the few

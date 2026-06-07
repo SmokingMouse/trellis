@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "agent-gateway": "file:../../agent-gateway",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
     "better-sqlite3": "^12.9.0",
