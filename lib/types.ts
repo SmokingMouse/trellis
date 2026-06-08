@@ -130,6 +130,9 @@ export type Session = {
   mode: string;
   // null in chat mode (no cwd binding); absolute path otherwise.
   workspacePath: string | null;
+  // D1: custom system prompt locked at creation (chat mode only).
+  // null = use the built-in default.
+  systemPrompt: string | null;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while

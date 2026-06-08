@@ -3,6 +3,9 @@ import { useState, useRef, useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ReferencePicker } from "./ReferencePicker";
 import { ModePicker } from "./ModePicker";
+import { SystemPromptPicker, FEYNMAN_PROMPT } from "./SystemPromptPicker";
+import { ZoneEditor } from "./ZoneEditor";
+import { isSendCombo, sendHint } from "@/lib/send-key";
 import {
   AttachmentPreview,
   uploadAttachment,
@@ -13,21 +16,65 @@ import type { NodeAttachment } from "@/lib/types";
 
 const MAX_ATTACHMENTS = 6;
 
+// B4: starter prompts shown on the empty first screen (chat mode) to lower
+// the blank-canvas barrier — click fills the input. Mirrors GPT's suggestions.
+const SUGGESTED_PROMPTS = [
+  "用类比讲清楚 TCP 和 UDP 的区别",
+  "帮我 review 一段代码的潜在 bug",
+  "解释 React useEffect 的依赖数组",
+  "把一段话润色得更专业",
+];
+
+// 费曼考官角色激活时的「讲解」起手式，替换默认的「提问」建议词，
+// 避免在「你讲、AI 挑漏洞」语境下还提示用户去提问。
+const FEYNMAN_STARTERS = [
+  "我来讲讲 TCP 三次握手为什么是三次……",
+  "我理解的 React 闭包陷阱是这样……",
+  "我试着解释一下数据库索引为什么能加速查询……",
+  "我来讲讲 HTTPS 是怎么保证安全的……",
+];
+
 export function QuestionInput() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [zoneOpen, setZoneOpen] = useState(false);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [skills, setSkills] = useState<{ name: string; description: string }[]>(
+    [],
+  );
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRoot = useSessionStore((s) => s.streamRoot);
   const draftMode = useSessionStore((s) => s.draftMode);
+  const draftSystemPrompt = useSessionStore((s) => s.draftSystemPrompt);
   const draftWorkspacePath = useSessionStore((s) => s.draftWorkspacePath);
+  // 费曼考官角色：输入框从「问问题」翻转成「讲解你的理解」。
+  const isFeynman = draftSystemPrompt === FEYNMAN_PROMPT;
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
+  // C4: skill picker shows whenever the agent can run skills — workspace/
+  // project always, plus chat with enhanced mode on (scratch workspace + full
+  // tools). Plain chat (claude or codex) can't run skills.
+  const skillCapable = draftMode !== "chat" || chatEnhanced;
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const setSendKey = useSessionStore((s) => s.setSendKey);
+  const historyDepth = useSessionStore((s) => s.historyDepth);
+  const setHistoryDepth = useSessionStore((s) => s.setHistoryDepth);
 
   useEffect(() => {
     ref.current?.focus();
   }, []);
+
+  // C4: lazily load the skill list once the user is in a tool-capable mode.
+  useEffect(() => {
+    if (!skillCapable || skills.length) return;
+    fetch("/api/skills")
+      .then((r) => r.json())
+      .then((d) => setSkills(d.skills ?? []))
+      .catch(() => {});
+  }, [skillCapable, skills.length]);
 
   // Stage 14: Workspace / Project draft modes need a workspace path
   // chosen before submit.
@@ -129,11 +176,25 @@ export function QuestionInput() {
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (isSendCombo(e, sendKey)) {
       e.preventDefault();
       submit();
     }
   };
+
+  // C4: skill picker — active in workspace/project while the user types a
+  // leading "/name" token (no space yet). Selecting fills "/name " so claude
+  // (which handles skills natively) runs it when sent.
+  const skillQuery =
+    skillCapable && q.startsWith("/") && !q.includes(" ")
+      ? q.slice(1).toLowerCase()
+      : null;
+  const matchedSkills =
+    skillQuery !== null
+      ? skills
+          .filter((s) => s.name.toLowerCase().includes(skillQuery))
+          .slice(0, 8)
+      : [];
 
   const atLimit = pending.length >= MAX_ATTACHMENTS;
   const submitDisabled =
@@ -159,6 +220,24 @@ export function QuestionInput() {
         <div className="mb-3 flex justify-center">
           <ModePicker />
         </div>
+        {draftMode === "chat" && (
+          <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
+            <SystemPromptPicker />
+            <button
+              type="button"
+              onClick={() => setChatEnhanced(!chatEnhanced)}
+              title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
+              className={`px-3 py-1.5 rounded-full border text-[13px] inline-flex items-center gap-1.5 transition-colors ${
+                chatEnhanced
+                  ? "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200"
+                  : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:border-stone-400 dark:hover:border-stone-500"
+              }`}
+            >
+              <span aria-hidden>⚡</span>
+              <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
+            </button>
+          </div>
+        )}
         <div
           className={`bg-white dark:bg-stone-900 border rounded-xl shadow-sm overflow-hidden transition-colors ${
             dragOver
@@ -189,21 +268,42 @@ export function QuestionInput() {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
             onPaste={handlePaste}
-            placeholder="例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片可加入提问。"
+            placeholder={
+              isFeynman
+                ? "讲讲你对某个概念的理解——AI 会复述、挑漏洞、追问你没讲清的地方。讲不清的点，选中它 ⌘K 开子节点继续深讲。"
+                : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片可加入提问。"
+            }
             rows={4}
             className="w-full px-5 py-4 outline-none resize-none text-[15px] leading-relaxed bg-transparent text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500"
             disabled={busy}
           />
           <div className="border-t border-stone-100 dark:border-stone-800 px-4 py-2 flex items-center justify-between gap-3">
             <div className="text-xs text-stone-400 dark:text-stone-500 flex-1 min-w-0">
-              <kbd className="bg-stone-100 dark:bg-stone-800 dark:text-stone-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                ⌘↩
-              </kbd>{" "}
-              提交 ·{" "}
-              <kbd className="bg-stone-100 dark:bg-stone-800 dark:text-stone-300 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                Enter
-              </kbd>{" "}
-              换行
+              <button
+                type="button"
+                onClick={() =>
+                  setSendKey(sendKey === "enter" ? "mod-enter" : "enter")
+                }
+                title="点击切换发送快捷键（Enter / ⌘Enter）"
+                className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+              >
+                <span>{sendHint(sendKey)}</span>
+                <span className="opacity-50" aria-hidden>
+                  ⇄
+                </span>
+              </button>
+              <span className="mx-1.5 text-stone-300 dark:text-stone-600">·</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setHistoryDepth(historyDepth >= 8 ? 2 : historyDepth + 2)
+                }
+                title="对话携带的历史层数（越大越不易丢上下文，但更费 token；分叉对话时生效）"
+                className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+              >
+                <span aria-hidden>📚</span>
+                <span>上下文 {historyDepth} 层</span>
+              </button>
             </div>
             <input
               ref={fileInputRef}
@@ -213,6 +313,16 @@ export function QuestionInput() {
               onChange={handlePicked}
               className="hidden"
             />
+            <button
+              type="button"
+              onClick={() => setZoneOpen(true)}
+              disabled={busy}
+              title="进入专注写作模式（全屏 Markdown 编辑 + 预览）"
+              className="text-xs text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800"
+            >
+              <span aria-hidden>⛶</span>
+              <span className="hidden sm:inline">专注写作</span>
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -241,6 +351,47 @@ export function QuestionInput() {
             </button>
           </div>
         </div>
+        {matchedSkills.length > 0 && (
+          <div className="mt-2 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-sm overflow-hidden max-h-64 overflow-y-auto">
+            {matchedSkills.map((s) => (
+              <button
+                key={s.name}
+                type="button"
+                onClick={() => {
+                  setQ(`/${s.name} `);
+                  ref.current?.focus();
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
+              >
+                <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
+                  /{s.name}
+                </div>
+                {s.description && (
+                  <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                    {s.description}
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+        {draftMode === "chat" && !q.trim() && (
+          <div className="mt-4 flex flex-wrap gap-2 justify-center">
+            {(isFeynman ? FEYNMAN_STARTERS : SUGGESTED_PROMPTS).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setQ(s);
+                  ref.current?.focus();
+                }}
+                className="px-3 py-1.5 rounded-full border border-stone-200 dark:border-stone-700 bg-white/60 dark:bg-stone-900/60 text-stone-600 dark:text-stone-300 text-[13px] hover:border-stone-400 dark:hover:border-stone-500 hover:bg-white dark:hover:bg-stone-800 transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="mt-5 flex items-center gap-3 justify-center text-xs">
           <div className="h-px flex-1 max-w-[80px] bg-stone-200 dark:bg-stone-800" />
           <span className="text-stone-400 dark:text-stone-500">或</span>
@@ -261,6 +412,26 @@ export function QuestionInput() {
       </div>
       {pickerOpen && (
         <ReferencePicker onClose={() => setPickerOpen(false)} />
+      )}
+      {zoneOpen && (
+        <ZoneEditor
+          value={q}
+          onChange={setQ}
+          onSubmit={() => {
+            if (submitDisabled) return;
+            setZoneOpen(false);
+            submit();
+          }}
+          onClose={() => setZoneOpen(false)}
+          title={isFeynman ? "讲讲你的理解" : "专注写作"}
+          placeholder={
+            isFeynman
+              ? "讲讲你对某个概念的理解——尽量讲透，AI 会复述、挑漏洞、追问。"
+              : "在这里专注写下你的问题，支持 Markdown……"
+          }
+          submitLabel={submitLabel}
+          submitDisabled={submitDisabled}
+        />
       )}
     </div>
   );

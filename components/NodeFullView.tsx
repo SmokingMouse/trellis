@@ -8,6 +8,11 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { CopyButton } from "./CopyButton";
+import { isSendCombo, sendHint } from "@/lib/send-key";
+import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { SkillPickerList } from "./SkillPickerList";
+import { ZoneEditor } from "./ZoneEditor";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode, NodeAttachment, ParentAnchor } from "@/lib/types";
 import { buildNodeIndex } from "@/lib/node-index";
@@ -18,6 +23,11 @@ import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
+// A1: while streaming we render markdown live but skip rehypeRaw — mid-stream
+// text often contains a half-typed HTML tag, and raw-HTML parsing on each
+// frame is both wasteful and can throw on malformed fragments. Highlighting
+// alone is enough for the live view; the final render uses REHYPE_FULL.
+const REHYPE_STREAMING = [rehypeHighlight];
 
 type MobileSelection = { text: string; nodeId: string };
 
@@ -176,7 +186,7 @@ export function NodeFullView() {
   }
 
   return (
-    <div className="fixed inset-0 pt-12 flex flex-col bg-stone-50 dark:bg-stone-950">
+    <div className="fixed inset-0 pt-12 flex flex-col bg-stone-100 dark:bg-stone-950">
       <SubBar
         onShowCanvas={onShowCanvas}
         onShowTree={() => setTreeOpen(true)}
@@ -185,7 +195,7 @@ export function NodeFullView() {
         nodeIndex={currentIndex}
       />
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 py-4">
+        <div className="max-w-3xl mx-auto my-5 bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-sm px-6 py-6">
           {node.kind === "reference" ? (
             <ReferenceFullBody key={node.id} node={node} />
           ) : (
@@ -212,6 +222,7 @@ export function NodeFullView() {
                 </button>
               )}
               <QuestionBlock
+                nodeId={node.id}
                 question={node.question}
                 attachments={node.attachments}
               />
@@ -229,26 +240,28 @@ export function NodeFullView() {
           )}
         </div>
       </div>
-      <div className="border-t border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shrink-0">
-        {anchorSel ? (
-          <SelectionBar
-            selection={anchorSel}
-            onClose={() => {
-              setAnchorSel(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-          />
-        ) : (
-          <>
-            <BranchStrip
-              parent={parent}
-              siblings={siblings}
-              childNodes={children}
-              onPick={setActiveNode}
+      <div className="border-t border-stone-200/80 dark:border-stone-800 bg-white/80 dark:bg-stone-900/80 backdrop-blur shrink-0">
+        <div className="max-w-3xl mx-auto">
+          {anchorSel ? (
+            <SelectionBar
+              selection={anchorSel}
+              onClose={() => {
+                setAnchorSel(null);
+                window.getSelection()?.removeAllRanges();
+              }}
             />
-            <FollowupBar node={node} />
-          </>
-        )}
+          ) : (
+            <>
+              <BranchStrip
+                parent={parent}
+                siblings={siblings}
+                childNodes={children}
+                onPick={setActiveNode}
+              />
+              <FollowupBar node={node} />
+            </>
+          )}
+        </div>
       </div>
       <NodeTreeOverlay open={treeOpen} onClose={() => setTreeOpen(false)} />
     </div>
@@ -272,7 +285,7 @@ function SubBar({
   const confirmDelete = useConfirmDelete();
   const canDelete = sessionRootId !== node.id;
   return (
-    <div className="px-2 py-1.5 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 flex items-center gap-1.5 text-xs shrink-0">
+    <div className="px-2 py-1.5 border-b border-stone-200/80 dark:border-stone-800 bg-white/80 dark:bg-stone-900/80 backdrop-blur flex items-center gap-1.5 text-xs shrink-0">
       <button
         onClick={onShowCanvas}
         className="px-2 py-1 rounded text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 active:bg-stone-200 dark:active:bg-stone-700 flex items-center gap-1 shrink-0"
@@ -373,19 +386,211 @@ function SubBar({
   );
 }
 
+// D5: regenerate the same question as a NEW sibling (a second "version"),
+// rather than overwriting in place like retry. The existing sibling chips in
+// BranchStrip then let the user compare the variants side by side.
+function RegenerateVariantButton({
+  nodeId,
+  question,
+}: {
+  nodeId: string;
+  question: string;
+}) {
+  const editNode = useSessionStore((s) => s.editNode);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        editNode(nodeId, question);
+      }}
+      title="用相同问题再生成一个版本（新建兄弟节点，可在分支条对比）"
+      className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+    >
+      ↻ 再答一版
+    </button>
+  );
+}
+
+// C2 (memory bridge): save this node's insight into ~/.claude/memory/ so
+// future Claude sessions can recall it. Popover lets the user edit the
+// title/content + pick a memory type before writing (write is user-triggered).
+function MemorySaveButton({
+  title,
+  content,
+}: {
+  title: string;
+  content: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [t, setT] = useState(title);
+  const [c, setC] = useState(content);
+  const [type, setType] = useState("reference");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    if (!c.trim() || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: t, content: c, type }),
+      });
+      if (res.ok) {
+        setSaved(true);
+        window.setTimeout(() => {
+          setSaved(false);
+          setOpen(false);
+        }, 1200);
+      }
+    } catch {
+      /* network failure — leave popover open so the user can retry */
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setT(title);
+          setC(content);
+          setOpen((v) => !v);
+        }}
+        title="沉淀到 Claude 记忆（~/.claude/memory，后续会话可召回）"
+        className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        🧠 存到记忆
+      </button>
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div className="absolute z-50 right-0 mt-2 w-[320px] bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl p-3 text-left">
+            <div className="text-[11px] text-stone-500 dark:text-stone-400 mb-2">
+              沉淀到 <code className="text-[10px]">~/.claude/memory/</code>，后续 Claude 会话可召回
+            </div>
+            <input
+              value={t}
+              onChange={(e) => setT(e.target.value)}
+              placeholder="一句话描述（标题）"
+              className="w-full mb-2 px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[13px] text-stone-800 dark:text-stone-200 outline-none focus:border-stone-400"
+            />
+            <textarea
+              value={c}
+              onChange={(e) => setC(e.target.value)}
+              rows={4}
+              placeholder="要记住的内容"
+              className="w-full mb-2 px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[13px] text-stone-800 dark:text-stone-200 outline-none resize-none focus:border-stone-400"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="px-2 py-1 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[12px] text-stone-700 dark:text-stone-300 outline-none"
+              >
+                <option value="reference">reference</option>
+                <option value="project">project</option>
+                <option value="user">user</option>
+                <option value="feedback">feedback</option>
+              </select>
+              <button
+                onClick={save}
+                disabled={!c.trim() || saving}
+                className="px-3 py-1 rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[12px] disabled:opacity-40 hover:bg-stone-800 dark:hover:bg-stone-300"
+              >
+                {saved ? "✓ 已存" : saving ? "存入中…" : "存入"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function QuestionBlock({
+  nodeId,
   question,
   attachments,
 }: {
+  nodeId: string;
   question: string;
   attachments: NodeAttachment[];
 }) {
+  const editNode = useSessionStore((s) => s.editNode);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(question);
+
+  const submit = () => {
+    const t = text.trim();
+    if (!t) return;
+    setEditing(false);
+    editNode(nodeId, t);
+  };
+  const cancel = () => {
+    setEditing(false);
+    setText(question);
+  };
+
+  if (editing) {
+    return (
+      <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 rounded-lg px-4 py-3 mb-4">
+        <textarea
+          value={text}
+          autoFocus
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (isSendCombo(e, sendKey)) {
+              e.preventDefault();
+              submit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          rows={3}
+          className="w-full resize-none px-3 py-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-stone-900 text-[15px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 leading-relaxed"
+        />
+        <div className="flex items-center justify-between gap-2 mt-2">
+          <span className="text-[11px] text-stone-400 dark:text-stone-500 min-w-0 truncate">
+            改问法会新建一个分支，保留原问答（{sendHint(sendKey)}）
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={cancel}
+              className="px-2.5 py-1 text-[12px] text-stone-500 hover:text-stone-900 dark:hover:text-stone-100"
+            >
+              取消
+            </button>
+            <button
+              onClick={submit}
+              disabled={!text.trim()}
+              className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-[12px] disabled:opacity-40 hover:bg-indigo-700 active:scale-95 transition-transform"
+            >
+              ↻ 重问
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-lg px-4 py-3 mb-4 flex items-start gap-2.5">
-      <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center shrink-0 font-medium">
+    <div className="group bg-indigo-50/60 dark:bg-indigo-950/30 border-l-[3px] border-l-indigo-500 rounded-lg px-4 py-3 mb-5 flex items-start gap-3">
+      <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center shrink-0 font-medium shadow-sm">
         你
       </div>
-      <div className="text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium whitespace-pre-wrap min-w-0">
+      <div className="flex-1 text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed pt-1 font-medium whitespace-pre-wrap min-w-0">
         {question}
         {attachments.length > 0 && (
           <div className="mt-2 font-normal">
@@ -393,6 +598,30 @@ function QuestionBlock({
           </div>
         )}
       </div>
+      <button
+        onClick={() => {
+          setText(question);
+          setEditing(true);
+        }}
+        title="编辑问题（会新建一个分支重问）"
+        aria-label="编辑问题"
+        className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-md text-stone-500 dark:text-stone-400 opacity-60 sm:opacity-0 group-hover:opacity-100 hover:bg-white dark:hover:bg-stone-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-opacity"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -564,16 +793,30 @@ function ResponseBody({ node }: { node: ChatNode }) {
     suspended: isStreaming,
   });
 
-  // DOM-direct streaming sink (same pattern as ChatNode); see lib/stream-bus.ts.
-  const streamRef = useRef<HTMLDivElement>(null);
+  // A1: live markdown render while streaming. Accumulate deltas in a ref and
+  // flush to state on requestAnimationFrame (coalescing token bursts to one
+  // re-render per frame), then render through ReactMarkdown so code/lists/
+  // tables format as they arrive — matching GPT/Claude. Affordable here
+  // because NodeFullView is a single mounted view, not inside the ReactFlow
+  // canvas (ChatNode deliberately keeps the textContent-direct sink there).
+  const [liveText, setLiveText] = useState("");
   useEffect(() => {
     if (!isStreaming) return;
-    const el = streamRef.current;
-    if (!el) return;
-    el.textContent = node.response + getStreamPending(node.id);
-    return subscribeStream(node.id, (delta) => {
-      el.textContent = (el.textContent ?? "") + delta;
+    let raf = 0;
+    let buf = node.response + getStreamPending(node.id);
+    setLiveText(buf);
+    const flush = () => {
+      raf = 0;
+      setLiveText(buf);
+    };
+    const unsub = subscribeStream(node.id, (delta) => {
+      buf += delta;
+      if (!raf) raf = requestAnimationFrame(flush);
     });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      unsub();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, node.id]);
 
@@ -582,24 +825,52 @@ function ResponseBody({ node }: { node: ChatNode }) {
       ref={bodyRef}
       data-chat-node-id={node.id}
       onClick={onMarkClick}
-      className="md-body text-[14.5px] text-stone-700 dark:text-stone-300 leading-relaxed"
+      className="md-body text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed"
     >
       {isStreaming ? (
-        <>
-          <div
-            ref={streamRef}
-            className="whitespace-pre-wrap break-words leading-relaxed"
-          />
-          <span className="streaming-cursor" />
-        </>
+        liveText ? (
+          <>
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              rehypePlugins={REHYPE_STREAMING}
+              components={MD_COMPONENTS}
+            >
+              {liveText}
+            </ReactMarkdown>
+            <span className="streaming-cursor" />
+          </>
+        ) : (
+          // First token hasn't arrived yet — show an animated indicator
+          // instead of a blank pane (the "no streaming" complaint).
+          <div className="flex items-center gap-1.5 py-2 text-stone-400 dark:text-stone-500">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse [animation-delay:150ms]" />
+            <span className="w-2 h-2 rounded-full bg-indigo-300 animate-pulse [animation-delay:300ms]" />
+            <span className="ml-1.5 text-[13px]">正在生成…</span>
+          </div>
+        )
       ) : node.response ? (
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_FULL}
-          components={MD_COMPONENTS}
-        >
-          {node.response}
-        </ReactMarkdown>
+        <>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_FULL}
+            components={MD_COMPONENTS}
+          >
+            {node.response}
+          </ReactMarkdown>
+          <div className="mt-3 flex justify-end gap-2">
+            <RegenerateVariantButton nodeId={node.id} question={node.question} />
+            <MemorySaveButton
+              title={node.topicLabel ?? node.question}
+              content={node.response}
+            />
+            <CopyButton
+              text={node.response}
+              label="复制全文"
+              className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+            />
+          </div>
+        </>
       ) : (
         <div className="text-stone-400 dark:text-stone-500 italic flex items-center gap-2">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
@@ -720,9 +991,17 @@ function SelectionBar({
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
+  const [zoneOpen, setZoneOpen] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const addNote = useSessionStore((s) => s.addNote);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const sessionMode = useSessionStore((s) => s.session?.mode);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const matchedSkills = useSkillSuggestions(
+    text,
+    sessionMode !== "chat" || chatEnhanced,
+  );
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const captureNote = async () => {
@@ -771,7 +1050,14 @@ function SelectionBar({
           ✕
         </button>
       </div>
-      <div className="px-3 py-2 flex items-end gap-2">
+      <div className="relative px-3 py-2 flex items-end gap-2">
+        <SkillPickerList
+          skills={matchedSkills}
+          onPick={(name) => {
+            setText(`/${name} `);
+            ref.current?.focus();
+          }}
+        />
         <button
           onClick={captureNote}
           disabled={savingNote}
@@ -789,18 +1075,26 @@ function SelectionBar({
             <path d="M12 2C9.243 2 7 4.243 7 7v6.5l-2.707 2.707A1 1 0 0 0 5 18h4v3a1 1 0 1 0 2 0v-3h2v3a1 1 0 1 0 2 0v-3h4a1 1 0 0 0 .707-1.707L17 13.5V7c0-2.757-2.243-5-5-5z" />
           </svg>
         </button>
+        <button
+          onClick={() => setZoneOpen(true)}
+          title="专注写作模式（全屏 Markdown 编辑 + 预览）"
+          className="shrink-0 h-[38px] w-[38px] rounded-lg bg-white dark:bg-stone-900 border border-amber-400 dark:border-amber-700 text-amber-700 dark:text-amber-300 flex items-center justify-center active:scale-95 transition-transform"
+          aria-label="专注写作"
+        >
+          <span aria-hidden>⛶</span>
+        </button>
         <textarea
           ref={ref}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            if (isSendCombo(e, sendKey)) {
               e.preventDefault();
               submit();
             }
           }}
           rows={1}
-          placeholder="针对选中内容追问…（⌘↩ 提交）"
+          placeholder={`针对选中内容追问…（${sendHint(sendKey)}）`}
           className="flex-1 min-h-[38px] max-h-[120px] resize-none px-3 py-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-stone-900 text-[14px] text-stone-900 dark:text-stone-100 outline-none focus:border-amber-500 dark:focus:border-amber-600 placeholder:text-stone-400 dark:placeholder:text-stone-500"
         />
         <button
@@ -823,16 +1117,40 @@ function SelectionBar({
           </svg>
         </button>
       </div>
+      {zoneOpen && (
+        <ZoneEditor
+          value={text}
+          onChange={setText}
+          onSubmit={() => {
+            if (!text.trim()) return;
+            setZoneOpen(false);
+            submit();
+          }}
+          onClose={() => setZoneOpen(false)}
+          title={`针对「${truncate(selection.text, 30)}」追问`}
+          placeholder="专注写下针对选中内容的追问，支持 Markdown……"
+          submitLabel="提问"
+          submitDisabled={!text.trim()}
+        />
+      )}
     </div>
   );
 }
 
 function FollowupBar({ node }: { node: ChatNode }) {
   const [text, setText] = useState("");
+  const [zoneOpen, setZoneOpen] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const abortStream = useSessionStore((s) => s.abortStream);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const sessionMode = useSessionStore((s) => s.session?.mode);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
   const isStreaming = node.status === "streaming";
+  const matchedSkills = useSkillSuggestions(
+    text,
+    sessionMode !== "chat" || chatEnhanced,
+  );
 
   useEffect(() => {
     if (ref.current) {
@@ -870,25 +1188,73 @@ function FollowupBar({ node }: { node: ChatNode }) {
   }
 
   return (
-    <div className="px-3 py-2 flex items-end gap-2">
+    <div className="relative px-3 py-2 flex items-end gap-2">
+      {matchedSkills.length > 0 && (
+        <div className="absolute bottom-full left-3 right-3 mb-1 z-10 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+          {matchedSkills.map((s) => (
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => {
+                setText(`/${s.name} `);
+                ref.current?.focus();
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
+            >
+              <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
+                /{s.name}
+              </div>
+              {s.description && (
+                <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                  {s.description}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={() => setZoneOpen(true)}
+        title="专注写作模式（全屏 Markdown 编辑 + 预览）"
+        className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-stone-500 dark:text-stone-400 flex items-center justify-center hover:text-stone-900 dark:hover:text-stone-100 hover:border-stone-400 active:scale-95 transition-all shadow-sm"
+        aria-label="专注写作"
+      >
+        <span aria-hidden>⛶</span>
+      </button>
       <textarea
         ref={ref}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (isSendCombo(e, sendKey)) {
             e.preventDefault();
             submit();
           }
         }}
         rows={1}
-        placeholder="继续追问，创建子节点…（⌘↩ 提交）"
-        className="flex-1 min-h-[38px] max-h-[120px] resize-none px-3 py-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-[14px] text-stone-900 dark:text-stone-100 outline-none focus:border-stone-500 dark:focus:border-stone-500 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+        placeholder={`继续追问，创建子节点…（${sendHint(sendKey)}）`}
+        className="flex-1 min-h-[44px] max-h-[140px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm"
       />
+      {zoneOpen && (
+        <ZoneEditor
+          value={text}
+          onChange={setText}
+          onSubmit={() => {
+            if (!text.trim()) return;
+            setZoneOpen(false);
+            submit();
+          }}
+          onClose={() => setZoneOpen(false)}
+          title="继续追问"
+          placeholder="专注写下你的追问，支持 Markdown……"
+          submitLabel="提问"
+          submitDisabled={!text.trim()}
+        />
+      )}
       <button
         onClick={submit}
         disabled={!text.trim()}
-        className="shrink-0 h-[38px] w-[38px] rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+        className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
         aria-label="提问"
       >
         <svg
@@ -1015,7 +1381,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
         ref={bodyRef}
         data-chat-node-id={node.id}
         onClick={onMarkClick}
-        className="md-body text-[14.5px] text-stone-700 dark:text-stone-300 leading-relaxed"
+        className="md-body text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed"
       >
         {ref.contentMd ? (
           <ReactMarkdown

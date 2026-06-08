@@ -70,6 +70,13 @@ export type StreamRequest = {
   // (provider reads it as needed) plus mime so the right wrapper is
   // emitted. Empty array when none.
   attachments?: { path: string; mime: string }[];
+  // D1: chat-mode custom system prompt. null/undefined → provider uses
+  // DEFAULT_SYSTEM_PROMPT. Ignored by workspace/project (they use CLAUDE.md).
+  systemPrompt?: string | null;
+  // chat "enhanced mode": when true, chat gets a scratch workspace + full
+  // permission (no sandbox) so it can run skills + the web — YOLO. Default
+  // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
+  chatEnhanced?: boolean;
 };
 
 export interface LLMProvider {

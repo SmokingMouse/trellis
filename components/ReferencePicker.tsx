@@ -18,6 +18,32 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
       ? "由本机 codex CLI + 已配置的 MCP servers / plugins 决定怎么抓——YOLO 模式下它能直接 spawn feishu-cli、yt-dlp、curl 等工具。需要授权的平台预先 auth login 即可。"
       : "由本机 claude + 已安装的 skills 决定怎么抓——飞书文档自动走 feishu-cli，YouTube 走字幕 skill，普通网页走 web-fetch，等等。需要授权的平台预先 auth login 即可。";
   const firstField = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // C1 (file attachment, text/code subset): read a local text/code file into
+  // the paste box (wrapped as a code block). Binary formats (PDF/Excel/Word)
+  // need a parser dependency — out of scope here; accept whitelists text-ish
+  // extensions so FileReader.readAsText doesn't produce garbage.
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      setError("文件过大（>1MB），请改为粘贴关键片段");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const ext = file.name.includes(".") ? file.name.split(".").pop()! : "";
+      setPastedText("```" + ext + "\n" + text + "\n```");
+      setTitle((t) => t || file.name);
+      setMode("paste");
+      setError(null);
+    };
+    reader.onerror = () => setError("读取文件失败");
+    reader.readAsText(file);
+  };
 
   useEffect(() => {
     firstField.current?.focus();
@@ -134,9 +160,24 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
                 rows={10}
                 className="w-full px-3 py-2 rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-stone-900 dark:text-stone-100 text-sm outline-none focus:border-stone-500 dark:focus:border-stone-500 resize-none font-mono leading-relaxed placeholder:text-stone-400 dark:placeholder:text-stone-500"
               />
-              <div className="text-[11px] text-stone-400 dark:text-stone-500 mt-1">
-                ⌘↩ 创建 · {pastedText.length} 字
+              <div className="text-[11px] text-stone-400 dark:text-stone-500 mt-1 flex items-center justify-between gap-2">
+                <span>⌘↩ 创建 · {pastedText.length} 字</span>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="inline-flex items-center gap-1 text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 px-1.5 py-0.5 rounded hover:bg-stone-100 dark:hover:bg-stone-800"
+                  title="读取本地代码/文本文件（PDF/Excel/Word 暂需粘贴或后续支持）"
+                >
+                  📎 从文件读取
+                </button>
               </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".txt,.md,.markdown,.js,.jsx,.ts,.tsx,.py,.json,.csv,.html,.css,.scss,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.bash,.zsh,.yml,.yaml,.xml,.sql,.toml,.ini,.conf,.log,.rb,.php,.swift,.kt,.lua,.r,.vue,.svelte"
+                onChange={handleFile}
+                className="hidden"
+              />
             </>
           ) : (
             <>

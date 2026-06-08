@@ -122,6 +122,18 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE sessions ADD COLUMN workspace_path TEXT");
   }
 
+  // D1: per-session custom system prompt (chat mode only — workspace/project
+  // get their persona from CLAUDE.md + full tools). NULL = use the built-in
+  // DEFAULT_SYSTEM_PROMPT. Locked at session creation like mode/workspace.
+  const hasSystemPrompt = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'system_prompt'",
+    )
+    .get();
+  if (!hasSystemPrompt) {
+    db.exec("ALTER TABLE sessions ADD COLUMN system_prompt TEXT");
+  }
+
   // Idempotent column add for short LLM-generated topic label per node.
   // Used by overview rendering (LoD) and outline. Null until first done.
   const hasTopicLabel = db

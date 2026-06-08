@@ -4,7 +4,12 @@
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
 import { buildPrompt } from "./prompt";
 import { CodexBackend } from "agent-gateway";
-import { modeToRunOptions, toStreamEvent, buildProjectPrompt } from "./sdk-adapter";
+import {
+  modeToRunOptions,
+  toStreamEvent,
+  buildProjectPrompt,
+  ensureChatScratch,
+} from "./sdk-adapter";
 
 export function makeCodexProvider(
   opts: { mode?: Mode; model?: string } = {},
@@ -17,7 +22,13 @@ export function makeCodexProvider(
         mode === "project"
           ? buildProjectPrompt(req.question, req.parentAnchor)
           : buildPrompt(req.history, req.question, req.parentAnchor);
-      const runOpts = { ...modeToRunOptions(mode, opts.model ?? "gpt-5.5", req), signal: req.signal };
+      // Enhanced chat points the workspace at the scratch dir (via
+      // modeToRunOptions); make sure it exists. Pure chat skips it.
+      if (mode === "chat" && req.chatEnhanced) ensureChatScratch();
+      const runOpts = {
+        ...modeToRunOptions(mode, opts.model ?? "gpt-5.5", req),
+        signal: req.signal,
+      };
       for await (const e of backend.run(prompt, runOpts)) {
         const se = toStreamEvent(e, mode);
         if (se) yield se;

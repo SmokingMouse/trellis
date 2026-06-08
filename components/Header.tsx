@@ -60,6 +60,9 @@ export function Header() {
   const noteCount = useSessionStore((s) => s.notes.length);
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
+  const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const nodeCount = Object.keys(nodes).length;
   // Aggregate four buckets independently — total input vs total output vs
   // total cache leverage. Computed via useMemo (NOT inside the Zustand
@@ -149,6 +152,48 @@ export function Header() {
         </button>
         {session && (
           <>
+            <button
+              onClick={() => setOutlineOpen(true)}
+              title="思维树"
+              aria-label="思维树"
+              className="md:hidden px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <line x1="9" y1="6" x2="21" y2="6" />
+                <line x1="9" y1="12" x2="21" y2="12" />
+                <line x1="9" y1="18" x2="21" y2="18" />
+                <circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none" />
+                <circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none" />
+                <circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+            {session.mode === "chat" && (
+              <button
+                onClick={() => setChatEnhanced(!chatEnhanced)}
+                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
+                aria-label="增强模式"
+                className={`px-2 py-1 rounded inline-flex items-center gap-1 transition-colors ${
+                  chatEnhanced
+                    ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300"
+                    : "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                }`}
+              >
+                <span aria-hidden>⚡</span>
+                <span className="hidden sm:inline text-[11px]">
+                  {chatEnhanced ? "增强·开" : "增强"}
+                </span>
+              </button>
+            )}
             <span className="hidden md:inline">{nodeCount} 节点</span>
             <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
             <span
@@ -174,7 +219,7 @@ export function Header() {
               <>
                 <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
                 <span
-                  className={`hidden md:inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
+                  className={`inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
                   title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(CONTEXT_WINDOW)} tokens (${ctx.percent.toFixed(1)}%)。新提问可清空。`}
                 >
                   🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%

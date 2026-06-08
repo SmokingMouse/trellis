@@ -14,6 +14,7 @@ import {
   getStreamPending,
 } from "@/lib/stream-bus";
 import { ancestorsOf, subtreeIds } from "@/lib/collapsed";
+import { type SendKey, SEND_KEY_DEFAULT, isSendKey } from "@/lib/send-key";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -27,6 +28,20 @@ const PROVIDER_KEY = "trellis-provider";
 // active sessions read their locked mode from the DB.
 const MODE_KEY = "trellis-mode";
 const WORKSPACE_KEY = "trellis-workspace";
+// D1: draft custom system prompt for new chat sessions (locked into the
+// session row on first POST, like draftMode/draftWorkspacePath).
+const SYSTEM_PROMPT_KEY = "trellis-system-prompt";
+// A4: global send-key preference (applies to all chat inputs immediately).
+const SEND_KEY_KEY = "trellis-send-key";
+// D2: how many ancestor turns chat/workspace fold into the prompt. Default 4
+// (was a hardcoded 2) — deeper context for branched conversations, at a token
+// cost the user can dial back. project mode ignores this (history is in the
+// resumed CLI session).
+const HISTORY_DEPTH_KEY = "trellis-history-depth";
+const DEFAULT_HISTORY_DEPTH = 4;
+// chat enhanced-mode toggle: when on, chat gets workspace+full (skills + web,
+// YOLO). Global runtime preference, default off. Sent on every chat request.
+const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 
 // Per-session collapsed-set persistence — sessionStorage so it survives
@@ -95,6 +110,32 @@ function loadDraftWorkspace(): string | null {
   return stored && stored.trim() ? stored : null;
 }
 
+function loadDraftSystemPrompt(): string | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(SYSTEM_PROMPT_KEY);
+  return stored && stored.trim() ? stored : null;
+}
+
+function loadSendKey(): SendKey {
+  if (typeof window === "undefined") return SEND_KEY_DEFAULT;
+  const stored = window.localStorage.getItem(SEND_KEY_KEY);
+  return isSendKey(stored) ? stored : SEND_KEY_DEFAULT;
+}
+
+function clampDepth(n: number): number {
+  return Number.isFinite(n) && n >= 1 && n <= 12 ? Math.round(n) : DEFAULT_HISTORY_DEPTH;
+}
+function loadHistoryDepth(): number {
+  if (typeof window === "undefined") return DEFAULT_HISTORY_DEPTH;
+  const raw = window.localStorage.getItem(HISTORY_DEPTH_KEY);
+  return raw ? clampDepth(parseInt(raw, 10)) : DEFAULT_HISTORY_DEPTH;
+}
+
+function loadChatEnhanced(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(CHAT_ENHANCED_KEY) === "1";
+}
+
 // API node → client node (add position field, drop nullable distinction)
 type ApiNode = Omit<ChatNode, "position" | "topicLabel"> & {
   topicLabel?: string | null;
@@ -119,6 +160,15 @@ type State = {
   // sessions row on first POST.
   draftMode: Mode;
   draftWorkspacePath: string | null;
+  // D1: draft system prompt for the next new chat session. null = use the
+  // built-in default. Only consumed when creating a brand-new session.
+  draftSystemPrompt: string | null;
+  // A4: send-key preference, applied live to every chat input.
+  sendKey: SendKey;
+  // D2: ancestor turns folded into chat/workspace prompts (1–12).
+  historyDepth: number;
+  // chat enhanced-mode (skills + web, YOLO). Global, default off.
+  chatEnhanced: boolean;
   // Bumps every time the server's session list might have changed —
   // SessionPicker watches this to refetch.
   sessionsRevision: number;
@@ -165,6 +215,10 @@ type State = {
   // both the ⌘P global keydown listener and the Header 🔍 button (mobile
   // entry point) can toggle the same modal.
   searchOpen: boolean;
+  // B1: mobile outline drawer visibility. Desktop shows the outline as a
+  // permanent left rail (md:block); mobile (which defaults to fullscreen,
+  // hiding the rail) opens it as a full-height drawer via a Header button.
+  outlineOpen: boolean;
   // Set of nodeIds whose subtree is currently folded — collapsed nodes
   // themselves stay visible, but every descendant is hidden from the
   // canvas (and the outline). Persisted to sessionStorage per-session
@@ -192,6 +246,8 @@ type Actions = {
   // currently active session.
   setDraftMode: (mode: Mode) => void;
   setDraftWorkspacePath: (path: string | null) => void;
+  setDraftSystemPrompt: (prompt: string | null) => void;
+  setSendKey: (key: SendKey) => void;
   setFullScreen: (v: boolean) => void;
   // Stream a new root question.
   // - default (no opts): creates a brand-new session + root node.
@@ -270,6 +326,12 @@ type Actions = {
   deleteNote: (noteId: string) => Promise<void>;
   setNotesOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
+  setOutlineOpen: (open: boolean) => void;
+  setHistoryDepth: (n: number) => void;
+  setChatEnhanced: (v: boolean) => void;
+  // A2: re-ask an existing node's question with an edited wording. Creates a
+  // new sibling (same parent + anchor) — original Q&A is preserved (Q1 = B).
+  editNode: (nodeId: string, newQuestion: string) => Promise<void>;
   // Toggle collapse on a node. No-op semantically meaningful even on
   // leaves (allows "pre-collapse" before children exist) but UIs should
   // hide the toggle when there are no descendants.
@@ -327,6 +389,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   provider: DEFAULT_PROVIDER,
   draftMode: "chat",
   draftWorkspacePath: null,
+  draftSystemPrompt: null,
+  sendKey: SEND_KEY_DEFAULT,
+  historyDepth: DEFAULT_HISTORY_DEPTH,
+  chatEnhanced: false,
   sessionsRevision: 0,
   fullScreen: false,
   fetchProgress: {},
@@ -335,6 +401,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   notes: [],
   notesOpen: false,
   searchOpen: false,
+  outlineOpen: false,
   collapsedNodeIds: new Set(),
   lastEditedNodeId: null,
 
@@ -343,6 +410,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       provider: loadProvider(),
       draftMode: loadDraftMode(),
       draftWorkspacePath: loadDraftWorkspace(),
+      draftSystemPrompt: loadDraftSystemPrompt(),
+      sendKey: loadSendKey(),
+      historyDepth: loadHistoryDepth(),
+      chatEnhanced: loadChatEnhanced(),
     });
     try {
       let targetId = sessionId;
@@ -486,15 +557,69 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  setDraftSystemPrompt: (prompt) => {
+    const v = prompt && prompt.trim() ? prompt : null;
+    set({ draftSystemPrompt: v });
+    if (typeof window !== "undefined") {
+      if (v) window.localStorage.setItem(SYSTEM_PROMPT_KEY, v);
+      else window.localStorage.removeItem(SYSTEM_PROMPT_KEY);
+    }
+  },
+
+  setSendKey: (key) => {
+    set({ sendKey: key });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SEND_KEY_KEY, key);
+    }
+  },
+
+  setHistoryDepth: (n) => {
+    const v = clampDepth(n);
+    set({ historyDepth: v });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(HISTORY_DEPTH_KEY, String(v));
+    }
+  },
+
+  setChatEnhanced: (v) => {
+    set({ chatEnhanced: v });
+    if (typeof window !== "undefined") {
+      if (v) window.localStorage.setItem(CHAT_ENHANCED_KEY, "1");
+      else window.localStorage.removeItem(CHAT_ENHANCED_KEY);
+    }
+  },
+
+  editNode: async (nodeId, newQuestion) => {
+    const node = get().nodes[nodeId];
+    if (!node) return;
+    const q = newQuestion.trim();
+    if (!q) return;
+    // A2 (roadmap Q1 = B): editing a question re-asks with the same lineage
+    // as a NEW sibling — the original Q&A is preserved, tree stays
+    // append-only (no destructive in-place edit / downstream wipe).
+    if (node.parentId) {
+      await get().streamBranch(node.parentId, q, node.parentAnchor ?? null);
+    } else {
+      await get().streamRoot(q, { attachToCurrentSession: true });
+    }
+  },
+
   streamRoot: async (question, opts) => {
-    const { provider, draftMode, draftWorkspacePath, session } = get();
+    const { provider, draftMode, draftWorkspacePath, draftSystemPrompt, session } =
+      get();
     const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
-    // Mode + workspace are only sent when creating a new session. When
-    // attaching to an existing session, the server reads them from the
-    // session row.
+    // Mode + workspace + systemPrompt are only sent when creating a new
+    // session. When attaching to an existing session, the server reads them
+    // from the locked session row. systemPrompt only applies to chat mode.
     const modeFields = sessionId
       ? {}
-      : { mode: draftMode, workspacePath: draftWorkspacePath };
+      : {
+          mode: draftMode,
+          workspacePath: draftWorkspacePath,
+          ...(draftMode === "chat" && draftSystemPrompt
+            ? { systemPrompt: draftSystemPrompt }
+            : {}),
+        };
     const attachments = opts?.attachments;
     const controller = new AbortController();
     try {
@@ -504,6 +629,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           question,
           provider,
           sessionId,
+          chatEnhanced: get().chatEnhanced,
           ...modeFields,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
@@ -534,6 +660,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           question,
           parentAnchor: anchor,
           provider,
+          historyDepth: get().historyDepth,
+          chatEnhanced: get().chatEnhanced,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
         handleStreamEvent(set, get, { focusNew, controller }),
@@ -577,7 +705,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     STREAM_CONTROLLERS.set(nodeId, controller);
     try {
       await runStream(
-        { kind: "retry", nodeId, provider },
+        { kind: "retry", nodeId, provider, historyDepth: get().historyDepth, chatEnhanced: get().chatEnhanced },
         handleStreamEvent(set, get, { controller }),
         controller.signal,
       );
@@ -917,6 +1045,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   setNotesOpen: (open) => set({ notesOpen: open }),
   setSearchOpen: (open) => set({ searchOpen: open }),
+  setOutlineOpen: (open) => set({ outlineOpen: open }),
 
   deleteNode: async (nodeId) => {
     const state = get();
@@ -1165,6 +1294,9 @@ type ChatRequestBody =
       // otherwise.
       mode?: Mode;
       workspacePath?: string | null;
+      // D1: chat-mode custom system prompt for a new session.
+      systemPrompt?: string | null;
+      chatEnhanced?: boolean;
       // Stage 15: image attachments uploaded via /api/uploads. Server
       // sanitizes + caps; omitted on retry (server re-reads from DB).
       attachments?: NodeAttachment[];
@@ -1175,12 +1307,16 @@ type ChatRequestBody =
       question: string;
       parentAnchor: ParentAnchor | null;
       provider: ProviderId;
+      historyDepth?: number;
+      chatEnhanced?: boolean;
       attachments?: NodeAttachment[];
     }
   | {
       kind: "retry";
       nodeId: string;
       provider: ProviderId;
+      historyDepth?: number;
+      chatEnhanced?: boolean;
     };
 
 type StreamEvent =

@@ -30,6 +30,9 @@ export type ApiSession = {
   mode: string;
   // null in 'chat' mode (no cwd binding); absolute path otherwise.
   workspacePath: string | null;
+  // D1: custom system prompt locked at creation (chat mode only).
+  // null = use DEFAULT_SYSTEM_PROMPT.
+  systemPrompt: string | null;
 };
 
 export type ApiNode = {
@@ -98,10 +101,11 @@ type SessionRow = {
   updated_at: number;
   context_mode: string;
   workspace_path: string | null;
+  system_prompt: string | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
-       context_mode, workspace_path`;
+       context_mode, workspace_path, system_prompt`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -192,6 +196,7 @@ function rowToSession(r: SessionRow): ApiSession {
     updatedAt: r.updated_at,
     mode: r.context_mode,
     workspacePath: r.workspace_path,
+    systemPrompt: r.system_prompt,
   };
 }
 
@@ -439,11 +444,13 @@ export function createSessionWithRoot(args: {
   now: number;
   mode?: string;
   workspacePath?: string | null;
+  systemPrompt?: string | null;
   attachments?: NodeAttachment[];
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
   const mode = args.mode ?? "chat";
   const workspacePath = args.workspacePath ?? null;
+  const systemPrompt = args.systemPrompt ?? null;
   const attachmentsJson =
     args.attachments && args.attachments.length > 0
       ? JSON.stringify(args.attachments)
@@ -451,8 +458,8 @@ export function createSessionWithRoot(args: {
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
-                             context_mode, workspace_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                             context_mode, workspace_path, system_prompt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -461,6 +468,7 @@ export function createSessionWithRoot(args: {
       args.now,
       mode,
       workspacePath,
+      systemPrompt,
     );
 
     db.prepare(

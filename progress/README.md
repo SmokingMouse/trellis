@@ -1,7 +1,17 @@
 # Trellis Progress
 
 ## Current Focus
-Stage 17 完成 — Tool call / Bash 可视化全链路落地。同 session 顺手做了三件中间事：手机搜索入口（Header 🔍 按钮）+ Chat 配色对比修复 + 画布 80/20 居中（lastEditedNodeId）+ **durable streams 改造**（spawn 跟 HTTP 解耦，client 断连/切后台/网络抖动不再杀生成）。`npm run build` ✓；端到端 curl 实测 `pwd` 单 Bash 调用被完整捕获，reconnect endpoint catchup 含 toolCalls。等浏览器实测。下一步进 Stage 18（Skill 调用入口）。
+**费曼学习法 Phase 1 已落地**（Session 28，轻量预设版，未实测）。继续按 [optimization-roadmap.md](optimization-roadmap.md)（替代 GPT 体验优化）实施第一阶段 P0。**用户要求「一口气全做完」。已完成 15 项**（全部 `npm run build` ✓）：
+- P0：A3 代码块/回复复制 · B2(并入) · D1 System Prompt 可配 · A4 Enter 发送 · A1 全屏流式 markdown · B1 移动端 Outline 抽屉 · A2 编辑=新分支重问 · C2 记忆桥接(写侧) · C1 文件附件(code/text 子集)
+- P1/P2：B5 a11y · B4 首屏建议 · A5 Alt+方向导航 · D2 上下文 depth 可调 · D5 多版本对比 · C4 Skill 入口
+
+**剩余（每项有明确状态，非遗漏）**：
+- C1 PDF/Excel/Word — 二进制需 npm 装 sheetjs/pdf/mammoth 解析（code/text 子集已做）
+- C5 / A6 / B3 — 评估低 ROI 暂缓（理由见 P1/P2 清单，简洁优先）
+- D4 thinking — SDK 无 thinking 事件，blocked；D3 工具闭环 — 疑底层已覆盖待确认
+- C3 语义检索（Q2 embedding 未决）· C6 图片生成（Q3 倾向不做，走 ai-legion）
+
+**全部待浏览器实测**（dev server 在 3001）。roadmap 的 Stage 20/22（plan 节点/subagent 可视化）仍属功能广度归原 roadmap。本轮补的是交互/UI/对话内核体验维度。
 
 ## Goals
 ### Short-term (MVP)
@@ -48,7 +58,92 @@ Stage 17 完成 — Tool call / Bash 可视化全链路落地。同 session 顺�
 - [ ] Stage 21: Memory 桥接（节点 ↔ ~/.claude/memory/ 双向）
 - [ ] Stage 22 (可选): Subagent 子树可视化
 
+### GPT 替代体验优化 → [optimization-roadmap.md](optimization-roadmap.md)
+体验深度维度（交互手感 / UI 精致 / 对话内核），与上面功能广度互补。第一阶段 P0：
+- [x] A3 代码块语言标签+复制 + 回复全文复制（+B2 并入）
+- [x] D1 System Prompt 可配（5 预设角色+自定义，per-session 锁定）
+- [x] A4 Enter 发送可配（默认 Enter 发送，对齐 GPT；可一键切回 ⌘Enter）
+- [x] A1 流式实时 markdown（NodeFullView 全屏；画布卡片维持 textContent 直写保性能）
+- [x] B1 移动端 Outline 抽屉（Header ☰ 开全屏抽屉，variant prop + page 顶层挂载；响应式卡片宽度评估后不做——600px 是 dagre 布局基准、移动端走全屏不看画布，保留）
+- [x] A2 编辑消息（全屏问题区铅笔→改问法重问；`editNode` 复用 streamBranch/streamRoot，Q1=B 新建 sibling、原问答保留无损）
+- [x] C2 记忆桥接（写侧）：新 `app/api/memory/route.ts` 写 `~/.claude/memory/{slug}-{hash}.md`（auto-memory 格式 + MEMORY.md 索引，防覆盖）；NodeFullView `MemorySaveButton` popover（标题/内容可编辑 + type 选择，用户点击触发写入）。自定义指令部分由 D1 覆盖。读侧（节点旁显示相关 memory + session init 注入）标注 follow-up。
+- [x] C1 文件附件（code/text 子集）：ReferencePicker 加「📎 从文件读取」，FileReader 读白名单扩展（.py/.ts/.md/.json/.csv 等 30+）→ 包代码块填入 paste reference（≤1MB）。**PDF/Excel/Word 未做**：二进制需 npm 装 sheetjs/pdf/mammoth 解析，留新上下文 + 依赖决策。
+
+**用户已确认「一口气全做完」。P1/P2 进度（含开放决策处理）：**
+- [x] B5 a11y（globals.css `:focus-visible` 键盘焦点环；userScalable 保留=画布需要）
+- [x] B4 首屏建议问题 chips（QuestionInput，chat 模式空输入时）
+- [x] D2 上下文 depth 可调（store historyDepth 默认 4=原硬编码 2 翻倍缓解深树丢上下文；footer 📚 stepper 2/4/6/8；全链路传 maxDepth 给 buildHistoryForNode）
+- [x] A5 节点键盘导航（Alt+方向键：上=父 / 下=首子 / 左右=兄弟；新 useNodeKeyboardNav hook）
+- [x] D5 同问多版本对比（「再答一版」= editNode 同问题建 sibling，复用兄弟条对比，零新机制）
+- [x] C4 Skill 入口（新 `/api/skills` 扫 `~/.claude/skills/*/SKILL.md` 取 name+desc；QuestionInput 输入 `/` 触发 picker 补全 `/name `，由 claude CLI 原生执行；仅 workspace/project 模式）
+- [ ] C5 模型 session 级 — **评估暂缓**：现全局切换已可用且更灵活，session 锁定反而削弱灵活性、且「锁定 vs 每轮可选」语义需产品决策，低 ROI
+- [ ] A6 命令面板 — **评估暂缓**：现有快捷键（J/K 未读、B 回父、F 全屏、⌘K 分叉、⌘P 搜索、Alt+方向导航）已覆盖高频操作，命令面板边际
+- [ ] B3 长回复折叠/TOC — **评估暂缓**：现 max-h 滚动 + 全屏阅读已覆盖核心阅读，TOC 边际（简洁优先）
+- [ ] C2 记忆桥接、C1 文件附件（见上 P0）
+- [ ] D4 thinking 可视化 — **疑似 blocked**：agent-gateway SDK 的 EventType 无 thinking 事件，需 SDK 支持，待确认
+- [ ] D3 工具结果闭环 — 待确认：tool result 回灌模型可能 agent-gateway/CLI 已自带，trellis 只做可视化
+- [ ] C3 语义检索 — **开放决策 Q2**（embedding API）未拍板，暂不做
+- [ ] C6 图片生成/语音 — **开放决策 Q3 倾向不做**（付费 API + 偏离单机定位，走 ai-legion skill）
+
 ## Session Log
+### Session 28 (2026-06-08)
+- **Done**: **费曼学习法 Phase 1（轻量版，今天可用）**。本质是反转 Trellis 的信息流——普通模式「你问→AI 答」，费曼模式「你讲→AI 当考官」，逼出理解漏洞；且费曼的「发现漏洞→补讲」循环天然 = Trellis 的「分叉子节点」（每个没讲清的点选中 ⌘K 开子节点深讲）。挂在现有 D1 系统提示词预设机制上，零 schema 改动：
+  - `components/SystemPromptPicker.tsx`：导出 `FEYNMAN_PROMPT` 常量（复述确认→漏洞清单→naive 追问的「复述+考官」角色，明确禁止 AI 替用户把概念补完整）；PRESETS 加「费曼考官」预设（排在苏格拉底导师后，二者正好相反：苏格拉底是 AI 引导你推导，费曼是你主动讲 AI 挑刺）。
+  - `components/QuestionInput.tsx`：import `FEYNMAN_PROMPT`，读 `draftSystemPrompt` 引用相等检测 `isFeynman`；激活时 textarea placeholder 翻转成「讲讲你的理解……选中讲不清的点 ⌘K 开子节点」+ 建议词从 `SUGGESTED_PROMPTS`（提问）切到 `FEYNMAN_STARTERS`（讲解起手式）。
+  - `npm run build` ✓。
+- **Done (续)**: **Zone 专注写作模式**（用户要「写回答时更好的体验 + Markdown 编辑」）。新 `components/ZoneEditor.tsx`——全屏 overlay 写作区：顶栏[编辑]/[预览]切换、Markdown 工具栏（⌘B 粗/⌘I 斜/行内代码/标题/引用/有序无序列表/链接，操作 textarea 选区）、居中大号沉浸编辑区、预览复用 `.md-body`+`MD_COMPONENTS`+同款 remark/rehype（和最终回答所见即所得一致）。可复用：parent 持有 value/onChange，退出 Zone 草稿无损留在原输入框。`npm run build` ✓（零新依赖）。
+- **Done (续2)**: **接入全部 4 个输入框 + 浏览器实测**（用户反馈「为啥没试渲染 / 只有首屏有，追问都没」，两点都对，已补）。
+  - 接入 `QuestionInput`（首屏）+ `ChatNode` FollowupInput（画布卡片）+ NodeFullView `FollowupBar` + `SelectionBar`——三个追问框各加「⛶」入口，复用同一 ZoneEditor。
+  - **实测抓到一个真 bug（光 build 看不出）**：`fixed inset-0` 被祖先 transform（ReactFlow 画布 / NodeFullView 全屏）限制，Zone 只占底部一条而非全屏。修法：ZoneEditor 用 `createPortal` 渲染到 `document.body` 逃出 transform 祖先。
+  - **agent-browser 实测全过**（截图 + eval 验证）：① 预览渲染 = 标题/粗体/行内 code/列表/斜体/引用框/python 代码块语法高亮+复制按钮，和回答正文一致 ② 工具栏 B 选中「路由表」→`**路由表**`+选区恢复内层 ③ Esc 关闭 Zone 不泄漏到 useEscapeAbort（capture 阶段 stopImmediatePropagation 生效）④ 退出后草稿完整回流到原输入框（共享 state）。
+- **Decisions**:
+  - **Zone 三选全取推荐项**：编辑器=轻量零依赖（textarea+工具栏+预览复用 react-markdown，"输入即发给 LLM 的 markdown 源码"，不引 CodeMirror/WYSIWYG）；布局=沉浸编辑+一键切预览（顶栏 toggle 不分栏）；范围=先 QuestionInput + 抽成可复用 ZoneEditor（追问框后续一行接入）。
+  - **Zone 内发送恒为 ⌘↩，无视全局 sendKey**：长文写作区裸 Enter 必须换行否则误发；Esc 退出 + ⌘↩ 发送走 window 级监听（编辑/预览两态都生效）。
+  - **工具栏选区保持**：按钮 `onMouseDown preventDefault` 防 textarea 失焦丢选区；transform 后 `pendingSel` ref + `useEffect([value])` 在 value 流回后恢复光标。
+  - **Zone 必须 createPortal 到 body**：从追问框（在 transform 祖先内）渲染时 `fixed inset-0` 会相对 transform 祖先而非视口 → 只占一条。portal 是 overlay 逃出 transform containing block 的标准解。实测才发现，build 看不出。
+  - **测试教训**：FollowupBar 的追问 textarea 与 Zone textarea 共享同一 `text` state（DOM 里两个元素值镜像）；`querySelector('div.fixed.inset-0 textarea')` 还会同时命中 NodeFullView 全屏自身的 fixed 容器——验证选区行为时必须按 placeholder 精确选 Zone 那个，否则误判逻辑有 bug。
+  - **用户三选全取推荐项**：AI 角色=复述+考官（既确认听懂又施压，最贴费曼原意）；落地=先轻后重（Phase 1 零架构今天用，结构化漏洞清单+一键分叉留 Phase 2）；补漏闭环=两个都要先用现成的（MVP 复用「选区 ⌘K 分叉」，自动生成子节点入口留 Phase 2）。
+  - **挂预设而非新建第四模式**：费曼是 chat 模式下的一种 AI 人格，D1 预设机制（chat 专属、创建锁定）天生契合；新建 mode 要动 schema/Mode 联合/全链路，违反简洁优先。workspace/project 的人格来自 CLAUDE.md，不叠费曼。
+  - **引用相等检测角色**：复用本文件已有的 `PRESETS.find(p => p.prompt === current)` 同款机制，不引入新 marker 字段。
+- **Caveats**:
+  - **未浏览器实测**：需新建 chat 对话 → 角色选「费曼考官」→ 看 placeholder/建议词翻转 → 讲一段理解 → 看 AI 是否按「复述+漏洞清单+追问」结构回应、且不替你补完整。
+  - **角色创建后锁定**：和 mode/workspace 一致，想中途切角色得开新对话（符合「一棵树一个语境」哲学）。
+- **Done (续3)**: **发送键默认改 mod-enter**（用户反馈「打字回车很容易误发送」）。`lib/send-key.ts` `SEND_KEY_DEFAULT` 从 `"enter"` 改 `"mod-enter"`——全局 Enter=换行、⌘Enter=发送，推翻 Session 26 A4 的「对齐 GPT 默认 Enter 发送」（单人工具，用户明确痛点，思维树场景 prompt 多为多行）。机制本就可配（footer toggle 可切回 + store 读 localStorage，无存值则用默认）。**实测**：localStorage `trellis-send-key`=null（用户从没切过）→ 新默认直接生效；首屏提示显示「⌘↩ 发送」；输入框打字按 Enter→插入换行、不发送（`第一行\n第二行`，仍在 composer）。`npm run build` ✓。Zone 本就硬编码 ⌘Enter，与新默认一致。
+- **Next**: 费曼角色仍待实测（讲解→AI 复述+漏洞清单+追问）。Zone 已实测通过（4 输入框全接 + portal 修复 + 渲染/工具栏/Esc/草稿回流验证）。后续：Phase 2 费曼结构化闭环：AI 输出漏洞清单时每条自带「展开讲这点」按钮 → 一键生成子节点（需让 ChatNode/NodeFullView 解析 AI 的结构化输出）；可选「理解度评分」。
+### Session 27 (2026-06-08)
+- **Done**: (A) **provider 行为调研**（带 file:line 证据回答用户）：`lib/llm/topic.ts:34` 话题标签写死 `spawn("claude")`——选 codex 也会后台跑 claude 生成 topic label（用户确认不改）；codex **无工具白名单**（`agent-gateway/src/backends.ts:231` `toolAllowlist:false`），所以「勾 skill / WebSearch」对 codex 无效，可达工具由 sandbox 决定；codex chat 是 OS 级 readonly 沙箱（无 workspace→readonly），连 curl 都拦死；**codex 联网只能走 MCP**（`mcp:true`，有 mcp_tool_call）或 full-access sandbox，不是勾 skill。codex 是 **block streaming**（`backends.ts:233`，整段出无逐字）——这是「没有流式」的一个真实来源。claude chat 能联网是因为 claude 吃工具白名单（`--tools`）。
+- (B) **NodeFullView 对话流重设计**（agent-browser 截图驱动，截了 8 张对比）：① 发送框/分支条从满宽 1440 收窄到 `max-w-3xl mx-auto` 与内容列对齐（用户要的「窄一点」）② 流式首 token 前空白 → 加三点脉冲「正在生成…」（修「没有流式展示」——根因是首 token 延迟期零反馈）③ 正文 stone-700→800 + 14.5→15px 提对比 ④ 发送框 rounded-2xl + focus ring indigo + indigo 圆形发送钮 ⑤ 问题块 浅紫低对比 → 白卡片+左 indigo 强调条+阴影，拉开与回复区层次。`npm run build` ✓。
+- (C) **Codex chat 联网实现**（用户提的临时 workspace 方案，比 MCP 更直接）：`lib/llm/codex.ts` chat 模式注入固定 scratch workspace（`~/.trellis/codex-chat`）+ `permission:"full"`。full 在 codex 映射成 `--dangerously-bypass-approvals-and-sandbox`（`backends.ts`），整体无沙箱 → 解锁联网 + 本机工具/skill。**代价 = YOLO**（codex 能跑任意命令；codex 无 claude WebSearch 那种受限联网工具，联网只能整体放开沙箱）。`npm run build` ✓。**需 codex 登录实测确认联网真通**。
+- (D) **NodeFullView 第二轮美化（内容卡片）**：主背景 stone-50→stone-100；内容列改成浮起的白色卡片（rounded-2xl + border + shadow，居中 my-5）；问题块从「白卡+左条」改回 indigo-50 浅背景+左 indigo 条（避免白卡内白叠白）。层次：浅灰背景 → 白内容卡 → 浅紫问题块/裸文字回复，接近 Notion/Linear 文档质感。`npm run build` ✓。
+- (E) **skill picker 放宽**（用户反馈「没看到 skill 可选」）：`QuestionInput` 显示条件从 `draftMode!=="chat"` 改为 `skillCapable = draftMode!=="chat" || provider==="codex"`——codex chat（现 YOLO 有工具）也触发；claude chat 仍不显示（本就只有 WebSearch/WebFetch，不能跑 skill，正确）。**仍只在首屏新建对话的输入框，追问框暂无**（待扩）。
+- (F) **画布 ChatNode 卡片美化**（用户反馈「没看到卡片美化」——上轮只美化了全屏内容卡，画布卡片没动）：compact + full card 都改 rounded-xl→2xl + hover:shadow-md + active 态改 indigo accent。
+- (G) **画布质感升级（用 frontend-design skill，定 Linear 风精致克制）**：ChatNode 卡片 border→`ring` + 多层柔和阴影（arbitrary shadow）+ hover 抬升 `-translate-y-px`（浮起感）；Canvas 容器加冷调渐变背景 `from-stone-50 via-white to-stone-100`；Background 点阵调淡（opacity-60/dark 0.18）；连线 `defaultEdgeOptions` smoothstep + globals.css `.react-flow__edge-path` indigo tint（#c7d2fe / dark #3730a3，selected #818cf8）+ `.react-flow` 透明露渐变。截图验证：连线 indigo smoothstep 比灰贝塞尔优雅，卡片浮起，背景有空间层次。
+- (H) **追问框 skill picker**（用户要的 ①）：抽 `hooks/useSkillSuggestions.ts` 复用 hook（懒加载 skill 列表 + `/name` 匹配）；NodeFullView FollowupBar 接入（picker 向上弹 `bottom-full`，仅 tool-capable）。**ChatNode FollowupInput + SelectionBar 待接**（hook 已抽，下轮快）。
+- (I) **收尾批（用户「都做了」= ①②③ 全做）**：① 其余 2 追问框接 skill picker——抽 `components/SkillPickerList.tsx` 复用组件，ChatNode FollowupInput + NodeFullView SelectionBar 都接上（三个追问框现在都能输 `/` 调 skill）② ChatNode 卡片左侧状态色条替代圆点（emerald 已读 / amber 未读 / stone 进行中，Linear 感）③ SubBar 改 backdrop-blur 半透明。截图复核 **light + dark 画布都协调**，状态色条两模式可见。`npm run build` ✓。
+- **遗留**：dev overlay 显「1 Issue」——dev server 日志无 error/warn，疑似 next.config 自定义 Cache-Control 的已知 dev warning（build 日志早有此条），非本轮引入，待点开确认；移动端未单独截图复核（之前已做 Outline 抽屉 + 响应式）。
+- (J) **chat 增强模式开关（用户选 C：加开关）**——解决「claude chat 看不到 skill」根因。全链路：`StreamRequest.chatEnhanced`；`sdk-adapter` 加共享 `CHAT_SCRATCH`（`~/.trellis/chat-scratch`）+ `ensureChatScratch()`，`modeToRunOptions` chat 分支按 `req.chatEnhanced` 分流（开=workspace+full 无沙箱 YOLO 能 skill+联网，关=WebSearch/WebFetch 纯对话）；`claude.ts`+`codex.ts` enhanced 时建 scratch（**codex.ts 删掉上轮无条件 YOLO，统一到开关**）；`route` 读 body.chatEnhanced 传 provider；store `chatEnhanced`（localStorage `trellis-chat-enhanced`，全局运行时偏好）+ 3 个请求体传递；UI：QuestionInput chat 模式加「⚡增强模式」pill（amber 高亮）。skill picker 显示条件全部从 `provider==="codex"` 改 `chatEnhanced`（QuestionInput + 3 追问框统一）。`npm run build` ✓。
+- **chat 增强 caveat**：① 开关在**新建对话首屏**（chat 模式），全局偏好设一次生效；已有 session 无切换入口（下轮可加 Header）② YOLO 安全提示已在 tooltip ③ **未浏览器实测**（需新建对话开增强→输入 `/` 看 skill / 问联网）。
+- (K) **增强开关加 Header 入口**（补全 J 缺口）：Header chat session 下显示「⚡ 增强」按钮（amber 高亮表开启），已有 session 也能随时切。截图验证生效。`npm run build` ✓。
+- (L) **「1 Issue」定性结案**：= `next.config.ts:25-41` 自定义 Cache-Control（/_next/:path*，为 globals.css 即时生效）触发的 Next dev 警告。`git log` 证明 next.config 从未在本轮 sessions 改过（最后改是 852aa41 重构 llm）。dev 专属、对生产无影响，**非本轮引入，可无视**。
+- **Next**: 实测 chat 增强（开关/skill/联网，需 codex 或开增强）；移动端专项复核；roadmap 剩余大件（C1 PDF/Excel 需装依赖、C3 语义检索 Q2、C6 图片生成 Q3）。**（README 6 条 session log，下次轮转 Session 22 入 archive）**
+### Session 26 (2026-06-08)
+- **Done**: 写了 [optimization-roadmap.md](optimization-roadmap.md)（4 个只读 agent 实测测绘 + 四维度 P0/P1/P2 路径，锚定替代 GPT），然后开始按 P0 实施。完成 3 项，`npm run build` ✓ ×2：
+  - **A3 + B2 代码块/回复复制**：新 `components/CodeBlock.tsx`（react-markdown `pre` 渲染器，顶 bar = 语言标签 + 复制按钮，复制读 `pre.textContent` 抗 rehype-highlight 拆 span）+ 新 `components/CopyButton.tsx`（复制全文，含 ✓ 反馈）。`lib/md-components.ts` 注册 `pre: CodeBlock`。ChatNode footer + NodeFullView 回复底部各加「复制全文」。`globals.css` 加 `.md-codeblock*` 样式。
+  - **D1 System Prompt 可配**：全链路。DB `sessions.system_prompt TEXT`（idempotent ALTER，NULL=默认）；repo `ApiSession/SessionRow/SESSION_COLS/rowToSession/createSessionWithRoot` 全加列；`lib/types.ts` Session 镜像 + `lib/llm/types.ts` StreamRequest 加 `systemPrompt`；`sdk-adapter.ts` chat 分支 `req.systemPrompt?.trim() || DEFAULT`；`route.ts` 四分支（新建/parallel root/branch/retry）解析 `resolvedSystemPrompt`（仅 chat 模式从 body 取，workspace/project 钳为 null 因走 CLAUDE.md），传 provider。前端 store `draftSystemPrompt`（localStorage `trellis-system-prompt`）+ setter；`streamRoot` 仅新建 chat session 时带。新 `components/SystemPromptPicker.tsx`（5 预设角色 + 自定义 textarea，QuestionInput chat 模式下显示）。
+- **Decisions**:
+  - **system prompt 只对 chat 模式开放**：workspace/project 的人格来自 `~/.claude/CLAUDE.md` + 全工具，再叠一层 system prompt 会语义打架。route 在非 chat 分支显式钳 null。
+  - **B2 并入 A3**：语言标签和复制按钮在同一个 `pre` 渲染器里实现，拆成两次改纯属浪费。
+  - **复制读 DOM textContent 而非 React children**：rehype-highlight 把源码拆成嵌套 `<span>` 高亮 token，递归提 children 文本繁琐且易错；`pre.textContent` 天然 flatten 回源码。
+- **Caveats**:
+  - **均未浏览器实测**：A3 复制依赖 `navigator.clipboard`（localhost 安全上下文 OK，已 try/catch 兜底失败静默）；D1 预设角色切换、自定义保存、创建后 system prompt 真正生效（看模型回答风格变化）需手测。
+  - **存量 chat session 的 system_prompt 为 NULL** → 走内置默认，行为不变（无破坏性迁移）。
+  - **D1 只在「新建 session」时可设**：和 mode/workspace 一致（创建后锁定）。已存在 session 想换角色得开新 session。符合「一棵树一个语境」哲学。
+- **A4 Enter 发送可配（done，本 session 续做）**：新 `lib/send-key.ts`（`SendKey="enter"|"mod-enter"` + `isSendCombo` + `sendHint`，默认 `enter` 对齐 GPT）；store `sendKey`（localStorage `trellis-send-key`）+ `setSendKey` live 应用；4 个主对话输入框（QuestionInput / ChatNode FollowupInput / NodeFullView SelectionBar + FollowupBar）keydown 统一走 `isSendCombo`、placeholder 走 `sendHint`；QuestionInput 底部静态提示改成可点 toggle。`npm run build` ✓。
+  - **A4 Caveat**：BranchPopover（本就 Enter 发送）+ ReferencePicker（⌘Enter 创建参考卡）这轮未纳入 sendKey 统一——mod-enter 模式下这俩仍各自原行为，后续统一。
+- **A1 流式实时 markdown（done，本 session 续做）**：`components/NodeFullView.tsx` ResponseBody 流式分支从 textContent 直写改为 rAF 节流的 state 累积 + ReactMarkdown 渲染。新 `REHYPE_STREAMING = [rehypeHighlight]`（流式期间不挂 rehypeRaw，避半截 HTML 标签 parse 报错；终态仍用 REHYPE_FULL）。删 streamRef，加 liveText state + requestAnimationFrame 合并 token 突发为每帧一次 re-render。**范围决策**：只改 NodeFullView 全屏（单挂载视图，re-render 便宜），画布 ChatNode 仍保留 textContent 直写（在 ReactFlow 内，性能敏感）。`npm run build` ✓。
+  - **A1 Caveat（务必实测）**：① 长回复流式时每帧重 parse markdown 的性能 ② 未闭合代码块/表格的中途渲染是否闪烁 ③ streaming-cursor 位置。这三点必须浏览器实测确认。
+- **Next**: **浏览器实测本批 5 项**（A3 复制 / D1 角色切换+生效 / A4 Enter 发送+toggle / A1 全屏流式格式化+性能）。实测无碍后继续 P0 大件：B1（响应式+移动端 Outline，M）→ A2（编辑消息，M-L，树语义取 Q1 倾向 B）→ C2（记忆+自定义指令，M-L）→ C1（文件附件，L↩Stage19）。
+
 ### Session 25 (2026-05-13)
 - **Done**: 三件事一起做完 — (A) mobile/UX 三个小补丁；(B) **durable streams** 架构改造；(C) Stage 17 Tool call / Bash 可视化全链路。`npm run build` ✓；端到端 curl 实测 `pwd` 工具调用从 spawn → 进 DB tool_calls_json → reconnect endpoint catchup 完整回放。
 
@@ -225,93 +320,5 @@ Stage 17 完成 — Tool call / Bash 可视化全链路落地。同 session 顺�
   5. 删一个 session → 再 ⌘P 搜该 session 内的关键词 → 0 结果（FTS cleanup 验证）
   6. 在 NotesDrawer 跳源节点 vs ⌘P 搜笔记跳源 → 两条路径行为应一致（jumpToNoteSource 共用）
 
-### Session 22 (2026-05-13)
-- **Done**: Stage 15 全部 8 步落地 — 图片输入（vision）三档模式可用。`npm run build` ✓ 一次过；端到端 curl 测试：upload → chat with attachment → SSE delta 全链路通；spike 验证 Project 模式 `--resume` + stream-json 输入兼容性。→ [spec](vision-input.md)
-  - **CLI spike**：实测 claude `-p --input-format stream-json` 从 stdin 喂 `{type:"user",message:{role:"user",content:[{type:"image",source:{type:"base64",...}},{type:"text",text:...}]}}` —— Anthropic Messages API 内容块原样工作。codex 用 `-i/--image FILE` 重复 flag。Project 模式：第 1 轮 stream-json 拿到 session id，第 2 轮 `--resume <id> --input-format stream-json` 续上、claude 能回忆图片内容（验证"light gray canvas"≈ trellis 截图）。
-  - **存储策略**：`~/.trellis/blobs/<sha256>.<ext>` 文件系统 + content-addressed。sha256 命名天然去重；DB 只存 metadata（`attachments_json TEXT`，NodeAttachment[] 序列化）。不进 SQLite blob → WAL 不膨胀 → 跨进程读 zero-copy。
-  - **DB migration**（`lib/server/sqlite.ts`）：idempotent ALTER `nodes.attachments_json TEXT`，NULL 默认。老节点全 NULL → repo rowToNode 返回 `attachments: []` → 消费者不需要 nullability check。
-  - **新模块 `lib/server/blobs.ts`**：sha256 + ext 白名单（PNG/JPEG/WebP/GIF）+ 写盘 + resolve。`sniffDimensions` 手写 magic-byte parser：PNG 读 IHDR uint32be、GIF87a/89a 读 LE16、JPEG 扫 SOF marker（FFC0-CF 跳过 FFC4/C8/CC）。不引 image-size 依赖，保持 deps 干净。
-  - **新 API**：
-    - `POST /api/uploads`：接 `multipart/form-data` 或 raw `image/*` body；10MB cap、mime 白名单；返回 NodeAttachment shape（hash + mime + size + width/height + filename）。
-    - `GET /api/uploads/[hash]`：流式回读，`Cache-Control: public, max-age=31536000, immutable`（content-addressed 永远不变）。`dynamic = "force-static"` 让 Next 标志为可缓存路由。
-  - **Provider 改造**：
-    - `claude.ts`：`hasImages = attachments.length > 0` 时切到 stream-json 输入 —— spawn 加 `stdio: ["pipe", "pipe", "pipe"]`，spawn 后 `proc.stdin.write(JSON.stringify(userMessage) + "\n")` + `end()`。文本路径完全不动：没图就还是 `-p "<prompt>"`。`buildPrompt(history, question, anchor)` 结果原样塞进 stream-json 的 text content block，所以折叠祖先链 / cli-multi prompt 逻辑零变动。
-    - `codex.ts`：`buildArgs` 多一个 `imagePaths: string[]` 参数，所有四个分支（project resume / project first turn / chat / workspace）prompt 前插 `--image FILE` 重复 flag。codex 吃文件路径而非 base64，跟 claude 不同。
-    - `mock.ts`：no-op（StreamRequest.attachments 是 optional，mock 忽略）。
-  - **Chat route**（`app/api/chat/route.ts`）：root + branch 接 attachments（NodeAttachment[]），retry 服务端从 DB `getNodeAttachments(nodeId)` 读出（用户不需要重传）。`sanitizeAttachments` 防御性清洗：hash 必须 hex64、mime 必须白名单、cap 6。`resolveAttachments(NodeAttachment[]) → {path, mime}[]` 把 hash 映射到磁盘路径；缺失的 blob 静默丢弃（rare：blob dir 被人手 rm 才会发生）。
-  - **Store**（`stores/sessionStore.ts`）：`streamRoot(question, opts?: { attachToCurrentSession?, attachments? })` / `streamBranch(parentId, question, anchor, opts?: { attachments? })`；`ChatRequestBody` root/branch 加 attachments。retry 不加（服务端独立解析）。`ApiNode = Omit<ChatNode, "position" | "topicLabel"> & ...` 自动吃下 ChatNode.attachments 新字段，apiNodeToChatNode 无需改动。
-  - **UI 新组件 `components/AttachmentPreview.tsx`**：
-    - 双模 props：readonly（NodeAttachment[]，用于 ChatNode/NodeFullView 展示已存图）+ edit（PendingAttachment[] + onRemove，用于 input 态）
-    - `PendingAttachment = { localId, status, previewUrl, filename, attachment?, errorMessage? }` —— 上传中显示 ↑ + 半透明，失败显示"失败"红色 + ✕，完成显示完整缩略图
-    - 单击缩略图 → lightbox（fixed inset-0 + Esc 关 + click-outside 关）
-    - 导出 `uploadAttachment(file, filename)` helper 给 input 组件复用；`newPendingId()` 顺序 localId
-  - **QuestionInput**（`components/QuestionInput.tsx`）：textarea 上方 AttachmentPreview；三个入口 — onPaste 遍历 clipboardData.items 找 image/*；onDragOver/Drop（仅响应 Files 类型，忽略文本拖拽）；底部 🖼️ 按钮触发 hidden `<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>`。submit 锁：`hasUploading` 时按钮文案变 "等待图片上传…" 禁用。drop 时容器加 indigo ring 提示。
-  - **BranchPopover**（`components/BranchPopover.tsx`）：精简版 —— 仅 paste（textarea onPaste）+ file picker（🖼️ 按钮），不要 drag（小弹层 drop target 不舒服）。popoverHeight = `130 + (pending.length > 0 ? 96 : 0)` 保证顶部不被截。
-  - **ChatNode / NodeFullView**：question 区下方加 `<AttachmentPreview attachments={node.attachments} readOnly />`；NodeFullView 的 QuestionBlock 接受额外 attachments prop。
-  - **README + progress**：vision 一段补到核心特性 + tick Stage 15。
-- **Decisions**:
-  - **stream-json 输入按需切换而非永久切换**：保留 `-p "<prompt>"` 作为无图路径。理由：(1) 没图时 stream-json 是不必要的 IO 层（虽然代价小但语义更复杂），(2) 现有 buildPrompt → spawn 链路是经验证的，最小破坏面。代价：claude.ts 有两套 stdin 配置（"ignore" vs "pipe"），可读性 trade 走稳定性。
-  - **buildPrompt 不重写为 multi-message**：spec 开放问题 5 — 现在的"祖先链 → 单块文本"在 stream-json 模式下作为唯一一条 user.message.content 的 text block 喂入。模型可能在多消息形态下利用得更好（更 native），但 cli-multi prompt 的特殊处理（仅当前问题、不带历史）等几条业务逻辑都依赖单块语义，重写就是 stage 内蔓延。等真实回答质量出问题再调整。
-  - **blob 不进 SQLite**：base64 进 WAL = SQLite 把整个 blob 反复 fsync + 维护 rollback journal；磁盘膨胀比文件系统多 ~1.4x，且 better-sqlite3 BLOB 读出来是 Buffer 反序列化。文件系统 + content hash 直接拿到稳定 path，spawn claude 时一行 fs.readFileSync 就转 base64，零额外复杂度。
-  - **手写 magic-byte parser 而非 image-size 依赖**：4 个 mime 加起来 ~80 行，依赖图保持空。WebP 的 VP8L/VP8X 多分支不写，未识别格式返回 `{}` 让客户端用 `<img>` 自然 dims。
-  - **GET /api/uploads/[hash] 用 force-static**：Next runtime hint 让框架知道这条路由跟请求参数无关（同一 hash 永远同一字节流），可以缓存。Cache-Control: immutable 由我们设。
-  - **上传中 submit 禁用**：用户可能粘贴图后 ⌘↩ 极快，如果不锁住，半秒后图片才上传完，对应的 attachment 就不会被带上而被默默丢掉。锁住 + 文案"等待图片上传…" 是显式的、不会丢图的设计。
-  - **重试自动复用旧图**：服务端 `getNodeAttachments(nodeId)` 直接读 attachments_json。比让 client 重传简单，且解决"重试节点本来就没保留原图"这个客户端做不到的问题。
-  - **PendingAttachment.localId 独立于 hash**：因为上传过程中 hash 还没有；keying React list / onRemove 都用 localId。done 之后才有 hash，仍然继续用 localId 引用（不切 key 避免组件重挂导致 object URL 闪烁）。
-  - **drag-drop 只在 QuestionInput 不在 BranchPopover**：BranchPopover 是飘在文本上的小卡片，drop target 边界不直观（容易拖到外面被浏览器接管打开图片）。粘贴 + 文件选择已覆盖 95% 用例。
-- **Caveats**:
-  - **大 prompt 注意事项**：6 张 5MB 图 = base64 ~40MB 一次性写进 claude stdin。实测单张 400KB 没问题；上限场景应该也 OK（pipe buffer 一般 64KB but stdin pipe 是 stream，不需要一次性塞）。仍标个 P2 监控点：极端情况下可能阻塞 spawn。
-  - **codex `--image` 路径 sandbox 兼容**：spike 没专门测 `--sandbox read-only` + `--image /Users/.../trellis/blobs/...`。猜测 OK（codex sandbox 允许读 home 下任何文件），但浏览器实测时如果 codex chat 模式吃图失败，可能是 sandbox 拦了；fallback 是把 blob 移到工作目录里再 `--image`。先不处理。
-  - **lightbox click-outside**：用 `cursor-zoom-out` 提示，但 `e.stopPropagation()` 在 img 上阻止冒泡。点 img 不会关。这是 feature（避免误关），但可能反直觉。
-  - **drag overlay 视觉边界**：onDragLeave 只在指针离开根容器时触发，textarea 内部子元素 leave 也会冒泡。多余的 setDragOver(false) 调用，没有视觉副作用，但偶尔 ring 闪一下。先不修。
-  - **blob 孤儿清理 P2**：删 session / 删 node 不删 blob。同一张图被多个 session 引用是常见的（截图复用），蛮力 GC 需要扫所有 sessions.attachments_json。磁盘膨胀到几百 MB 再做。
-  - **codex chat 模式 sandbox + image 没单独 spike**：实测命令用了 `--sandbox read-only` 跑通了，但那是单独 codex 调用；trellis route 走的代码路径稍微复杂（buildArgs imageArgs 插入位置可能影响 sandbox flag 解析）。浏览器实测点。
-- **Next**: 用户浏览器实测六类 case：
-  1. Chat 模式粘贴截图 → ⌘↩ → claude 看见图回答（test_chat_mode_paste）
-  2. Workspace 模式选 trellis 仓库 + 拖一张图 → claude 同时能 vision + Read 本地代码文件
-  3. Project 模式头 3 轮各附 1 张图，第 4 轮纯文本"刚才几张图都是啥" → claude 应该都记得（验证 resume 长 session 记忆）
-  4. 单张超过 10MB → upload 413 报错，UI 红色 ✕ + tooltip 显示错误
-  5. 单节点连续粘 6 张 → 第 7 张 disable + tooltip "已到 6 张上限"
-  6. 重试一个带图节点 → response 重生成，图保留（server 端从 DB 读）
-
-### Session 21 (2026-05-13)
-- **Done**: Stage 14 全部 7 步落地 — 三档模式重命名 + session 级 workspace 绑定。`npm run build` ✓ 一次过；`/api/workspaces/recent` curl 返回 20 个候选项。→ [spec](mode-workspace-rebuild.md)
-  - **DB migration**（`lib/server/sqlite.ts`）：两个 idempotent ALTER 加 `context_mode TEXT NOT NULL DEFAULT 'chat'` 和 `workspace_path TEXT`；migration UPDATE 把 `claude_session_id IS NOT NULL` 的旧 session 归到 `project`，其余归 `chat`。cli-single 用户失去工具能力，按用户选项 1 静默迁移。
-  - **Types**（`lib/llm/types.ts` + `lib/types.ts`）：`Mode = "chat" | "workspace" | "project"`；`StreamRequest` 加 `cwd?: string | null`；`Session` 加 `mode: string` + `workspacePath: string | null`（用 string 而非 Mode 联合，避免 client/server 模块边界引入 server-only 依赖）。
-  - **Provider cwd 注入**（`lib/llm/claude.ts` + `codex.ts`）：spawn cwd 改为 `mode === "chat" ? os.homedir() : (cwd ?? os.homedir())`；chat 模式 claude 加 `--tools "WebSearch,WebFetch"`（codex 暂无对应能力，标 TODO）；`buildCliMultiPrompt` 重命名 `buildProjectPrompt`。
-  - **`repo.ts` 关键改动**：`claudeSessionPath` 改成接受 `cwd` 参数（不再硬编码 `os.homedir()`）；`deleteSession` 取 workspace_path → 拼正确的 encoded-cwd 目录路径。否则 Project session 的 jsonl 在新 cwd 下会被漏清。
-  - **API route**（`app/api/chat/route.ts`）：root 请求接受 `mode + workspacePath`，校验 workspace/project 必须有路径，chat 强行清掉路径；branch / retry **不再从 body 读 mode**，直接 `getSession(sessionId).mode` 取，传给 provider 的 cwd 也来自 session 行——彻底打破"中途切 mode 影响活跃 session"的旧行为。
-  - **新增 `/api/workspaces/recent`**（`app/api/workspaces/recent/route.ts`）：合并 trellis DB 的 `SELECT DISTINCT workspace_path` + 扫 `~/.claude/projects/` 反查 cwd。反查策略两层：先在每个 dir 找一个 jsonl 读前 32KB 找带 `"cwd":` 的行（authoritative，因为 `-` 编码 lossy），fallback 才 naïve `replace(/-/g, "/")`。最后 `fs.existsSync` 过滤掉失效路径。spike 实测：扫 ~120 个 dir + 反查 ~50 个 jsonl，整体 < 200ms，可接受。
-  - **Store**（`stores/sessionStore.ts`）：删 `mode` state，加 `draftMode` + `draftWorkspacePath`（localStorage 同步）；删 `setMode`，加 `setDraftMode` + `setDraftWorkspacePath`；`streamRoot` 在 `attachToCurrentSession` 时不传 mode/workspace（让服务端从 session 取），新建 session 时才传；`streamBranch` / `retryNode` ChatRequestBody 不再带 mode。localStorage migration：旧 `MODE_KEY` 值 `lean/cli-single/cli-multi` 在 `loadDraftMode` 里自动翻译。
-  - **UI 拆分**：
-    - 新 `components/WorkspacePicker.tsx`：modal 列表 + 筛选 + Browse 兜底（手动输入绝对路径）。`prettifyHome` 用 regex `/^\/Users\/[^/]+\/(.+)$/` 缩 `~/...`（client-side 不知道 homedir，所以 regex 兜底）。
-    - 新 `components/ModeBadge.tsx`：readonly 显示当前 session 的 mode + workspace 基名，三色区分（Chat stone / Workspace amber / Project rose）。session 为空时返回 null（避免空 header）。
-    - 重写 `components/ModePicker.tsx`：现在专门是"draft picker"——读 draftMode/draftWorkspacePath，写 set 函数；选 Workspace/Project 且无 workspace → 自动打开 WorkspacePicker；workspace chip 在缺失时 animate-pulse 红色提示。
-    - `Header.tsx` 把 `<ModePicker />` 换成 `<ModeBadge />`，再无中途切模式入口。
-    - `QuestionInput.tsx` 在 textarea 上方居中放 ModePicker；submit 按钮多一个 `needsWorkspace` 锁，缺 workspace 时按钮文案变 "先选工作区"，title 注释解释。
-  - **Docs**：README 三档表 + 详解段全部重写；progress/README.md tick Stage 14，加 Current Focus 指向 Stage 15（vision）。
-- **Decisions**:
-  - **mode 升级成 DB 列 + session 创建后锁定**：spec 写到一半才发现当前 mode 是全局 localStorage。如果不升级，"一棵树一个语境"就只是 README 修辞，实际运行时 Header 切 mode 会影响所有历史 session。改动量大但本质上是修复"模式归属错位"的旧 bug。
-  - **session 内 mode 不可再切**：原 `ModePicker` 允许 cli-multi 切 cli-single 弹 confirm 对话；新方案直接不暴露切换。换语境 = 开新 session，跟 workspace 绑定一致。这是用户选项 4「按 7 步顺序我一气跑完」隐含的设定。
-  - **claudeSessionPath 改签名而非加 helper**：考虑过单独 `claudeSessionPathForWorkspace(workspacePath)` helper，但只有一个调用点（deleteSession），inline 参数更清晰，避免多个查 workspace 的 round-trip。
-  - **WorkspacePicker 数据源合并而非二选一**：用户问"picker 解决什么"暴露了概念门槛——所以最终列表必须第一次看就有候选项。trellis 自己的 DB 在新装时是空的，必须靠扫 `~/.claude/projects/` 给"我之前用 claude 跑过的项目"的种子数据。
-  - **`-` 反向解码做 fallback 而非主路径**：编码 lossy（`foo-bar` 目录名跟 `foo/bar` 路径冲突），所以主路径是读 jsonl 找 `"cwd"` 字段（authoritative）。fallback 留着是因为有些 dir 可能没 jsonl（清理过 / 残留空目录）；通过 `fs.existsSync` 过滤掉错误命中。
-  - **Codex chat 不加联网，标 TODO**：用户选项 1，原因是 codex CLI 0.125 没有独立 web tool 概念。spike 等价能力延后到 Stage 15 一起做，避免 Stage 14 scope 蔓延。
-  - **ApiSession.mode 用 string 而非 Mode 联合**：repo.ts 是 server-only，但 ApiSession 类型被前端 store 间接消费。如果 ApiSession.mode 是 Mode 联合，前端要从 `@/lib/llm/types` import 类型——但这条 import 链最终拽进 server-only 模块（claude.ts spawn）。改成 string + 在 boundary（route 的 `isMode` / store 的 `isMode`）窄化，干净。
-- **Caveats**:
-  - **存量 cli-single session 自动归到 Chat**：失去工具能力。用户选项 1（静默）。如果有正在跑工具的 session，下次发问会突然不工作——预期，不出 toast。
-  - **Codex Chat 模式无联网**：UI title 注释了。等 spike codex web 能力。
-  - **WorkspacePicker prettifyHome 不知道真实 homedir**：硬编码 `/Users/<user>/` regex。Linux/Windows 用户会看到完整路径。先不修，等真有非 mac 用户提。
-  - **ModePicker 旁的 workspace chip 在 mobile 上可能换行**：用了 `flex-wrap` 兜底，但视觉不完美。等浏览器实测再调。
-  - **顶栏 ModeBadge 没在 mobile 显示**（`hidden sm:inline-flex`）：mobile 屏幕窄，省空间。如果用户想知道当前 session 模式，可以打开 SessionPicker（list 里目前没显示 mode——后续可加）。
-  - **session 创建后改 workspace 完全没出口**：是 feature 不是 bug。换 workspace = 开新 session。但如果路径被外部移动（用户在 finder 里 mv 了仓库），现存 session 下次发问会 spawn 失败。错误信息用户能看到，但不会自动 relink。
-- **Next**: 浏览器实测六类 case：
-  1. 新 session 创建走 Chat 默认 → 提交 → 顶栏 ModeBadge 显示 Chat
-  2. 创建走 Workspace → WorkspacePicker 自动弹 → 选 trellis 仓库 → 提交 → claude spawn 在 trellis 目录里能 ls 出 components/ 等
-  3. 创建走 Project + 选 obsidian-cli 仓库 → 跑两轮对话 → 看 token 计量 ⚡ cacheRead 命中率
-  4. 旧 session（有 claude_session_id 的）打开 → ModeBadge 显示 Project；workspace 字段是 NULL → spawn 回退到 ~
-  5. 删除 Project session → 检查 `~/.claude/projects/<encoded-cwd>/<jsonl>` 真的被清掉（encoded-cwd 用 workspace 路径而非 home）
-  6. WorkspacePicker 筛选 + Browse 手动输路径都能用，输错路径（不存在的）提交后 chat 报错
-
-（Session 1–20 已归档，见 `archive.md`）
+（Session 1–21 已归档，见 `archive.md`）
 

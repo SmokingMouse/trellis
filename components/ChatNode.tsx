@@ -21,6 +21,11 @@ import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector"
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
+import { CopyButton } from "./CopyButton";
+import { isSendCombo, sendHint } from "@/lib/send-key";
+import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { SkillPickerList } from "./SkillPickerList";
+import { ZoneEditor } from "./ZoneEditor";
 
 // Plugin arrays at module scope so identity is stable across renders.
 const REMARK_PLUGINS = [remarkGfm];
@@ -132,12 +137,12 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   if (showCompact) {
     return (
       <div
-        className={`group relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[280px] transition-shadow ${
+        className={`group relative nopan w-[280px] rounded-2xl bg-white dark:bg-stone-900 cursor-pointer transition-all duration-200 ring-1 shadow-[0_1px_2px_rgba(28,25,23,0.04),0_6px_20px_-6px_rgba(28,25,23,0.10)] hover:shadow-[0_2px_4px_rgba(28,25,23,0.05),0_14px_30px_-8px_rgba(28,25,23,0.18)] hover:-translate-y-px ${
           isActive
-            ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
+            ? "ring-2 ring-indigo-400/80 dark:ring-indigo-500/70"
             : isUnread
-              ? "border-amber-300 dark:border-amber-700/70"
-              : "border-stone-200 dark:border-stone-800"
+              ? "ring-amber-300/80 dark:ring-amber-700/60"
+              : "ring-stone-200/80 dark:ring-stone-800 hover:ring-stone-300 dark:hover:ring-stone-700"
         }`}
         onClick={goFullScreen}
         title={n.question}
@@ -155,24 +160,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             variant="compact"
           />
         )}
+        <span
+          className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
+            n.status !== "done"
+              ? "bg-stone-300 dark:bg-stone-600"
+              : isUnread
+                ? "bg-amber-400"
+                : "bg-emerald-400/70"
+          }`}
+          aria-hidden
+          title={n.status === "done" ? (isUnread ? "未读" : "已读") : undefined}
+        />
         <div className="px-4 py-3 flex items-center gap-2.5">
-          <span
-            className={`shrink-0 w-2.5 h-2.5 rounded-full ${
-              n.status !== "done"
-                ? "bg-stone-300 dark:bg-stone-600"
-                : isUnread
-                  ? "bg-amber-500"
-                  : "bg-emerald-500"
-            }`}
-            aria-hidden
-            title={
-              n.status === "done"
-                ? isUnread
-                  ? "未读"
-                  : "已读"
-                : undefined
-            }
-          />
           {indexLabel && (
             <span className="shrink-0 text-[11px] font-mono text-stone-400 dark:text-stone-500 tabular-nums">
               {indexLabel}
@@ -198,11 +197,11 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 
   return (
     <div
-      className={`group relative nopan bg-white dark:bg-stone-900 border rounded-xl shadow-sm w-[600px] transition-shadow ${
+      className={`group relative nopan bg-white dark:bg-stone-900 border rounded-2xl shadow-sm w-[600px] transition-all ${
         isStreaming
           ? "border-indigo-300 dark:border-indigo-700 ring-4 ring-indigo-100 dark:ring-indigo-900/40"
           : isActive
-            ? "border-stone-400 dark:border-stone-500 ring-2 ring-stone-200 dark:ring-stone-700 shadow-md"
+            ? "border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-200/60 dark:ring-indigo-800/50 shadow-md"
             : isUnread
               ? "border-amber-300 dark:border-amber-700/70"
               : "border-stone-200 dark:border-stone-800"
@@ -409,9 +408,15 @@ function NodeFooter({
         <>
           <ToolCallBadge count={node.toolCalls.length} />
           <TokenMeta tokenCount={node.tokenCount} variant="full" />
+          {node.response && (
+            <CopyButton
+              text={node.response}
+              className="nodrag ml-2 px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+            />
+          )}
           <button
             onClick={() => setOpen(true)}
-            className="ml-2 px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+            className="ml-1 px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
           >
             + 追问
           </button>
@@ -432,8 +437,16 @@ function FollowupInput({
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [zoneOpen, setZoneOpen] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const streamBranch = useSessionStore((s) => s.streamBranch);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const sessionMode = useSessionStore((s) => s.session?.mode);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const matchedSkills = useSkillSuggestions(
+    q,
+    sessionMode !== "chat" || chatEnhanced,
+  );
 
   useEffect(() => {
     ref.current?.focus();
@@ -447,13 +460,20 @@ function FollowupInput({
   };
 
   return (
-    <div className="border-t border-stone-100 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-900/60">
+    <div className="relative border-t border-stone-100 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-900/60">
+      <SkillPickerList
+        skills={matchedSkills}
+        onPick={(name) => {
+          setQ(`/${name} `);
+          ref.current?.focus();
+        }}
+      />
       <textarea
         ref={ref}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (isSendCombo(e, sendKey)) {
             e.preventDefault();
             submit();
           } else if (e.key === "Escape") {
@@ -461,11 +481,19 @@ function FollowupInput({
             onClose();
           }
         }}
-        placeholder="对整段回复继续追问…（⌘↩ 提交）"
+        placeholder={`对整段回复继续追问…（${sendHint(sendKey)}）`}
         rows={2}
         className="w-full px-5 py-3 outline-none resize-none text-sm bg-transparent text-stone-800 dark:text-stone-200 placeholder:text-stone-400 dark:placeholder:text-stone-500"
       />
       <div className="px-3 py-1.5 flex items-center justify-end gap-2 text-xs">
+        <button
+          onClick={() => setZoneOpen(true)}
+          title="专注写作模式（全屏 Markdown 编辑 + 预览）"
+          className="mr-auto px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 inline-flex items-center gap-1"
+        >
+          <span aria-hidden>⛶</span>
+          <span>专注写作</span>
+        </button>
         <button
           onClick={onClose}
           className="px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100"
@@ -480,6 +508,22 @@ function FollowupInput({
           提问
         </button>
       </div>
+      {zoneOpen && (
+        <ZoneEditor
+          value={q}
+          onChange={setQ}
+          onSubmit={() => {
+            if (!q.trim()) return;
+            setZoneOpen(false);
+            submit();
+          }}
+          onClose={() => setZoneOpen(false)}
+          title="继续追问"
+          placeholder="专注写下你的追问，支持 Markdown……"
+          submitLabel="提问"
+          submitDisabled={!q.trim()}
+        />
+      )}
     </div>
   );
 }

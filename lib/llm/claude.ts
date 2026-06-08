@@ -4,7 +4,12 @@
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
 import { buildPrompt } from "./prompt";
 import { ClaudeBackend } from "agent-gateway";
-import { modeToRunOptions, toStreamEvent, buildProjectPrompt } from "./sdk-adapter";
+import {
+  modeToRunOptions,
+  toStreamEvent,
+  buildProjectPrompt,
+  ensureChatScratch,
+} from "./sdk-adapter";
 
 export type ClaudeModel = "opus" | "sonnet" | "haiku";
 
@@ -19,6 +24,7 @@ export function makeClaudeProvider(
         mode === "project"
           ? buildProjectPrompt(req.question, req.parentAnchor)
           : buildPrompt(req.history, req.question, req.parentAnchor);
+      if (mode === "chat" && req.chatEnhanced) ensureChatScratch();
       const runOpts = { ...modeToRunOptions(mode, opts.model ?? "sonnet", req), signal: req.signal };
       for await (const e of backend.run(prompt, runOpts)) {
         const se = toStreamEvent(e, mode);

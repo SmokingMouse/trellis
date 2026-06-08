@@ -5,12 +5,14 @@ import { QuestionInput } from "@/components/QuestionInput";
 import { Canvas } from "@/components/Canvas";
 import { Header } from "@/components/Header";
 import { NodeFullView } from "@/components/NodeFullView";
+import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
+import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 
 export default function Home() {
@@ -23,6 +25,7 @@ export default function Home() {
   const isMobile = useIsMobile();
   useEscapeAbort();
   useUnreadNavigation();
+  useNodeKeyboardNav();
   useReconnectStreams();
 
   useEffect(() => {
@@ -60,6 +63,10 @@ export default function Home() {
           onNodeFocus={isMobile ? () => setFullScreen(true) : undefined}
         />
       )}
+      {/* B1: mobile outline drawer — mounted top-level so it survives
+          fullscreen (where Canvas + its rail Outline unmount). Desktop hides
+          it (md:hidden) since the rail Outline inside Canvas covers desktop. */}
+      {session && <Outline variant="drawer" />}
       <DoneToast />
       <NotesDrawer />
       <SearchModal />

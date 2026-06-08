@@ -4,18 +4,46 @@
 // 这一层是"反向依赖 SDK"的关键:SDK 不认 trellis 的 mode/prompt,全部留在此。
 
 import os from "node:os";
+import path from "node:path";
+import { mkdirSync } from "node:fs";
 import { EventType, type AgentEvent, type RunOptions } from "agent-gateway";
 import type { Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
+
+// chat enhanced-mode scratch workspace (shared by claude + codex). Giving chat
+// a workspace flips it out of the no-tool / readonly sandbox so it can run
+// skills + the web. Providers call ensureChatScratch() before spawning.
+export const CHAT_SCRATCH = path.join(os.homedir(), ".trellis", "chat-scratch");
+export function ensureChatScratch(): void {
+  try {
+    mkdirSync(CHAT_SCRATCH, { recursive: true });
+  } catch {
+    /* exists / unwritable — provider surfaces errors */
+  }
+}
 
 /** trellis mode + StreamRequest → SDK RunOptions(细粒度机制)。 */
 export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
   const common: RunOptions = { model, attachments: req.attachments };
   if (mode === "chat") {
-    // 像 GPT web 客户端:替换 system prompt + 仅 web 工具 + 不落盘。无 workspace。
+    const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+    if (req.chatEnhanced) {
+      // 增强模式:scratch workspace + full → 无沙箱 → 能跑 skill + 联网 + 工具
+      // (YOLO)。claude 拿全工具;codex 的 full 整体绕过沙箱。
+      return {
+        ...common,
+        systemPrompt: sp,
+        workspace: CHAT_SCRATCH,
+        permission: "full",
+        persistence: false,
+      };
+    }
+    // 纯对话:替换 system prompt + 仅 web 工具 + 不落盘。无 workspace。
     return {
       ...common,
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      // D1: user can override the chat persona per-session; fall back to the
+      // built-in default when unset/blank.
+      systemPrompt: sp,
       tools: ["WebSearch", "WebFetch"], // claude 用;codex 无 web,backend 自行忽略
       persistence: false,
     };

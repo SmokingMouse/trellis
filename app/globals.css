@@ -134,6 +134,79 @@ html, body {
   padding: 0;
   font-family: "JetBrains Mono", "Menlo", monospace;
 }
+/* Code block frame: language label + copy button bar above the <pre>.
+   The wrapper owns the rounded corners so the bar + pre read as one unit
+   (A3 copy / B2 language label). */
+.md-body .md-codeblock {
+  margin: 0.7em 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.md-body .md-codeblock pre {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+}
+.md-body .md-codeblock-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px 4px 12px;
+  background: #292524;
+  color: #a8a29e;
+  font-size: 11px;
+  font-family: "JetBrains Mono", "Menlo", monospace;
+  border-bottom: 1px solid #0c0a09;
+}
+.dark .md-body .md-codeblock-bar {
+  background: #1c1917;
+  border-bottom-color: #000;
+}
+.md-body .md-codeblock-lang {
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+}
+.md-body .md-codeblock-copy {
+  padding: 1px 8px;
+  border-radius: 4px;
+  color: #d6d3d1;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background-color 120ms, color 120ms;
+}
+.md-body .md-codeblock-copy:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+/* B5 (a11y): visible keyboard-focus ring. Pointer clicks don't trigger
+   :focus-visible, so this only shows during keyboard navigation — no visual
+   noise for mouse users, clear affordance for keyboard users. */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.dark :focus-visible {
+  outline-color: #818cf8;
+}
+
+/* Canvas (ReactFlow) polish: transparent container so the gradient bg shows
+   through; indigo-tinted smoothstep edges, softer than the default gray. */
+.react-flow {
+  background: transparent !important;
+}
+.react-flow__edge-path {
+  stroke: #c7d2fe;
+  transition: stroke 150ms;
+}
+.dark .react-flow__edge-path {
+  stroke: #3730a3;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #818cf8;
+}
 .md-body h1, .md-body h2, .md-body h3 {
   font-weight: 600;
   margin: 0.9em 0 0.4em;

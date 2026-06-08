@@ -333,7 +333,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
-        className={`w-screen h-screen pt-12${
+        className={`w-screen h-screen pt-12 bg-gradient-to-b from-stone-50 via-white to-stone-100 dark:from-stone-950 dark:via-stone-950 dark:to-stone-900${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
       >
@@ -344,13 +344,14 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
           minZoom={0.2}
           maxZoom={1.5}
           proOptions={{ hideAttribution: true }}
+          defaultEdgeOptions={{ type: "smoothstep", style: { strokeWidth: 1.5 } }}
           onNodeClick={(_, node) => {
             setActiveNode(node.id);
             onNodeFocus?.();
           }}
           onPaneClick={() => fitView({ padding: 0.15, duration: 400 })}
         >
-          <Background gap={24} size={1} color="#e7e5e4" />
+          <Background gap={22} size={1} color="#d6d3d1" className="opacity-60 dark:opacity-[0.18]" />
           <Controls position="bottom-right" showInteractive={false} />
         </ReactFlow>
       </div>

@@ -4,6 +4,94 @@
 
 ## Session Log
 
+### Session 22 (2026-05-13)
+- **Done**: Stage 15 全部 8 步落地 — 图片输入（vision）三档模式可用。`npm run build` ✓ 一次过；端到端 curl 测试：upload → chat with attachment → SSE delta 全链路通；spike 验证 Project 模式 `--resume` + stream-json 输入兼容性。→ [spec](vision-input.md)
+  - **CLI spike**：实测 claude `-p --input-format stream-json` 从 stdin 喂 `{type:"user",message:{role:"user",content:[{type:"image",source:{type:"base64",...}},{type:"text",text:...}]}}` —— Anthropic Messages API 内容块原样工作。codex 用 `-i/--image FILE` 重复 flag。Project 模式：第 1 轮 stream-json 拿到 session id，第 2 轮 `--resume <id> --input-format stream-json` 续上、claude 能回忆图片内容（验证"light gray canvas"≈ trellis 截图）。
+  - **存储策略**：`~/.trellis/blobs/<sha256>.<ext>` 文件系统 + content-addressed。sha256 命名天然去重；DB 只存 metadata（`attachments_json TEXT`，NodeAttachment[] 序列化）。不进 SQLite blob → WAL 不膨胀 → 跨进程读 zero-copy。
+  - **DB migration**（`lib/server/sqlite.ts`）：idempotent ALTER `nodes.attachments_json TEXT`，NULL 默认。老节点全 NULL → repo rowToNode 返回 `attachments: []` → 消费者不需要 nullability check。
+  - **新模块 `lib/server/blobs.ts`**：sha256 + ext 白名单（PNG/JPEG/WebP/GIF）+ 写盘 + resolve。`sniffDimensions` 手写 magic-byte parser：PNG 读 IHDR uint32be、GIF87a/89a 读 LE16、JPEG 扫 SOF marker（FFC0-CF 跳过 FFC4/C8/CC）。不引 image-size 依赖，保持 deps 干净。
+  - **新 API**：
+    - `POST /api/uploads`：接 `multipart/form-data` 或 raw `image/*` body；10MB cap、mime 白名单；返回 NodeAttachment shape（hash + mime + size + width/height + filename）。
+    - `GET /api/uploads/[hash]`：流式回读，`Cache-Control: public, max-age=31536000, immutable`（content-addressed 永远不变）。`dynamic = "force-static"` 让 Next 标志为可缓存路由。
+  - **Provider 改造**：
+    - `claude.ts`：`hasImages = attachments.length > 0` 时切到 stream-json 输入 —— spawn 加 `stdio: ["pipe", "pipe", "pipe"]`，spawn 后 `proc.stdin.write(JSON.stringify(userMessage) + "\n")` + `end()`。文本路径完全不动：没图就还是 `-p "<prompt>"`。`buildPrompt(history, question, anchor)` 结果原样塞进 stream-json 的 text content block，所以折叠祖先链 / cli-multi prompt 逻辑零变动。
+    - `codex.ts`：`buildArgs` 多一个 `imagePaths: string[]` 参数，所有四个分支（project resume / project first turn / chat / workspace）prompt 前插 `--image FILE` 重复 flag。codex 吃文件路径而非 base64，跟 claude 不同。
+    - `mock.ts`：no-op（StreamRequest.attachments 是 optional，mock 忽略）。
+  - **Chat route**（`app/api/chat/route.ts`）：root + branch 接 attachments（NodeAttachment[]），retry 服务端从 DB `getNodeAttachments(nodeId)` 读出（用户不需要重传）。`sanitizeAttachments` 防御性清洗：hash 必须 hex64、mime 必须白名单、cap 6。`resolveAttachments(NodeAttachment[]) → {path, mime}[]` 把 hash 映射到磁盘路径；缺失的 blob 静默丢弃（rare：blob dir 被人手 rm 才会发生）。
+  - **Store**（`stores/sessionStore.ts`）：`streamRoot(question, opts?: { attachToCurrentSession?, attachments? })` / `streamBranch(parentId, question, anchor, opts?: { attachments? })`；`ChatRequestBody` root/branch 加 attachments。retry 不加（服务端独立解析）。`ApiNode = Omit<ChatNode, "position" | "topicLabel"> & ...` 自动吃下 ChatNode.attachments 新字段，apiNodeToChatNode 无需改动。
+  - **UI 新组件 `components/AttachmentPreview.tsx`**：
+    - 双模 props：readonly（NodeAttachment[]，用于 ChatNode/NodeFullView 展示已存图）+ edit（PendingAttachment[] + onRemove，用于 input 态）
+    - `PendingAttachment = { localId, status, previewUrl, filename, attachment?, errorMessage? }` —— 上传中显示 ↑ + 半透明，失败显示"失败"红色 + ✕，完成显示完整缩略图
+    - 单击缩略图 → lightbox（fixed inset-0 + Esc 关 + click-outside 关）
+    - 导出 `uploadAttachment(file, filename)` helper 给 input 组件复用；`newPendingId()` 顺序 localId
+  - **QuestionInput**（`components/QuestionInput.tsx`）：textarea 上方 AttachmentPreview；三个入口 — onPaste 遍历 clipboardData.items 找 image/*；onDragOver/Drop（仅响应 Files 类型，忽略文本拖拽）；底部 🖼️ 按钮触发 hidden `<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>`。submit 锁：`hasUploading` 时按钮文案变 "等待图片上传…" 禁用。drop 时容器加 indigo ring 提示。
+  - **BranchPopover**（`components/BranchPopover.tsx`）：精简版 —— 仅 paste（textarea onPaste）+ file picker（🖼️ 按钮），不要 drag（小弹层 drop target 不舒服）。popoverHeight = `130 + (pending.length > 0 ? 96 : 0)` 保证顶部不被截。
+  - **ChatNode / NodeFullView**：question 区下方加 `<AttachmentPreview attachments={node.attachments} readOnly />`；NodeFullView 的 QuestionBlock 接受额外 attachments prop。
+  - **README + progress**：vision 一段补到核心特性 + tick Stage 15。
+- **Decisions**:
+  - **stream-json 输入按需切换而非永久切换**：保留 `-p "<prompt>"` 作为无图路径。理由：(1) 没图时 stream-json 是不必要的 IO 层（虽然代价小但语义更复杂），(2) 现有 buildPrompt → spawn 链路是经验证的，最小破坏面。代价：claude.ts 有两套 stdin 配置（"ignore" vs "pipe"），可读性 trade 走稳定性。
+  - **buildPrompt 不重写为 multi-message**：spec 开放问题 5 — 现在的"祖先链 → 单块文本"在 stream-json 模式下作为唯一一条 user.message.content 的 text block 喂入。模型可能在多消息形态下利用得更好（更 native），但 cli-multi prompt 的特殊处理（仅当前问题、不带历史）等几条业务逻辑都依赖单块语义，重写就是 stage 内蔓延。等真实回答质量出问题再调整。
+  - **blob 不进 SQLite**：base64 进 WAL = SQLite 把整个 blob 反复 fsync + 维护 rollback journal；磁盘膨胀比文件系统多 ~1.4x，且 better-sqlite3 BLOB 读出来是 Buffer 反序列化。文件系统 + content hash 直接拿到稳定 path，spawn claude 时一行 fs.readFileSync 就转 base64，零额外复杂度。
+  - **手写 magic-byte parser 而非 image-size 依赖**：4 个 mime 加起来 ~80 行，依赖图保持空。WebP 的 VP8L/VP8X 多分支不写，未识别格式返回 `{}` 让客户端用 `<img>` 自然 dims。
+  - **GET /api/uploads/[hash] 用 force-static**：Next runtime hint 让框架知道这条路由跟请求参数无关（同一 hash 永远同一字节流），可以缓存。Cache-Control: immutable 由我们设。
+  - **上传中 submit 禁用**：用户可能粘贴图后 ⌘↩ 极快，如果不锁住，半秒后图片才上传完，对应的 attachment 就不会被带上而被默默丢掉。锁住 + 文案"等待图片上传…" 是显式的、不会丢图的设计。
+  - **重试自动复用旧图**：服务端 `getNodeAttachments(nodeId)` 直接读 attachments_json。比让 client 重传简单，且解决"重试节点本来就没保留原图"这个客户端做不到的问题。
+  - **PendingAttachment.localId 独立于 hash**：因为上传过程中 hash 还没有；keying React list / onRemove 都用 localId。done 之后才有 hash，仍然继续用 localId 引用（不切 key 避免组件重挂导致 object URL 闪烁）。
+  - **drag-drop 只在 QuestionInput 不在 BranchPopover**：BranchPopover 是飘在文本上的小卡片，drop target 边界不直观（容易拖到外面被浏览器接管打开图片）。粘贴 + 文件选择已覆盖 95% 用例。
+- **Caveats**:
+  - **大 prompt 注意事项**：6 张 5MB 图 = base64 ~40MB 一次性写进 claude stdin。实测单张 400KB 没问题；上限场景应该也 OK（pipe buffer 一般 64KB but stdin pipe 是 stream，不需要一次性塞）。仍标个 P2 监控点：极端情况下可能阻塞 spawn。
+  - **codex `--image` 路径 sandbox 兼容**：spike 没专门测 `--sandbox read-only` + `--image /Users/.../trellis/blobs/...`。猜测 OK（codex sandbox 允许读 home 下任何文件），但浏览器实测时如果 codex chat 模式吃图失败，可能是 sandbox 拦了；fallback 是把 blob 移到工作目录里再 `--image`。先不处理。
+  - **lightbox click-outside**：用 `cursor-zoom-out` 提示，但 `e.stopPropagation()` 在 img 上阻止冒泡。点 img 不会关。这是 feature（避免误关），但可能反直觉。
+  - **drag overlay 视觉边界**：onDragLeave 只在指针离开根容器时触发，textarea 内部子元素 leave 也会冒泡。多余的 setDragOver(false) 调用，没有视觉副作用，但偶尔 ring 闪一下。先不修。
+  - **blob 孤儿清理 P2**：删 session / 删 node 不删 blob。同一张图被多个 session 引用是常见的（截图复用），蛮力 GC 需要扫所有 sessions.attachments_json。磁盘膨胀到几百 MB 再做。
+  - **codex chat 模式 sandbox + image 没单独 spike**：实测命令用了 `--sandbox read-only` 跑通了，但那是单独 codex 调用；trellis route 走的代码路径稍微复杂（buildArgs imageArgs 插入位置可能影响 sandbox flag 解析）。浏览器实测点。
+- **Next**: 用户浏览器实测六类 case：
+  1. Chat 模式粘贴截图 → ⌘↩ → claude 看见图回答（test_chat_mode_paste）
+  2. Workspace 模式选 trellis 仓库 + 拖一张图 → claude 同时能 vision + Read 本地代码文件
+  3. Project 模式头 3 轮各附 1 张图，第 4 轮纯文本"刚才几张图都是啥" → claude 应该都记得（验证 resume 长 session 记忆）
+  4. 单张超过 10MB → upload 413 报错，UI 红色 ✕ + tooltip 显示错误
+  5. 单节点连续粘 6 张 → 第 7 张 disable + tooltip "已到 6 张上限"
+  6. 重试一个带图节点 → response 重生成，图保留（server 端从 DB 读）
+
+### Session 21 (2026-05-13)
+- **Done**: Stage 14 全部 7 步落地 — 三档模式重命名 + session 级 workspace 绑定。`npm run build` ✓ 一次过；`/api/workspaces/recent` curl 返回 20 个候选项。→ [spec](mode-workspace-rebuild.md)
+  - **DB migration**（`lib/server/sqlite.ts`）：两个 idempotent ALTER 加 `context_mode TEXT NOT NULL DEFAULT 'chat'` 和 `workspace_path TEXT`；migration UPDATE 把 `claude_session_id IS NOT NULL` 的旧 session 归到 `project`，其余归 `chat`。cli-single 用户失去工具能力，按用户选项 1 静默迁移。
+  - **Types**（`lib/llm/types.ts` + `lib/types.ts`）：`Mode = "chat" | "workspace" | "project"`；`StreamRequest` 加 `cwd?: string | null`；`Session` 加 `mode: string` + `workspacePath: string | null`（用 string 而非 Mode 联合，避免 client/server 模块边界引入 server-only 依赖）。
+  - **Provider cwd 注入**（`lib/llm/claude.ts` + `codex.ts`）：spawn cwd 改为 `mode === "chat" ? os.homedir() : (cwd ?? os.homedir())`；chat 模式 claude 加 `--tools "WebSearch,WebFetch"`（codex 暂无对应能力，标 TODO）；`buildCliMultiPrompt` 重命名 `buildProjectPrompt`。
+  - **`repo.ts` 关键改动**：`claudeSessionPath` 改成接受 `cwd` 参数（不再硬编码 `os.homedir()`）；`deleteSession` 取 workspace_path → 拼正确的 encoded-cwd 目录路径。否则 Project session 的 jsonl 在新 cwd 下会被漏清。
+  - **API route**（`app/api/chat/route.ts`）：root 请求接受 `mode + workspacePath`，校验 workspace/project 必须有路径，chat 强行清掉路径；branch / retry **不再从 body 读 mode**，直接 `getSession(sessionId).mode` 取，传给 provider 的 cwd 也来自 session 行——彻底打破"中途切 mode 影响活跃 session"的旧行为。
+  - **新增 `/api/workspaces/recent`**（`app/api/workspaces/recent/route.ts`）：合并 trellis DB 的 `SELECT DISTINCT workspace_path` + 扫 `~/.claude/projects/` 反查 cwd。反查策略两层：先在每个 dir 找一个 jsonl 读前 32KB 找带 `"cwd":` 的行（authoritative，因为 `-` 编码 lossy），fallback 才 naïve `replace(/-/g, "/")`。最后 `fs.existsSync` 过滤掉失效路径。spike 实测：扫 ~120 个 dir + 反查 ~50 个 jsonl，整体 < 200ms，可接受。
+  - **Store**（`stores/sessionStore.ts`）：删 `mode` state，加 `draftMode` + `draftWorkspacePath`（localStorage 同步）；删 `setMode`，加 `setDraftMode` + `setDraftWorkspacePath`；`streamRoot` 在 `attachToCurrentSession` 时不传 mode/workspace（让服务端从 session 取），新建 session 时才传；`streamBranch` / `retryNode` ChatRequestBody 不再带 mode。localStorage migration：旧 `MODE_KEY` 值 `lean/cli-single/cli-multi` 在 `loadDraftMode` 里自动翻译。
+  - **UI 拆分**：
+    - 新 `components/WorkspacePicker.tsx`：modal 列表 + 筛选 + Browse 兜底（手动输入绝对路径）。`prettifyHome` 用 regex `/^\/Users\/[^/]+\/(.+)$/` 缩 `~/...`（client-side 不知道 homedir，所以 regex 兜底）。
+    - 新 `components/ModeBadge.tsx`：readonly 显示当前 session 的 mode + workspace 基名，三色区分（Chat stone / Workspace amber / Project rose）。session 为空时返回 null（避免空 header）。
+    - 重写 `components/ModePicker.tsx`：现在专门是"draft picker"——读 draftMode/draftWorkspacePath，写 set 函数；选 Workspace/Project 且无 workspace → 自动打开 WorkspacePicker；workspace chip 在缺失时 animate-pulse 红色提示。
+    - `Header.tsx` 把 `<ModePicker />` 换成 `<ModeBadge />`，再无中途切模式入口。
+    - `QuestionInput.tsx` 在 textarea 上方居中放 ModePicker；submit 按钮多一个 `needsWorkspace` 锁，缺 workspace 时按钮文案变 "先选工作区"，title 注释解释。
+  - **Docs**：README 三档表 + 详解段全部重写；progress/README.md tick Stage 14，加 Current Focus 指向 Stage 15（vision）。
+- **Decisions**:
+  - **mode 升级成 DB 列 + session 创建后锁定**：spec 写到一半才发现当前 mode 是全局 localStorage。如果不升级，"一棵树一个语境"就只是 README 修辞，实际运行时 Header 切 mode 会影响所有历史 session。改动量大但本质上是修复"模式归属错位"的旧 bug。
+  - **session 内 mode 不可再切**：原 `ModePicker` 允许 cli-multi 切 cli-single 弹 confirm 对话；新方案直接不暴露切换。换语境 = 开新 session，跟 workspace 绑定一致。这是用户选项 4「按 7 步顺序我一气跑完」隐含的设定。
+  - **claudeSessionPath 改签名而非加 helper**：考虑过单独 `claudeSessionPathForWorkspace(workspacePath)` helper，但只有一个调用点（deleteSession），inline 参数更清晰，避免多个查 workspace 的 round-trip。
+  - **WorkspacePicker 数据源合并而非二选一**：用户问"picker 解决什么"暴露了概念门槛——所以最终列表必须第一次看就有候选项。trellis 自己的 DB 在新装时是空的，必须靠扫 `~/.claude/projects/` 给"我之前用 claude 跑过的项目"的种子数据。
+  - **`-` 反向解码做 fallback 而非主路径**：编码 lossy（`foo-bar` 目录名跟 `foo/bar` 路径冲突），所以主路径是读 jsonl 找 `"cwd"` 字段（authoritative）。fallback 留着是因为有些 dir 可能没 jsonl（清理过 / 残留空目录）；通过 `fs.existsSync` 过滤掉错误命中。
+  - **Codex chat 不加联网，标 TODO**：用户选项 1，原因是 codex CLI 0.125 没有独立 web tool 概念。spike 等价能力延后到 Stage 15 一起做，避免 Stage 14 scope 蔓延。
+  - **ApiSession.mode 用 string 而非 Mode 联合**：repo.ts 是 server-only，但 ApiSession 类型被前端 store 间接消费。如果 ApiSession.mode 是 Mode 联合，前端要从 `@/lib/llm/types` import 类型——但这条 import 链最终拽进 server-only 模块（claude.ts spawn）。改成 string + 在 boundary（route 的 `isMode` / store 的 `isMode`）窄化，干净。
+- **Caveats**:
+  - **存量 cli-single session 自动归到 Chat**：失去工具能力。用户选项 1（静默）。如果有正在跑工具的 session，下次发问会突然不工作——预期，不出 toast。
+  - **Codex Chat 模式无联网**：UI title 注释了。等 spike codex web 能力。
+  - **WorkspacePicker prettifyHome 不知道真实 homedir**：硬编码 `/Users/<user>/` regex。Linux/Windows 用户会看到完整路径。先不修，等真有非 mac 用户提。
+  - **ModePicker 旁的 workspace chip 在 mobile 上可能换行**：用了 `flex-wrap` 兜底，但视觉不完美。等浏览器实测再调。
+  - **顶栏 ModeBadge 没在 mobile 显示**（`hidden sm:inline-flex`）：mobile 屏幕窄，省空间。如果用户想知道当前 session 模式，可以打开 SessionPicker（list 里目前没显示 mode——后续可加）。
+  - **session 创建后改 workspace 完全没出口**：是 feature 不是 bug。换 workspace = 开新 session。但如果路径被外部移动（用户在 finder 里 mv 了仓库），现存 session 下次发问会 spawn 失败。错误信息用户能看到，但不会自动 relink。
+- **Next**: 浏览器实测六类 case：
+  1. 新 session 创建走 Chat 默认 → 提交 → 顶栏 ModeBadge 显示 Chat
+  2. 创建走 Workspace → WorkspacePicker 自动弹 → 选 trellis 仓库 → 提交 → claude spawn 在 trellis 目录里能 ls 出 components/ 等
+  3. 创建走 Project + 选 obsidian-cli 仓库 → 跑两轮对话 → 看 token 计量 ⚡ cacheRead 命中率
+  4. 旧 session（有 claude_session_id 的）打开 → ModeBadge 显示 Project；workspace 字段是 NULL → spawn 回退到 ~
+  5. 删除 Project session → 检查 `~/.claude/projects/<encoded-cwd>/<jsonl>` 真的被清掉（encoded-cwd 用 workspace 路径而非 home）
+  6. WorkspacePicker 筛选 + Browse 手动输路径都能用，输错路径（不存在的）提交后 chat 报错
+
 ### Session 20 (2026-05-06)
 - **Done**: 引用高亮 mark 注入从"源 markdown regex"切到"渲染 DOM textContent + Range wrap"，富文本场景全部命中。→ [spec](anchor-dom-inject.md)
   - **根因**：`injectHighlights` / `injectNoteMarks`（`NodeFullView.tsx:892-937` / `ChatNode.tsx:475`）在源 markdown 字符串上 regex 匹配 anchor.text，但 anchor.text 来自 `selection.toString()` = 渲染后 DOM textContent。两者只在"纯文本段落"等价；遇到代码块（``` ``` ` 围栏）、行内代码（` 反引号）、表格（`|` 分隔）、链接（`[text](url)`）、加粗（`**`）、列表前缀（`- `）等 markdown 语法字符就匹配失败。还有第二层：`injectHighlights` 没做 `\s+` flex（只 `injectNoteMarks` 有），跨段选区 child 必挂。session 18 caveat 已记录。

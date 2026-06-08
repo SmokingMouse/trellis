@@ -42,6 +42,9 @@ type ChatRequestRoot = {
   // sessionId). After creation they're locked in the DB row.
   mode?: Mode;
   workspacePath?: string | null;
+  // D1: chat-mode custom system prompt for a new session. Locked at
+  // creation; ignored for workspace/project (they use CLAUDE.md).
+  systemPrompt?: string | null;
   // Stage 15: image attachments uploaded via /api/uploads. The client
   // sends NodeAttachment shapes; the server hash-resolves to on-disk
   // paths before handing to the provider.
@@ -69,6 +72,12 @@ type ChatRequest = ChatRequestRoot | ChatRequestBranch | ChatRequestRetry;
 
 function nid(): string {
   return crypto.randomUUID();
+}
+
+// D2: clamp the client-supplied history depth (ancestor turns folded into the
+// prompt). Falls back to 4 for anything out of [1,12] or missing.
+function clampDepth(n: unknown): number {
+  return typeof n === "number" && n >= 1 && n <= 12 ? Math.round(n) : 4;
 }
 
 // Defensive cleanup of client-supplied attachments. Drops anything with a
@@ -138,6 +147,9 @@ export async function POST(req: Request) {
   // Resolved at session create (new root) or read from DB (everything else).
   let resolvedMode: Mode;
   let resolvedWorkspacePath: string | null;
+  // D1: chat-mode system prompt, resolved the same way (new = from body,
+  // everything else = from the locked session row). null = provider default.
+  let resolvedSystemPrompt: string | null = null;
   // Image attachments — supplied by client for root/branch, read from
   // DB for retry. Always normalized to NodeAttachment[] before going
   // into createNode args (so they land in attachments_json) and
@@ -157,6 +169,7 @@ export async function POST(req: Request) {
         }
         resolvedMode = isMode(existing.mode) ? existing.mode : "chat";
         resolvedWorkspacePath = existing.workspacePath;
+        resolvedSystemPrompt = existing.systemPrompt;
         nodeId = nid();
         const node = createRootInSession({
           sessionId: trellisSessionId,
@@ -173,6 +186,17 @@ export async function POST(req: Request) {
           typeof body.workspacePath === "string" && body.workspacePath.trim()
             ? body.workspacePath
             : null;
+        // D1: only chat mode carries a custom system prompt; clamp it away
+        // for workspace/project (their persona comes from CLAUDE.md).
+        if (resolvedMode === "chat") {
+          const sp =
+            typeof body.systemPrompt === "string" && body.systemPrompt.trim()
+              ? body.systemPrompt.trim()
+              : null;
+          resolvedSystemPrompt = sp;
+        } else {
+          resolvedSystemPrompt = null;
+        }
         if (resolvedMode === "chat") {
           // chat has no cwd binding; clamp any client-side workspace_path away.
           resolvedWorkspacePath = null;
@@ -196,6 +220,7 @@ export async function POST(req: Request) {
           now,
           mode: resolvedMode,
           workspacePath: resolvedWorkspacePath,
+          systemPrompt: resolvedSystemPrompt,
           attachments: resolvedAttachments,
         });
         createdEvent = { type: "created", session, node };
@@ -224,6 +249,7 @@ export async function POST(req: Request) {
       resolvedMode =
         parentSession && isMode(parentSession.mode) ? parentSession.mode : "chat";
       resolvedWorkspacePath = parentSession?.workspacePath ?? null;
+      resolvedSystemPrompt = parentSession?.systemPrompt ?? null;
       createdEvent = { type: "created", node };
       questionForLLM = body.question;
     } else if (body.kind === "retry") {
@@ -249,6 +275,7 @@ export async function POST(req: Request) {
       resolvedMode =
         retrySession && isMode(retrySession.mode) ? retrySession.mode : "chat";
       resolvedWorkspacePath = retrySession?.workspacePath ?? null;
+      resolvedSystemPrompt = retrySession?.systemPrompt ?? null;
       createdEvent = { type: "created", node };
     } else {
       return Response.json({ error: "unknown kind" }, { status: 400 });
@@ -266,8 +293,11 @@ export async function POST(req: Request) {
 
   // project mode: history lives in the resumed claude session, so we don't
   // fold it into the prompt. chat/workspace still need the folded history.
+  const reqDepth = clampDepth((body as { historyDepth?: number }).historyDepth);
+  const chatEnhanced =
+    (body as { chatEnhanced?: boolean }).chatEnhanced === true;
   const history =
-    mode === "project" ? [] : buildHistoryForNode(nodeId);
+    mode === "project" ? [] : buildHistoryForNode(nodeId, { maxDepth: reqDepth });
   // project mode: each root in the session owns its own claude session id
   // (post-2026-05 upgrade — was session-level before). Branches walk up
   // to find their root's id; fresh-context roots return null until their
@@ -291,6 +321,8 @@ export async function POST(req: Request) {
         signal,
         claudeSessionId,
         cwd: resolvedWorkspacePath,
+        systemPrompt: resolvedSystemPrompt,
+        chatEnhanced,
         attachments: providerAttachments,
       }),
     topicLabel:
