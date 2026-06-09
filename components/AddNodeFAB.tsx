@@ -2,15 +2,31 @@
 import { useEffect, useRef, useState } from "react";
 import { ReferencePicker } from "./ReferencePicker";
 import { NewQuestionPicker } from "./NewQuestionPicker";
+import { useSessionStore } from "@/stores/sessionStore";
 
 type Picker = "question" | "reference" | null;
 
 // Bottom-right FAB. Clicking opens a small popover menu with two creation
-// flows: 新提问 (parallel root in current session) / 参考卡片 (paste / URL).
+// flows: 新话题 (fresh-context parallel root in current session) / 参考卡片.
+// The 新话题 composer can also be opened remotely via the store's
+// composeRootOpen flag — the Header context-pressure prompt (B3) uses that.
 export function AddNodeFAB() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [picker, setPicker] = useState<Picker>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+
+  // Mirror the store flag into local picker state so a remote trigger
+  // (Header B3 prompt) opens the same NewQuestionPicker.
+  useEffect(() => {
+    if (composeRootOpen) setPicker("question");
+  }, [composeRootOpen]);
+
+  const closeQuestion = () => {
+    setPicker(null);
+    if (composeRootOpen) setComposeRootOpen(false);
+  };
 
   // Close menu on outside click / Escape.
   useEffect(() => {
@@ -41,9 +57,9 @@ export function AddNodeFAB() {
           <div className="absolute bottom-14 right-0 w-56 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-lg shadow-xl py-1 text-sm">
             <MenuItem
               onClick={() => open("question")}
-              icon="💬"
-              title="新提问"
-              hint="独立的根问答"
+              icon="🧹"
+              title="新话题（清空上下文）"
+              hint="等价 /clear · 不继承现有节点"
             />
             <MenuItem
               onClick={() => open("reference")}
@@ -77,7 +93,7 @@ export function AddNodeFAB() {
         </button>
       </div>
       {picker === "question" && (
-        <NewQuestionPicker onClose={() => setPicker(null)} />
+        <NewQuestionPicker onClose={closeQuestion} />
       )}
       {picker === "reference" && (
         <ReferencePicker onClose={() => setPicker(null)} />

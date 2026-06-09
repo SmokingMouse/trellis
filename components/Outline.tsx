@@ -147,9 +147,14 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
     );
   }
 
-  // Desktop rail (default): permanent left rail, hidden on mobile.
+  // Desktop rail (default): permanent left rail, hidden on mobile. Wave 4:
+  // shift right of the explorer sidebar when it's open (var from page.tsx;
+  // falls back to 0 so the rail sits at its original left-3 = 12px).
   return (
-    <aside className="hidden md:block fixed left-3 top-[60px] w-60 bg-white/90 dark:bg-stone-900/90 backdrop-blur border border-stone-200 dark:border-stone-800 rounded-lg p-2 text-xs shadow-sm z-30 max-h-[calc(100vh-72px)] overflow-y-auto">
+    <aside
+      className="hidden md:block fixed top-[96px] w-60 bg-white/90 dark:bg-stone-900/90 backdrop-blur border border-stone-200 dark:border-stone-800 rounded-lg p-2 text-xs shadow-sm z-30 max-h-[calc(100vh-108px)] overflow-y-auto"
+      style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
+    >
       {body}
     </aside>
   );

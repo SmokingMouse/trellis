@@ -4,7 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type Database from "better-sqlite3";
 import { getDB } from "./sqlite";
-import type { ChatMessage } from "@/lib/llm";
+import type { ChatMessage, ProviderFamily } from "@/lib/llm";
 import type {
   NodeKind,
   NodeAttachment,
@@ -12,6 +12,7 @@ import type {
   ReferenceMeta,
   ReferencePayload,
   ToolCall,
+  PendingInteraction,
 } from "@/lib/types";
 
 // Wire-format types — what gets sent over HTTP. Mirrors the client-side
@@ -33,6 +34,12 @@ export type ApiSession = {
   // D1: custom system prompt locked at creation (chat mode only).
   // null = use DEFAULT_SYSTEM_PROMPT.
   systemPrompt: string | null;
+  // B2: soft-archive flag. true = hidden from tabs + default lists, fully
+  // reversible (jsonl/nodes untouched). false = active.
+  archived: boolean;
+  // Per-session model lock (ProviderId string). null = legacy row → caller
+  // falls back to DEFAULT_PROVIDER. Set at creation; editable via PATCH.
+  model: string | null;
 };
 
 export type ApiNode = {
@@ -50,6 +57,9 @@ export type ApiNode = {
     output: number;
     cacheRead: number;
     cacheCreation: number;
+    // Main-agent context occupancy (last assistant message). null = backend
+    // didn't report → consumers fall back to the input+cache sum.
+    contextTokens?: number | null;
   };
   createdAt: number;
   topicLabel: string | null;
@@ -58,6 +68,8 @@ export type ApiNode = {
   readAt: number | null;
   attachments: NodeAttachment[];
   toolCalls: ToolCall[];
+  // A路②: non-null while a run paused on an interactive tool awaits the user.
+  pendingInteraction: PendingInteraction | null;
 };
 
 type NodeRow = {
@@ -74,6 +86,7 @@ type NodeRow = {
   token_output: number;
   token_cache_read: number;
   token_cache_creation: number;
+  token_context: number | null;
   created_at: number;
   topic_label: string | null;
   kind: string | null;
@@ -85,13 +98,15 @@ type NodeRow = {
   read_at: number | null;
   attachments_json: string | null;
   tool_calls_json: string | null;
+  pending_interaction_json: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
        status, error_message, sibling_index, token_input, token_output,
-       token_cache_read, token_cache_creation, created_at,
+       token_cache_read, token_cache_creation, token_context, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
-       ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json`;
+       ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
+       pending_interaction_json`;
 
 type SessionRow = {
   id: string;
@@ -102,10 +117,12 @@ type SessionRow = {
   context_mode: string;
   workspace_path: string | null;
   system_prompt: string | null;
+  archived: number;
+  model: string | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
-       context_mode, workspace_path, system_prompt`;
+       context_mode, workspace_path, system_prompt, archived, model`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -159,6 +176,17 @@ function rowToNode(r: NodeRow): ApiNode {
       /* malformed → empty */
     }
   }
+  let pendingInteraction: PendingInteraction | null = null;
+  if (r.pending_interaction_json) {
+    try {
+      const parsed = JSON.parse(r.pending_interaction_json);
+      if (parsed && typeof parsed === "object" && "toolUseId" in parsed) {
+        pendingInteraction = parsed as PendingInteraction;
+      }
+    } catch {
+      /* malformed → null */
+    }
+  }
   return {
     id: r.id,
     sessionId: r.session_id,
@@ -176,6 +204,7 @@ function rowToNode(r: NodeRow): ApiNode {
       output: r.token_output,
       cacheRead: r.token_cache_read,
       cacheCreation: r.token_cache_creation,
+      contextTokens: r.token_context,
     },
     createdAt: r.created_at,
     topicLabel: r.topic_label,
@@ -184,6 +213,7 @@ function rowToNode(r: NodeRow): ApiNode {
     readAt: r.read_at,
     attachments,
     toolCalls,
+    pendingInteraction,
   };
 }
 
@@ -197,6 +227,8 @@ function rowToSession(r: SessionRow): ApiSession {
     mode: r.context_mode,
     workspacePath: r.workspace_path,
     systemPrompt: r.system_prompt,
+    archived: r.archived === 1,
+    model: r.model,
   };
 }
 
@@ -246,14 +278,62 @@ function ftsDeleteBySession(
   db.prepare("DELETE FROM search_index WHERE session_id = ?").run(sessionId);
 }
 
-export function listSessions(): ApiSession[] {
+// B2: default returns only active (archived=0) sessions — so the tab bar
+// and pickers hide archived ones automatically. Pass { archived: true } to
+// list ONLY the archived ones (the "show archived" picker view).
+export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const db = getDB();
+  const want = opts?.archived ? 1 : 0;
   const rows = db
     .prepare(
-      `SELECT ${SESSION_COLS} FROM sessions ORDER BY updated_at DESC`,
+      `SELECT ${SESSION_COLS} FROM sessions WHERE archived = ?
+       ORDER BY updated_at DESC`,
     )
-    .all() as SessionRow[];
+    .all(want) as SessionRow[];
   return rows.map(rowToSession);
+}
+
+// B2: count archived sessions — drives the "显示已归档 (N)" toggle label.
+export function countArchivedSessions(): number {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE archived = 1")
+    .get() as { n: number };
+  return row.n;
+}
+
+// B2: soft-archive / restore. Mirrors renameSession (bumps updated_at so the
+// restored row re-sorts to the top). Returns the updated session, or null if
+// the id doesn't exist. NEVER touches nodes / jsonl — purely reversible.
+export function setSessionArchived(
+  sessionId: string,
+  archived: boolean,
+  now: number,
+): ApiSession | null {
+  const db = getDB();
+  const result = db
+    .prepare(
+      "UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(archived ? 1 : 0, now, sessionId);
+  if (result.changes === 0) return null;
+  return getSession(sessionId);
+}
+
+// Per-session model lock. Persists the chosen ProviderId on the session row so
+// switching sessions restores each one's own model instead of inheriting the
+// global picker. Does NOT bump updated_at — changing the model isn't activity
+// that should re-sort the session list. Returns the updated session or null.
+export function setSessionModel(
+  sessionId: string,
+  model: string,
+): ApiSession | null {
+  const db = getDB();
+  const result = db
+    .prepare("UPDATE sessions SET model = ? WHERE id = ?")
+    .run(model, sessionId);
+  if (result.changes === 0) return null;
+  return getSession(sessionId);
 }
 
 export function getSession(id: string): ApiSession | null {
@@ -332,50 +412,101 @@ export function deleteSession(id: string): void {
   }
 }
 
-// Walk up the parent chain from `nodeId` until parent_id IS NULL (the root
-// of this branch's lineage), and return that root's claude_session_id.
-// In project mode this is the id that `claude --resume` should target so
+// Resume ids are provider-family-scoped — claude ids live in
+// claude_session_id, codex ids in codex_session_id, and mock never resumes.
+// Map a family to its column (null = no resumable column for this family).
+function resumeColumnForFamily(family: ProviderFamily): string | null {
+  if (family === "claude") return "claude_session_id";
+  if (family === "codex") return "codex_session_id";
+  return null; // mock
+}
+
+// True iff the claude CLI transcript for `id` still exists on disk. Used to
+// self-heal: historically-polluted rows (a codex id stranded in
+// claude_session_id before family isolation) and rows whose jsonl was
+// manually cleaned both fail this check, so we fall back to a fresh session
+// instead of feeding `claude --resume` an id it can't honor. Only meaningful
+// for the claude family — codex transcript paths embed a date we can't derive
+// from the id alone, so codex skips this check.
+export function claudeJsonlExists(
+  id: string,
+  workspacePath: string | null,
+): boolean {
+  try {
+    return fs.existsSync(claudeSessionPath(id, workspacePath));
+  } catch {
+    return false;
+  }
+}
+
+// Walk up the parent chain from `nodeId` until parent_id IS NULL (the root of
+// this branch's lineage), and return that root's resume id for `family`. In
+// project mode this is the id that the provider's `--resume` should target so
 // the branch continues its root's conversation. Returns null when:
+//   - family is "mock" (never resumable)
 //   - nodeId doesn't exist
-//   - the root's column is unset (first turn of a fresh-context root —
+//   - the root's column for this family is unset (first turn of a
+//     fresh-context root, or the root's first turn ran a different family —
 //     spawn without --resume; session_init will populate it)
-export function getRootClaudeIdForNode(nodeId: string): string | null {
+//   - (claude only) workspacePath is provided and the transcript jsonl no
+//     longer exists on disk — treat as fresh, self-healing stale/polluted ids
+export function getRootResumeIdForNode(
+  nodeId: string,
+  family: ProviderFamily,
+  workspacePath?: string | null,
+): string | null {
+  const col = resumeColumnForFamily(family);
+  if (!col) return null; // mock
   const db = getDB();
   const stmt = db.prepare(
-    "SELECT parent_id, claude_session_id FROM nodes WHERE id = ?",
+    `SELECT parent_id, ${col} AS resume_id FROM nodes WHERE id = ?`,
   );
   let cur: string | null = nodeId;
   // Hard cap walk depth so a broken chain (shouldn't happen but DB-level
   // cycles are technically possible after manual edits) can't spin.
   for (let i = 0; i < 1000 && cur; i++) {
     const row = stmt.get(cur) as
-      | { parent_id: string | null; claude_session_id: string | null }
+      | { parent_id: string | null; resume_id: string | null }
       | undefined;
     if (!row) return null;
-    if (row.parent_id === null) return row.claude_session_id;
+    if (row.parent_id === null) {
+      const id = row.resume_id;
+      if (!id) return null;
+      // claude: validate the transcript exists before handing it to
+      // --resume. codex: path embeds a date, can't validate by id — trust it.
+      if (
+        family === "claude" &&
+        workspacePath !== undefined &&
+        !claudeJsonlExists(id, workspacePath)
+      ) {
+        return null;
+      }
+      return id;
+    }
     cur = row.parent_id;
   }
   return null;
 }
 
-// Walk up to the root and set its claude_session_id. Called from the chat
-// route on `session_init` so the freshly-spawned claude session id sticks
-// to whichever root this stream belongs to.
-export function setRootClaudeIdForNode(nodeId: string, claudeId: string): void {
+// Walk up to the root and set its resume id for `family`. Called from
+// run-bus on `session_init` so the freshly-spawned CLI session id sticks to
+// whichever root this stream belongs to, in the family-correct column. mock
+// has no resumable column, so it's a no-op.
+export function setRootResumeIdForNode(
+  nodeId: string,
+  family: ProviderFamily,
+  resumeId: string,
+): void {
+  const col = resumeColumnForFamily(family);
+  if (!col) return; // mock
   const db = getDB();
-  const stmt = db.prepare(
-    "SELECT parent_id FROM nodes WHERE id = ?",
-  );
+  const stmt = db.prepare("SELECT parent_id FROM nodes WHERE id = ?");
   let cur: string | null = nodeId;
   for (let i = 0; i < 1000 && cur; i++) {
-    const row = stmt.get(cur) as
-      | { parent_id: string | null }
-      | undefined;
+    const row = stmt.get(cur) as { parent_id: string | null } | undefined;
     if (!row) return;
     if (row.parent_id === null) {
-      db.prepare(
-        "UPDATE nodes SET claude_session_id = ? WHERE id = ?",
-      ).run(claudeId, cur);
+      db.prepare(`UPDATE nodes SET ${col} = ? WHERE id = ?`).run(resumeId, cur);
       return;
     }
     cur = row.parent_id;
@@ -427,12 +558,19 @@ export function markNodeRead(nodeId: string, now: number): number | null {
 
 // Claude CLI stores session transcripts at
 // ~/.claude/projects/<encoded-cwd>/<session_id>.jsonl, where encoded-cwd is
-// the absolute cwd path with "/" replaced by "-" (e.g. "/Users/foo" →
-// "-Users-foo"). cwd is whatever we spawned claude from: workspace_path for
-// project sessions, os.homedir() as the chat/workspace fallback.
+// the absolute cwd with EVERY non-alphanumeric char replaced by "-" (matching
+// Claude Code's own encoding) — e.g. "/Users/me/.claude" → "-Users-me--claude"
+// (the dot becomes "-" too). cwd is whatever we spawned claude from:
+// workspace_path for project sessions, os.homedir() as the chat/workspace
+// fallback.
+//
+// NOTE: the old encode only replaced "/", so any cwd with a dot/underscore
+// mismatched → claudeJsonlExists() falsely reported "missing" →
+// getRootResumeIdForNode() returned null → project mode silently lost history
+// every turn. (Same bug also broke deleteSession's jsonl cleanup.)
 function claudeSessionPath(sessionId: string, cwd: string | null): string {
   const effectiveCwd = cwd ?? os.homedir();
-  const encodedCwd = effectiveCwd.replace(/\//g, "-");
+  const encodedCwd = effectiveCwd.replace(/[^a-zA-Z0-9]/g, "-");
   return path.join(os.homedir(), ".claude", "projects", encodedCwd, `${sessionId}.jsonl`);
 }
 
@@ -445,12 +583,14 @@ export function createSessionWithRoot(args: {
   mode?: string;
   workspacePath?: string | null;
   systemPrompt?: string | null;
+  model?: string | null;
   attachments?: NodeAttachment[];
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
   const mode = args.mode ?? "chat";
   const workspacePath = args.workspacePath ?? null;
   const systemPrompt = args.systemPrompt ?? null;
+  const model = args.model ?? null;
   const attachmentsJson =
     args.attachments && args.attachments.length > 0
       ? JSON.stringify(args.attachments)
@@ -458,8 +598,8 @@ export function createSessionWithRoot(args: {
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
-                             context_mode, workspace_path, system_prompt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                             context_mode, workspace_path, system_prompt, model)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -469,6 +609,7 @@ export function createSessionWithRoot(args: {
       mode,
       workspacePath,
       systemPrompt,
+      model,
     );
 
     db.prepare(
@@ -609,7 +750,9 @@ export function resetNodeForRetry(
          error_message = NULL,
          token_input = 0, token_output = 0,
          token_cache_read = 0, token_cache_creation = 0,
-         tool_calls_json = NULL
+         token_context = NULL,
+         tool_calls_json = NULL,
+         pending_interaction_json = NULL
      WHERE id = ?`,
   ).run(nodeId);
   // The old response is gone; remove it from FTS so stale text doesn't
@@ -730,6 +873,28 @@ export function getNodeToolCalls(nodeId: string): ToolCall[] {
   }
 }
 
+// A路②: persist the in-flight interactive-tool prompt so a reload / reconnect
+// can re-render the waiting form. Overwrites any prior pending value (only one
+// interaction is in flight per node at a time). No-op if the node vanished.
+export function persistPendingInteraction(
+  nodeId: string,
+  pending: PendingInteraction,
+): void {
+  const db = getDB();
+  db.prepare(
+    "UPDATE nodes SET pending_interaction_json = ? WHERE id = ?",
+  ).run(JSON.stringify(pending), nodeId);
+}
+
+// A路②: clear the pending interaction once the user answered (or the run
+// aborted). Idempotent.
+export function clearPendingInteraction(nodeId: string): void {
+  const db = getDB();
+  db.prepare(
+    "UPDATE nodes SET pending_interaction_json = NULL WHERE id = ?",
+  ).run(nodeId);
+}
+
 export function appendNodeResponse(nodeId: string, delta: string): void {
   const db = getDB();
   db.prepare("UPDATE nodes SET response = response || ? WHERE id = ?").run(
@@ -746,6 +911,9 @@ export function finalizeNode(args: {
   tokenOutput: number;
   tokenCacheRead: number;
   tokenCacheCreation: number;
+  // Main-agent context-window occupancy (last assistant message). null when the
+  // backend can't report it; persisted as-is so the % gauge survives reload.
+  tokenContext?: number | null;
   now: number;
 }): void {
   const db = getDB();
@@ -758,7 +926,9 @@ export function finalizeNode(args: {
       `UPDATE nodes
        SET status = ?, error_message = ?,
            token_input = ?, token_output = ?,
-           token_cache_read = ?, token_cache_creation = ?
+           token_cache_read = ?, token_cache_creation = ?,
+           token_context = ?,
+           pending_interaction_json = NULL
        WHERE id = ?`,
     ).run(
       args.status,
@@ -767,6 +937,7 @@ export function finalizeNode(args: {
       args.tokenOutput,
       args.tokenCacheRead,
       args.tokenCacheCreation,
+      args.tokenContext ?? null,
       args.nodeId,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
@@ -1436,7 +1607,9 @@ export function reapInterruptedStreams(): number {
   const db = getDB();
   const result = db
     .prepare(
-      `UPDATE nodes SET status = 'error', error_message = 'interrupted' WHERE status = 'streaming'`,
+      `UPDATE nodes SET status = 'error', error_message = 'interrupted',
+              pending_interaction_json = NULL
+       WHERE status = 'streaming'`,
     )
     .run();
   return result.changes;

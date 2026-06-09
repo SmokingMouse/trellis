@@ -9,11 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "agent-gateway": "file:../../agent-gateway",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
+    "agent-gateway": "file:../../agent-gateway",
     "better-sqlite3": "^12.9.0",
     "highlight.js": "^11.11.1",
+    "html-to-image": "^1.11.13",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

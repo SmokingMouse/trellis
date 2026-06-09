@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**新战略方向定调(Session 29):Session 工作台层** → [spec](session-workbench.md)。原北极星「替代 GPT + Claude Code CLI」交互层已基本达成,下一道坎是「承载更多工作」——让 CLI 重度用户能像 tmux 一样并行承载多 session、靠肌肉记忆导航。已完成 recon(4 agent 并发测绘),关键发现:**执行引擎(run-bus)本就多 session 并发,墙在 store 单 active session 模型 + 缺导航/生命周期/命令 UI 层;一大半"迷惑"是可发现性而非能力缺失**。三组件:(a) tmux tab 导航 (b) session 生命周期正名 (c) 命令面板。**三波全部落地(Session 29-30,build ✓×3,UI 待浏览器实测)**:Wave 1(SessionTabs + `/api/runs`)+ Wave 2(B1 正名/B2 归档/B3 compact 降级)+ Wave 3(C1 命令面板,`/` 前缀触发 /new /clear /archive /switch /model)。deferred 项:Level B 多 session in-memory store 重构、`/model` per-session DB 锁定(均有产品语义未决,实测驱动再上)。下一步:浏览器实测全部交互。
+
+---
 **费曼学习法 Phase 1 已落地**（Session 28，轻量预设版，未实测）。继续按 [optimization-roadmap.md](optimization-roadmap.md)（替代 GPT 体验优化）实施第一阶段 P0。**用户要求「一口气全做完」。已完成 15 项**（全部 `npm run build` ✓）：
 - P0：A3 代码块/回复复制 · B2(并入) · D1 System Prompt 可配 · A4 Enter 发送 · A1 全屏流式 markdown · B1 移动端 Outline 抽屉 · A2 编辑=新分支重问 · C2 记忆桥接(写侧) · C1 文件附件(code/text 子集)
 - P1/P2：B5 a11y · B4 首屏建议 · A5 Alt+方向导航 · D2 上下文 depth 可调 · D5 多版本对比 · C4 Skill 入口
@@ -85,240 +88,91 @@
 - [ ] C3 语义检索 — **开放决策 Q2**（embedding API）未拍板，暂不做
 - [ ] C6 图片生成/语音 — **开放决策 Q3 倾向不做**（付费 API + 偏离单机定位，走 ai-legion skill）
 
+### Session 工作台层(tmux 式多 session)→ [spec](session-workbench.md)
+下一道坎:让 CLI 重度用户并行承载多 session + 靠肌肉记忆导航。三波:
+**Wave 1(导航先立)**
+- [ ] A1: 常驻 session tab 条 + mode 色标 + ⌘1-9 快切(Level A,不重构 store)
+- [ ] A2: live 状态点(新 `/api/runs` 暴露 run-bus RUNS 快照,tab 上显示 streaming/done/error)
+- [ ] A3: tab 条按 mode 分区(Chat 区 / Workspace·Project 区,借 SearchModal mode facet)
+
+**Wave 2(生命周期正名)** — Session 30 落地(build ✓ + curl 验证 archive 往返)
+- [x] B1: 「新提问」→「🧹 新话题(清空上下文)」正名;NewQuestionPicker 🧹 badge + `/clear` 文案对所有 mode 统一(原仅 project);FAB/SessionPicker/Header 文案对齐。仅改标签文案,createRootInSession 行为不变
+- [x] B2: 归档机制(`sessions.archived INTEGER` idempotent ALTER + repo `setSessionArchived`/`countArchivedSessions` + listSessions 默认排除 archived + PATCH `{archived}` + store `archiveSession`/`unarchiveSession` + SessionPicker 行内归档/恢复 + 「显示已归档(N)」toggle)。归档纯隐藏不删 jsonl/节点。SessionTabs 未改(同 endpoint 自动受益)
+
+**Wave 3(命令面 + 深水)**
+- [x] C1: 通用命令面板(Session 30)。新 `lib/commands.ts` registry(`matchCommands`/`parseCommand`/`resolveProvider`)+ QuestionInput 提交拦截分流(纯 Trellis 命令本地执行不发 LLM,skill 照旧透传 CLI)+ `/` 下拉合并命令(前)+skill(后)。`/clear` 复用 Wave 2 `setComposeRootOpen`。仅接首屏 composer(命令是 session 元操作),追问框刻意不接
+- [x] B3: `/compact` 降级提示(Session 30 随 Wave 2 一起做)。spike 确认 claude CLI/SDK 无原生 compact → 降级为 Header 🧠 ctx 徽章在 ≥50% 时变可点 popover(解释上下文压力 + 「🧹 开新话题清空」一键复用 createRootInSession,经 store `composeRootOpen` 标志驱动 AddNodeFAB 的 NewQuestionPicker)。<50% 保持非交互只读不打扰。不实现 summarize
+- [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
+
 ## Session Log
-### Session 28 (2026-06-08)
-- **Done**: **费曼学习法 Phase 1（轻量版，今天可用）**。本质是反转 Trellis 的信息流——普通模式「你问→AI 答」，费曼模式「你讲→AI 当考官」，逼出理解漏洞；且费曼的「发现漏洞→补讲」循环天然 = Trellis 的「分叉子节点」（每个没讲清的点选中 ⌘K 开子节点深讲）。挂在现有 D1 系统提示词预设机制上，零 schema 改动：
-  - `components/SystemPromptPicker.tsx`：导出 `FEYNMAN_PROMPT` 常量（复述确认→漏洞清单→naive 追问的「复述+考官」角色，明确禁止 AI 替用户把概念补完整）；PRESETS 加「费曼考官」预设（排在苏格拉底导师后，二者正好相反：苏格拉底是 AI 引导你推导，费曼是你主动讲 AI 挑刺）。
-  - `components/QuestionInput.tsx`：import `FEYNMAN_PROMPT`，读 `draftSystemPrompt` 引用相等检测 `isFeynman`；激活时 textarea placeholder 翻转成「讲讲你的理解……选中讲不清的点 ⌘K 开子节点」+ 建议词从 `SUGGESTED_PROMPTS`（提问）切到 `FEYNMAN_STARTERS`（讲解起手式）。
-  - `npm run build` ✓。
-- **Done (续)**: **Zone 专注写作模式**（用户要「写回答时更好的体验 + Markdown 编辑」）。新 `components/ZoneEditor.tsx`——全屏 overlay 写作区：顶栏[编辑]/[预览]切换、Markdown 工具栏（⌘B 粗/⌘I 斜/行内代码/标题/引用/有序无序列表/链接，操作 textarea 选区）、居中大号沉浸编辑区、预览复用 `.md-body`+`MD_COMPONENTS`+同款 remark/rehype（和最终回答所见即所得一致）。可复用：parent 持有 value/onChange，退出 Zone 草稿无损留在原输入框。`npm run build` ✓（零新依赖）。
-- **Done (续2)**: **接入全部 4 个输入框 + 浏览器实测**（用户反馈「为啥没试渲染 / 只有首屏有，追问都没」，两点都对，已补）。
-  - 接入 `QuestionInput`（首屏）+ `ChatNode` FollowupInput（画布卡片）+ NodeFullView `FollowupBar` + `SelectionBar`——三个追问框各加「⛶」入口，复用同一 ZoneEditor。
-  - **实测抓到一个真 bug（光 build 看不出）**：`fixed inset-0` 被祖先 transform（ReactFlow 画布 / NodeFullView 全屏）限制，Zone 只占底部一条而非全屏。修法：ZoneEditor 用 `createPortal` 渲染到 `document.body` 逃出 transform 祖先。
-  - **agent-browser 实测全过**（截图 + eval 验证）：① 预览渲染 = 标题/粗体/行内 code/列表/斜体/引用框/python 代码块语法高亮+复制按钮，和回答正文一致 ② 工具栏 B 选中「路由表」→`**路由表**`+选区恢复内层 ③ Esc 关闭 Zone 不泄漏到 useEscapeAbort（capture 阶段 stopImmediatePropagation 生效）④ 退出后草稿完整回流到原输入框（共享 state）。
-- **Decisions**:
-  - **Zone 三选全取推荐项**：编辑器=轻量零依赖（textarea+工具栏+预览复用 react-markdown，"输入即发给 LLM 的 markdown 源码"，不引 CodeMirror/WYSIWYG）；布局=沉浸编辑+一键切预览（顶栏 toggle 不分栏）；范围=先 QuestionInput + 抽成可复用 ZoneEditor（追问框后续一行接入）。
-  - **Zone 内发送恒为 ⌘↩，无视全局 sendKey**：长文写作区裸 Enter 必须换行否则误发；Esc 退出 + ⌘↩ 发送走 window 级监听（编辑/预览两态都生效）。
-  - **工具栏选区保持**：按钮 `onMouseDown preventDefault` 防 textarea 失焦丢选区；transform 后 `pendingSel` ref + `useEffect([value])` 在 value 流回后恢复光标。
-  - **Zone 必须 createPortal 到 body**：从追问框（在 transform 祖先内）渲染时 `fixed inset-0` 会相对 transform 祖先而非视口 → 只占一条。portal 是 overlay 逃出 transform containing block 的标准解。实测才发现，build 看不出。
-  - **测试教训**：FollowupBar 的追问 textarea 与 Zone textarea 共享同一 `text` state（DOM 里两个元素值镜像）；`querySelector('div.fixed.inset-0 textarea')` 还会同时命中 NodeFullView 全屏自身的 fixed 容器——验证选区行为时必须按 placeholder 精确选 Zone 那个，否则误判逻辑有 bug。
-  - **用户三选全取推荐项**：AI 角色=复述+考官（既确认听懂又施压，最贴费曼原意）；落地=先轻后重（Phase 1 零架构今天用，结构化漏洞清单+一键分叉留 Phase 2）；补漏闭环=两个都要先用现成的（MVP 复用「选区 ⌘K 分叉」，自动生成子节点入口留 Phase 2）。
-  - **挂预设而非新建第四模式**：费曼是 chat 模式下的一种 AI 人格，D1 预设机制（chat 专属、创建锁定）天生契合；新建 mode 要动 schema/Mode 联合/全链路，违反简洁优先。workspace/project 的人格来自 CLAUDE.md，不叠费曼。
-  - **引用相等检测角色**：复用本文件已有的 `PRESETS.find(p => p.prompt === current)` 同款机制，不引入新 marker 字段。
-- **Caveats**:
-  - **未浏览器实测**：需新建 chat 对话 → 角色选「费曼考官」→ 看 placeholder/建议词翻转 → 讲一段理解 → 看 AI 是否按「复述+漏洞清单+追问」结构回应、且不替你补完整。
-  - **角色创建后锁定**：和 mode/workspace 一致，想中途切角色得开新对话（符合「一棵树一个语境」哲学）。
-- **Done (续3)**: **发送键默认改 mod-enter**（用户反馈「打字回车很容易误发送」）。`lib/send-key.ts` `SEND_KEY_DEFAULT` 从 `"enter"` 改 `"mod-enter"`——全局 Enter=换行、⌘Enter=发送，推翻 Session 26 A4 的「对齐 GPT 默认 Enter 发送」（单人工具，用户明确痛点，思维树场景 prompt 多为多行）。机制本就可配（footer toggle 可切回 + store 读 localStorage，无存值则用默认）。**实测**：localStorage `trellis-send-key`=null（用户从没切过）→ 新默认直接生效；首屏提示显示「⌘↩ 发送」；输入框打字按 Enter→插入换行、不发送（`第一行\n第二行`，仍在 composer）。`npm run build` ✓。Zone 本就硬编码 ⌘Enter，与新默认一致。
-- **Next**: 费曼角色仍待实测（讲解→AI 复述+漏洞清单+追问）。Zone 已实测通过（4 输入框全接 + portal 修复 + 渲染/工具栏/Esc/草稿回流验证）。后续：Phase 2 费曼结构化闭环：AI 输出漏洞清单时每条自带「展开讲这点」按钮 → 一键生成子节点（需让 ChatNode/NodeFullView 解析 AI 的结构化输出）；可选「理解度评分」。
-### Session 27 (2026-06-08)
-- **Done**: (A) **provider 行为调研**（带 file:line 证据回答用户）：`lib/llm/topic.ts:34` 话题标签写死 `spawn("claude")`——选 codex 也会后台跑 claude 生成 topic label（用户确认不改）；codex **无工具白名单**（`agent-gateway/src/backends.ts:231` `toolAllowlist:false`），所以「勾 skill / WebSearch」对 codex 无效，可达工具由 sandbox 决定；codex chat 是 OS 级 readonly 沙箱（无 workspace→readonly），连 curl 都拦死；**codex 联网只能走 MCP**（`mcp:true`，有 mcp_tool_call）或 full-access sandbox，不是勾 skill。codex 是 **block streaming**（`backends.ts:233`，整段出无逐字）——这是「没有流式」的一个真实来源。claude chat 能联网是因为 claude 吃工具白名单（`--tools`）。
-- (B) **NodeFullView 对话流重设计**（agent-browser 截图驱动，截了 8 张对比）：① 发送框/分支条从满宽 1440 收窄到 `max-w-3xl mx-auto` 与内容列对齐（用户要的「窄一点」）② 流式首 token 前空白 → 加三点脉冲「正在生成…」（修「没有流式展示」——根因是首 token 延迟期零反馈）③ 正文 stone-700→800 + 14.5→15px 提对比 ④ 发送框 rounded-2xl + focus ring indigo + indigo 圆形发送钮 ⑤ 问题块 浅紫低对比 → 白卡片+左 indigo 强调条+阴影，拉开与回复区层次。`npm run build` ✓。
-- (C) **Codex chat 联网实现**（用户提的临时 workspace 方案，比 MCP 更直接）：`lib/llm/codex.ts` chat 模式注入固定 scratch workspace（`~/.trellis/codex-chat`）+ `permission:"full"`。full 在 codex 映射成 `--dangerously-bypass-approvals-and-sandbox`（`backends.ts`），整体无沙箱 → 解锁联网 + 本机工具/skill。**代价 = YOLO**（codex 能跑任意命令；codex 无 claude WebSearch 那种受限联网工具，联网只能整体放开沙箱）。`npm run build` ✓。**需 codex 登录实测确认联网真通**。
-- (D) **NodeFullView 第二轮美化（内容卡片）**：主背景 stone-50→stone-100；内容列改成浮起的白色卡片（rounded-2xl + border + shadow，居中 my-5）；问题块从「白卡+左条」改回 indigo-50 浅背景+左 indigo 条（避免白卡内白叠白）。层次：浅灰背景 → 白内容卡 → 浅紫问题块/裸文字回复，接近 Notion/Linear 文档质感。`npm run build` ✓。
-- (E) **skill picker 放宽**（用户反馈「没看到 skill 可选」）：`QuestionInput` 显示条件从 `draftMode!=="chat"` 改为 `skillCapable = draftMode!=="chat" || provider==="codex"`——codex chat（现 YOLO 有工具）也触发；claude chat 仍不显示（本就只有 WebSearch/WebFetch，不能跑 skill，正确）。**仍只在首屏新建对话的输入框，追问框暂无**（待扩）。
-- (F) **画布 ChatNode 卡片美化**（用户反馈「没看到卡片美化」——上轮只美化了全屏内容卡，画布卡片没动）：compact + full card 都改 rounded-xl→2xl + hover:shadow-md + active 态改 indigo accent。
-- (G) **画布质感升级（用 frontend-design skill，定 Linear 风精致克制）**：ChatNode 卡片 border→`ring` + 多层柔和阴影（arbitrary shadow）+ hover 抬升 `-translate-y-px`（浮起感）；Canvas 容器加冷调渐变背景 `from-stone-50 via-white to-stone-100`；Background 点阵调淡（opacity-60/dark 0.18）；连线 `defaultEdgeOptions` smoothstep + globals.css `.react-flow__edge-path` indigo tint（#c7d2fe / dark #3730a3，selected #818cf8）+ `.react-flow` 透明露渐变。截图验证：连线 indigo smoothstep 比灰贝塞尔优雅，卡片浮起，背景有空间层次。
-- (H) **追问框 skill picker**（用户要的 ①）：抽 `hooks/useSkillSuggestions.ts` 复用 hook（懒加载 skill 列表 + `/name` 匹配）；NodeFullView FollowupBar 接入（picker 向上弹 `bottom-full`，仅 tool-capable）。**ChatNode FollowupInput + SelectionBar 待接**（hook 已抽，下轮快）。
-- (I) **收尾批（用户「都做了」= ①②③ 全做）**：① 其余 2 追问框接 skill picker——抽 `components/SkillPickerList.tsx` 复用组件，ChatNode FollowupInput + NodeFullView SelectionBar 都接上（三个追问框现在都能输 `/` 调 skill）② ChatNode 卡片左侧状态色条替代圆点（emerald 已读 / amber 未读 / stone 进行中，Linear 感）③ SubBar 改 backdrop-blur 半透明。截图复核 **light + dark 画布都协调**，状态色条两模式可见。`npm run build` ✓。
-- **遗留**：dev overlay 显「1 Issue」——dev server 日志无 error/warn，疑似 next.config 自定义 Cache-Control 的已知 dev warning（build 日志早有此条），非本轮引入，待点开确认；移动端未单独截图复核（之前已做 Outline 抽屉 + 响应式）。
-- (J) **chat 增强模式开关（用户选 C：加开关）**——解决「claude chat 看不到 skill」根因。全链路：`StreamRequest.chatEnhanced`；`sdk-adapter` 加共享 `CHAT_SCRATCH`（`~/.trellis/chat-scratch`）+ `ensureChatScratch()`，`modeToRunOptions` chat 分支按 `req.chatEnhanced` 分流（开=workspace+full 无沙箱 YOLO 能 skill+联网，关=WebSearch/WebFetch 纯对话）；`claude.ts`+`codex.ts` enhanced 时建 scratch（**codex.ts 删掉上轮无条件 YOLO，统一到开关**）；`route` 读 body.chatEnhanced 传 provider；store `chatEnhanced`（localStorage `trellis-chat-enhanced`，全局运行时偏好）+ 3 个请求体传递；UI：QuestionInput chat 模式加「⚡增强模式」pill（amber 高亮）。skill picker 显示条件全部从 `provider==="codex"` 改 `chatEnhanced`（QuestionInput + 3 追问框统一）。`npm run build` ✓。
-- **chat 增强 caveat**：① 开关在**新建对话首屏**（chat 模式），全局偏好设一次生效；已有 session 无切换入口（下轮可加 Header）② YOLO 安全提示已在 tooltip ③ **未浏览器实测**（需新建对话开增强→输入 `/` 看 skill / 问联网）。
-- (K) **增强开关加 Header 入口**（补全 J 缺口）：Header chat session 下显示「⚡ 增强」按钮（amber 高亮表开启），已有 session 也能随时切。截图验证生效。`npm run build` ✓。
-- (L) **「1 Issue」定性结案**：= `next.config.ts:25-41` 自定义 Cache-Control（/_next/:path*，为 globals.css 即时生效）触发的 Next dev 警告。`git log` 证明 next.config 从未在本轮 sessions 改过（最后改是 852aa41 重构 llm）。dev 专属、对生产无影响，**非本轮引入，可无视**。
-- **Next**: 实测 chat 增强（开关/skill/联网，需 codex 或开增强）；移动端专项复核；roadmap 剩余大件（C1 PDF/Excel 需装依赖、C3 语义检索 Q2、C6 图片生成 Q3）。**（README 6 条 session log，下次轮转 Session 22 入 archive）**
-### Session 26 (2026-06-08)
-- **Done**: 写了 [optimization-roadmap.md](optimization-roadmap.md)（4 个只读 agent 实测测绘 + 四维度 P0/P1/P2 路径，锚定替代 GPT），然后开始按 P0 实施。完成 3 项，`npm run build` ✓ ×2：
-  - **A3 + B2 代码块/回复复制**：新 `components/CodeBlock.tsx`（react-markdown `pre` 渲染器，顶 bar = 语言标签 + 复制按钮，复制读 `pre.textContent` 抗 rehype-highlight 拆 span）+ 新 `components/CopyButton.tsx`（复制全文，含 ✓ 反馈）。`lib/md-components.ts` 注册 `pre: CodeBlock`。ChatNode footer + NodeFullView 回复底部各加「复制全文」。`globals.css` 加 `.md-codeblock*` 样式。
-  - **D1 System Prompt 可配**：全链路。DB `sessions.system_prompt TEXT`（idempotent ALTER，NULL=默认）；repo `ApiSession/SessionRow/SESSION_COLS/rowToSession/createSessionWithRoot` 全加列；`lib/types.ts` Session 镜像 + `lib/llm/types.ts` StreamRequest 加 `systemPrompt`；`sdk-adapter.ts` chat 分支 `req.systemPrompt?.trim() || DEFAULT`；`route.ts` 四分支（新建/parallel root/branch/retry）解析 `resolvedSystemPrompt`（仅 chat 模式从 body 取，workspace/project 钳为 null 因走 CLAUDE.md），传 provider。前端 store `draftSystemPrompt`（localStorage `trellis-system-prompt`）+ setter；`streamRoot` 仅新建 chat session 时带。新 `components/SystemPromptPicker.tsx`（5 预设角色 + 自定义 textarea，QuestionInput chat 模式下显示）。
-- **Decisions**:
-  - **system prompt 只对 chat 模式开放**：workspace/project 的人格来自 `~/.claude/CLAUDE.md` + 全工具，再叠一层 system prompt 会语义打架。route 在非 chat 分支显式钳 null。
-  - **B2 并入 A3**：语言标签和复制按钮在同一个 `pre` 渲染器里实现，拆成两次改纯属浪费。
-  - **复制读 DOM textContent 而非 React children**：rehype-highlight 把源码拆成嵌套 `<span>` 高亮 token，递归提 children 文本繁琐且易错；`pre.textContent` 天然 flatten 回源码。
-- **Caveats**:
-  - **均未浏览器实测**：A3 复制依赖 `navigator.clipboard`（localhost 安全上下文 OK，已 try/catch 兜底失败静默）；D1 预设角色切换、自定义保存、创建后 system prompt 真正生效（看模型回答风格变化）需手测。
-  - **存量 chat session 的 system_prompt 为 NULL** → 走内置默认，行为不变（无破坏性迁移）。
-  - **D1 只在「新建 session」时可设**：和 mode/workspace 一致（创建后锁定）。已存在 session 想换角色得开新 session。符合「一棵树一个语境」哲学。
-- **A4 Enter 发送可配（done，本 session 续做）**：新 `lib/send-key.ts`（`SendKey="enter"|"mod-enter"` + `isSendCombo` + `sendHint`，默认 `enter` 对齐 GPT）；store `sendKey`（localStorage `trellis-send-key`）+ `setSendKey` live 应用；4 个主对话输入框（QuestionInput / ChatNode FollowupInput / NodeFullView SelectionBar + FollowupBar）keydown 统一走 `isSendCombo`、placeholder 走 `sendHint`；QuestionInput 底部静态提示改成可点 toggle。`npm run build` ✓。
-  - **A4 Caveat**：BranchPopover（本就 Enter 发送）+ ReferencePicker（⌘Enter 创建参考卡）这轮未纳入 sendKey 统一——mod-enter 模式下这俩仍各自原行为，后续统一。
-- **A1 流式实时 markdown（done，本 session 续做）**：`components/NodeFullView.tsx` ResponseBody 流式分支从 textContent 直写改为 rAF 节流的 state 累积 + ReactMarkdown 渲染。新 `REHYPE_STREAMING = [rehypeHighlight]`（流式期间不挂 rehypeRaw，避半截 HTML 标签 parse 报错；终态仍用 REHYPE_FULL）。删 streamRef，加 liveText state + requestAnimationFrame 合并 token 突发为每帧一次 re-render。**范围决策**：只改 NodeFullView 全屏（单挂载视图，re-render 便宜），画布 ChatNode 仍保留 textContent 直写（在 ReactFlow 内，性能敏感）。`npm run build` ✓。
-  - **A1 Caveat（务必实测）**：① 长回复流式时每帧重 parse markdown 的性能 ② 未闭合代码块/表格的中途渲染是否闪烁 ③ streaming-cursor 位置。这三点必须浏览器实测确认。
-- **Next**: **浏览器实测本批 5 项**（A3 复制 / D1 角色切换+生效 / A4 Enter 发送+toggle / A1 全屏流式格式化+性能）。实测无碍后继续 P0 大件：B1（响应式+移动端 Outline，M）→ A2（编辑消息，M-L，树语义取 Q1 倾向 B）→ C2（记忆+自定义指令，M-L）→ C1（文件附件，L↩Stage19）。
+### Session 37 (2026-06-09)
+- **Done**: **文件预览围栏从「cwd 内」放宽到「session 实际碰过的范围」+ 重写 HTML 内 file:// 链接（build ✓ + curl + agent-browser 实测真实案例）**。触发:用户的 `~/design-loop-demo/compare.html`(4 版对比面板,链到 naive/cand-a/cand-b/looped.html + shots/*.png)预览不了——文件全在 cwd(`~/.claude`)外,旧围栏只服务 cwd。用户拍板最完整方案,并要求「能预览所有它生成的文件**包括子 agent 生成的**,但保证安全」。
+  - **新围栏模型**(`lib/server/workspace-files.ts` 重写):`resolveSessionFile(sessionId, absPath)` + `sessionAllow(sessionId)`——白名单 = workspace cwd ∪ {session 所有 nodes 的 Write/Edit tool_calls 的 file_path 父目录}。**目录级放行**是覆盖「子 agent 生成的兄弟文件」的关键:主 agent Write 了 `design-loop-demo/looped.html` → 整个 `design-loop-demo/` 放行 → 子 agent/脚本写的 compare.html/naive.html/shots/*.png 全可预览。**安全**:`isBroadDir` 把 $HOME 本身 / 顶层系统根 / depth≤1 判为 broad,这类父目录只放行**单个文件**(不暴露整个 home);全程 realpath(symlink/firmlink 归一)+ containment。
+  - **URL 方案改成绝对路径**:`/api/files/<sid>/<完整绝对路径去前导/>`(原 workspace-relative)。这样 HTML 相对资源(`./naive.html`/`shots/x.png`)**天然解析正确**(URL path 镜像真实目录结构),且重写后的链接一致。`filePreviewUrl(sid, absPath)`/store `filePreview.path`/`openFilePreview(absPath)` 全链路改绝对路径;客户端 `previewablePath`(原 pathInWorkspace)绝对路径直通、相对路径 join workspace、`~/` 跳过;chip 列**所有** Write 文件(不再按 cwd 预筛,服务端兜底)。
+  - **file:// 重写**(route):服务 `text/html` 时读进内存,把 `(href|src)="file://(/...)"` 正则重写成 `/api/files/<sid>/...`(直接 file:// 导航在 http 页/sandbox iframe 被拦)。非 HTML 仍流式。
+- **验证**: `npm run build` ✓。**curl 实测**(真实 ee30f329 session):compare.html/looped.html/naive.html(子 agent 兄弟)→**200**;`~/.zshrc`(home broad 未碰)→**404**;`/etc/passwd`→**404**;相对链接 `naive.html`→200、`shots/cand-a.png`→200(子目录 dir 白名单覆盖)。**agent-browser 实测**:① 直接渲染 compare.html→**4 版网格 + 截图全加载** ② 节点行内路径(相对 `skills/…eval-compare.html`)渲染靛蓝可点 → 点击 → **全局 overlay → iframe 渲染对比面板**(含内嵌 SVG/图)。安全守住 + 子 agent 产物可见 + 内部链接可跳,全达成。
+- **Caveat**: 围栏走 tool_calls,故只认主 agent 工具调用记录过的目录/文件(子 agent 内部 Write 不冒泡到顶层 tool_calls,靠「父目录放行」间接覆盖——主 agent 没碰过的全新目录里的子 agent 产物仍够不着);`~/` 开头的行内路径客户端展不开 home → 不可点(绝对/相对正常);sessionAllow 每请求遍历 nodes(HTML 多资源时多次,未缓存,够用)。
+- **Next**: 回 session-workbench Wave 1-4 积压的 UI 实测,或等用户新指令。
 
-### Session 25 (2026-05-13)
-- **Done**: 三件事一起做完 — (A) mobile/UX 三个小补丁；(B) **durable streams** 架构改造；(C) Stage 17 Tool call / Bash 可视化全链路。`npm run build` ✓；端到端 curl 实测 `pwd` 工具调用从 spawn → 进 DB tool_calls_json → reconnect endpoint catchup 完整回放。
+### Session 36 (2026-06-09)
+- **Done**: **文件预览入口升级——回答里像路径的行内代码直接可点（build ✓ + agent-browser 实测全过）**。用户提议:别只靠 tool_calls 抽 chip,默认让回答正文里像文件路径的都能点、点完渲染。比 chip 更通用(解耦文件来源:Write/Bash 生成、引用提到的都覆盖)。
+  - **架构:FilePreview 升级为 store 驱动的全局 overlay**。store 加 `filePreview:{relPath,name}|null` + `openFilePreview(relPath)`/`closeFilePreview`;`FilePreview` 改无 props、从 store 读、page.tsx 顶层挂一次(像 SearchModal/NotesDrawer)。所有入口(chip / 行内路径 / 未来文件浏览器)调同一个 action,预览那半完全复用。
+  - **行内路径检测**:`lib/generated-files.ts` 新 `pathInWorkspace(text, ws)`——严格降误判:必须含 `/` 分隔符(根目录裸文件名走 chip 不行内,避免 `config.py` 误判)+ 已知扩展名(`PREVIEWABLE_EXT`)+ 非 URL + 能 resolve 进 workspace(复用 `relativeToWorkspace` 含 /private firmlink 归一)。`lib/md-components.ts` 加 `code` 组件:行内且命中 `pathInWorkspace` → 渲染靛蓝虚线下划线可点 button(`openFilePreview`),否则原样 `<code>`;block code 不动(仍走 `pre`→CodeBlock)。用 `useSessionStore.getState()`(非 hook,读稳定值)。
+  - **chip 保留**:`GeneratedFilesBar` 改调 `openFilePreview`(去本地 FilePreview + active 态),和行内路径统一走全局 overlay。两入口并存(chip 抓 Bash 生成但正文没提的;行内抓正文提到的)。
+- **验证**: `npm run build` ✓ + **agent-browser 实测**(隔离 project session,Claude Write `assets/page.html` 到子目录 + 回复行内引用):① `assets/page.html`(带 `/`)渲染成**靛蓝可点**、点击→全局 overlay→**iframe 渲染青色渐变 HTML** ✓ ② 同行 `#00c6ff → #0072ff`(非路径)保持**玫红普通 code 不可点** ✓(误判控制住)③ 底部 chip「🌐 page.html」并存、点击同样开预览 ✓ ④ Esc 关闭 ✓。测后清理 session+文件。
+- **Caveat**: 行内仅认含 `/` 的路径(根目录裸文件名只走 chip);`~/` 前缀路径客户端无法展开 home → 不可点(绝对/相对路径正常);路径不存在→点了 404(纯语法判定,客户端无法 stat)。`getState()` 非响应式,但回答随 session 变更整体重渲染,够新。
+- **Next**: 回 session-workbench Wave 1-4 积压的 UI 实测,或等用户新指令。
 
-  ### A. mobile/UX 三件小补丁
-  - **Header 🔍 全局搜索按钮**（`components/Header.tsx` + `stores/sessionStore.ts:searchOpen` + `components/SearchModal.tsx`）：SearchModal 的 open state 从 self-managed 提到 store；⌘P 全局 hotkey 仍走 store toggle；Header 新增放大镜按钮（桌面 + 手机共用，省去 ⌘P 在手机不可用的问题）。SearchModal 不变以外只把 `useState` 改成 `useSessionStore(s => s.searchOpen)`，⌘P 监听里读 `useSessionStore.getState().searchOpen` 拿最新值（避免 listener closure 抓老值）。
-  - **ModeBadge 手机可见**（`components/ModeBadge.tsx`）：去掉 `hidden sm:inline-flex`，手机也能看见当前 session mode + workspace 简称。label 文字在 `<sm` 隐藏（icon 已够认），workspace 短名宽度 mobile `max-w-[6rem]` / desktop `max-w-[10rem]`。
-  - **Chat picker 配色对比修复**（`components/ModePicker.tsx`）：用户反馈"chat 模式无法选择" —— 根因是 chat active 用 `bg-stone-100`，跟外层 `bg-white` 几乎无色差。改 `bg-stone-200 + ring-1 ring-inset ring-stone-400/40`，跟 amber/rose 视觉等量。
-  - **画布 80/20 居中**（`components/Canvas.tsx`）：session-load effect 当 `activeNodeId` 为空时不再 fitView 整棵树，先看 `lastEditedNodeId`（已在 store 里按 createdAt 最高 seed）→ `setCenter(node.position, { zoom: cur })` 保持当前 zoom；为空才 fallback fitView。用户每次回画布大概率不用拖动。
+### Session 35 (2026-06-09)
+- **Done**: **B — token/context 占用计算修正（跨 2 包全链路 + 运行时实测，build ✓）**。Session 34 已证 claude `result.usage` 是跨工具迭代/同模型 subagent 的**累计和**，被当成「当前 context 占用」→ 虚高数倍。本轮落地修正：报**末条 assistant message 的 usage**（=主 agent 当前窗口实际占用）作为独立口径。
+  - **agent-gateway**（`../../agent-gateway`）：`events.ts` Cost 加 `contextTokens: number|null`；`backends.ts` claude 分支流式中 `let lastAssistantContext`，每条 `t==="assistant"` 用 `msg.usage` 覆盖更新（input+cache_read+cache_creation），result 直报 `contextTokens: lastAssistantContext`（异常退回累计）；codex 设 `totalIn`（单轮无累计问题）；其余 5 处 Cost 构造（image×2/gemini/api/mock）补 `null`。`npm run build`(tsc) emit dist（注：gemini.ts:73 有**预存在**无关 TS error，noEmitOnError 未设仍 emit；未碰）。
+  - **trellis 全链路**：`lib/llm/types.ts` TokenUsage +`contextTokens?`；`sdk-adapter` Result→done 映射；`run-bus` 3 处 inline usage 形状 + 初始化器 +`contextTokens`，finalizeNode 传 `tokenContext`；`sqlite.ts` nodes 加 `token_context INTEGER`（可空，幂等 ALTER）；`repo.ts` finalizeNode 写列 + NodeRow/NODE_COLS/rowToNode/ApiNode.tokenCount + resetNodeForRetry 置 NULL；`lib/types.ts` ChatNode.tokenCount +`contextTokens?`；store done 处理 `tokenCount: usage` 自动带（apiNodeToChatNode 全展开，reload 路径通）；`Header.tsx` 新 `ctxTokensOf(n)`（优先 contextTokens，null 回退 input+cache 旧口径）替换 findLatestCtxTurn + ctx 计算。
+  - **设计**：contextTokens 作 TokenUsage 第 5 个可选字段贯穿（而非到处加新参数），最小化触点；与四桶累计（成本口径）并存——成本仍看累计，占用%看 contextTokens。null = legacy/codex/非 claude → 回退旧口径，无破坏。
+- **验证**: `npm run build` ✓（trellis 端到端）。**运行时实测**（`backend.run` 直跑 2 工具 prompt）：累计 sum=**150,209**（旧口径，占 200k 窗 75%）vs contextTokens=**50,178**（新口径，~25%），**虚高 2.99x** — 修正生效。
+- **Caveat**: DB `token_context` 持久化是 mirror 既有 token 列 + build 验证，**未单独跑 project-mode 落库往返**（逻辑等价于 cache 列，风险低）。Header% 在有 contextTokens 的新数据上准确；老节点 null→回退旧口径（仍偏高，但无新数据可补，可接受）。
+- **Done (续) — 本地文件预览（workspace/project 生成的文件/HTML 在 Trellis 内直接看，build ✓ + curl 实测围栏）**。用户痛点:生成的文件 or HTML 看不到、得折腾去文件系统。用户拍板:**自动列出本轮生成/改动的文件 chip + HTML 走 sandbox iframe 渲染**。
+  - **服务端**:新 `lib/server/workspace-files.ts` `resolveWorkspaceFile(sessionId, relPath)`——`getSessionWorkspacePath` 取 cwd,**realpath 双重围栏**(root realpath + target realpath + startsWith,防 `../`/符号链接逃逸),扩展名→mime 表。新 path-based 路由 `GET /api/files/[session]/[...path]`(path-based 而非 query,让生成 HTML 的相对资源 `./style.css` 能解析),`fs.createReadStream→Response`,`Cache-Control: no-store`。
+  - **客户端**:`lib/generated-files.ts`:`generatedFilesFromNode`(从 toolCalls 抽 Write/Edit/MultiEdit/NotebookEdit 的 file_path)、`relativeToWorkspace`(剥 workspace 前缀)、`filePreviewUrl`、`previewKind`(html/image/pdf/markdown/text)。`components/FilePreview.tsx`:全屏 overlay(createPortal 逃 transform 祖先,Esc 关),按 kind 分发——**html→sandbox iframe**(`allow-scripts allow-popups allow-forms`,**无 allow-same-origin**=opaque origin 跑 JS 但碰不到父/cookie)、image→img(棋盘底)、pdf→iframe、markdown→ReactMarkdown 复用 MD_COMPONENTS、text→fetch 文本 `<pre>`(>500k 截断)。`components/GeneratedFilesBar.tsx`:从 store 读 session,只列 workspace 内文件 chip(带 kind icon),点开 FilePreview。挂在 NodeFullView 回答动作行下方。
+  - **设计**:文件来源 = tool calls 的 file_path(零额外存储,精确对应"这轮生成");只读、只服务 workspace 内、HTML opaque-origin sandbox —— 三重边界。
+  - **验证**: `npm run build` ✓。**curl 实测**:workspace 内 CLAUDE.md→200 text/markdown 8696B;编码 `../` 逃逸→404;`../../etc/passwd`→404;不存在→404;chat session(无 workspace)→404。**围栏稳固**。UI(chip 显示/点开/iframe 渲染)未浏览器实测。
+- **Caveat (文件预览)**: Bash 间接生成的文件不在 chip 内(只认 Write/Edit 类 tool);文件须在 workspace 内才显 chip(外部写按安全边界不预览);iframe `allow-scripts` 无 same-origin → 用 localStorage/同源 fetch 的页面受限(MVP 取舍,多数 dashboard/svg 自包含 OK)。
+- **Done (续2) — agent-browser 浏览器实测全过 + 抓修一个真 bug**。逐项眼验:
+  - **B context%**: 旧节点显 39%(token_context=NULL→回退旧口径);**新写入节点显 5.1%**(走新 contextTokens 口径,单轮 write ~5% 合理) — 新口径在真实新数据上生效。
+  - **C 划线追问**: 程序化选区 + 派发 pointerup,3 字符→**不弹** bar、15 字符→**弹** bar(`针对「…」`) — 8 字符门槛 + 释放才提交都对。
+  - **D 卡片图**: 直接 DOM click 触发完整序列 `卡片图→生成中…→✓已下载→复位`(headless 无 clipboard 权限→按设计降级下载;toBlob 成功=PNG 生成 OK,真实浏览器会复制图片)。
+  - **文件预览(全链路)**: 建隔离 project session(/tmp)→Claude `Write` 写 dashboard.html→chip「🌐 dashboard.html」显示→点击→**FilePreview sandbox iframe 实时渲染**(紫渐变 Dashboard+按钮)→Esc 关闭。
+  - **per-session model 顺带验**: 切到的 chat session 显 Codex、project session 显 Claude,各保各的模型(Session 34 A 生效)。
+  - **★ 抓到真 bug(build/curl 都看不出)**: macOS `/tmp` 是 `/private/tmp` 的 firmlink,Claude `Write` 报 realpath `/private/tmp/...` 而 session workspace 存的是 `/tmp/...`,`relativeToWorkspace` 朴素前缀匹配失败→**chip 不显**。修:`canonical()` 归一化 `/private/(tmp|var|etc)` firmlink 后再前缀匹配。修后 chip 正常。production build ✓。(真实用户 session 多在 /Users 下不踩此坑,但 /tmp·/var workspace 会,值得修。)
+- **Next**: 三件「修复吧」(per-session model / token / 文件预览)+ C/D 全部落地并浏览器验收。回 session-workbench Wave 1-4 积压的 UI 实测,或等用户新指令。
 
-  ### B. Durable streams（独立架构改造，未列入 roadmap 但用户主动要求）
-  - **动机**：原 `/api/chat` 把 spawn 生命周期挂在 `req.signal` 上 —— mobile 切后台 / 网络抖动 / 关 tab → HTTP 断 → req.signal aborted → 子进程被 kill → DB 节点写一半 status='error'。这是 mobile / 不稳定网络下最大的 UX 痛点。
-  - **核心改造**：spawn 跟 HTTP handler 解绑。spawn 跑在 module-level 的"runner"上，HTTP 只是订阅者。客户端断开仅取消订阅，spawn 继续；客户端重连走新 endpoint，先拿 catchup snapshot 再订阅未来 delta。
-  - **新文件**：
-    - `lib/server/run-bus.ts`：per-nodeId 的 RunState (`AbortController` + `Subscriber` Set + `committedText` mirror + `committedToolCalls` mirror + 30s 终态缓存)。`startRun(nodeId, factory)` 通过 queueMicrotask 启动 generator，`subscribe(nodeId, sub)` 加入订阅集并立刻发 `catchup` 事件（snapshot of committedText + committedToolCalls）。runner 内部对 delta / tool_call_start / tool_call_done 三类事件遵守 commit-before-broadcast 时序 —— 先更新 mirror + 写 DB，再迭代 subscriber 集合广播，保证 race 中的新订阅者要么从 catchup 看到事件，要么从 broadcast 看到，never both never neither。
-    - `app/api/nodes/[id]/stream/route.ts`：GET SSE endpoint。`subscribe()` 拿到 unsubscribe 函数 → forward 包含 catchup 的事件流；返 null（run 已被 GC 或从未启动）→ 退到 DB 直接读节点状态 + tool calls，合成 catchup + 终态 + 关闭。
-    - `app/api/chat/[id]/abort/route.ts`：POST 显式中止。调用 `abortRun(nodeId)`，200 / 404（已终态）。
-    - `hooks/useReconnectStreams.ts`：`visibilitychange`（页面 visible）+ `online`（网络回来）+ 首次 mount 触发 `store.reconnectStreamingNodes()`。
-  - **现有文件改造**：
-    - `app/api/chat/route.ts`：handler 不再 `for await llm.stream()`。改为 `startRun({nodeId, factory: (signal) => llm.stream({..., signal}), topicLabel: ...})` + `subscribe()` 把 bus 事件转 SSE，且过滤掉 catchup（POST chat 给新建节点，catchup 永远空，没必要 forward 给客户端）。`req.signal` abort 现在只 unsubscribe，spawn 不受影响。
-    - `lib/server/repo.ts:resetNodeForRetry`：重试时一并把 FTS 中的 node_response 清掉（前 stage 已实现的部分；retry 也清 tool_calls_json，见 C 段）。
-    - `stores/sessionStore.ts`：
-      - 新增 `searchOpen` state + `setSearchOpen` action（mobile UX 顺路改的）。
-      - `pendingScrollAnchor` 之前已经支持 search，本次不变；StreamEvent union 加 catchup（toolCalls 字段）和 tool_call_start/done（C 段需要）。
-      - `handleStreamEvent` 加 `seedNodeId` 选项，让 reconnect 路径（没有 created 事件）能直接知道这个流绑哪个 nodeId。catchup 分支：clearStreamPending + 覆盖 response + 覆盖 toolCalls；tool_call_start 分支：append ToolCall（status="running"）；tool_call_done 分支：按 id 找到 ToolCall 并 merge output/stderr/status/duration。
-      - `abortStream` 改为：发 `POST /api/chat/[id]/abort` + 本地 controller.abort()（让 SSE reader 立刻退出，同步 UI），server-side abort 走 run-bus.abortRun。
-      - `runStream` catch 块：signal.aborted 仍合成 "aborted" error 给 UI 即时反馈；网络中断（非 aborted）改为不合成假 error，留 streaming 状态等 reconnect 触发。
-      - 新增 `RECONNECT_HANDLES` Map + `attachReconnectStream(nodeId, set, get)` + `reconnectStreamingNodes` action（遍历 streaming 节点逐个 fetch `/api/nodes/[id]/stream`，复用 handleStreamEvent 处理事件）。
-      - `loadSession` + `hydrate` 末尾 `get().reconnectStreamingNodes()`。
-  - **app/page.tsx**：挂 `useReconnectStreams()`。
-  - **E2E 验证**（mock provider）：POST → curl `--max-time 0.8` 强制断开 → server 端 spawn 仍跑 → 3s 后 DB 写完 `status='done'` 368 chars。reconnect endpoint 立即返 catchup（response-so-far）+ 后续 deltas → 直到 done。显式 POST /abort → `{aborted:true}`，节点 `error/aborted` 保留 partial response；再 POST /abort → 404 幂等。
+### Session 34 (2026-06-09)
+- **Done**: 三件用户提的修复（build ✓ ×N，A 另过 curl 实测）+ 一个基础设施根治。
+  - **A — 模型 per-session 锁定（修「切回来模型变了」）**。原 `provider`（=ProviderId，即模型 claude-opus/sonnet/haiku/codex）纯全局（localStorage `trellis-provider`），切 session 不变 → 误用。全链路落库：`sqlite.ts` 加 `sessions.model TEXT`（幂等 ALTER，镜像 system_prompt）；`repo.ts` ApiSession/SessionRow/SESSION_COLS/rowToSession + `createSessionWithRoot` 落 model + 新 `setSessionModel`；`/api/chat` 建 session 时存 `model:providerId`；`PATCH /api/sessions/[id]` 加 `{model}` 分支（isProviderId 校验）；`lib/types.ts` Session.model；**store 核心**：`loadSessionInternal` 把 `provider` 设成该 session 的 model（legacy null 不动），`setProvider` 改 model 时 PATCH 持久化到当前 session（全局值降级为「新 session 默认」）。**curl 实测**：PATCH model=codex→200+持久化、切回 claude-opus、非法值 400、rename 回归 ✓。
+  - **C — 划线追问太易触发**。根因 `useMobileSelection`（NodeFullView.tsx）对任意非空选区触发 + 每 300ms 轮询 + selectionchange 持续触发。改成：只在**手势释放**（pointerup/touchend/keyup）提交、**最小选区 8 字符**（`MIN_SELECTION_LEN`）、去掉轮询，selectionchange 仅用于「选区塌缩则关闭」。
+  - **D — 去掉「存到记忆」，改「卡片图+复制剪贴板」**。删 NodeFullView 内联 `MemorySaveButton`（定义+挂载）；新 `components/CardImageButton.tsx`：把问答（问题=标题 + 回答正文，复用 md-body+MD_COMPONENTS 保持渲染一致）渲染到屏外卡片 → `html-to-image` toBlob PNG → `navigator.clipboard.write([ClipboardItem image/png])`，不支持则降级下载。新依赖 `html-to-image@1.11.13`。用户确认：PNG 图片 + 卡片放「问题+回答」。
+  - **基础设施根治 — agent-gateway symlink 在 Turbopack 解析失败**。`npm install html-to-image` 把 node_modules 里原本的 agent-gateway **真实拷贝换成 symlink**（指向项目根外 `../../agent-gateway`），Turbopack 不跟进项目外 symlink → `Module not found: agent-gateway`（Node 能解析、Turbopack 不能；serverExternalPackages 也含它）。根治：`next.config.ts` 加 `turbopack.root = path.join(__dirname,"..","..")` 指到 monorepo 父目录，symlink target 落入 root → 解析通过。**从此 npm install 的自然 symlink 无害**，且 B 改 agent-gateway 重 build 后经 symlink 自动反映。
+- **验证**: `npm run build` ✓（端到端，含 A/C/D + turbopack root）。A 经 dev server curl 往返实测。**C/D 未浏览器实测**——C 的手势手感（释放才弹/8 字符门槛/拖动中不弹）、D 的剪贴板 PNG 写入（ClipboardItem image/png，localhost 安全上下文）+ 卡片 light/dark 渲染，均按逻辑写未眼验。
+- **Caveat**: html-to-image 安装一度连带破坏 package-lock 的 agent-gateway resolved 字段，已 `git checkout` 还原 + 重新规范化（现 lock 一致、html-to-image 正式声明）。
+- **Next**: **B（token/context 计算）未做**——这是另一半「修复吧」。实测已证：claude `result.usage` 是跨迭代/同模型子 agent 的**累计和**（5 轮工具循环报 ~150k，真实窗口仅 ~50k，虚高 3x），而非主 agent 当前 context。修法在 agent-gateway `backends.ts`：流式中追踪**最后一条 assistant message 的 usage** 作为「当前 context 占用」单独报（与累计成本分开），trellis sdk-adapter/types/store/Header 接新字段。turbopack root 已铺好 agent-gateway 编辑路。之后浏览器实测 C/D。
 
-  ### C. Stage 17 — Tool call / Bash 可视化
-  - **spike 实测 claude stream-json**：在 /tmp 跑 `claude -p "what files..." --output-format stream-json --verbose` 拿真实 JSON 结构。
-    - `{type:"assistant", message:{content:[{type:"tool_use", id:"toolu_...", name:"Bash", input:{...}}]}, ...}` — 工具调用开始（consolidated event，input 完整无需重组 stream_event 的 input_json_delta partials）
-    - `{type:"user", message:{content:[{type:"tool_result", tool_use_id, content, is_error}]}, tool_use_result:{stdout, stderr, ...}, ...}` — 工具结果。content 是模型可见结果；顶层 tool_use_result.stdout 是 Bash 专用 stdout 隔离，UI 应优先用 stdout（else fallback content）。
-    - `{type:"assistant", message:{content:[{type:"thinking", thinking, signature}]}, ...}` — 思考块（本 stage 不渲染）。
-  - **schema**（`lib/types.ts` + `lib/server/sqlite.ts`）：
-    - `ToolCall` 类型：`{ id, name, input: unknown, output: string|null, stderr: string|null, status: "running"|"done"|"error", durationMs: number|null, startedAt: number, endedAt: number|null }`。input 故意保留为 `unknown` —— 各工具 input shape 千差万别（Bash 的 command, Read 的 file_path, WebFetch 的 url），UI 端再窄化。
-    - DB migration: idempotent `ALTER TABLE nodes ADD COLUMN tool_calls_json TEXT`。`resetNodeForRetry` UPDATE 时一并清空 + 删 FTS node_response 行（避免重试期间 stale 命中）。
-    - `ChatNode.toolCalls: ToolCall[]`（空数组而非 null，消费方零 nullability）。
-  - **provider 解析**（`lib/llm/claude.ts`）：
-    - 在 `safeParse` 后两个新分支：
-      - `event.type === "assistant"` → `extractContentBlocks(event.message)` 找 `type:"tool_use"` 块，per-block emit `tool_call_start { id, name, input, startedAt: Date.now() }`。
-      - `event.type === "user"` → 找 `tool_result` 块，结合顶层 `tool_use_result.stdout/stderr`：output 优先用 stdout（Bash 准确），else block.content；stderr 仅当非空才记。emit `tool_call_done { id, output, stderr, isError, endedAt: Date.now() }`。
-    - 类型层 `safeParse` 返回的 `ClaudeStreamLine.message` 宽化为 `unknown`（之前是 `string | undefined`，现在 assistant/user 上是对象），所有用 `message` 字段的地方加 narrow（error/system_error 分支用 `typeof event.message === "string"` 守卫）。
-  - **run-bus 转发**（`lib/server/run-bus.ts`）：
-    - `ProviderEvent` 和 `RunEvent` union 各加 tool_call_start / tool_call_done。
-    - runLoop 新增两分支：tool_call_start → 在 `committedToolCalls` push 新 ToolCall (status="running") + `appendToolCallStart(repo)` 写 DB + broadcast；tool_call_done → 找到 id merge fields + `markToolCallDone(repo)` + broadcast。
-    - `subscribe()` 的 catchup 现在还带 `toolCalls: committedToolCalls.map(c => ({...c}))` 浅拷贝快照。
-    - `CatchupEvent` 类型加 toolCalls 字段；`/api/nodes/[id]/stream` 在 fallback DB 路径也填 `node.toolCalls`。
-  - **repo helpers**（`lib/server/repo.ts`）：`appendToolCallStart({nodeId, call})` 和 `markToolCallDone({nodeId, toolCallId, output, stderr, status, endedAt})`。两者都先 SELECT tool_calls_json → parse → 修改 → JSON.stringify 回写。性能：一个 turn 至多几十次写，回写整 array O(N) 但 N 小，可忽略。
-  - **UI 新组件 `components/ToolCallsPanel.tsx`**：
-    - 外层折叠面板（默认收起）：标题 "🔧 工具调用 (N) · K 运行中 · M 失败"。
-    - 展开后每条 ToolCallRow，再可单独展开：左侧 StatusPill (running/done/error 三色)，name (mono)，one-line summary（自动从 input 抓 command/file_path/url/query/pattern 等高信息字段，fallback JSON.stringify slice 80），右侧 durationMs (ms/s/m+s 三级)。
-    - 展开后显示 Section "输入"（JSON.stringify pretty print，max-h-72 overflow-auto）+ "输出"（OutputView：超 200 行自动 clamp + "展开剩余 N 行" / "收起" 按钮）+ "stderr"（仅 stderr 非空时显示，rose 配色）。
-    - 整个面板 mount 在 NodeFullView 的 QuestionBlock 下方 + ResponseBody 上方（顺序：你的问题 → 模型用了什么工具 → 模型的回答）。
-  - **ChatNode 加 ToolCallBadge**：canvas card compact 视图 + 全屏 footer 两处都加。`toolCalls.length === 0` 时不渲染（chat 模式节点不增加 clutter）。徽章文案 `🔧3` 紧贴 TokenMeta 左侧。
-  - **store handleStreamEvent**：（已在 B 段列了）—— catchup 覆盖 toolCalls，tool_call_start append，tool_call_done merge by id。retry 本地优化先把 `toolCalls: []` 重置，等 server 端 created 事件再硬覆盖。
-  - **E2E**：POST `please run \`pwd\` ... mode=workspace, workspacePath=/tmp` → 60s 内 done → DB tool_calls_json 1 条记录: `Bash / done / {"command":"pwd"} / output: /private/tmp`，duration 877ms。reconnect endpoint catchup 含完整 toolCalls 数组 → 客户端 hard-sync 后看见折叠面板。
-- **Decisions**:
-  - **durable streams 用 in-memory pub/sub 而不是 SQL trigger / SQL polling**：runner 是 Node 进程内的 async generator，spawn 子进程也在同进程。pub/sub 跟 spawn 一起活 / 一起死，进程崩了 spawn 也被 SIGTERM —— 边界一致。SQL polling 给 reconnect 用是个 fallback，但 live tab 用 polling 体验差。in-memory 适合"短期、单进程"，trellis 单人单机正是这场景。
-  - **catchup 用 snapshot + commit-before-broadcast 而不是 sequence-number 协议**：JS 单线程让我们能保证"commit committedText 后立刻 broadcast" 是原子的。snapshot 在 subscribe 时取 → add subscriber → send catchup。任何新事件要么 commit 已发生（snapshot 含），要么 commit 还没发生但 broadcast 会发给新 subscriber。零事件丢失/重复。
-  - **runner 抽象为 factory + topicLabel 两个参数**：route handler 把所有 llm.stream args 包成一个 `(signal) => llm.stream(...)` 闭包传进去，runner 完全不知道 LLM provider 细节。topicLabel 同理，可选 callback。run-bus 只关心 "AsyncIterable<ProviderEvent> 进来 → 各种事件出去"。
-  - **/api/chat 仍然返回 SSE（不是立即 200 + 客户端再去 subscribe）**：保留向后兼容 + 减少一次额外 fetch。第一次连接就拿到 created + 后续 deltas，链路最短。catchup 在这条路上被过滤掉（client 已经有 node row from created）。
-  - **tool_call_start 用 Date.now() 作为 startedAt 而不是从 claude 时间戳里取**：claude 的 timestamp 字段在 user 事件上才有（tool_result 上的 `timestamp`），assistant tool_use 没有。统一在 trellis 这边打时间戳更简单，duration 计算口径一致。
-  - **catchup 也带 toolCalls 而不是单独走"重发 N 个 tool_call_start/done"**：单独事件流的话，reconnect 时要重放整个工具调用历史 = N 个 event；catchup 一次性发整个 array 网络效率高 + 客户端逻辑简单（覆盖而非 append）。
-  - **mobile 入口 🔍 按钮放在 Header 而不是 FAB**：FAB 已经被"新提问/参考"占用；Header 是 always-on 的、跟 SessionPicker 一类的全局导航位。⌘P 是同一个 modal 的另一个入口，两条路径用同一个 store-backed open state。
-  - **chat 配色用 stone-200 而不是切到 indigo 系**：amber/rose 是 workspace/project，chat 是"中性"语义。改成 indigo 等品牌色会让 chat 看起来比另外两档更"主"，与"三档平级"心智模型冲突。stone-200 + inset ring 在 light 模式视觉对比够，又保持 neutral 语义。
-  - **canvas 80/20 用 lastEditedNodeId 而不是设 activeNodeId**：activeNodeId 会触发 NodeFullView 自动滚到 mark / pulse / 切全屏等副作用。我们只想把 viewport 居中过去，不要切焦点。直接 setCenter 是干净路径。
-- **Caveats**:
-  - **Stage 17 codex 没解析**：codex CLI 没有等价的 stream-json tool 协议，本 stage 仅 claude provider 支持。codex 的 ToolCallsPanel 会一直空 → ToolCallBadge 也不显示 → 用户在 codex 模式下看不到工具可视化。Stage 18 可考虑给 codex 加一个简化层。
-  - **thinking 块不渲染**：claude 在 `assistant.content[*].type === "thinking"` 里输出 chain-of-thought（带 signature），本 stage spec 没要求，未显示。后续如果做"模型推理过程可视化"再加。
-  - **process 重启会失活 run-bus 内存状态**：server 重启 / crash → RUNS Map 清空 → 所有 in-flight runs 失联。`reapInterruptedStreams()` 在 boot 时把它们标 status='error'，UI 看到错误状态。客户端重连走 `/api/nodes/[id]/stream` 的 DB fallback 路径，拿到 error 终态 + partial response。这是预期降级 —— 比之前的"HTTP 断 = run 杀"好太多，但还是没法 resume spawn。
-  - **tool_calls_json 不进 FTS 索引**：Bash 输出噪音多，搜索价值低，spec 没列。如果未来发现"用户经常想搜某条 stderr"再加。
-  - **reconnect 触发过于频繁的 risk**：每次 visibilitychange 都会扫所有 streaming 节点重连。RECONNECT_HANDLES Map gate 防重复，但极端场景（用户快速来回切窗口）可能 churn 几次 fetch。实测影响不大，保留观察。
-  - **tool_call 流式输入流（input_json_delta）没用上**：claude 在 stream_event 里其实会先 partial-stream tool_use 的 input JSON 再 emit consolidated assistant event。我们只取后者 → tool 卡片显示稍滞后（先看到"运行中"，input 已完整可读）。不是大问题，更复杂 partial JSON 拼接放到下次。
-  - **renaming inconsistency**：代码注释里我两次用了"Stage 17"——一次指 durable streams（lib/server/run-bus.ts 顶注），一次指 Tool 可视化（types/repo 各处）。roadmap 的 Stage 17 应该指 Tool 可视化；durable streams 是 out-of-band。已记，下次重构时把 run-bus 注释里那个改成 "Stage 17 follow-up: durable streams"。本次不动，避免重构噪音。
-- **Next**: 浏览器实测：
-  1. 提交一个复杂 workspace 问题（涉及 Read + Bash + WebFetch 多次调用）→ 看 ToolCallsPanel 流式 append → 每条 expand 看 input/output
-  2. mobile 切后台 5 分钟 → 回来看 streaming 节点是否自动续上（reconnect 触发）
-  3. 提交问题然后用 ⏹ 中止 → 节点变 error/aborted，partial response 保留
-  4. mobile 上 Header 点 🔍 → SearchModal 弹出 → 输入 → 跳转
-  5. 画布 80/20 居中：开个有 10+ 节点的 session 刷新 → 应直接居中到最近编辑的节点
+### Session 33 (2026-06-09)
+- **Done**: **Session 重开恢复「上次浏览位置」（build ✓）**。痛点:打开/切换 session 时 `loadSessionInternal` 把 `activeNodeId` 重置为 `null`——桌面落在画布全景、手机/全屏 fallback 到 `rootNodeId`(最老节点),从不回到上次离开的地方。用户拍板语义:**记住上次离开时所在的节点 + 连视图层(画布/全屏)一起还原**。
+  - **持久化 helper**(`stores/sessionStore.ts`):新 `VIEW_KEY`/`loadViewState`/`persistViewState`,存 `{activeNodeId, fullScreen}` 到 **localStorage**(`trellis-view:<sid>`,选 localStorage 而非 collapsed 的 sessionStorage——要跨 reload/重启存活)。
+  - **恢复**(`loadSessionInternal`):读 saved view,校验节点仍存在(被删则回退 canvas 无焦点),`fullScreen` 仅在有有效节点时还原;并 un-collapse 还原节点的祖先(复用 `ancestorsOf`)保证画布可见。原子 set() 一次写入 `activeNodeId`+`fullScreen`。
+  - **写入**:模块级 `useSessionStore.subscribe` 监听 `(session.id, activeNodeId, fullScreen)` 变化即 `persistViewState`——一处覆盖所有散落写点(focus/jump/search/键盘导航/全屏切换),mutation 站点零改动。loadSessionInternal 原子 seed → 切换后首次 fire 只是幂等重写。
+- **验证**: `npm run build` ✓ + Compiled successfully。逻辑走查:cold start 走 hydrate→loadSessionInternal 自动恢复;切 session 同链路;collapsed=sessionStorage 冷启为空→还原节点必可见。
+- **Caveat**: **未浏览器实测**——(a)桌面还原全屏层、(b)切换 session 视图层跟随、(c)被删节点回退 canvas、(d)祖先折叠时自动展开,四条按逻辑写未眼验。mobile 仍被 page.tsx:58 强制 fullScreen(符合移动端定位,activeNodeId 已正确还原所以全屏看的是对的节点)。
+- **Next**: 浏览器实测重开恢复全链路(桌面画布/全屏跟随 + 切换 + 删节点回退)。回 Wave 2/3/4 积压的 UI 实测。
 
-### Session 24 (2026-05-13)
-- **Done**: 小补丁 — Project 模式 claude_session_id 从 `sessions` 列降到 `nodes` 列（per-root）。`npm run build` ✓。
-  - **动机**：用户问"project 模式怎么 clear session，总不能一直延伸吧"。原架构一个 trellis session 绑定一个 claude_session_id，session 内所有 root + 所有 branch 都 `--resume` 同一个 id → jsonl 单调增长 → 早晚撞 200K context window。"开新 session"是唯一出路但同时丢了 workspace / 树状结构 / 搜索索引。
-  - **核心改动**：claude_session_id 从 session 维度下沉到 root 节点维度。"新提问"（`createRootInSession`）天然产生 fresh-context root（claude_session_id NULL → 首轮 spawn 不带 --resume → 新 id 写到 root 行）。同根的所有 branch 沿 parent_id 上溯到 root 取 id，行为不变。
-  - **DB migration**（`lib/server/sqlite.ts`）：idempotent `ALTER TABLE nodes ADD COLUMN claude_session_id TEXT`，回填用 `UPDATE nodes SET claude_session_id = (SELECT s.claude_session_id FROM sessions s WHERE s.id = nodes.session_id) WHERE id IN (SELECT root_node_id FROM sessions WHERE claude_session_id IS NOT NULL)` 直接借 sessions.root_node_id 定位 legacy 唯一根。sessions.claude_session_id 保留但不再读（legacy 兼容 + 历史可读性）。
-  - **repo 层**（`lib/server/repo.ts`）：
-    - 新 `getRootClaudeIdForNode(nodeId)` / `setRootClaudeIdForNode(nodeId, claudeId)`：沿 parent_id 走到 root（带 1000 深度上限防数据损坏死循环）。
-    - `deleteSession` 改为收集 session 内所有 `parent_id IS NULL AND claude_session_id IS NOT NULL` 节点的 claude id，逐一 unlink jsonl —— 多 root 多 claude session 都要清。workspace_path 共用一个（session 级），encoded-cwd 目录路径不变。
-    - 删 `getSessionClaudeId` / `setSessionClaudeId`（只有 chat route 一处调用，已替换）。
-  - **route**（`app/api/chat/route.ts`）：两处替换 — claudeSessionId 读改 `getRootClaudeIdForNode(nodeId)`，session_init 写改 `setRootClaudeIdForNode(nodeId, event.sessionId)`。trellisSessionId 变量保留（别处仍用）。
-  - **UI**（`components/NewQuestionPicker.tsx`）：Project 模式下显示红色"🧹 全新上下文"小徽章 + 描述改成"Project 模式下会同时开启全新的 Claude 会话记忆"。其他模式文案不变。
-- **Decisions**:
-  - **不加 toggle，"新提问" = 默认 fresh context**：考虑过给 NewQuestionPicker 加"☐ 继承现有上下文"复选框反向覆盖，但"新提问"语义本来就强烈指向"开新话题"。如果想继续原对话用 BranchPopover 即可（任何 leaf 节点上分叉 = resume 该 root）。零 toggle 让 UI 最简，且跟现有"分叉 = 同 root，新提问 = 新 root"心智模型一致。
-  - **借 sessions.root_node_id 回填而不是按 created_at 找 earliest root**：sessions 行已经存了 root_node_id 作为权威指针，直接用。pre-upgrade 一个 session 只有一个 root，1:1 映射零歧义。
-  - **保留 sessions.claude_session_id 列不删**：legacy data 还在里面，删列要 schema rebuild（SQLite 改列不便宜），且不读就不读，零运行时开销。等下次大重构再统一清。
-  - **walk depth 1000 上限**：SQLite 不强制 parent_id 引用图无环，理论上手动 SQL UPDATE 可能造出环。1000 远超合理树深，撞到就静默返回 null 而非死循环。
-- **Caveats**:
-  - **存量项目 session 的所有现存 root 共用同一个 claude id**：迁移只把 legacy `sessions.claude_session_id` 复制到 `sessions.root_node_id` 那一个 root。但用户在画布上加过的"新提问"root（Stage 19 之后）也共享了这同一个 id（因为当时 claude_session_id 是 session 级的，所有 root 走同一条 jsonl）。迁移后这些"已存在的平行根"仍指向同一个 claude session，并不自动分裂。**新建** 的"新提问"才走 fresh context。预期可接受 —— legacy 行为延续，新行为对新 root 生效。
-  - **jsonl 多到一定程度时 `~/.claude/projects/<encoded-cwd>/` 文件数上升**：每个 trellis project session 现在可能产 N 个 jsonl（每个 fresh-context root 一个）。单用户场景没问题；删 session 时 cleanup 已覆盖全部 root id。
-  - **重试一个从未成功完成首轮的 fresh-context root**：claude_session_id 还是 NULL，重试 spawn 不带 --resume → 又拿到一个新 id 写入。期望行为（旧 jsonl 没落地，丢了也无所谓）。
-  - **走 BranchPopover 分叉时仍 resume 原 root 的 claude session**：这是 feature——分叉语义就是"继续这条对话"。如果用户想"在已有节点处开新 fresh context"，没有直接入口，得回画布点 FAB → 新提问。可以接受。
-- **Next**: 浏览器实测三件 —
-  1. Project session 里点 FAB → 新提问 → 看到 🧹 徽章 → 提交 → 新 root 的 claude 不应记得另一条 root 里说过的事（"忘记"验证）
-  2. 同一新 root 里继续分叉发问 → claude 记得这个 root 内的对话（resume 验证）
-  3. 删掉一个 Project session → `ls ~/.claude/projects/<encoded-cwd>/` 应清掉**所有** root 的 jsonl（多 jsonl cleanup 验证）
+### Session 32 (2026-06-09)
+- **Done**: **A 路第③刀(最后一刀,纯前端)— 把模型交互请求渲染成表单(build ✓)**。后端①②(store 镜像 `node.pendingInteraction` + SSE `interaction_required/resolved` + `POST /api/nodes/[id]/respond`)已完成,本刀只读 `pendingInteraction` + 调 respond API,不碰后端。
+  - **store action `respondToInteraction(nodeId, toolUseId, decision)`**(`stores/sessionStore.ts`):POST respond API,**乐观清除** pendingInteraction(`interaction_resolved` 也会清,幂等)。失败分层:404/409=stale(保持清除,UI 提示"会话已失效")、400/5xx/网络=retryable(还原表单可重试)。返回判别结果 `{ok:true}|{ok:false;reason:"stale"|"error"}` 给组件渲染反馈。提交前 guard:pending 不存在或 toolUseId 不匹配直接判 stale。
+  - **新组件 `components/InteractionForm.tsx`**:按 toolName 分发。AskUserQuestion → 每问一卡(header 小标签 + question 标题 + options),单选 radio 圆点/多选 checkbox 方框,选中 indigo 高亮,全部答完才能提交;构造 `answers` map(单选 = label string、多选 = label[])→ allow + `updatedInput:{...input,answers}`。ExitPlanMode → 复用 NodeFullView 同套 MD_COMPONENTS+remark/rehype 渲染 `input.plan`,两键「✅ 批准执行」(allow)/「✋ 拒绝」(deny,可选 textarea 填理由 → message)。醒目 indigo 容器 + 「🙋 模型在等你回答」标题,dark mode 全配。
+  - **挂载**:NodeFullView `<ResponseBody>` 下方,`node.pendingInteraction` 非空时渲染 `<InteractionForm>`。
+  - **画布徽章**:ChatNode 全卡(amber「🙋 待你回答」banner)+ 紧凑概览卡(🙋 amber pill),让用户从画布就看到待答节点。
+- **验证**: `npm run build` ✓ + TypeScript ✓。grep 自检全过:respondToInteraction 接 `/api/nodes/${nodeId}/respond`;InteractionForm 按 pendingInteraction 在 NodeFullView 挂载;ChatNode 两处徽章接上;answers 单选 `chosen[0]`(string)/多选 `chosen`(array)构造正确;ExitPlanMode allow/deny 双键接对。
+- **Caveat**: **未浏览器实测**——尤其(a)多选交互手感(toggle 累加/取消)、(b)失效态(404/409 stale 提示 + retryable 还原)两条失败路径,均按逻辑写但未真触发后端验证;(c)dark mode 配色、提交中 loading/禁用、表单随 pendingInteraction 清除而消失,均靠现有 Tailwind 习惯未眼验。
+- **Next**: 浏览器实测 A 路③全链路(AskUserQuestion 单/多选 + ExitPlanMode 批准/拒绝 + 失效态 + 画布徽章)。
 
-### Session 23 (2026-05-13)
-- **Done**: Stage 16 全部 7 步落地 — 跨 session 全文搜索（FTS5 trigram + ⌘P 全局 modal）。`npm run build` ✓ 一次过；端到端 curl 测试：backfill 542 行索引 / Web3 / IPFS / Theta / 服务业 / 一张图片 五种 query 都命中正确 session + snippet。→ [spec](fts-search.md)
-  - **DB migration**（`lib/server/sqlite.ts`）：`CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(text, source_kind UNINDEXED, source_id UNINDEXED, session_id UNINDEXED, tokenize='trigram')`。trigram 选型理由：中英文都能子串匹配（同 Notion / Linear），代价是索引体积 2-3x、最少 3 字符 query。UNINDEXED 三个 meta 列：不进倒排索引但能 JOIN/filter，比拿 source_id 反查 nodes 表快。
-  - **首启动回填**：migrate() 末尾 `COUNT(*) FROM search_index === 0 && COUNT FROM nodes > 0` → 单 transaction 跑 4 条 INSERT…SELECT 拿 qa.question / qa.response (status='done') / reference.ref_content_md / notes.quoted_text。在我自己的 DB 上一次完成 542 行（288 节点 + 5 笔记 + 18 reference），< 100ms。幂等：跑过后下次启动 COUNT > 0 跳过。
-  - **repo 层显式 sync（不走 trigger）**：考虑过 SQL trigger 但 `appendNodeResponse` 每个 delta 都触发会写放大；改为 10 处 mutation 内显式调 `ftsUpsert(db, kind, sourceId, sessionId, text)` helper。具体：
-    - `createSessionWithRoot` / `createRootInSession` / `createBranchNode` 各加一行 sync question（spec 写"等 finalize"，实现时调整为创建即入索引——question 创建态已是最终态，没必要延迟）。
-    - `finalizeNode` 读 `response`，status='done' 写 node_response，status='error' 删 node_response（错误流式残留是噪音）。
-    - `resetNodeForRetry` 删 node_response（旧响应清空了，避免重试期间命中已不存在的文）。
-    - `createReferenceNode` / `finalizeReferenceFetch` / `refreshReferenceNode` 各 upsert node_reference。
-    - `createNote` upsert note；`deleteNote` 删行。
-    - `deleteNodeSubtree` 收集 subtree ids + noteIds → 一次 IN 批量删（UUID 跨 kind 不冲突）。
-    - `deleteSession` 显式 `DELETE FROM search_index WHERE session_id = ?`——FK CASCADE 不覆盖虚拟表。
-  - **searchAll(query, limit=80)**（`lib/server/repo.ts`）：
-    - `buildFtsQuery` trim + 长度 < 3 返 null（trigram 边界）+ 双引号 escape（`"` → `""`）+ 整体用 `"..."` phrase 包裹。trigram phrase 等价于子串匹配，不需要布尔操作符。
-    - SQL：FTS JOIN sessions（INNER——orphan 节点被天然过滤，这是好事），ORDER BY `bm25(search_index)` ASC，`snippet(...)` 调两次：一次 `<mark>` 包装给 UI 渲染，一次空 marker + 空 ellipsis 给 client 当 anchor matchText。
-    - 同 session 多 hits 在 JS 层折叠到一个 `SearchResult` 内（先按 bm25 排序了，第一个 hit 决定 session 的展示顺序）。
-    - 全段 try/catch：FTS5 罕见的 syntax error 当 0 结果处理，不 500。
-  - **API `/api/search?q=&limit=`**（`app/api/search/route.ts`）：薄壳，limit 上限 200。`runtime = "nodejs"` + `dynamic = "force-dynamic"`。
-  - **store 改动**（`stores/sessionStore.ts`）：
-    - `pendingScrollAnchor` union 加第三个 case `kind: "search"`，带 `matchText` + `matchKind` ("question" | "response" | "reference")。
-    - 新 action `jumpToSearchHit({sessionId, nodeId, matchText, matchKind})`：跨 session 时先 await `loadSessionInternal`（同步等到节点加载完，否则后续 set 会被 load 函数覆盖），再 `expandAncestors(nodeId)` + set `activeNodeId / fullScreen / pendingScrollAnchor`。
-    - 笔记类 hit 不走 jumpToSearchHit，UI 层直接调 `jumpToNoteSource`——复用已有的"跳源节点 + emerald pulse 笔记原句"路径。
-  - **`lib/dom-mark-injector.ts`**：DataKey 扩 `"searchId"`；clearMarks 选择器加 `mark[data-search-id]`。其他算法（whitespace normalize / per-textNode wrap / index rebuild per anchor）不动。
-  - **NodeFullView `useMarkdownBodyMarks`**（`components/NodeFullView.tsx`）：
-    - 新增 `searchAnchor` useMemo：当 `pendingScrollAnchor.kind === "search"` 且 `nodeId` 命中且 `matchKind !== "question"` 时返 matchText，否则 null。
-    - 注入 effect 在原 note + child 之外加第三个 spec（dataKey:"searchId"，单 anchor id:"current"）。push 在最后 → 嵌套语义跟 child 一致（marks land 内层）。
-    - scroll effect selector 三分支：child / note / search。kind===search 用 `mark[data-search-id="current"]` 选择器。
-    - matchKind===question 时 searchAnchor 为 null，scroll effect 找不到 mark 走 rAF 两次重试后 clearScrollAnchor 兜底——节点本身已激活+全屏，question 在视图顶部用户自然看见，不强制 pulse。
-  - **CSS**（`app/globals.css`）：新增 `mark[data-search-id]` emerald 静态样式 + dark mode 变体 + `.anchor-pulse` 复用现有 emerald 动画。视觉跟 note mark 同色——区别只在 mark 是临时的（pulse 完即 clear）。
-  - **SearchModal**（`components/SearchModal.tsx`）：
-    - 自管 open state；全局 `keydown` listener 监听 `(metaKey||ctrlKey) && (key==='p'||'P')`，`preventDefault` 覆盖浏览器 print 快捷键。
-    - 输入框 200ms debounce → fetch `/api/search`。< 3 字符直接 short-circuit，UI 显示「至少输入 3 个字符（trigram 分词器限制）」。empty / loading / too-short 三态分别 placeholder。
-    - facet chips 四档（all/chat/workspace/project）走 client 侧过滤（节省往返）。
-    - 结果按 session 分组，每组顶部展示 title + ModeChip + workspace basename。每条 hit 行：sourceKind icon（💬 question / 💭 response / 📄 reference / 📝 note）+ snippet（dangerouslySetInnerHTML 渲染 `<mark>` 高亮——FTS 返回的内容已是 plain text + 我们注入的 mark tag，不存在 XSS）。
-    - 键盘：↑↓ 在 `flatHits` 上循环，⏎ 触发 `onJump`，Esc 关。鼠标 hover 改 cursor 同步选中。`data-cursor` 属性 + `scrollIntoView({block:"nearest"})` 保证选中行可见。
-    - mount 在 `app/page.tsx` 跟 NotesDrawer / DoneToast 同级。
-  - **README + progress**：Stage 16 tick + Current Focus 切到"等浏览器实测"。
-- **Decisions**:
-  - **trigram 而非 unicode61**：unicode61 中文按字符 token，'图片' 必须输入完整词才匹配，'图' 单字符匹配会有海量误报。trigram 三字符滑窗给中文带来天然 substring 能力，对英文则等价于"3 字符前缀子串"——'tok' 命中 'token'/'tokenize'/'tokenizer'。代价是索引膨胀 2-3x（短期可接受），最少 3 字符限制写在 UI 提示里。
-  - **显式 repo 层 sync 而非 SQL trigger**：trigger 的优势是零侵入，但 `appendNodeResponse(delta)` 流式期每秒几十次 UPDATE 触发 FTS 重写。改为 finalize 才入索引，sync 调用面 10 处但全在 repo.ts 同文件，可读性可控。
-  - **创建节点也入 FTS（与 spec 不同）**：spec 写"等 finalize"，但 question 创建时就是终值，等 finalize 让搜索看不到流式中的节点没意义。response 仍走 finalize（status==done 才入）。
-  - **两次 snippet() 而非客户端 strip marker**：服务端用 FTS5 同一组 positional offsets 调两次 snippet——`<mark>...</mark>` 给显示，空 marker 给 anchor 匹配。比客户端 regex 抽取 mark 内容更准确（不会被嵌套 / 缺失 `>` / 跨 token 边界误匹配）。
-  - **INNER JOIN 而非 LEFT JOIN**：搜索结果只显示能跳过去的 hit。orphan FTS 行（在我自己的 DB 有 17 行，对应 18 个孤儿 nodes—— pre-existing FK 数据完整性问题，跟 Stage 16 无关）被天然过滤。LEFT JOIN 会展示无 session 信息的"死链"hit，体验更糟。
-  - **kind="search" 单一 anchor id "current"**：同时只有一个 search 跳转在进行中（modal 选完即关），不存在多 anchor 同时存在的需求。固定 id 避免 dataset key 命名设计开销。
-  - **matchKind===question 不强制 pulse**：question 在 NodeFullView 顶部，全屏 + 激活就足以让用户看见。如果还要 pulse 需要在 QuestionBlock 里加另一套文本级 mark 注入（QuestionBlock 是 `whitespace-pre-wrap` 纯文本，不走 markdown）——投入产出不划算。
-  - **bm25 升序排序**：FTS5 bm25 返回负值，越小越相关。`ORDER BY rank ASC` 等价 "ORDER BY relevance DESC"。
-  - **dangerouslySetInnerHTML 在 snippet**：FTS5 snippet() 返回的 `<mark>` 是我们设的；text 本身没经 HTML escape——意味着如果原文里有 `<script>` 字面量也会原样进入 DOM。但 trellis 是单机单用户，question/response/note 都是用户自己写的或 claude 输出的（不会蓄意 XSS），风险极低。如果未来引入多人协作再加 escape。
-  - **debounce 200ms**：典型用户打字间隔 100-300ms，200ms 是不打断思考但能合并连续按键的甜点。trigram 查询 ~2ms 在我的 DB 上完成，理论上不需要 debounce，但 debounce 也减少了 React state churn。
-- **Caveats**:
-  - **最少 3 字符 query**：trigram tokenizer 的边界，UI 已显式提示。少数 2 字符高频中文词（"代码"/"金融"）需要用户多打一个字才能搜。预期成本。
-  - **Orphan FTS rows**：我自己的 DB 有 17 行无对应 session 的 FTS 数据（来自 nodes 表 18 个孤儿节点——pre-Stage-14 时代留下的 FK 数据完整性问题）。INNER JOIN 让它们对用户不可见，但仍占索引空间。如果用户的 DB 干净，0 影响。
-  - **流式期间不入响应索引**：finalizeNode 才写 response。如果用户正在等待长 response 流完时想搜，搜不到。这是 trade，避免每个 delta 写 FTS。流式期间用户主要在看回答，不在搜索。
-  - **kind=question 搜索结果跳转无 pulse**：question 在 NodeFullView 顶部，用户能看见但没有强视觉提示。如果用户经常搜 question 命中可能体感不连贯。监控。
-  - **`<mark>` 在 snippet 没有 escape**：FTS5 snippet 函数把原文按 token 边界切片，原文里的 `<script>` 等会原样输出。单机单用户场景安全；多用户/网络场景需要在客户端 strip。
-  - **重复关键词在同节点的多处命中**：FTS5 一行只返一个 snippet（最相关的 12 token 窗口），不会展示该节点的其他命中位置。跳转后 inline pulse 也只命中第一处。监控真实使用频率。
-  - **`⌘P` 跟浏览器 print 冲突**：我们 preventDefault 拦截了。`Ctrl+P` 在 Windows/Linux 同理。如果用户真要打印走浏览器菜单 → 文件 → 打印（这是 web app 本来就少用的功能）。
-  - **trigram 索引膨胀**：542 行 raw text 对应索引 ~10-20MB。千行级别 50-100MB 体感无差异；万行级别可能体感开始。Q3 真膨胀再做 vacuum / 索引压缩。
-  - **跨 session 跳转后 loadSession 异步**：jumpToSearchHit await loadSessionInternal 完才 set anchor。期间用户能看到搜索 modal 已关闭但目标 session 还在加载——空窗期 ~ 几十毫秒，体感正常。
-- **Next**: 用户浏览器实测：
-  1. ⌘P 打开 modal → 输入 3+ 字符 → 200ms 后看到结果
-  2. ↑↓ 移动 cursor + ⏎ 跳转 → 切到目标 session + 全屏 + emerald pulse 匹配段
-  3. 切 facet chip "Workspace" → 列表只剩 mode=workspace 的结果
-  4. 搜 < 3 字符 → 看到"至少输入 3 个字符"提示，无请求
-  5. 删一个 session → 再 ⌘P 搜该 session 内的关键词 → 0 结果（FTS cleanup 验证）
-  6. 在 NotesDrawer 跳源节点 vs ⌘P 搜笔记跳源 → 两条路径行为应一致（jumpToNoteSource 共用）
-
-（Session 1–21 已归档，见 `archive.md`）
+（Session 1–31 已归档，见 `archive.md`）
 

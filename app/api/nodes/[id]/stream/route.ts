@@ -87,6 +87,11 @@ export async function GET(
         response: node.response,
         status: catchupStatus,
         toolCalls: node.toolCalls,
+        // A路②: no live run means the process died — there's no resolver to
+        // unpark, so a stale pending form would be un-answerable. Surface null
+        // (the form, if any, is dead alongside the run). The live-bus path
+        // above carries a real pending via subscribe()'s catchup.
+        pendingInteraction: null,
       });
       if (catchupStatus === "done") {
         send({ type: "done", usage: node.tokenCount });

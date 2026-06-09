@@ -43,6 +43,41 @@ const DEFAULT_HISTORY_DEPTH = 4;
 // YOLO). Global runtime preference, default off. Sent on every chat request.
 const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
+// Workbench Wave 4 (VSCode-style IDE shell):
+// - pinned tabs (ordered) persist across reloads, like VSCode's permanently
+//   opened editor tabs.
+// - the left explorer sidebar open/closed state persists (desktop default on).
+const PINNED_KEY = "trellis-pinned-sessions";
+const SIDEBAR_KEY = "trellis-sidebar-open";
+
+function loadPinned(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PINNED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPinned(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (ids.length === 0) window.localStorage.removeItem(PINNED_KEY);
+    else window.localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+  } catch {
+    /* quota / private mode — non-fatal */
+  }
+}
+
+function loadSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  const raw = window.localStorage.getItem(SIDEBAR_KEY);
+  // Desktop default = open; only an explicit "0" closes it.
+  return raw === null ? true : raw !== "0";
+}
 
 // Per-session collapsed-set persistence — sessionStorage so it survives
 // reload but doesn't leak across tabs or re-appear weeks later. Key is
@@ -74,6 +109,43 @@ function persistCollapsed(
         JSON.stringify([...ids]),
       );
     }
+  } catch {
+    /* quota / private mode — non-fatal */
+  }
+}
+
+// Per-session "last viewed position": which node the user was looking at and
+// whether they were in the fullscreen reader vs the canvas. Persisted to
+// localStorage (survives reload / app restart, unlike collapsed which is
+// per-tab sessionStorage) so reopening a session lands back where you left.
+const VIEW_KEY = (sid: string) => `trellis-view:${sid}`;
+
+type ViewState = { activeNodeId: string | null; fullScreen: boolean };
+
+function loadViewState(sessionId: string): ViewState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(VIEW_KEY(sessionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      activeNodeId:
+        typeof parsed.activeNodeId === "string" ? parsed.activeNodeId : null,
+      fullScreen: Boolean(parsed.fullScreen),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistViewState(
+  sessionId: string | undefined,
+  state: ViewState,
+): void {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    window.localStorage.setItem(VIEW_KEY(sessionId), JSON.stringify(state));
   } catch {
     /* quota / private mode — non-fatal */
   }
@@ -205,6 +277,13 @@ type State = {
   // DoneToast component renders these in the bottom-right and auto-clears
   // each entry after the toast component's timer fires.
   doneToasts: Array<{ nodeId: string; emittedAt: number }>;
+  // Anti-misfire for Esc-to-abort: a single Esc only *arms* a confirm prompt
+  // (abortArm); a second Esc within the window actually stops the run. A
+  // stray single press can no longer kill a long-running task.
+  abortArm: { nodeId: string; label: string } | null;
+  // After a user-initiated stop, a recovery toast offers one-click re-run so
+  // an accidental abort is instantly recoverable.
+  abortRecovery: { nodeId: string; label: string } | null;
   // Notebook entries for the currently loaded session. Hydrated alongside
   // nodes from /api/sessions/[id], mutated optimistically by addNote /
   // deleteNote. Empty when no session loaded.
@@ -215,10 +294,20 @@ type State = {
   // both the ⌘P global keydown listener and the Header 🔍 button (mobile
   // entry point) can toggle the same modal.
   searchOpen: boolean;
+  // Global file-preview overlay target. Lifted into the store so every entry
+  // point (generated-files chips, clickable inline paths in answers, a future
+  // workspace browser) opens the same one. relPath is workspace-relative; the
+  // preview reads the live file from /api/files for the active session. null =
+  // closed.
+  filePreview: { path: string; name: string } | null;
   // B1: mobile outline drawer visibility. Desktop shows the outline as a
   // permanent left rail (md:block); mobile (which defaults to fullscreen,
   // hiding the rail) opens it as a full-height drawer via a Header button.
   outlineOpen: boolean;
+  // B3: visibility of the "新话题（清空上下文）" composer (NewQuestionPicker).
+  // Lifted into the store so both the canvas FAB and the Header context-
+  // pressure prompt (the /compact degradation entry) can open the same modal.
+  composeRootOpen: boolean;
   // Set of nodeIds whose subtree is currently folded — collapsed nodes
   // themselves stay visible, but every descendant is hidden from the
   // canvas (and the outline). Persisted to sessionStorage per-session
@@ -231,14 +320,51 @@ type State = {
   // instead of whatever the previous viewport was. In-memory only;
   // on session load we seed from the highest createdAt as a proxy.
   lastEditedNodeId: string | null;
+  // ── Workbench Wave 4: VSCode-style IDE shell ────────────────────────
+  // The single active session that is *previewed* (single-click in the
+  // sidebar / opened transiently). Shown as an italic temporary tab and
+  // replaced the moment another preview happens. null = no preview tab.
+  // A previewed id never appears in pinnedSessionIds simultaneously.
+  previewSessionId: string | null;
+  // Pinned (permanently opened) tabs, in user-visible order. Persisted to
+  // localStorage so the workbench survives reload. Double-click pins.
+  pinnedSessionIds: string[];
+  // Sessions that finished a run while the user was *not* looking at them
+  // (computed by the run-poll diff). Cleared the moment loadSession lands
+  // on that id. Drives the emerald "完成·未读" badge on tabs + sidebar rows.
+  unreadSessionIds: Set<string>;
+  // Sessions with ≥1 streaming node right now (the run-poll snapshot).
+  // Shared from the central poll so SessionTabs + SessionSidebar don't each
+  // run their own interval. Drives the blue running pulse.
+  runningSessionIds: Set<string>;
+  // Left explorer sidebar open/closed (desktop). Persisted to localStorage.
+  sidebarOpen: boolean;
 };
 
 type Actions = {
   hydrate: (sessionId?: string) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   newConversation: () => void;
+  // ── Workbench Wave 4: VSCode tab management ─────────────────────────
+  // Single-click a sidebar item: load it + mark it as the (transient)
+  // preview tab unless it's already pinned. Replaces any prior preview.
+  previewSession: (sessionId: string) => Promise<void>;
+  // Double-click / "keep open": move into pinned (deduped, appended) +
+  // clear preview if it was previewing this id + load it.
+  pinSession: (sessionId: string) => Promise<void>;
+  // Close a tab (the × on a tab). If pinned → remove from pinned. If it was
+  // the preview → clear preview. If we closed the active session, switch to
+  // an adjacent still-open tab, else drop to the new-conversation screen.
+  closeTab: (sessionId: string) => void;
+  // Central run-poll diff: feed the latest set of running session ids; the
+  // store computes the "finished while away" unread diff against the prior
+  // snapshot. Called by useRunPolling only.
+  ingestRunningSessions: (ids: Set<string>) => void;
+  setSidebarOpen: (open: boolean) => void;
   deleteSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  archiveSession: (sessionId: string) => Promise<void>;
+  unarchiveSession: (sessionId: string) => Promise<void>;
   setNodePosition: (nodeId: string, pos: { x: number; y: number }) => void;
   setActiveNode: (nodeId: string | null) => void;
   setProvider: (provider: ProviderId) => void;
@@ -298,6 +424,23 @@ type Actions = {
   // before the server round-trip finishes — UI feedback is instant; if
   // the POST fails (network glitch, etc.) we silently revert.
   markNodeRead: (nodeId: string) => Promise<void>;
+  // A路③: answer a paused interactive tool (AskUserQuestion / ExitPlanMode).
+  // Optimistically clears node.pendingInteraction (the interaction_resolved
+  // SSE event also clears it — idempotent). On 404/409 (stale: run no longer
+  // live, or a different toolUseId is pending) it still clears the form and
+  // returns { ok:false, reason:"stale" } so the UI can flash "会话已失效".
+  // Other failures (network / 400 / 5xx) return { ok:false, reason:"error" }
+  // WITHOUT clearing, so the user can retry. Restores pendingInteraction if
+  // it was optimistically cleared but the request failed retryably.
+  respondToInteraction: (
+    nodeId: string,
+    toolUseId: string,
+    decision: {
+      behavior: "allow" | "deny";
+      updatedInput?: unknown;
+      message?: string;
+    },
+  ) => Promise<{ ok: true } | { ok: false; reason: "stale" | "error" }>;
   // Combined "go to parent + scroll its response to the mark for this
   // child" action. Sets pendingScrollAnchor first so the consumer effect
   // sees it on the next render, then flips activeNodeId.
@@ -319,6 +462,8 @@ type Actions = {
   clearScrollAnchor: () => void;
   // Remove a single done toast (timer expiry or user dismiss/click).
   dismissDoneToast: (nodeId: string) => void;
+  setAbortArm: (v: { nodeId: string; label: string } | null) => void;
+  setAbortRecovery: (v: { nodeId: string; label: string } | null) => void;
   // Capture a quoted excerpt as a note. Optimistic: prepends a temp
   // entry, swaps in the server's id once POST resolves; rolls back on
   // failure. Returns the persisted note (or throws).
@@ -326,7 +471,10 @@ type Actions = {
   deleteNote: (noteId: string) => Promise<void>;
   setNotesOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
+  openFilePreview: (absPath: string) => void;
+  closeFilePreview: () => void;
   setOutlineOpen: (open: boolean) => void;
+  setComposeRootOpen: (open: boolean) => void;
   setHistoryDepth: (n: number) => void;
   setChatEnhanced: (v: boolean) => void;
   // A2: re-ask an existing node's question with an edited wording. Creates a
@@ -398,12 +546,21 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   fetchProgress: {},
   pendingScrollAnchor: null,
   doneToasts: [],
+  abortArm: null,
+  abortRecovery: null,
   notes: [],
   notesOpen: false,
   searchOpen: false,
+  filePreview: null,
   outlineOpen: false,
+  composeRootOpen: false,
   collapsedNodeIds: new Set(),
   lastEditedNodeId: null,
+  previewSessionId: null,
+  pinnedSessionIds: loadPinned(),
+  unreadSessionIds: new Set(),
+  runningSessionIds: new Set(),
+  sidebarOpen: loadSidebarOpen(),
 
   hydrate: async (sessionId) => {
     set({
@@ -428,7 +585,16 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         return;
       }
       await loadSessionInternal(targetId, set);
-      set({ hydrated: true });
+      // Wave 4: surface the auto-loaded session as a tab. If the user had
+      // it pinned across reloads, it's already an open tab; otherwise show
+      // it as the (transient) preview tab so the strip isn't empty while a
+      // session is active.
+      set((s) => ({
+        hydrated: true,
+        previewSessionId: s.pinnedSessionIds.includes(targetId!)
+          ? s.previewSessionId
+          : targetId!,
+      }));
       // Stage 17: any rows still status='streaming' after hydrate must
       // be a stream that was alive when we last saw the page. Attach
       // reconnect SSE to each so live deltas / terminal events resume.
@@ -442,6 +608,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   loadSession: async (sessionId) => {
     await loadSessionInternal(sessionId, set);
+    // Wave 4: landing on a session clears its "finished while away" badge.
+    set((s) => {
+      if (!s.unreadSessionIds.has(sessionId)) return s;
+      const next = new Set(s.unreadSessionIds);
+      next.delete(sessionId);
+      return { unreadSessionIds: next };
+    });
     get().reconnectStreamingNodes();
   },
 
@@ -453,7 +626,121 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       notes: [],
       collapsedNodeIds: new Set(),
       lastEditedNodeId: null,
+      // Wave 4: dropping to the composer screen is a "no tab is active"
+      // state — leave the preview tab cleared so the bar doesn't keep an
+      // orphan italic tab pointing at nothing.
+      previewSessionId: null,
     });
+  },
+
+  // ── Workbench Wave 4: VSCode tab management ───────────────────────────
+  previewSession: async (sessionId) => {
+    const { pinnedSessionIds } = get();
+    // Pinned sessions stay pinned (clicking a pinned tab is a plain switch,
+    // not a preview). Only non-pinned ids occupy the single preview slot.
+    set({
+      previewSessionId: pinnedSessionIds.includes(sessionId)
+        ? get().previewSessionId
+        : sessionId,
+    });
+    // Already the active session → only update tab state, never reload.
+    // Reloading resets every node position to (0,0) while the layoutKey
+    // (id:parent:status) stays identical, so Canvas's dagre effect won't
+    // re-fire and the nodes pile up at the origin.
+    if (get().session?.id !== sessionId) await get().loadSession(sessionId);
+  },
+
+  pinSession: async (sessionId) => {
+    set((s) => {
+      const pinned = s.pinnedSessionIds.includes(sessionId)
+        ? s.pinnedSessionIds
+        : [...s.pinnedSessionIds, sessionId];
+      if (pinned !== s.pinnedSessionIds) persistPinned(pinned);
+      return {
+        pinnedSessionIds: pinned,
+        // Pinning consumes the preview slot if it was previewing this id.
+        previewSessionId:
+          s.previewSessionId === sessionId ? null : s.previewSessionId,
+      };
+    });
+    // Pinning the already-active (previewed) session must NOT reload — that
+    // would reset node positions to (0,0) without changing layoutKey, leaving
+    // every node stacked at the origin. Only switch when it's a different one.
+    if (get().session?.id !== sessionId) await get().loadSession(sessionId);
+  },
+
+  closeTab: (sessionId) => {
+    const state = get();
+    const wasActive = state.session?.id === sessionId;
+    // Compute the ordered list of currently-open tabs (pinned, then preview)
+    // *before* removal, so we can pick a neighbor if we closed the active one.
+    const openOrder = [
+      ...state.pinnedSessionIds,
+      ...(state.previewSessionId &&
+      !state.pinnedSessionIds.includes(state.previewSessionId)
+        ? [state.previewSessionId]
+        : []),
+    ];
+    const closingIdx = openOrder.indexOf(sessionId);
+
+    const nextPinned = state.pinnedSessionIds.filter((id) => id !== sessionId);
+    if (nextPinned.length !== state.pinnedSessionIds.length) {
+      persistPinned(nextPinned);
+    }
+    const nextPreview =
+      state.previewSessionId === sessionId ? null : state.previewSessionId;
+    set({ pinnedSessionIds: nextPinned, previewSessionId: nextPreview });
+
+    if (!wasActive) return;
+    // Closed the active tab → switch to an adjacent still-open tab.
+    const remaining = [
+      ...nextPinned,
+      ...(nextPreview && !nextPinned.includes(nextPreview)
+        ? [nextPreview]
+        : []),
+    ];
+    if (remaining.length === 0) {
+      get().newConversation();
+      return;
+    }
+    // Prefer the tab that took the closed one's slot (or the new last tab).
+    const neighbor =
+      remaining[Math.min(closingIdx, remaining.length - 1)] ?? remaining[0];
+    void get().loadSession(neighbor);
+  },
+
+  ingestRunningSessions: (ids) => {
+    set((s) => {
+      const prev = s.runningSessionIds;
+      // Diff: any id that *was* running last tick but isn't now, and isn't
+      // the session the user is currently looking at, just finished while
+      // they were away → flag it unread.
+      const activeId = s.session?.id ?? null;
+      let unread = s.unreadSessionIds;
+      let unreadChanged = false;
+      for (const id of prev) {
+        if (!ids.has(id) && id !== activeId) {
+          if (!unread.has(id)) {
+            if (!unreadChanged) {
+              unread = new Set(unread);
+              unreadChanged = true;
+            }
+            unread.add(id);
+          }
+        }
+      }
+      return {
+        runningSessionIds: ids,
+        ...(unreadChanged ? { unreadSessionIds: unread } : {}),
+      };
+    });
+  },
+
+  setSidebarOpen: (open) => {
+    set({ sidebarOpen: open });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
+    }
   },
 
   deleteSession: async (sessionId) => {
@@ -461,16 +748,46 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     if (typeof window !== "undefined") {
       window.sessionStorage.removeItem(COLLAPSED_KEY(sessionId));
     }
+    // Wave 4: a deleted session must not linger as a tab. If it was the
+    // active one, closeTab also handles switching to a neighbor; otherwise
+    // just evict it from pinned/preview/unread.
     if (get().session?.id === sessionId) {
-      set({
-        session: null,
-        nodes: {},
-        activeNodeId: null,
-        notes: [],
-        collapsedNodeIds: new Set(),
-        lastEditedNodeId: null,
-      });
+      get().closeTab(sessionId);
+    } else {
+      evictSessionFromTabs(set, get, sessionId);
     }
+    set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+  },
+
+  // B2: soft-archive — hides the session from tabs + default lists but keeps
+  // every node/jsonl intact (reversible via unarchiveSession). Mirrors
+  // deleteSession's "if it's the active one, clear to a fresh-conversation
+  // state" so the canvas doesn't keep showing a now-hidden session.
+  archiveSession: async (sessionId) => {
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    // Wave 4: an archived session is hidden from tabs, so evict it. When
+    // it's the active one, closeTab handles the neighbor switch + clear.
+    if (get().session?.id === sessionId) {
+      get().closeTab(sessionId);
+    } else {
+      evictSessionFromTabs(set, get, sessionId);
+    }
+    set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+  },
+
+  // B2: restore an archived session back into the active lists. Does not
+  // auto-load it (the picker decides whether to switch); just flips the flag
+  // and bumps the revision so lists/tabs refetch.
+  unarchiveSession: async (sessionId) => {
+    await fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: false }),
+    });
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
 
@@ -538,7 +855,27 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   setProvider: (provider) => {
     set({ provider });
     if (typeof window !== "undefined") {
+      // Global value = the default model for NEW sessions.
       window.localStorage.setItem(PROVIDER_KEY, provider);
+    }
+    // If a session is active, this also becomes that session's locked model:
+    // mirror it into the in-memory row immediately, then persist (fire-and-
+    // forget — local state already updated optimistically). This is what makes
+    // the choice stick when the user switches away and back.
+    const sid = get().session?.id;
+    if (sid) {
+      set((s) =>
+        s.session && s.session.id === sid
+          ? { session: { ...s.session, model: provider } }
+          : {},
+      );
+      if (typeof window !== "undefined") {
+        void fetch(`/api/sessions/${sid}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: provider }),
+        }).catch(() => {});
+      }
     }
   },
 
@@ -694,6 +1031,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             // in resetNodeForRetry; mirror locally so the UI doesn't
             // briefly show stale entries during the network round-trip.
             toolCalls: [],
+            // A路②: server also clears pending_interaction_json on retry.
+            pendingInteraction: null,
           },
         },
         lastEditedNodeId: nodeId,
@@ -737,6 +1076,18 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     });
     const ctrl = STREAM_CONTROLLERS.get(nodeId);
     if (ctrl) ctrl.abort();
+    // Recovery affordance: surface a toast offering one-click re-run, so a
+    // stop (especially a stray Esc) is instantly recoverable.
+    const aborted = get().nodes[nodeId];
+    set({
+      abortArm: null,
+      abortRecovery: {
+        nodeId,
+        label: aborted
+          ? aborted.topicLabel ?? aborted.question.slice(0, 40)
+          : "",
+      },
+    });
     // Don't delete here — the terminal branch in handleStreamEvent will,
     // once the SSE response actually winds down. Keeping it lets a
     // double-press of Esc be a no-op instead of finding a stale entry.
@@ -983,6 +1334,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set((s) => ({
       doneToasts: s.doneToasts.filter((t) => t.nodeId !== nodeId),
     })),
+  setAbortArm: (v) => set({ abortArm: v }),
+  setAbortRecovery: (v) => set({ abortRecovery: v }),
 
   addNote: async (sourceNodeId, quotedText) => {
     const session = get().session;
@@ -1045,7 +1398,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   setNotesOpen: (open) => set({ notesOpen: open }),
   setSearchOpen: (open) => set({ searchOpen: open }),
+  openFilePreview: (absPath) =>
+    set({ filePreview: { path: absPath, name: absPath.split("/").pop() || absPath } }),
+  closeFilePreview: () => set({ filePreview: null }),
   setOutlineOpen: (open) => set({ outlineOpen: open }),
+  setComposeRootOpen: (open) => set({ composeRootOpen: open }),
 
   deleteNode: async (nodeId) => {
     const state = get();
@@ -1189,6 +1546,68 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  respondToInteraction: async (nodeId, toolUseId, decision) => {
+    const existing = get().nodes[nodeId];
+    const pending = existing?.pendingInteraction ?? null;
+    // Guard: nothing to answer, or the form is already stale against a
+    // different toolUseId — treat as stale so the UI dismisses it.
+    if (!pending || pending.toolUseId !== toolUseId) {
+      if (existing) {
+        set((s) => {
+          const cur = s.nodes[nodeId];
+          if (!cur) return s;
+          return {
+            nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: null } },
+          };
+        });
+      }
+      return { ok: false, reason: "stale" };
+    }
+    // Optimistically clear so the form disappears immediately. Stash the
+    // prior value to restore on a retryable failure.
+    set((s) => {
+      const cur = s.nodes[nodeId];
+      if (!cur) return s;
+      return {
+        nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: null } },
+      };
+    });
+    const restore = () =>
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        // Only restore if nothing newer took its place.
+        if (!cur || cur.pendingInteraction) return s;
+        return {
+          nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: pending } },
+        };
+      });
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toolUseId,
+          behavior: decision.behavior,
+          updatedInput: decision.updatedInput,
+          message: decision.message,
+        }),
+      });
+      if (res.ok) return { ok: true };
+      // 404 (no live run) / 409 (no pending / toolUseId mismatch): the run is
+      // gone or moved on. Leave the form cleared — retrying won't help.
+      if (res.status === 404 || res.status === 409) {
+        return { ok: false, reason: "stale" };
+      }
+      // 400 / 5xx / anything else: retryable — put the form back.
+      restore();
+      return { ok: false, reason: "error" };
+    } catch {
+      // Network failure — retryable.
+      restore();
+      return { ok: false, reason: "error" };
+    }
+  },
+
   refreshReference: async (nodeId) => {
     const { provider } = get();
     const res = await fetch(
@@ -1232,6 +1651,30 @@ type Setter = (
 
 type Getter = () => State & Actions;
 
+// Wave 4: remove a session from every tab-tracking collection (pinned /
+// preview / unread) without touching the active canvas. Used when a
+// non-active session is deleted/archived out from under the workbench.
+function evictSessionFromTabs(
+  set: Setter,
+  get: Getter,
+  sessionId: string,
+): void {
+  const s = get();
+  const nextPinned = s.pinnedSessionIds.filter((id) => id !== sessionId);
+  if (nextPinned.length !== s.pinnedSessionIds.length) persistPinned(nextPinned);
+  let unread = s.unreadSessionIds;
+  if (unread.has(sessionId)) {
+    unread = new Set(unread);
+    unread.delete(sessionId);
+  }
+  set({
+    pinnedSessionIds: nextPinned,
+    previewSessionId:
+      s.previewSessionId === sessionId ? null : s.previewSessionId,
+    unreadSessionIds: unread,
+  });
+}
+
 async function loadSessionInternal(sessionId: string, set: Setter) {
   const res = await fetchWithTimeout(`/api/sessions/${sessionId}`, 5000);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1267,13 +1710,42 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
       lastEditedNodeId = n.id;
     }
   }
+  // Restore the last-viewed position for this session (focused node + view
+  // layer) so reopening lands back where the user left — not on the canvas
+  // overview / root node. Falls back to no focus (canvas) when there's no
+  // record or the recorded node has since been deleted.
+  const savedView = loadViewState(session.id);
+  let restoredActive: string | null = null;
+  if (savedView?.activeNodeId && map[savedView.activeNodeId]) {
+    restoredActive = savedView.activeNodeId;
+  }
+  const restoredFull = Boolean(savedView?.fullScreen) && restoredActive !== null;
+  // Make sure the restored node is actually visible in the canvas by
+  // un-collapsing any of its ancestors that were persisted collapsed.
+  if (restoredActive && collapsed.size > 0) {
+    const next = new Set(collapsed);
+    let changed = false;
+    for (const a of ancestorsOf(restoredActive, map)) {
+      if (next.delete(a)) changed = true;
+    }
+    if (changed) {
+      persistCollapsed(session.id, next);
+      collapsed = next;
+    }
+  }
+  // Per-session model lock: adopt the loaded session's own model as the active
+  // provider so switching away and back doesn't inherit the global picker.
+  // Legacy rows (model === null) leave the current provider untouched.
+  const sessionProvider = isProviderId(session.model) ? session.model : null;
   set({
     session,
     nodes: map,
-    activeNodeId: null,
+    activeNodeId: restoredActive,
+    fullScreen: restoredFull,
     notes: notes ?? [],
     collapsedNodeIds: collapsed,
     lastEditedNodeId,
+    ...(sessionProvider ? { provider: sessionProvider } : {}),
   });
 }
 
@@ -1348,6 +1820,9 @@ type StreamEvent =
       response: string;
       status: "streaming" | "done" | "error";
       toolCalls: import("@/lib/types").ToolCall[];
+      // A路②: present when the run is paused on an interactive tool; the UI
+      // (third knife) renders the waiting form from it. null otherwise.
+      pendingInteraction?: import("@/lib/types").PendingInteraction | null;
     }
   // Stage 17 (tool visualization). Streams the lifecycle of every tool
   // claude invokes mid-turn. start arrives with input + name; done
@@ -1367,7 +1842,19 @@ type StreamEvent =
       stderr: string | null;
       isError: boolean;
       endedAt: number;
-    };
+    }
+  // A路②: the run paused on an interactive tool (AskUserQuestion /
+  // ExitPlanMode). interaction_required carries the prompt for the UI to
+  // render a form; interaction_resolved fires once the user answered and the
+  // model continues. The store mirrors these onto node.pendingInteraction so
+  // a re-render / reconnect shows (or clears) the form.
+  | {
+      type: "interaction_required";
+      toolUseId: string;
+      toolName: string;
+      input: unknown;
+    }
+  | { type: "interaction_resolved"; toolUseId: string };
 
 function handleStreamEvent(
   set: Setter,
@@ -1418,6 +1905,11 @@ function handleStreamEvent(
         if (focusNew) next.activeNodeId = node.id;
         if (event.session) {
           next.session = event.session;
+          // Wave 4: a brand-new session enters the workbench as the preview
+          // tab (transient) unless the user had already pinned this id.
+          if (!s.pinnedSessionIds.includes(event.session.id)) {
+            next.previewSessionId = event.session.id;
+          }
         } else if (s.session) {
           next.session = { ...s.session, updatedAt: Date.now() };
         }
@@ -1518,6 +2010,9 @@ function handleStreamEvent(
               ...n,
               response: event.response,
               toolCalls: event.toolCalls,
+              // A路②: sync the paused-interaction state on reconnect so a
+              // refreshed / late tab re-renders (or clears) the waiting form.
+              pendingInteraction: event.pendingInteraction ?? null,
             },
           },
         };
@@ -1578,6 +2073,44 @@ function handleStreamEvent(
           durationMs: Math.max(0, event.endedAt - cur.startedAt),
         };
         return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
+      });
+    } else if (event.type === "interaction_required" && currentNodeId) {
+      // A路②: the run paused — stash the prompt so the UI (third knife) can
+      // render a form. Idempotent: a re-broadcast with the same toolUseId
+      // just overwrites with identical data.
+      const id = currentNodeId;
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n) return s;
+        return {
+          nodes: {
+            ...s.nodes,
+            [id]: {
+              ...n,
+              pendingInteraction: {
+                toolUseId: event.toolUseId,
+                toolName: event.toolName,
+                input: event.input,
+              },
+            },
+          },
+        };
+      });
+    } else if (event.type === "interaction_resolved" && currentNodeId) {
+      // A路②: user answered (or it was denied/aborted) — clear the form. Guard
+      // on toolUseId so a stale resolved for an older prompt can't wipe a
+      // newer pending one.
+      const id = currentNodeId;
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n || !n.pendingInteraction) return s;
+        if (n.pendingInteraction.toolUseId !== event.toolUseId) return s;
+        return {
+          nodes: {
+            ...s.nodes,
+            [id]: { ...n, pendingInteraction: null },
+          },
+        };
       });
     }
   };
@@ -1781,4 +2314,29 @@ async function runStream(
       console.warn("[trellis] /api/chat SSE dropped:", err);
     }
   }
+}
+
+// Persist the active session's last-viewed position (focused node + view
+// layer) on every change, so reopening / switching back restores it. A single
+// module-level subscription spares the many activeNodeId / fullScreen mutation
+// sites (focus, jump, search, keyboard nav, fullscreen toggle…) from each
+// having to remember to write. loadSessionInternal seeds the restored values
+// in one atomic set(), so the first fire after a switch just re-persists the
+// same state (idempotent).
+if (typeof window !== "undefined") {
+  useSessionStore.subscribe((state, prev) => {
+    const sid = state.session?.id;
+    if (!sid) return;
+    if (
+      state.session?.id === prev.session?.id &&
+      state.activeNodeId === prev.activeNodeId &&
+      state.fullScreen === prev.fullScreen
+    ) {
+      return;
+    }
+    persistViewState(sid, {
+      activeNodeId: state.activeNodeId,
+      fullScreen: state.fullScreen,
+    });
+  });
 }

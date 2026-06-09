@@ -6,6 +6,7 @@ import { ModePicker } from "./ModePicker";
 import { SystemPromptPicker, FEYNMAN_PROMPT } from "./SystemPromptPicker";
 import { ZoneEditor } from "./ZoneEditor";
 import { isSendCombo, sendHint } from "@/lib/send-key";
+import { matchCommands, parseCommand, type CommandStore } from "@/lib/commands";
 import {
   AttachmentPreview,
   uploadAttachment,
@@ -62,6 +63,17 @@ export function QuestionInput() {
   const setSendKey = useSessionStore((s) => s.setSendKey);
   const historyDepth = useSessionStore((s) => s.historyDepth);
   const setHistoryDepth = useSessionStore((s) => s.setHistoryDepth);
+  // C1: Trellis command palette. These store actions are dispatched locally
+  // (never sent to the LLM) when the input is a bare /command.
+  const session = useSessionStore((s) => s.session);
+  const newConversation = useSessionStore((s) => s.newConversation);
+  const archiveSession = useSessionStore((s) => s.archiveSession);
+  const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const setProvider = useSessionStore((s) => s.setProvider);
+  // Transient note when a command no-ops (e.g. /clear with no session) or
+  // /model echoes its usage. Cleared on the next keystroke.
+  const [cmdNotice, setCmdNotice] = useState<string | null>(null);
 
   useEffect(() => {
     ref.current?.focus();
@@ -86,9 +98,36 @@ export function QuestionInput() {
     )
     .map((p) => p.attachment);
 
+  const commandStore: CommandStore = {
+    session,
+    newConversation,
+    archiveSession,
+    setSearchOpen,
+    setComposeRootOpen,
+    setProvider,
+  };
+
   const submit = async () => {
     const trimmed = q.trim();
-    if (!trimmed || busy || needsWorkspace || hasUploading) return;
+    if (!trimmed) return;
+    // C1: intercept bare Trellis commands BEFORE any send-to-LLM path. A bare
+    // /command runs locally against the store and never streams. Skill
+    // commands (/skill-name) aren't in the command registry, so parseCommand
+    // returns null and they fall through to streamRoot → claude CLI as before.
+    const parsed = parseCommand(trimmed);
+    if (parsed) {
+      const note = parsed.command.run(commandStore, parsed.args);
+      if (note) {
+        // No-op / usage echo: keep the input, surface the note inline.
+        setCmdNotice(note);
+      } else {
+        // Command ran — clear the input so the palette resets.
+        setQ("");
+        setCmdNotice(null);
+      }
+      return;
+    }
+    if (busy || needsWorkspace || hasUploading) return;
     setBusy(true);
     streamRoot(trimmed, {
       attachments: doneAttachments.length > 0 ? doneAttachments : undefined,
@@ -195,6 +234,10 @@ export function QuestionInput() {
           .filter((s) => s.name.toLowerCase().includes(skillQuery))
           .slice(0, 8)
       : [];
+  // C1: Trellis commands match in *every* mode (first-class). They render
+  // above skills in the shared "/" dropdown. matchCommands gates on the same
+  // "/name" (no space) shape as skills, so the two lists co-exist cleanly.
+  const matchedCommands = matchCommands(q);
 
   const atLimit = pending.length >= MAX_ATTACHMENTS;
   const submitDisabled =
@@ -208,7 +251,12 @@ export function QuestionInput() {
         : "开始探索";
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6">
+    <div
+      className="min-h-screen flex flex-col items-center justify-center px-6"
+      // Wave 4: keep the composer centered within the editor area (right of
+      // the explorer sidebar). var from page.tsx; 0 on mobile / collapsed.
+      style={{ paddingLeft: "var(--trellis-sb, 0px)" }}
+    >
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-8 justify-center">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400" />
@@ -265,7 +313,10 @@ export function QuestionInput() {
           <textarea
             ref={ref}
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              if (cmdNotice) setCmdNotice(null);
+            }}
             onKeyDown={onKey}
             onPaste={handlePaste}
             placeholder={
@@ -351,11 +402,65 @@ export function QuestionInput() {
             </button>
           </div>
         </div>
-        {matchedSkills.length > 0 && (
+        {cmdNotice && (
+          <div className="mt-2 text-[12px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+            {cmdNotice}
+          </div>
+        )}
+        {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
           <div className="mt-2 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-sm overflow-hidden max-h-64 overflow-y-auto">
+            {/* C1: Trellis commands first (first-class, all modes). Selecting
+                a no-arg command runs it immediately; /model (which takes an
+                arg) fills "/model " so the user can type the provider. */}
+            {matchedCommands.map((c) => {
+              const needsArg = c.name === "model";
+              return (
+                <button
+                  key={`cmd-${c.name}`}
+                  type="button"
+                  onClick={() => {
+                    if (needsArg) {
+                      setQ(`/${c.name} `);
+                      ref.current?.focus();
+                      return;
+                    }
+                    const note = c.run(commandStore, "");
+                    if (note) {
+                      setCmdNotice(note);
+                      ref.current?.focus();
+                    } else {
+                      setQ("");
+                      setCmdNotice(null);
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
+                >
+                  <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                    <span
+                      className="text-[10px] px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans"
+                      aria-hidden
+                    >
+                      ⚡ 命令
+                    </span>
+                    <span>
+                      /{c.name}
+                      {c.hint && (
+                        <span className="text-stone-400 dark:text-stone-500">
+                          {" "}
+                          {c.hint}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                    {c.description}
+                  </div>
+                </button>
+              );
+            })}
             {matchedSkills.map((s) => (
               <button
-                key={s.name}
+                key={`skill-${s.name}`}
                 type="button"
                 onClick={() => {
                   setQ(`/${s.name} `);

@@ -3,7 +3,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   useReactFlow,
   useStore as useFlowStore,
   type Node,
@@ -333,9 +332,13 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
-        className={`w-screen h-screen pt-12 bg-gradient-to-b from-stone-50 via-white to-stone-100 dark:from-stone-950 dark:via-stone-950 dark:to-stone-900${
+        className={`w-screen h-screen pt-[5.25rem] bg-gradient-to-b from-stone-50 via-white to-stone-100 dark:from-stone-950 dark:via-stone-950 dark:to-stone-900${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
+        // Wave 4: shift the canvas right of the explorer sidebar (var set in
+        // page.tsx; 0 on mobile / when collapsed). box-border keeps the
+        // element 100vw while the inner ReactFlow area shrinks by the pad.
+        style={{ paddingLeft: "var(--trellis-sb, 0px)", boxSizing: "border-box" }}
       >
         <ReactFlow
           nodes={flowNodes}
@@ -352,7 +355,6 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
           onPaneClick={() => fitView({ padding: 0.15, duration: 400 })}
         >
           <Background gap={22} size={1} color="#d6d3d1" className="opacity-60 dark:opacity-[0.18]" />
-          <Controls position="bottom-right" showInteractive={false} />
         </ReactFlow>
       </div>
       {/* Always-visible "fit view" floating button — replaces F key on mobile */}

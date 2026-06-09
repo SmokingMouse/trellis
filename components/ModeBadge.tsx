@@ -1,5 +1,6 @@
 "use client";
 import { useSessionStore } from "@/stores/sessionStore";
+import { MODE_STYLES } from "@/lib/mode-style";
 
 // Readonly badge rendered in the Header for an active session. Shows
 // "Chat" / "Workspace · <shortName>" / "Project · <shortName>" depending
@@ -30,7 +31,7 @@ export function ModeBadge() {
           ? `${cfg.label} · ${path}\n模式与工作区在 session 创建时锁定`
           : `${cfg.label}\nsession 创建时锁定 — 换语境请开新 session`
       }
-      className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border ${cfg.color}`}
+      className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border ${cfg.badge}`}
     >
       <cfg.Icon />
       {/* Mode label hidden on mobile to save space — the icon already
@@ -53,28 +54,15 @@ export function ModeBadge() {
   );
 }
 
+// Mode label + badge class come from the shared lib/mode-style.ts token
+// table (DRY with SessionTabs). Icons stay local to this component.
 const MODE_CONFIG: Record<
   string,
-  { label: string; color: string; Icon: () => React.ReactElement }
+  { label: string; badge: string; Icon: () => React.ReactElement }
 > = {
-  chat: {
-    label: "Chat",
-    color:
-      "border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200",
-    Icon: ChatIcon,
-  },
-  workspace: {
-    label: "Workspace",
-    color:
-      "border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200",
-    Icon: WorkspaceIcon,
-  },
-  project: {
-    label: "Project",
-    color:
-      "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200",
-    Icon: ProjectIcon,
-  },
+  chat: { ...MODE_STYLES.chat, Icon: ChatIcon },
+  workspace: { ...MODE_STYLES.workspace, Icon: WorkspaceIcon },
+  project: { ...MODE_STYLES.project, Icon: ProjectIcon },
 };
 
 function ChatIcon() {

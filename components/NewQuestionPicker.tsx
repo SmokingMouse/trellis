@@ -2,8 +2,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 
-// Modal composer for "新提问" — adds a parallel root (parent_id=NULL) to the
-// current session. Visual structure mirrors ReferencePicker for consistency.
+// Modal composer for "新话题（清空上下文）" — adds a parallel root
+// (parent_id=NULL) to the current session. This is Trellis's equivalent of the
+// CLI `/clear`: the model no longer remembers the existing nodes. Visual
+// structure mirrors ReferencePicker for consistency.
 export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -12,8 +14,11 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   const sessionMode = useSessionStore((s) => s.session?.mode);
   const ref = useRef<HTMLTextAreaElement>(null);
   // In project mode a new root also forks a fresh claude session id — the
-  // model loses its conversation memory of the existing tree. Call it out
-  // so users don't trip over the "wait, why doesn't it remember?" beat.
+  // model loses its conversation memory of the existing tree AND starts a
+  // brand-new Claude session. In chat/workspace there's no resumed claude
+  // session, but the new root still carries zero prior context. Either way
+  // the "🧹 清空上下文" promise holds, so we surface the badge in every mode
+  // (it used to only show in project — a discoverability blind spot).
   const isProject = sessionMode === "project";
 
   useEffect(() => {
@@ -59,17 +64,18 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
         <div className="px-5 py-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
           <div>
             <div className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 flex items-center gap-2">
-              新提问
-              {isProject && (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-200/60 dark:border-rose-900/60">
-                  🧹 全新上下文
-                </span>
-              )}
+              新话题
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-200/60 dark:border-rose-900/60">
+                🧹 清空上下文
+              </span>
             </div>
             <div className="text-[12px] text-stone-500 dark:text-stone-400 mt-0.5">
-              {isProject
-                ? "起一条独立的根问答；Project 模式下会同时开启全新的 Claude 会话记忆。"
-                : "在当前画布上起一条独立的根问答，不继承现有节点的上下文。"}
+              起一条全新上下文的根问答，模型不再记得现有节点（等价 CLI 的{" "}
+              <code className="px-1 rounded bg-stone-100 dark:bg-stone-800 text-[11px]">
+                /clear
+              </code>
+              ）。
+              {isProject && " Project 模式下还会同时开启全新的 Claude 会话记忆。"}
             </div>
           </div>
           <button

@@ -27,6 +27,10 @@ export type TokenUsage = {
   output: number;
   cacheRead: number;
   cacheCreation: number;
+  // 主 agent「当前上下文窗口实际占用」(末条 assistant 的 input+cache)，区别于
+  // 上面四桶的跨迭代累计(含同模型 subagent)。专供算 context 占用%，null/缺省 =
+  // 后端没报(codex 老数据/非 claude)，消费端回退到旧的累计口径。
+  contextTokens?: number | null;
 };
 
 export type StreamEvent =
@@ -55,13 +59,31 @@ export type StreamEvent =
       endedAt: number;
     };
 
+// A路②: interaction_required / interaction_resolved are NOT provider stream
+// events — interactive tools flow through the onCanUseTool callback, and
+// run-bus synthesizes those two events onto its own bus + SSE wire. They live
+// on run-bus's RunEvent and the client store's StreamEvent, never here.
+
+// Decision returned for an interactive tool. Mirrors the SDK's onCanUseTool
+// resolution: allow lets the tool run (optionally with rewritten input),
+// deny rejects it with an optional message.
+export type InteractionDecision = {
+  behavior: "allow" | "deny";
+  updatedInput?: unknown;
+  message?: string;
+};
+
 export type StreamRequest = {
   history: ChatMessage[];
   question: string;
   parentAnchor?: { selectedText: string } | null;
   signal?: AbortSignal;
-  // project mode: if set, claude resumes this session id; if null, a new
-  // one is created and emitted via session_init.
+  // project mode: the current provider's resume id (field name is legacy;
+  // post family-isolation this is whichever family's id — claude or codex —
+  // matches the active provider). If set, the CLI resumes this session id;
+  // if null, a new one is created and emitted via session_init. Resume ids
+  // are family-scoped — never pass a codex id to claude or vice versa; the
+  // route reads it from the family-correct column.
   claudeSessionId?: string | null;
   // Stage 14: cwd to spawn the CLI in. null = home dir (chat default,
   // or workspace/project fallback when path missing).
@@ -77,6 +99,22 @@ export type StreamRequest = {
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
   // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
   chatEnhanced?: boolean;
+  // A路②: bidirectional interaction callback. When set, the claude provider
+  // opens the SDK's stdio permission protocol so AskUserQuestion / ExitPlanMode
+  // pause and await a user decision. Non-interactive tools are auto-allowed by
+  // the caller's dispatcher (run-bus), so passing this never blocks normal
+  // tools. codex/mock ignore it (no such protocol). The shape matches the
+  // SDK's RunOptions.onCanUseTool exactly.
+  onCanUseTool?: (req: {
+    toolName: string;
+    toolUseId: string;
+    requestId: string;
+    input: unknown;
+  }) => Promise<{
+    behavior: "allow" | "deny";
+    updatedInput?: unknown;
+    message?: string;
+  }>;
 };
 
 export interface LLMProvider {

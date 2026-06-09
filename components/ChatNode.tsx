@@ -187,6 +187,14 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               </div>
             )}
           </div>
+          {n.pendingInteraction && (
+            <span
+              className="shrink-0 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 text-[10px] font-medium"
+              title="待你回答"
+            >
+              🙋
+            </span>
+          )}
           <ToolCallBadge count={n.toolCalls.length} />
           <TokenMeta tokenCount={n.tokenCount} variant="compact" />
         </div>
@@ -234,9 +242,22 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         </div>
       )}
 
+      {n.pendingInteraction && (
+        <div
+          className={`px-4 py-1.5 border-b border-amber-200 dark:border-amber-800/60 bg-amber-100/80 dark:bg-amber-900/40 text-[11px] font-medium text-amber-900 dark:text-amber-200 flex items-center gap-1.5 ${
+            n.parentAnchor ? "" : "rounded-t-xl"
+          }`}
+        >
+          <span>🙋</span>
+          <span>待你回答</span>
+        </div>
+      )}
+
       <div
         className={`px-5 py-3 border-b border-stone-100 dark:border-stone-800 flex items-start gap-2.5 ${
-          n.parentAnchor ? "" : "bg-indigo-50/60 dark:bg-indigo-950/30 rounded-t-xl"
+          n.parentAnchor || n.pendingInteraction
+            ? ""
+            : "bg-indigo-50/60 dark:bg-indigo-950/30 rounded-t-xl"
         }`}
       >
         <div className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] flex items-center justify-center mt-0.5 shrink-0 font-medium">

@@ -76,6 +76,16 @@ export type ToolCall = {
   endedAt: number | null;
 };
 
+// A路②: a paused interactive-tool prompt awaiting a user answer. Set while
+// an AskUserQuestion / ExitPlanMode call is in flight; cleared on response or
+// abort. input carries the tool's raw arguments (e.g. AskUserQuestion's
+// { questions: [...] }) so the UI can render the form without re-fetching.
+export type PendingInteraction = {
+  toolUseId: string;
+  toolName: string;
+  input: unknown;
+};
+
 export type ChatNode = {
   id: string;
   sessionId: string;
@@ -94,6 +104,10 @@ export type ChatNode = {
     output: number;
     cacheRead: number;
     cacheCreation: number;
+    // Main-agent context-window occupancy for this turn (last assistant
+    // message). null/absent = backend didn't report → the % gauge falls back
+    // to input+cacheRead+cacheCreation. See Header.tsx ctx computation.
+    contextTokens?: number | null;
   };
   createdAt: number;
   siblingIndex: number;
@@ -116,6 +130,10 @@ export type ChatNode = {
   // model didn't call any tools (chat mode often, workspace/project
   // when the prompt didn't need them).
   toolCalls: ToolCall[];
+  // A路②: non-null while this node's run is paused on an interactive tool
+  // (AskUserQuestion / ExitPlanMode) waiting for the user to answer. The UI
+  // renders the form from this; POST /api/nodes/[id]/respond clears it.
+  pendingInteraction: PendingInteraction | null;
 };
 
 export type Session = {
@@ -133,6 +151,11 @@ export type Session = {
   // D1: custom system prompt locked at creation (chat mode only).
   // null = use the built-in default.
   systemPrompt: string | null;
+  // B2: soft-archive flag. true = hidden from tabs + default lists.
+  archived: boolean;
+  // Per-session model lock (ProviderId string). null = legacy row → the
+  // client falls back to its global default. Set at creation, editable.
+  model: string | null;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while

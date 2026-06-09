@@ -9,6 +9,8 @@ import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { CopyButton } from "./CopyButton";
+import { CardImageButton } from "./CardImageButton";
+import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import { SkillPickerList } from "./SkillPickerList";
@@ -19,6 +21,7 @@ import { buildNodeIndex } from "@/lib/node-index";
 import { NodeTreeOverlay } from "./NodeTreeOverlay";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { ToolCallsPanel } from "./ToolCallsPanel";
+import { InteractionForm } from "./InteractionForm";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
 const REMARK_PLUGINS = [remarkGfm];
@@ -31,18 +34,24 @@ const REHYPE_STREAMING = [rehypeHighlight];
 
 type MobileSelection = { text: string; nodeId: string };
 
-// Mobile-specific selection capture. iOS Safari fires neither selectionchange
-// nor touchend reliably while the user drags selection handles, so in
-// addition to event listeners we poll every 300ms as last-resort fallback.
+// Minimum selected characters before the follow-up bar is offered. Stray
+// 1–N char drags / double-clicks on short words shouldn't pop it; a branch
+// is a deliberate "ask about this passage" gesture.
+const MIN_SELECTION_LEN = 8;
+
+// Selection capture for the follow-up / branch bar. Deliberately conservative
+// so it isn't trigger-happy: the bar only commits on a *finished* gesture
+// (pointer/touch release, or shift-select keyup), never mid-drag and never on
+// a continuous poll. `selectionchange` is used ONLY to dismiss the bar when
+// the selection collapses (click away), not to open it.
 function useMobileSelection(): MobileSelection | null {
   const [sel, setSel] = useState<MobileSelection | null>(null);
   useEffect(() => {
-    let timer: number | undefined;
-    const compute = () => {
+    const read = (): MobileSelection | null => {
       const s = window.getSelection();
-      if (!s || s.isCollapsed || s.rangeCount === 0) return;
+      if (!s || s.isCollapsed || s.rangeCount === 0) return null;
       const text = s.toString().trim();
-      if (!text) return;
+      if (text.length < MIN_SELECTION_LEN) return null;
       const range = s.getRangeAt(0);
       const container = range.commonAncestorContainer;
       const el =
@@ -51,27 +60,39 @@ function useMobileSelection(): MobileSelection | null {
           : (container as Element);
       const nodeEl = el?.closest("[data-chat-node-id]");
       const nodeId = nodeEl?.getAttribute("data-chat-node-id");
-      if (!nodeId) return;
+      if (!nodeId) return null;
+      return { text, nodeId };
+    };
+    // Commit on deliberate gesture end only.
+    const commit = () => {
+      const next = read();
+      if (!next) return; // don't clobber an open bar on an unrelated release
       setSel((prev) =>
-        prev && prev.text === text && prev.nodeId === nodeId
+        prev && prev.text === next.text && prev.nodeId === next.nodeId
           ? prev
-          : { text, nodeId },
+          : next,
       );
     };
-    const handler = () => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(compute, 80);
+    // Dismiss when the selection is gone / too short (e.g. user clicked away).
+    const onSelectionChange = () => {
+      const s = window.getSelection();
+      if (
+        !s ||
+        s.isCollapsed ||
+        s.toString().trim().length < MIN_SELECTION_LEN
+      ) {
+        setSel((prev) => (prev ? null : prev));
+      }
     };
-    document.addEventListener("selectionchange", handler);
-    document.addEventListener("pointerup", handler);
-    document.addEventListener("touchend", handler);
-    const poll = window.setInterval(compute, 300);
+    document.addEventListener("pointerup", commit);
+    document.addEventListener("touchend", commit);
+    document.addEventListener("keyup", commit);
+    document.addEventListener("selectionchange", onSelectionChange);
     return () => {
-      document.removeEventListener("selectionchange", handler);
-      document.removeEventListener("pointerup", handler);
-      document.removeEventListener("touchend", handler);
-      window.clearInterval(poll);
-      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("pointerup", commit);
+      document.removeEventListener("touchend", commit);
+      document.removeEventListener("keyup", commit);
+      document.removeEventListener("selectionchange", onSelectionChange);
     };
   }, []);
   return sel;
@@ -179,14 +200,22 @@ export function NodeFullView() {
 
   if (!node) {
     return (
-      <div className="fixed inset-0 pt-12 flex items-center justify-center text-stone-400 text-sm">
+      <div
+        className="fixed inset-0 pt-[5.25rem] flex items-center justify-center text-stone-400 text-sm"
+        style={{ left: "var(--trellis-sb, 0px)" }}
+      >
         没有节点可显示
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 pt-12 flex flex-col bg-stone-100 dark:bg-stone-950">
+    <div
+      className="fixed inset-0 pt-[5.25rem] flex flex-col bg-stone-100 dark:bg-stone-950"
+      // Wave 4: clear the explorer sidebar (var from page.tsx; 0 on
+      // mobile / collapsed). inset-0 sets left:0 — this overrides it.
+      style={{ left: "var(--trellis-sb, 0px)" }}
+    >
       <SubBar
         onShowCanvas={onShowCanvas}
         onShowTree={() => setTreeOpen(true)}
@@ -236,6 +265,15 @@ export function NodeFullView() {
                   the cleanup clearMarks() run before React touches the
                   DOM. */}
               <ResponseBody key={node.id} node={node} />
+              {/* A路③: when this node's run is paused on an interactive tool,
+                  render the answer form below the response so the user can
+                  reply in place and the model continues. */}
+              {node.pendingInteraction && (
+                <InteractionForm
+                  nodeId={node.id}
+                  interaction={node.pendingInteraction}
+                />
+              )}
             </>
           )}
         </div>
@@ -409,111 +447,6 @@ function RegenerateVariantButton({
     >
       ↻ 再答一版
     </button>
-  );
-}
-
-// C2 (memory bridge): save this node's insight into ~/.claude/memory/ so
-// future Claude sessions can recall it. Popover lets the user edit the
-// title/content + pick a memory type before writing (write is user-triggered).
-function MemorySaveButton({
-  title,
-  content,
-}: {
-  title: string;
-  content: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [t, setT] = useState(title);
-  const [c, setC] = useState(content);
-  const [type, setType] = useState("reference");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  const save = async () => {
-    if (!c.trim() || saving) return;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/memory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: t, content: c, type }),
-      });
-      if (res.ok) {
-        setSaved(true);
-        window.setTimeout(() => {
-          setSaved(false);
-          setOpen(false);
-        }, 1200);
-      }
-    } catch {
-      /* network failure — leave popover open so the user can retry */
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setT(title);
-          setC(content);
-          setOpen((v) => !v);
-        }}
-        title="沉淀到 Claude 记忆（~/.claude/memory，后续会话可召回）"
-        className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
-      >
-        🧠 存到记忆
-      </button>
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
-          <div className="absolute z-50 right-0 mt-2 w-[320px] bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl p-3 text-left">
-            <div className="text-[11px] text-stone-500 dark:text-stone-400 mb-2">
-              沉淀到 <code className="text-[10px]">~/.claude/memory/</code>，后续 Claude 会话可召回
-            </div>
-            <input
-              value={t}
-              onChange={(e) => setT(e.target.value)}
-              placeholder="一句话描述（标题）"
-              className="w-full mb-2 px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[13px] text-stone-800 dark:text-stone-200 outline-none focus:border-stone-400"
-            />
-            <textarea
-              value={c}
-              onChange={(e) => setC(e.target.value)}
-              rows={4}
-              placeholder="要记住的内容"
-              className="w-full mb-2 px-2.5 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[13px] text-stone-800 dark:text-stone-200 outline-none resize-none focus:border-stone-400"
-            />
-            <div className="flex items-center justify-between gap-2">
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value)}
-                className="px-2 py-1 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[12px] text-stone-700 dark:text-stone-300 outline-none"
-              >
-                <option value="reference">reference</option>
-                <option value="project">project</option>
-                <option value="user">user</option>
-                <option value="feedback">feedback</option>
-              </select>
-              <button
-                onClick={save}
-                disabled={!c.trim() || saving}
-                className="px-3 py-1 rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[12px] disabled:opacity-40 hover:bg-stone-800 dark:hover:bg-stone-300"
-              >
-                {saved ? "✓ 已存" : saving ? "存入中…" : "存入"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -860,7 +793,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
           </ReactMarkdown>
           <div className="mt-3 flex justify-end gap-2">
             <RegenerateVariantButton nodeId={node.id} question={node.question} />
-            <MemorySaveButton
+            <CardImageButton
               title={node.topicLabel ?? node.question}
               content={node.response}
             />
@@ -870,6 +803,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
               className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
             />
           </div>
+          <GeneratedFilesBar node={node} />
         </>
       ) : (
         <div className="text-stone-400 dark:text-stone-500 italic flex items-center gap-2">

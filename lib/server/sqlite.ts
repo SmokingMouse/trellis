@@ -93,6 +93,21 @@ function migrate(db: Database.Database) {
     `);
   }
 
+  // Per-root codex session id — the codex sibling of claude_session_id.
+  // Resume ids are provider-family-scoped (a codex CLI session can only be
+  // resumed by codex, never by claude), so each family gets its own column;
+  // storing them in one shared column let a codex id reach `claude --resume`
+  // and fail with "No conversation found". NULL on chat/workspace roots,
+  // every branch, and any root whose first turn ran a non-codex provider.
+  const hasNodeCodexId = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'codex_session_id'",
+    )
+    .get();
+  if (!hasNodeCodexId) {
+    db.exec("ALTER TABLE nodes ADD COLUMN codex_session_id TEXT");
+  }
+
   // Stage 14: per-session context mode + workspace cwd. See
   // progress/mode-workspace-rebuild.md. Mode previously lived in
   // localStorage as a global preference; now it's locked at session
@@ -122,6 +137,21 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE sessions ADD COLUMN workspace_path TEXT");
   }
 
+  // Wave 2 (B2): session archive flag. archived = soft-hide, fully reversible
+  // (never touches jsonl / nodes — only filters lists). 0 = active, 1 =
+  // archived. Idempotent ALTER following the same pattern as every column
+  // above. Existing rows default to 0 (active) — lossless.
+  const hasArchived = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'archived'",
+    )
+    .get();
+  if (!hasArchived) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+
   // D1: per-session custom system prompt (chat mode only — workspace/project
   // get their persona from CLAUDE.md + full tools). NULL = use the built-in
   // DEFAULT_SYSTEM_PROMPT. Locked at session creation like mode/workspace.
@@ -132,6 +162,18 @@ function migrate(db: Database.Database) {
     .get();
   if (!hasSystemPrompt) {
     db.exec("ALTER TABLE sessions ADD COLUMN system_prompt TEXT");
+  }
+
+  // Per-session model lock: stores the ProviderId (claude-opus / claude-sonnet
+  // / claude-haiku / codex) chosen when the session was created, so switching
+  // away and back doesn't silently inherit whatever the global picker last
+  // pointed at. NULL = legacy rows → fall back to DEFAULT_PROVIDER on read.
+  // Idempotent ALTER, same pattern as every column above.
+  const hasModel = db
+    .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'model'")
+    .get();
+  if (!hasModel) {
+    db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
   }
 
   // Idempotent column add for short LLM-generated topic label per node.
@@ -201,6 +243,20 @@ function migrate(db: Database.Database) {
     if (!has) db.exec(c.sql);
   }
 
+  // B (token fix): the main agent's true context-window occupancy for this
+  // turn = the LAST assistant message's input+cache, NOT the result.usage sum
+  // (which double-counts every tool-loop iteration + same-model subagents).
+  // Nullable: legacy rows / codex-less-precise / non-claude → NULL → the % gauge
+  // falls back to the old input+cache_read+cache_creation estimate.
+  const hasTokenContext = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'token_context'",
+    )
+    .get();
+  if (!hasTokenContext) {
+    db.exec("ALTER TABLE nodes ADD COLUMN token_context INTEGER");
+  }
+
   // Stage 15: image attachments on a node. JSON-encoded NodeAttachment[]
   // (see lib/types.ts). NULL means no attachments. Actual image bytes
   // live in ~/.trellis/blobs/<hash>.<ext>; the JSON only carries
@@ -227,6 +283,20 @@ function migrate(db: Database.Database) {
     .get();
   if (!hasToolCalls) {
     db.exec("ALTER TABLE nodes ADD COLUMN tool_calls_json TEXT");
+  }
+
+  // A路②: in-flight interactive-tool prompt (AskUserQuestion / ExitPlanMode)
+  // awaiting a user answer. JSON-encoded { toolUseId, toolName, input }. NULL
+  // when nothing is pending. Persisted so a page reload / reconnect / late tab
+  // can re-render the waiting form; cleared the moment the user responds (or
+  // the run aborts). Only ever set while status='streaming'.
+  const hasPendingInteraction = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'pending_interaction_json'",
+    )
+    .get();
+  if (!hasPendingInteraction) {
+    db.exec("ALTER TABLE nodes ADD COLUMN pending_interaction_json TEXT");
   }
 
   // Notebook: per-session free-form excerpts the user collects while
@@ -265,7 +335,8 @@ function migrate(db: Database.Database) {
 
   // Reap dangling streams from a previous server crash, exactly once on boot.
   db.prepare(
-    `UPDATE nodes SET status = 'error', error_message = 'interrupted'
+    `UPDATE nodes SET status = 'error', error_message = 'interrupted',
+            pending_interaction_json = NULL
      WHERE status = 'streaming'`,
   ).run();
 

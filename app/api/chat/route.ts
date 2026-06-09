@@ -1,6 +1,7 @@
 import {
   isProviderId,
   DEFAULT_PROVIDER,
+  providerFamily,
   type ProviderId,
   type Mode,
 } from "@/lib/llm";
@@ -15,7 +16,7 @@ import {
   getNode,
   getNodeAttachments,
   getSession,
-  getRootClaudeIdForNode,
+  getRootResumeIdForNode,
 } from "@/lib/server/repo";
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import { resolveBlobPath, isAllowedMime, isValidHash } from "@/lib/server/blobs";
@@ -221,6 +222,7 @@ export async function POST(req: Request) {
           mode: resolvedMode,
           workspacePath: resolvedWorkspacePath,
           systemPrompt: resolvedSystemPrompt,
+          model: providerId,
           attachments: resolvedAttachments,
         });
         createdEvent = { type: "created", session, node };
@@ -286,6 +288,9 @@ export async function POST(req: Request) {
   }
 
   const mode = resolvedMode;
+  // Resume ids are provider-family-scoped: read/write the family-correct
+  // column so a codex session can't be handed to `claude --resume`.
+  const family = providerFamily(providerId);
   const llm = getProvider(providerId, { mode });
   // Resolve image hashes → on-disk paths once, here. The provider
   // doesn't talk to the blobs module so it can stay free of fs lookups.
@@ -298,22 +303,39 @@ export async function POST(req: Request) {
     (body as { chatEnhanced?: boolean }).chatEnhanced === true;
   const history =
     mode === "project" ? [] : buildHistoryForNode(nodeId, { maxDepth: reqDepth });
-  // project mode: each root in the session owns its own claude session id
-  // (post-2026-05 upgrade — was session-level before). Branches walk up
-  // to find their root's id; fresh-context roots return null until their
-  // first turn's session_init populates the column.
+  // project mode: each root in the session owns its own per-family resume id
+  // (post-2026-05 upgrade — was session-level before). Branches walk up to
+  // find their root's id for the current provider's family; fresh-context
+  // roots, or roots whose first turn ran a different family, return null
+  // until this run's session_init populates the family-correct column. For
+  // the claude family we also validate the transcript jsonl still exists
+  // (passing resolvedWorkspacePath) — this self-heals stale/cleaned ids and
+  // historical pollution (codex ids that were stored in claude_session_id
+  // before family isolation) by falling back to fresh instead of failing
+  // `claude --resume`. This is the StreamRequest.claudeSessionId value below
+  // (its field name is legacy; the value is "the current provider's resume id").
   const claudeSessionId =
-    mode === "project" ? getRootClaudeIdForNode(nodeId) : null;
+    mode === "project"
+      ? getRootResumeIdForNode(nodeId, family, resolvedWorkspacePath)
+      : null;
 
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
   // We start the run with its own AbortController; HTTP disconnect only
   // unsubscribes us from the event broadcast — the LLM keeps running and
   // keeps writing to the DB. Late tabs / a returning mobile client pick
   // up via GET /api/nodes/[id]/stream.
+  // A路②: only the claude family speaks the stdio permission protocol that
+  // backs interactive tools (AskUserQuestion / ExitPlanMode). codex/mock get
+  // no callback, so run-bus passes ctx.onCanUseTool=undefined and the provider
+  // never opens the protocol. Pure chat (no workspace) won't trigger the
+  // interactive tools, but threading the callback is harmless there.
+  const interactive = family === "claude";
   startRun({
     nodeId,
     projectModeFirstTurn: mode === "project" && !claudeSessionId,
-    factory: (signal) =>
+    resumeFamily: family,
+    interactive,
+    factory: (signal, ctx) =>
       llm.stream({
         history,
         question: questionForLLM,
@@ -324,6 +346,7 @@ export async function POST(req: Request) {
         systemPrompt: resolvedSystemPrompt,
         chatEnhanced,
         attachments: providerAttachments,
+        onCanUseTool: ctx?.onCanUseTool,
       }),
     topicLabel:
       providerId !== "mock"

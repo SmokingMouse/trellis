@@ -6,11 +6,15 @@ export type {
   StreamEvent,
   StreamRequest,
   LLMProvider,
+  InteractionDecision,
 } from "./types";
 export {
   PROVIDERS,
   DEFAULT_PROVIDER,
   isProviderId,
+  providerFamily,
+  contextWindowFor,
   type ProviderId,
   type ProviderInfo,
+  type ProviderFamily,
 } from "./providers";

@@ -30,12 +30,15 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     if (req.chatEnhanced) {
       // 增强模式:scratch workspace + full → 无沙箱 → 能跑 skill + 联网 + 工具
       // (YOLO)。claude 拿全工具;codex 的 full 整体绕过沙箱。
+      // A路②: enhanced chat can also hit AskUserQuestion/ExitPlanMode, so it
+      // gets the interaction callback too.
       return {
         ...common,
         systemPrompt: sp,
         workspace: CHAT_SCRATCH,
         permission: "full",
         persistence: false,
+        onCanUseTool: req.onCanUseTool,
       };
     }
     // 纯对话:替换 system prompt + 仅 web 工具 + 不落盘。无 workspace。
@@ -50,7 +53,15 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
   }
   if (mode === "workspace") {
     // 像一次性 Claude Code CLI:全工具 + bypass,cwd 绑工作区,每轮无状态。
-    return { ...common, workspace: req.cwd ?? os.homedir(), permission: "full", persistence: false };
+    // A路②: onCanUseTool 开启 stdio 权限协议,非交互工具由 run-bus 的
+    // dispatcher 立即 auto-allow(保持 bypass YOLO),仅交互工具暂停等用户。
+    return {
+      ...common,
+      workspace: req.cwd ?? os.homedir(),
+      permission: "full",
+      persistence: false,
+      onCanUseTool: req.onCanUseTool,
+    };
   }
   // project:像 Projects,整棵树共享一个 session(resume),持久化。
   return {
@@ -59,6 +70,7 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     permission: "full",
     persistence: true,
     resume: req.claudeSessionId ?? undefined,
+    onCanUseTool: req.onCanUseTool,
   };
 }
 
@@ -86,7 +98,13 @@ export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
       };
     case EventType.Result: {
       const c = e.data.cost as
-        | { inputTokens?: number; outputTokens?: number; cachedTokens?: number; cacheCreation?: number }
+        | {
+            inputTokens?: number;
+            outputTokens?: number;
+            cachedTokens?: number;
+            cacheCreation?: number;
+            contextTokens?: number | null;
+          }
         | undefined;
       return {
         type: "done",
@@ -95,6 +113,7 @@ export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
           output: c?.outputTokens ?? 0,
           cacheRead: c?.cachedTokens ?? 0,
           cacheCreation: c?.cacheCreation ?? 0,
+          contextTokens: c?.contextTokens ?? null,
         },
       };
     }

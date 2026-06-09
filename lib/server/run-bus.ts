@@ -5,9 +5,35 @@ import {
   finalizeNode,
   markToolCallDone,
   setNodeTopicLabel,
-  setRootClaudeIdForNode,
+  setRootResumeIdForNode,
 } from "./repo";
-import type { ToolCall } from "@/lib/types";
+import {
+  persistPendingInteraction,
+  clearPendingInteraction,
+} from "./repo";
+import type { ToolCall, PendingInteraction } from "@/lib/types";
+import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
+
+// A路②: tools that pause the run and require a user answer. Every other tool
+// the CLI surfaces through the stdio permission protocol is auto-allowed so
+// workspace/project keep their bypassPermissions YOLO behaviour (zero stall).
+const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+
+// A路②: the onCanUseTool callback shape the SDK hands us. Redeclared narrowly
+// (same as ProviderEvent) to avoid widening server-only imports.
+export type OnCanUseTool = (req: {
+  toolName: string;
+  toolUseId: string;
+  requestId: string;
+  input: unknown;
+}) => Promise<InteractionDecision>;
+
+// A路②: context handed to the factory so it can plumb the interaction callback
+// into the provider's RunOptions. Only claude-family runs receive a non-null
+// onCanUseTool (codex/mock have no stdio permission protocol).
+export type RunContext = {
+  onCanUseTool?: OnCanUseTool;
+};
 
 // Stage 17 (durable streams): a module-level pub/sub that decouples LLM
 // spawn lifecycles from HTTP requests. Before this, /api/chat held the
@@ -36,6 +62,7 @@ export type RunEvent =
         output: number;
         cacheRead: number;
         cacheCreation: number;
+        contextTokens?: number | null;
       };
     }
   | { type: "error"; message: string }
@@ -58,7 +85,16 @@ export type RunEvent =
       stderr: string | null;
       isError: boolean;
       endedAt: number;
-    };
+    }
+  // A路②: a run paused on an interactive tool, broadcast so the UI renders the
+  // waiting form; interaction_resolved when the user's answer continues it.
+  | {
+      type: "interaction_required";
+      toolUseId: string;
+      toolName: string;
+      input: unknown;
+    }
+  | { type: "interaction_resolved"; toolUseId: string };
 
 // Special event delivered by subscribe() to fresh subscribers so they
 // can sync their UI to the current persisted state before live delta
@@ -71,6 +107,11 @@ export type CatchupEvent = {
   // so far. Client overwrites its local toolCalls list with this, then
   // applies subsequent tool_call_start / tool_call_done events on top.
   toolCalls: ToolCall[];
+  // A路②: if the run is currently paused on an interactive tool, the snapshot
+  // carries the pending prompt so a reconnecting / late client immediately
+  // renders the waiting form (without waiting for a fresh interaction_required
+  // it already missed). null when nothing is pending.
+  pendingInteraction: PendingInteraction | null;
   // When status !== "streaming", the terminal events follow immediately
   // (so the subscriber can close out). For "streaming" status, the
   // subscriber stays attached and waits for live RunEvents.
@@ -112,6 +153,12 @@ type RunState = {
       }
     | { type: "error"; message: string };
   topicLabel?: string;
+  // A路②: the interactive-tool prompt currently awaiting a user answer, plus
+  // the resolver that the onCanUseTool promise is parked on. Both null/unset
+  // when no interaction is in flight. resolveInteraction() (POST respond) and
+  // the abort path call interactionResolver to unpark the promise.
+  pendingInteraction: PendingInteraction | null;
+  interactionResolver?: (answer: InteractionDecision) => void;
   subscribers: Set<Subscriber>;
   // Drop the RunState 30s after terminal so memory doesn't accrete. New
   // subscribers after that window go through /api/nodes/[id]/stream
@@ -134,6 +181,7 @@ export type ProviderEvent =
         output: number;
         cacheRead: number;
         cacheCreation: number;
+        contextTokens?: number | null;
       };
     }
   | { type: "error"; message: string }
@@ -166,10 +214,26 @@ export function startRun(args: {
   nodeId: string;
   // Set once the runner emits 'session_init' for project mode.
   projectModeFirstTurn: boolean;
+  // Which provider family this run belongs to — decides which resume-id
+  // column session_init writes (claude_session_id vs codex_session_id; mock
+  // is a no-op). Resume ids are family-scoped and must not cross families.
+  resumeFamily: ProviderFamily;
   // Async generator factory. Receives the run's abort signal — the
   // provider should plumb this into its child_process kill path so
   // abort() actually tears the spawn down.
-  factory: (signal: AbortSignal) => AsyncIterable<ProviderEvent>;
+  // A路②: also receives a RunContext whose onCanUseTool the factory threads
+  // into the provider RunOptions (claude family only). run-bus builds that
+  // callback here (closure over `state`) so it can broadcast + persist + park
+  // a resolver. Non-interactive tools auto-allow inside it; only
+  // AskUserQuestion / ExitPlanMode actually pause.
+  factory: (
+    signal: AbortSignal,
+    ctx: RunContext,
+  ) => AsyncIterable<ProviderEvent>;
+  // A路②: whether this run should open the interaction protocol. True only for
+  // the claude family — codex/mock have no stdio permission control. When
+  // false, ctx.onCanUseTool is undefined and the provider never opens it.
+  interactive?: boolean;
   // Optional post-done topic generator. Called with the aggregated
   // text; if it returns a non-empty string we write the label and emit
   // a topic_label event to subscribers. Errors are swallowed.
@@ -191,6 +255,7 @@ export function startRun(args: {
     status: "streaming",
     committedText: "",
     committedToolCalls: [],
+    pendingInteraction: null,
     subscribers: new Set(),
   };
   RUNS.set(args.nodeId, state);
@@ -210,12 +275,71 @@ async function runLoop(
   args: Parameters<typeof startRun>[0],
 ): Promise<void> {
   let aggregated = "";
-  let usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  let usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+    contextTokens?: number | null;
+  } = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, contextTokens: null };
   let stoppedWith: "done" | "error" = "done";
   let errorMessage: string | undefined;
 
+  // A路②: build the interaction dispatcher once per run. Only claude-family
+  // runs (args.interactive) get a live callback; others pass undefined so the
+  // provider never opens the stdio permission protocol.
+  const onCanUseTool: OnCanUseTool | undefined = args.interactive
+    ? async (req) => {
+        // Non-interactive tools (Bash/Read/Write/Edit/…) → instant allow.
+        // This is the★ invariant: workspace/project keep their YOLO bypass —
+        // no UI, no wait, zero stall. Echo input back unchanged.
+        if (!INTERACTIVE_TOOLS.has(req.toolName)) {
+          return { behavior: "allow", updatedInput: req.input };
+        }
+        // Interactive tool → pause. Record + persist + broadcast, then park
+        // on a promise the user (POST respond) or abort will resolve.
+        const pending: PendingInteraction = {
+          toolUseId: req.toolUseId,
+          toolName: req.toolName,
+          input: req.input,
+        };
+        state.pendingInteraction = pending;
+        try {
+          persistPendingInteraction(args.nodeId, pending);
+        } catch {
+          /* best-effort — broadcast still lets live clients respond */
+        }
+        broadcast(state, {
+          type: "interaction_required",
+          toolUseId: req.toolUseId,
+          toolName: req.toolName,
+          input: req.input,
+        });
+        return await new Promise<InteractionDecision>((resolve) => {
+          state.interactionResolver = (answer) => {
+            // Single-shot: clear resolver + pending before resolving so a
+            // duplicate respond / abort can't double-fire.
+            state.interactionResolver = undefined;
+            state.pendingInteraction = null;
+            try {
+              clearPendingInteraction(args.nodeId);
+            } catch {
+              /* best-effort */
+            }
+            broadcast(state, {
+              type: "interaction_resolved",
+              toolUseId: req.toolUseId,
+            });
+            resolve(answer);
+          };
+        });
+      }
+    : undefined;
+
   try {
-    for await (const event of args.factory(state.controller.signal)) {
+    for await (const event of args.factory(state.controller.signal, {
+      onCanUseTool,
+    })) {
       if (event.type === "delta") {
         // Order matters: grow committedText BEFORE broadcasting, so a
         // subscriber that races in concurrently can't snapshot pre-delta
@@ -239,7 +363,11 @@ async function runLoop(
       } else if (event.type === "session_init") {
         if (args.projectModeFirstTurn) {
           try {
-            setRootClaudeIdForNode(args.nodeId, event.sessionId);
+            setRootResumeIdForNode(
+              args.nodeId,
+              args.resumeFamily,
+              event.sessionId,
+            );
           } catch {
             // best-effort — next turn will get a fresh session
           }
@@ -320,6 +448,21 @@ async function runLoop(
     errorMessage = err instanceof Error ? err.message : String(err);
     broadcast(state, { type: "error", message: errorMessage });
   } finally {
+    // A路②: defensive — if the generator ended while an interaction was still
+    // parked (e.g. provider threw before the SDK called back), unpark it deny
+    // and clear the pending state so nothing leaks. Normal abort/respond paths
+    // already cleared it.
+    if (state.interactionResolver) {
+      state.interactionResolver({ behavior: "deny", message: "stream ended" });
+    } else if (state.pendingInteraction) {
+      state.pendingInteraction = null;
+      try {
+        clearPendingInteraction(args.nodeId);
+      } catch {
+        /* best-effort */
+      }
+    }
+
     if (state.controller.signal.aborted && stoppedWith === "done") {
       // Generator returned without an explicit error event — the
       // subprocess provider exits cleanly on SIGTERM. Surface as error
@@ -338,6 +481,7 @@ async function runLoop(
         tokenOutput: usage.output,
         tokenCacheRead: usage.cacheRead,
         tokenCacheCreation: usage.cacheCreation,
+        tokenContext: usage.contextTokens ?? null,
         now: Date.now(),
       });
     } catch {
@@ -448,6 +592,11 @@ export function subscribe(
   const snapshot = state.committedText;
   const snapshotStatus = state.status;
   const snapshotTools = state.committedToolCalls.map((c) => ({ ...c }));
+  // A路②: copy the pending interaction (if any) into the catchup so a tab that
+  // joins mid-pause renders the waiting form right away.
+  const snapshotPending = state.pendingInteraction
+    ? { ...state.pendingInteraction }
+    : null;
   state.subscribers.add(sub);
   try {
     sub.onEvent({
@@ -455,6 +604,7 @@ export function subscribe(
       response: snapshot,
       status: snapshotStatus,
       toolCalls: snapshotTools,
+      pendingInteraction: snapshotPending,
     });
   } catch {
     /* ignore */
@@ -502,8 +652,37 @@ export function subscribe(
 export function abortRun(nodeId: string): boolean {
   const state = RUNS.get(nodeId);
   if (!state || state.status !== "streaming") return false;
+  // A路②: if the run is parked on an interactive prompt, the abort signal
+  // alone won't unpark the onCanUseTool promise (it's a plain Promise, not
+  // signal-aware). Resolve it with deny so the SDK control loop can tear down
+  // cleanly instead of leaving the promise — and the spawn — hung forever.
+  if (state.interactionResolver) {
+    state.interactionResolver({ behavior: "deny", message: "aborted" });
+  }
   state.controller.abort();
   return true;
+}
+
+// A路②: deliver a user's answer to a paused interactive tool. Looks up the
+// live run, validates the pending toolUseId matches, and resolves the parked
+// onCanUseTool promise so the model continues. Returns:
+//   - "ok"        → resolved, run continues
+//   - "no_run"    → no live run for this node (cleaned up / never started)
+//   - "no_pending"→ live run but nothing is awaiting (already answered / raced)
+//   - "mismatch"  → a different toolUseId is pending (stale client)
+export function resolveInteraction(
+  nodeId: string,
+  toolUseId: string,
+  answer: InteractionDecision,
+): "ok" | "no_run" | "no_pending" | "mismatch" {
+  const state = RUNS.get(nodeId);
+  if (!state || state.status !== "streaming") return "no_run";
+  if (!state.pendingInteraction || !state.interactionResolver) {
+    return "no_pending";
+  }
+  if (state.pendingInteraction.toolUseId !== toolUseId) return "mismatch";
+  state.interactionResolver(answer);
+  return "ok";
 }
 
 // Returns true if we have a live in-memory run for this node (still
@@ -512,4 +691,19 @@ export function abortRun(nodeId: string): boolean {
 export function hasLiveRun(nodeId: string): boolean {
   const s = RUNS.get(nodeId);
   return !!s && s.status === "streaming";
+}
+
+// Wave 1 / A2: read-only snapshot of every node that currently has an
+// active (streaming) run. GET /api/runs maps each nodeId → sessionId so
+// the tab bar can show a "this pane is busy" pulse. Pure read — does not
+// touch RunState lifecycle. Only "streaming" runs are reported; finished
+// ones (in the 30s cleanup grace window) are not active.
+export function getActiveRuns(): { nodeId: string; status: string }[] {
+  const out: { nodeId: string; status: string }[] = [];
+  for (const [nodeId, state] of RUNS) {
+    if (state.status === "streaming") {
+      out.push({ nodeId, status: state.status });
+    }
+  }
+  return out;
 }

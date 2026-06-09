@@ -1,17 +1,17 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
-import { SessionPicker } from "./SessionPicker";
 import { ExportMenu } from "./ExportMenu";
 import { ModeBadge } from "./ModeBadge";
 import { ThemeToggle } from "./ThemeToggle";
 import { formatTokens } from "@/lib/format-tokens";
+import { contextWindowFor } from "@/lib/llm";
 import type { ChatNode } from "@/lib/types";
 
-// Sonnet / Opus default ceiling. (Some tiers expose 1M behind a beta header;
-// trellis doesn't enable that, so 200K is the right denominator until we do.)
-const CONTEXT_WINDOW = 200_000;
+// The 🧠 context-occupancy % uses a per-provider window (contextWindowFor),
+// resolved in-component from the current model — see lib/llm/providers.ts.
+// (The CLI stream carries no real window field, so it's a per-model lookup.)
 
 // In project mode every node under a root resumes the same claude session,
 // so the model's working memory at any moment ≈ the input bundle of the
@@ -24,6 +24,18 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
     cur = nodes[cur.parentId];
   }
   return null;
+}
+
+// A turn's true context-window occupancy. Prefer the backend-reported
+// contextTokens (last assistant message — excludes tool-loop / same-model
+// subagent accumulation); fall back to the input+cache sum for legacy rows /
+// backends that don't report it.
+function ctxTokensOf(n: ChatNode): number {
+  const ct = n.tokenCount.contextTokens;
+  if (typeof ct === "number" && ct > 0) return ct;
+  return (
+    n.tokenCount.input + n.tokenCount.cacheRead + n.tokenCount.cacheCreation
+  );
 }
 
 function findLatestCtxTurn(
@@ -44,8 +56,7 @@ function findLatestCtxTurn(
     const id = stack.pop()!;
     const n = nodes[id];
     if (!n) continue;
-    const total =
-      n.tokenCount.input + n.tokenCount.cacheRead + n.tokenCount.cacheCreation;
+    const total = ctxTokensOf(n);
     if (total > 0 && (!best || n.createdAt > best.createdAt)) best = n;
     const kids = childrenByParent.get(id);
     if (kids) stack.push(...kids);
@@ -63,7 +74,10 @@ export function Header() {
   const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const provider = useSessionStore((s) => s.provider);
   const nodeCount = Object.keys(nodes).length;
+  const contextWindow = contextWindowFor(provider);
   // Aggregate four buckets independently — total input vs total output vs
   // total cache leverage. Computed via useMemo (NOT inside the Zustand
   // selector) because returning a fresh object from a selector defeats
@@ -95,17 +109,14 @@ export function Header() {
     if (!root) return null;
     const latest = findLatestCtxTurn(root.id, nodes);
     if (!latest) return null;
-    const tokens =
-      latest.tokenCount.input +
-      latest.tokenCount.cacheRead +
-      latest.tokenCount.cacheCreation;
+    const tokens = ctxTokensOf(latest);
     return {
       tokens,
-      percent: Math.min(100, (tokens / CONTEXT_WINDOW) * 100),
+      percent: Math.min(100, (tokens / contextWindow) * 100),
       rootId: root.id,
       rootLabel: root.topicLabel ?? root.question.slice(0, 30),
     };
-  }, [session?.mode, activeNodeId, nodes]);
+  }, [session?.mode, activeNodeId, nodes, contextWindow]);
 
   // Three-band color: muted → amber → rose. 80% is when context pressure
   // usually starts mattering (model gets slower; cache stops growing).
@@ -118,6 +129,36 @@ export function Header() {
           ? "text-amber-600 dark:text-amber-400"
           : "text-stone-500 dark:text-stone-400";
 
+  // B3 (/compact degradation): once the focused root's claude session is
+  // ≥ 50% full, the 🧠 badge becomes a clickable affordance that opens a
+  // small popover explaining context pressure + a one-click "开新话题清空"
+  // shortcut (which spawns a fresh-context root — there is no native compact
+  // in the claude CLI / agent-gateway SDK, confirmed by spike). Below 50% the
+  // badge stays a plain non-interactive readout to avoid nagging.
+  const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
+  const ctxRef = useRef<HTMLDivElement>(null);
+  const ctxActionable = ctx != null && ctx.percent >= 50;
+  useEffect(() => {
+    if (!ctxPopoverOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ctxRef.current?.contains(e.target as Node)) setCtxPopoverOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxPopoverOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxPopoverOpen]);
+  // If the badge stops being actionable (context dropped / session changed),
+  // make sure a stale popover doesn't linger.
+  useEffect(() => {
+    if (!ctxActionable) setCtxPopoverOpen(false);
+  }, [ctxActionable]);
+
   return (
     <header className="fixed top-0 inset-x-0 h-12 bg-white/85 dark:bg-stone-950/85 backdrop-blur border-b border-stone-200 dark:border-stone-800 flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
       <div className="flex items-center gap-2 shrink-0">
@@ -125,9 +166,10 @@ export function Header() {
         <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>
         <span className="text-stone-300 dark:text-stone-600 hidden sm:inline">/</span>
       </div>
-      <div className="flex-1 min-w-0">
-        <SessionPicker />
-      </div>
+      {/* The session switcher now lives in the always-visible SessionTabs
+          bar just below the Header (Wave 1). This spacer keeps the
+          right-side controls pinned to the edge. */}
+      <div className="flex-1 min-w-0" />
       <div className="flex items-center gap-2 sm:gap-3 text-xs text-stone-500 dark:text-stone-400 shrink-0">
         <button
           onClick={() => setSearchOpen(true)}
@@ -218,12 +260,53 @@ export function Header() {
             {ctx && (
               <>
                 <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
-                <span
-                  className={`inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
-                  title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(CONTEXT_WINDOW)} tokens (${ctx.percent.toFixed(1)}%)。新提问可清空。`}
-                >
-                  🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
-                </span>
+                {ctxActionable ? (
+                  <div className="relative" ref={ctxRef}>
+                    <button
+                      onClick={() => setCtxPopoverOpen((v) => !v)}
+                      className={`inline-flex items-center gap-1 tabular-nums rounded px-1 py-0.5 hover:bg-stone-100 dark:hover:bg-stone-800 ${ctxTone}`}
+                      title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看清空上下文选项。`}
+                      aria-label="上下文占用，点击查看清空选项"
+                    >
+                      🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
+                      {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
+                    </button>
+                    {ctxPopoverOpen && (
+                      <div className="absolute right-0 mt-1.5 w-72 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg shadow-xl p-3 text-left z-50">
+                        <div className="text-[13px] font-semibold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                          🧠 上下文占用 {ctx.percent.toFixed(1)}%
+                        </div>
+                        <div className="text-[12px] text-stone-500 dark:text-stone-400 mt-1.5 leading-relaxed">
+                          当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
+                          {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
+                          占用越高，模型越慢、缓存越难增长。
+                        </div>
+                        <div className="text-[11px] text-stone-400 dark:text-stone-500 mt-1.5 leading-relaxed">
+                          claude CLI 的 <code className="px-1 rounded bg-stone-100 dark:bg-stone-800">/compact</code>{" "}
+                          在这里暂无原生支持。可改为开一条「新话题」——
+                          全新上下文的根问答，等价{" "}
+                          <code className="px-1 rounded bg-stone-100 dark:bg-stone-800">/clear</code>。
+                        </div>
+                        <button
+                          onClick={() => {
+                            setCtxPopoverOpen(false);
+                            setComposeRootOpen(true);
+                          }}
+                          className="mt-2.5 w-full bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[13px] px-3 py-1.5 rounded-md hover:bg-stone-800 dark:hover:bg-stone-300 inline-flex items-center justify-center gap-1.5"
+                        >
+                          🧹 开新话题（清空上下文）
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span
+                    className={`inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
+                    title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。`}
+                  >
+                    🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
+                  </span>
+                )}
               </>
             )}
             <button
