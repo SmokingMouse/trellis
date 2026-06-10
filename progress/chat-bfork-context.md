@@ -71,9 +71,9 @@ B-fork **不比当前失忆的 chat 更便宜**(它真的多带了有效历史);
 ## 五、未完成 TODO(下次接续)
 
 1. ✅ **【已完成 2026-06-11】干净端到端验证** —— 见上"验证状态",judge 全绿。验证中发现纯对话 spawn cwd bug 并已修复。
-2. **deleteNodeSubtree per-node jsonl 清理**(还没做):删 chat 子树时 per-node session jsonl 会泄漏。`deleteNodeSubtree` 在 repo.ts ~1496。需收集子树 node 的 `claude_session_id` + session mode → `sessionCwd` → unlink。**用 `git show main:lib/server/repo.ts` 拿干净内容**(直接 Read 源文件被污染)。
-3. **localStorage 旧值**:老用户 localStorage `trellis-history-depth=4` 会停窗口模式,需手动切"全发"或清 localStorage。
-4. **验证通过后 commit 两仓 + 更新本文档状态**。
+2. ✅ **【已完成 2026-06-11】deleteNodeSubtree per-node jsonl 清理**:镜像 deleteSession,删前收集子树 `claude_session_id` → tx 删完用 `sessionCwd(session.mode, session.workspacePath)` unlink。实测:删 chat 叶子节点 → 对应 jsonl 从 CHAT_SCRATCH 编码目录消失。
+3. ✅ **【已完成 2026-06-11】localStorage 旧值**:`migrateHistoryDepth()` 一次性迁移(版本标记 `trellis-history-depth-migrated` gated)—— 清掉旧 depth 值让老用户落到新 B-fork 默认 0,想要窗口模式再自行重设。
+4. ✅ **【已完成 2026-06-11】两仓 commit + 合 main**(B-fork 部分)。
 
 ## 六、本次 session 的陷阱(下次注意)
 

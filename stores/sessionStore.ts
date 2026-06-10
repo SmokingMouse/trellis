@@ -40,6 +40,8 @@ const SEND_KEY_KEY = "trellis-send-key";
 // lives in the forked CLI session, cache-friendly, no forgetting); 1-12 =
 // window-mode fallback (fold N ancestor turns into the prompt).
 const HISTORY_DEPTH_KEY = "trellis-history-depth";
+// One-shot flag: B-fork changed the default depth 4→0. See migrateHistoryDepth.
+const HISTORY_DEPTH_MIGRATED_KEY = "trellis-history-depth-migrated";
 const DEFAULT_HISTORY_DEPTH = 0;
 // chat enhanced-mode toggle: when on, chat gets workspace+full (skills + web,
 // YOLO). Global runtime preference, default off. Sent on every chat request.
@@ -199,8 +201,22 @@ function loadSendKey(): SendKey {
 function clampDepth(n: number): number {
   return Number.isFinite(n) && n >= 0 && n <= 12 ? Math.round(n) : DEFAULT_HISTORY_DEPTH;
 }
+// One-time migration to the B-fork era. Before B-fork the default depth was 4
+// and the knob only ever stored 2/4/6/8 (window mode). Those persisted values
+// would silently pin upgraded users to window mode and deny them B-fork
+// (append-only + cache). Clear the stored value ONCE so everyone lands on the
+// new default (0 = B-fork); the flag makes it idempotent, and a user who still
+// wants window mode just re-picks a depth (which re-persists). Runs before
+// loadHistoryDepth reads the key.
+function migrateHistoryDepth(): void {
+  if (typeof window === "undefined") return;
+  if (window.localStorage.getItem(HISTORY_DEPTH_MIGRATED_KEY)) return;
+  window.localStorage.removeItem(HISTORY_DEPTH_KEY);
+  window.localStorage.setItem(HISTORY_DEPTH_MIGRATED_KEY, "1");
+}
 function loadHistoryDepth(): number {
   if (typeof window === "undefined") return DEFAULT_HISTORY_DEPTH;
+  migrateHistoryDepth();
   const raw = window.localStorage.getItem(HISTORY_DEPTH_KEY);
   return raw ? clampDepth(parseInt(raw, 10)) : DEFAULT_HISTORY_DEPTH;
 }
@@ -1321,6 +1337,16 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // — that's why we set the anchor *after* the load resolves.
     if (cur?.id !== sessionId) {
       await loadSessionInternal(sessionId, set);
+      // Surface the jumped-to session as a tab (mirror hydrate). Without this
+      // the strip keeps showing the previous preview while a different session
+      // is active — the tab bar desyncs from what's on screen. On mobile this
+      // is the ONLY cross-session entry (the sidebar is hidden), so a jump that
+      // doesn't open a tab leaves the user unable to switch sessions at all.
+      set((s) => ({
+        previewSessionId: s.pinnedSessionIds.includes(sessionId)
+          ? s.previewSessionId
+          : sessionId,
+      }));
     }
     get().expandAncestors(nodeId);
     set({

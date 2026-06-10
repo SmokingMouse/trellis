@@ -1531,6 +1531,17 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
     )
     .all(...ids) as { id: string }[];
   const noteIds = noteRows.map((r) => r.id);
+  // Per-node claude session jsonls leak unless cleaned here. project shares one
+  // id per root (tree-shared), chat B-fork stores one per NODE — collect ALL
+  // non-null ids in the subtree, same discipline as deleteSession. Read before
+  // the tx deletes the rows. codex jsonls are skipped (their path embeds a date
+  // we can't derive from the id), mirroring deleteSession.
+  const claudeIdRows = db
+    .prepare(
+      `SELECT claude_session_id FROM nodes
+       WHERE id IN (${placeholders}) AND claude_session_id IS NOT NULL`,
+    )
+    .all(...ids) as { claude_session_id: string }[];
   const tx = db.transaction(() => {
     if (noteIds.length) {
       db.prepare(
@@ -1548,6 +1559,19 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
     ftsDeleteByIds(db, [...ids, ...noteIds]);
   });
   tx();
+  // Best-effort jsonl cleanup after the DB rows are gone. The spawn cwd
+  // (sessionCwd) decides the encoded-cwd dir the transcript lives in — same
+  // value spawn/resume-validation use, so the path resolves correctly.
+  if (session && claudeIdRows.length) {
+    const cwd = sessionCwd(session.mode as Mode, session.workspacePath);
+    for (const r of claudeIdRows) {
+      try {
+        fs.unlinkSync(claudeSessionPath(r.claude_session_id, cwd));
+      } catch {
+        // jsonl may have been moved/deleted manually — best effort.
+      }
+    }
+  }
   return { ok: true, deletedNodeIds: ids, deletedNoteIds: noteIds };
 }
 

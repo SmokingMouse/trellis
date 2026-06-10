@@ -115,7 +115,7 @@ export function SessionTabs() {
       <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
           <div className="self-center pl-1 text-[11px] text-stone-400 dark:text-stone-500 italic">
-            从左侧单击预览、双击固定一个会话
+            搜索或＋新建打开会话，双击标签固定
           </div>
         )}
         {openIds.map((id, i) => {
@@ -241,7 +241,7 @@ function Tab({
         onDoubleClick={(e) => e.stopPropagation()}
         title="关闭标签"
         aria-label="关闭标签"
-        className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-700 dark:hover:text-stone-200 transition-opacity"
+        className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-700 dark:hover:text-stone-200 transition-opacity"
       >
         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
           <path d="M3 3 L9 9 M9 3 L3 9" />
