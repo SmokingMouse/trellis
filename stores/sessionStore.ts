@@ -36,9 +36,11 @@ const SEND_KEY_KEY = "trellis-send-key";
 // D2: how many ancestor turns chat/workspace fold into the prompt. Default 4
 // (was a hardcoded 2) — deeper context for branched conversations, at a token
 // cost the user can dial back. project mode ignores this (history is in the
-// resumed CLI session).
+// resumed CLI session). 0 = B-fork (append-only, chat+claude default: history
+// lives in the forked CLI session, cache-friendly, no forgetting); 1-12 =
+// window-mode fallback (fold N ancestor turns into the prompt).
 const HISTORY_DEPTH_KEY = "trellis-history-depth";
-const DEFAULT_HISTORY_DEPTH = 4;
+const DEFAULT_HISTORY_DEPTH = 0;
 // chat enhanced-mode toggle: when on, chat gets workspace+full (skills + web,
 // YOLO). Global runtime preference, default off. Sent on every chat request.
 const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
@@ -195,7 +197,7 @@ function loadSendKey(): SendKey {
 }
 
 function clampDepth(n: number): number {
-  return Number.isFinite(n) && n >= 1 && n <= 12 ? Math.round(n) : DEFAULT_HISTORY_DEPTH;
+  return Number.isFinite(n) && n >= 0 && n <= 12 ? Math.round(n) : DEFAULT_HISTORY_DEPTH;
 }
 function loadHistoryDepth(): number {
   if (typeof window === "undefined") return DEFAULT_HISTORY_DEPTH;

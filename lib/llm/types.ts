@@ -99,6 +99,13 @@ export type StreamRequest = {
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
   // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
   chatEnhanced?: boolean;
+  // chat B-fork: when true (claude family only), the provider persists + resumes
+  // the parent node's forked CLI session (--fork-session) so history lives as
+  // immutable message blocks the CLI caches — instead of folding it into the
+  // prompt string. claudeSessionId carries the parent's resume id (null on the
+  // first turn → fresh session, no fork). codex/mock leave this false and stay
+  // on the folded-history path. Set by the route for chat + claude.
+  forkSession?: boolean;
   // A路②: bidirectional interaction callback. When set, the claude provider
   // opens the SDK's stdio permission protocol so AskUserQuestion / ExitPlanMode
   // pause and await a user decision. Non-interactive tools are auto-allowed by

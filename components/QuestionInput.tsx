@@ -347,13 +347,13 @@ export function QuestionInput() {
               <button
                 type="button"
                 onClick={() =>
-                  setHistoryDepth(historyDepth >= 8 ? 2 : historyDepth + 2)
+                  setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)
                 }
-                title="对话携带的历史层数（越大越不易丢上下文，但更费 token；分叉对话时生效）"
+                title="0 = B-fork 全发（历史存在会话里、缓存友好、不失忆，推荐）；≥1 = 窗口回退，只折叠 N 层历史进提示"
                 className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
               >
                 <span aria-hidden>📚</span>
-                <span>上下文 {historyDepth} 层</span>
+                <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
               </button>
             </div>
             <input

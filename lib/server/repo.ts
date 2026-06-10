@@ -4,7 +4,8 @@ import path from "node:path";
 import fs from "node:fs";
 import type Database from "better-sqlite3";
 import { getDB } from "./sqlite";
-import type { ChatMessage, ProviderFamily } from "@/lib/llm";
+import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
+import { sessionCwd } from "@/lib/paths";
 import type {
   NodeKind,
   NodeAttachment,
@@ -387,27 +388,34 @@ export function getNode(id: string): ApiNode | null {
 
 export function deleteSession(id: string): void {
   const db = getDB();
-  // Collect every claude session jsonl bound to any root in this trellis
-  // session — post per-root upgrade, a single trellis session can own
-  // multiple claude sessions (one per "新提问" fresh-context root). All
-  // share the same workspace_path so the encoded-cwd dir is identical.
+  // Collect every claude session jsonl bound to this trellis session. project
+  // stores one id per root (tree-shared); chat B-fork stores one per NODE — so
+  // collect ALL non-null ids, not just roots, or B-fork transcripts leak. The
+  // spawn cwd (sessionCwd) decides the encoded-cwd dir the jsonl lives in,
+  // identical for every node in the session.
+  const meta = db
+    .prepare(
+      "SELECT context_mode AS mode, workspace_path AS wp FROM sessions WHERE id = ?",
+    )
+    .get(id) as { mode: string; wp: string | null } | undefined;
   const claudeIdRows = db
     .prepare(
       `SELECT claude_session_id FROM nodes
-       WHERE session_id = ? AND parent_id IS NULL
-         AND claude_session_id IS NOT NULL`,
+       WHERE session_id = ? AND claude_session_id IS NOT NULL`,
     )
     .all(id) as { claude_session_id: string }[];
-  const workspacePath = getSessionWorkspacePath(id);
   db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   // FK cascade nukes nodes/notes but the FTS virtual table isn't on the
   // FK graph — do it explicitly.
   ftsDeleteBySession(db, id);
-  for (const r of claudeIdRows) {
-    try {
-      fs.unlinkSync(claudeSessionPath(r.claude_session_id, workspacePath));
-    } catch {
-      // jsonl may have been moved/deleted manually — best effort.
+  if (meta) {
+    const cwd = sessionCwd(meta.mode as Mode, meta.wp);
+    for (const r of claudeIdRows) {
+      try {
+        fs.unlinkSync(claudeSessionPath(r.claude_session_id, cwd));
+      } catch {
+        // jsonl may have been moved/deleted manually — best effort.
+      }
     }
   }
 }
@@ -511,6 +519,57 @@ export function setRootResumeIdForNode(
     }
     cur = row.parent_id;
   }
+}
+
+// Per-node resume id — chat B-fork stores each node's OWN forked session id on
+// the node itself (NOT walked up to root like project's setRootResumeIdForNode).
+// The child node later resumes its immediate parent's session via --fork-session,
+// inheriting the parent's history KV cache while branching into an isolated
+// session (so sibling branches don't cross-pollute). Called from run-bus on
+// session_init for chat mode, every turn (not just the first).
+export function setNodeResumeId(
+  nodeId: string,
+  family: ProviderFamily,
+  resumeId: string,
+): void {
+  const col = resumeColumnForFamily(family);
+  if (!col) return; // mock
+  const db = getDB();
+  db.prepare(`UPDATE nodes SET ${col} = ? WHERE id = ?`).run(resumeId, nodeId);
+}
+
+// Read the IMMEDIATE PARENT node's resume id for `family` — chat B-fork resumes
+// the parent's forked session (vs project's getRootResumeIdForNode which shares
+// the root's id across the whole tree). Returns null when: family is mock,
+// node/parent missing, the parent is a root with no session yet (chat's first
+// turn — spawn fresh without --fork-session), or (claude only) the parent's
+// transcript jsonl was cleaned (self-heal to fresh, same discipline as
+// getRootResumeIdForNode).
+export function getParentResumeId(
+  nodeId: string,
+  family: ProviderFamily,
+  workspacePath?: string | null,
+): string | null {
+  const col = resumeColumnForFamily(family);
+  if (!col) return null; // mock
+  const db = getDB();
+  const self = db
+    .prepare("SELECT parent_id FROM nodes WHERE id = ?")
+    .get(nodeId) as { parent_id: string | null } | undefined;
+  if (!self || !self.parent_id) return null; // root: no parent session to fork
+  const prow = db
+    .prepare(`SELECT ${col} AS resume_id FROM nodes WHERE id = ?`)
+    .get(self.parent_id) as { resume_id: string | null } | undefined;
+  const id = prow?.resume_id;
+  if (!id) return null;
+  if (
+    family === "claude" &&
+    workspacePath !== undefined &&
+    !claudeJsonlExists(id, workspacePath)
+  ) {
+    return null; // stale/cleaned transcript — fall back to fresh
+  }
+  return id;
 }
 
 // User-driven session rename. Bumps updated_at so the picker re-sorts the

@@ -20,11 +20,17 @@ export function makeClaudeProvider(
   const backend = new ClaudeBackend();
   return {
     async *stream(req: StreamRequest): AsyncGenerator<StreamEvent> {
+      // project always resumes a CLI-maintained session; chat B-fork does too
+      // (req.forkSession) — both send only the current question, history lives
+      // in the resumed/forked session as cache-hit message blocks. Folded-string
+      // buildPrompt is the fallback: workspace, or chat with B-fork off (window
+      // mode回退).
       const prompt =
-        mode === "project"
+        mode === "project" || (mode === "chat" && req.forkSession)
           ? buildProjectPrompt(req.question, req.parentAnchor)
           : buildPrompt(req.history, req.question, req.parentAnchor);
-      if (mode === "chat" && req.chatEnhanced) ensureChatScratch();
+      // chat (enhanced AND pure B-fork) spawns in CHAT_SCRATCH, so ensure it.
+      if (mode === "chat") ensureChatScratch();
       const runOpts = { ...modeToRunOptions(mode, opts.model ?? "sonnet", req), signal: req.signal };
       for await (const e of backend.run(prompt, runOpts)) {
         const se = toStreamEvent(e, mode);

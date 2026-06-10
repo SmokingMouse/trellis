@@ -17,9 +17,11 @@ import {
   getNodeAttachments,
   getSession,
   getRootResumeIdForNode,
+  getParentResumeId,
 } from "@/lib/server/repo";
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import { resolveBlobPath, isAllowedMime, isValidHash } from "@/lib/server/blobs";
+import { sessionCwd } from "@/lib/paths";
 import type { NodeAttachment } from "@/lib/types";
 
 const VALID_MODES: Mode[] = ["chat", "workspace", "project"];
@@ -75,10 +77,12 @@ function nid(): string {
   return crypto.randomUUID();
 }
 
-// D2: clamp the client-supplied history depth (ancestor turns folded into the
-// prompt). Falls back to 4 for anything out of [1,12] or missing.
+// History depth knob. 0 = B-fork (append-only via --fork-session, chat+claude
+// default — history lives in the forked CLI session, nothing folded into the
+// prompt). 1-12 = window mode (fold N ancestor turns — the fallback, also used
+// by codex chat / workspace). Anything out of [0,12] or missing → 0.
 function clampDepth(n: unknown): number {
-  return typeof n === "number" && n >= 1 && n <= 12 ? Math.round(n) : 4;
+  return typeof n === "number" && n >= 0 && n <= 12 ? Math.round(n) : 0;
 }
 
 // Defensive cleanup of client-supplied attachments. Drops anything with a
@@ -296,28 +300,39 @@ export async function POST(req: Request) {
   // doesn't talk to the blobs module so it can stay free of fs lookups.
   const providerAttachments = resolveAttachments(resolvedAttachments);
 
-  // project mode: history lives in the resumed claude session, so we don't
-  // fold it into the prompt. chat/workspace still need the folded history.
+  // chat B-fork (claude only, depth 0 = default): history lives in the forked
+  // CLI session — fold nothing, resume the PARENT node's session. depth>=1 or
+  // codex falls back to window mode (folded history). project folds nothing
+  // either (history in the resumed root session).
   const reqDepth = clampDepth((body as { historyDepth?: number }).historyDepth);
   const chatEnhanced =
     (body as { chatEnhanced?: boolean }).chatEnhanced === true;
+  const chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
+  // codex chat at depth 0 gets no B-fork — fold history at a sane default depth.
+  const foldDepth = reqDepth === 0 ? 4 : reqDepth;
   const history =
-    mode === "project" ? [] : buildHistoryForNode(nodeId, { maxDepth: reqDepth });
-  // project mode: each root in the session owns its own per-family resume id
-  // (post-2026-05 upgrade — was session-level before). Branches walk up to
-  // find their root's id for the current provider's family; fresh-context
-  // roots, or roots whose first turn ran a different family, return null
-  // until this run's session_init populates the family-correct column. For
-  // the claude family we also validate the transcript jsonl still exists
-  // (passing resolvedWorkspacePath) — this self-heals stale/cleaned ids and
-  // historical pollution (codex ids that were stored in claude_session_id
-  // before family isolation) by falling back to fresh instead of failing
-  // `claude --resume`. This is the StreamRequest.claudeSessionId value below
-  // (its field name is legacy; the value is "the current provider's resume id").
+    chatBFork || mode === "project"
+      ? []
+      : buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+  // Resume id (StreamRequest.claudeSessionId — legacy name, value is the active
+  // family's resume id). project shares the ROOT's id across the whole tree
+  // (getRoot…, each root owns a per-family id since the post-2026-05 upgrade).
+  // chat B-fork resumes the IMMEDIATE PARENT's forked session (getParent…) so
+  // each branch continues its own lineage in isolation — null on a B-fork first
+  // turn (root has no parent) → fresh session, no --fork-session. For claude we
+  // validate the transcript jsonl still exists (passing resolvedWorkspacePath),
+  // self-healing stale/cleaned/family-polluted ids by falling back to fresh
+  // instead of failing `claude --resume`.
+  // claude spawns in this cwd → its session jsonl lands here, so resume
+  // validation, the provider spawn, and cleanup must ALL use the same value.
+  // sessionCwd centralizes the chat→scratch / workspace→bound mapping.
+  const spawnCwd = sessionCwd(mode, resolvedWorkspacePath);
   const claudeSessionId =
     mode === "project"
-      ? getRootResumeIdForNode(nodeId, family, resolvedWorkspacePath)
-      : null;
+      ? getRootResumeIdForNode(nodeId, family, spawnCwd)
+      : chatBFork
+        ? getParentResumeId(nodeId, family, spawnCwd)
+        : null;
 
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
   // We start the run with its own AbortController; HTTP disconnect only
@@ -332,7 +347,15 @@ export async function POST(req: Request) {
   const interactive = family === "claude";
   startRun({
     nodeId,
-    projectModeFirstTurn: mode === "project" && !claudeSessionId,
+    // chat B-fork writes the forked id to THIS node (per-node); project writes
+    // the root-shared id on its first turn only; codex/mock/window persist none.
+    sessionIdTarget: chatBFork
+      ? "node"
+      : mode === "project"
+        ? claudeSessionId
+          ? undefined
+          : "root"
+        : undefined,
     resumeFamily: family,
     interactive,
     factory: (signal, ctx) =>
@@ -342,9 +365,10 @@ export async function POST(req: Request) {
         parentAnchor,
         signal,
         claudeSessionId,
-        cwd: resolvedWorkspacePath,
+        cwd: spawnCwd,
         systemPrompt: resolvedSystemPrompt,
         chatEnhanced,
+        forkSession: chatBFork,
         attachments: providerAttachments,
         onCanUseTool: ctx?.onCanUseTool,
       }),

@@ -6,6 +6,7 @@ import {
   markToolCallDone,
   setNodeTopicLabel,
   setRootResumeIdForNode,
+  setNodeResumeId,
 } from "./repo";
 import {
   persistPendingInteraction,
@@ -212,8 +213,13 @@ export type ProviderEvent =
 // responsibility is to subscribe() if it wants live events.
 export function startRun(args: {
   nodeId: string;
-  // Set once the runner emits 'session_init' for project mode.
-  projectModeFirstTurn: boolean;
+  // Where session_init writes the freshly-spawned CLI session id:
+  //   "root" — walk to root, store there (project: whole tree shares one id).
+  //   "node" — store on this node itself (chat B-fork: each node owns its
+  //            forked session; children resume the parent's via --fork-session).
+  //   undefined — don't persist (codex/mock, or project non-first-turn where
+  //            the root id already exists and shouldn't be overwritten).
+  sessionIdTarget?: "root" | "node";
   // Which provider family this run belongs to — decides which resume-id
   // column session_init writes (claude_session_id vs codex_session_id; mock
   // is a no-op). Resume ids are family-scoped and must not cross families.
@@ -361,16 +367,20 @@ async function runLoop(
         errorMessage = event.message;
         broadcast(state, { type: "error", message: event.message });
       } else if (event.type === "session_init") {
-        if (args.projectModeFirstTurn) {
-          try {
+        try {
+          if (args.sessionIdTarget === "node") {
+            // chat B-fork: this node's forked session id sticks to the node.
+            setNodeResumeId(args.nodeId, args.resumeFamily, event.sessionId);
+          } else if (args.sessionIdTarget === "root") {
+            // project: first turn of a root populates the tree-shared id.
             setRootResumeIdForNode(
               args.nodeId,
               args.resumeFamily,
               event.sessionId,
             );
-          } catch {
-            // best-effort — next turn will get a fresh session
           }
+        } catch {
+          // best-effort — next turn will get a fresh session
         }
         // Not forwarded to subscribers — server-internal.
       } else if (event.type === "tool_call_start") {

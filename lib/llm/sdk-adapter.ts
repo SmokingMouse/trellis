@@ -27,6 +27,18 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
   const common: RunOptions = { model, attachments: req.attachments };
   if (mode === "chat") {
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+    // chat B-fork (claude only): persist + resume the parent's forked session so
+    // the CLI keeps history as immutable, cache-hit message blocks. forkSession
+    // is honored by agent-gateway only when resume is set, so the first turn
+    // (resume undefined) spawns a fresh session without --fork-session. codex
+    // leaves req.forkSession false → no persist, folded-history path unchanged.
+    const forkOpts: RunOptions = req.forkSession
+      ? {
+          persistence: true,
+          resume: req.claudeSessionId ?? undefined,
+          forkSession: true,
+        }
+      : { persistence: false };
     if (req.chatEnhanced) {
       // 增强模式:scratch workspace + full → 无沙箱 → 能跑 skill + 联网 + 工具
       // (YOLO)。claude 拿全工具;codex 的 full 整体绕过沙箱。
@@ -37,18 +49,18 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
         systemPrompt: sp,
         workspace: CHAT_SCRATCH,
         permission: "full",
-        persistence: false,
+        ...forkOpts,
         onCanUseTool: req.onCanUseTool,
       };
     }
-    // 纯对话:替换 system prompt + 仅 web 工具 + 不落盘。无 workspace。
+    // 纯对话:替换 system prompt + 仅 web 工具。无 workspace。落盘与否看 B-fork。
     return {
       ...common,
       // D1: user can override the chat persona per-session; fall back to the
       // built-in default when unset/blank.
       systemPrompt: sp,
       tools: ["WebSearch", "WebFetch"], // claude 用;codex 无 web,backend 自行忽略
-      persistence: false,
+      ...forkOpts,
     };
   }
   if (mode === "workspace") {
@@ -118,8 +130,12 @@ export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
       };
     }
     case EventType.SessionStart:
-      // project 据此把 claude/codex 的 session id 存进 nodes.claude_session_id。
-      return mode === "project" && e.sessionId ? { type: "session_init", sessionId: e.sessionId } : null;
+      // project (root-shared id) + chat B-fork (per-node forked id) both need
+      // the session id written back; run-bus's sessionIdTarget decides where it
+      // lands (or drops it for codex/mock chat). workspace stays stateless.
+      return (mode === "project" || mode === "chat") && e.sessionId
+        ? { type: "session_init", sessionId: e.sessionId }
+        : null;
     case EventType.Error:
       return { type: "error", message: String(e.data.message ?? "agent error") };
     default:
