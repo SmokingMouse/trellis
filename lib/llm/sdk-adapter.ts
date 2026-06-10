@@ -53,13 +53,22 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
         onCanUseTool: req.onCanUseTool,
       };
     }
-    // 纯对话:替换 system prompt + 仅 web 工具。无 workspace。落盘与否看 B-fork。
+    // 纯对话:替换 system prompt + 仅 web 工具。无 workspace(无文件工具)。
+    // 但 cwd 必须给 —— B-fork 的 session jsonl 落在 cwd 编码目录,spawn/resume
+    // 校验/清理三处必须同一个 cwd。req.cwd = sessionCwd(chat) = CHAT_SCRATCH;
+    // 不设则 agent-gateway 回退进程 cwd(trellis 项目目录),与校验用的 CHAT_SCRATCH
+    // 错位 → resume 自愈误判 jsonl 不存在 → 全 fresh → 失忆。cwd 与 workspace
+    // 正交:给 cwd 稳定落盘、不给 workspace 保持无文件工具。
+    // settingSources:false:稳定 cwd 会让 claude 向上找到项目/全局 CLAUDE.md 污染
+    // 纯对话人设,且白搭 token —— 纯对话本就只要 DEFAULT_SYSTEM_PROMPT + web,关掉。
     return {
       ...common,
       // D1: user can override the chat persona per-session; fall back to the
       // built-in default when unset/blank.
       systemPrompt: sp,
       tools: ["WebSearch", "WebFetch"], // claude 用;codex 无 web,backend 自行忽略
+      cwd: req.cwd ?? CHAT_SCRATCH,
+      settingSources: false,
       ...forkOpts,
     };
   }

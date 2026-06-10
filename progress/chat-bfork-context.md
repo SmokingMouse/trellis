@@ -54,14 +54,23 @@ B-fork **不比当前失忆的 chat 更便宜**(它真的多带了有效历史);
 
 - ✅ trellis `npx tsc --noEmit`:**0 错误**
 - ✅ agent-gateway `npm run build`:CLEAN,dist 含 cwd(d.ts + js 都确认)
-- ❌ **端到端未确认**:首次测试(改 cwd 前的旧代码)B2 失忆;cwd 解耦后重测时,curl 请求**没打到新 dev server**(dev log 无 POST 记录,端口 3001 新旧进程抢占混乱),且 chat-scratch 目录未创建——**结果不可信,需干净重测**。
+- ✅ **端到端通过(2026-06-11 干净重测,dev port 3099)**:root→B1→B2 三轮 `historyDepth:0`,judge 全绿:
+  - **不失忆**:埋暗号 58206 → B1 答 `58206`、B2 答 `58206` 且复述了最初指令(跨分支记忆)。
+  - **KV cache 命中**:root read0/create1163 → B1 **read1163**/create38 → B2 **read1201**/create38。每轮 cache_read ≈ 父全量 context,命中 ~97%(fork 真继承父 KV)。
+  - **per-node fork**:三 node `claude_session_id` 各不同(724d/0bd7/7e82)。
+  - **jsonl 落点**:全在 `-Users-smokingmouse--trellis-chat-scratch/`(不在项目目录);B1 jsonl 含 58206(fork 复制了父历史)。`~/.trellis/chat-scratch/` 被 ensureChatScratch 创建。
+
+### ⚠️ 验证中发现并修复的真 bug(原"已修复"声明是错的)
+
+**症状**:首次干净重测 root 的 jsonl 落在 **trellis 项目目录**(`-Users-...-trellis/`,即 dev 进程 cwd)而非 CHAT_SCRATCH,B1 失忆("我们之前没有约定过暗号")。
+
+**根因**:`sessionCwd 收敛`只改了 route + repo(resume 校验 + 清理)侧,**漏了 sdk-adapter 的 spawn 侧**。`modeToRunOptions` 的**纯对话分支**既没设 `workspace` 也没设 `cwd` → agent-gateway 回退进程 cwd → jsonl 落项目目录。但 `getParentResumeId` 用 CHAT_SCRATCH 校验 jsonl 是否存在 → 错位 → 判不存在 → 回退 fresh、不带 `--fork-session` → 失忆。三处 cwd 仍不一致,方向与文档原以为的相反。(enhanced chat 因 `workspace:CHAT_SCRATCH` 被 agent-gateway 当 cwd 用,恰好没踩;只有纯对话踩。)
+
+**修复**(`lib/llm/sdk-adapter.ts` 纯对话分支):加 `cwd: req.cwd ?? CHAT_SCRATCH` + `settingSources: false`(决策 #7,稳定 cwd 会向上找到项目/全局 CLAUDE.md 污染纯对话人设)。修复后端到端全绿(见上)。
 
 ## 五、未完成 TODO(下次接续)
 
-1. **【最高优先】干净端到端验证**:
-   - 先彻底清理 dev 进程(3000 被 pid 3286 占,trellis dev 用 3001;新旧进程会抢端口)。确认只有一个新代码 dev 在跑,且测试后 **dev log 有 `POST /api/chat` 记录**(否则没打到新代码)。
-   - 测试:curl root chat(`provider:"claude-sonnet"`, `mode:"chat"`)→ branch → branch,`historyDepth:0`。判据:① B2 response 含 root 埋的数字(不失忆)② B1/B2 `token_cache_read` 命中(深层应高,不是 0)③ 三个 node `claude_session_id` 各不同(per-node fork)④ jsonl 落 `~/.claude/projects/<encoded CHAT_SCRATCH>/`(encoded = `-Users-smokingmouse--trellis-chat-scratch`)⑤ `~/.trellis/chat-scratch/` 目录被 ensureChatScratch 创建。
-   - 验证后重跑 depth×cache_read SQL,确认 chat 命中率从 36% 升向 project 的 ~90%。
+1. ✅ **【已完成 2026-06-11】干净端到端验证** —— 见上"验证状态",judge 全绿。验证中发现纯对话 spawn cwd bug 并已修复。
 2. **deleteNodeSubtree per-node jsonl 清理**(还没做):删 chat 子树时 per-node session jsonl 会泄漏。`deleteNodeSubtree` 在 repo.ts ~1496。需收集子树 node 的 `claude_session_id` + session mode → `sessionCwd` → unlink。**用 `git show main:lib/server/repo.ts` 拿干净内容**(直接 Read 源文件被污染)。
 3. **localStorage 旧值**:老用户 localStorage `trellis-history-depth=4` 会停窗口模式,需手动切"全发"或清 localStorage。
 4. **验证通过后 commit 两仓 + 更新本文档状态**。
