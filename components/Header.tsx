@@ -72,6 +72,7 @@ export function Header() {
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
+  const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
@@ -162,6 +163,21 @@ export function Header() {
   return (
     <header className="fixed top-0 inset-x-0 h-12 bg-white/85 dark:bg-stone-950/85 backdrop-blur border-b border-stone-200 dark:border-stone-800 flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
       <div className="flex items-center gap-2 shrink-0">
+        {/* Mobile-only: open the session-list drawer. The left sidebar is
+            hidden on phones, so this is the only way to see / switch between
+            sessions there. */}
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          title="会话列表"
+          aria-label="会话列表"
+          className="md:hidden -ml-1 p-1.5 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
         <div className="w-6 h-6 rounded bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400" />
         <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>
         <span className="text-stone-300 dark:text-stone-600 hidden sm:inline">/</span>

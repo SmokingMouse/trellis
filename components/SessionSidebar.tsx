@@ -34,6 +34,8 @@ export function SessionSidebar() {
   const deleteSession = useSessionStore((s) => s.deleteSession);
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const setSidebarOpen = useSessionStore((s) => s.setSidebarOpen);
+  const mobileNavOpen = useSessionStore((s) => s.mobileNavOpen);
+  const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const runningIds = useSessionStore((s) => s.runningSessionIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
@@ -92,6 +94,13 @@ export function SessionSidebar() {
     };
   }, [archivedOpen, sessionsRevision]);
 
+  // Mobile drawer auto-closes once a session is chosen (activeId changes). The
+  // drawer is an overlay, so leaving it open over the loaded session would hide
+  // what the user just opened. No-op on desktop (drawer never shown there).
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [activeId, setMobileNavOpen]);
+
   const { chat, work } = useMemo(() => {
     const chat: Session[] = [];
     const work: Session[] = [];
@@ -143,29 +152,12 @@ export function SessionSidebar() {
       </div>
     );
 
-  // Collapsed → render only the thin re-open affordance so the rail can be
-  // brought back without hunting in the Header.
-  if (!sidebarOpen) {
-    return (
-      <button
-        onClick={() => setSidebarOpen(true)}
-        title="展开侧栏"
-        aria-label="展开侧栏"
-        className="hidden md:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 w-5 h-12 items-center justify-center rounded-r-md bg-white/90 dark:bg-stone-900/90 border border-l-0 border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 shadow-sm"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
-          <path d="M4.5 2 L8.5 6 L4.5 10" />
-        </svg>
-      </button>
-    );
-  }
-
-  return (
-    <aside
-      className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-white/90 dark:bg-stone-950/90 backdrop-blur border-r border-stone-200 dark:border-stone-800"
-      style={{ width: SIDEBAR_W }}
-    >
-      {/* Header: new-session entry (R2) + collapse toggle. */}
+  // The panel body (new-session + grouped list + archived footer) is shared by
+  // the desktop rail and the mobile drawer. `onClose` wires the header chevron
+  // to whichever container is showing it (collapse rail vs close drawer).
+  const renderPanel = (onClose: () => void) => (
+    <>
+      {/* Header: new-session entry (R2) + collapse/close toggle. */}
       <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-stone-100 dark:border-stone-800 flex items-center gap-1.5">
         <button
           onClick={onNew}
@@ -176,9 +168,9 @@ export function SessionSidebar() {
           新建会话
         </button>
         <button
-          onClick={() => setSidebarOpen(false)}
-          title="收起侧栏"
-          aria-label="收起侧栏"
+          onClick={onClose}
+          title="收起"
+          aria-label="收起"
           className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-700 dark:hover:text-stone-200"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
@@ -237,7 +229,7 @@ export function SessionSidebar() {
                       onClick={() => unarchiveSession(s.id)}
                       title="恢复（取消归档）"
                       aria-label="恢复"
-                      className="shrink-0 hidden group-hover:inline-flex p-1 rounded text-stone-500 dark:text-stone-400 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
+                      className="shrink-0 inline-flex p-1 rounded text-stone-500 dark:text-stone-400 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 7v6h6" />
@@ -251,7 +243,51 @@ export function SessionSidebar() {
           )}
         </div>
       )}
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* ── Desktop rail ── permanent, pushes content via --trellis-sb. ── */}
+      {sidebarOpen ? (
+        <aside
+          className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-white/90 dark:bg-stone-950/90 backdrop-blur border-r border-stone-200 dark:border-stone-800"
+          style={{ width: SIDEBAR_W }}
+        >
+          {renderPanel(() => setSidebarOpen(false))}
+        </aside>
+      ) : (
+        // Collapsed → thin re-open affordance so the rail can be brought back.
+        <button
+          onClick={() => setSidebarOpen(true)}
+          title="展开侧栏"
+          aria-label="展开侧栏"
+          className="hidden md:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 w-5 h-12 items-center justify-center rounded-r-md bg-white/90 dark:bg-stone-900/90 border border-l-0 border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 shadow-sm"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+            <path d="M4.5 2 L8.5 6 L4.5 10" />
+          </svg>
+        </button>
+      )}
+
+      {/* ── Mobile drawer ── overlay (md:hidden), opened by Header hamburger.
+          The sidebar is otherwise invisible on phones, leaving no way to see
+          or switch between sessions — this is that entry point. ── */}
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden
+          />
+          <aside
+            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-white dark:bg-stone-950 border-r border-stone-200 dark:border-stone-800 shadow-xl"
+          >
+            {renderPanel(() => setMobileNavOpen(false))}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }
 

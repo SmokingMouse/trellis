@@ -357,6 +357,10 @@ type State = {
   runningSessionIds: Set<string>;
   // Left explorer sidebar open/closed (desktop). Persisted to localStorage.
   sidebarOpen: boolean;
+  // Mobile session-list drawer (the sidebar is hidden on mobile; this overlays
+  // it on demand). Ephemeral — not persisted, defaults closed so a session
+  // isn't hidden behind it on load. Opened by the Header hamburger.
+  mobileNavOpen: boolean;
 };
 
 type Actions = {
@@ -379,6 +383,7 @@ type Actions = {
   // snapshot. Called by useRunPolling only.
   ingestRunningSessions: (ids: Set<string>) => void;
   setSidebarOpen: (open: boolean) => void;
+  setMobileNavOpen: (open: boolean) => void;
   deleteSession: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   archiveSession: (sessionId: string) => Promise<void>;
@@ -579,6 +584,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   unreadSessionIds: new Set(),
   runningSessionIds: new Set(),
   sidebarOpen: loadSidebarOpen(),
+  mobileNavOpen: false,
 
   hydrate: async (sessionId) => {
     set({
@@ -760,6 +766,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       window.localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
     }
   },
+
+  setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
 
   deleteSession: async (sessionId) => {
     await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
