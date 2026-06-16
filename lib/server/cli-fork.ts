@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDB } from "./sqlite";
 import { parseCliSessionJsonl } from "./cli-import";
+import { getSession, getRootResumeIdForNode } from "./repo";
 
 type ContentBlock = {
   type: string;
@@ -157,6 +158,34 @@ export function attachedLineageForNode(nodeId: string): AttachedLineage | null {
     sourceJsonlPath: row.jsonl_path,
     isJsonlTip: tipId === nodeId,
   };
+}
+
+// 「在 CLI 继续」轻量入口（progress/cli-branch-alignment.md §7）：project 模式会话
+// 本就是真 claude CLI 会话——给出在 CLI 续该节点 lineage 的 cwd + resume id。
+// attached（cli-import）取该节点的 lineage sid（验源 jsonl 在盘）；native project 走
+// getRootResumeIdForNode（其自带 jsonl 存在性自愈，缺失返回 null=不可续）。
+// 仅 project 模式（有 cwd 才可 resume）；chat/workspace 返回 null。续到的是该 lineage 的
+// 主链 tip（CLI --resume 本就只跟主链——树内分叉走 P2 的前缀 jsonl，不在本入口范围）。
+export function cliResumeForNode(
+  nodeId: string,
+): { cwd: string; resumeId: string } | null {
+  const db = getDB();
+  const node = db
+    .prepare("SELECT session_id FROM nodes WHERE id = ?")
+    .get(nodeId) as { session_id: string } | undefined;
+  if (!node) return null;
+  const session = getSession(node.session_id);
+  if (!session || session.mode !== "project" || !session.workspacePath) {
+    return null;
+  }
+  if (session.origin === "cli-import") {
+    const lin = attachedLineageForNode(nodeId);
+    if (!lin || !fs.existsSync(lin.sourceJsonlPath)) return null;
+    return { cwd: session.workspacePath, resumeId: lin.lineageSid };
+  }
+  const resumeId = getRootResumeIdForNode(nodeId, "claude", session.workspacePath);
+  if (!resumeId) return null;
+  return { cwd: session.workspacePath, resumeId };
 }
 
 function ownerTurnFactory(rawLines: RawLine[]) {

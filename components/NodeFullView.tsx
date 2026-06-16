@@ -10,6 +10,7 @@ import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { CopyButton } from "./CopyButton";
 import { CardImageButton } from "./CardImageButton";
+import { CliResumeButton } from "./CliResumeButton";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
@@ -792,6 +793,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
             {node.response}
           </ReactMarkdown>
           <div className="mt-3 flex justify-end gap-2">
+            <CliResumeButton nodeId={node.id} />
             <RegenerateVariantButton nodeId={node.id} question={node.question} />
             <CardImageButton
               title={node.topicLabel ?? node.question}

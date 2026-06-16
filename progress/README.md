@@ -111,6 +111,12 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 42 (2026-06-17)
+- **Done**: **「在 CLI 继续」轻量入口**（project 会话本就是真 claude CLI 会话，给可粘贴的续聊命令）。`cli-fork.ts` 加 `cliResumeForNode(nodeId)`：project 模式下，attached(cli-import) 取该节点 lineage sid（验源 jsonl 在盘）、native 走 `getRootResumeIdForNode`（自带 jsonl 存在性自愈），返回 `{cwd, resumeId}`，非 project/缺盘→null。新 `GET /api/nodes/[id]/cli-resume` 返回 `{resumable, command}`（`cd '<ws>' && claude --resume <id>`，cwd 单引号转义）。新 `CliResumeButton`（仅 project 模式渲染，点击 fetch+复制命令，不可续显「盘上找不到」）挂 NodeFullView 动作行。续到的是该 lineage 主链 tip（树内分叉的「CLI 续任意分支」需 P2 前缀 jsonl，本入口不含——已记 spec）。
+- **验证**: tsc ✓ + `npm run build` ✓（`/api/nodes/[id]/cli-resume` 注册）。隔离 dev server 实测：attach 真会话 → `GET cli-resume` root 返回正确 `cd … && claude --resume <sid>`、坏节点 `resumable:false`；真跑生成的命令 `claude --resume` 被接受（无 "No conversation found"）。环境/产物全清。
+- **架构注记**: 用户问「一棵树本质是多 session id，为啥 CLI 只能加载主链」——答：①「新提问」根=独立 claude session，今天就各自可 resume；② 一个 session 内的分叉是 in-jsonl fork，`claude --resume` 只跟主线性叶子（claude CLI 把会话当线性消费，非数据限制，且 claude CLI 非我方代码）；③ 破法=把分叉物化成独立 session（= P2 的 fork-session/前缀 jsonl 引擎）。本轮选轻量档（只续 lineage tip）；「CLI 续任意分支」= 推广 P2 到 native，留作后续。
+- **Next**: 按需把「续任意分支」做全（推广 buildPrefixJsonl 到 native project）；或 merge。
+
 ### Session 41 (2026-06-17)
 - **Done**: **CLI 分支对齐 P2b：trellis→CLI 分叉接线 + 真 claude 端到端验**。`/api/chat/route.ts` 加 `resolvedOrigin`（branch 取 parentSession.origin），resume 解析在 `origin==='cli-import' && kind==='branch' && family==='claude'` 时走 attached lineage：`attachedLineageForNode(X)` → 若 X 是其 lineage jsonl tip 且 trellis 无其他子（`hasOtherChild`）→ 线性 `--resume <lineageSid>`；否则 `buildPrefixJsonl(X)` 在 X 构造前缀 jsonl → `registerForkLineage` 插 `cli_lineages` 新 fork 行 → `setNodeResumeId(新节点, newSid)` → `--resume <newSid>`。两路 `forkSession=false`、`sessionIdTarget=undefined`（id 自管，不写 root）。`cli-fork.ts` 加 `hasOtherChild`/`registerForkLineage`。原生 chat/workspace/project resume 与 `getRootResumeIdForNode` 零改。
 - **验证（真 claude 闭环，翻盘性未知已打掉）**: 造真会话 2 轮（haiku，turn1 记暗号「香蕉」→turn2 记「苹果」，21 行 jsonl）→ 临时 DB attach（2 turn 导入）→ `buildPrefixJsonl(turn1)` 产 9 行前缀（含香蕉 3 处、含苹果 0、旧 sid 残留 0）→ 真 `claude --resume <newSid> -p "记住过哪些暗号"` 答「**只记得香蕉**，无法回溯其他 session」。证明 trellis 程序化构造的前缀 jsonl 可被真 claude 从任意历史节点 X 续上、且上下文严格截到 X（不含被砍的后续轮）。`npm run build` ✓（Compiled successfully）+ `tsc --noEmit` ✓。测试产物（含 `~/.claude/projects/-private-tmp-p2b-claude-test`、临时 DB、tsx 脚本）已全清。
