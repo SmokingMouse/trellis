@@ -23,6 +23,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/linear-thread.png" alt="线性 thread 主视图 + 树缩略图" width="840" />
+  <br/>
+  <sub>Project 模式默认的<b>线性 thread 视图</b> —— 连续阅读 + 行内分叉「↳ N 个分支」+「在 CLI 继续」+ 右下角<b>树缩略图</b>导航</sub>
+</p>
+
 | 树状画布 — 思维树概览 | 聚焦阅读 — 锚点回跳 | 参考材料 — 飞书 / YouTube / 网页通吃 |
 |:---:|:---:|:---:|
 | <img src="docs/screenshots/canvas-medium.png" width="320" /> | <img src="docs/screenshots/node-fullview.png" width="320" /> | <img src="docs/screenshots/reference-node.png" width="320" /> |
@@ -30,6 +36,10 @@
 <details>
 <summary>更多截图</summary>
 <br/>
+
+**行内分叉**：线性视图里真分叉折成「↳ N 个分支」，点开就地切到那条 lineage
+
+<img src="docs/screenshots/linear-branch.png" width="640" />
 
 **选区分叉**：在任意回复里选一段 → ⌘K 长出子节点
 
