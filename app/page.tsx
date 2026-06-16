@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { NodeFullView } from "@/components/NodeFullView";
+import { LinearThreadView } from "@/components/LinearThreadView";
 import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
 import { AbortToast } from "@/components/AbortToast";
@@ -29,6 +30,8 @@ export default function Home() {
   const hydrateError = useSessionStore((s) => s.hydrateError);
   const fullScreen = useSessionStore((s) => s.fullScreen);
   const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const viewMode = useSessionStore((s) => s.viewMode);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const isMobile = useIsMobile();
   useEscapeAbort();
@@ -58,9 +61,10 @@ export default function Home() {
   // on a (different) session on a touch device. They can still back out to
   // canvas; we don't force them back in.
   const sessionId = session?.id;
+  const sessionMode = session?.mode;
   useEffect(() => {
-    if (isMobile && sessionId) setFullScreen(true);
-  }, [isMobile, sessionId, setFullScreen]);
+    if (isMobile && sessionId && sessionMode !== "project") setFullScreen(true);
+  }, [isMobile, sessionId, sessionMode, setFullScreen]);
 
   if (!hydrated || isMobile === null) {
     return (
@@ -81,11 +85,30 @@ export default function Home() {
         </div>
       )}
       {!session && <QuestionInput />}
-      {session && fullScreen && <NodeFullView />}
-      {session && !fullScreen && (
-        <Canvas
-          onNodeFocus={isMobile ? () => setFullScreen(true) : undefined}
-        />
+      {session && session.mode === "project" && viewMode === "linear" && (
+        <LinearThreadView />
+      )}
+      {session &&
+        !(session.mode === "project" && viewMode === "linear") &&
+        fullScreen && <NodeFullView />}
+      {session &&
+        !(session.mode === "project" && viewMode === "linear") &&
+        !fullScreen && (
+        <>
+          <Canvas
+            onNodeFocus={isMobile ? () => setFullScreen(true) : undefined}
+          />
+          {session.mode === "project" && (
+            <button
+              type="button"
+              onClick={() => setViewMode("linear")}
+              className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 shadow-md text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800 active:scale-95 transition-transform"
+              title="切换到线性 thread"
+            >
+              线性
+            </button>
+          )}
+        </>
       )}
       {/* B1: mobile outline drawer — mounted top-level so it survives
           fullscreen (where Canvas + its rail Outline unmount). Desktop hides

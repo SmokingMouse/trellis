@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**Project 线性 thread 主视图 + 树缩略图已落地（待浏览器验）** → [spec](linear-thread-view-spec.md)。纯前端增量：project 默认 `viewMode=linear`，线性 thread 按 active lineage 展开，分叉折成行内入口，右下角 SVG 树缩略图导航；chat/workspace 的 canvas + NodeFullView 路径保持不变。验证：`npx tsc --noEmit` ✓、`npm run build` ✓。**未 commit。下一步：浏览器实测真实 project 会话的线性默认、分叉切 lineage、画布往返、缩略图点击。**
+
+---
 **CLI ↔ trellis 分支对齐 P1+P2 全落地（含真 claude 端到端验）** → [P1 spec](cli-branch-alignment-p1-spec.md) / [P2 spec](cli-branch-alignment-p2-spec.md)。双向分叉对齐做透：P1=CLI→trellis（union 导入 + lineage 发现 + watcher 新 fork 检测）；P2=trellis→CLI（attached 会话续聊/分叉的 resume 重定向 + 构造前缀 jsonl）。P2 统一模型=分叉一律构造前缀 jsonl（弃 fork-session，见 decisions.md）。落地：`cli_lineages` 表 + per-node lineage sid + `attachedLineageForNode`/`buildPrefixJsonl`/`hasOtherChild`/`registerForkLineage`（`cli-fork.ts`）+ `/api/chat` origin='cli-import' 分支路由（tip 且无子→线性 resume 该 lineage；否则→前缀 jsonl 在 X 分叉成新 lineage + setNodeResumeId）+ `deleteNodeSubtree` 加 origin 闸防误删用户 jsonl。仅动 `origin='cli-import'`，原生 chat/workspace/project + `getRootResumeIdForNode` + 解析器内核零改。**验证**：P1/P2a fixture ALL PASS（独立跑、临时 DB）；**P2 翻盘性未知真 claude 闭环**——真会话 2 轮（香蕉→苹果）→ `buildPrefixJsonl` 截到 turn1 → 真 `claude --resume` 答「只记得香蕉」（不知被截掉的苹果）→ 程序化前缀 jsonl 可被真 claude 从任意历史点续上；`npm run build` ✓ + tsc ✓。**HTTP 全链路 e2e 已验收**（隔离 dev server + 真 claude：从历史节点分叉→`/api/chat`→spawn→reconcile→fork 子树正确长出、答案严格截到分叉点）。**未 commit。下一步：按需 commit/merge `feat/cli-session-sync`。**
 
 ---
@@ -117,7 +120,13 @@
   - **大纲缩进按「分叉深度」而非「轮数」**（`Outline.tsx`）：TreeRow 用 `branchDepth`(=祖先分叉点数) 取代 `depth`，子代仅当父 >1 子才 +1；`↳` 仅分叉子显示。线性段全平铺。
   - **画布重叠修**（`layout.ts`）：compact 模式原固定 90px 且忽略实测高度，但 streaming/error 节点仍渲染 600px 全卡（`ChatNode: showCompact=isCompact&&!streaming&&!error`）→ 被当 90px 摆放压住下方。改为 compact 下当实测高度 >90 时按实测留位（保持普通 compact 卡统一打包）。
   - **验证**: tsc ✓；快照 DB 起隔离 dev server + agent-browser 实测真实「Analyze WeChat」会话(24 轮纯线性)：大纲 50 行**全 paddingLeft=4px 平铺**(原会得楼梯到 ~600px)；画布 25 节点 **0 重叠**。环境/快照已清。
-- **Next（增量 2，主菜）**: LinearThreadView 线性主视图（活跃 lineage 纵向 chat thread，分叉折成行内「↳N 分支」可展开）+ 原图状画布缩为侧边树缩略图导航 + project 默认线性视图。待设计落地。
+- **Done（增量 2：线性 thread 主视图 + 树缩略图，待浏览器验）**:
+  - Store 加 `viewMode: "canvas"|"linear"` + `setViewMode`；`loadSessionInternal`/新建 session 路径按 mode 初始化（project→linear，其余→canvas），`ViewState` 持久化扩 `viewMode` 且兼容旧数据。
+  - 新 `LinearThreadView`：active 锚点算 root→tip 线性 thread（祖先反转 + active + 最小 `siblingIndex` 子链），逐轮渲染问题/markdown 回答/工具调用/CLI 续聊/复制；非主线子节点折成「↳N 个分支」并可切 active lineage。
+  - 新 `ThreadMinimap`：复用 `layoutNodes(nodes, undefined, {compact:true})` 画右下角 SVG 树，点圆点 `setActiveNode`，可折叠；无第二个 React Flow。
+  - `app/page.tsx` 仅 `project && viewMode==="linear"` 走线性视图；否则保持原 `fullScreen ? NodeFullView : Canvas`，project canvas 增「线性」切换钮；移动端 project 不再被启动 effect 强制 fullscreen。
+  - **验证**: `npx tsc --noEmit` ✓；`npm run build` ✓；grep 自检 viewMode 默认/持久化、thread 计算、分叉条件、minimap 点击、page project-only 分流均符合 spec。
+- **Next**: 用户浏览器实测真实 project 会话：默认线性、画布往返、缩略图点击、分叉展开切 lineage。
 
 ### Session 42 (2026-06-17)
 - **Done**: **「在 CLI 继续」轻量入口**（project 会话本就是真 claude CLI 会话，给可粘贴的续聊命令）。`cli-fork.ts` 加 `cliResumeForNode(nodeId)`：project 模式下，attached(cli-import) 取该节点 lineage sid（验源 jsonl 在盘）、native 走 `getRootResumeIdForNode`（自带 jsonl 存在性自愈），返回 `{cwd, resumeId}`，非 project/缺盘→null。新 `GET /api/nodes/[id]/cli-resume` 返回 `{resumable, command}`（`cd '<ws>' && claude --resume <id>`，cwd 单引号转义）。新 `CliResumeButton`（仅 project 模式渲染，点击 fetch+复制命令，不可续显「盘上找不到」）挂 NodeFullView 动作行。续到的是该 lineage 主链 tip（树内分叉的「CLI 续任意分支」需 P2 前缀 jsonl，本入口不含——已记 spec）。

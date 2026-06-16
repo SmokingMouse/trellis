@@ -124,7 +124,21 @@ function persistCollapsed(
 // per-tab sessionStorage) so reopening a session lands back where you left.
 const VIEW_KEY = (sid: string) => `trellis-view:${sid}`;
 
-type ViewState = { activeNodeId: string | null; fullScreen: boolean };
+export type ViewMode = "canvas" | "linear";
+
+type ViewState = {
+  activeNodeId: string | null;
+  fullScreen: boolean;
+  viewMode?: ViewMode;
+};
+
+function isViewMode(value: unknown): value is ViewMode {
+  return value === "canvas" || value === "linear";
+}
+
+function defaultViewModeForSession(session: Pick<Session, "mode"> | null): ViewMode {
+  return session?.mode === "project" ? "linear" : "canvas";
+}
 
 function loadViewState(sessionId: string): ViewState | null {
   if (typeof window === "undefined") return null;
@@ -137,6 +151,7 @@ function loadViewState(sessionId: string): ViewState | null {
       activeNodeId:
         typeof parsed.activeNodeId === "string" ? parsed.activeNodeId : null,
       fullScreen: Boolean(parsed.fullScreen),
+      viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : undefined,
     };
   } catch {
     return null;
@@ -274,6 +289,9 @@ type State = {
   // defaults this to true after hydrate; desktop opts in via the expand
   // button on a canvas card.
   fullScreen: boolean;
+  // Project sessions default to the linear thread reader; chat/workspace
+  // always stay on the existing canvas/fullscreen path.
+  viewMode: ViewMode;
   // Latest progress message per streaming reference node. Set as the
   // claude fetcher emits SSE `progress` events; cleared when the node
   // transitions to status=done. Transient — never persisted.
@@ -406,6 +424,7 @@ type Actions = {
   setDraftSystemPrompt: (prompt: string | null) => void;
   setSendKey: (key: SendKey) => void;
   setFullScreen: (v: boolean) => void;
+  setViewMode: (mode: ViewMode) => void;
   // Stream a new root question.
   // - default (no opts): creates a brand-new session + root node.
   // - attachToCurrentSession=true: adds a parallel root to the current session
@@ -603,6 +622,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     });
   },
   fullScreen: false,
+  viewMode: "canvas",
   fetchProgress: {},
   pendingScrollAnchor: null,
   doneToasts: [],
@@ -684,6 +704,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       session: null,
       nodes: {},
       activeNodeId: null,
+      viewMode: "canvas",
       notes: [],
       collapsedNodeIds: new Set(),
       lastEditedNodeId: null,
@@ -913,6 +934,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         : activeNodeId;
     if (focus) get().expandAncestors(focus);
     set({ fullScreen: false, activeNodeId: focus });
+  },
+
+  setViewMode: (mode) => {
+    const session = get().session;
+    if (session?.mode !== "project") {
+      set({ viewMode: "canvas" });
+      return;
+    }
+    set({ viewMode: mode, fullScreen: false });
   },
 
   setProvider: (provider) => {
@@ -1225,8 +1255,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           sessionsRevision: s.sessionsRevision + 1,
           lastEditedNodeId: local.id,
         };
-        if (session) next.session = session;
-        else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
+        if (session) {
+          next.session = session;
+          next.viewMode = defaultViewModeForSession(session);
+          if (next.viewMode === "linear") next.fullScreen = false;
+        } else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
         return next;
       });
       return local;
@@ -1788,11 +1821,18 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
   // overview / root node. Falls back to no focus (canvas) when there's no
   // record or the recorded node has since been deleted.
   const savedView = loadViewState(session.id);
+  const restoredViewMode =
+    session.mode === "project"
+      ? savedView?.viewMode ?? defaultViewModeForSession(session)
+      : "canvas";
   let restoredActive: string | null = null;
   if (savedView?.activeNodeId && map[savedView.activeNodeId]) {
     restoredActive = savedView.activeNodeId;
   }
-  const restoredFull = Boolean(savedView?.fullScreen) && restoredActive !== null;
+  const restoredFull =
+    restoredViewMode === "canvas" &&
+    Boolean(savedView?.fullScreen) &&
+    restoredActive !== null;
   // Make sure the restored node is actually visible in the canvas by
   // un-collapsing any of its ancestors that were persisted collapsed.
   if (restoredActive && collapsed.size > 0) {
@@ -1815,6 +1855,7 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     nodes: map,
     activeNodeId: restoredActive,
     fullScreen: restoredFull,
+    viewMode: restoredViewMode,
     notes: notes ?? [],
     collapsedNodeIds: collapsed,
     lastEditedNodeId,
@@ -1982,6 +2023,8 @@ function handleStreamEvent(
         if (focusNew) next.activeNodeId = node.id;
         if (event.session) {
           next.session = event.session;
+          next.viewMode = defaultViewModeForSession(event.session);
+          if (next.viewMode === "linear") next.fullScreen = false;
           // Wave 4: a brand-new session enters the workbench as the preview
           // tab (transient) unless the user had already pinned this id.
           if (!s.pinnedSessionIds.includes(event.session.id)) {
@@ -2236,8 +2279,11 @@ function handleRefStreamEvent(
         sessionsRevision: s.sessionsRevision + 1,
         lastEditedNodeId: local.id,
       };
-      if (event.session) next.session = event.session;
-      else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
+      if (event.session) {
+        next.session = event.session;
+        next.viewMode = defaultViewModeForSession(event.session);
+        if (next.viewMode === "linear") next.fullScreen = false;
+      } else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
       return next;
     });
     get().expandAncestors(local.id);
@@ -2413,13 +2459,15 @@ if (typeof window !== "undefined") {
     if (
       state.session?.id === prev.session?.id &&
       state.activeNodeId === prev.activeNodeId &&
-      state.fullScreen === prev.fullScreen
+      state.fullScreen === prev.fullScreen &&
+      state.viewMode === prev.viewMode
     ) {
       return;
     }
     persistViewState(sid, {
       activeNodeId: state.activeNodeId,
       fullScreen: state.fullScreen,
+      viewMode: state.viewMode,
     });
   });
 }
