@@ -41,6 +41,11 @@ export type ApiSession = {
   // Per-session model lock (ProviderId string). null = legacy row → caller
   // falls back to DEFAULT_PROVIDER. Set at creation; editable via PATCH.
   model: string | null;
+  // CLI 同步（progress/cli-sync.md）。origin: 'native'（trellis 原生）|
+  // 'cli-import'（attach 的本机 CLI 会话，双向绑定，只读 detach 安全）。
+  // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
+  origin: string;
+  sourceJsonlPath: string | null;
 };
 
 export type ApiNode = {
@@ -120,10 +125,13 @@ type SessionRow = {
   system_prompt: string | null;
   archived: number;
   model: string | null;
+  origin: string;
+  source_jsonl_path: string | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
-       context_mode, workspace_path, system_prompt, archived, model`;
+       context_mode, workspace_path, system_prompt, archived, model,
+       origin, source_jsonl_path`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -230,6 +238,8 @@ function rowToSession(r: SessionRow): ApiSession {
     systemPrompt: r.system_prompt,
     archived: r.archived === 1,
     model: r.model,
+    origin: r.origin ?? "native",
+    sourceJsonlPath: r.source_jsonl_path,
   };
 }
 
@@ -395,9 +405,11 @@ export function deleteSession(id: string): void {
   // identical for every node in the session.
   const meta = db
     .prepare(
-      "SELECT context_mode AS mode, workspace_path AS wp FROM sessions WHERE id = ?",
+      "SELECT context_mode AS mode, workspace_path AS wp, origin FROM sessions WHERE id = ?",
     )
-    .get(id) as { mode: string; wp: string | null } | undefined;
+    .get(id) as
+    | { mode: string; wp: string | null; origin: string }
+    | undefined;
   const claudeIdRows = db
     .prepare(
       `SELECT claude_session_id FROM nodes
@@ -408,7 +420,8 @@ export function deleteSession(id: string): void {
   // FK cascade nukes nodes/notes but the FTS virtual table isn't on the
   // FK graph — do it explicitly.
   ftsDeleteBySession(db, id);
-  if (meta) {
+  // cli-import 镜像的 jsonl 是用户的原始 CLI 历史，绝不能跟着删 —— 只清 DB 行。
+  if (meta && meta.origin !== "cli-import") {
     const cwd = sessionCwd(meta.mode as Mode, meta.wp);
     for (const r of claudeIdRows) {
       try {
@@ -1559,10 +1572,10 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
     ftsDeleteByIds(db, [...ids, ...noteIds]);
   });
   tx();
-  // Best-effort jsonl cleanup after the DB rows are gone. The spawn cwd
-  // (sessionCwd) decides the encoded-cwd dir the transcript lives in — same
-  // value spawn/resume-validation use, so the path resolves correctly.
-  if (session && claudeIdRows.length) {
+  // Best-effort jsonl cleanup after the DB rows are gone. cli-import rows mirror
+  // user-owned Claude CLI history, so attached nodes must never unlink source
+  // jsonl files even when they carry per-lineage claude_session_id values.
+  if (session && session.origin !== "cli-import" && claudeIdRows.length) {
     const cwd = sessionCwd(session.mode as Mode, session.workspacePath);
     for (const r of claudeIdRows) {
       try {

@@ -18,7 +18,14 @@ import {
   getSession,
   getRootResumeIdForNode,
   getParentResumeId,
+  setNodeResumeId,
 } from "@/lib/server/repo";
+import {
+  attachedLineageForNode,
+  buildPrefixJsonl,
+  hasOtherChild,
+  registerForkLineage,
+} from "@/lib/server/cli-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import { resolveBlobPath, isAllowedMime, isValidHash } from "@/lib/server/blobs";
 import { sessionCwd } from "@/lib/paths";
@@ -155,6 +162,9 @@ export async function POST(req: Request) {
   // D1: chat-mode system prompt, resolved the same way (new = from body,
   // everything else = from the locked session row). null = provider default.
   let resolvedSystemPrompt: string | null = null;
+  // CLI 同步：'native' | 'cli-import'。attached（cli-import）会话的续聊/分叉走
+  // lineage 解析（P2），其余 mode 走原生 resume。read from DB（branch 取 parentSession）。
+  let resolvedOrigin = "native";
   // Image attachments — supplied by client for root/branch, read from
   // DB for retry. Always normalized to NodeAttachment[] before going
   // into createNode args (so they land in attachments_json) and
@@ -256,6 +266,7 @@ export async function POST(req: Request) {
         parentSession && isMode(parentSession.mode) ? parentSession.mode : "chat";
       resolvedWorkspacePath = parentSession?.workspacePath ?? null;
       resolvedSystemPrompt = parentSession?.systemPrompt ?? null;
+      resolvedOrigin = parentSession?.origin ?? "native";
       createdEvent = { type: "created", node };
       questionForLLM = body.question;
     } else if (body.kind === "retry") {
@@ -327,12 +338,50 @@ export async function POST(req: Request) {
   // validation, the provider spawn, and cleanup must ALL use the same value.
   // sessionCwd centralizes the chat→scratch / workspace→bound mapping.
   const spawnCwd = sessionCwd(mode, resolvedWorkspacePath);
-  const claudeSessionId =
-    mode === "project"
-      ? getRootResumeIdForNode(nodeId, family, spawnCwd)
-      : chatBFork
-        ? getParentResumeId(nodeId, family, spawnCwd)
-        : null;
+  // attached CLI 会话（origin='cli-import'）的续聊/分叉走 lineage 解析（P2，
+  // progress/cli-branch-alignment-p2-spec.md）：从某 lineage 的 jsonl tip 且 X 在
+  // trellis 无其他子 → 线性 resume 该 lineage（append 同 jsonl）；否则（非 tip 或已有
+  // 子）→ buildPrefixJsonl 在 X 构造前缀 jsonl、resume 新 sid 成新 fork lineage。
+  // 仅 claude family（jsonl 是 claude 的）；codex/mock 在 attached 上不支持续聊。
+  let attachedHandled = false;
+  let claudeSessionId: string | null = null;
+  if (
+    resolvedOrigin === "cli-import" &&
+    body.kind === "branch" &&
+    family === "claude"
+  ) {
+    const branchFrom = body.parentNodeId;
+    const lin = attachedLineageForNode(branchFrom);
+    if (lin) {
+      attachedHandled = true;
+      if (lin.isJsonlTip && !hasOtherChild(branchFrom, nodeId)) {
+        claudeSessionId = lin.lineageSid; // 线性续：--resume 同 lineage，append 同 jsonl
+      } else {
+        const built = buildPrefixJsonl(branchFrom); // 任意点分叉
+        if (built) {
+          registerForkLineage(
+            trellisSessionId,
+            built.newSid,
+            built.jsonlPath,
+            branchFrom, // fork_point = X turn uuid
+          );
+          // 新节点归属新 fork lineage（reconcile 删临时节点后 canonical 会重得同值）。
+          setNodeResumeId(nodeId, family, built.newSid);
+          claudeSessionId = built.newSid;
+        } else {
+          claudeSessionId = lin.lineageSid; // 构造失败兜底线性
+        }
+      }
+    }
+  }
+  if (!attachedHandled) {
+    claudeSessionId =
+      mode === "project"
+        ? getRootResumeIdForNode(nodeId, family, spawnCwd)
+        : chatBFork
+          ? getParentResumeId(nodeId, family, spawnCwd)
+          : null;
+  }
 
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
   // We start the run with its own AbortController; HTTP disconnect only
@@ -349,13 +398,15 @@ export async function POST(req: Request) {
     nodeId,
     // chat B-fork writes the forked id to THIS node (per-node); project writes
     // the root-shared id on its first turn only; codex/mock/window persist none.
-    sessionIdTarget: chatBFork
-      ? "node"
-      : mode === "project"
-        ? claudeSessionId
-          ? undefined
-          : "root"
-        : undefined,
+    sessionIdTarget: attachedHandled
+      ? undefined
+      : chatBFork
+        ? "node"
+        : mode === "project"
+          ? claudeSessionId
+            ? undefined
+            : "root"
+          : undefined,
     resumeFamily: family,
     interactive,
     factory: (signal, ctx) =>

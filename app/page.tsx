@@ -19,6 +19,7 @@ import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
 import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
+import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
 import { SIDEBAR_W } from "@/lib/workbench-layout";
 
 export default function Home() {
@@ -34,6 +35,7 @@ export default function Home() {
   useUnreadNavigation();
   useNodeKeyboardNav();
   useReconnectStreams();
+  useCliSyncEvents();
   // Wave 4: one app-level /api/runs poll feeds running + unread badges to
   // both the tab strip and the sidebar (no per-component intervals).
   useRunPolling();

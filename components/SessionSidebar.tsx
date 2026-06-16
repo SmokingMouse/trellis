@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { RunSpinner } from "@/components/RunSpinner";
+import { CliAttachPicker } from "@/components/CliAttachPicker";
 import { SIDEBAR_W } from "@/lib/workbench-layout";
 import type { Session } from "@/lib/types";
 
@@ -40,6 +41,9 @@ export function SessionSidebar() {
   const runningIds = useSessionStore((s) => s.runningSessionIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
   const unarchiveSession = useSessionStore((s) => s.unarchiveSession);
+  const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
+  const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
+  const [attachOpen, setAttachOpen] = useState(false);
 
   // Zero-latency running state for the active session (derive from live nodes
   // rather than waiting for the /api/runs poll); non-active rows use the poll.
@@ -130,6 +134,7 @@ export function SessionSidebar() {
             preview={s.id === previewId}
             running={isRunning(s.id)}
             unread={unreadIds.has(s.id)}
+            live={liveSessionIds.has(s.id)}
             editing={editingId === s.id}
             onPreview={() => previewSession(s.id)}
             onPin={() => pinSession(s.id)}
@@ -178,6 +183,16 @@ export function SessionSidebar() {
           </svg>
         </button>
       </div>
+
+      {/* CLI 同步：attach 本机 Claude Code 会话（双向）。 */}
+      <button
+        onClick={() => setAttachOpen(true)}
+        title="把本机 Claude Code CLI 会话 attach 进来（双向同步）"
+        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-stone-300 dark:border-stone-700 text-[11.5px] text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
+      >
+        <span aria-hidden>⇄</span>
+        Attach CLI 会话
+      </button>
 
       <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 ? (
@@ -248,6 +263,12 @@ export function SessionSidebar() {
 
   return (
     <>
+      {attachOpen && (
+        <CliAttachPicker
+          onClose={() => setAttachOpen(false)}
+          onChanged={bumpSessionsRevision}
+        />
+      )}
       {/* ── Desktop rail ── permanent, pushes content via --trellis-sb. ── */}
       {sidebarOpen ? (
         <aside
@@ -297,6 +318,7 @@ function SidebarRow({
   preview,
   running,
   unread,
+  live,
   editing,
   onPreview,
   onPin,
@@ -311,6 +333,7 @@ function SidebarRow({
   preview: boolean;
   running: boolean;
   unread: boolean;
+  live: boolean;
   editing: boolean;
   onPreview: () => void;
   onPin: () => void;
@@ -396,6 +419,27 @@ function SidebarRow({
         >
           {session.title}
         </span>
+      )}
+
+      {/* CLI 同步：attach 的会话标个 CLI 角标（双向绑定）。正被 claude 实时驱动时
+          换成「● live」脉冲（remote-control 式感知）。 */}
+      {session.origin === "cli-import" && !editing && (
+        live ? (
+          <span
+            className="shrink-0 inline-flex items-center gap-1 text-[8.5px] font-semibold px-1 py-px rounded bg-emerald-500 text-white group-hover:hidden"
+            title="正被一个活的 claude 进程实时驱动"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            live
+          </span>
+        ) : (
+          <span
+            className="shrink-0 text-[8.5px] font-semibold px-1 py-px rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 group-hover:hidden"
+            title="已 attach 的本机 CLI 会话（双向同步）"
+          >
+            CLI
+          </span>
+        )
       )}
 
       {/* Running label — the sidebar row is wide enough to spell it out. */}

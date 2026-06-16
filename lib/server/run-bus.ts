@@ -68,6 +68,9 @@ export type RunEvent =
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
+  // CLI 同步 Stage 2：attach 会话续聊完，身份对账把临时节点换成 canonical jsonl-uuid
+  // 节点后，让客户端重载该 session 拿到正确 id（详见 progress/cli-sync.md）。
+  | { type: "reload_session"; sessionId: string }
   // Stage 17: tool visualization. tool_call_start fires when claude
   // emits a tool_use block; tool_call_done fires when the matching
   // tool_result arrives. Both ride the same bus as deltas, so the
@@ -538,6 +541,21 @@ async function runLoop(
         }
       } catch {
         /* best-effort */
+      }
+    }
+
+    // CLI 同步 Stage 2：若这轮跑在 attach 的 CLI 会话上，续聊已写回真实 jsonl。
+    // 做身份对账（删临时节点、让 canonical jsonl-uuid 节点接管），再让客户端重载。
+    // 动态 import 避免 run-bus（核心）静态依赖 cli 同步（feature）层。
+    if (stoppedWith === "done") {
+      try {
+        const { reconcileAttachedTurn } = await import("./cli-import-db");
+        const reloadSessionId = await reconcileAttachedTurn(args.nodeId);
+        if (reloadSessionId) {
+          broadcast(state, { type: "reload_session", sessionId: reloadSessionId });
+        }
+      } catch {
+        /* 对账失败不影响主流程；临时节点保留，watcher 兜底 */
       }
     }
 

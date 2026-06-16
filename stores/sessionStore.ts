@@ -262,6 +262,14 @@ type State = {
   // Bumps every time the server's session list might have changed —
   // SessionPicker watches this to refetch.
   sessionsRevision: number;
+  // Force every session-list consumer (sidebar / tabs) to refetch. Used by
+  // the CLI attach picker after attach/detach changes the session set.
+  bumpSessionsRevision: () => void;
+  // CLI 同步「live 感知」：正被一个活的 claude 进程实时写的 attached 会话集合。
+  // 信号 = SSE session_updated 事件（持续写 = 持续 live），收到就 markSessionLive
+  // 续期 LIVE_TTL_MS；停写后自动褪去。给侧栏一个 remote-control 式的「● live」脉冲。
+  liveSessionIds: Set<string>;
+  markSessionLive: (sessionId: string) => void;
   // Layer 3: when true, render NodeFullView in place of canvas. Mobile
   // defaults this to true after hydrate; desktop opts in via the expand
   // button on a canvas card.
@@ -531,6 +539,10 @@ type Actions = {
 // becomes known once the server emits `created`, so we register inside
 // handleStreamEvent's created branch.
 const STREAM_CONTROLLERS = new Map<string, AbortController>();
+// CLI 同步 live 感知：每个 session 的「褪去」定时器 + live 续期窗口。模块级（不进
+// React state），markSessionLive 收到新事件就清旧定时器、重置 TTL。
+const LIVE_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
+const LIVE_TTL_MS = 12_000;
 // Insertion-ordered list — last entry is the most recently started stream.
 // Map.keys() preserves insertion order so we don't need a separate array.
 
@@ -565,6 +577,31 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   historyDepth: DEFAULT_HISTORY_DEPTH,
   chatEnhanced: false,
   sessionsRevision: 0,
+  bumpSessionsRevision: () =>
+    set((s) => ({ sessionsRevision: s.sessionsRevision + 1 })),
+  liveSessionIds: new Set<string>(),
+  markSessionLive: (sessionId) => {
+    const prev = LIVE_TIMERS.get(sessionId);
+    if (prev) clearTimeout(prev);
+    LIVE_TIMERS.set(
+      sessionId,
+      setTimeout(() => {
+        LIVE_TIMERS.delete(sessionId);
+        set((s) => {
+          if (!s.liveSessionIds.has(sessionId)) return s;
+          const next = new Set(s.liveSessionIds);
+          next.delete(sessionId);
+          return { liveSessionIds: next };
+        });
+      }, LIVE_TTL_MS),
+    );
+    set((s) => {
+      if (s.liveSessionIds.has(sessionId)) return s;
+      const next = new Set(s.liveSessionIds);
+      next.add(sessionId);
+      return { liveSessionIds: next };
+    });
+  },
   fullScreen: false,
   fetchProgress: {},
   pendingScrollAnchor: null,
@@ -1841,10 +1878,14 @@ type StreamEvent =
         output: number;
         cacheRead: number;
         cacheCreation: number;
+        contextTokens?: number | null;
       };
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
+  // CLI 同步 Stage 2：attach 会话续聊后服务端做了身份对账（临时节点 → canonical
+  // jsonl-uuid 节点），通知客户端重载该 session 拿正确的节点 id。
+  | { type: "reload_session"; sessionId: string }
   // Stage 17 (durable streams): emitted by /api/nodes/[id]/stream when a
   // reconnecting subscriber joins an in-flight run. The payload is the
   // server's authoritative response-so-far + current status + tool call
@@ -2028,6 +2069,12 @@ function handleStreamEvent(
           nodes: { ...s.nodes, [id]: { ...n, topicLabel: event.label } },
         };
       });
+    } else if (event.type === "reload_session") {
+      // CLI 同步 Stage 2：服务端把临时续聊节点换成了 canonical jsonl-uuid 节点。
+      // 只在它就是当前 active session 时重载（否则下次切过去 loadSession 自然拿新的）。
+      if (get().session?.id === event.sessionId) {
+        void get().loadSession(event.sessionId);
+      }
     } else if (event.type === "catchup" && currentNodeId) {
       // Reconnect path: server-authoritative snapshot of where the run
       // is right now. Overwrite the response + toolCalls and reset the

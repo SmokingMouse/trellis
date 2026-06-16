@@ -9,10 +9,15 @@ const DB_PATH = path.join(DB_DIR, "data.db");
 
 let _db: Database.Database | null = null;
 
+function dbPath(): string {
+  return process.env.TRELLIS_DB_PATH || DB_PATH;
+}
+
 export function getDB(): Database.Database {
   if (_db) return _db;
-  fs.mkdirSync(DB_DIR, { recursive: true });
-  const db = new Database(DB_PATH);
+  const file = dbPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   migrate(db);
@@ -176,6 +181,58 @@ function migrate(db: Database.Database) {
     db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
   }
 
+  // CLI session 同步（progress/cli-sync.md）。一个 session 的来源：
+  //   'native'     — trellis 自己造的（默认，所有既有行）
+  //   'cli-import' — 从 ~/.claude/projects 的本地 CLI jsonl 镜像来的（只读）
+  // source_jsonl_path = 镜像源 jsonl 绝对路径；synced_uuid = 上次同步到的末行
+  // uuid（增量游标，watcher 据此只重解析新增部分）。后两者 native 行恒 NULL。
+  const cliSyncCols: { name: string; sql: string }[] = [
+    {
+      name: "origin",
+      sql: "ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'native'",
+    },
+    {
+      name: "source_jsonl_path",
+      sql: "ALTER TABLE sessions ADD COLUMN source_jsonl_path TEXT",
+    },
+    {
+      name: "synced_uuid",
+      sql: "ALTER TABLE sessions ADD COLUMN synced_uuid TEXT",
+    },
+  ];
+  for (const c of cliSyncCols) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = ?")
+      .get(c.name);
+    if (!has) db.exec(c.sql);
+  }
+
+  // CLI branch alignment P1: one attached trellis session can bind a whole
+  // lineage of Claude CLI jsonl files (root + fork sessions). The old
+  // sessions.source_jsonl_path remains a denormalized root path; this table is
+  // the authoritative member list and carries per-jsonl sync cursors.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cli_lineages (
+      trellis_session_id TEXT NOT NULL,
+      claude_session_id TEXT NOT NULL,
+      jsonl_path TEXT NOT NULL,
+      fork_point_uuid TEXT,
+      is_root INTEGER NOT NULL DEFAULT 0,
+      synced_uuid TEXT,
+      PRIMARY KEY (trellis_session_id, claude_session_id),
+      FOREIGN KEY (trellis_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS cli_lineages_session ON cli_lineages(trellis_session_id);
+  `);
+  db.exec(`
+    INSERT OR IGNORE INTO cli_lineages
+      (trellis_session_id, claude_session_id, jsonl_path, fork_point_uuid, is_root, synced_uuid)
+    SELECT id, id, source_jsonl_path, NULL, 1, synced_uuid
+    FROM sessions
+    WHERE origin = 'cli-import'
+      AND source_jsonl_path IS NOT NULL
+  `);
+
   // Idempotent column add for short LLM-generated topic label per node.
   // Used by overview rendering (LoD) and outline. Null until first done.
   const hasTopicLabel = db
@@ -312,6 +369,16 @@ function migrate(db: Database.Database) {
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS notes_session ON notes(session_id);
+  `);
+
+  // CLI session 同步（Stage B，progress/cli-sync.md）：用户 opt-in 的 ~/.claude/
+  // projects 子目录白名单。watcher 启动时 bulk 导入这些目录里的（非 trellis 自有）
+  // jsonl，并 fs.watch 增量同步。删一条只停止同步、不删已镜像的 session。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cli_sync_dirs (
+      path TEXT PRIMARY KEY,
+      added_at INTEGER NOT NULL
+    );
   `);
 
   // Stage 16: FTS5 cross-session full-text search. Single virtual table

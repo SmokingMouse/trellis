@@ -156,6 +156,10 @@ export type Session = {
   // Per-session model lock (ProviderId string). null = legacy row → the
   // client falls back to its global default. Set at creation, editable.
   model: string | null;
+  // CLI 同步：'native' | 'cli-import'（attach 的本机 CLI 会话，双向绑定）。
+  origin?: string;
+  // cli-import 的源 jsonl 路径（UI 提示 / detach 用），否则 null。
+  sourceJsonlPath?: string | null;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while
