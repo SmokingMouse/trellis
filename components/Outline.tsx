@@ -118,7 +118,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
             i > 0 ? "mt-1.5 pt-1.5 border-t border-stone-100 dark:border-stone-800" : undefined
           }
         >
-          <TreeRow node={t} depth={0} indices={indices} unreadOnly={unreadOnly} />
+          <TreeRow node={t} branchDepth={0} isBranch={false} indices={indices} unreadOnly={unreadOnly} />
         </div>
       ))}
     </>
@@ -162,12 +162,17 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
 
 function TreeRow({
   node,
-  depth,
+  branchDepth,
+  isBranch,
   indices,
   unreadOnly,
 }: {
   node: TreeNode;
-  depth: number;
+  // 缩进按「祖先分叉点个数」而非「轮数」——线性段全部平铺(branchDepth 不变)，
+  // 只有真分叉(父节点 >1 子)才让子代缩进一级。避免线性长聊变成跑出面板的楼梯。
+  branchDepth: number;
+  // 本节点是否是分叉子(父节点有多个子)——决定是否画 ↳ 标记。
+  isBranch: boolean;
   indices: Record<string, number>;
   unreadOnly: boolean;
 }) {
@@ -201,7 +206,7 @@ function TreeRow({
             ? "bg-indigo-50 dark:bg-indigo-950/50"
             : "hover:bg-stone-50 dark:hover:bg-stone-800/60"
         }`}
-        style={{ paddingLeft: `${4 + depth * 12}px` }}
+        style={{ paddingLeft: `${4 + branchDepth * 12}px` }}
       >
         {hasChildren ? (
           <button
@@ -245,7 +250,7 @@ function TreeRow({
             isReference ? node.reference?.sourceUri ?? undefined : node.question
           }
         >
-          {depth > 0 && (
+          {isBranch && (
             <span className="text-stone-400 dark:text-stone-500">↳</span>
           )}
           {index ? (
@@ -304,7 +309,9 @@ function TreeRow({
           <TreeRow
             key={c.id}
             node={c}
-            depth={depth + 1}
+            // 只有当前节点是真分叉(>1 子)时子代才缩进一级；线性单子保持同级平铺。
+            branchDepth={branchDepth + (node.children.length > 1 ? 1 : 0)}
+            isBranch={node.children.length > 1}
             indices={indices}
             unreadOnly={unreadOnly}
           />

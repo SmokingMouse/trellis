@@ -111,6 +111,14 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 43 (2026-06-17)
+- **用户反馈**: 画布节点重叠 + 长线性 project 聊天的大纲「层层缩进楼梯」别扭（project 基本线性，树是过度抽象）。选了交互方向 **C·线性 thread 主视图 + 树缩略图**（分两增量做）。
+- **Done（增量 1：两个 bug，已浏览器验）**:
+  - **大纲缩进按「分叉深度」而非「轮数」**（`Outline.tsx`）：TreeRow 用 `branchDepth`(=祖先分叉点数) 取代 `depth`，子代仅当父 >1 子才 +1；`↳` 仅分叉子显示。线性段全平铺。
+  - **画布重叠修**（`layout.ts`）：compact 模式原固定 90px 且忽略实测高度，但 streaming/error 节点仍渲染 600px 全卡（`ChatNode: showCompact=isCompact&&!streaming&&!error`）→ 被当 90px 摆放压住下方。改为 compact 下当实测高度 >90 时按实测留位（保持普通 compact 卡统一打包）。
+  - **验证**: tsc ✓；快照 DB 起隔离 dev server + agent-browser 实测真实「Analyze WeChat」会话(24 轮纯线性)：大纲 50 行**全 paddingLeft=4px 平铺**(原会得楼梯到 ~600px)；画布 25 节点 **0 重叠**。环境/快照已清。
+- **Next（增量 2，主菜）**: LinearThreadView 线性主视图（活跃 lineage 纵向 chat thread，分叉折成行内「↳N 分支」可展开）+ 原图状画布缩为侧边树缩略图导航 + project 默认线性视图。待设计落地。
+
 ### Session 42 (2026-06-17)
 - **Done**: **「在 CLI 继续」轻量入口**（project 会话本就是真 claude CLI 会话，给可粘贴的续聊命令）。`cli-fork.ts` 加 `cliResumeForNode(nodeId)`：project 模式下，attached(cli-import) 取该节点 lineage sid（验源 jsonl 在盘）、native 走 `getRootResumeIdForNode`（自带 jsonl 存在性自愈），返回 `{cwd, resumeId}`，非 project/缺盘→null。新 `GET /api/nodes/[id]/cli-resume` 返回 `{resumable, command}`（`cd '<ws>' && claude --resume <id>`，cwd 单引号转义）。新 `CliResumeButton`（仅 project 模式渲染，点击 fetch+复制命令，不可续显「盘上找不到」）挂 NodeFullView 动作行。续到的是该 lineage 主链 tip（树内分叉的「CLI 续任意分支」需 P2 前缀 jsonl，本入口不含——已记 spec）。
 - **验证**: tsc ✓ + `npm run build` ✓（`/api/nodes/[id]/cli-resume` 注册）。隔离 dev server 实测：attach 真会话 → `GET cli-resume` root 返回正确 `cd … && claude --resume <sid>`、坏节点 `resumable:false`；真跑生成的命令 `claude --resume` 被接受（无 "No conversation found"）。环境/产物全清。

@@ -46,11 +46,19 @@ export function layoutNodes(
   });
   g.setDefaultEdgeLabel(() => ({}));
 
-  // Compact mode ignores measured heights — every card is the same compact
-  // size, so dagre packs them uniformly. Full mode honors measurements so
-  // long answers don't overlap shorter siblings.
-  const heightFor = (id: string) =>
-    compact ? NH_DEFAULT : (measuredHeights?.get(id) ?? NH_DEFAULT);
+  // Full mode honors measurements so long answers don't overlap shorter
+  // siblings. Compact mode normally packs uniformly at NH_DEFAULT — BUT a
+  // streaming/error node still renders as the full 600px card even on a
+  // compact canvas (ChatNode: showCompact = isCompact && !isStreaming &&
+  // !isError). If we reserved only the compact 90px for it, the node below
+  // overlaps it. So in compact mode honor the measured height when it's
+  // TALLER than the compact default (= a not-actually-compact card), while
+  // keeping uniform packing for genuinely compact cards.
+  const heightFor = (id: string) => {
+    if (!compact) return measuredHeights?.get(id) ?? NH_DEFAULT;
+    const m = measuredHeights?.get(id);
+    return m && m > NH_DEFAULT ? m : NH_DEFAULT;
+  };
 
   for (const n of nodes) {
     g.setNode(n.id, { width: NW, height: heightFor(n.id) });
