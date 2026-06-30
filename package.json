@@ -35,5 +35,8 @@
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "trustedDependencies": [
+    "agent-gateway"
+  ]
 }
