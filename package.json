@@ -11,7 +11,7 @@
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
-    "agent-gateway": "file:../../agent-gateway",
+    "agent-gateway": "github:SmokingMouse/agent-gateway",
     "better-sqlite3": "^12.9.0",
     "highlight.js": "^11.11.1",
     "html-to-image": "^1.11.13",
