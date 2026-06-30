@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-teal.svg?style=for-the-badge" alt="License" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" /></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-%3E%3D1.1-f9f1e1?style=for-the-badge&logo=bun&logoColor=black" alt="Bun" /></a>
   <img src="https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <a href="https://github.com/SmokingMouse/trellis/stargazers"><img src="https://img.shields.io/github/stars/SmokingMouse/trellis?style=for-the-badge&color=f5a623" alt="GitHub Stars" /></a>
@@ -202,7 +202,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 
 ### 前置依赖
 
-- Node.js 20+ 和 npm
+- [Bun](https://bun.sh) v1.1+
 - 至少装一个 LLM CLI（Trellis 不直接打 API，是 spawn 本机 CLI）：
   - [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)：`npm i -g @anthropic-ai/claude-code` → `claude` 可用并已登录
   - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成登录
@@ -213,8 +213,8 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 ```bash
 git clone https://github.com/SmokingMouse/trellis.git
 cd trellis
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 打开 http://localhost:3000，第一次输入问题即创建 session。想 attach 已有 CLI 会话：左侧 sidebar →「Attach CLI 会话」。
@@ -222,8 +222,8 @@ npm run dev
 ### 生产构建
 
 ```bash
-npm run build
-npm run start -- -p 3088
+bun run build
+bun run start -- -p 3088
 ```
 
 数据落 `~/.trellis/data.db`（SQLite WAL，自动迁移）。卸载只需删掉这个目录。

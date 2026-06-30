@@ -1,5 +1,5 @@
 import "server-only";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -7,25 +7,25 @@ import fs from "node:fs";
 const DB_DIR = path.join(os.homedir(), ".trellis");
 const DB_PATH = path.join(DB_DIR, "data.db");
 
-let _db: Database.Database | null = null;
+let _db: Database | null = null;
 
 function dbPath(): string {
   return process.env.TRELLIS_DB_PATH || DB_PATH;
 }
 
-export function getDB(): Database.Database {
+export function getDB(): Database {
   if (_db) return _db;
   const file = dbPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   _db = db;
   return db;
 }
 
-function migrate(db: Database.Database) {
+function migrate(db: Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
