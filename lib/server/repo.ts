@@ -2,7 +2,7 @@ import "server-only";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
@@ -254,7 +254,7 @@ function rowToSession(r: SessionRow): ApiSession {
 type FtsKind = "node_question" | "node_response" | "node_reference" | "note";
 
 function ftsUpsert(
-  db: Database.Database,
+  db: Database,
   kind: FtsKind,
   sourceId: string,
   sessionId: string,
@@ -272,7 +272,7 @@ function ftsUpsert(
 }
 
 function ftsDeleteByIds(
-  db: Database.Database,
+  db: Database,
   sourceIds: string[],
 ): void {
   if (sourceIds.length === 0) return;
@@ -283,7 +283,7 @@ function ftsDeleteByIds(
 }
 
 function ftsDeleteBySession(
-  db: Database.Database,
+  db: Database,
   sessionId: string,
 ): void {
   db.prepare("DELETE FROM search_index WHERE session_id = ?").run(sessionId);

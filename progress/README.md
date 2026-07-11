@@ -124,6 +124,14 @@
 - **Caveat**: `onCanUseTool` 交互式工具协议（AskUserQuestion/ExitPlanMode 表单）在第三方模型下未专门用真实交互场景触发验证，但 workspace 模式下的真实 Bash tool_call 已间接证明该协议在第三方端点下能正常收发（`--permission-prompt-tool stdio` 是 CLI 本地机制，不依赖远端模型侧的特殊支持）。`/model` 命令面板的动态 catalog resolve 只过了 tsc/build，未浏览器实测交互手感。
 - **Next**: 浏览器实测 `/model` 命令面板动态 catalog + ModelPicker 置灰交互；若要收尾 agent-gateway 独立仓库（留着不维护 vs 删除）是用户的决定，本轮不动。
 
+- **Done（同日续，合并进 main）**: 上面全是在 npm 分支（旧 `agent-gateway` file: 依赖已损坏）上做的，`git merge main` 时发现 **main 早已独立完成 bun 迁移**（`better-sqlite3`→`bun:sqlite`、删 `package-lock.json`、`agent-gateway` 改 `github:` 引用可直接装）——两条线互不知情地各自"修好了 agent-gateway 问题"，用不同手段。拍板方案：改成 bun 跟main对齐，不留 npm/bun 双版本。合并冲突（`package.json`/`next.config.ts`/`README.md`）手动逐一解决，`progress/README.md` 自动合并无冲突。
+  - **两个 bun 特有的坑，均已修复并固化进 `Makefile`（`relink-sdk` target + `--bun` flag），非一次性手工绕过**：
+    1. **bun 的 `file:` 依赖不是单层软链**（npm 那样），而是给依赖目录本身建**真实目录**、目录内**每个文件单独软链**回源。Turbopack 生产构建的 package.json 解析器吃不下这种结构（`Error: package.json is not parseable: invalid JSON: a redirect can't be parsed as json`），跟 `turbopack.root` 设多宽无关（窄/宽两种都试过，都复现）。修法：`bun install` 后用 `make relink-sdk`（内联在 `make setup` 里）把 `node_modules/@sm/{agent,llm}` 换成单层目录软链（跟 npm 产物同形），问题消失。**这条 Verified Fact 对任何未来往 trellis 加 `file:` 依赖的场景都成立**，不是本次特例。
+    2. **`bun run dev/build/start` 不会让 Next/Turbopack 内部 spawn 的 worker 进程也跑在 bun 运行时下**，导致 `lib/server/sqlite.ts` 的 `bun:sqlite`（bun 内置模块）在 worker 里解析不到而崩。必须用 `bun --bun run ...`（`--bun` 强制递归子进程也走 bun runtime）。`Makefile` 的 `dev`/`build`/`start` target 已经这么写。
+    3. （顺手验证过、非 bug）家目录下有个无关的旧 `~/package-lock.json`（大概率某次误在 home 目录跑过 `npm init`）——一度怀疑是 Turbopack root 自动推断选错根的原因，实测确认**不是**（挪走/放回结果一样），Turbopack 的自动推断仍不可靠，所以显式钉 `turbopack.root` 是必须的，不是可选优化。
+  - **验证**：`rm -rf node_modules .next && make setup` 全自动跑通（clone/pull `~/sdk` → build → 装依赖 → relink → 前置检查全绿）；`make build` 全量过；`make dev` 起服务后 `curl /api/providers` + 真实 `deepseek:deepseek-v4-flash` chat 消息全走通（`bun --bun` 下 `bun:sqlite` 正常）。测试 session 已删。
+  - **Commit**：`~/sdk` 在 `main` 直接提交（无分支问题）；trellis 在 `SmokingMouse/goosefish` 上先 checkpoint 提交 npm 版本，再 `git merge main` 解冲突改 bun，尚未 fast-forward `main`/push（用户要求先不 push，本地完成即可）。
+
 ### Session 43 (2026-06-17)
 - **用户反馈**: 画布节点重叠 + 长线性 project 聊天的大纲「层层缩进楼梯」别扭（project 基本线性，树是过度抽象）。选了交互方向 **C·线性 thread 主视图 + 树缩略图**（分两增量做）。
 - **Done（增量 1：两个 bug，已浏览器验）**:

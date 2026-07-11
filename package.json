@@ -13,7 +13,6 @@
     "@sm/agent": "file:/Users/smokingmouse/sdk/packages/agent",
     "@sm/llm": "file:/Users/smokingmouse/sdk/packages/llm",
     "@xyflow/react": "^12.10.2",
-    "better-sqlite3": "^12.9.0",
     "highlight.js": "^11.11.1",
     "html-to-image": "^1.11.13",
     "next": "16.2.4",
@@ -28,7 +27,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "^1.3.14",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

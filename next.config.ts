@@ -3,22 +3,32 @@ import os from "node:os";
 
 const isDev = process.env.NODE_ENV !== "production";
 
+// @sm/agent + @sm/llm are `file:` dependencies pointing at ~/sdk (absolute
+// path, outside this project dir entirely — not even a sibling).
+//
+// bun's default `file:` linking is NOT a single top-level symlink like npm's
+// — it creates a real directory in node_modules but symlinks every individual
+// file inside it back to the source (see Makefile's `patch-deps`/`relink-sdk`
+// step, which normalizes this to one clean top-level symlink per package,
+// same shape npm used to produce). Turbopack's production-build file tracer
+// cannot parse a per-file-symlinked package.json (`Error: package.json is
+// not parseable: invalid JSON: a redirect can't be parsed as json`) — this
+// bites even with root scoped correctly, it's specifically about the
+// per-file symlink shape, not root breadth. The single-symlink normalization
+// is the actual fix; this `root` setting is the second, independent half —
+// Turbopack only follows symlinks *within* its configured root, and the
+// symlink targets (~/sdk) sit outside this project dir, so root needs to be
+// a common ancestor.
+const projectRoot = os.homedir();
+
 // Allow tunneled dev (e.g. Cloudflare Tunnel, ngrok) to reach next dev.
 // Set TRELLIS_DEV_ORIGIN=your.host.example to whitelist a custom origin.
 const devOrigin = process.env.TRELLIS_DEV_ORIGIN;
 
 const nextConfig: NextConfig = {
   ...(devOrigin ? { allowedDevOrigins: [devOrigin] } : {}),
-  // @sm/agent + @sm/llm are `file:` dependencies pointing at ~/sdk (absolute
-  // path, outside this project dir entirely — not even a sibling). npm links
-  // them as symlinks whose targets sit outside this project dir. Turbopack
-  // only follows symlinks within its workspace root, so point the root at a
-  // common ancestor of trellis and ~/sdk — otherwise `import ... from
-  // "@sm/agent"` fails to resolve at build time whenever node_modules holds
-  // the symlink (which any `npm install` recreates). Lets npm's natural
-  // linking stay harmless.
   turbopack: {
-    root: os.homedir(),
+    root: projectRoot,
   },
   // Codex SDK uses createRequire(import.meta.url) at runtime to resolve the
   // platform-specific CLI binary. Bundling breaks that resolution. Keep it
