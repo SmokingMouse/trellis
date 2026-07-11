@@ -1,24 +1,26 @@
 // Client-safe provider metadata. No Node-only imports here.
-export type ProviderId =
-  | "mock"
-  | "claude-sonnet"
-  | "claude-opus"
-  | "claude-haiku"
-  | "codex";
+//
+// ProviderId used to be a closed union of 5 literals. It's now widened to a
+// plain string: the real catalog is sourced live from ~/.claude/global/
+// endpoints.yaml (via @sm/llm, server-only — see app/api/providers/route.ts)
+// and can contain arbitrary "<provider>:<model>" composite ids (e.g.
+// "deepseek:deepseek-v4-flash"), not just the 3 hardcoded Claude tiers. The
+// legacy literals ("claude-opus"/"claude-sonnet"/"claude-haiku"/"codex"/
+// "mock") remain valid values of this wider type — they still resolve
+// correctly server-side (see lib/llm/server.ts, lib/llm/sdk-adapter.ts).
+export type ProviderId = string;
 
 export type ProviderInfo = {
   id: ProviderId;
   label: string;
   shortLabel: string;
   note?: string;
+  hasKey?: boolean;
 };
 
-// Candidate list shown in the picker. Collapsed to three: Codex / Claude / Mock.
-// "Claude" maps to opus (the single Claude tier we offer). The legacy
-// claude-sonnet / claude-haiku ids stay valid in the ProviderId *type* (the
-// backend still understands them) but are no longer selectable — any stored
-// preference pointing at them fails isProviderId() and migrates to the
-// DEFAULT_PROVIDER (opus) on next load.
+// Static fallback shown in the picker before the live catalog (GET
+// /api/providers) has loaded, and if that fetch ever fails. Not the source
+// of truth — see stores/sessionStore.ts's providerCatalog.
 export const PROVIDERS: ProviderInfo[] = [
   { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex" },
   { id: "claude-opus", label: "Claude (Opus 4.7)", shortLabel: "Claude" },
@@ -27,8 +29,14 @@ export const PROVIDERS: ProviderInfo[] = [
 
 export const DEFAULT_PROVIDER: ProviderId = "claude-opus";
 
+// Structural check only (non-empty string) — the live catalog isn't
+// synchronously available at this module's import time (it needs node:fs,
+// and this file is explicitly client-safe/Node-free). Real validity is
+// enforced server-side when the id is actually resolved to a backend (see
+// ClaudeBackend's model resolution in @sm/agent) — an unknown/stale id
+// surfaces as a chat error there instead of being silently rejected here.
 export function isProviderId(s: unknown): s is ProviderId {
-  return typeof s === "string" && PROVIDERS.some((p) => p.id === s);
+  return typeof s === "string" && s.length > 0;
 }
 
 // Resume ids are provider-family-scoped: a codex CLI session can only be
@@ -39,15 +47,15 @@ export type ProviderFamily = "claude" | "codex" | "mock";
 export function providerFamily(id: ProviderId): ProviderFamily {
   if (id === "codex") return "codex";
   if (id === "mock") return "mock";
-  return "claude"; // claude-opus / claude-sonnet / claude-haiku
+  return "claude"; // every other id (legacy tiers + endpoints.yaml ids) routes through the claude CLI shell
 }
 
 // Per-model context window (tokens) — the denominator for the 🧠 context-
 // occupancy %. The CLI's stream carries no window field (the init event has
-// none), so this is a best-guess lookup keyed by the current provider. This
-// setup runs Claude on the 1M tier (the opus family carries the [1m] marker),
-// so opus/sonnet use 1M; haiku stays 200K. Adjust here if your tier differs —
-// a wrong window only skews the % readout, nothing functional.
+// none), so this is a best-guess lookup. endpoints.yaml has no real context-
+// window data for third-party models, so unrecognized ids fall back to a
+// generic guess — this is purely cosmetic (wrong window only skews the %
+// readout, nothing functional).
 export function contextWindowFor(id: ProviderId): number {
   switch (id) {
     case "claude-opus":
@@ -59,5 +67,7 @@ export function contextWindowFor(id: ProviderId): number {
       return 400_000;
     case "mock":
       return 200_000;
+    default:
+      return id.includes("[1m]") ? 1_000_000 : 128_000;
   }
 }

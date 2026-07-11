@@ -202,19 +202,31 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 
 ### 前置依赖
 
-- Node.js 20+ 和 npm
+- Node.js 20+、npm、[Bun](https://bun.sh)（构建 `~/sdk` 用）
 - 至少装一个 LLM CLI（Trellis 不直接打 API，是 spawn 本机 CLI）：
   - [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)：`npm i -g @anthropic-ai/claude-code` → `claude` 可用并已登录
   - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成登录
 - 完全不装 CLI 也能启动——provider picker 选 `Mock`，返回固定假回复，仅用于看 UI
+
+Trellis 的 LLM/CLI 运行时层来自独立仓库 [`sm-toolkit`](https://github.com/SmokingMouse/sm-toolkit)（`@sm/agent` + `@sm/llm`），以 `file:` 依赖指向本机的 `~/sdk`。`make setup` 会自动 clone/build 它、把 `package.json` 里的路径对齐到本机实际位置，再装 trellis 自己的依赖——一条命令搞定，不用手动两步走。
 
 ### 跑起来
 
 ```bash
 git clone https://github.com/SmokingMouse/trellis.git
 cd trellis
-npm install
-npm run dev
+make setup   # clone/build ~/sdk（sm-toolkit）+ 对齐依赖路径 + npm install + 前置检查
+make dev
+```
+
+`~/sdk` 已经存在但不在默认位置？`make setup SDK_HOME=/your/path`。只想看当前环境缺什么、不装任何东西：`make check`。不想用 Makefile 也行，手动等价于：
+
+```bash
+git clone https://github.com/SmokingMouse/sm-toolkit.git ~/sdk
+cd ~/sdk && bun install && bunx tsc --build --force
+cd ../trellis
+# package.json 里的 "@sm/agent"/"@sm/llm" 两行 file: 路径需指向你实际的 ~/sdk
+npm install && npm run dev
 ```
 
 打开 http://localhost:3000，第一次输入问题即创建 session。想 attach 已有 CLI 会话：左侧 sidebar →「Attach CLI 会话」。
@@ -224,6 +236,7 @@ npm run dev
 ```bash
 npm run build
 npm run start -- -p 3088
+# 等价：make build && make start（start 固定 -p 3088）
 ```
 
 数据落 `~/.trellis/data.db`（SQLite WAL，自动迁移）。卸载只需删掉这个目录。

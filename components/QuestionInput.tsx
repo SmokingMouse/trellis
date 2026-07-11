@@ -71,6 +71,7 @@ export function QuestionInput() {
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setProvider = useSessionStore((s) => s.setProvider);
+  const providerCatalog = useSessionStore((s) => s.providerCatalog);
   // Transient note when a command no-ops (e.g. /clear with no session) or
   // /model echoes its usage. Cleared on the next keystroke.
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
@@ -105,6 +106,7 @@ export function QuestionInput() {
     setSearchOpen,
     setComposeRootOpen,
     setProvider,
+    providerCatalog,
   };
 
   const submit = async () => {

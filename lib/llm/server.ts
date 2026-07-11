@@ -15,13 +15,13 @@ export function getProvider(
   switch (id) {
     case "mock":
       return mockProvider;
-    case "claude-sonnet":
-      return makeClaudeProvider({ model: "sonnet", mode });
-    case "claude-opus":
-      return makeClaudeProvider({ model: "opus", mode });
-    case "claude-haiku":
-      return makeClaudeProvider({ model: "haiku", mode });
     case "codex":
       return makeCodexProvider({ mode });
+    default:
+      // Legacy tiers ("claude-opus"/"claude-sonnet"/"claude-haiku"), bare
+      // endpoints.yaml model names, and "<provider>:<model>" composite ids
+      // all flow through here — resolution happens inside @sm/agent's
+      // ClaudeBackend, not here (see lib/llm/sdk-adapter.ts).
+      return makeClaudeProvider({ model: id, mode });
   }
 }

@@ -114,6 +114,16 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 44 (2026-07-11)
+- **Done**: **全局 LLM 模型选择接入（结合 `~/sdk`/sm_toolkit 的 endpoints.yaml），并连带把死掉的 `agent-gateway` 依赖迁移彻底解决**。触发：模型选择原来硬编码三档（claude-opus/sonnet/haiku + codex）；调研发现 trellis 依赖的 `agent-gateway`（`file:../../agent-gateway`）本机已缺失、`node_modules` 未装，app 实际处于装不起来的状态。拍板方向：不修复对 agent-gateway 的依赖，而是把它的能力整体拆开摊平进 `~/sdk` 的 `@sm/agent`（agent-gateway 仓库退役），trellis 只依赖 `~/sdk`。
+  - `~/sdk`（`@sm/llm`/`@sm/agent`）侧的改动详见 `~/sdk/progress/README.md` 2026-07-11 session（含 self-agent 生产 bot 的零改动兼容验证）。
+  - trellis 侧：`package.json` 从 `agent-gateway` 换成 `@sm/agent`+`@sm/llm`(`file:` 绝对路径指到 `~/sdk/packages/*`)；`next.config.ts` 的 `turbopack.root` 挪到 `$HOME`（覆盖 trellis 和 `~/sdk` 两处 symlink 目标）、`serverExternalPackages` 同步换名。`lib/llm/claude.ts`/`codex.ts`/`sdk-adapter.ts` 只换 import 源，不需要自己再解析 endpoint/拼 env——这个能力已经内置进 `@sm/agent` 的 `ClaudeBackend`。`lib/llm/providers.ts` 的 `ProviderId` 从闭合联合放宽成 `string`，`isProviderId` 降级为结构校验（真正校验在服务端解析时抛错）；`providers.ts`/`server.ts` 的 switch 收敛成 `mock`/`codex`/`default→claude`。新增 `GET /api/providers`：读 endpoints.yaml，过滤掉只有 `openai_url`（协议不兼容 claude CLI 壳，如 gemini）的条目，映射成 `"<provider>:<model>"` 复合 id，服务端专属（密钥/YAML 访问不出服务端）。`stores/sessionStore.ts` 加 `providerCatalog` 状态 + hydrate 时 fetch；`ModelPicker.tsx`/`lib/commands.ts` 的 `/model` 命令改吃动态 catalog（`hasKey===false` 置灰不可选）。
+  - **踩坑&修复**：`/api/providers` 最初把原生 claude 条目的 `hasKey` 也按 `api_key_env`(`ANTHROPIC_API_KEY`) 判定，误报 false——原生 claude 走 `claude login` OAuth 不需要这个 env var，实测验证「hasKey:false 但真实可用」后修正：无 override URL 的原生条目一律 `hasKey:true`。
+  - **验证**（隔离 dev server 3099 + 真实 spawn，全部走真实 `/api/chat` HTTP 全链路，非直调 provider 函数）：`GET /api/providers` 返回 claude 三档 + `deepseek:*`(2) + `ark-coding:*`(12) + codex/mock，gemini 正确排除；chat 模式选 `deepseek:deepseek-v4-flash` 真实发消息拿到真回复；chat 模式选原生 `claude-opus` 回归不受影响；**workspace 模式 + 第三方模型 + 真实 Bash 工具调用**全链路成功（`--add-dir`+`--dangerously-skip-permissions`+ env 覆盖三者叠加正确）；project 模式两轮对话验证 `--resume` 在第三方端点下正确复用 session（第二轮 cache_read≈18.8k，与第一轮总 context 量级吻合，证明 resume 命中同一 CLI session，未被模型换了就断链）；codex 路径完全不受影响（真实回复）；`sessions.model` DB 全量往返正确（含 legacy `claude-opus`/`codex` 与新 `deepseek:deepseek-v4-flash` 复合 id）。**测试数据已清理**（5 个测试 session 通过 `DELETE /api/sessions/[id]` 移除，未触碰其余 30 个真实用户 session）。
+  - `npx tsc --noEmit` ✓、`npm run build` ✓（`/api/providers` 路由已注册，仅一条关于 `@sm/llm` 动态 fs 路径的 Turbopack NFT trace 警告，无害）。
+- **Caveat**: `onCanUseTool` 交互式工具协议（AskUserQuestion/ExitPlanMode 表单）在第三方模型下未专门用真实交互场景触发验证，但 workspace 模式下的真实 Bash tool_call 已间接证明该协议在第三方端点下能正常收发（`--permission-prompt-tool stdio` 是 CLI 本地机制，不依赖远端模型侧的特殊支持）。`/model` 命令面板的动态 catalog resolve 只过了 tsc/build，未浏览器实测交互手感。
+- **Next**: 浏览器实测 `/model` 命令面板动态 catalog + ModelPicker 置灰交互；若要收尾 agent-gateway 独立仓库（留着不维护 vs 删除）是用户的决定，本轮不动。
+
 ### Session 43 (2026-06-17)
 - **用户反馈**: 画布节点重叠 + 长线性 project 聊天的大纲「层层缩进楼梯」别扭（project 基本线性，树是过度抽象）。选了交互方向 **C·线性 thread 主视图 + 树缩略图**（分两增量做）。
 - **Done（增量 1：两个 bug，已浏览器验）**:

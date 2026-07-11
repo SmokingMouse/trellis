@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import path from "node:path";
+import os from "node:os";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -9,21 +9,23 @@ const devOrigin = process.env.TRELLIS_DEV_ORIGIN;
 
 const nextConfig: NextConfig = {
   ...(devOrigin ? { allowedDevOrigins: [devOrigin] } : {}),
-  // agent-gateway is a sibling `file:` dependency (../../agent-gateway), so npm
-  // links it as a symlink whose target sits OUTSIDE this project dir. Turbopack
-  // only follows symlinks within its workspace root, so point the root at the
-  // shared parent — otherwise `import ... from "agent-gateway"` fails to
-  // resolve at build time whenever node_modules holds the symlink (which any
-  // `npm install` recreates). Lets npm's natural linking stay harmless.
+  // @sm/agent + @sm/llm are `file:` dependencies pointing at ~/sdk (absolute
+  // path, outside this project dir entirely — not even a sibling). npm links
+  // them as symlinks whose targets sit outside this project dir. Turbopack
+  // only follows symlinks within its workspace root, so point the root at a
+  // common ancestor of trellis and ~/sdk — otherwise `import ... from
+  // "@sm/agent"` fails to resolve at build time whenever node_modules holds
+  // the symlink (which any `npm install` recreates). Lets npm's natural
+  // linking stay harmless.
   turbopack: {
-    root: path.join(__dirname, "..", ".."),
+    root: os.homedir(),
   },
   // Codex SDK uses createRequire(import.meta.url) at runtime to resolve the
   // platform-specific CLI binary. Bundling breaks that resolution. Keep it
   // external so it runs from real node_modules.
-  // agent-gateway 是 server-only Node 包(spawn child_process),external 它从 node_modules
-  // 直接运行(dist 编译产物),不进 bundler。
-  serverExternalPackages: ["@openai/codex-sdk", "@openai/codex", "agent-gateway"],
+  // @sm/agent 是 server-only Node 包(spawn child_process),external 它从 node_modules
+  // 直接运行(dist 编译产物),不进 bundler。@sm/llm 同理(读 fs)。
+  serverExternalPackages: ["@openai/codex-sdk", "@openai/codex", "@sm/agent", "@sm/llm"],
   // Tunneled dev (Cloudflare CDN, etc.): some CDNs rewrite Next dev's
   // `Cache-Control: no-cache` into `max-age=14400`, so edits to globals.css
   // don't reach the browser for hours. `no-store` is one of the few

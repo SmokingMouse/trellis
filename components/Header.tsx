@@ -134,7 +134,7 @@ export function Header() {
   // ≥ 50% full, the 🧠 badge becomes a clickable affordance that opens a
   // small popover explaining context pressure + a one-click "开新话题清空"
   // shortcut (which spawns a fresh-context root — there is no native compact
-  // in the claude CLI / agent-gateway SDK, confirmed by spike). Below 50% the
+  // in the claude CLI / @sm/agent SDK, confirmed by spike). Below 50% the
   // badge stays a plain non-interactive readout to avoid nagging.
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);

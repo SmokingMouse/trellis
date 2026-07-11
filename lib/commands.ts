@@ -10,7 +10,7 @@
 // one dropdown. Commands are first-class (available in every mode); skills are
 // only shown in tool-capable modes.
 
-import { PROVIDERS, isProviderId, type ProviderId } from "@/lib/llm";
+import { PROVIDERS, type ProviderId, type ProviderInfo } from "@/lib/llm";
 
 // Minimal slice of the store the commands touch — keeps commands.ts free of a
 // direct dependency on the store module (which would pull in browser-only
@@ -22,6 +22,9 @@ export type CommandStore = {
   setSearchOpen: (open: boolean) => void;
   setComposeRootOpen: (open: boolean) => void;
   setProvider: (provider: ProviderId) => void;
+  // Live model catalog (GET /api/providers) — falls back to the static
+  // PROVIDERS list when empty (e.g. store not yet hydrated).
+  providerCatalog: ProviderInfo[];
 };
 
 export type Command = {
@@ -69,16 +72,17 @@ export const COMMANDS: Command[] = [
   {
     name: "model",
     description: "切换模型",
-    hint: "<name>，如 claude-opus / claude-sonnet / claude-haiku / codex",
+    hint: "<name>，如 claude-opus / codex / deepseek:deepseek-v4-flash",
     run: (store, args) => {
+      const catalog = store.providerCatalog.length > 0 ? store.providerCatalog : PROVIDERS;
       const raw = args.trim().toLowerCase();
       if (!raw) {
-        const ids = PROVIDERS.map((p) => p.id).join(" / ");
+        const ids = catalog.map((p) => p.id).join(" / ");
         return `用法：/model <name> — 可选 ${ids}`;
       }
-      const id = resolveProvider(raw);
+      const id = resolveProvider(raw, catalog);
       if (!id) {
-        const ids = PROVIDERS.map((p) => p.id).join(" / ");
+        const ids = catalog.map((p) => p.id).join(" / ");
         return `未知模型「${args.trim()}」— 可选 ${ids}`;
       }
       store.setProvider(id);
@@ -121,23 +125,26 @@ export function parseCommand(
   return { command, args };
 }
 
-// Map a user-typed model token to a ProviderId. Accepts the full id
-// ("claude-opus"), a bare family/short label ("opus", "sonnet", "haiku",
-// "codex"), or anything that uniquely prefix-matches a provider id/shortLabel.
-function resolveProvider(raw: string): ProviderId | null {
-  if (isProviderId(raw)) return raw;
-  // shortLabel match (e.g. "opus" → claude-opus, "codex" → codex).
-  const byShort = PROVIDERS.find(
-    (p) => p.shortLabel.toLowerCase() === raw,
-  );
+// Map a user-typed model token to a ProviderId against a given catalog.
+// Accepts the full id ("claude-opus", or a composite "deepseek:deepseek-v4-
+// flash"), a bare short label ("codex"), or anything that uniquely suffix/
+// prefix-matches a catalog id. Note: isProviderId() itself can't do this
+// matching anymore — it's just a structural (non-empty string) check now
+// that the catalog is dynamic, so every candidate has to be checked against
+// the actual catalog here instead.
+function resolveProvider(raw: string, catalog: ProviderInfo[]): ProviderId | null {
+  const exact = catalog.find((p) => p.id.toLowerCase() === raw);
+  if (exact) return exact.id;
+  const byShort = catalog.find((p) => p.shortLabel.toLowerCase() === raw);
   if (byShort) return byShort.id;
-  // bare family suffix: "opus" matches "claude-opus".
-  const bySuffix = PROVIDERS.filter((p) =>
-    p.id.toLowerCase().endsWith(`-${raw}`),
+  // bare suffix: "opus" matches "claude-opus"; also matches the model half
+  // of a composite id like "deepseek:deepseek-v4-flash".
+  const bySuffix = catalog.filter(
+    (p) => p.id.toLowerCase().endsWith(`-${raw}`) || p.id.toLowerCase().endsWith(`:${raw}`),
   );
   if (bySuffix.length === 1) return bySuffix[0].id;
   // unique prefix of the id.
-  const byPrefix = PROVIDERS.filter((p) => p.id.toLowerCase().startsWith(raw));
+  const byPrefix = catalog.filter((p) => p.id.toLowerCase().startsWith(raw));
   if (byPrefix.length === 1) return byPrefix[0].id;
   return null;
 }

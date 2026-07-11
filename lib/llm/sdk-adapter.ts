@@ -1,12 +1,14 @@
-// trellis ↔ agent-gateway SDK 的转换层。
+// trellis ↔ @sm/agent(~/sdk)SDK 的转换层。
 // SDK 暴露细粒度 RunOptions(机制)+ 统一 AgentEvent;trellis 在这里把自己的
 // mode(策略)映射成 RunOptions,把 AgentEvent 转回自己的 StreamEvent。
 // 这一层是"反向依赖 SDK"的关键:SDK 不认 trellis 的 mode/prompt,全部留在此。
+// 模型/endpoints.yaml 解析已经下沉进 SDK 的 ClaudeBackend 内部(见 @sm/agent/backends/
+// claude.ts)——这里的 `model` 字段只是原样透传,不在这一层再手动解析 endpoint/拼 env。
 
 import os from "node:os";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { EventType, type AgentEvent, type RunOptions } from "agent-gateway";
+import { EventType, type AgentEvent, type RunOptions } from "@sm/agent";
 import type { Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 

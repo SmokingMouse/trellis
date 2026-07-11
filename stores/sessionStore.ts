@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Mode, ProviderId } from "@/lib/llm";
-import { DEFAULT_PROVIDER, isProviderId } from "@/lib/llm";
+import type { Mode, ProviderId, ProviderInfo } from "@/lib/llm";
+import { DEFAULT_PROVIDER, isProviderId, PROVIDERS } from "@/lib/llm";
 import type {
   ChatNode,
   NodeAttachment,
@@ -257,6 +257,10 @@ type State = {
   hydrated: boolean;
   hydrateError: string | null;
   provider: ProviderId;
+  // Live model catalog from GET /api/providers (sourced from
+  // ~/.claude/global/endpoints.yaml). Seeded with the static PROVIDERS
+  // fallback until the fetch (fired once from hydrate()) resolves.
+  providerCatalog: ProviderInfo[];
   // Stage 14: mode is per-session and locked at creation. The runtime
   // mode for the currently-loaded session is derived from `session.mode`
   // (see ModeBadge). The store keeps two independent "draft" fields that
@@ -417,6 +421,7 @@ type Actions = {
   setNodePosition: (nodeId: string, pos: { x: number; y: number }) => void;
   setActiveNode: (nodeId: string | null) => void;
   setProvider: (provider: ProviderId) => void;
+  fetchProviderCatalog: () => Promise<void>;
   // Stage 14: only affects subsequent new-session creation. No-op for
   // currently active session.
   setDraftMode: (mode: Mode) => void;
@@ -589,6 +594,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   hydrated: false,
   hydrateError: null,
   provider: DEFAULT_PROVIDER,
+  providerCatalog: PROVIDERS,
   draftMode: "chat",
   draftWorkspacePath: null,
   draftSystemPrompt: null,
@@ -653,6 +659,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       historyDepth: loadHistoryDepth(),
       chatEnhanced: loadChatEnhanced(),
     });
+    void get().fetchProviderCatalog();
     try {
       let targetId = sessionId;
       if (!targetId) {
@@ -969,6 +976,19 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           body: JSON.stringify({ model: provider }),
         }).catch(() => {});
       }
+    }
+  },
+
+  fetchProviderCatalog: async () => {
+    try {
+      const res = await fetchWithTimeout("/api/providers", 5000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { providers } = (await res.json()) as { providers: ProviderInfo[] };
+      if (providers.length > 0) set({ providerCatalog: providers });
+    } catch (err) {
+      // Fetch failed (offline/first-boot race/etc) — keep the static
+      // PROVIDERS fallback already seeded at store creation, don't blank it.
+      console.error("[trellis] fetchProviderCatalog failed:", err);
     }
   },
 

@@ -1,9 +1,10 @@
-// trellis Claude provider —— 薄 adapter,委托给 agent-gateway SDK 的 ClaudeBackend。
+// trellis Claude provider —— 薄 adapter,委托给 @sm/agent(~/sdk)的 ClaudeBackend。
 // prompt 构造(buildPrompt)+ mode→RunOptions 映射留在 trellis;CLI spawn / stream-json
-// 解析 / 真流式 delta / vision / tool 配对全在 SDK。详见 lib/llm/sdk-adapter.ts。
+// 解析 / 真流式 delta / vision / tool 配对 / endpoints.yaml 模型解析全在 SDK。
+// 详见 lib/llm/sdk-adapter.ts。
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
 import { buildPrompt } from "./prompt";
-import { ClaudeBackend } from "agent-gateway";
+import { ClaudeBackend } from "@sm/agent";
 import {
   modeToRunOptions,
   toStreamEvent,
@@ -11,7 +12,10 @@ import {
   ensureChatScratch,
 } from "./sdk-adapter";
 
-export type ClaudeModel = "opus" | "sonnet" | "haiku";
+// 裸 tier 别名("opus"/"sonnet"/"haiku")、trellis 的 legacy ProviderId
+// ("claude-opus" 等)、endpoints.yaml 的模型名/"<provider>:<model>" 限定 id 都合法
+// —— ClaudeBackend 内部按顺序尝试这几种解析方式,这里不再收窄成字面量联合。
+export type ClaudeModel = string;
 
 export function makeClaudeProvider(
   opts: { model?: ClaudeModel; mode?: Mode } = {},
