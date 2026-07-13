@@ -56,6 +56,7 @@ export function LinearThreadView() {
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -194,6 +195,32 @@ export function LinearThreadView() {
                   <span className="text-stone-500 dark:text-stone-400">
                     {node.kind === "reference" ? "Reference" : "Turn"}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveNode(node.id);
+                      setViewMode("canvas");
+                      setFullScreen(true);
+                    }}
+                    className="ml-auto px-2 py-1 rounded-md text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors flex items-center gap-1"
+                    title="进入对话"
+                    aria-label="进入对话"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span>聊</span>
+                  </button>
                 </div>
 
                 <div className="px-4 py-4 space-y-4">
