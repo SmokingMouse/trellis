@@ -9,6 +9,8 @@ import { ancestorsOf } from "@/lib/collapsed";
 import { buildNodeIndex } from "@/lib/node-index";
 import { getStreamPending, subscribeStream } from "@/lib/stream-bus";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { isSendCombo, sendHint } from "@/lib/send-key";
+import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import type { ChatNode } from "@/lib/types";
 import { CliResumeButton } from "./CliResumeButton";
 import { CopyButton } from "./CopyButton";
@@ -130,6 +132,11 @@ export function LinearThreadView() {
     });
   };
 
+  const tipNode =
+    threadData.thread.length > 0
+      ? threadData.thread[threadData.thread.length - 1]
+      : null;
+
   if (!session) return null;
 
   return (
@@ -157,7 +164,7 @@ export function LinearThreadView() {
         </div>
       </div>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 pb-32 space-y-4">
+      <main className="max-w-3xl mx-auto px-4 py-5 pb-6 space-y-4">
         {threadData.thread.length === 0 ? (
           <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-8 text-center text-sm text-stone-500 dark:text-stone-400">
             暂无节点
@@ -279,7 +286,120 @@ export function LinearThreadView() {
           })
         )}
       </main>
+      {tipNode && (
+        <div className="sticky bottom-0 z-20 border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
+          <div className="max-w-3xl mx-auto px-4">
+            <LinearComposer tipNode={tipNode} />
+          </div>
+        </div>
+      )}
       <ThreadMinimap />
+    </div>
+  );
+}
+
+function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
+  const [text, setText] = useState("");
+  const streamBranch = useSessionStore((s) => s.streamBranch);
+  const abortStream = useSessionStore((s) => s.abortStream);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const isStreaming = tipNode.status === "streaming";
+  // Linear view only ever renders for project sessions, which are always
+  // tool-capable — no chatEnhanced gate needed here (unlike QuestionInput).
+  const matchedSkills = useSkillSuggestions(text, true);
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.style.height = "auto";
+      ref.current.style.height = `${Math.min(ref.current.scrollHeight, 160)}px`;
+    }
+  }, [text]);
+
+  const submit = () => {
+    const trimmed = text.trim();
+    if (!trimmed || isStreaming) return;
+    setText("");
+    streamBranch(tipNode.id, trimmed, null);
+  };
+
+  if (isStreaming) {
+    return (
+      <div className="py-3">
+        <button
+          onClick={() => abortStream(tipNode.id)}
+          className="w-full h-[42px] rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-[0.99] transition-colors flex items-center justify-center gap-2 text-[13px]"
+          aria-label="停止生成"
+        >
+          <span className="inline-block w-2.5 h-2.5 bg-current rounded-[2px]" />
+          停止生成
+          <span className="opacity-60 text-[11px] hidden sm:inline">
+            （Esc）
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative py-3 flex items-end gap-2">
+      {matchedSkills.length > 0 && (
+        <div className="absolute bottom-full left-0 right-0 mb-1 z-10 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+          {matchedSkills.map((s) => (
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => {
+                setText(`/${s.name} `);
+                ref.current?.focus();
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
+            >
+              <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
+                /{s.name}
+              </div>
+              {s.description && (
+                <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                  {s.description}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      <textarea
+        ref={ref}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (isSendCombo(e, sendKey)) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        rows={1}
+        placeholder={`继续对话…（${sendHint(sendKey)}）`}
+        className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm"
+      />
+      <button
+        onClick={submit}
+        disabled={!text.trim()}
+        className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
+        aria-label="发送"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 19V5M5 12l7-7 7 7" />
+        </svg>
+      </button>
     </div>
   );
 }
