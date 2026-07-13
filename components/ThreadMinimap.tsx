@@ -64,7 +64,7 @@ export function ThreadMinimap() {
   if (nodes.length === 0) return null;
 
   return (
-    <div className="fixed right-3 bottom-3 z-40 text-xs">
+    <div className="fixed right-3 bottom-24 z-40 text-xs">
       <div className="rounded-lg border border-stone-200/80 dark:border-stone-700 bg-white/90 dark:bg-stone-950/90 shadow-lg backdrop-blur">
         <button
           type="button"
