@@ -460,6 +460,17 @@ export function claudeJsonlExists(
   }
 }
 
+// Per-lineage 隔离开关（server-internal，不进 ApiSession——客户端无需感知）。
+// true = 该 session 的 project resume 走 per-lineage 路由（spec:
+// progress/project-lineage-isolation-spec.md）。存量行 / 非 project 恒 false。
+export function isLineageIsolated(sessionId: string): boolean {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT lineage_isolation FROM sessions WHERE id = ?")
+    .get(sessionId) as { lineage_isolation: number } | undefined;
+  return row?.lineage_isolation === 1;
+}
+
 // Walk up the parent chain from `nodeId` until parent_id IS NULL (the root of
 // this branch's lineage), and return that root's resume id for `family`. In
 // project mode this is the id that the provider's `--resume` should target so
@@ -640,8 +651,15 @@ export function markNodeRead(nodeId: string, now: number): number | null {
 // mismatched → claudeJsonlExists() falsely reported "missing" →
 // getRootResumeIdForNode() returned null → project mode silently lost history
 // every turn. (Same bug also broke deleteSession's jsonl cleanup.)
-function claudeSessionPath(sessionId: string, cwd: string | null): string {
-  const effectiveCwd = cwd ?? os.homedir();
+export function claudeSessionPath(sessionId: string, cwd: string | null): string {
+  let effectiveCwd = cwd ?? os.homedir();
+  // Claude Code 编码 cwd 前先解 symlink（macOS /tmp → /private/tmp 实测如此）；
+  // 不归一会导致含 symlink 的 workspace 下 resume 验证恒 false → 每轮静默丢历史。
+  try {
+    effectiveCwd = fs.realpathSync(effectiveCwd);
+  } catch {
+    /* 目录不存在等 — 保持原样，后续 existsSync 自然 false */
+  }
   const encodedCwd = effectiveCwd.replace(/[^a-zA-Z0-9]/g, "-");
   return path.join(os.homedir(), ".claude", "projects", encodedCwd, `${sessionId}.jsonl`);
 }
@@ -668,10 +686,13 @@ export function createSessionWithRoot(args: {
       ? JSON.stringify(args.attachments)
       : null;
   const tx = db.transaction(() => {
+    // 新建 project session 一律走 per-lineage 隔离（spec:
+    // progress/project-lineage-isolation-spec.md）；存量行保持 0（旧共享语义）。
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
-                             context_mode, workspace_path, system_prompt, model)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             context_mode, workspace_path, system_prompt, model,
+                             lineage_isolation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -682,6 +703,7 @@ export function createSessionWithRoot(args: {
       workspacePath,
       systemPrompt,
       model,
+      mode === "project" ? 1 : 0,
     );
 
     db.prepare(

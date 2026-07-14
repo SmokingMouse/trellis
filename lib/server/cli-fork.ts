@@ -4,7 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDB } from "./sqlite";
 import { parseCliSessionJsonl } from "./cli-import";
-import { getSession, getRootResumeIdForNode } from "./repo";
+import {
+  getSession,
+  getRootResumeIdForNode,
+  claudeSessionPath,
+  isLineageIsolated,
+} from "./repo";
 
 type ContentBlock = {
   type: string;
@@ -183,6 +188,13 @@ export function cliResumeForNode(
     if (!lin || !fs.existsSync(lin.sourceJsonlPath)) return null;
     return { cwd: session.workspacePath, resumeId: lin.lineageSid };
   }
+  // isolated（per-lineage）native 会话：续到该节点所属 lineage（fork 分支各有
+  // 自己的 sid，root sid 只覆盖主 lineage）；legacy 会话维持 root sid 旧路径。
+  if (isLineageIsolated(session.id)) {
+    const lin = nativeLineageForNode(nodeId, session.workspacePath);
+    if (!lin) return null;
+    return { cwd: session.workspacePath, resumeId: lin.lineageSid };
+  }
   const resumeId = getRootResumeIdForNode(nodeId, "claude", session.workspacePath);
   if (!resumeId) return null;
   return { cwd: session.workspacePath, resumeId };
@@ -306,15 +318,18 @@ export function registerForkLineage(
   ).run(trellisSessionId, newSid, jsonlPath, forkPointUuid);
 }
 
-export function buildPrefixJsonl(
-  branchFromNodeId: string,
+// 前缀构造核心：在 sourceJsonl 里以 turnUuid（turn-start user entry uuid）为分叉点，
+// 截出 root→该 turn 末条 assistant 的 uuid 链，改写 sessionId 为新 sid 写同目录
+// `<newSid>.jsonl`。attached 与 native isolated（per-lineage）两条路共用——前者
+// 节点 id 即 turn uuid，后者经 nodes.cli_turn_uuid 映射。
+export function buildPrefixJsonlCore(
+  sourceJsonlPath: string,
+  turnUuid: string,
 ): { newSid: string; jsonlPath: string } | null {
-  const lineage = attachedLineageForNode(branchFromNodeId);
-  if (!lineage) return null;
-  const rawLines = readJsonl(lineage.sourceJsonlPath);
+  const rawLines = readJsonl(sourceJsonlPath);
   if (!rawLines || rawLines.length === 0) return null;
 
-  const tail = terminalAssistantLine(rawLines, branchFromNodeId);
+  const tail = terminalAssistantLine(rawLines, turnUuid);
   const tailUuid = tail?.entry.uuid;
   if (!tail || typeof tailUuid !== "string") return null;
 
@@ -335,7 +350,132 @@ export function buildPrefixJsonl(
   }
   if (out.length === 0) return null;
 
-  const jsonlPath = path.join(path.dirname(lineage.sourceJsonlPath), `${newSid}.jsonl`);
+  const jsonlPath = path.join(path.dirname(sourceJsonlPath), `${newSid}.jsonl`);
   fs.writeFileSync(jsonlPath, `${out.join("\n")}\n`, "utf8");
   return { newSid, jsonlPath };
+}
+
+export function buildPrefixJsonl(
+  branchFromNodeId: string,
+): { newSid: string; jsonlPath: string } | null {
+  const lineage = attachedLineageForNode(branchFromNodeId);
+  if (!lineage) return null;
+  return buildPrefixJsonlCore(lineage.sourceJsonlPath, branchFromNodeId);
+}
+
+// ── native per-lineage（progress/project-lineage-isolation-spec.md）──────────
+// attachedLineageForNode 的 native 版：origin='native' 的 isolated project 会话里，
+// lineage 头节点（root / fork 节点）在自己行上持有 claude_session_id，线性子节点
+// walk-up 解析归属；jsonl 路径由 claudeSessionPath(sid, spawnCwd) 确定性推导，
+// 不经 cli_lineages（那是 attach-sync 域）。
+
+export type NativeLineage = {
+  lineageSid: string;
+  jsonlPath: string;
+  // 该节点的 turn 在 lineage jsonl 里的 uuid（nodes.cli_turn_uuid）。NULL =
+  // 回填缺失 → 调用方在该点分叉须降级线性 resume。
+  nodeTurnUuid: string | null;
+  isJsonlTip: boolean;
+};
+
+export function nativeLineageForNode(
+  nodeId: string,
+  spawnCwd: string | null,
+): NativeLineage | null {
+  const db = getDB();
+  const node = db
+    .prepare(
+      "SELECT parent_id, claude_session_id, cli_turn_uuid FROM nodes WHERE id = ?",
+    )
+    .get(nodeId) as
+    | {
+        parent_id: string | null;
+        claude_session_id: string | null;
+        cli_turn_uuid: string | null;
+      }
+    | undefined;
+  if (!node) return null;
+
+  let lineageSid = node.claude_session_id;
+  let parentId = node.parent_id;
+  const parentStmt = db.prepare(
+    "SELECT parent_id, claude_session_id FROM nodes WHERE id = ?",
+  );
+  while (!lineageSid && parentId) {
+    const parent = parentStmt.get(parentId) as
+      | { parent_id: string | null; claude_session_id: string | null }
+      | undefined;
+    if (!parent) break;
+    lineageSid = parent.claude_session_id;
+    parentId = parent.parent_id;
+  }
+  if (!lineageSid) return null;
+
+  const jsonlPath = claudeSessionPath(lineageSid, spawnCwd);
+  if (!fs.existsSync(jsonlPath)) return null;
+  const tipId = newestTurnId(jsonlPath);
+  return {
+    lineageSid,
+    jsonlPath,
+    nodeTurnUuid: node.cli_turn_uuid,
+    isJsonlTip: node.cli_turn_uuid !== null && tipId === node.cli_turn_uuid,
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// done 后回填该 native isolated 节点的 turn uuid（run-bus 钩子，best-effort）。
+// jsonl 落盘略滞后于 done 事件（与 reconcileAttachedTurn 同时序）→ 轮询 ≤8×300ms。
+// 防错配闸：最新 turn 的 question 必须包含节点 question（project prompt = 原文或
+// anchor 包裹原文，contains 恒成立；skill 命令轮会被解析器滤成噪音则匹配不上）——
+// 匹配不上就放弃：错误的 uuid 会让分叉切错位置，缺失只是降级线性，后者严格更安全。
+export async function backfillNativeTurnUuid(nodeId: string): Promise<void> {
+  const db = getDB();
+  const row = db
+    .prepare(
+      `SELECT n.question, n.cli_turn_uuid, s.origin, s.context_mode AS mode,
+              s.workspace_path AS wp, s.lineage_isolation AS iso
+       FROM nodes n JOIN sessions s ON s.id = n.session_id
+       WHERE n.id = ?`,
+    )
+    .get(nodeId) as
+    | {
+        question: string;
+        cli_turn_uuid: string | null;
+        origin: string;
+        mode: string;
+        wp: string | null;
+        iso: number;
+      }
+    | undefined;
+  if (
+    !row ||
+    row.cli_turn_uuid !== null ||
+    row.origin !== "native" ||
+    row.mode !== "project" ||
+    row.iso !== 1
+  ) {
+    return;
+  }
+
+  const q = row.question.trim();
+  for (let i = 0; i < 8; i++) {
+    // project 的 spawnCwd 恒 = workspace_path（sessionCwd 只对 chat 改道 scratch）。
+    const lin = nativeLineageForNode(nodeId, row.wp);
+    if (lin) {
+      const parsed = parseCliSessionJsonl(lin.jsonlPath);
+      if (parsed && parsed.turns.length > 0) {
+        const newest = [...parsed.turns].sort(
+          (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+        )[0];
+        if (!q || newest.question.includes(q)) {
+          db.prepare(
+            "UPDATE nodes SET cli_turn_uuid = ? WHERE id = ? AND cli_turn_uuid IS NULL",
+          ).run(newest.id, nodeId);
+          return;
+        }
+      }
+    }
+    await sleep(300);
+  }
 }

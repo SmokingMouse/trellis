@@ -18,12 +18,15 @@ import {
   getSession,
   getRootResumeIdForNode,
   getParentResumeId,
+  isLineageIsolated,
   setNodeResumeId,
 } from "@/lib/server/repo";
 import {
   attachedLineageForNode,
   buildPrefixJsonl,
+  buildPrefixJsonlCore,
   hasOtherChild,
+  nativeLineageForNode,
   registerForkLineage,
 } from "@/lib/server/cli-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
@@ -374,7 +377,51 @@ export async function POST(req: Request) {
       }
     }
   }
-  if (!attachedHandled) {
+  // 原生 per-lineage 隔离（progress/project-lineage-isolation-spec.md）：新建的
+  // project session（lineage_isolation=1）走 lineage 解析，路由与 attached P2 同构：
+  // 父是 lineage jsonl tip 且无其他子 → 线性 resume 该 lineage（append 同 jsonl）；
+  // 真分叉 → 前缀 jsonl 在父 turn 分叉成新 lineage；uuid 缺失/构造失败 → 降级线性
+  // （= 旧共享行为，上下文只多不错）。root/新话题 → fresh，sid 由 session_init 落
+  // 本节点（lineage 头自持）。仅 claude family；存量 session（flag=0）与 codex 走
+  // 下方旧路径。
+  let nativeIsolated = false;
+  if (
+    !attachedHandled &&
+    mode === "project" &&
+    family === "claude" &&
+    resolvedOrigin === "native" &&
+    isLineageIsolated(trellisSessionId)
+  ) {
+    nativeIsolated = true;
+    if (body.kind === "branch") {
+      const lin = nativeLineageForNode(body.parentNodeId, spawnCwd);
+      if (!lin) {
+        // 祖先链无可用 lineage（首轮失败 / jsonl 被清）→ fresh，本节点成新 lineage 头。
+        claudeSessionId = null;
+      } else if (lin.isJsonlTip && !hasOtherChild(body.parentNodeId, nodeId)) {
+        claudeSessionId = lin.lineageSid;
+      } else if (lin.nodeTurnUuid) {
+        const built = buildPrefixJsonlCore(lin.jsonlPath, lin.nodeTurnUuid);
+        if (built) {
+          // 新 lineage 头预写 sid（trellis 同步生成，不依赖 session_init）。
+          setNodeResumeId(nodeId, family, built.newSid);
+          claudeSessionId = built.newSid;
+        } else {
+          claudeSessionId = lin.lineageSid;
+        }
+      } else {
+        claudeSessionId = lin.lineageSid;
+      }
+    } else if (body.kind === "retry") {
+      // self-or-ancestor：fork 头重试续自己的 lineage，线性节点续父 lineage；
+      // jsonl 缺失 → null → fresh + sid 落本节点（自愈，同 claudeJsonlExists 纪律）。
+      const lin = nativeLineageForNode(nodeId, spawnCwd);
+      claudeSessionId = lin?.lineageSid ?? null;
+    } else {
+      claudeSessionId = null; // root / 新话题：fresh lineage
+    }
+  }
+  if (!attachedHandled && !nativeIsolated) {
     claudeSessionId =
       mode === "project"
         ? getRootResumeIdForNode(nodeId, family, spawnCwd)
@@ -396,17 +443,24 @@ export async function POST(req: Request) {
   const interactive = family === "claude";
   startRun({
     nodeId,
-    // chat B-fork writes the forked id to THIS node (per-node); project writes
-    // the root-shared id on its first turn only; codex/mock/window persist none.
+    // chat B-fork writes the forked id to THIS node (per-node); native isolated
+    // project writes the fresh lineage head's id to THIS node (fork heads were
+    // pre-written above, so claudeSessionId is set → undefined); legacy project
+    // writes the root-shared id on its first turn only; codex/mock/window
+    // persist none.
     sessionIdTarget: attachedHandled
       ? undefined
-      : chatBFork
-        ? "node"
-        : mode === "project"
-          ? claudeSessionId
-            ? undefined
-            : "root"
-          : undefined,
+      : nativeIsolated
+        ? claudeSessionId
+          ? undefined
+          : "node"
+        : chatBFork
+          ? "node"
+          : mode === "project"
+            ? claudeSessionId
+              ? undefined
+              : "root"
+            : undefined,
     resumeFamily: family,
     interactive,
     factory: (signal, ctx) =>

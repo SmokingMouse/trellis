@@ -356,6 +356,35 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN pending_interaction_json TEXT");
   }
 
+  // Per-lineage 上下文隔离（progress/project-lineage-isolation-spec.md）。
+  // lineage_isolation: 1 = 该 project session 走 per-lineage resume（一条岔一个
+  // claude session；线性续聊 append，真分叉构造前缀 jsonl）。仅新建 project session
+  // 置 1；存量行恒 0 → 保持全树共享 root sid 的旧行为（混排 jsonl 无法可靠迁移）。
+  const hasLineageIsolation = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'lineage_isolation'",
+    )
+    .get();
+  if (!hasLineageIsolation) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN lineage_isolation INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+
+  // 该节点的 turn 在其 lineage jsonl 里的 turn-start user entry uuid（=
+  // ParsedTurn.id）。native isolated project 节点 done 后由 backfillNativeTurnUuid
+  // 回填；是 buildPrefixJsonl 在该节点分叉的下刀坐标。NULL = 回填缺失 → 该点分叉
+  // 降级为线性 resume（安全降级，等价旧行为）。attached 会话不用它（节点 id 本身
+  // 就是 jsonl uuid）。
+  const hasCliTurnUuid = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'cli_turn_uuid'",
+    )
+    .get();
+  if (!hasCliTurnUuid) {
+    db.exec("ALTER TABLE nodes ADD COLUMN cli_turn_uuid TEXT");
+  }
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

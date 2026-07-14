@@ -557,6 +557,15 @@ async function runLoop(
       } catch {
         /* 对账失败不影响主流程；临时节点保留，watcher 兜底 */
       }
+      // Per-lineage 隔离：native isolated project 节点回填 turn uuid（后续在该点
+      // 分叉的下刀坐标）。非目标节点在函数内直接 no-op；与上面的 reconcile 按
+      // origin 互斥。动态 import 同理——run-bus（核心）不静态依赖 lineage 层。
+      try {
+        const { backfillNativeTurnUuid } = await import("./cli-fork");
+        await backfillNativeTurnUuid(args.nodeId);
+      } catch {
+        /* best-effort —— 缺失只让该点分叉降级线性 resume */
+      }
     }
 
     // Close every still-attached subscriber and drop the state after a

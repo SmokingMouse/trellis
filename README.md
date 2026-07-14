@@ -114,7 +114,7 @@ session 创建时锁定 mode + workspace + **model**（per-session 持久化，�
 |---|---|---|---|---|---|
 | **Chat** | GPT 网页客户端 | 无 | `WebSearch + WebFetch` | 无 | 默认日常问答、补认知、查信息 |
 | **Workspace** | 一次性 Claude Code CLI | session 绑定 | 全开（bypassPermissions） | 无 | 在某个仓库一次性操作、改 bug、查代码 |
-| **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有 | 跨节点延续记忆，cache 命中通常 70%+ |
+| **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有（沿祖先链，分支间隔离） | 跨节点延续记忆，cache 命中通常 70%+ |
 
 Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），三档语义对齐。
 
@@ -280,13 +280,13 @@ session 创建时锁定 mode + workspace，整棵树共用。三档差别在 pro
 - 加载 `~/.claude/CLAUDE.md` + 项目 CLAUDE.md + 全部 skills + MCP + Bash/Write/Edit/Web 全开
 - 跨节点不共享 claude 内部记忆——只有 trellis 给的折叠上下文连续
 
-### Project —— 长期协作 + 共享真 CLI session
+### Project —— 长期协作 + per-lineage 真 CLI session
 
 - Prompt：**只发当前问题**给 claude，让它 resume 持久 session 自己找历史
-- 执行：每个 root 节点拥有自己的 claude session id（存 `nodes.claude_session_id`），分支走到 root 取 id `--resume`；cwd 绑定 workspace_path
-- **跨节点共享 claude 全部历史**，cache hit 通常占 input token 70%+
+- 执行：**一条岔一个 claude session（lineage）**——顺着聊 = `--resume` 线性 append 同一份 jsonl；真分叉 = 在分叉点构造前缀 jsonl 成新 session（与 attached 会话的 P2 引擎同一套）；cwd 绑定 workspace_path
+- **沿祖先链共享 claude 全部历史**（分支间互相隔离），线性续聊 cache hit 通常占 input token 70%+
 - 「🧹 新话题」= 同树里另起一个 root（全新 fresh context，不 resume 旧记忆，对应 CLI `/clear`）
-- ⚠️ 同一 root 下平行分支彼此知道对方说了啥（共享 session）；要「两条互不影响的探索」切回 Chat / Workspace
+- 存量会话（per-lineage 上线前建的）保持旧的全树共享行为不迁移；新建 project session 自动 per-lineage
 
 ### Codex 那边
 
