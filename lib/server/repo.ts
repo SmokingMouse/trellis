@@ -46,6 +46,9 @@ export type ApiSession = {
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
   sourceJsonlPath: string | null;
+  // 权限确认：true = workspace/project 轮次的可变更工具需用户逐个允许/拒绝
+  // （权限卡）。创建时锁定；false = YOLO（默认，含全部存量行）。
+  requireApproval: boolean;
 };
 
 export type ApiNode = {
@@ -127,11 +130,12 @@ type SessionRow = {
   model: string | null;
   origin: string;
   source_jsonl_path: string | null;
+  require_approval: number;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, system_prompt, archived, model,
-       origin, source_jsonl_path`;
+       origin, source_jsonl_path, require_approval`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -240,6 +244,7 @@ function rowToSession(r: SessionRow): ApiSession {
     model: r.model,
     origin: r.origin ?? "native",
     sourceJsonlPath: r.source_jsonl_path,
+    requireApproval: r.require_approval === 1,
   };
 }
 
@@ -674,6 +679,7 @@ export function createSessionWithRoot(args: {
   workspacePath?: string | null;
   systemPrompt?: string | null;
   model?: string | null;
+  requireApproval?: boolean;
   attachments?: NodeAttachment[];
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
@@ -681,6 +687,7 @@ export function createSessionWithRoot(args: {
   const workspacePath = args.workspacePath ?? null;
   const systemPrompt = args.systemPrompt ?? null;
   const model = args.model ?? null;
+  const requireApproval = args.requireApproval === true;
   const attachmentsJson =
     args.attachments && args.attachments.length > 0
       ? JSON.stringify(args.attachments)
@@ -691,8 +698,8 @@ export function createSessionWithRoot(args: {
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
                              context_mode, workspace_path, system_prompt, model,
-                             lineage_isolation)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             lineage_isolation, require_approval)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -704,6 +711,7 @@ export function createSessionWithRoot(args: {
       systemPrompt,
       model,
       mode === "project" ? 1 : 0,
+      requireApproval ? 1 : 0,
     );
 
     db.prepare(

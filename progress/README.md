@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**权限确认 Permission Gate（Session 56，未 commit）** → [spec](permission-gate.md) / decisions.md 2026-07-15。session 级 `require_approval`（创建锁定，仅 claude 系 workspace/project）：spawn 降 `--permission-mode default` + **ask 规则注入**（硬前提：本机全局 allowlist 裸 `Bash` 会让 can_use_tool 永不触发，实测 ask > allow），可变更工具暂停 → 复用 A路② 管道 → TurnCard 权限卡（允许/本轮总是允许/拒绝+理由）。SDK 加 `RunOptions.askTools`（dist 已重建）。验证全绿：协议探针 + HTTP e2e 四场景 + 浏览器实测；tsc/build ✓，prod 已重启。P1（终端逃生舱 tmux+ttyd）等被绊到再做。**注意：本轮与 S54/S55 在同目录并行，working tree 另有 S55 未 commit 的 Composer/QuestionInput/ChatNode 改动，commit 时需分开摘。**
+
+---
 **线性视图中间节点分叉（Session 54，已提交推送）**：卡片头 ⑂ 按钮 → reply-to 式 chip 重定向底部 Composer（`streamBranch(节点, q, null)`），补上「线性页面对中间节点自由分叉提问」的缺口（此前只能划线 ⌘K）。隔离实例 mock 全链路浏览器实测 ✓。
 
 ---
@@ -135,6 +138,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 56 (2026-07-15)
+- **Done**: **权限确认（Permission Gate P0）落地** → [spec](permission-gate.md) + decisions.md 2026-07-15。缘起：botmux（tmux 会话常驻/attach 模式）对照讨论 → 拆解出「权限确认不需要终端，stream-json control protocol 是结构化正解」（终端逃生舱=P1 等触发）→ 用户拍板直接实现。
+  - **关键实测发现**：`--permission-mode default` 下本机全局 settings.json 裸 `Bash` allowlist 直接放行、can_use_tool 永不触发——审批必须注入 `--settings '{"permissions":{"ask":[Bash,Write,Edit,MultiEdit,NotebookEdit]}}'`（ask > allow 优先级实测坐实，claude 2.1.207）。
+  - **SDK**（~/sdk，dist 已重建）：`RunOptions.askTools?: string[]` → ClaudeBackend 注入 `--settings`（纯机制，工具名单留 trellis）。
+  - **trellis**：`sessions.require_approval` migration + repo/Session 类型全链；chat route 创建钳制（claude 系 + 非 chat）+ branch/retry 从 session 行读；sdk-adapter approve → permission "default"+askTools（`req.onCanUseTool` 在场才生效，天然隔离 codex/mock）；run-bus dispatcher approve 分支（不再 auto-allow → 复用 A路② PendingInteraction 全管道）+ `approvedTools` per-run「总是允许」+ resolveInteraction opts；respond route `alwaysAllowTool`；UI = ModePicker 🛡️需确认/⚡YOLO 开关（draft localStorage）+ InteractionForm 新 PermissionForm（Bash 命令等宽块/入参 JSON + 允许/本轮总是允许/拒绝+理由）+ ModeBadge 🛡️ 角标。A路② 既有 AskUserQuestion/ExitPlanMode 与 YOLO 会话零变化。
+- **验证**（全绿）：协议探针 allow/deny；隔离实例（:3123 + 临时 DB + 真 claude haiku）HTTP e2e 四场景 = allow 弹卡→执行 / deny 不执行+理由回模型+正常 done / always 两 Bash 只弹一卡 / yolo 零卡回归，mid-pause catchup 带 pendingInteraction（刷新恢复卡片）；agent-browser 实测 开关→建会话→权限卡渲染→允许→执行→答案正确 + Header 🛡️徽章；tsc ✓ + `make build` ✓；prod kickstart（login 200/api 401）。测试产物全清（server/临时 DB/ws/probe/两个 claude projects 测试目录）。
+- **并行注记**：本轮与 S54/S55 同目录并行开发（发现时 S55 已 commit 到 main，另留有未 commit 的 Composer/QuestionInput/ChatNode 小改动）；文件零交集、无冲突，但 **commit 时两批改动需分开摘**（本轮 14 文件 + permission-gate.md；SDK 侧另一 repo 一并 commit）。
+- **Next**: ① 用户验收后 commit（trellis + ~/sdk 两 repo，注意与 S55 残留分摘）；② P1 候选：终端逃生舱（tmux 包 `claude --resume` + ttyd web 终端，回程复用 CLI sync watcher）等真实需求触发再做；③ 可选 follow-up：权限决议审计日志、三档权限演化（+acceptEdits）。
+
 ### Session 55 (2026-07-15)
 - **Done**: **`/` 命令接入日常对话 Composer + 下拉键盘导航（推翻 S30「追问框刻意不接」的取舍，用户明确要求；worktree `增加工作区目录`，与 S54 撞号重编为 S55）**。共享 `Composer.tsx`（线性 sticky footer + 画布 DockedComposer）此前只接了 skill 补全，`lib/commands.ts` 的 Trellis 命令只有首屏 QuestionInput 能用。三处改动，registry/命令语义零改：
   - `SkillPickerList` 扩成命令+skill 合并下拉（可选 `commands`/`onPickCommand` props，命令在前带 ⚡ 徽章，与首屏下拉同序；ChatNode 行内追问框传参不变、向后兼容）。

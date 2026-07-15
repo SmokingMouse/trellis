@@ -64,6 +64,9 @@ type ChatRequestRoot = {
   // D1: chat-mode custom system prompt for a new session. Locked at
   // creation; ignored for workspace/project (they use CLAUDE.md).
   systemPrompt?: string | null;
+  // 权限确认（new session 时锁定）：true = workspace/project 的可变更工具逐个
+  // 弹权限卡。仅 claude 系 + 非 chat 模式生效，其余组合服务端钳成 false。
+  requireApproval?: boolean;
   // Stage 15: image attachments uploaded via /api/uploads. The client
   // sends NodeAttachment shapes; the server hash-resolves to on-disk
   // paths before handing to the provider.
@@ -232,6 +235,8 @@ export async function POST(req: Request) {
   // CLI 同步：'native' | 'cli-import'。attached（cli-import）会话的续聊/分叉走
   // lineage 解析（P2），其余 mode 走原生 resume。read from DB（branch 取 parentSession）。
   let resolvedOrigin = "native";
+  // 权限确认：new root 从 body 钳制后锁进 session 行；其余路径从 session 行读。
+  let resolvedRequireApproval = false;
   // Image attachments — supplied by client for root/branch, read from
   // DB for retry. Always normalized to NodeAttachment[] before going
   // into createNode args (so they land in attachments_json) and
@@ -252,6 +257,7 @@ export async function POST(req: Request) {
         resolvedMode = isMode(existing.mode) ? existing.mode : "chat";
         resolvedWorkspacePath = existing.workspacePath;
         resolvedSystemPrompt = existing.systemPrompt;
+        resolvedRequireApproval = existing.requireApproval;
         nodeId = nid();
         const node = createRootInSession({
           sessionId: trellisSessionId,
@@ -292,6 +298,12 @@ export async function POST(req: Request) {
           }
           resolvedWorkspacePath = wp;
         }
+        // 权限确认钳制：只有 claude 系的 workspace/project 才可开（chat 无文件
+        // 工具；codex/mock 无 stdio 协议，开了也是谎言级 UI）。
+        resolvedRequireApproval =
+          body.requireApproval === true &&
+          resolvedMode !== "chat" &&
+          providerFamily(providerId) === "claude";
         trellisSessionId = nid();
         nodeId = nid();
         const { session, node } = createSessionWithRoot({
@@ -304,6 +316,7 @@ export async function POST(req: Request) {
           workspacePath: resolvedWorkspacePath,
           systemPrompt: resolvedSystemPrompt,
           model: providerId,
+          requireApproval: resolvedRequireApproval,
           attachments: resolvedAttachments,
         });
         createdEvent = { type: "created", session, node };
@@ -334,6 +347,7 @@ export async function POST(req: Request) {
       resolvedWorkspacePath = parentSession?.workspacePath ?? null;
       resolvedSystemPrompt = parentSession?.systemPrompt ?? null;
       resolvedOrigin = parentSession?.origin ?? "native";
+      resolvedRequireApproval = parentSession?.requireApproval ?? false;
       createdEvent = { type: "created", node };
       questionForLLM = body.question;
     } else if (body.kind === "retry") {
@@ -360,6 +374,7 @@ export async function POST(req: Request) {
         retrySession && isMode(retrySession.mode) ? retrySession.mode : "chat";
       resolvedWorkspacePath = retrySession?.workspacePath ?? null;
       resolvedSystemPrompt = retrySession?.systemPrompt ?? null;
+      resolvedRequireApproval = retrySession?.requireApproval ?? false;
       createdEvent = { type: "created", node };
     } else {
       return Response.json({ error: "unknown kind" }, { status: 400 });
@@ -547,6 +562,7 @@ export async function POST(req: Request) {
             : undefined,
     resumeFamily: family,
     interactive,
+    requireApproval: resolvedRequireApproval,
     factory: (signal, ctx) =>
       llm.stream({
         history,
@@ -558,6 +574,7 @@ export async function POST(req: Request) {
         systemPrompt: resolvedSystemPrompt,
         chatEnhanced,
         forkSession: chatBFork,
+        requireApproval: resolvedRequireApproval,
         attachments: providerAttachments,
         onCanUseTool: ctx?.onCanUseTool,
       }),

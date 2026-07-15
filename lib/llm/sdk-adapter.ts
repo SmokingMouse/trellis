@@ -24,9 +24,19 @@ export function ensureChatScratch(): void {
   }
 }
 
+// 权限确认模式下强制走审批的工具（claude permissions.ask 规则）。只列「可变更」
+// 类——Read/Glob/Grep 等只读工具 claude 本就免审，继续放行；这份名单的意义是
+// 压过用户全局 settings.json 的 allow 规则（本机裸 "Bash" 全放行，2026-07-15
+// 实测不注入 ask 则 can_use_tool 永不触发）。MCP 等未列工具走 claude 默认审批
+// （未 allowlist 的也会进 can_use_tool → 同样弹卡）。
+const APPROVAL_ASK_TOOLS = ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"];
+
 /** trellis mode + StreamRequest → SDK RunOptions(细粒度机制)。 */
 export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
   const common: RunOptions = { model, attachments: req.attachments };
+  // 权限确认仅在交互回调在场时生效（run-bus 只给 claude 系建回调；codex/mock
+  // 无 stdio 协议，保持各自现有 permission 策略不受影响）。
+  const approve = req.requireApproval === true && !!req.onCanUseTool;
   if (mode === "chat") {
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
     // chat B-fork (claude only): persist + resume the parent's forked session so
@@ -84,10 +94,13 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     // 像一次性 Claude Code CLI:全工具 + bypass,cwd 绑工作区,每轮无状态。
     // A路②: onCanUseTool 开启 stdio 权限协议,非交互工具由 run-bus 的
     // dispatcher 立即 auto-allow(保持 bypass YOLO),仅交互工具暂停等用户。
+    // 权限确认(approve):permission 降为 default + ask 规则,可变更工具全部
+    // 进 can_use_tool,由 dispatcher 暂停弹权限卡。
     return {
       ...common,
       workspace: req.cwd ?? os.homedir(),
-      permission: "full",
+      permission: approve ? "default" : "full",
+      ...(approve ? { askTools: APPROVAL_ASK_TOOLS } : {}),
       persistence: false,
       onCanUseTool: req.onCanUseTool,
     };
@@ -96,7 +109,8 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
   return {
     ...common,
     workspace: req.cwd ?? os.homedir(),
-    permission: "full",
+    permission: approve ? "default" : "full",
+    ...(approve ? { askTools: APPROVAL_ASK_TOOLS } : {}),
     persistence: true,
     resume: req.claudeSessionId ?? undefined,
     onCanUseTool: req.onCanUseTool,

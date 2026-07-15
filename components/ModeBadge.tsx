@@ -52,6 +52,12 @@ export function ModeBadge() {
           </span>
         </>
       )}
+      {/* 权限确认会话：可变更工具逐个审批（创建时锁定）。 */}
+      {session.requireApproval && (
+        <span title="需确认：Bash/Write/Edit 等工具执行前弹卡等你允许" aria-label="需确认">
+          🛡️
+        </span>
+      )}
     </div>
   );
 }

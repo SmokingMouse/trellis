@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-07-15 · 权限确认（permission gate）= per-session 布尔 + ask 规则注入，还 skip-permissions 的债
+
+**Decision**：session 级 `require_approval`（创建时锁定，仅 claude 系 workspace/project 可开，
+默认 0=YOLO 现状）。开启后 spawn 从 `--dangerously-skip-permissions` 降为 `--permission-mode
+default` **+ `--settings '{"permissions":{"ask":["Bash","Write","Edit","MultiEdit","NotebookEdit"]}}'`**，
+可变更工具经 stdio can_use_tool 暂停 → 复用 A路② 全套管道（PendingInteraction/catchup/respond
+API）→ TurnCard 弹权限卡（允许 / 本轮总是允许 / 拒绝+理由）。「总是允许」记忆存 RunState
+（per-run，每轮 spawn 重置）。
+**Why（两层）**：① 动机 = botmux attach 模式对照后确认的 P0——远程/手机场景需要「重要操作过我
+一眼」，且权限确认**不需要终端**，stream-json control protocol 是结构化正解（SDK `onCanUseTool`
+已预留，管道 A路② 已全在，本次纯增量）。② **ask 规则是硬前提**：实测（2026-07-15，claude
+2.1.207）本机全局 settings.json 裸 `Bash` 全放行，权限规则优先于 stdio 回调——不注入 ask 则
+can_use_tool 永不触发、审批形同虚设。ask > allow 的优先级已实测坐实。
+**Alternatives**：① 尊重本机 allowlist（不注入 ask）—— 拒绝，等于功能不存在；本机 allowlist
+反映的是「人在终端旁」的信任姿态，远程审批是另一种信任语境。② `--setting-sources=` 砍掉用户
+settings —— 拒绝，连 CLAUDE.md/skills 一起砍，workspace/project 不可接受。③ per-session 三档
+（+acceptEdits）—— 暂缓，布尔够用，要再演化。④ 「总是允许」持久到 session —— 拒绝，per-run
+成本为零且语义干净（每轮新进程本就是新权限上下文）。
+**SDK 配套**：`RunOptions.askTools?: string[]`（纯机制，policy 名单留在 trellis sdk-adapter）。
+
 ## 2026-07-14 · 统一阅读面：NodeFullView 退役，线性 thread 成为唯一「阅读/对话面」（issue #7）
 
 **Decision**：三种界面收敛为两个正交面——**画布 = 看结构/分叉操作，线性 thread = 阅读/续聊**，
