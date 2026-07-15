@@ -13,13 +13,242 @@
 @layer hljs-light, hljs-dark;
 :where(.dark) .hljs { /* re-export dark layer rules unconditionally */ }
 
+/* ───────────────────────── Design tokens ─────────────────────────
+   双层结构：
+   1) 原始变量（--surface 等）定义在普通 CSS 块里，参与级联——
+      `.dark` 与 `[data-theme=X]` 通过覆盖这些变量实现暗色与多主题，
+      组件端不再写 dark: 双份颜色。
+   2) 下方 @theme inline 把它们注册成 Tailwind utility（bg-surface、
+      text-ink-muted…）。`inline` 让 utility 直接引用 var()，在使用处
+      解析、随主题级联；没有 inline 只会取 :root 静态值。
+   默认主题的值精确取自 Tailwind v4 调色板（oklch 原值），保证
+   token 化前后零视觉 diff。语义角色后缀约定：
+     X        实色（按钮底/dot/实心 badge）
+     X-strong 实色的 hover/加重档
+     X-ink    淡色底上的文字
+     X-muted  淡色填充底
+     X-line   边框 / ring（mode 系另有 -line-strong 供激活态）        */
+
 :root {
-  --background: #fafaf9;
-  --foreground: #1c1917;
+  color-scheme: light;
+
+  /* 中性族 —— stone */
+  --surface-canvas: oklch(98.5% 0.001 106.423); /* stone-50 */
+  --surface: #fff;
+  --surface-raised: #fff;
+  --surface-muted: oklch(97% 0.001 106.424); /* stone-100 */
+  --scrim: oklch(14.7% 0.004 49.25); /* stone-950，配 /50 使用 */
+  --line: oklch(92.3% 0.003 48.717); /* stone-200 */
+  --line-strong: oklch(86.9% 0.005 56.366); /* stone-300 */
+  --line-faint: oklch(97% 0.001 106.424); /* stone-100 */
+  --ink: oklch(21.6% 0.006 56.043); /* stone-900 */
+  --ink-strong: oklch(21.6% 0.006 56.043); /* stone-900 */
+  --ink-muted: oklch(44.4% 0.011 73.639); /* stone-600 */
+  --ink-faint: oklch(70.9% 0.01 56.259); /* stone-400 */
+  --ink-inverse: #fff;
+
+  /* accent —— indigo（主按钮/焦点/流式/选中） */
+  --accent: oklch(51.1% 0.262 276.966); /* indigo-600 */
+  --accent-strong: oklch(45.7% 0.24 277.023); /* indigo-700 */
+  --accent-ink: oklch(35.9% 0.144 278.697); /* indigo-900 */
+  --accent-muted: oklch(96.2% 0.018 272.314); /* indigo-50 */
+  --accent-line: oklch(87% 0.065 274.039); /* indigo-200 */
+
+  /* 状态色 —— warn(amber) / danger(rose) / positive(emerald) / unread(=emerald) */
+  --warn: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --warn-ink: oklch(41.4% 0.112 45.904); /* amber-900 */
+  --warn-muted: oklch(98.7% 0.022 95.277); /* amber-50 */
+  --warn-line: oklch(87.9% 0.169 91.605); /* amber-300 */
+  --danger: oklch(58.6% 0.253 17.585); /* rose-600 */
+  --danger-strong: oklch(51.4% 0.222 16.935); /* rose-700 */
+  --danger-ink: oklch(41% 0.159 10.272); /* rose-900 */
+  --danger-muted: oklch(96.9% 0.015 12.422); /* rose-50 */
+  --danger-line: oklch(89.2% 0.058 10.001); /* rose-200 */
+  --positive: oklch(69.6% 0.17 162.48); /* emerald-500 */
+  --positive-ink: oklch(37.8% 0.077 168.94); /* emerald-900 */
+  --positive-muted: oklch(97.9% 0.021 166.113); /* emerald-50 */
+  --positive-line: oklch(84.5% 0.143 164.978); /* emerald-300 */
+  --unread: oklch(69.6% 0.17 162.48); /* emerald-500 */
+  --unread-ink: oklch(37.8% 0.077 168.94); /* emerald-900 */
+  --unread-muted: oklch(97.9% 0.021 166.113); /* emerald-50 */
+  --unread-line: oklch(84.5% 0.143 164.978); /* emerald-300 */
+
+  /* fork —— 分叉锚点（banner/badge），默认与 warn 同值但独立可换 */
+  --fork: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --fork-ink: oklch(41.4% 0.112 45.904); /* amber-900 */
+  --fork-muted: oklch(98.7% 0.022 95.277); /* amber-50 */
+  --fork-line: oklch(87.9% 0.169 91.605); /* amber-300 */
+
+  /* mode 三色 —— 与状态色解耦（值同 stone/amber/rose 但独立变量） */
+  --mode-chat: oklch(70.9% 0.01 56.259); /* stone-400 */
+  --mode-chat-ink: oklch(37.4% 0.01 67.558); /* stone-700 */
+  --mode-chat-muted: oklch(97% 0.001 106.424); /* stone-100 */
+  --mode-chat-line: oklch(86.9% 0.005 56.366); /* stone-300 */
+  --mode-chat-line-strong: oklch(70.9% 0.01 56.259); /* stone-400 */
+  --mode-workspace: oklch(76.9% 0.188 70.08); /* amber-500 */
+  --mode-workspace-ink: oklch(41.4% 0.112 45.904); /* amber-900 */
+  --mode-workspace-muted: oklch(98.7% 0.022 95.277); /* amber-50 */
+  --mode-workspace-line: oklch(87.9% 0.169 91.605); /* amber-300 */
+  --mode-workspace-line-strong: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --mode-project: oklch(64.5% 0.246 16.439); /* rose-500 */
+  --mode-project-ink: oklch(41% 0.159 10.272); /* rose-900 */
+  --mode-project-muted: oklch(96.9% 0.015 12.422); /* rose-50 */
+  --mode-project-line: oklch(81% 0.117 11.638); /* rose-300 */
+  --mode-project-line-strong: oklch(71.2% 0.194 13.428); /* rose-400 */
+
+  /* 兼容别名（W2 收编 html/body 后删除） */
+  --background: var(--surface-canvas);
+  --foreground: var(--ink);
 }
+
 .dark {
-  --background: #0c0a09;
-  --foreground: #e7e5e4;
+  color-scheme: dark;
+
+  --surface-canvas: oklch(14.7% 0.004 49.25); /* stone-950 */
+  --surface: oklch(21.6% 0.006 56.043); /* stone-900 */
+  --surface-raised: oklch(26.8% 0.007 34.298); /* stone-800 */
+  --surface-muted: oklch(26.8% 0.007 34.298); /* stone-800 */
+  --line: oklch(26.8% 0.007 34.298); /* stone-800 */
+  --line-strong: oklch(37.4% 0.01 67.558); /* stone-700 */
+  --line-faint: oklch(21.6% 0.006 56.043); /* stone-900 */
+  --ink: oklch(92.3% 0.003 48.717); /* stone-200 */
+  --ink-strong: oklch(97% 0.001 106.424); /* stone-100 */
+  --ink-muted: oklch(70.9% 0.01 56.259); /* stone-400 */
+  --ink-faint: oklch(55.3% 0.013 58.071); /* stone-500 */
+  --ink-inverse: oklch(21.6% 0.006 56.043); /* stone-900 */
+
+  --accent: oklch(58.5% 0.233 277.117); /* indigo-500 */
+  --accent-strong: oklch(67.3% 0.182 276.935); /* indigo-400，dark hover 变亮 */
+  --accent-ink: oklch(78.5% 0.115 274.713); /* indigo-300 */
+  --accent-muted: oklch(25.7% 0.09 281.288); /* indigo-950 */
+  --accent-line: oklch(35.9% 0.144 278.697); /* indigo-900 */
+
+  --warn: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --warn-ink: oklch(92.4% 0.12 95.746); /* amber-200 */
+  --warn-muted: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); /* amber-950/40 */
+  --warn-line: oklch(47.3% 0.137 46.201); /* amber-800 */
+  --danger: oklch(64.5% 0.246 16.439); /* rose-500 */
+  --danger-strong: oklch(71.2% 0.194 13.428); /* rose-400 */
+  --danger-ink: oklch(89.2% 0.058 10.001); /* rose-200 */
+  --danger-muted: color-mix(in oklab, oklch(27.1% 0.105 12.094) 40%, transparent); /* rose-950/40 */
+  --danger-line: oklch(41% 0.159 10.272); /* rose-900 */
+  --positive: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --positive-ink: oklch(90.5% 0.093 164.15); /* emerald-200 */
+  --positive-muted: color-mix(in oklab, oklch(26.2% 0.051 172.552) 40%, transparent); /* emerald-950/40 */
+  --positive-line: oklch(43.2% 0.095 166.913); /* emerald-800 */
+  --unread: oklch(76.5% 0.177 163.223); /* emerald-400 */
+  --unread-ink: oklch(90.5% 0.093 164.15); /* emerald-200 */
+  --unread-muted: color-mix(in oklab, oklch(26.2% 0.051 172.552) 40%, transparent); /* emerald-950/40 */
+  --unread-line: oklch(43.2% 0.095 166.913); /* emerald-800 */
+
+  --fork: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --fork-ink: oklch(92.4% 0.12 95.746); /* amber-200 */
+  --fork-muted: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); /* amber-950/40 */
+  --fork-line: oklch(47.3% 0.137 46.201); /* amber-800 */
+
+  --mode-chat: oklch(55.3% 0.013 58.071); /* stone-500 */
+  --mode-chat-ink: oklch(92.3% 0.003 48.717); /* stone-200 */
+  --mode-chat-muted: oklch(26.8% 0.007 34.298); /* stone-800 */
+  --mode-chat-line: oklch(37.4% 0.01 67.558); /* stone-700 */
+  --mode-chat-line-strong: oklch(55.3% 0.013 58.071); /* stone-500 */
+  --mode-workspace: oklch(82.8% 0.189 84.429); /* amber-400 */
+  --mode-workspace-ink: oklch(92.4% 0.12 95.746); /* amber-200 */
+  --mode-workspace-muted: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); /* amber-950/40 */
+  --mode-workspace-line: oklch(47.3% 0.137 46.201); /* amber-800 */
+  --mode-workspace-line-strong: oklch(55.5% 0.163 48.998); /* amber-700 */
+  --mode-project: oklch(71.2% 0.194 13.428); /* rose-400 */
+  --mode-project-ink: oklch(89.2% 0.058 10.001); /* rose-200 */
+  --mode-project-muted: color-mix(in oklab, oklch(27.1% 0.105 12.094) 40%, transparent); /* rose-950/40 */
+  --mode-project-line: oklch(45.5% 0.188 13.697); /* rose-800 */
+  --mode-project-line-strong: oklch(51.4% 0.222 16.935); /* rose-700 */
+}
+
+/* Tailwind utility 注册。inline = 在使用处解析 var()，随 .dark /
+   [data-theme] 级联（关键，见上）。 */
+@theme inline {
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-muted: var(--surface-muted);
+  --color-scrim: var(--scrim);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-faint: var(--line-faint);
+  --color-ink: var(--ink);
+  --color-ink-strong: var(--ink-strong);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-muted: var(--accent-muted);
+  --color-accent-line: var(--accent-line);
+  --color-warn: var(--warn);
+  --color-warn-ink: var(--warn-ink);
+  --color-warn-muted: var(--warn-muted);
+  --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-muted: var(--danger-muted);
+  --color-danger-line: var(--danger-line);
+  --color-positive: var(--positive);
+  --color-positive-ink: var(--positive-ink);
+  --color-positive-muted: var(--positive-muted);
+  --color-positive-line: var(--positive-line);
+  --color-unread: var(--unread);
+  --color-unread-ink: var(--unread-ink);
+  --color-unread-muted: var(--unread-muted);
+  --color-unread-line: var(--unread-line);
+  --color-fork: var(--fork);
+  --color-fork-ink: var(--fork-ink);
+  --color-fork-muted: var(--fork-muted);
+  --color-fork-line: var(--fork-line);
+  --color-mode-chat: var(--mode-chat);
+  --color-mode-chat-ink: var(--mode-chat-ink);
+  --color-mode-chat-muted: var(--mode-chat-muted);
+  --color-mode-chat-line: var(--mode-chat-line);
+  --color-mode-chat-line-strong: var(--mode-chat-line-strong);
+  --color-mode-workspace: var(--mode-workspace);
+  --color-mode-workspace-ink: var(--mode-workspace-ink);
+  --color-mode-workspace-muted: var(--mode-workspace-muted);
+  --color-mode-workspace-line: var(--mode-workspace-line);
+  --color-mode-workspace-line-strong: var(--mode-workspace-line-strong);
+  --color-mode-project: var(--mode-project);
+  --color-mode-project-ink: var(--mode-project-ink);
+  --color-mode-project-muted: var(--mode-project-muted);
+  --color-mode-project-line: var(--mode-project-line);
+  --color-mode-project-line-strong: var(--mode-project-line-strong);
+
+  /* 字号阶梯：19 个任意 px 档收敛为 6 档 */
+  --text-nano: 10px; /* 徽标/kbd/角标（原 8~10.5px） */
+  --text-nano--line-height: 1.35;
+  --text-label: 11px; /* meta/标签（原 11/11.5px） */
+  --text-label--line-height: 1.4;
+  --text-ui: 12.5px; /* UI 默认（原 12/12.5/13px） */
+  --text-ui--line-height: 1.5;
+  --text-body: 14px; /* 画布正文（原 13.5/14/14.5px） */
+  --text-body--line-height: 1.6;
+  --text-reading: 15px; /* 线性正文（原 15/16px） */
+  --text-reading--line-height: 1.7;
+  --text-title: 18px; /* 标题（原 18/19px） */
+  --text-title--line-height: 1.4;
+
+  /* 圆角阶梯：field=按钮/输入，card=卡片/popover，overlay=modal/sheet */
+  --radius-field: 8px;
+  --radius-card: 12px;
+  --radius-overlay: 16px;
+
+  /* 阴影阶梯：raise=卡片，pop=dropdown/popover，overlay=modal/drawer/toast */
+  --shadow-raise: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-pop: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+  /* 等宽字体归一：globals 声明与组件 font-mono 从此同源（原 CSS 声明
+     JetBrains Mono 但从未加载、实际回退 Menlo；组件 font-mono 又是
+     ui-monospace——双源不一致就此终结） */
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 html, body {

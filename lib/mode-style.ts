@@ -1,8 +1,10 @@
 // Shared mode color tokens for the three session modes. Single source of
 // truth so ModeBadge (Header) and SessionTabs (tab bar) can't drift apart.
 //
-// Palette (from the original ModeBadge): chat = neutral stone,
-// workspace = amber, project = rose.
+// Colors come from the semantic token layer (globals.css @theme):
+// mode-chat / mode-workspace / mode-project each carry dot·ink·muted·line·
+// line-strong roles, decoupled from the status hues (warn/danger) so a
+// palette can restyle modes without touching alert semantics.
 //
 // - `dot`:    bg-* for the small mode color dot on a tab.
 // - `text`:   text-* for an active-tab label tint.
@@ -22,30 +24,28 @@ export type ModeStyle = {
 export const MODE_STYLES: Record<string, ModeStyle> = {
   chat: {
     label: "Chat",
-    dot: "bg-stone-400 dark:bg-stone-500",
-    text: "text-stone-700 dark:text-stone-200",
-    badge:
-      "border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200",
-    activeBg: "bg-stone-100 dark:bg-stone-800",
-    activeBorder: "border-stone-400 dark:border-stone-500",
+    dot: "bg-mode-chat",
+    text: "text-mode-chat-ink",
+    badge: "border-mode-chat-line bg-mode-chat-muted text-mode-chat-ink",
+    activeBg: "bg-mode-chat-muted",
+    activeBorder: "border-mode-chat-line-strong",
   },
   workspace: {
     label: "Workspace",
-    dot: "bg-amber-500 dark:bg-amber-400",
-    text: "text-amber-900 dark:text-amber-200",
+    dot: "bg-mode-workspace",
+    text: "text-mode-workspace-ink",
     badge:
-      "border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200",
-    activeBg: "bg-amber-50 dark:bg-amber-950/40",
-    activeBorder: "border-amber-400 dark:border-amber-700",
+      "border-mode-workspace-line bg-mode-workspace-muted text-mode-workspace-ink",
+    activeBg: "bg-mode-workspace-muted",
+    activeBorder: "border-mode-workspace-line-strong",
   },
   project: {
     label: "Project",
-    dot: "bg-rose-500 dark:bg-rose-400",
-    text: "text-rose-900 dark:text-rose-200",
-    badge:
-      "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200",
-    activeBg: "bg-rose-50 dark:bg-rose-950/40",
-    activeBorder: "border-rose-400 dark:border-rose-700",
+    dot: "bg-mode-project",
+    text: "text-mode-project-ink",
+    badge: "border-mode-project-line bg-mode-project-muted text-mode-project-ink",
+    activeBg: "bg-mode-project-muted",
+    activeBorder: "border-mode-project-line-strong",
   },
 };
 
