@@ -1,16 +1,16 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
+import { Drawer } from "@/components/ui/Drawer";
+import { IconButton } from "@/components/ui/IconButton";
 import type { Note } from "@/lib/types";
 
 // Right-side drawer (mobile = bottom sheet) listing the session's
 // notebook entries. Each row shows the quoted excerpt, source node ref
 // (#N · topic), and two actions: jump back (sets activeNodeId +
-// fullScreen + pendingScrollAnchor for scroll-to-mark) and delete.
-//
-// Skeleton mirrors NodeTreeOverlay so transitions / backdrop / mobile
-// breakpoints feel consistent.
+// pendingScrollAnchor for scroll-to-mark) and delete.
+// 外壳（scrim/滑入/Esc）来自 ui/Drawer 原语。
 export function NotesDrawer() {
   const open = useSessionStore((s) => s.notesOpen);
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
@@ -21,82 +21,51 @@ export function NotesDrawer() {
 
   const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
 
-  // Esc closes the drawer (matches every other modal in trellis).
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNotesOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, setNotesOpen]);
-
-  // Jump-to-source: store action handles activeNodeId + fullScreen +
+  // Jump-to-source: store action handles activeNodeId +
   // pendingScrollAnchor in one set(), and ResponseBody scrolls/pulses
   // the matching mark[data-note-id]. Drawer self-closes via setNotesOpen
   // inside the action.
   const onJump = (note: Note) => jumpToNoteSource(note.id);
 
   return (
-    <div
-      className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}
-      aria-hidden={!open}
-    >
-      <div
-        onClick={() => setNotesOpen(false)}
-        className={`absolute inset-0 bg-black/40 sm:bg-black/15 transition-opacity duration-200 ${
-          open ? "opacity-100" : "opacity-0"
-        }`}
-      />
-      <div
-        className={`absolute bg-white dark:bg-stone-900 shadow-2xl flex flex-col overflow-hidden transition-transform duration-200
-          inset-x-0 bottom-0 h-[60vh] rounded-t-2xl
-          sm:inset-x-auto sm:right-2 sm:top-14 sm:bottom-2 sm:w-[360px] sm:h-auto sm:rounded-xl
-          ${
-            open
-              ? "translate-y-0 sm:translate-x-0"
-              : "translate-y-full sm:translate-y-0 sm:translate-x-[calc(100%+0.5rem)]"
-          }`}
-      >
-        <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 shrink-0">
-          <div className="text-stone-400 dark:text-stone-500 uppercase tracking-wider text-[10px] font-medium">
-            笔记
-          </div>
-          <div className="text-stone-400 dark:text-stone-500 text-xs">
-            · {notes.length} 条
-          </div>
-          <button
-            onClick={() => setNotesOpen(false)}
-            className="ml-auto text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 text-sm px-2 py-0.5"
-            aria-label="关闭"
-          >
-            ✕
-          </button>
+    <Drawer open={open} onClose={() => setNotesOpen(false)}>
+      <div className="px-4 py-3 border-b border-line flex items-center gap-2 shrink-0">
+        <div className="text-ink-faint uppercase tracking-wider text-nano font-medium">
+          笔记
         </div>
-        <div className="flex-1 overflow-y-auto py-2 px-3">
-          {notes.length === 0 ? (
-            <div className="text-stone-400 dark:text-stone-500 text-xs text-center py-8 leading-relaxed">
-              还没有笔记。
-              <br />
-              在阅读时选中文字 → ⌘D 或 📌 按钮即可摘录。
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {notes.map((note) => (
-                <NoteRow
-                  key={note.id}
-                  note={note}
-                  sourceIndex={indices[note.sourceNodeId] ?? 0}
-                  sourceTopic={topicForSource(note, nodes)}
-                  onJump={() => onJump(note)}
-                  onDelete={() => deleteNote(note.id)}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+        <div className="text-ink-faint text-xs">· {notes.length} 条</div>
+        <IconButton
+          label="关闭"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setNotesOpen(false)}
+        >
+          ✕
+        </IconButton>
       </div>
-    </div>
+      <div className="flex-1 overflow-y-auto py-2 px-3">
+        {notes.length === 0 ? (
+          <div className="text-ink-faint text-xs text-center py-8 leading-relaxed">
+            还没有笔记。
+            <br />
+            在阅读时选中文字 → ⌘D 或 📌 按钮即可摘录。
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {notes.map((note) => (
+              <NoteRow
+                key={note.id}
+                note={note}
+                sourceIndex={indices[note.sourceNodeId] ?? 0}
+                sourceTopic={topicForSource(note, nodes)}
+                onJump={() => onJump(note)}
+                onDelete={() => deleteNote(note.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </Drawer>
   );
 }
 

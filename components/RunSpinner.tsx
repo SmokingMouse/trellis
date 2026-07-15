@@ -45,13 +45,6 @@ export function RunSpinner({ size = 12 }: { size?: number }) {
 }
 
 // Three-dot bounce — even more compact, used inline next to a title when a
-// spinner ring would be redundant. CSS lives in globals.css (.trellis-dots).
-export function RunDots() {
-  return (
-    <span className="trellis-dots shrink-0" aria-label="生成中" role="status" aria-hidden>
-      <span />
-      <span />
-      <span />
-    </span>
-  );
-}
+// spinner ring would be redundant. Now delegates to the ui/Dots primitive
+// (the app-wide "in progress" vocabulary); W7 retires the ring above too.
+export { Dots as RunDots } from "@/components/ui/Dots";

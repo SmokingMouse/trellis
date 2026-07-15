@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { ToastShell } from "@/components/ui/Toast";
 
 const AUTO_DISMISS_MS = 8000;
 
@@ -22,22 +23,23 @@ export function StreamAlertToast() {
   if (!alert) return null;
 
   return (
-    <div className="fixed bottom-20 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="pointer-events-auto max-w-md w-full bg-rose-50 dark:bg-rose-950/90 border border-rose-200 dark:border-rose-800 rounded-lg shadow-lg px-3 py-2 flex items-start gap-2.5">
+    <div className="fixed bottom-20 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
+      <ToastShell
+        tone="danger"
+        className="max-w-md w-full px-3 py-2 flex items-start gap-2.5"
+      >
         <span className="shrink-0 mt-0.5" aria-hidden>
           ⚠️
         </span>
-        <div className="flex-1 min-w-0 text-[13px] text-rose-800 dark:text-rose-200 break-words">
-          {alert}
-        </div>
+        <div className="flex-1 min-w-0 text-ui break-words">{alert}</div>
         <button
           onClick={() => setStreamAlert(null)}
-          className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-rose-400 hover:text-rose-700 dark:hover:text-rose-200 text-sm leading-none"
+          className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-danger/60 hover:text-danger text-sm leading-none"
           aria-label="关闭"
         >
           ×
         </button>
-      </div>
+      </ToastShell>
     </div>
   );
 }
