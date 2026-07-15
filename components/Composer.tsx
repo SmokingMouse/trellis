@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
+import { AttachmentPreview } from "./AttachmentPreview";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
 import type { ChatNode } from "@/lib/types";
 
@@ -28,14 +30,17 @@ export function Composer({
   const sessionMode = useSessionStore((s) => s.session?.mode);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
   // Before the server's `created` event lands, the streaming card is a local
   // optimistic placeholder — there's no run to abort yet.
   const isPending = targetNode ? isOptimisticNodeId(targetNode.id) : false;
-  const matchedSkills = useSkillSuggestions(
-    text,
-    sessionMode !== "chat" || chatEnhanced,
-  );
+  // Same tool-capability gate as skills (and the chat route's attachment
+  // handling): workspace/project/enhanced chat take any whitelisted file
+  // (staged to disk for the agent); pure chat only images + inlineable text.
+  const toolCapable = sessionMode !== "chat" || chatEnhanced;
+  const matchedSkills = useSkillSuggestions(text, toolCapable);
+  const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
 
   useEffect(() => {
     if (ref.current) {
@@ -46,9 +51,14 @@ export function Composer({
 
   const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || !targetNode || isStreaming) return;
+    if (!trimmed || !targetNode || isStreaming || att.hasUploading) return;
+    const attachments =
+      att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
     setText("");
-    streamBranch(targetNode.id, trimmed, null);
+    // This composer stays mounted after submit — clear so the next turn
+    // starts fresh.
+    att.clear();
+    streamBranch(targetNode.id, trimmed, null, { attachments });
   };
 
   if (isStreaming && targetNode) {
@@ -74,7 +84,7 @@ export function Composer({
   }
 
   return (
-    <div className="relative py-3 flex items-end gap-2">
+    <div className="relative py-3">
       {matchedSkills.length > 0 && (
         <SkillPickerList
           skills={matchedSkills}
@@ -84,40 +94,72 @@ export function Composer({
           }}
         />
       )}
-      <textarea
-        ref={ref}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (isSendCombo(e, sendKey)) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        rows={1}
-        disabled={!targetNode}
-        placeholder={placeholder ?? `继续对话…（${sendHint(sendKey)}）`}
-        className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm disabled:opacity-50"
-      />
-      <button
-        onClick={submit}
-        disabled={!text.trim() || !targetNode}
-        className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
-        aria-label="发送"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      {att.pending.length > 0 && (
+        <div className="mb-2">
+          <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+        </div>
+      )}
+      {att.notice && (
+        <div className="mb-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          {att.notice}
+        </div>
+      )}
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={ref}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (isSendCombo(e, sendKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          onPaste={att.handlePaste}
+          rows={1}
+          disabled={!targetNode}
+          placeholder={placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`}
+          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm disabled:opacity-50"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={att.accept}
+          multiple
+          onChange={att.handlePicked}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!targetNode || att.atLimit}
+          title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-stone-500 dark:text-stone-400 flex items-center justify-center disabled:opacity-30 hover:text-stone-800 dark:hover:text-stone-200 hover:border-stone-400 dark:hover:border-stone-500 active:scale-95 transition-all shadow-sm"
+          aria-label="添加附件"
         >
-          <path d="M12 19V5M5 12l7-7 7 7" />
-        </svg>
-      </button>
+          <span aria-hidden>📎</span>
+        </button>
+        <button
+          onClick={submit}
+          disabled={!text.trim() || !targetNode || att.hasUploading}
+          title={att.hasUploading ? "等待附件上传…" : undefined}
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
+          aria-label="发送"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

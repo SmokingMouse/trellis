@@ -1,18 +1,31 @@
 import "server-only";
-import { storeBlob, isAllowedMime, sniffDimensions } from "@/lib/server/blobs";
+import { storeBlob, sniffDimensions } from "@/lib/server/blobs";
+import {
+  IMAGE_MIME_EXT,
+  FILE_EXT_MIME,
+  isImageMime,
+  extOf,
+} from "@/lib/attachments";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // 10 MB hard cap. Larger images make claude prompt token cost explode
 // and the multipart parse stay in memory the whole time; both bad.
+// Generic files share the cap — the agent reads them from disk, but the
+// upload itself is still buffered in memory here.
 const MAX_BYTES = 10 * 1024 * 1024;
 
 // POST /api/uploads
 // Accepts either:
-//   - multipart/form-data with a single file field "file"
+//   - multipart/form-data with a single file field "file" — images AND
+//     generic files (csv/log/pdf/…). Generic files are validated by
+//     extension against the shared whitelist and get their canonical
+//     mime from it (browsers report "" or junk for data files).
 //   - raw body with image/* Content-Type (used by paste flow when the
-//     client already has a Blob and doesn't need FormData wrapping)
+//     client already has a Blob and doesn't need FormData wrapping).
+//     Images only — generic files must come through multipart so we
+//     have a filename to derive the extension from.
 //
 // Returns NodeAttachment-shaped JSON so the client can push it
 // directly into the question's pending attachments list.
@@ -20,6 +33,7 @@ export async function POST(req: Request) {
   const ct = req.headers.get("content-type") ?? "";
   let buf: Buffer;
   let mime: string;
+  let ext: string;
   let filename: string | null = null;
 
   try {
@@ -29,12 +43,31 @@ export async function POST(req: Request) {
       if (!(file instanceof Blob)) {
         return Response.json({ error: "missing 'file' field" }, { status: 400 });
       }
-      mime = file.type || "application/octet-stream";
-      if (!isAllowedMime(mime)) {
-        return Response.json(
-          { error: `unsupported mime: ${mime}` },
-          { status: 415 },
-        );
+      filename =
+        file instanceof File && typeof file.name === "string" && file.name
+          ? file.name
+          : null;
+      const claimed = file.type || "";
+      if (claimed.startsWith("image/")) {
+        if (!isImageMime(claimed)) {
+          return Response.json(
+            { error: `unsupported mime: ${claimed}` },
+            { status: 415 },
+          );
+        }
+        mime = claimed;
+        ext = IMAGE_MIME_EXT[claimed];
+      } else {
+        const fromName = filename ? extOf(filename) : "";
+        const canonical = FILE_EXT_MIME[fromName];
+        if (!canonical) {
+          return Response.json(
+            { error: `unsupported file type: ${fromName ? `.${fromName}` : "(no extension)"}` },
+            { status: 415 },
+          );
+        }
+        mime = canonical;
+        ext = fromName;
       }
       // Blob is a Web type; Buffer.from(ArrayBuffer) handles the conversion.
       const ab = await file.arrayBuffer();
@@ -45,18 +78,15 @@ export async function POST(req: Request) {
         );
       }
       buf = Buffer.from(ab);
-      filename =
-        file instanceof File && typeof file.name === "string" && file.name
-          ? file.name
-          : null;
     } else if (ct.startsWith("image/")) {
-      if (!isAllowedMime(ct)) {
+      if (!isImageMime(ct)) {
         return Response.json(
           { error: `unsupported mime: ${ct}` },
           { status: 415 },
         );
       }
       mime = ct;
+      ext = IMAGE_MIME_EXT[ct];
       const ab = await req.arrayBuffer();
       if (ab.byteLength > MAX_BYTES) {
         return Response.json(
@@ -78,8 +108,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const { hash, size } = storeBlob(buf, mime);
-  const { width, height } = sniffDimensions(buf, mime);
+  const { hash, size } = storeBlob(buf, ext);
+  const { width, height } = mime.startsWith("image/")
+    ? sniffDimensions(buf, mime)
+    : { width: undefined, height: undefined };
 
   return Response.json({
     hash,

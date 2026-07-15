@@ -75,7 +75,7 @@
 **Wave 2 (Week 3-4) — Workspace/Project 超过 raw CLI**
 - [x] Stage 17: Tool call / Bash 可视化（解析 stream-json 的 tool_use/tool_result，节点折叠区展示）+ durable streams 改造（spawn 与 HTTP 解耦，断线不杀生成）
 - [ ] Stage 18: Skill 调用入口（输入 `/<skill-name>` 触发，复用 ~/.claude/skills/ 50+ skill）
-- [ ] Stage 19: 文件附件（PDF/Excel/Word/code 拖拽进 reference 节点）
+- [x] Stage 19: 文件附件（Session 50 落地，形态调整：进 composer 附件而非 reference 节点——CSV/文本/PDF 等通用文件走「blob + staging 路径注入 prompt」，agent 自己用工具读）
 
 **Wave 3 (Week 5-6) — 树状结构优势放大**
 - [ ] Stage 20: Plan 节点 type（计划-步骤-子节点联动，对齐 Plan → Execute → Verify → Learn）
@@ -126,6 +126,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 50 (2026-07-15)
+- **Done**: **临时文件上传（Stage 19 落地，形态调整为 composer 附件）**。动机：远程操作时快速给 agent 补充文件+上下文（CSV/日志/PDF 等截图之外的东西）。核心设计：**复用 Stage 15 blob 基座零 schema 变更**（`attachments_json` 原样，kind 由 mime 推断），通用文件**不进 provider vision 通道**——tool-capable 模式（workspace/project/chat增强，全是 `--dangerously-skip-permissions`）spawn 前物化到 `~/.trellis/uploads/<nodeId>/<原文件名>` + prompt 末尾注入绝对路径清单，agent 自己 Read/Bash 消费（CSV 能现场跑分析）；纯 chat 文本类 ≤128KB 内联 fenced block、二进制 UI 拦 + 服务端 prompt 注明。`~/sdk` 零改动、codex 路径零改动。
+  - 新 `lib/attachments.ts`（客户端/服务端共享 ext↔mime 白名单 ~35 种 + 分类 helpers）；`blobs.ts` 泛化（storeBlob 按 ext、resolveBlobPath 全表、`materializeAttachments` 幂等 staging→retry 免费复用、`readTextBlob`）；uploads POST 收通用文件（multipart 必带文件名，ext 白名单 + 服务端钦定 canonical mime 防浏览器 junk mime）、GET 加 `?name=` Content-Disposition；chat route images/files 分流 + `questionForTopic` 隔离（内联大 CSV 不污染 topic label）。
+  - 前端：新 `hooks/useAttachmentUploads.ts` 抽掉 QuestionInput/BranchPopover 各 ~80 行重复（顺手修多文件拖入 stale length 超上限），policy 感知（纯 chat=图+文本，tool-capable=全量）；AttachmentPreview 非图片渲染文件 chip（图标+文件名+大小，readonly 点击开 `?name=` URL），`PendingAttachment` 加 mime。
+- **Merge 注记**：feature 在 `goby` 分支基于旧结构开发（旧 LinearComposer/QuestionBlock），merge 时撞上 Session 47 的统一阅读面重构——LinearThreadView 冲突**整体取 main 版**，附件能力改移植进新共享 `Composer.tsx`（线性+画布 DockedComposer 一处接线，比旧结构更收敛）；TurnCard 已自带 readonly AttachmentPreview，文件 chip 自动生效。
+- **验证**（合并前 goby 侧：隔离 dev 3099 + 临时 DB + 真 claude haiku 全链路）：curl 上传 csv（含 junk mime→canonical）/415 拦截/Content-Disposition/图片 raw 回归全过；**workspace 真 claude 带 CSV → Read staging 路径 → 答对 3 行、均值 86.33**；纯 chat 内联答对 bob=92（无 tool call）；纯 chat PDF → 模型正确告知换模式；**retry 删 staging 后幂等重建再答对**；project 两轮 resume 不断链（turn2 答对 carol=79）；agent-browser 实测选文件→chip→发送→答对 + PDF 拦截提示。合并后 main 侧：tsc ✓ + `make build` ✓ + Composer 移植点浏览器 smoke（见 merge commit）。测试产物全清。
+- **边界**：export.ts 不动（图片附件本也不导出，保持一致）；staging/blob GC 沿用 P2 决策；文件路径只注入当轮 prompt 不回灌折叠历史（与图片对齐）。
+- **Next**: 用户真机（手机远程）验收。commit 均 `--no-gpg-sign`（1P 签名 agent 当时拒签，同 3b61a2e 待补签）。
+
 ### Session 49 (2026-07-15)
 - **Done**: **「空白沙箱」workspace——Project/Workspace 模式不挑目录，一键随机开一个空白上下文的空目录当 cwd**。新 `POST /api/workspaces/scratch`：在 `~/.trellis/scratch/<adj-animal-NN>`（与 `lib/paths.ts` 的 CHAT_SCRATCH 同族约定）非递归 mkdir，slug 碰撞（EEXIST）自动重试；WorkspacePicker header 下方加「✨ 空白沙箱」快捷入口（两个 tab 都可见，创建中禁用 + 失败行内报错），拿到路径走既有 `pickPath`。下游（session 创建/spawn cwd/文件预览围栏/最近列表）零改动——就是一个普通 workspace path，basename=slug 在「最近」里可读。
 - **验证**: 本 worktree（barnacle）首次 bootstrap：`make setup` 中 bun 装 `file:` 的 @sm 两包报 ENOENT，但 `make relink-sdk` 本来就会重建软链，补跑后 `make check` 全绿（这个失败对 setup 无实质影响）。`tsc --noEmit` ✓、`make build` ✓（`/api/workspaces/scratch` 注册）。隔离 dev server（:3097 + 临时 DB）runtime 验证：POST ×2 产出两个独立空目录；**真 claude 全链路**：用 scratch 目录建 project session（haiku）→ SSE created/delta/done 正常、答 PONG!、jsonl 落在 `~/.claude/projects/-Users-smokingmouse--trellis-scratch-<slug>/`。测试产物（server/临时 DB/两个 scratch 目录/claude projects 目录）已全清。

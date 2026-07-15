@@ -2,15 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { SelectionInfo } from "@/hooks/useSelectionWithin";
+import { AttachmentPreview } from "./AttachmentPreview";
 import {
-  AttachmentPreview,
-  uploadAttachment,
-  newPendingId,
-  type PendingAttachment,
-} from "./AttachmentPreview";
-import type { NodeAttachment } from "@/lib/types";
-
-const MAX_ATTACHMENTS = 6;
+  useAttachmentUploads,
+  MAX_ATTACHMENTS,
+} from "@/hooks/useAttachmentUploads";
 
 type Props = {
   selection: SelectionInfo;
@@ -22,11 +18,17 @@ type Props = {
 export function BranchPopover({ selection, expanded, onExpand, onClose }: Props) {
   const [q, setQ] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const addNote = useSessionStore((s) => s.addNote);
+  const session = useSessionStore((s) => s.session);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  // Same tool-capability gate as the chat route: workspace/project (and
+  // enhanced chat) can take any whitelisted file; pure chat can't.
+  const att = useAttachmentUploads(
+    session?.mode !== "chat" || chatEnhanced ? "all" : "chat-safe",
+  );
 
   const captureNote = async () => {
     if (savingNote) return;
@@ -75,77 +77,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     }
   }, [expanded]);
 
-  const hasUploading = pending.some((p) => p.status === "uploading");
-  const doneAttachments: NodeAttachment[] = pending
-    .filter((p): p is PendingAttachment & { attachment: NodeAttachment } =>
-      p.status === "done" && !!p.attachment,
-    )
-    .map((p) => p.attachment);
-
-  const startUpload = (file: File | Blob, filename: string | null) => {
-    if (pending.length >= MAX_ATTACHMENTS) return;
-    if (!file.type.startsWith("image/")) return;
-    const localId = newPendingId();
-    const previewUrl = URL.createObjectURL(file);
-    setPending((prev) => [
-      ...prev,
-      { localId, status: "uploading", previewUrl, filename },
-    ]);
-    uploadAttachment(file, filename)
-      .then((att) =>
-        setPending((prev) =>
-          prev.map((p) =>
-            p.localId === localId
-              ? { ...p, status: "done", attachment: att }
-              : p,
-          ),
-        ),
-      )
-      .catch((err) =>
-        setPending((prev) =>
-          prev.map((p) =>
-            p.localId === localId
-              ? {
-                  ...p,
-                  status: "error",
-                  errorMessage:
-                    err instanceof Error ? err.message : String(err),
-                }
-              : p,
-          ),
-        ),
-      );
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (!it.type.startsWith("image/")) continue;
-      const file = it.getAsFile();
-      if (!file) continue;
-      e.preventDefault();
-      startUpload(file, null);
-    }
-  };
-
-  const handlePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      startUpload(files[i], files[i].name);
-    }
-    e.target.value = "";
-  };
-
-  const handleRemove = (localId: string) => {
-    setPending((prev) => {
-      const target = prev.find((p) => p.localId === localId);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((p) => p.localId !== localId);
-    });
-  };
+  const { doneAttachments, hasUploading } = att;
 
   const submit = async () => {
     const text = q.trim();
@@ -158,13 +90,12 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     streamBranch(selection.nodeId, text, anchor, opts);
   };
 
-  // Expanded popover height grows with pending image previews so it
+  // Expanded popover height grows with pending attachment previews so it
   // doesn't clip behind the textarea / clobber screen-edge math.
-  const pendingHeight = pending.length > 0 ? 96 : 0;
+  const pendingHeight = att.pending.length > 0 ? 96 : 0;
   const popoverHeight = expanded ? 130 + pendingHeight : 38;
   const top = Math.max(8, selection.rect.top - popoverHeight - 8);
   const left = selection.rect.left + selection.rect.width / 2;
-  const atLimit = pending.length >= MAX_ATTACHMENTS;
 
   return (
     <div
@@ -184,11 +115,11 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             </span>
             」
           </div>
-          {pending.length > 0 && (
+          {att.pending.length > 0 && (
             <div className="px-3 pt-2">
               <AttachmentPreview
-                pending={pending}
-                onRemove={handleRemove}
+                pending={att.pending}
+                onRemove={att.remove}
               />
             </div>
           )}
@@ -196,7 +127,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            onPaste={handlePaste}
+            onPaste={att.handlePaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -206,27 +137,32 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
                 onClose();
               }
             }}
-            placeholder="进一步追问…（可粘贴图片）"
+            placeholder="进一步追问…（可粘贴图片 / 文件）"
             rows={2}
             className="w-full px-3 py-2 bg-transparent text-stone-900 dark:text-stone-100 outline-none resize-none text-sm placeholder:text-stone-400 dark:placeholder:text-stone-500"
           />
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
+            accept={att.accept}
             multiple
-            onChange={handlePicked}
+            onChange={att.handlePicked}
             className="hidden"
           />
+          {att.notice && (
+            <div className="px-3 pb-1 text-[11px] text-amber-700 dark:text-amber-300">
+              {att.notice}
+            </div>
+          )}
           <div className="border-t border-stone-100 dark:border-stone-800 px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={atLimit}
-              title={atLimit ? `已到 ${MAX_ATTACHMENTS} 张上限` : "添加图片"}
+              disabled={att.atLimit}
+              title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : "添加图片 / 文件"}
               className="px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 mr-auto"
             >
-              <span aria-hidden>🖼️</span>
+              <span aria-hidden>📎</span>
             </button>
             <button
               onClick={onClose}
@@ -237,7 +173,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             <button
               onClick={submit}
               disabled={!q.trim() || hasUploading}
-              title={hasUploading ? "等待图片上传…" : undefined}
+              title={hasUploading ? "等待附件上传…" : undefined}
               className="px-2.5 py-0.5 rounded bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 disabled:opacity-40 hover:bg-stone-800 dark:hover:bg-stone-300"
             >
               {hasUploading ? "上传中…" : "提问"}
