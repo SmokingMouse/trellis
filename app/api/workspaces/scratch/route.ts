@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Sibling of CHAT_SCRATCH (lib/paths.ts): chat mode shares one scratch cwd,
-// while each "blank sandbox" workspace/project session gets its own fresh
+// while each "blank sandbox" project session gets its own fresh
 // empty dir here — no repo, no CLAUDE.md, nothing to pick up as context.
 const SCRATCH_ROOT = path.join(os.homedir(), ".trellis", "scratch");
 

@@ -17,7 +17,7 @@ import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
 // A路②: tools that pause the run and require a user answer. Every other tool
 // the CLI surfaces through the stdio permission protocol is auto-allowed so
-// workspace/project keep their bypassPermissions YOLO behaviour (zero stall).
+// project keeps its bypassPermissions YOLO behaviour (zero stall).
 const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 // A路②: the onCanUseTool callback shape the SDK hands us. Redeclared narrowly

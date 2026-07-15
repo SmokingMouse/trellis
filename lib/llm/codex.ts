@@ -30,7 +30,7 @@ export function makeCodexProvider(
         signal: req.signal,
       };
       for await (const e of backend.run(prompt, runOpts)) {
-        const se = toStreamEvent(e, mode);
+        const se = toStreamEvent(e);
         if (se) yield se;
       }
     },

@@ -19,7 +19,7 @@ import { TargetChip } from "./TargetChip";
 import { ThreadMinimap } from "./ThreadMinimap";
 import { TurnCard } from "./TurnCard";
 
-// #7: the unified reading/chat surface for EVERY mode (chat / workspace /
+// #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
 // first-child chain below, non-thread children folded into "↳ N 个分支"
 // rows. Cards are fully interactive (TurnCard: edit question, ⌘K selection

@@ -27,8 +27,7 @@ export function makeClaudeProvider(
       // project always resumes a CLI-maintained session; chat B-fork does too
       // (req.forkSession) — both send only the current question, history lives
       // in the resumed/forked session as cache-hit message blocks. Folded-string
-      // buildPrompt is the fallback: workspace, or chat with B-fork off (window
-      // mode回退).
+      // buildPrompt is the fallback: chat with B-fork off (window mode回退).
       const prompt =
         mode === "project" || (mode === "chat" && req.forkSession)
           ? buildProjectPrompt(req.question, req.parentAnchor)
@@ -37,7 +36,7 @@ export function makeClaudeProvider(
       if (mode === "chat") ensureChatScratch();
       const runOpts = { ...modeToRunOptions(mode, opts.model ?? "sonnet", req), signal: req.signal };
       for await (const e of backend.run(prompt, runOpts)) {
-        const se = toStreamEvent(e, mode);
+        const se = toStreamEvent(e);
         if (se) yield se;
       }
     },

@@ -5,7 +5,7 @@ import path from "node:path";
 // C4 (Stage 18): list the user's ~/.claude/skills/ for the input `/`-picker.
 // trellis only does discovery/autocomplete — actual skill execution is handled
 // by the claude CLI itself when the `/skill-name ...` text is sent in
-// workspace/project mode (chat mode has no tools, so the picker is hidden there).
+// project mode (chat mode has no tools, so the picker is hidden there).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

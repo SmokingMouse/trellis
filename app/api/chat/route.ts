@@ -40,7 +40,7 @@ import { isKnownAttachmentMime, isTextMime } from "@/lib/attachments";
 import { sessionCwd } from "@/lib/paths";
 import type { NodeAttachment } from "@/lib/types";
 
-const VALID_MODES: Mode[] = ["chat", "workspace", "project"];
+const VALID_MODES: Mode[] = ["chat", "project"];
 function isMode(s: unknown): s is Mode {
   return typeof s === "string" && (VALID_MODES as string[]).includes(s);
 }
@@ -62,10 +62,10 @@ type ChatRequestRoot = {
   mode?: Mode;
   workspacePath?: string | null;
   // D1: chat-mode custom system prompt for a new session. Locked at
-  // creation; ignored for workspace/project (they use CLAUDE.md).
+  // creation; ignored for project (it uses CLAUDE.md).
   systemPrompt?: string | null;
-  // 权限确认（new session 时锁定）：true = workspace/project 的可变更工具逐个
-  // 弹权限卡。仅 claude 系 + 非 chat 模式生效，其余组合服务端钳成 false。
+  // 权限确认（new session 时锁定）：true = project 的可变更工具逐个弹权限卡。
+  // 仅 claude 系 + project 模式生效，其余组合服务端钳成 false。
   requireApproval?: boolean;
   // Stage 15: image attachments uploaded via /api/uploads. The client
   // sends NodeAttachment shapes; the server hash-resolves to on-disk
@@ -99,7 +99,7 @@ function nid(): string {
 // History depth knob. 0 = B-fork (append-only via --fork-session, chat+claude
 // default — history lives in the forked CLI session, nothing folded into the
 // prompt). 1-12 = window mode (fold N ancestor turns — the fallback, also used
-// by codex chat / workspace). Anything out of [0,12] or missing → 0.
+// by codex chat). Anything out of [0,12] or missing → 0.
 function clampDepth(n: unknown): number {
   return typeof n === "number" && n >= 0 && n <= 12 ? Math.round(n) : 0;
 }
@@ -157,7 +157,7 @@ function fmtSize(n: number): string {
 
 // Generic (non-image) attachments reach the model as prompt text, shaped
 // by what the mode can do:
-//  - tool-capable (workspace / project / enhanced chat): stage blobs to
+//  - tool-capable (project / enhanced chat): stage blobs to
 //    ~/.trellis/uploads/<nodeId>/ under their original filenames and list
 //    absolute paths — the agent reads/parses them with its own tools.
 //  - pure chat (web tools only): inline text files bodily (≤ cap); note
@@ -195,7 +195,7 @@ function buildFileAttachmentSuffix(
         ? "超过内联大小上限"
         : "二进制文件需要文件工具";
       parts.push(
-        `文件「${name}」（${f.mime}, ${fmtSize(f.size)}）已上传，但纯对话模式无法读取（${reason}）——请提醒用户改用增强模式 / Workspace / Project 再问。`,
+        `文件「${name}」（${f.mime}, ${fmtSize(f.size)}）已上传，但纯对话模式无法读取（${reason}）——请提醒用户改用增强模式 / Project 再问。`,
       );
     }
   }
@@ -275,7 +275,7 @@ export async function POST(req: Request) {
             ? body.workspacePath
             : null;
         // D1: only chat mode carries a custom system prompt; clamp it away
-        // for workspace/project (their persona comes from CLAUDE.md).
+        // for project (its persona comes from CLAUDE.md).
         if (resolvedMode === "chat") {
           const sp =
             typeof body.systemPrompt === "string" && body.systemPrompt.trim()
@@ -289,7 +289,7 @@ export async function POST(req: Request) {
           // chat has no cwd binding; clamp any client-side workspace_path away.
           resolvedWorkspacePath = null;
         } else {
-          // workspace / project require a path.
+          // project requires a path.
           if (!wp) {
             return Response.json(
               { error: `${resolvedMode} mode requires workspacePath` },
@@ -298,8 +298,8 @@ export async function POST(req: Request) {
           }
           resolvedWorkspacePath = wp;
         }
-        // 权限确认钳制：只有 claude 系的 workspace/project 才可开（chat 无文件
-        // 工具；codex/mock 无 stdio 协议，开了也是谎言级 UI）。
+        // 权限确认钳制：只有 claude 系的 project 才可开（chat 无文件工具；
+        // codex/mock 无 stdio 协议，开了也是谎言级 UI）。
         resolvedRequireApproval =
           body.requireApproval === true &&
           resolvedMode !== "chat" &&
@@ -438,7 +438,7 @@ export async function POST(req: Request) {
   // instead of failing `claude --resume`.
   // claude spawns in this cwd → its session jsonl lands here, so resume
   // validation, the provider spawn, and cleanup must ALL use the same value.
-  // sessionCwd centralizes the chat→scratch / workspace→bound mapping.
+  // sessionCwd centralizes the chat→scratch / project→bound-path mapping.
   const spawnCwd = sessionCwd(mode, resolvedWorkspacePath);
   // attached CLI 会话（origin='cli-import'）的续聊/分叉走 lineage 解析（P2，
   // progress/cli-branch-alignment-p2-spec.md）：从某 lineage 的 jsonl tip 且 X 在

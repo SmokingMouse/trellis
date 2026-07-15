@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-07-16 · 砍掉 Workspace 档：上下文模式收敛为 chat / project 两档
+
+**Decision**：`Mode = "chat" | "project"`，Workspace（一次性 CLI、每轮无状态）整档退役。
+DB migrate 加一行防御性 `UPDATE context_mode='workspace' → 'project'`（本机全库实测 0 行，
+零迁移负担）；localStorage 旧值（`cli-single`/`workspace`/legacy flag）折到 project；API 收到
+老 `mode:"workspace"` 走 isMode 兜底安全回落 chat。UI（ModePicker 两 chip / SearchModal facet /
+SessionSidebar 分组 / ModeBadge）、mode-workspace token（globals.css 全主题 + @theme 注册）、
+README 三档文档全量清理。
+**Why**：① 用量实锤为零（32 个原生 session：chat 21 / project 11 / workspace 0）；② 机制上
+workspace ≡ project − resume，减掉的恰是仓库干活想要的跨轮记忆（trellis 折叠历史不含工具副作
+用，agent 每轮忘记自己改过什么）；③ 原定位「一次性 CLI」已被 chat 增强模式吃掉（scratch +
+full + skill 自动开启，S55）。
+**Alternatives**：① 保留给 codex 树分叉用（codex project 是线性共享 session，分支上下文互染；
+workspace 折叠 lineage 反而语义干净）—— 拒绝，为 0 使用率保一整档不值；真被绊到再把 codex
+project 的历史构造降级成折叠 prompt。② workspace 合进 chat（可选 cwd）—— 拒绝，chat 增强已
+覆盖，加 cwd 选择反而复杂化。
+
 ## 2026-07-15 · 权限确认（permission gate）= per-session 布尔 + ask 规则注入，还 skip-permissions 的债
 
 **Decision**：session 级 `require_approval`（创建时锁定，仅 claude 系 workspace/project 可开，

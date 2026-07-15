@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**模式收敛：砍掉 Workspace 档，chat / project 两档（Session 58，已落地待 commit）** → decisions.md 2026-07-16。用量 0（32 原生 session 无一 workspace）+ 语义被增强 chat / project 双向吃掉。全链路清理（Mode 类型/sdk-adapter/route/store/ModePicker/SearchModal/SessionSidebar/ModeBadge/mode-workspace token 全主题/README 两档文档）+ DB 防御性 migrate（workspace→project，幂等）。tsc ✓ + `make build` ✓ + 隔离实例 HTTP e2e ✓（migration 生效 / chat·project 创建 / 老 `mode:"workspace"` 请求安全回落 chat）。
+
+---
 **主题系统 + 界面&交互整体优化（Session 57——原 56 与权限确认撞号重编，分支 `trellis-theme` 已 merge main 权限确认后合入）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**merge 注**：权限确认（04a9c18）的 InteractionForm 权限卡 / ModePicker 新增段为 token 化前写就，随 merge 一并迁移 token（见 S57 log merge 追记）。
 
 ---
@@ -141,6 +144,17 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 58 (2026-07-16)
+- **Done**: **Workspace 档退役,模式收敛 chat / project 两档** → decisions.md 2026-07-16。证据链:DB 全库 0 workspace 行(原生 chat 21 / project 11);机制上 workspace ≡ project − resume(减掉的恰是仓库干活要的跨轮记忆);「一次性 CLI」定位已被 S55 增强 chat(scratch + full + skill 自动开)吃掉。改动面:
+  - 类型/机制:`Mode` 二值联合(types.ts 附退役注记);sdk-adapter 删 workspace 分支、`toStreamEvent` 去掉死参 `mode`(SessionStart 恒透传);route `VALID_MODES` 二值,老 `mode:"workspace"` isMode 兜底回落 chat。
+  - store:isMode 二值;loadDraftMode legacy 迁移(`cli-single`/`workspace`/旧 flag → project)。
+  - UI:ModePicker 两 chip(project 文案并入 per-lineage 语义,TerminalIcon 删)、SearchModal facet、SessionSidebar 分组「Project」、ModeBadge 删 workspace 条目/图标、WorkspacePicker 高亮色 mode-workspace→mode-project。
+  - token:globals.css `--mode-workspace-*` 全主题块 + `@theme` 注册全删;mode-style 二值。
+  - DB:migrate 加幂等 `UPDATE context_mode='workspace'→'project'`(本机 0 行,防御其他部署)。
+  - 文档:README 两档表 +「历史注」+ Chat 增强模式补写(此前文档缺失);全仓注释 workspace/project 措辞清理。
+- **验证**: tsc ✓ + `make build` ✓;隔离实例(:3141 + 临时 DB 拷贝 + 种假 workspace 行 + env 覆盖关 auth 闸,不动 .env.local):migration 读出 mode=project ✓、mock 三路创建(chat/project/legacy workspace→chat)✓、GET / 200 ✓;产物已清(server kill + 临时 DB 删)。
+- **Next**: commit(与 working tree 其他未提交改动分开摘);用户真机验收两档 ModePicker。候选 follow-up:codex project 树分叉语义(线性共享 session 分支互染,原 workspace 是干净解——被绊到再把 codex project 历史构造降级折叠 prompt,见 decisions Alternatives①)。
+
 ### Session 57 (2026-07-15，原 56 撞号重编)
 - **Done**: **主题系统 + 界面&交互整体优化**（worktree/分支 `trellis-theme`，基 main ce3481e，8 commits，f464c49..ac54e85）。前置：两份静态审计（视觉设计系统 + 交互流程，各出债务 Top10）+ 用户拍板（三线全做 / 主题系统 / 5 套主题 / 主按钮=accent / 代码字体系统栈）。分 8 wave 执行，决策全录 → [ADR](decisions/2026-07-15-theme-system.md)：
   - **W1-W2 token 层**：globals.css 双层变量（:root/.dark 级联块 + `@theme inline` 注册 utility）——中性族/语义 hue（含 amber 四分、unread/fork 独立 hue）/字号 6 档/圆角 3 档/阴影 3 档；~40 处裸 hex 全变量化；hljs light 死代码删除（「代码块恒暗」据实转正）；`color-scheme` 让 dark 原生滚动条变深（有意改进）。零 diff 验证 = 浏览器 computed-style 逐字节断言 + 截图 diff（残差定位为焦点态/滚动条噪音）。

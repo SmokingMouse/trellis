@@ -105,7 +105,7 @@ export function Header() {
   );
 
   // Project-mode context occupancy for the currently-focused root's claude
-  // session. Skipped in chat / workspace because every turn is independent
+  // session. Skipped in chat because every turn is independent
   // there — % has no meaning.
   const ctx = useMemo(() => {
     if (session?.mode !== "project") return null;
@@ -316,7 +316,7 @@ export function Header() {
               </>
             )}
             {/* Workspace-files drawer entry — only for sessions with a cwd
-                (workspace / project). A dedicated button: hiding this behind
+                (project). A dedicated button: hiding this behind
                 the ModeBadge chip proved undiscoverable. */}
             {session.workspacePath && (
               <IconButton

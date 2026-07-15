@@ -123,7 +123,7 @@ const TEXT_EXTS = Object.entries(FILE_EXT_MIME)
 const ALL_FILE_EXTS = Object.keys(FILE_EXT_MIME).map((e) => `.${e}`);
 
 // <input type="file" accept=…> strings per composer policy. "all" for
-// tool-capable modes (workspace / project / enhanced chat); "chat-safe"
+// tool-capable modes (project / enhanced chat); "chat-safe"
 // for pure chat, which can only consume images (vision) + inlined text.
 export function acceptFor(policy: "all" | "chat-safe"): string {
   const exts = policy === "all" ? ALL_FILE_EXTS : TEXT_EXTS;

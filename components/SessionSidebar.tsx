@@ -12,7 +12,7 @@ import type { Session } from "@/lib/types";
 // Workbench Wave 4 — VSCode-style left explorer sidebar (R1 + R2 + R3).
 //
 //  R1  Always-present desktop rail (md:block, ~210px). Lists every
-//      unarchived session grouped by mode (Chat / Workspace·Project),
+//      unarchived session grouped by mode (Chat / Project),
 //      each row: mode color dot + truncated title + running pulse /
 //      unread badge. Active row highlighted. Collapsible (toggle persists
 //      to localStorage via store.sidebarOpen); collapsed → rail hidden +
@@ -205,7 +205,7 @@ export function SessionSidebar() {
         ) : (
           <>
             {renderGroup("Chat", chat)}
-            {renderGroup("Workspace · Project", work)}
+            {renderGroup("Project", work)}
           </>
         )}
       </div>

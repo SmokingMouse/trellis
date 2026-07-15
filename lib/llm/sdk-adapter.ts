@@ -83,29 +83,18 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
       settingSources: false,
       // 纯对话 = GPT 式即答场景:effort 压到 low,否则默认 effort 下模型对
       // "你好"级问题也先思考半天(alwaysday1 等端点尤甚),chat 手感差。仅纯
-      // 对话——增强 chat / workspace / project 是干活 agent,保持 CLI 默认不
+      // 对话——增强 chat / project 是干活 agent,保持 CLI 默认不
       // 降智。instrumentation.ts 已 scrub 继承的 CLAUDE_CODE_EFFORT_LEVEL,
       // 这里是唯一显式下发点(RunOptions.env 优先级高于继承的进程 env)。
       env: { CLAUDE_CODE_EFFORT_LEVEL: "low" },
       ...forkOpts,
     };
   }
-  if (mode === "workspace") {
-    // 像一次性 Claude Code CLI:全工具 + bypass,cwd 绑工作区,每轮无状态。
-    // A路②: onCanUseTool 开启 stdio 权限协议,非交互工具由 run-bus 的
-    // dispatcher 立即 auto-allow(保持 bypass YOLO),仅交互工具暂停等用户。
-    // 权限确认(approve):permission 降为 default + ask 规则,可变更工具全部
-    // 进 can_use_tool,由 dispatcher 暂停弹权限卡。
-    return {
-      ...common,
-      workspace: req.cwd ?? os.homedir(),
-      permission: approve ? "default" : "full",
-      ...(approve ? { askTools: APPROVAL_ASK_TOOLS } : {}),
-      persistence: false,
-      onCanUseTool: req.onCanUseTool,
-    };
-  }
   // project:像 Projects,整棵树共享一个 session(resume),持久化。
+  // A路②: onCanUseTool 开启 stdio 权限协议,非交互工具由 run-bus 的
+  // dispatcher 立即 auto-allow(保持 bypass YOLO),仅交互工具暂停等用户。
+  // 权限确认(approve):permission 降为 default + ask 规则,可变更工具全部
+  // 进 can_use_tool,由 dispatcher 暂停弹权限卡。
   return {
     ...common,
     workspace: req.cwd ?? os.homedir(),
@@ -117,8 +106,8 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
   };
 }
 
-/** SDK AgentEvent → trellis StreamEvent。project 模式才 emit session_init。 */
-export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
+/** SDK AgentEvent → trellis StreamEvent。 */
+export function toStreamEvent(e: AgentEvent): StreamEvent | null {
   switch (e.type) {
     case EventType.TextChunk:
       return { type: "delta", text: String(e.data.text ?? "") };
@@ -165,8 +154,8 @@ export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
     case EventType.SessionStart:
       // project (root-shared id) + chat B-fork (per-node forked id) both need
       // the session id written back; run-bus's sessionIdTarget decides where it
-      // lands (or drops it for codex/mock chat). workspace stays stateless.
-      return (mode === "project" || mode === "chat") && e.sessionId
+      // lands (or drops it for codex/mock chat).
+      return e.sessionId
         ? { type: "session_init", sessionId: e.sessionId }
         : null;
     case EventType.Error:

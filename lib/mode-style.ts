@@ -1,10 +1,10 @@
-// Shared mode color tokens for the three session modes. Single source of
+// Shared mode color tokens for the two session modes. Single source of
 // truth so ModeBadge (Header) and SessionTabs (tab bar) can't drift apart.
 //
 // Colors come from the semantic token layer (globals.css @theme):
-// mode-chat / mode-workspace / mode-project each carry dot·ink·muted·line·
-// line-strong roles, decoupled from the status hues (warn/danger) so a
-// palette can restyle modes without touching alert semantics.
+// mode-chat / mode-project each carry dot·ink·muted·line·line-strong
+// roles, decoupled from the status hues (warn/danger) so a palette can
+// restyle modes without touching alert semantics.
 //
 // - `dot`:    bg-* for the small mode color dot on a tab.
 // - `text`:   text-* for an active-tab label tint.
@@ -29,15 +29,6 @@ export const MODE_STYLES: Record<string, ModeStyle> = {
     badge: "border-mode-chat-line bg-mode-chat-muted text-mode-chat-ink",
     activeBg: "bg-mode-chat-muted",
     activeBorder: "border-mode-chat-line-strong",
-  },
-  workspace: {
-    label: "Workspace",
-    dot: "bg-mode-workspace",
-    text: "text-mode-workspace-ink",
-    badge:
-      "border-mode-workspace-line bg-mode-workspace-muted text-mode-workspace-ink",
-    activeBg: "bg-mode-workspace-muted",
-    activeBorder: "border-mode-workspace-line-strong",
   },
   project: {
     label: "Project",

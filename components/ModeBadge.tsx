@@ -3,9 +3,9 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { MODE_STYLES } from "@/lib/mode-style";
 
 // Badge rendered in the Header for an active session. Shows
-// "Chat" / "Workspace · <shortName>" / "Project · <shortName>" depending
-// on the locked session mode. Renders nothing when there's no session
-// (the new-session draft picker lives in QuestionInput).
+// "Chat" / "Project · <shortName>" depending on the locked session mode.
+// Renders nothing when there's no session (the new-session draft picker
+// lives in QuestionInput).
 //
 // Hover reveals the full workspace path. Click is a no-op — mode +
 // workspace are locked at session creation; to use a different mode, open
@@ -37,8 +37,8 @@ export function ModeBadge() {
     >
       <cfg.Icon />
       {/* Mode label hidden on mobile to save space — the icon already
-          encodes the mode (chat bubble / chevron / link). Desktop shows
-          the word for clarity. */}
+          encodes the mode (chat bubble / link). Desktop shows the word
+          for clarity. */}
       <span className="hidden sm:inline text-label font-medium">
         {cfg.label}
       </span>
@@ -69,7 +69,6 @@ const MODE_CONFIG: Record<
   { label: string; badge: string; Icon: () => React.ReactElement }
 > = {
   chat: { ...MODE_STYLES.chat, Icon: ChatIcon },
-  workspace: { ...MODE_STYLES.workspace, Icon: WorkspaceIcon },
   project: { ...MODE_STYLES.project, Icon: ProjectIcon },
 };
 
@@ -87,25 +86,6 @@ function ChatIcon() {
       aria-hidden
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function WorkspaceIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }

@@ -46,7 +46,7 @@ export type ApiSession = {
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
   sourceJsonlPath: string | null;
-  // 权限确认：true = workspace/project 轮次的可变更工具需用户逐个允许/拒绝
+  // 权限确认：true = project 轮次的可变更工具需用户逐个允许/拒绝
   // （权限卡）。创建时锁定；false = YOLO（默认，含全部存量行）。
   requireApproval: boolean;
 };
@@ -649,7 +649,7 @@ export function markNodeRead(nodeId: string, now: number): number | null {
 // the absolute cwd with EVERY non-alphanumeric char replaced by "-" (matching
 // Claude Code's own encoding) — e.g. "/Users/me/.claude" → "-Users-me--claude"
 // (the dot becomes "-" too). cwd is whatever we spawned claude from:
-// workspace_path for project sessions, os.homedir() as the chat/workspace
+// workspace_path for project sessions, os.homedir() as the chat
 // fallback.
 //
 // NOTE: the old encode only replaced "/", so any cwd with a dot/underscore

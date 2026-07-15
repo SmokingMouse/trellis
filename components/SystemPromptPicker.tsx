@@ -4,7 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "@/components/ui/Button";
 
 // D1: pick the AI persona (system prompt) for the next new chat session.
-// Chat-mode only — workspace/project derive their persona from CLAUDE.md.
+// Chat-mode only — project derive their persona from CLAUDE.md.
 // Locked into the session row on creation, like mode/workspace.
 type Preset = { label: string; prompt: string | null; hint: string };
 

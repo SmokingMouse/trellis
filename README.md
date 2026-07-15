@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="#它解决什么">介绍</a> · <a href="#核心特性">核心特性</a> · <a href="#与-cli-双向打通">CLI 打通</a> · <a href="#quickstart">Quickstart</a> · <a href="#三种上下文模式详解">上下文模式</a> · <a href="#技术架构">技术架构</a> · <a href="#键盘快捷键">快捷键</a>
+  <a href="#它解决什么">介绍</a> · <a href="#核心特性">核心特性</a> · <a href="#与-cli-双向打通">CLI 打通</a> · <a href="#quickstart">Quickstart</a> · <a href="#两种上下文模式详解">上下文模式</a> · <a href="#技术架构">技术架构</a> · <a href="#键盘快捷键">快捷键</a>
 </p>
 
 ---
@@ -106,19 +106,18 @@ Trellis 的处理方式：每个回答都是一个**节点**，选中文字 → 
 - **抓取进度 ring** + **失败降级手动粘贴** + **⟳ 重新拉取**
 - 参考节点同样能选区分叉发问，体验和 QA 节点一致
 
-### 三种 LLM 上下文模式
+### 两种 LLM 上下文模式
 
-session 创建时锁定 mode + workspace + **model**（per-session 持久化，切走再回来不会变），顶栏只读 badge 显示。详见 [下方专章](#三种上下文模式详解)。
+session 创建时锁定 mode + workspace + **model**（per-session 持久化，切走再回来不会变），顶栏只读 badge 显示。详见 [下方专章](#两种上下文模式详解)。
 
 | 模式 | 类比 | cwd | Tools / Skills / MCP | 跨节点记忆 | 适合 |
 |---|---|---|---|---|---|
-| **Chat** | GPT 网页客户端 | 无 | `WebSearch + WebFetch` | 无 | 默认日常问答、补认知、查信息 |
-| **Workspace** | 一次性 Claude Code CLI | session 绑定 | 全开（bypassPermissions） | 无 | 在某个仓库一次性操作、改 bug、查代码 |
-| **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有（沿祖先链，分支间隔离） | 跨节点延续记忆，cache 命中通常 70%+ |
+| **Chat** | GPT 网页客户端 | 无 | `WebSearch + WebFetch`；⚡ 增强模式 = scratch 目录 + 全工具 | 无 | 默认日常问答、补认知、查信息；临时跑个命令 / skill 开增强 |
+| **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有（沿祖先链，分支间隔离） | 在仓库里干活、跨节点延续记忆，cache 命中通常 70%+ |
 
-Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），三档语义对齐。
+Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），两档语义对齐。
 
-### 工具调用与文件预览（Workspace / Project）
+### 工具调用与文件预览（Project / 增强 Chat）
 
 - **工具调用可视化**：解析 stream-json 的 `tool_use` / `tool_result`，在节点折叠区展示每次 Bash / Read / Write / WebFetch 的入参与输出
 - **交互式工具表单**：模型发起 `AskUserQuestion` / `ExitPlanMode` 时渲染成可填表单（单选/多选/批准计划），就地作答回灌
@@ -128,7 +127,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 
 - **⌘P 跨 session 全文搜**：FTS5 trigram 分词（中英混排都能子串匹配），覆盖问题 / 回答 / 参考 / 笔记，按 mode facet 过滤
 - **命令面板**：首屏输入框 `/` 前缀触发 —— `/new` `/clear`（🧹 开新话题/清空上下文）`/archive` `/switch` `/model` 等 session 元操作，纯 Trellis 命令本地执行不发 LLM
-- **Skill 入口**：输入 `/<skill-name>` 复用 `~/.claude/skills/` 下 50+ skill（仅 Workspace / Project，由 claude CLI 原生执行）
+- **Skill 入口**：输入 `/<skill-name>` 复用 `~/.claude/skills/` 下 50+ skill（由 claude CLI 原生执行；纯 Chat 点选自动开启增强模式）
 - **System Prompt 可配**（Chat）：5 个预设角色 + 自定义，per-session 锁定
 
 ### 会话工作台
@@ -140,7 +139,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 
 ### 图片输入（vision）
 
-- **粘贴 / 拖拽 / 选文件**，三档模式通吃；Project 模式连续追问可跨节点引用同一张图
+- **粘贴 / 拖拽 / 选文件**，两档模式通吃；Project 模式连续追问可跨节点引用同一张图
 - **内容寻址存储**：blob 落 `~/.trellis/blobs/<sha256>.<ext>` 自动去重，不进 SQLite
 - **重试自动带回原图**；单图 ≤ 10MB，单节点 ≤ 6 张；PNG / JPEG / WebP / GIF
 
@@ -239,7 +238,7 @@ make build && make start   # 固定 -p 3088；等价 bun --bun run build && bun 
 
 ## 与 CLI 双向打通
 
-Trellis 把每个会话当成真 Claude Code CLI 会话来对待——Project / Workspace 模式本就是 spawn 真 `claude` 把 transcript 写进 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`。在此之上做了三件事：
+Trellis 把每个会话当成真 Claude Code CLI 会话来对待——Project 模式本就是 spawn 真 `claude` 把 transcript 写进 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`。在此之上做了三件事：
 
 ### Attach + 双向同步
 
@@ -262,9 +261,11 @@ CLI 的会话是线性的，trellis 的是树。统一模型：**一棵 trellis 
 
 ---
 
-## 三种上下文模式（详解）
+## 两种上下文模式（详解）
 
-session 创建时锁定 mode + workspace，整棵树共用。三档差别在 prompt 怎么组装、CLI 走什么权限、是否绑定 cwd、跨节点要不要共享记忆，trade-off 是「成本 / 权限范围 / 上下文连续性」。
+session 创建时锁定 mode + workspace，整棵树共用。两档差别在 prompt 怎么组装、CLI 走什么权限、是否绑定 cwd、跨节点要不要共享记忆，trade-off 是「成本 / 权限范围 / 上下文连续性」。
+
+> 历史注：2026-07-16 砍掉了中间档 Workspace（一次性 CLI、每轮无状态）——实际用量为零，它的两个场景已被别人吃掉：临时跑命令/skill → Chat 增强模式；在仓库干活 → Project。存量 workspace 会话（如有）migrate 时自动归入 Project。
 
 ### Chat —— GPT 网页客户端替代
 
@@ -272,13 +273,7 @@ session 创建时锁定 mode + workspace，整棵树共用。三档差别在 pro
 - 执行：claude 仅开 `WebSearch + WebFetch`，cwd `~`，不读 CLAUDE.md / 不加载 skills / MCP / Bash
 - **每条分支真正独立**——claude 看到的只是 trellis 给的折叠历史，无外部副作用
 - claude 家族默认走 **B-fork**（`--fork-session`，历史活在 fork 出的 CLI session 里，不往 prompt 折叠）
-
-### Workspace —— 一次性 Claude Code CLI
-
-- Prompt：和 Chat 一样的"祖先链 → 当前问题"
-- 执行：`claude --permission-mode bypassPermissions`，**cwd = session 绑定的 workspace_path**
-- 加载 `~/.claude/CLAUDE.md` + 项目 CLAUDE.md + 全部 skills + MCP + Bash/Write/Edit/Web 全开
-- 跨节点不共享 claude 内部记忆——只有 trellis 给的折叠上下文连续
+- **⚡ 增强模式**（可随时开关，点选 skill 自动开）：spawn 到 `~/.trellis/chat-scratch` scratch 目录 + 权限全开——能跑 skill / Bash / 文件工具，但不绑定你的仓库
 
 ### Project —— 长期协作 + per-lineage 真 CLI session
 
@@ -290,9 +285,8 @@ session 创建时锁定 mode + workspace，整棵树共用。三档差别在 pro
 
 ### Codex 那边
 
-- `Chat` → codex sandbox `read-only`、tools 关，cwd `~`（Codex 暂无 WebSearch 等价，offline）
-- `Workspace` → `~/.codex/config.toml` + MCP，YOLO sandbox，cwd = workspace_path
-- `Project` → 共享 `~/.codex/sessions/<id>` 多轮 history，cwd = workspace_path
+- `Chat` → codex sandbox `read-only`、tools 关，cwd `~`（Codex 暂无 WebSearch 等价，offline）；增强模式 = scratch 目录 + 整体绕过沙箱
+- `Project` → `~/.codex/config.toml` + MCP 全开，共享 `~/.codex/sessions/<id>` 多轮 history，cwd = workspace_path
 
 ---
 

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE } from "@/lib/auth-cookie";
 
 // Public-exposure auth gate (Next's "proxy" convention — formerly "middleware").
-// trellis can spawn the claude/codex CLI with full permission (workspace/
-// project/enhanced modes) — i.e. arbitrary code execution on the host. When
+// trellis can spawn the claude/codex CLI with full permission (project/
+// enhanced modes) — i.e. arbitrary code execution on the host. When
 // served over the public tunnel (trellis.smokingmouse.cc) that endpoint MUST
 // sit behind auth.
 //

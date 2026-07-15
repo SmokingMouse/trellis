@@ -51,7 +51,7 @@ export function Composer({
   // optimistic placeholder — there's no run to abort yet.
   const isPending = targetNode ? isOptimisticNodeId(targetNode.id) : false;
   // Same tool-capability gate as skills (and the chat route's attachment
-  // handling): workspace/project/enhanced chat take any whitelisted file
+  // handling): project/enhanced chat take any whitelisted file
   // (staged to disk for the agent); pure chat only images + inlineable text.
   const toolCapable = sessionMode !== "chat" || chatEnhanced;
   // Skills show in every mode — pure chat can't run them as-is, but picking

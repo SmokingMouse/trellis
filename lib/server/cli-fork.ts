@@ -169,7 +169,7 @@ export function attachedLineageForNode(nodeId: string): AttachedLineage | null {
 // 本就是真 claude CLI 会话——给出在 CLI 续该节点 lineage 的 cwd + resume id。
 // attached（cli-import）取该节点的 lineage sid（验源 jsonl 在盘）；native project 走
 // getRootResumeIdForNode（其自带 jsonl 存在性自愈，缺失返回 null=不可续）。
-// 仅 project 模式（有 cwd 才可 resume）；chat/workspace 返回 null。续到的是该 lineage 的
+// 仅 project 模式（有 cwd 才可 resume）；chat 返回 null。续到的是该 lineage 的
 // 主链 tip（CLI --resume 本就只跟主链——树内分叉走 P2 的前缀 jsonl，不在本入口范围）。
 export function cliResumeForNode(
   nodeId: string,

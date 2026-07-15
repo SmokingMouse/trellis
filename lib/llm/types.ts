@@ -3,19 +3,18 @@ export type ChatMessage = {
   content: string;
 };
 
-// Three context modes (Stage 14, see progress/mode-workspace-rebuild.md):
+// Two context modes (Stage 14 introduced chat/project; the
+// workspace tier was retired 2026-07-16 — zero usage, and its two jobs were
+// already covered: ad-hoc tools by enhanced chat, repo work by project):
 //   chat        — like a GPT web client. Bare text reply with WebSearch +
-//                 WebFetch tool access only. No cwd binding. Replaces 'lean'.
-//   workspace   — like a one-shot Claude Code CLI. Full skills + tools +
-//                 CLAUDE.md, but each turn stateless (history folded by
-//                 trellis, depth=2). Bound to a cwd. Replaces 'cli-single'.
-//   project     — like ChatGPT Projects / Claude Projects. Full CLI plus
-//                 the entire trellis session shares one claude session_id
-//                 (linear turn history). Branches see the same history.
-//                 Bound to a cwd. Replaces 'cli-multi'.
+//                 WebFetch tool access only. No cwd binding. The enhanced
+//                 toggle upgrades it to full tools in a scratch workspace.
+//   project     — like ChatGPT Projects / Claude Projects. Full CLI; one
+//                 lineage per branch (fork = prefix jsonl into a new claude
+//                 session). Bound to a cwd.
 //
 // Mode is locked at session creation; not switchable mid-tree.
-export type Mode = "chat" | "workspace" | "project";
+export type Mode = "chat" | "project";
 
 // Per-turn token accounting. We track four buckets so the UI can show
 // "actual cost" (input + output) separately from "cache leverage"
@@ -91,20 +90,20 @@ export type StreamRequest = {
   // route reads it from the family-correct column.
   claudeSessionId?: string | null;
   // Stage 14: cwd to spawn the CLI in. null = home dir (chat default,
-  // or workspace/project fallback when path missing).
+  // or project fallback when path missing).
   cwd?: string | null;
   // Stage 15: image attachments. Each is a resolved on-disk path
   // (provider reads it as needed) plus mime so the right wrapper is
   // emitted. Empty array when none.
   attachments?: { path: string; mime: string }[];
   // D1: chat-mode custom system prompt. null/undefined → provider uses
-  // DEFAULT_SYSTEM_PROMPT. Ignored by workspace/project (they use CLAUDE.md).
+  // DEFAULT_SYSTEM_PROMPT. Ignored by project (it uses CLAUDE.md).
   systemPrompt?: string | null;
   // chat "enhanced mode": when true, chat gets a scratch workspace + full
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
   // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
   chatEnhanced?: boolean;
-  // Permission gate: when true (workspace/project, claude family), the spawn
+  // Permission gate: when true (project, claude family), the spawn
   // uses --permission-mode default + injected ask rules so mutating tools
   // (Bash/Write/Edit/…) pause on can_use_tool and wait for the user's
   // allow/deny (permission card). Only honored when onCanUseTool is present

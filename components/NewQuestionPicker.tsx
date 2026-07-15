@@ -18,7 +18,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   // In project mode a new root also forks a fresh claude session id — the
   // model loses its conversation memory of the existing tree AND starts a
-  // brand-new Claude session. In chat/workspace there's no resumed claude
+  // brand-new Claude session. In chat there is no resumed claude
   // session, but the new root still carries zero prior context. Either way
   // the "🧹 清空上下文" promise holds, so we surface the badge in every mode.
   const isProject = sessionMode === "project";

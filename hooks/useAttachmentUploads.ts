@@ -15,7 +15,7 @@ import type { NodeAttachment } from "@/lib/types";
 
 export const MAX_ATTACHMENTS = 6;
 
-// "all" for tool-capable modes (workspace / project / enhanced chat —
+// "all" for tool-capable modes (project / enhanced chat —
 // generic files get staged to disk and read by the agent's own tools);
 // "chat-safe" for pure chat, which can only consume images (vision) +
 // text files (inlined into the prompt).
@@ -46,7 +46,7 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
     }
     if (policy === "chat-safe" && kind === "binary") {
       setNotice(
-        "纯对话模式读不了二进制文件——开启增强模式或改用 Workspace / Project 再传",
+        "纯对话模式读不了二进制文件——开启增强模式或改用 Project 再传",
       );
       return;
     }

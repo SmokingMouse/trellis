@@ -11,9 +11,9 @@ import { WorkspacePicker } from "./WorkspacePicker";
 // the store; on first submit these get locked into the session row and
 // the readonly ModeBadge in the header takes over.
 //
-// Selecting Workspace or Project without a workspace_path forces the
-// WorkspacePicker open (the user can't leave with an inconsistent draft).
-// Chat clears the workspace draft — chat has no cwd binding.
+// Selecting Project without a workspace_path forces the WorkspacePicker
+// open (the user can't leave with an inconsistent draft). Chat clears the
+// workspace draft — chat has no cwd binding.
 
 function ChatIcon() {
   return (
@@ -29,25 +29,6 @@ function ChatIcon() {
       aria-hidden
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function TerminalIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }
@@ -89,13 +70,6 @@ function optionsFor(provider: ProviderId): Option[] {
           "Chat：纯文本回复，沙箱 read-only，禁用所有 tools / MCP。codex 暂无 WebSearch 等价，无联网。",
       },
       {
-        id: "workspace",
-        label: "Workspace",
-        Icon: TerminalIcon,
-        title:
-          "Workspace：在所选 cwd 中加载 ~/.codex/config.toml + MCP servers/plugins，YOLO 沙箱（含 Bash/Write/Edit）。每次提问独立。",
-      },
-      {
         id: "project",
         label: "Project",
         Icon: LinkIcon,
@@ -114,18 +88,11 @@ function optionsFor(provider: ProviderId): Option[] {
         "Chat：纯文本 + WebSearch / WebFetch 联网。不加载 skills / CLAUDE.md。最便宜，对标 GPT 网页客户端。",
     },
     {
-      id: "workspace",
-      label: "Workspace",
-      Icon: TerminalIcon,
-      title:
-        "Workspace：在所选仓库 cwd 中加载 skills + CLAUDE.md，工具自动放行（含 Bash/Write/Edit）。每次提问独立，分支上下文隔离。",
-    },
-    {
       id: "project",
       label: "Project",
       Icon: LinkIcon,
       title:
-        "Project：整棵 trellis 树共享一个 claude session（线性多轮历史）。skills/tools 全开。删除 trellis session 时清理对应 jsonl。",
+        "Project：在所选仓库 cwd 中加载 skills + CLAUDE.md，一条岔一个 claude session（分叉=前缀 jsonl 新 lineage）。skills/tools 全开。删除 trellis session 时清理对应 jsonl。",
     },
   ];
 }
@@ -141,8 +108,8 @@ export function ModePicker() {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const OPTIONS = optionsFor(provider);
-  const needsWorkspace = mode === "workspace" || mode === "project";
-  // 权限确认开关：仅 claude 系的 workspace/project 有意义（chat 无文件工具；
+  const needsWorkspace = mode === "project";
+  // 权限确认开关：仅 claude 系的 project 有意义（chat 无文件工具；
   // codex 无 stdio 审批协议，显示了也是谎言）。服务端创建时还会再钳一道。
   const approvalAvailable = needsWorkspace && providerFamily(provider) === "claude";
 
@@ -154,8 +121,8 @@ export function ModePicker() {
       // submit body coherent.
       setWorkspacePath(null);
     } else if (!workspacePath) {
-      // Workspace / Project need a path. Open picker; user can't leave
-      // it dangling because the submit gate also re-checks.
+      // Project needs a path. Open picker; user can't leave it dangling
+      // because the submit gate also re-checks.
       setPickerOpen(true);
     }
   };
@@ -174,8 +141,8 @@ export function ModePicker() {
           const activeColor =
             opt.id === "chat"
               ? // chat 的中性淡底贴着外层 surface 对比不足（历史：muted 灰
-                // 对纯白底近乎不可见），补一圈 inset ring 给它与
-                // workspace/project 同级的视觉重量；色值全走 mode-chat token。
+                // 对纯白底近乎不可见），补一圈 inset ring 给它与 project
+                // 同级的视觉重量；色值全走 mode-chat token。
                 `${style.activeBg} ${style.text} ring-1 ring-inset ring-mode-chat-line-strong/40`
               : `${style.activeBg} ${style.text}`;
           return (

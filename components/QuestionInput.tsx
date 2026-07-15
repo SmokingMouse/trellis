@@ -63,8 +63,8 @@ export function QuestionInput() {
   const isFeynman = draftSystemPrompt === FEYNMAN_PROMPT;
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
-  // C4: skill picker shows whenever the agent can run skills — workspace/
-  // project always, plus chat with enhanced mode on (scratch workspace + full
+  // C4: skill picker shows whenever the agent can run skills — project
+  // always, plus chat with enhanced mode on (scratch workspace + full
   // tools). Plain chat (claude or codex) can't run skills.
   const skillCapable = draftMode !== "chat" || chatEnhanced;
   const sendKey = useSessionStore((s) => s.sendKey);
@@ -100,8 +100,8 @@ export function QuestionInput() {
       .catch(() => {});
   }, [skills.length]);
 
-  // Stage 14: Workspace / Project draft modes need a workspace path
-  // chosen before submit.
+  // Stage 14: the Project draft mode needs a workspace path chosen
+  // before submit.
   const needsWorkspace = draftMode !== "chat" && !draftWorkspacePath;
   // Attachments: tool-capable modes take any whitelisted file (staged to
   // disk for the agent); pure chat is limited to images + inlineable text.
@@ -371,9 +371,7 @@ export function QuestionInput() {
               onClick={submit}
               disabled={submitDisabled}
               title={
-                needsWorkspace
-                  ? `${draftMode === "workspace" ? "Workspace" : "Project"} 模式需要先选择工作区`
-                  : undefined
+                needsWorkspace ? "Project 模式需要先选择工作区" : undefined
               }
             >
               {submitLabel}

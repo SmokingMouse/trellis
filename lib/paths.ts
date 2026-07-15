@@ -14,7 +14,7 @@ export const CHAT_SCRATCH = path.join(os.homedir(), ".trellis", "chat-scratch");
 // resume validation, and cleanup must all use this one value — centralized here
 // so they can never disagree (the bug that made B-fork resume silently fail:
 // spawn used the process cwd while validation computed the home dir). chat →
-// dedicated scratch dir; workspace/project → their bound path.
+// dedicated scratch dir; project → their bound path.
 export function sessionCwd(
   mode: Mode,
   workspacePath: string | null,

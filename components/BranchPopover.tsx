@@ -24,7 +24,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
   const addNote = useSessionStore((s) => s.addNote);
   const session = useSessionStore((s) => s.session);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
-  // Same tool-capability gate as the chat route: workspace/project (and
+  // Same tool-capability gate as the chat route: project (and
   // enhanced chat) can take any whitelisted file; pure chat can't.
   const att = useAttachmentUploads(
     session?.mode !== "chat" || chatEnhanced ? "all" : "chat-safe",

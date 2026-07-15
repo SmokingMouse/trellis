@@ -58,7 +58,7 @@ function migrate(db: Database) {
   `);
 
   // Idempotent column add for project mode: each trellis session may bind
-  // to one claude CLI session id (null in chat / workspace).
+  // to one claude CLI session id (null in chat).
   // Legacy: this column was authoritative pre-2026-05. After the per-root
   // upgrade, claude_session_id moved to nodes.claude_session_id (see below);
   // this column stays for backfill source + historical readability but is
@@ -76,7 +76,7 @@ function migrate(db: Database) {
   // in a project-mode session owns its own claude CLI session — so canvas
   // "新提问" gives the user a fresh context without losing the existing
   // tree's memory. Branches walk up to their root to find which claude
-  // session to --resume. NULL on chat/workspace roots and on every branch.
+  // session to --resume. NULL on chat roots and on every branch.
   const hasNodeClaudeId = db
     .prepare(
       "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'claude_session_id'",
@@ -102,7 +102,7 @@ function migrate(db: Database) {
   // Resume ids are provider-family-scoped (a codex CLI session can only be
   // resumed by codex, never by claude), so each family gets its own column;
   // storing them in one shared column let a codex id reach `claude --resume`
-  // and fail with "No conversation found". NULL on chat/workspace roots,
+  // and fail with "No conversation found". NULL on chat roots,
   // every branch, and any root whose first turn ran a non-codex provider.
   const hasNodeCodexId = db
     .prepare(
@@ -133,6 +133,12 @@ function migrate(db: Database) {
       "UPDATE sessions SET context_mode = 'project' WHERE claude_session_id IS NOT NULL",
     );
   }
+  // 2026-07-16: the workspace tier was retired (chat/project only). Any
+  // stray 'workspace' rows fold into project — same cwd + tools, they just
+  // gain cross-turn memory. Idempotent; local DBs had zero such rows.
+  db.exec(
+    "UPDATE sessions SET context_mode = 'project' WHERE context_mode = 'workspace'",
+  );
   const hasWorkspacePath = db
     .prepare(
       "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'workspace_path'",
@@ -157,8 +163,8 @@ function migrate(db: Database) {
     );
   }
 
-  // D1: per-session custom system prompt (chat mode only — workspace/project
-  // get their persona from CLAUDE.md + full tools). NULL = use the built-in
+  // D1: per-session custom system prompt (chat mode only — project
+  // gets its persona from CLAUDE.md + full tools). NULL = use the built-in
   // DEFAULT_SYSTEM_PROMPT. Locked at session creation like mode/workspace.
   const hasSystemPrompt = db
     .prepare(
@@ -371,10 +377,10 @@ function migrate(db: Database) {
     );
   }
 
-  // 权限确认（P0 permission gate）：1 = 该 session 的 workspace/project 轮次以
+  // 权限确认（P0 permission gate）：1 = 该 session 的 project 轮次以
   // --permission-mode default + ask 规则 spawn，可变更类工具（Bash/Write/Edit…）
   // 暂停等用户在 UI 里允许/拒绝；0 = 现状 YOLO（skip-permissions）。创建时锁定，
-  // 仅 claude 系 workspace/project 可置 1（chat 无文件工具；codex 无 stdio 协议）。
+  // 仅 claude 系 project 可置 1（chat 无文件工具；codex 无 stdio 协议）。
   const hasRequireApproval = db
     .prepare(
       "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'require_approval'",

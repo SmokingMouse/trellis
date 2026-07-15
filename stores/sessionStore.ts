@@ -34,7 +34,7 @@ const WORKSPACE_KEY = "trellis-workspace";
 const SYSTEM_PROMPT_KEY = "trellis-system-prompt";
 // A4: global send-key preference (applies to all chat inputs immediately).
 const SEND_KEY_KEY = "trellis-send-key";
-// D2: how many ancestor turns chat/workspace fold into the prompt. Default 4
+// D2: how many ancestor turns chat folds into the prompt. Default 4
 // (was a hardcoded 2) — deeper context for branched conversations, at a token
 // cost the user can dial back. project mode ignores this (history is in the
 // resumed CLI session). 0 = B-fork (append-only, chat+claude default: history
@@ -47,7 +47,7 @@ const DEFAULT_HISTORY_DEPTH = 0;
 // chat enhanced-mode toggle: when on, chat gets workspace+full (skills + web,
 // YOLO). Global runtime preference, default off. Sent on every chat request.
 const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
-// 权限确认 draft（workspace/project 新会话的开关记忆）。
+// 权限确认 draft（project 新会话的开关记忆）。
 const REQUIRE_APPROVAL_KEY = "trellis-require-approval";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 // Workbench Wave 4 (VSCode-style IDE shell):
@@ -182,20 +182,22 @@ function loadProvider(): ProviderId {
 }
 
 function isMode(s: unknown): s is Mode {
-  return s === "chat" || s === "workspace" || s === "project";
+  return s === "chat" || s === "project";
 }
 
 function loadDraftMode(): Mode {
   if (typeof window === "undefined") return "chat";
   const stored = window.localStorage.getItem(MODE_KEY);
-  // Migrate previous values: boolean cli-mode flag, then Stage-13 names.
+  // Migrate previous values: boolean cli-mode flag, Stage-13 names, then the
+  // retired workspace tier (2026-07-16) — tool-flavored drafts fold into
+  // project, everything else falls back to chat.
   if (stored === null) {
     const legacy = window.localStorage.getItem("trellis-cli-mode");
-    if (legacy === "1") return "workspace";
+    if (legacy === "1") return "project";
     return "chat";
   }
   if (stored === "lean") return "chat";
-  if (stored === "cli-single") return "workspace";
+  if (stored === "cli-single" || stored === "workspace") return "project";
   if (stored === "cli-multi") return "project";
   return isMode(stored) ? stored : "chat";
 }
@@ -284,11 +286,11 @@ type State = {
   draftSystemPrompt: string | null;
   // A4: send-key preference, applied live to every chat input.
   sendKey: SendKey;
-  // D2: ancestor turns folded into chat/workspace prompts (1–12).
+  // D2: ancestor turns folded into chat prompts (1–12).
   historyDepth: number;
   // chat enhanced-mode (skills + web, YOLO). Global, default off.
   chatEnhanced: boolean;
-  // 权限确认 draft：新建 workspace/project 会话时是否开审批（创建后锁进
+  // 权限确认 draft：新建 project 会话时是否开审批（创建后锁进
   // session 行，运行态读 session.requireApproval）。仅 claude 系生效。
   draftRequireApproval: boolean;
   // Bumps every time the server's session list might have changed —
@@ -304,8 +306,8 @@ type State = {
   markSessionLive: (sessionId: string) => void;
   // #7: the two surfaces. "linear" = the unified reading/chat thread (all
   // modes; replaced the old NodeFullView fullscreen reader), "canvas" = the
-  // tree structure view. Project sessions default to linear; chat/workspace
-  // default to canvas on desktop, linear on mobile (page effect).
+  // tree structure view. Project sessions default to linear; chat defaults
+  // to canvas on desktop, linear on mobile (page effect).
   viewMode: ViewMode;
   // #5: stream failures that happen before the server creates a node (fetch
   // refused / non-2xx). There's no node to attach the error to, so it
@@ -1095,7 +1097,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...(draftMode === "chat" && draftSystemPrompt
             ? { systemPrompt: draftSystemPrompt }
             : {}),
-          // 权限确认：仅 workspace/project 有意义；服务端还会按 provider
+          // 权限确认：仅 project 有意义；服务端还会按 provider
           // family 再钳一道（codex/mock 落 false）。
           ...(draftMode !== "chat" && get().draftRequireApproval
             ? { requireApproval: true }

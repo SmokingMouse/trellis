@@ -9,7 +9,7 @@ import { IconButton } from "@/components/ui/IconButton";
 // cwd — read-only, lazy per-directory listing via /api/sessions/[id]/files.
 // Files open in the same global FilePreview overlay as generated-file chips
 // (the preview fence already whitelists the whole cwd). Entered by clicking
-// the Header ModeBadge on workspace/project sessions.
+// the Header ModeBadge on project sessions.
 //
 // 外壳（scrim/滑入/Esc）来自 ui/Drawer 原语，与 NotesDrawer 一致。
 

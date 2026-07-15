@@ -28,7 +28,7 @@ type Result = {
   hits: Hit[];
 };
 
-type FacetKey = "all" | "chat" | "workspace" | "project";
+type FacetKey = "all" | "chat" | "project";
 
 export function SearchModal() {
   const open = useSessionStore((s) => s.searchOpen);
@@ -227,7 +227,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
 
         {/* Facet chips */}
         <div className="flex items-center gap-1 px-4 py-2 border-b border-line-faint text-ui">
-          {(["all", "chat", "workspace", "project"] as FacetKey[]).map(
+          {(["all", "chat", "project"] as FacetKey[]).map(
             (f) => (
               <button
                 key={f}
@@ -359,8 +359,6 @@ function facetLabel(f: FacetKey): string {
       return "全部";
     case "chat":
       return "Chat";
-    case "workspace":
-      return "Workspace";
     case "project":
       return "Project";
   }

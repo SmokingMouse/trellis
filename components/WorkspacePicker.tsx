@@ -267,7 +267,7 @@ function RecentTab({
                     onClick={() => onPick(e.path)}
                     className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors border-b border-line-faint last:border-b-0 ${
                       active
-                        ? "bg-mode-workspace-muted"
+                        ? "bg-mode-project-muted"
                         : "hover:bg-surface-muted"
                     }`}
                   >
@@ -283,7 +283,7 @@ function RecentTab({
                       </span>
                     </span>
                     {active && (
-                      <span className="text-xs text-mode-workspace-ink shrink-0">
+                      <span className="text-xs text-mode-project-ink shrink-0">
                         当前
                       </span>
                     )}
@@ -466,7 +466,7 @@ function BrowseTab({
                     <li key={c.path}>
                       <div
                         className={`w-full flex items-stretch border-b border-line-faint last:border-b-0 ${
-                          active ? "bg-mode-workspace-muted" : ""
+                          active ? "bg-mode-project-muted" : ""
                         }`}
                       >
                         <button
@@ -481,7 +481,7 @@ function BrowseTab({
                             {c.name}
                           </span>
                           {active && (
-                            <span className="text-xs text-mode-workspace-ink shrink-0 ml-auto">
+                            <span className="text-xs text-mode-project-ink shrink-0 ml-auto">
                               当前
                             </span>
                           )}
