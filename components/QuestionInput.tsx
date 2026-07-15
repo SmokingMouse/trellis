@@ -6,7 +6,8 @@ import { ModePicker } from "./ModePicker";
 import { SystemPromptPicker, FEYNMAN_PROMPT } from "./SystemPromptPicker";
 import { ZoneEditor } from "./ZoneEditor";
 import { isSendCombo, sendHint } from "@/lib/send-key";
-import { matchCommands, parseCommand, type CommandStore } from "@/lib/commands";
+import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
+import { useSlashNav } from "@/hooks/useSlashNav";
 import { AttachmentPreview } from "./AttachmentPreview";
 import {
   useAttachmentUploads,
@@ -30,6 +31,19 @@ const FEYNMAN_STARTERS = [
   "我试着解释一下数据库索引为什么能加速查询……",
   "我来讲讲 HTTPS 是怎么保证安全的……",
 ];
+
+// Keep the keyboard highlight visible inside the scrollable dropdown. Ref
+// callbacks re-run per render, but scrollIntoView(nearest) on an already
+// visible element is a no-op.
+const scrollToActive = (el: HTMLButtonElement | null) => {
+  el?.scrollIntoView({ block: "nearest" });
+};
+const suggestionRowClass = (isActive: boolean) =>
+  `w-full text-left px-3 py-2 border-b last:border-b-0 border-stone-100 dark:border-stone-800 ${
+    isActive
+      ? "bg-stone-100 dark:bg-stone-800"
+      : "hover:bg-stone-50 dark:hover:bg-stone-800"
+  }`;
 
 export function QuestionInput() {
   const [q, setQ] = useState("");
@@ -104,6 +118,55 @@ export function QuestionInput() {
     providerCatalog,
   };
 
+  // C4: skill picker — active in workspace/project while the user types a
+  // leading "/name" token (no space yet). Selecting fills "/name " so claude
+  // (which handles skills natively) runs it when sent.
+  const skillQuery =
+    skillCapable && q.startsWith("/") && !q.includes(" ")
+      ? q.slice(1).toLowerCase()
+      : null;
+  const matchedSkills =
+    skillQuery !== null
+      ? skills
+          .filter((s) => s.name.toLowerCase().includes(skillQuery))
+          .slice(0, 8)
+      : [];
+  // C1: Trellis commands match in *every* mode (first-class). They render
+  // above skills in the shared "/" dropdown. matchCommands gates on the same
+  // "/name" (no space) shape as skills, so the two lists co-exist cleanly.
+  const matchedCommands = matchCommands(q);
+
+  // Dropdown pick actions, shared by mouse click and keyboard (Enter/Tab).
+  // /model takes an argument → fill "/model " for typing; other commands run
+  // immediately; skills fill "/name " for claude to execute on send.
+  const pickCommand = (c: Command) => {
+    if (c.name === "model") {
+      setQ(`/${c.name} `);
+      ref.current?.focus();
+      return;
+    }
+    const note = c.run(commandStore, "");
+    if (note) {
+      setCmdNotice(note);
+      ref.current?.focus();
+    } else {
+      setQ("");
+      setCmdNotice(null);
+    }
+  };
+  const pickSkill = (name: string) => {
+    setQ(`/${name} `);
+    ref.current?.focus();
+  };
+  const slashNav = useSlashNav(
+    matchedCommands.length + matchedSkills.length,
+    q,
+    (i) =>
+      i < matchedCommands.length
+        ? pickCommand(matchedCommands[i])
+        : pickSkill(matchedSkills[i - matchedCommands.length].name),
+  );
+
   const submit = async () => {
     const trimmed = q.trim();
     if (!trimmed) return;
@@ -137,29 +200,14 @@ export function QuestionInput() {
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Suggestion navigation first — while the "/" dropdown is open, Enter
+    // picks the highlighted item instead of sending.
+    if (slashNav.handleKeyDown(e)) return;
     if (isSendCombo(e, sendKey)) {
       e.preventDefault();
       submit();
     }
   };
-
-  // C4: skill picker — active in workspace/project while the user types a
-  // leading "/name" token (no space yet). Selecting fills "/name " so claude
-  // (which handles skills natively) runs it when sent.
-  const skillQuery =
-    skillCapable && q.startsWith("/") && !q.includes(" ")
-      ? q.slice(1).toLowerCase()
-      : null;
-  const matchedSkills =
-    skillQuery !== null
-      ? skills
-          .filter((s) => s.name.toLowerCase().includes(skillQuery))
-          .slice(0, 8)
-      : [];
-  // C1: Trellis commands match in *every* mode (first-class). They render
-  // above skills in the shared "/" dropdown. matchCommands gates on the same
-  // "/name" (no space) shape as skills, so the two lists co-exist cleanly.
-  const matchedCommands = matchCommands(q);
 
   const submitDisabled =
     !q.trim() || busy || needsWorkspace || hasUploading;
@@ -340,62 +388,52 @@ export function QuestionInput() {
           <div className="mt-2 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-sm overflow-hidden max-h-64 overflow-y-auto">
             {/* C1: Trellis commands first (first-class, all modes). Selecting
                 a no-arg command runs it immediately; /model (which takes an
-                arg) fills "/model " so the user can type the provider. */}
-            {matchedCommands.map((c) => {
-              const needsArg = c.name === "model";
-              return (
-                <button
-                  key={`cmd-${c.name}`}
-                  type="button"
-                  onClick={() => {
-                    if (needsArg) {
-                      setQ(`/${c.name} `);
-                      ref.current?.focus();
-                      return;
-                    }
-                    const note = c.run(commandStore, "");
-                    if (note) {
-                      setCmdNotice(note);
-                      ref.current?.focus();
-                    } else {
-                      setQ("");
-                      setCmdNotice(null);
-                    }
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
-                >
-                  <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
-                    <span
-                      className="text-[10px] px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans"
-                      aria-hidden
-                    >
-                      ⚡ 命令
-                    </span>
-                    <span>
-                      /{c.name}
-                      {c.hint && (
-                        <span className="text-stone-400 dark:text-stone-500">
-                          {" "}
-                          {c.hint}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-                    {c.description}
-                  </div>
-                </button>
-              );
-            })}
-            {matchedSkills.map((s) => (
+                arg) fills "/model " so the user can type the provider.
+                slashNav.active highlights in the same commands-then-skills
+                index space. */}
+            {matchedCommands.map((c, i) => (
+              <button
+                key={`cmd-${c.name}`}
+                type="button"
+                ref={i === slashNav.active ? scrollToActive : undefined}
+                onClick={() => pickCommand(c)}
+                className={suggestionRowClass(i === slashNav.active)}
+              >
+                <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                  <span
+                    className="text-[10px] px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans"
+                    aria-hidden
+                  >
+                    ⚡ 命令
+                  </span>
+                  <span>
+                    /{c.name}
+                    {c.hint && (
+                      <span className="text-stone-400 dark:text-stone-500">
+                        {" "}
+                        {c.hint}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                  {c.description}
+                </div>
+              </button>
+            ))}
+            {matchedSkills.map((s, i) => (
               <button
                 key={`skill-${s.name}`}
                 type="button"
-                onClick={() => {
-                  setQ(`/${s.name} `);
-                  ref.current?.focus();
-                }}
-                className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
+                ref={
+                  matchedCommands.length + i === slashNav.active
+                    ? scrollToActive
+                    : undefined
+                }
+                onClick={() => pickSkill(s.name)}
+                className={suggestionRowClass(
+                  matchedCommands.length + i === slashNav.active,
+                )}
               >
                 <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
                   /{s.name}

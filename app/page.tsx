@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { LinearThreadView } from "@/components/LinearThreadView";
+import { NewQuestionPicker } from "@/components/NewQuestionPicker";
 import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
 import { AbortToast } from "@/components/AbortToast";
@@ -31,6 +32,11 @@ export default function Home() {
   const hydrateError = useSessionStore((s) => s.hydrateError);
   const viewMode = useSessionStore((s) => s.viewMode);
   const setViewMode = useSessionStore((s) => s.setViewMode);
+  // Remote 新话题 triggers (Header B3 prompt, /clear from any composer) —
+  // consumed here instead of inside AddNodeFAB so the picker opens in the
+  // linear view too, where the canvas FAB is unmounted.
+  const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const isMobile = useIsMobile();
   useEscapeAbort();
@@ -103,6 +109,9 @@ export default function Home() {
           linear view (where Canvas + its rail Outline unmount). Desktop hides
           it (md:hidden) since the rail Outline inside Canvas covers desktop. */}
       {session && <Outline variant="drawer" />}
+      {session && composeRootOpen && (
+        <NewQuestionPicker onClose={() => setComposeRootOpen(false)} />
+      )}
       <DoneToast />
       <AbortToast />
       <StreamAlertToast />

@@ -2,31 +2,18 @@
 import { useEffect, useRef, useState } from "react";
 import { ReferencePicker } from "./ReferencePicker";
 import { NewQuestionPicker } from "./NewQuestionPicker";
-import { useSessionStore } from "@/stores/sessionStore";
 
 type Picker = "question" | "reference" | null;
 
 // Bottom-right FAB. Clicking opens a small popover menu with two creation
 // flows: 新话题 (fresh-context parallel root in current session) / 参考卡片.
-// The 新话题 composer can also be opened remotely via the store's
-// composeRootOpen flag — the Header context-pressure prompt (B3) uses that.
+// Remote triggers (Header B3 prompt, /clear) go through the store's
+// composeRootOpen flag, consumed at page level so it works in both views —
+// this FAB only handles its own menu.
 export function AddNodeFAB() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [picker, setPicker] = useState<Picker>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
-  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
-
-  // Mirror the store flag into local picker state so a remote trigger
-  // (Header B3 prompt) opens the same NewQuestionPicker.
-  useEffect(() => {
-    if (composeRootOpen) setPicker("question");
-  }, [composeRootOpen]);
-
-  const closeQuestion = () => {
-    setPicker(null);
-    if (composeRootOpen) setComposeRootOpen(false);
-  };
 
   // Close menu on outside click / Escape.
   useEffect(() => {
@@ -94,7 +81,7 @@ export function AddNodeFAB() {
         </button>
       </div>
       {picker === "question" && (
-        <NewQuestionPicker onClose={closeQuestion} />
+        <NewQuestionPicker onClose={() => setPicker(null)} />
       )}
       {picker === "reference" && (
         <ReferencePicker onClose={() => setPicker(null)} />

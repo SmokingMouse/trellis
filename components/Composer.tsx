@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { isSendCombo, sendHint } from "@/lib/send-key";
+import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -52,6 +54,71 @@ export function Composer({
   const toolCapable = sessionMode !== "chat" || chatEnhanced;
   const matchedSkills = useSkillSuggestions(text, toolCapable);
   const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
+  // C1: Trellis commands in the docked composer — first-class in every mode
+  // (skills stay gated on toolCapable). A bare /command runs locally against
+  // the store and never streams; same registry + interception contract as the
+  // first-screen QuestionInput.
+  const session = useSessionStore((s) => s.session);
+  const newConversation = useSessionStore((s) => s.newConversation);
+  const archiveSession = useSessionStore((s) => s.archiveSession);
+  const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const setProvider = useSessionStore((s) => s.setProvider);
+  const provider = useSessionStore((s) => s.provider);
+  const providerCatalog = useSessionStore((s) => s.providerCatalog);
+  // Transient note when a command no-ops (e.g. unknown /model arg) or echoes
+  // its usage. Cleared on the next keystroke.
+  const [cmdNotice, setCmdNotice] = useState<string | null>(null);
+  const matchedCommands = matchCommands(text);
+
+  const commandStore: CommandStore = {
+    session,
+    newConversation,
+    archiveSession,
+    setSearchOpen,
+    setComposeRootOpen,
+    setProvider,
+    provider,
+    providerCatalog,
+  };
+
+  // Shared by submit-interception and dropdown pick: run a command, echo its
+  // note inline (keeping the input for correction) or reset on success.
+  const runCommand = (command: Command, args: string) => {
+    const note = command.run(commandStore, args);
+    if (note) {
+      setCmdNotice(note);
+      ref.current?.focus();
+    } else {
+      setText("");
+      setCmdNotice(null);
+    }
+  };
+
+  // Dropdown pick actions, shared by mouse click and keyboard (Enter/Tab).
+  // Same convention as QuestionInput: /model takes an argument → fill
+  // "/model " for typing; other commands run immediately; skills fill
+  // "/name " for claude to execute natively on send.
+  const pickCommand = (c: Command) => {
+    if (c.name === "model") {
+      setText(`/${c.name} `);
+      ref.current?.focus();
+      return;
+    }
+    runCommand(c, "");
+  };
+  const pickSkill = (name: string) => {
+    setText(`/${name} `);
+    ref.current?.focus();
+  };
+  const slashNav = useSlashNav(
+    matchedCommands.length + matchedSkills.length,
+    text,
+    (i) =>
+      i < matchedCommands.length
+        ? pickCommand(matchedCommands[i])
+        : pickSkill(matchedSkills[i - matchedCommands.length].name),
+  );
 
   useEffect(() => {
     if (ref.current) {
@@ -66,7 +133,16 @@ export function Composer({
 
   const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || !targetNode || isStreaming || att.hasUploading) return;
+    if (!trimmed) return;
+    // C1: intercept bare Trellis commands BEFORE any send-to-LLM path — they
+    // don't need a target node (/new, /switch work even mid-stream). Skill
+    // commands aren't in the registry → parseCommand null → fall through.
+    const parsed = parseCommand(trimmed);
+    if (parsed) {
+      runCommand(parsed.command, parsed.args);
+      return;
+    }
+    if (!targetNode || isStreaming || att.hasUploading) return;
     const attachments =
       att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
     setText("");
@@ -101,14 +177,19 @@ export function Composer({
 
   return (
     <div className="relative py-3">
-      {matchedSkills.length > 0 && (
+      {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
         <SkillPickerList
           skills={matchedSkills}
-          onPick={(name) => {
-            setText(`/${name} `);
-            ref.current?.focus();
-          }}
+          onPick={pickSkill}
+          commands={matchedCommands}
+          onPickCommand={pickCommand}
+          activeIndex={slashNav.active}
         />
+      )}
+      {cmdNotice && (
+        <div className="mb-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          {cmdNotice}
+        </div>
       )}
       {att.pending.length > 0 && (
         <div className="mb-2">
@@ -124,8 +205,14 @@ export function Composer({
         <textarea
           ref={ref}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (cmdNotice) setCmdNotice(null);
+          }}
           onKeyDown={(e) => {
+            // Suggestion navigation first — while the "/" dropdown is open,
+            // Enter picks the highlighted item instead of sending.
+            if (slashNav.handleKeyDown(e)) return;
             if (isSendCombo(e, sendKey)) {
               e.preventDefault();
               submit();
