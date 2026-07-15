@@ -71,6 +71,7 @@ export function QuestionInput() {
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setProvider = useSessionStore((s) => s.setProvider);
+  const provider = useSessionStore((s) => s.provider);
   const providerCatalog = useSessionStore((s) => s.providerCatalog);
   // Transient note when a command no-ops (e.g. /clear with no session) or
   // /model echoes its usage. Cleared on the next keystroke.
@@ -106,6 +107,7 @@ export function QuestionInput() {
     setSearchOpen,
     setComposeRootOpen,
     setProvider,
+    provider,
     providerCatalog,
   };
 
@@ -131,9 +133,14 @@ export function QuestionInput() {
     }
     if (busy || needsWorkspace || hasUploading) return;
     setBusy(true);
+    // #5: always release busy when the stream settles. On success the
+    // component unmounts first (`created` sets the session), so the reset is
+    // invisible; on failure (server unreachable / non-2xx — surfaced via the
+    // global StreamAlertToast) it un-bricks the composer so the user can
+    // retry instead of being stuck on a disabled "提交中…" forever.
     streamRoot(trimmed, {
       attachments: doneAttachments.length > 0 ? doneAttachments : undefined,
-    });
+    }).finally(() => setBusy(false));
   };
 
   const startUpload = (file: File | Blob, filename: string | null) => {

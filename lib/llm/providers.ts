@@ -45,9 +45,33 @@ export function isProviderId(s: unknown): s is ProviderId {
 export type ProviderFamily = "claude" | "codex" | "mock";
 
 export function providerFamily(id: ProviderId): ProviderFamily {
-  if (id === "codex") return "codex";
+  // "codex" (legacy bare id, default model) and "codex:<model>" composite ids
+  // (e.g. "codex:gpt-5.4-mini", enumerated from ~/.codex/models_cache.json)
+  // both spawn the codex CLI — same family, same resume-id column.
+  if (id === "codex" || id.startsWith("codex:")) return "codex";
   if (id === "mock") return "mock";
   return "claude"; // every other id (legacy tiers + endpoints.yaml ids) routes through the claude CLI shell
+}
+
+export const FAMILY_LABELS: Record<ProviderFamily, string> = {
+  claude: "Claude 系",
+  codex: "Codex 系",
+  mock: "调试",
+};
+
+// Session-family lock: while a session is active, switching between the two
+// real families (claude ↔ codex) is blocked — resume ids are family-scoped,
+// so a cross-family switch silently drops the conversation context. Switching
+// WITHIN a family (native claude ↔ deepseek ↔ ark, or codex:<a> ↔ codex:<b>)
+// keeps the resume chain intact and stays allowed. mock is a debug tool and
+// exempt in both directions.
+export function blockedFamilySwitch(
+  current: ProviderId,
+  next: ProviderId,
+): boolean {
+  const a = providerFamily(current);
+  const b = providerFamily(next);
+  return a !== b && a !== "mock" && b !== "mock";
 }
 
 // Per-model context window (tokens) — the denominator for the 🧠 context-
@@ -68,6 +92,7 @@ export function contextWindowFor(id: ProviderId): number {
     case "mock":
       return 200_000;
     default:
+      if (id.startsWith("codex:")) return 400_000;
       return id.includes("[1m]") ? 1_000_000 : 128_000;
   }
 }

@@ -14,6 +14,7 @@ import { ChatNode, type ChildAnchor } from "./ChatNode";
 import { ReferenceCard } from "./ReferenceCard";
 import { AddNodeFAB } from "./AddNodeFAB";
 import { BranchPopover } from "./BranchPopover";
+import { Composer } from "./Composer";
 import { Outline } from "./Outline";
 import {
   useSelectionWithin,
@@ -150,9 +151,9 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   // Also drop the layout-ready flag so the new session's first dagre
   // pass doesn't animate cards flying in from origin.
   //
-  // When Canvas is remounting because the user just exited NodeFullView
-  // (fullScreen → false), activeNodeId is already pointing at the node
-  // we want to land on (set by setFullScreen). Skip the auto-land in that
+  // When Canvas is remounting because the user just left the linear thread
+  // (viewMode → "canvas"), activeNodeId is already pointing at the node
+  // we want to land on (set by setViewMode). Skip the auto-land in that
   // case so the activeNodeId effect can pan/zoom to that node without
   // being overwritten by a global fit a few frames later.
   //
@@ -377,7 +378,61 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         />
       )}
       <AddNodeFAB />
+      <DockedComposer />
       <Outline />
     </>
+  );
+}
+
+// #3: the tree view's FIXED bottom input region. Follow-ups used to live
+// inside each card's footer, which jumps around as dagre re-layouts during
+// streaming — this bar is docked to the viewport so the input never moves.
+// It continues from the active node (falling back to the freshest work /
+// root); the target chip makes the branch point explicit.
+function DockedComposer() {
+  const nodeMap = useSessionStore((s) => s.nodes);
+  const activeNodeId = useSessionStore((s) => s.activeNodeId);
+  const lastEditedNodeId = useSessionStore((s) => s.lastEditedNodeId);
+  const rootNodeId = useSessionStore((s) => s.session?.rootNodeId);
+  const nodeIndices = useMemo(() => buildNodeIndex(nodeMap), [nodeMap]);
+
+  const target =
+    (activeNodeId ? nodeMap[activeNodeId] : undefined) ??
+    (lastEditedNodeId ? nodeMap[lastEditedNodeId] : undefined) ??
+    (rootNodeId ? nodeMap[rootNodeId] : undefined) ??
+    null;
+
+  const targetLabel = target
+    ? target.topicLabel ??
+      (target.kind === "reference"
+        ? "参考材料"
+        : target.question.length > 24
+          ? `${target.question.slice(0, 24)}…`
+          : target.question)
+    : null;
+
+  return (
+    <div
+      className="fixed bottom-0 right-0 z-20"
+      style={{ left: "var(--trellis-sb, 0px)" }}
+    >
+      <div className="border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
+        <div className="max-w-2xl mx-auto px-4">
+          {target && (
+            <div className="pt-2 -mb-1 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+              <span>回复</span>
+              <span className="font-mono tabular-nums">
+                #{nodeIndices[target.id] ?? "?"}
+              </span>
+              <span className="truncate max-w-[280px] text-stone-500 dark:text-stone-400">
+                {targetLabel}
+              </span>
+              <span className="hidden sm:inline">· 点卡片可切换目标</span>
+            </div>
+          )}
+          <Composer targetNode={target} placeholder="对选中节点继续追问…" />
+        </div>
+      </div>
+    </div>
   );
 }

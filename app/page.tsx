@@ -6,11 +6,11 @@ import { Canvas } from "@/components/Canvas";
 import { Header } from "@/components/Header";
 import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
-import { NodeFullView } from "@/components/NodeFullView";
 import { LinearThreadView } from "@/components/LinearThreadView";
 import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
 import { AbortToast } from "@/components/AbortToast";
+import { StreamAlertToast } from "@/components/StreamAlertToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
@@ -28,8 +28,6 @@ export default function Home() {
   const hydrated = useSessionStore((s) => s.hydrated);
   const session = useSessionStore((s) => s.session);
   const hydrateError = useSessionStore((s) => s.hydrateError);
-  const fullScreen = useSessionStore((s) => s.fullScreen);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const viewMode = useSessionStore((s) => s.viewMode);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
@@ -49,22 +47,21 @@ export default function Home() {
 
   // Wave 4: publish the effective left offset (sidebar width on desktop when
   // open, else 0) as a CSS variable so every full-bleed surface (Canvas /
-  // NodeFullView / QuestionInput) and the Outline rail can shift right by it
-  // without each re-deriving the breakpoint. Mobile keeps offset 0 — the
+  // LinearThreadView / QuestionInput) and the Outline rail can shift right by
+  // it without each re-deriving the breakpoint. Mobile keeps offset 0 — the
   // sidebar is a non-permanent overlay there.
   useEffect(() => {
     const offset = !isMobile && sidebarOpen ? SIDEBAR_W : 0;
     document.documentElement.style.setProperty("--trellis-sb", `${offset}px`);
   }, [isMobile, sidebarOpen]);
 
-  // Mobile default → Layer 3 (fullscreen). Re-applies whenever the user lands
-  // on a (different) session on a touch device. They can still back out to
-  // canvas; we don't force them back in.
+  // #7: mobile lands on the linear thread (the standard phone chat flow) for
+  // every mode whenever the user arrives on a (different) session. They can
+  // still switch to the canvas; we don't force them back.
   const sessionId = session?.id;
-  const sessionMode = session?.mode;
   useEffect(() => {
-    if (isMobile && sessionId && sessionMode !== "project") setFullScreen(true);
-  }, [isMobile, sessionId, sessionMode, setFullScreen]);
+    if (isMobile && sessionId) setViewMode("linear");
+  }, [isMobile, sessionId, setViewMode]);
 
   if (!hydrated || isMobile === null) {
     return (
@@ -85,37 +82,29 @@ export default function Home() {
         </div>
       )}
       {!session && <QuestionInput />}
-      {session && session.mode === "project" && viewMode === "linear" && (
-        <LinearThreadView />
-      )}
-      {session &&
-        !(session.mode === "project" && viewMode === "linear") &&
-        fullScreen && <NodeFullView />}
-      {session &&
-        !(session.mode === "project" && viewMode === "linear") &&
-        !fullScreen && (
+      {session && viewMode === "linear" && <LinearThreadView />}
+      {session && viewMode === "canvas" && (
         <>
           <Canvas
-            onNodeFocus={isMobile ? () => setFullScreen(true) : undefined}
+            onNodeFocus={isMobile ? () => setViewMode("linear") : undefined}
           />
-          {session.mode === "project" && (
-            <button
-              type="button"
-              onClick={() => setViewMode("linear")}
-              className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 shadow-md text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800 active:scale-95 transition-transform"
-              title="切换到线性 thread"
-            >
-              线性
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setViewMode("linear")}
+            className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 shadow-md text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800 active:scale-95 transition-transform"
+            title="切换到线性 thread"
+          >
+            线性
+          </button>
         </>
       )}
-      {/* B1: mobile outline drawer — mounted top-level so it survives
-          fullscreen (where Canvas + its rail Outline unmount). Desktop hides
+      {/* B1: mobile outline drawer — mounted top-level so it survives the
+          linear view (where Canvas + its rail Outline unmount). Desktop hides
           it (md:hidden) since the rail Outline inside Canvas covers desktop. */}
       {session && <Outline variant="drawer" />}
       <DoneToast />
       <AbortToast />
+      <StreamAlertToast />
       <NotesDrawer />
       <SearchModal />
       <FilePreview />

@@ -31,7 +31,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
   const indexLabel = data.index ? `#${data.index}` : "";
   const isUnread = n.status === "done" && !n.readAt;
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
   const refreshReference = useSessionStore((s) => s.refreshReference);
   const abortStream = useSessionStore((s) => s.abortStream);
   const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
@@ -63,9 +63,9 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
   const fetchError = ref.meta.fetchError;
   const canRefresh = ref.sourceType === "url" && !isStreaming;
 
-  const goFullScreen = () => {
+  const goRead = () => {
     setActiveNode(n.id);
-    setFullScreen(true);
+    setViewMode("linear");
   };
 
   const onRefresh = async (e: React.MouseEvent) => {
@@ -97,7 +97,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
               ? "border-rose-300 dark:border-rose-800"
               : "border-amber-300 dark:border-amber-800"
       }`}
-      onClick={goFullScreen}
+      onClick={goRead}
       title={ref.sourceUri ?? labelText}
     >
       <Handle type="target" position={Position.Top} />

@@ -20,7 +20,7 @@ export function DoneToast() {
   const toasts = useSessionStore((s) => s.doneToasts);
   const nodes = useSessionStore((s) => s.nodes);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
   const dismiss = useSessionStore((s) => s.dismissDoneToast);
 
   // Indices recomputed when nodes map changes — cheap, runs only when the
@@ -40,7 +40,7 @@ export function DoneToast() {
           label={topicForNode(nodes[t.nodeId])}
           onClick={() => {
             setActiveNode(t.nodeId);
-            setFullScreen(true);
+            setViewMode("linear");
             dismiss(t.nodeId);
           }}
           onDismiss={() => dismiss(t.nodeId)}

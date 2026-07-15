@@ -1,26 +1,29 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { buildNodeIndex } from "@/lib/node-index";
-import { getStreamPending, subscribeStream } from "@/lib/stream-bus";
-import { MD_COMPONENTS } from "@/lib/md-components";
-import { isSendCombo, sendHint } from "@/lib/send-key";
-import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { subscribeStream } from "@/lib/stream-bus";
+import { modeStyle } from "@/lib/mode-style";
+import { sendHint } from "@/lib/send-key";
+import {
+  useSelectionWithin,
+  type SelectionInfo,
+} from "@/hooks/useSelectionWithin";
+import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import type { ChatNode } from "@/lib/types";
-import { CliResumeButton } from "./CliResumeButton";
-import { CopyButton } from "./CopyButton";
-import { InteractionForm } from "./InteractionForm";
+import { BranchPopover } from "./BranchPopover";
+import { Composer } from "./Composer";
 import { ThreadMinimap } from "./ThreadMinimap";
-import { ToolCallsPanel } from "./ToolCallsPanel";
+import { TurnCard } from "./TurnCard";
 
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
-const REHYPE_STREAMING = [rehypeHighlight];
+// #7: the unified reading/chat surface for EVERY mode (chat / workspace /
+// project). One thread anchored at the active node: ancestors above, the
+// first-child chain below, non-thread children folded into "↳ N 个分支"
+// rows. Cards are fully interactive (TurnCard: edit question, ⌘K selection
+// branching via BranchPopover, regenerate, copy, interaction forms), and the
+// sticky bottom composer continues the displayed lineage — this replaced the
+// old NodeFullView fullscreen reader (issues #2/#4/#7).
 
 function nodeSort(a: ChatNode, b: ChatNode) {
   return (
@@ -53,16 +56,28 @@ function childrenIndex(nodes: Record<string, ChatNode>) {
   return byParent;
 }
 
+// How close to the bottom (px) still counts as "following" — scrolling
+// further up than this pauses the stream auto-follow until the user returns.
+const FOLLOW_SLACK_PX = 120;
+
 export function LinearThreadView() {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
   const setViewMode = useSessionStore((s) => s.setViewMode);
+  const markNodeRead = useSessionStore((s) => s.markNodeRead);
+  const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
+  const sendKey = useSessionStore((s) => s.sendKey);
+  const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
   const roundRefs = useRef(new Map<string, HTMLDivElement>());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // #6: sticky-to-bottom while the tip streams. True = keep pinning the
+  // viewport to the bottom on new content; flips off when the user scrolls
+  // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
+  const followRef = useRef(true);
 
   useEffect(() => {
     setOpenBranches(new Set());
@@ -108,15 +123,119 @@ export function LinearThreadView() {
     return { anchorId: anchor.id, thread, branchesByNode };
   }, [activeNodeId, nodes, session?.rootNodeId]);
 
+  const tipNode =
+    threadData.thread.length > 0
+      ? threadData.thread[threadData.thread.length - 1]
+      : null;
+  const tipStreamingId =
+    tipNode && tipNode.status === "streaming" ? tipNode.id : null;
+  const anchorNode = threadData.anchorId ? nodes[threadData.anchorId] : null;
+
+  // Anchor navigation → scroll the anchored card into view. Skipped while the
+  // anchor IS the streaming tip: the bottom-lock below owns the viewport then
+  // (centering a growing card would fight it every frame).
   useEffect(() => {
     if (!threadData.anchorId) return;
+    if (threadData.anchorId === tipStreamingId) return;
     const id = requestAnimationFrame(() => {
       roundRefs.current
         .get(threadData.anchorId!)
         ?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
     return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadData.anchorId]);
+
+  // #6: bottom-lock during streaming. Deltas bypass React (stream-bus), so we
+  // subscribe directly and pin scrollTop per animation frame while following.
+  useEffect(() => {
+    if (!tipStreamingId) return;
+    followRef.current = true;
+    const el = scrollRef.current;
+    if (!el) return;
+    let raf = 0;
+    const pin = () => {
+      raf = 0;
+      if (followRef.current && scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    };
+    pin();
+    const unsub = subscribeStream(tipStreamingId, () => {
+      if (!raf) raf = requestAnimationFrame(pin);
+    });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      unsub();
+    };
+  }, [tipStreamingId]);
+
+  // Store-driven growth while streaming (tool-call panel rows, interaction
+  // forms) doesn't emit stream deltas — re-pin after those renders too.
+  useEffect(() => {
+    if (!tipStreamingId || !followRef.current) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    followRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+  };
+
+  // Mark the anchored node read after the user keeps it on screen for 1s —
+  // same contract the fullscreen reader had. Streaming / error nodes don't
+  // count; only finished replies.
+  useEffect(() => {
+    if (!anchorNode) return;
+    if (anchorNode.status !== "done" || anchorNode.readAt) return;
+    const id = anchorNode.id;
+    const t = window.setTimeout(() => markNodeRead(id), 1000);
+    return () => window.clearTimeout(t);
+  }, [anchorNode, markNodeRead]);
+
+  // `B` jumps back to the anchored node's parent at its anchor mark (same
+  // target as clicking the card's "从「…」分叉" banner). Ignores presses while
+  // typing and modifier combos.
+  useEffect(() => {
+    if (!anchorNode?.parentAnchor || !anchorNode.parentId) return;
+    if (!nodes[anchorNode.parentId]) return;
+    const parentId = anchorNode.parentId;
+    const childId = anchorNode.id;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "b" && e.key !== "B") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      jumpToParentAtAnchor(parentId, childId);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [anchorNode, nodes, jumpToParentAtAnchor]);
+
+  // ⌘K selection branching + ⌘D note capture over any card body — the same
+  // BranchPopover the canvas uses (bodies carry data-chat-node-id).
+  const liveSelection = useSelectionWithin();
+  const [popover, setPopover] = useState<{
+    selection: SelectionInfo;
+    expanded: boolean;
+  } | null>(null);
+  useEffect(() => {
+    setPopover((prev) => {
+      if (prev?.expanded) return prev;
+      if (liveSelection) return { selection: liveSelection, expanded: false };
+      return null;
+    });
+  }, [liveSelection]);
 
   const setRoundRef = (id: string) => (el: HTMLDivElement | null) => {
     if (el) roundRefs.current.set(id, el);
@@ -132,23 +251,24 @@ export function LinearThreadView() {
     });
   };
 
-  const tipNode =
-    threadData.thread.length > 0
-      ? threadData.thread[threadData.thread.length - 1]
-      : null;
-
   if (!session) return null;
+  const mode = modeStyle(session.mode);
 
   return (
+    // #3: viewport-bound flex column — header and composer are fixed rails,
+    // only the middle scrolls. `sticky bottom-0` was NOT this: with less than
+    // a screen of content the composer sat right under the last card,
+    // floating mid-screen instead of docked at the bottom.
     <div
-      className="w-screen h-screen pt-[5.25rem] overflow-y-auto bg-stone-50 dark:bg-stone-950"
-      style={{ paddingLeft: "var(--trellis-sb, 0px)", boxSizing: "border-box" }}
+      className="fixed inset-0 pt-[5.25rem] flex flex-col bg-stone-50 dark:bg-stone-950"
+      style={{ left: "var(--trellis-sb, 0px)" }}
     >
-      <div className="sticky top-0 z-30 border-b border-stone-200/80 dark:border-stone-800 bg-stone-50/90 dark:bg-stone-950/90 backdrop-blur">
+      <div className="shrink-0 z-30 border-b border-stone-200/80 dark:border-stone-800 bg-stone-50/90 dark:bg-stone-950/90 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-stone-400 dark:text-stone-500">
-              Project thread
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 dark:text-stone-500 flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
+              {mode.label} · 线性
             </div>
             <h1 className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
               {session.title}
@@ -164,7 +284,8 @@ export function LinearThreadView() {
         </div>
       </div>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 pb-6 space-y-4">
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
+        <main className="max-w-3xl mx-auto px-4 py-5 pb-6 space-y-4">
         {threadData.thread.length === 0 ? (
           <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-8 text-center text-sm text-stone-500 dark:text-stone-400">
             暂无节点
@@ -173,6 +294,8 @@ export function LinearThreadView() {
           threadData.thread.map((node, idx) => {
             const branches = threadData.branchesByNode.get(node.id) ?? [];
             const isActive = node.id === threadData.anchorId;
+            const canDelete =
+              session.rootNodeId !== node.id && node.status !== "streaming";
             return (
               <section
                 key={node.id}
@@ -184,7 +307,7 @@ export function LinearThreadView() {
                     : "border-stone-200 dark:border-stone-800"
                 }`}
               >
-                <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-800 flex items-center gap-2 text-xs">
+                <div className="px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex items-center gap-2 text-xs">
                   <span className="font-mono text-stone-400 dark:text-stone-500">
                     #{nodeIndices[node.id] ?? idx + 1}
                   </span>
@@ -202,53 +325,38 @@ export function LinearThreadView() {
                   <span className="text-stone-500 dark:text-stone-400">
                     {node.kind === "reference" ? "Reference" : "Turn"}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveNode(node.id);
-                      setViewMode("canvas");
-                      setFullScreen(true);
-                    }}
-                    className="ml-auto px-2 py-1 rounded-md text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors flex items-center gap-1"
-                    title="进入对话"
-                    aria-label="进入对话"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => confirmDelete(node.id)}
+                      className="ml-auto px-1.5 py-1 rounded-md text-stone-400 dark:text-stone-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                      title="删除节点（含子树）"
+                      aria-label="删除节点"
                     >
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                    <span>聊</span>
-                  </button>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
 
-                <div className="px-4 py-4 space-y-4">
-                  {node.kind === "reference" ? (
-                    <ReferenceSummary node={node} />
-                  ) : (
-                    <>
-                      <QuestionBlock node={node} />
-                      <ToolCallsPanel toolCalls={node.toolCalls} />
-                      <ThreadResponseBody node={node} />
-                      {node.pendingInteraction && (
-                        <InteractionForm
-                          nodeId={node.id}
-                          interaction={node.pendingInteraction}
-                        />
-                      )}
-                    </>
-                  )}
+                <div className="px-4 py-4">
+                  <TurnCard node={node} />
 
                   {branches.length > 0 && (
-                    <div className="pt-2 border-t border-stone-100 dark:border-stone-800">
+                    <div className="mt-4 pt-2 border-t border-stone-100 dark:border-stone-800">
                       <button
                         type="button"
                         onClick={() => toggleBranches(node.id)}
@@ -285,242 +393,32 @@ export function LinearThreadView() {
             );
           })
         )}
-      </main>
-      {tipNode && (
-        <div className="sticky bottom-0 z-20 border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
-          <div className="max-w-3xl mx-auto px-4">
-            <LinearComposer tipNode={tipNode} />
-          </div>
-        </div>
-      )}
-      <ThreadMinimap />
-    </div>
-  );
-}
-
-function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
-  const [text, setText] = useState("");
-  const streamBranch = useSessionStore((s) => s.streamBranch);
-  const abortStream = useSessionStore((s) => s.abortStream);
-  const sendKey = useSessionStore((s) => s.sendKey);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const isStreaming = tipNode.status === "streaming";
-  // Linear view only ever renders for project sessions, which are always
-  // tool-capable — no chatEnhanced gate needed here (unlike QuestionInput).
-  const matchedSkills = useSkillSuggestions(text, true);
-
-  useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = "auto";
-      ref.current.style.height = `${Math.min(ref.current.scrollHeight, 160)}px`;
-    }
-  }, [text]);
-
-  const submit = () => {
-    const trimmed = text.trim();
-    if (!trimmed || isStreaming) return;
-    setText("");
-    streamBranch(tipNode.id, trimmed, null);
-  };
-
-  if (isStreaming) {
-    return (
-      <div className="py-3">
-        <button
-          onClick={() => abortStream(tipNode.id)}
-          className="w-full h-[42px] rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-[0.99] transition-colors flex items-center justify-center gap-2 text-[13px]"
-          aria-label="停止生成"
-        >
-          <span className="inline-block w-2.5 h-2.5 bg-current rounded-[2px]" />
-          停止生成
-          <span className="opacity-60 text-[11px] hidden sm:inline">
-            （Esc）
-          </span>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative py-3 flex items-end gap-2">
-      {matchedSkills.length > 0 && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 z-10 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
-          {matchedSkills.map((s) => (
-            <button
-              key={s.name}
-              type="button"
-              onClick={() => {
-                setText(`/${s.name} `);
-                ref.current?.focus();
-              }}
-              className="w-full text-left px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800 border-b last:border-b-0 border-stone-100 dark:border-stone-800"
-            >
-              <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
-                /{s.name}
-              </div>
-              {s.description && (
-                <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-                  {s.description}
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-      <textarea
-        ref={ref}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (isSendCombo(e, sendKey)) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        rows={1}
-        placeholder={`继续对话…（${sendHint(sendKey)}）`}
-        className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm"
-      />
-      <button
-        onClick={submit}
-        disabled={!text.trim()}
-        className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
-        aria-label="发送"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 19V5M5 12l7-7 7 7" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
-function QuestionBlock({ node }: { node: ChatNode }) {
-  return (
-    <div className="rounded-lg bg-stone-50 dark:bg-stone-950/50 border border-stone-100 dark:border-stone-800 px-3 py-3">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
-        You
-      </div>
-      <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-stone-900 dark:text-stone-100">
-        {node.question}
-      </div>
-    </div>
-  );
-}
-
-function ReferenceSummary({ node }: { node: ChatNode }) {
-  const ref = node.reference;
-  const title = ref?.meta.title ?? node.topicLabel ?? node.question;
-  return (
-    <div className="rounded-lg bg-amber-50/80 dark:bg-amber-950/25 border border-amber-100 dark:border-amber-900/70 px-3 py-3">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-700/70 dark:text-amber-300/70">
-        Reference
-      </div>
-      <div className="text-[15px] font-medium text-stone-900 dark:text-stone-100">
-        {title || "参考资料"}
-      </div>
-      {ref?.sourceUri && (
-        <a
-          href={ref.sourceUri}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-1 block truncate text-xs text-indigo-600 dark:text-indigo-300 hover:underline"
-        >
-          {ref.sourceUri}
-        </a>
-      )}
-      {typeof ref?.meta.wordCount === "number" && (
-        <div className="mt-2 text-[11px] text-stone-500 dark:text-stone-400 tabular-nums">
-          {ref.meta.wordCount.toLocaleString()} words
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ThreadResponseBody({ node }: { node: ChatNode }) {
-  const isStreaming = node.status === "streaming";
-  const isError = node.status === "error";
-  const [liveText, setLiveText] = useState("");
-
-  useEffect(() => {
-    if (!isStreaming) return;
-    let raf = 0;
-    let buf = node.response + getStreamPending(node.id);
-    setLiveText(buf);
-    const flush = () => {
-      raf = 0;
-      setLiveText(buf);
-    };
-    const unsub = subscribeStream(node.id, (delta) => {
-      buf += delta;
-      if (!raf) raf = requestAnimationFrame(flush);
-    });
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      unsub();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStreaming, node.id]);
-
-  const text = isStreaming ? liveText : node.response;
-
-  return (
-    <div className="space-y-3">
-      <div
-        data-chat-node-id={node.id}
-        className="md-body text-[15px] leading-relaxed text-stone-800 dark:text-stone-200"
-      >
-        {text ? (
-          <>
-            <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
-              rehypePlugins={isStreaming ? REHYPE_STREAMING : REHYPE_FULL}
-              components={MD_COMPONENTS}
-            >
-              {text}
-            </ReactMarkdown>
-            {isStreaming && <span className="streaming-cursor" />}
-          </>
-        ) : isStreaming ? (
-          <div className="flex items-center gap-1.5 py-2 text-stone-400 dark:text-stone-500">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse [animation-delay:150ms]" />
-            <span className="w-2 h-2 rounded-full bg-indigo-300 animate-pulse [animation-delay:300ms]" />
-            <span className="ml-1.5 text-[13px]">正在生成…</span>
-          </div>
-        ) : (
-          <div className="text-stone-400 dark:text-stone-500 italic">
-            （暂无回答）
-          </div>
-        )}
+        </main>
       </div>
 
-      {isError && (
-        <div className="rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/35 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
-          出错：{node.errorMessage ?? "unknown error"}
-        </div>
-      )}
-
-      {text && (
-        <div className="flex justify-end gap-2">
-          <CliResumeButton nodeId={node.id} />
-          <CopyButton
-            text={text}
-            label="复制全文"
-            className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      <div className="shrink-0 z-20 border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
+        <div className="max-w-3xl mx-auto px-4">
+          <Composer
+            targetNode={tipNode}
+            placeholder={`继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`}
           />
         </div>
+      </div>
+
+      {popover?.selection && (
+        <BranchPopover
+          selection={popover.selection}
+          expanded={popover.expanded}
+          onExpand={() =>
+            setPopover((prev) => (prev ? { ...prev, expanded: true } : prev))
+          }
+          onClose={() => {
+            setPopover(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
       )}
+      <ThreadMinimap />
     </div>
   );
 }
