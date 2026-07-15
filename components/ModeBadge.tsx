@@ -2,16 +2,18 @@
 import { useSessionStore } from "@/stores/sessionStore";
 import { MODE_STYLES } from "@/lib/mode-style";
 
-// Readonly badge rendered in the Header for an active session. Shows
+// Badge rendered in the Header for an active session. Shows
 // "Chat" / "Workspace · <shortName>" / "Project · <shortName>" depending
 // on the locked session mode. Renders nothing when there's no session
 // (the new-session draft picker lives in QuestionInput).
 //
-// Hover reveals the full workspace path. Click is a no-op — mode +
-// workspace are locked at session creation. To use a different mode,
-// open a new session.
+// Hover reveals the full workspace path. Mode + workspace are locked at
+// session creation — to use a different mode, open a new session. When the
+// session has a workspace cwd, clicking the badge opens the read-only
+// workspace-files drawer; without one (chat) it stays a static status chip.
 export function ModeBadge() {
   const session = useSessionStore((s) => s.session);
+  const setWorkspaceFilesOpen = useSessionStore((s) => s.setWorkspaceFilesOpen);
   if (!session) return null;
 
   const mode = session.mode || "chat";
@@ -23,16 +25,8 @@ export function ModeBadge() {
   // through the session row to keep the schema lean.
   const shortName = path ? basename(path) : null;
 
-  return (
-    <div
-      role="status"
-      title={
-        path
-          ? `${cfg.label} · ${path}\n模式与工作区在 session 创建时锁定`
-          : `${cfg.label}\nsession 创建时锁定 — 换语境请开新 session`
-      }
-      className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border ${cfg.badge}`}
-    >
+  const body = (
+    <>
       <cfg.Icon />
       {/* Mode label hidden on mobile to save space — the icon already
           encodes the mode (chat bubble / chevron / link). Desktop shows
@@ -50,6 +44,30 @@ export function ModeBadge() {
           </span>
         </>
       )}
+    </>
+  );
+
+  if (path) {
+    return (
+      <button
+        type="button"
+        onClick={() => setWorkspaceFilesOpen(true)}
+        title={`${cfg.label} · ${path}\n点击浏览工作区文件（只读）\n模式与工作区在 session 创建时锁定`}
+        aria-label="浏览工作区文件"
+        className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border cursor-pointer hover:opacity-80 transition-opacity ${cfg.badge}`}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      role="status"
+      title={`${cfg.label}\nsession 创建时锁定 — 换语境请开新 session`}
+      className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border ${cfg.badge}`}
+    >
+      {body}
     </div>
   );
 }
