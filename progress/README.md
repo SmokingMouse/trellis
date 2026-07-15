@@ -127,11 +127,19 @@
 - [x] B2: 归档机制(`sessions.archived INTEGER` idempotent ALTER + repo `setSessionArchived`/`countArchivedSessions` + listSessions 默认排除 archived + PATCH `{archived}` + store `archiveSession`/`unarchiveSession` + SessionPicker 行内归档/恢复 + 「显示已归档(N)」toggle)。归档纯隐藏不删 jsonl/节点。SessionTabs 未改(同 endpoint 自动受益)
 
 **Wave 3(命令面 + 深水)**
-- [x] C1: 通用命令面板(Session 30)。新 `lib/commands.ts` registry(`matchCommands`/`parseCommand`/`resolveProvider`)+ QuestionInput 提交拦截分流(纯 Trellis 命令本地执行不发 LLM,skill 照旧透传 CLI)+ `/` 下拉合并命令(前)+skill(后)。`/clear` 复用 Wave 2 `setComposeRootOpen`。仅接首屏 composer(命令是 session 元操作),追问框刻意不接
+- [x] C1: 通用命令面板(Session 30)。新 `lib/commands.ts` registry(`matchCommands`/`parseCommand`/`resolveProvider`)+ QuestionInput 提交拦截分流(纯 Trellis 命令本地执行不发 LLM,skill 照旧透传 CLI)+ `/` 下拉合并命令(前)+skill(后)。`/clear` 复用 Wave 2 `setComposeRootOpen`。仅接首屏 composer(命令是 session 元操作),追问框刻意不接 → **S54 推翻**:用户要求日常对话框也能用,共享 Composer 已接同一 registry
 - [x] B3: `/compact` 降级提示(Session 30 随 Wave 2 一起做)。spike 确认 claude CLI/SDK 无原生 compact → 降级为 Header 🧠 ctx 徽章在 ≥50% 时变可点 popover(解释上下文压力 + 「🧹 开新话题清空」一键复用 createRootInSession,经 store `composeRootOpen` 标志驱动 AddNodeFAB 的 NewQuestionPicker)。<50% 保持非交互只读不打扰。不实现 summarize
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 54 (2026-07-15)
+- **Done**: **`/` 命令接入日常对话 Composer（推翻 S30「追问框刻意不接」的取舍，用户明确要求）**。共享 `Composer.tsx`（线性 sticky footer + 画布 DockedComposer）此前只接了 skill 补全，`lib/commands.ts` 的 Trellis 命令只有首屏 QuestionInput 能用。三处改动，registry/命令语义零改：
+  - `SkillPickerList` 扩成命令+skill 合并下拉（可选 `commands`/`onPickCommand` props，命令在前带 ⚡ 徽章，与首屏下拉同序；ChatNode 行内追问框传参不变、向后兼容）。
+  - `Composer` 接 `matchCommands`（全模式一等，skill 仍 gated on toolCapable）+ 提交拦截 `parseCommand`（裸 /command 本地执行不进 LLM，拦截在 targetNode/isStreaming 闸之前——/new /switch 不需要目标节点）+ cmdNotice 行内提示（下次击键清除）；下拉点选无参命令立即执行、/model 填 `"/model "` 待补参，与 QuestionInput 同约定。
+  - **顺手修存量 bug**：`composeRootOpen` 消费从 AddNodeFAB（仅画布挂载）上移到 `page.tsx` 顶层——此前线性视图里 Header B3「开新话题」和 `/clear` 置了 flag 没人消费，静默无效且切回画布时 picker 突然弹出。FAB 只保留自己的菜单流。
+- **验证**: tsc ✓ + `make build` ✓；隔离实例（:3096 + 临时 DB + mock provider，产物已清）agent-browser 实测：线性 Composer 输 `/` 出 5 命令（纯 chat 无 skill）、`/cl` 过滤、点 /clear 在**线性视图**弹 NewQuestionPicker（修复生效）、`/model` 无参回显用法且保留输入、`/model mock` 切换生效+清空输入、增强模式下命令+skill 合并（5 命令+6 skill）、`/switch` 开搜索面板、`/new` 回首屏。
+- **Next**: 用户真机验收；候选 follow-up：下拉键盘导航（↑↓ 选中 + Enter 补全，现仅鼠标点选，首屏同缺）。
+
 ### Session 53 (2026-07-15)
 - **Done**: **收敛工作机对 CHAT 修复的四个补丁**（工作机 pull a29f9b5 后仍 0 输出，自行打了四个本地补丁；逐条评估后收敛）：
   - **#1 `--setting-sources ""` 被 runtime 吞空 argv** → 采纳但改形式：SDK 上游化为 `--setting-sources=` 等号写法（sm-toolkit `0326299`），语义不变；工作机临时用的 `=local` 不采纳（通用 SDK 会在真实 cwd 突然加载 .claude/settings.local.json，语义漂移）。本机 bun 1.3.14 实测不吞空 argv（不复现），等号形式对 runtime 差异免疫。
