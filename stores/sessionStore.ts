@@ -353,6 +353,9 @@ type State = {
   // preview reads the live file from /api/files for the active session. null =
   // closed.
   filePreview: { path: string; name: string } | null;
+  // Whether the workspace-files drawer (read-only browser of the session's
+  // cwd, entered via the Header ModeBadge) is open. UI-only — not persisted.
+  workspaceFilesOpen: boolean;
   // B1: mobile outline drawer visibility. Desktop shows the outline as a
   // permanent left rail (md:block); mobile (which defaults to fullscreen,
   // hiding the rail) opens it as a full-height drawer via a Header button.
@@ -533,6 +536,7 @@ type Actions = {
   setSearchOpen: (open: boolean) => void;
   openFilePreview: (absPath: string) => void;
   closeFilePreview: () => void;
+  setWorkspaceFilesOpen: (open: boolean) => void;
   setOutlineOpen: (open: boolean) => void;
   setComposeRootOpen: (open: boolean) => void;
   setHistoryDepth: (n: number) => void;
@@ -643,6 +647,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   notesOpen: false,
   searchOpen: false,
   filePreview: null,
+  workspaceFilesOpen: false,
   outlineOpen: false,
   composeRootOpen: false,
   collapsedNodeIds: new Set(),
@@ -1573,6 +1578,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   openFilePreview: (absPath) =>
     set({ filePreview: { path: absPath, name: absPath.split("/").pop() || absPath } }),
   closeFilePreview: () => set({ filePreview: null }),
+  setWorkspaceFilesOpen: (open) => set({ workspaceFilesOpen: open }),
   setOutlineOpen: (open) => set({ outlineOpen: open }),
   setComposeRootOpen: (open) => set({ composeRootOpen: open }),
 

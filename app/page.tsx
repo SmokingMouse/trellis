@@ -12,6 +12,7 @@ import { DoneToast } from "@/components/DoneToast";
 import { AbortToast } from "@/components/AbortToast";
 import { StreamAlertToast } from "@/components/StreamAlertToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { WorkspaceFilesDrawer } from "@/components/WorkspaceFilesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -106,6 +107,7 @@ export default function Home() {
       <AbortToast />
       <StreamAlertToast />
       <NotesDrawer />
+      <WorkspaceFilesDrawer />
       <SearchModal />
       <FilePreview />
     </>

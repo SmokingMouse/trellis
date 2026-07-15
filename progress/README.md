@@ -1,7 +1,10 @@
 # Trellis Progress
 
 ## Current Focus
-**CHAT 模式"假死"修复 = thinking 可视化 + effort env 卫生（Session 52，本 worktree 未 commit）**：claude 思考期 UI 零反馈像卡死（effort=max 时达分钟级）。双修：① SDK（~/sdk @sm/agent）新增 `EventType.Thinking` 透传 `thinking_delta`，trellis 全链路接力（StreamEvent/RunEvent/catchup → stream-bus thinkingChannel → TurnCard 思考面板 + 画布 ChatNode 指示器）；② `instrumentation.ts` 启动 scrub 从 shell 继承的 `CLAUDE_CODE_EFFORT_LEVEL`。roadmap D4 解锁。隔离实例真 claude 全链路 + 浏览器实测 ✓。
+**工作区文件抽屉（Session 53，已合入 main）**：workspace/project 会话点 Header ModeBadge → 右侧抽屉（移动端底部 sheet）只读浏览 session cwd 目录树，点文件走既有 FilePreview。API 围栏 + UI 全链路隔离实测 ✓；`make build` 因中文 worktree 路径触发 Turbopack panic 无法在 feature worktree 跑（见 Session 53 Verified Fact，与 Session 52 撞的是同一坑），已在 main（ASCII 路径）补跑。
+
+---
+**CHAT 模式"假死"修复 = thinking 可视化 + effort env 卫生（Session 52，已合入 main `a29f9b5`）**：claude 思考期 UI 零反馈像卡死（effort=max 时达分钟级）。双修：① SDK（~/sdk @sm/agent）新增 `EventType.Thinking` 透传 `thinking_delta`，trellis 全链路接力（StreamEvent/RunEvent/catchup → stream-bus thinkingChannel → TurnCard 思考面板 + 画布 ChatNode 指示器）；② `instrumentation.ts` 启动 scrub 从 shell 继承的 `CLAUDE_CODE_EFFORT_LEVEL`。roadmap D4 解锁。隔离实例真 claude 全链路 + 浏览器实测 ✓。
 
 ---
 **线性视图滚动已读修复（Session 48，已合入 main，fix commit `51d7dff`）**：已读判定从「仅 anchor 1s」改为 IntersectionObserver 视口停留 1s，滚动阅读即计已读；隔离实例浏览器实测 ✓。
@@ -129,6 +132,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 53 (2026-07-15)
+- **Done**: **工作区文件抽屉**（分支/worktree `增加工作区目录`，commit `3a64f4b`）。动机：文件可见性链条缺最后一环——上传（Stage 19）/生成（GeneratedFilesBar 只覆盖回答里提到的路径）/空白沙箱（S49，产物散在 `~/.trellis/scratch` 无入口），远程/手机场景无终端可取件。形态拍板：**按需抽屉（只读浏览 + 预览），不做常驻 IDE 面板**——入口 = Header ModeBadge（有 workspacePath 时变可点 button，chat 保持静态 chip）。
+  - 新 `GET /api/sessions/[id]/files?dir=<abs>`：单层非递归列目录，围栏 = session cwd realpath 前缀（`dir` 必须绝对路径；symlink 一律不列，指向 cwd 外的目录 realpath 后 403）；隐藏 dotfiles/node_modules/__pycache__/venv，**保留 dist/build**（agent 产物常落那里，与 workspaces/browse 的隐藏表刻意不同）；单目录 300 条截断标记。
+  - 新 `components/WorkspaceFilesDrawer.tsx`（NotesDrawer 同款骨架：桌面右侧 360px / 移动端 60vh 底部 sheet）：惰性展开子目录、文件行显示 kind 图标+大小、点击 `openFilePreview(absPath)` 复用全局 FilePreview（**预览围栏零改动——`sessionAllow` 本就放行整个 cwd**，store 注释里预留的 "future workspace browser" 正是此物）；每次开抽屉 epoch 重挂载强制刷新 + ⟳ 手动刷新。store 加 `workspaceFilesOpen`（UI-only）。
+- **验证**（临时 ASCII worktree + 隔离 dev :3095 + 临时 DB + mock provider，产物已全清）：curl——根/子目录列表正确（dotfile/node_modules/symlink 均不出现，/tmp→/private/tmp realpath 归一）；围栏 `/etc`、symlink 逃逸（`ln -s /etc`）、前缀同胞目录（`ws-testXX`）全 403、相对路径 400、无 workspace session 404；`/api/files` 预览联动 200。agent-browser——badge 点开抽屉、展开子目录、点 report.md 开 FilePreview（markdown 渲染）、**Esc 分层**（第一下关预览第二下关抽屉，FilePreview capture-phase stopPropagation 生效）、390px 视口底部 sheet 正常。`tsc --noEmit` ✓。
+- **★ Verified Fact：中文路径 worktree 会炸 Turbopack**（与 Session 52 独立撞上同一坑，互证）。ident 截断按字节切、落在多字节字符中间直接 Rust panic（`start byte index N is not a char boundary`，turbopack-core/ident.rs）。`make build` 在中文 worktree 必炸；**dev 模式按 route ident 字节长度选择性炸**——存量 route 都能跑，本 feature 新 route 恰好中招（500）。worktree 目录一律用 ASCII 名（分支名不受影响，炸点只在目录路径）。
+- **边界**：`.env` 等 dotfile 只是不列出，`/api/files` 预览围栏本就放行整个 cwd（现状未收紧，与行内路径可开任意 cwd 文件一致）；chat 无 badge 入口（代码路径未浏览器验，条件分支 trivial）；子目录展开状态在刷新后不保留（v1 取舍）。
+- **Next**: 用户真机验收（尤其手机远程取件场景）。合并/build/prod/worktree 挪移状态见本条 merge 后追记。
+
 ### Session 52 (2026-07-15)
 - **Done**: **CHAT 模式"假死"修复（thinking 可视化 + effort env 卫生，roadmap D4 解锁）**。根因两层：claude CLI 2.x **默认**先出 thinking 块再出正文（实测 haiku 无任何 effort env 也 thinking），而 SDK/trellis 只透传 `text_delta`、thinking 全丢——UI 对一条一等输出通道结构性失明；叠加 `CLAUDE_CODE_EFFORT_LEVEL=max` 从 occ alias 启动的 shell 穿透进 trellis 进程（SDK streamLines 用 `{...process.env, ...opts.env}` spawn），思考期拉到分钟级把症状放大成"卡死"。
   - **SDK 侧**（~/sdk，dist 已重建）：`EventType.Thinking` + ClaudeBackend 映射 `thinking_delta`→Thinking 事件；纯增量，CLIRunner switch 有 default→null，self-agent 无感。
