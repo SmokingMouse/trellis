@@ -102,6 +102,8 @@ export function toStreamEvent(e: AgentEvent, mode: Mode): StreamEvent | null {
   switch (e.type) {
     case EventType.TextChunk:
       return { type: "delta", text: String(e.data.text ?? "") };
+    case EventType.Thinking:
+      return { type: "thinking", text: String(e.data.text ?? "") };
     case EventType.ToolCall:
       return {
         type: "tool_call_start",

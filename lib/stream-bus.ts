@@ -17,6 +17,13 @@ type Listener = (delta: string) => void;
 const listeners = new Map<string, Set<Listener>>();
 const pending = new Map<string, string>();
 
+// Extended thinking rides the same bus on a namespaced channel key (thinking
+// deltas stream BEFORE any text delta; UI shows them live, drops them on
+// done). " " can't appear in a node id, so no collision with real ids.
+export function thinkingChannel(nodeId: string): string {
+  return nodeId + " thinking";
+}
+
 export function subscribeStream(nodeId: string, cb: Listener): () => void {
   let set = listeners.get(nodeId);
   if (!set) {

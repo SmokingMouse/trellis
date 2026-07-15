@@ -12,7 +12,11 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
-import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
+import {
+  subscribeStream,
+  getStreamPending,
+  thinkingChannel,
+} from "@/lib/stream-bus";
 import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -103,6 +107,32 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
     // n.response intentionally excluded from deps: it doesn't change while
     // streaming (deltas bypass the store), and re-running this effect on
     // every render would clobber the DOM-direct text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming, n.id]);
+
+  // Extended thinking indicator: claude thinks BEFORE it answers (minutes
+  // under high effort), during which streamRef stays empty and the card used
+  // to look dead. DOM-direct toggle (same no-React-render discipline as
+  // streamRef): visible while thinking deltas flow and no text has arrived.
+  const thinkingRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isStreaming) return;
+    const el = thinkingRef.current;
+    if (!el) return;
+    const sync = () => {
+      const hasText =
+        n.response.length > 0 || getStreamPending(n.id).length > 0;
+      const hasThinking = getStreamPending(thinkingChannel(n.id)).length > 0;
+      el.style.display = hasThinking && !hasText ? "flex" : "none";
+    };
+    sync();
+    const unsubThinking = subscribeStream(thinkingChannel(n.id), sync);
+    const unsubText = subscribeStream(n.id, sync);
+    return () => {
+      unsubThinking();
+      unsubText();
+    };
+    // n.response excluded for the same reason as the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, n.id]);
 
@@ -315,6 +345,14 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       >
         {isStreaming ? (
           <>
+            <div
+              ref={thinkingRef}
+              style={{ display: "none" }}
+              className="items-center gap-1.5 mb-1 text-[12px] text-stone-400 dark:text-stone-500"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              思考中…
+            </div>
             <div
               ref={streamRef}
               className="whitespace-pre-wrap break-words leading-relaxed"

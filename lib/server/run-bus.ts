@@ -56,6 +56,10 @@ export type RunContext = {
 // session_init are server-internal and never forwarded as SSE.
 export type RunEvent =
   | { type: "delta"; text: string }
+  // Extended thinking chunk (claude). Broadcast-only — never persisted to
+  // the node row; the UI shows it live during the思考期 and drops it when
+  // the turn finalizes (与 CLI 的 thinking 折叠行为一致).
+  | { type: "thinking"; text: string }
   | {
       type: "done";
       usage: {
@@ -111,6 +115,10 @@ export type CatchupEvent = {
   // so far. Client overwrites its local toolCalls list with this, then
   // applies subsequent tool_call_start / tool_call_done events on top.
   toolCalls: ToolCall[];
+  // Thinking accumulated so far this run (empty when none / already done).
+  // Lets a reconnecting client render the思考期 immediately instead of
+  // waiting for the next thinking delta. In-memory only, never in DB.
+  thinking: string;
   // A路②: if the run is currently paused on an interactive tool, the snapshot
   // carries the pending prompt so a reconnecting / late client immediately
   // renders the waiting form (without waiting for a fresh interaction_required
@@ -142,6 +150,9 @@ type RunState = {
   // updates this BEFORE going to subscribers, so a racing subscribe()
   // snapshot can't miss a tool call that's already been persisted.
   committedToolCalls: ToolCall[];
+  // Thinking accumulated this run. In-memory only (no DB column) — shipped
+  // in catchup so late subscribers see the思考期; dropped with the RunState.
+  committedThinking: string;
   // Final-state cache so late subscribers (joining after the runner
   // terminated but within the cleanup window) still get the right
   // terminal event sequence.
@@ -178,6 +189,7 @@ const CLEANUP_GRACE_MS = 30_000;
 // places; we redeclare here narrowly enough.
 export type ProviderEvent =
   | { type: "delta"; text: string }
+  | { type: "thinking"; text: string }
   | {
       type: "done";
       usage?: {
@@ -264,6 +276,7 @@ export function startRun(args: {
     status: "streaming",
     committedText: "",
     committedToolCalls: [],
+    committedThinking: "",
     pendingInteraction: null,
     subscribers: new Set(),
   };
@@ -363,6 +376,11 @@ async function runLoop(
           // best-effort; DB hiccup shouldn't kill the stream
         }
         broadcast(state, { type: "delta", text: event.text });
+      } else if (event.type === "thinking") {
+        // Commit-before-broadcast, same as delta — but memory-only, no DB
+        // write: thinking is ephemeral status, not part of the node row.
+        state.committedThinking += event.text;
+        broadcast(state, { type: "thinking", text: event.text });
       } else if (event.type === "done") {
         usage = event.usage ?? usage;
       } else if (event.type === "error") {
@@ -629,6 +647,10 @@ export function subscribe(
   const snapshot = state.committedText;
   const snapshotStatus = state.status;
   const snapshotTools = state.committedToolCalls.map((c) => ({ ...c }));
+  // Only ship thinking while still streaming — after terminal it's dropped
+  // (与 done 后 UI 丢弃 thinking 的行为一致，catchup 不该复活它).
+  const snapshotThinking =
+    state.status === "streaming" ? state.committedThinking : "";
   // A路②: copy the pending interaction (if any) into the catchup so a tab that
   // joins mid-pause renders the waiting form right away.
   const snapshotPending = state.pendingInteraction
@@ -641,6 +663,7 @@ export function subscribe(
       response: snapshot,
       status: snapshotStatus,
       toolCalls: snapshotTools,
+      thinking: snapshotThinking,
       pendingInteraction: snapshotPending,
     });
   } catch {

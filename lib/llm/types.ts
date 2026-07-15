@@ -35,6 +35,11 @@ export type TokenUsage = {
 
 export type StreamEvent =
   | { type: "delta"; text: string }
+  // Extended thinking chunk. claude 2.x emits a thinking block BEFORE the
+  // text block by default (much longer under high effort), so without this
+  // the UI is blind — nothing renders — for the entire思考期. Ephemeral:
+  // never persisted, dropped when the turn finalizes (与 CLI 行为一致).
+  | { type: "thinking"; text: string }
   | { type: "done"; usage?: TokenUsage }
   | { type: "error"; message: string }
   // project mode only: emitted once per spawn after parsing system/init.
