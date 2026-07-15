@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**主题系统 + 界面&交互整体优化（Session 56，分支 `trellis-theme` 8 commits，待用户验收）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**未 merge main、未 push。**
+
+---
 **线性视图中间节点分叉（Session 54，已提交推送）**：卡片头 ⑂ 按钮 → reply-to 式 chip 重定向底部 Composer（`streamBranch(节点, q, null)`），补上「线性页面对中间节点自由分叉提问」的缺口（此前只能划线 ⌘K）。隔离实例 mock 全链路浏览器实测 ✓。
 
 ---
@@ -135,6 +138,18 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 56 (2026-07-15)
+- **Done**: **主题系统 + 界面&交互整体优化**（worktree/分支 `trellis-theme`，基 main ce3481e，8 commits，f464c49..ac54e85）。前置：两份静态审计（视觉设计系统 + 交互流程，各出债务 Top10）+ 用户拍板（三线全做 / 主题系统 / 5 套主题 / 主按钮=accent / 代码字体系统栈）。分 8 wave 执行，决策全录 → [ADR](decisions/2026-07-15-theme-system.md)：
+  - **W1-W2 token 层**：globals.css 双层变量（:root/.dark 级联块 + `@theme inline` 注册 utility）——中性族/语义 hue（含 amber 四分、unread/fork 独立 hue）/字号 6 档/圆角 3 档/阴影 3 档；~40 处裸 hex 全变量化；hljs light 死代码删除（「代码块恒暗」据实转正）；`color-scheme` 让 dark 原生滚动条变深（有意改进）。零 diff 验证 = 浏览器 computed-style 逐字节断言 + 截图 diff（残差定位为焦点态/滚动条噪音）。
+  - **W3 主题状态**：useTheme {mode,palette}（storage 兼容零迁移）+ 预水合脚本 + ThemeMenu（外观三段 + swatch）+ `/theme` 命令；localStorage 四态矩阵实测。
+  - **W4 原语**：`components/ui/` 九件（Button/IconButton/Popover/Modal/Drawer/ToastShell/Pill/StopButton/Dots）+ 进场动画（reduced-motion 豁免）+ pilot 迁移。
+  - **W5+W5.5 全量迁移**：5 个并行 subagent 按批清完 40+ 组件（全仓调色板 class 与 text-[Npx] grep 清零）；黑按钮升 primary、节点未读 amber→emerald、NoteRow→positive、ChatNode 已读侧条改中性（撞色裁决）；`--color-X-*: initial` 闸门为永久回归护栏。ChatNode 零重渲染纪律未破（纯 class 替换）。
+  - **W6 四主题**：paper（米白+青墨）/terminal（石墨蓝黑+荧光青）/morandi（灰绿+雾蓝，状态色全降饱和）/contrast（纯黑白+AAA）；4×2 截图矩阵 ✓。级联规则：light 块设过的变量 dark 块必须重设。
+  - **W7 交互九项**：①useIsMobile→767px 与 md: 同线（修「窄窗口 sb 不归零挤右半屏」确定性 bug，390px 实测恢复）②「＋新会话（全新树）」vs「🧹 新话题」正名 ③`lib/shortcuts.ts` 注册表 + `?`/`/help` KeyboardHelp 面板 + `isEditableTarget()` 换掉 5 处重复 guard ④RunSpinner 退役统一 Dots ⑤TargetChip 归一画布/线性目标指示 ⑥移动端思维树入口换树形 icon ⑦🧠 徽章恒按钮（<50% 只读弹层）⑧Outline/移动侧栏/FAB 菜单补进场动画 ⑨移动端 SessionTabs 隐藏 + 内容 pt responsive。
+- **验证**: 每 wave tsc + `make build`（共 6 次全绿）；隔离实例（快照 DB /tmp + :3131 + agent-browser）：截图基线→零 diff 断言→5 主题矩阵→390px/桌面回归→**mock 全链路流式回归**（建会话→/model mock→发送→流式 Dots/run-bar/未读 pill→done）✓。测试产物全清（server/快照 DB/浏览器 session；截图留 /tmp/trellis-theme-shots 备查，重启自清）。
+- **坑（工具）**: agent-browser 本轮三次页面莫名跳 about:blank（eval 报错后/带 CSS 选择器的 click 后/daemon 重启丢 media 模拟状态）——重 open 恢复；截图前显式 `set media`，点击用 eval DOM 直点（S54 教训延续）。
+- **Next**: 用户真机验收（重点：手机布局、5 套主题观感、? 面板、新 accent 主按钮）；验收后 merge main + push（commit 均 --no-gpg-sign 待补签）。候选 follow-up：ThreadMinimap 移动端默认折叠（这次发现它在手机上盖内容，未在本轮范围）；terminal 主题可选装 JetBrains Mono。
+
 ### Session 55 (2026-07-15)
 - **Done**: **`/` 命令接入日常对话 Composer + 下拉键盘导航（推翻 S30「追问框刻意不接」的取舍，用户明确要求；worktree `增加工作区目录`，与 S54 撞号重编为 S55）**。共享 `Composer.tsx`（线性 sticky footer + 画布 DockedComposer）此前只接了 skill 补全，`lib/commands.ts` 的 Trellis 命令只有首屏 QuestionInput 能用。三处改动，registry/命令语义零改：
   - `SkillPickerList` 扩成命令+skill 合并下拉（可选 `commands`/`onPickCommand` props，命令在前带 ⚡ 徽章，与首屏下拉同序；ChatNode 行内追问框传参不变、向后兼容）。
