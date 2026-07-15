@@ -131,16 +131,18 @@ export function LinearThreadView() {
     tipNode && tipNode.status === "streaming" ? tipNode.id : null;
   const anchorNode = threadData.anchorId ? nodes[threadData.anchorId] : null;
 
-  // Anchor navigation → scroll the anchored card into view. Skipped while the
-  // anchor IS the streaming tip: the bottom-lock below owns the viewport then
-  // (centering a growing card would fight it every frame).
+  // Anchor navigation → scroll the anchored card into view, top-aligned so
+  // the card header (with the question) is what lands in view — centering a
+  // card taller than the viewport would drop you mid-answer. Skipped while
+  // the anchor IS the streaming tip: the bottom-lock below owns the viewport
+  // then.
   useEffect(() => {
     if (!threadData.anchorId) return;
     if (threadData.anchorId === tipStreamingId) return;
     const id = requestAnimationFrame(() => {
       roundRefs.current
         .get(threadData.anchorId!)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+        ?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -373,7 +375,7 @@ export function LinearThreadView() {
                 key={node.id}
                 ref={setRoundRef(node.id)}
                 data-thread-node-id={node.id}
-                className={`rounded-lg border bg-white dark:bg-stone-900 shadow-sm transition-colors ${
+                className={`scroll-mt-3 rounded-lg border bg-white dark:bg-stone-900 shadow-sm transition-colors ${
                   isActive
                     ? "border-indigo-300 dark:border-indigo-700 ring-2 ring-indigo-100 dark:ring-indigo-950"
                     : "border-stone-200 dark:border-stone-800"
