@@ -17,11 +17,22 @@ import type { ChatNode } from "@/lib/types";
 export function Composer({
   targetNode,
   placeholder,
+  onSubmitted,
+  onEscape,
+  focusToken,
 }: {
   // The node a submit branches from (thread tip in linear view, the active
   // node on canvas). null → composer renders disabled.
   targetNode: ChatNode | null;
   placeholder?: string;
+  // Fired right after a submit dispatches — the linear view uses it to drop
+  // its "branch from #N" retarget chip so the next turn goes to the tip.
+  onSubmitted?: () => void;
+  // Esc inside the textarea (local semantics — useEscapeAbort leaves
+  // textareas alone). Linear view: dismiss the retarget chip.
+  onEscape?: () => void;
+  // Bump to pull focus into the textarea (e.g. after arming a branch chip).
+  focusToken?: number | null;
 }) {
   const [text, setText] = useState("");
   const streamBranch = useSessionStore((s) => s.streamBranch);
@@ -49,6 +60,10 @@ export function Composer({
     }
   }, [text]);
 
+  useEffect(() => {
+    if (focusToken != null) ref.current?.focus();
+  }, [focusToken]);
+
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed || !targetNode || isStreaming || att.hasUploading) return;
@@ -59,6 +74,7 @@ export function Composer({
     // starts fresh.
     att.clear();
     streamBranch(targetNode.id, trimmed, null, { attachments });
+    onSubmitted?.();
   };
 
   if (isStreaming && targetNode) {
@@ -113,6 +129,9 @@ export function Composer({
             if (isSendCombo(e, sendKey)) {
               e.preventDefault();
               submit();
+            } else if (e.key === "Escape" && onEscape) {
+              e.preventDefault();
+              onEscape();
             }
           }}
           onPaste={att.handlePaste}

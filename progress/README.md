@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**线性视图中间节点分叉（Session 54，已提交推送）**：卡片头 ⑂ 按钮 → reply-to 式 chip 重定向底部 Composer（`streamBranch(节点, q, null)`），补上「线性页面对中间节点自由分叉提问」的缺口（此前只能划线 ⌘K）。隔离实例 mock 全链路浏览器实测 ✓。
+
+---
 **工作区文件抽屉（Session 53，已合入 main）**：workspace/project 会话点 Header ModeBadge → 右侧抽屉（移动端底部 sheet）只读浏览 session cwd 目录树，点文件走既有 FilePreview。API 围栏 + UI 全链路隔离实测 ✓；`make build` 因中文 worktree 路径触发 Turbopack panic 无法在 feature worktree 跑（见 Session 53 Verified Fact，与 Session 52 撞的是同一坑），已在 main（ASCII 路径）补跑。
 
 ---
@@ -132,6 +135,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 54 (2026-07-15)
+- **Done**: **线性视图中间节点自由分叉（reply-to 式 chip，方案 A）**。用户痛点：线性页面对中间节点岔开提新问题只能划线 ⌘K（BranchPopover 需要文本锚点，问题与原文无关时被迫造假锚点）；数据层 `streamBranch(parentId, q, null)` 本就支持自由分叉（画布 DockedComposer 在用），纯 UI 缺口。落地（仅改 2 文件，store 零改动）：
+  - `LinearThreadView.tsx`：卡片头 actions 区加 ⑂ 按钮（`branchFrom {id,n}` state，n 为 nonce 供重复点击再聚焦；tip 卡不显示——从 tip 分叉=普通续聊；streaming 卡不显示）；底部 Composer 上方渲染 indigo chip「⑂ 从 #N 分叉 · 题干」（点题干滚回该卡，✕ 清除）；armed 时 Composer targetNode = 分叉节点、placeholder 变「从 #N 分叉提问…（Esc 取消）」；session 切换 / 目标节点被删自动清 chip。
+  - `Composer.tsx`：+3 可选 prop——`onSubmitted`（提交后清 chip）、`onEscape`（textarea 内 Esc 清 chip，遵循 useEscapeAbort「textarea 内 Esc 归局部语义」约定，零冲突）、`focusToken`（arm 时拉焦点进输入框）。
+  - 提交后走既有 `focusNew=true` 语义：active 跳新支线、线性视图重锚展开新 lineage，原卡自动折出「↳ N 个分支」。
+- **验证**: tsc ✓ + `make build` ✓（main ASCII 路径）。隔离实例（快照 DB /tmp + `next start` :3112 + 临时挪开 `.env.local` 关 auth 闸后立即还原 + mock provider）浏览器实测：⑂ arm → chip/placeholder/自动聚焦 ✓；textarea 内 Esc 清 chip ✓；✕ 清 chip ✓；mock 会话 2 节点后从 #1 分叉发送 → chip 自动清除、thread 重锚为 [#1,#3]、#1 折出「↳ 1 个分支」、点分支卡切回 [#1,#2] 往返 ✓；tip/streaming 卡无 ⑂ ✓；chip 视觉截图核对 ✓。测试产物：server 已 kill、浏览器 session 已 close；/tmp 下快照 DB 等临时文件删除命令被拒（`/tmp/trellis-branchtest.db*` 等仍在，重启自清或手动删）。
+- **坑（工具）**: agent-browser ref 点击在 React 重渲染后 stale（点了没反应但报 ✓ Done），换 `eval` DOM 直点即稳——同类 UI 实测建议直接用 eval 点。
+- **Next**: 已 commit + push（免签，同 3b61a2e 待补签）；真机/手机验收；候选 follow-up：画布模式是否也要 per-node ⑂ 入口（现画布靠选中节点已覆盖，倾向不做）。
+
 ### Session 53 (2026-07-15)
 - **Done**: **收敛工作机对 CHAT 修复的四个补丁**（工作机 pull a29f9b5 后仍 0 输出，自行打了四个本地补丁；逐条评估后收敛）：
   - **#1 `--setting-sources ""` 被 runtime 吞空 argv** → 采纳但改形式：SDK 上游化为 `--setting-sources=` 等号写法（sm-toolkit `0326299`），语义不变；工作机临时用的 `=local` 不采纳（通用 SDK 会在真实 cwd 突然加载 .claude/settings.local.json，语义漂移）。本机 bun 1.3.14 实测不吞空 argv（不复现），等号形式对 runtime 差异免疫。

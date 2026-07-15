@@ -72,6 +72,12 @@ export function LinearThreadView() {
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
+  // Retargets the bottom composer at an intermediate node (reply-to style):
+  // the ⑂ button on a card arms it, submit/Esc/✕ disarm it. `n` is a nonce so
+  // re-clicking the same card re-pulls focus into the composer.
+  const [branchFrom, setBranchFrom] = useState<{ id: string; n: number } | null>(
+    null,
+  );
   const roundRefs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
   // #6: sticky-to-bottom while the tip streams. True = keep pinning the
@@ -81,6 +87,7 @@ export function LinearThreadView() {
 
   useEffect(() => {
     setOpenBranches(new Set());
+    setBranchFrom(null);
   }, [session?.id]);
 
   const threadData = useMemo(() => {
@@ -130,6 +137,12 @@ export function LinearThreadView() {
   const tipStreamingId =
     tipNode && tipNode.status === "streaming" ? tipNode.id : null;
   const anchorNode = threadData.anchorId ? nodes[threadData.anchorId] : null;
+  // Armed branch target — falls back to null (→ composer targets the tip)
+  // if the node got deleted out from under the chip.
+  const branchFromNode = branchFrom ? (nodes[branchFrom.id] ?? null) : null;
+  useEffect(() => {
+    if (branchFrom && !nodes[branchFrom.id]) setBranchFrom(null);
+  }, [branchFrom, nodes]);
 
   // Anchor navigation → scroll the anchored card into view, top-aligned so
   // the card header (with the question) is what lands in view — centering a
@@ -370,6 +383,11 @@ export function LinearThreadView() {
             const isActive = node.id === threadData.anchorId;
             const canDelete =
               session.rootNodeId !== node.id && node.status !== "streaming";
+            // Branching from the tip is just "continue" — the composer
+            // already does that, so no button there.
+            const canBranch =
+              node.status !== "streaming" && node.id !== tipNode?.id;
+            const isBranchTarget = branchFrom?.id === node.id;
             return (
               <section
                 key={node.id}
@@ -399,31 +417,68 @@ export function LinearThreadView() {
                   <span className="text-stone-500 dark:text-stone-400">
                     {node.kind === "reference" ? "Reference" : "Turn"}
                   </span>
-                  {canDelete && (
-                    <button
-                      type="button"
-                      onClick={() => confirmDelete(node.id)}
-                      className="ml-auto px-1.5 py-1 rounded-md text-stone-400 dark:text-stone-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
-                      title="删除节点（含子树）"
-                      aria-label="删除节点"
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
+                  <div className="ml-auto flex items-center gap-0.5">
+                    {canBranch && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBranchFrom((prev) => ({
+                            id: node.id,
+                            n: (prev?.n ?? 0) + 1,
+                          }))
+                        }
+                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                          isBranchTarget
+                            ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50"
+                            : "text-stone-400 dark:text-stone-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:text-indigo-600 dark:hover:text-indigo-400"
+                        }`}
+                        title="从此节点分叉提问"
+                        aria-label="从此节点分叉提问"
                       >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        <path d="M10 11v6M14 11v6" />
-                      </svg>
-                    </button>
-                  )}
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <line x1="6" y1="3" x2="6" y2="15" />
+                          <circle cx="18" cy="6" r="3" />
+                          <circle cx="6" cy="18" r="3" />
+                          <path d="M18 9a9 9 0 0 1-9 9" />
+                        </svg>
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => confirmDelete(node.id)}
+                        className="px-1.5 py-1 rounded-md text-stone-400 dark:text-stone-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                        title="删除节点（含子树）"
+                        aria-label="删除节点"
+                      >
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <path d="M10 11v6M14 11v6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="px-4 py-4">
@@ -472,9 +527,43 @@ export function LinearThreadView() {
 
       <div className="shrink-0 z-20 border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4">
+          {branchFromNode && (
+            <div className="mt-3 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/40 text-xs text-indigo-800 dark:text-indigo-200">
+              <span aria-hidden>⑂</span>
+              <button
+                type="button"
+                onClick={() =>
+                  roundRefs.current
+                    .get(branchFromNode.id)
+                    ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                }
+                className="min-w-0 flex-1 text-left truncate hover:underline"
+                title="滚动到该节点"
+              >
+                从 <span className="font-mono">#{nodeIndices[branchFromNode.id] ?? "?"}</span> 分叉 ·{" "}
+                {branchFromNode.topicLabel ?? truncate(branchFromNode.question, 60)}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBranchFrom(null)}
+                className="shrink-0 px-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900/60"
+                title="取消分叉 (Esc)"
+                aria-label="取消分叉"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <Composer
-            targetNode={tipNode}
-            placeholder={`继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`}
+            targetNode={branchFromNode ?? tipNode}
+            placeholder={
+              branchFromNode
+                ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`
+                : `继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`
+            }
+            onSubmitted={branchFromNode ? () => setBranchFrom(null) : undefined}
+            onEscape={branchFromNode ? () => setBranchFrom(null) : undefined}
+            focusToken={branchFrom?.n ?? null}
           />
         </div>
       </div>
