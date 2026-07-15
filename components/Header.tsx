@@ -76,6 +76,7 @@ export function Header() {
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const setWorkspaceFilesOpen = useSessionStore((s) => s.setWorkspaceFilesOpen);
   const provider = useSessionStore((s) => s.provider);
   const nodeCount = Object.keys(nodes).length;
   const contextWindow = contextWindowFor(provider);
@@ -324,6 +325,31 @@ export function Header() {
                   </span>
                 )}
               </>
+            )}
+            {/* Workspace-files drawer entry — only for sessions with a cwd
+                (workspace / project). A dedicated button: hiding this behind
+                the ModeBadge chip proved undiscoverable. */}
+            {session.workspacePath && (
+              <button
+                onClick={() => setWorkspaceFilesOpen(true)}
+                title="工作区文件（只读浏览）"
+                aria-label="工作区文件"
+                className="px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
             )}
             <button
               onClick={() => setNotesOpen(true)}
