@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-**GitHub issue #2-#7 六个 issue 一轮清完（Session 47，未 commit）** → 决策见 decisions.md 2026-07-14「统一阅读面」。#7 架构统一做透：NodeFullView/NodeTreeOverlay 退役、`fullScreen` 状态删除，线性 thread（共享 TurnCard + sticky Composer）成为全模式唯一阅读/对话面（关 #2/#4）；#3 画布 fixed DockedComposer；#5 首屏卡死修（busy 复位 + streamAlert toast）；#6 乐观占位节点 + 流式锁底。tsc/build ✓ + 隔离实例浏览器实测全绿；prod launchd 已重启对齐新 build。**待用户验收后 commit + close issues。**
+**GitHub issue #2-#7 六个 issue 一轮清完并已合入 main 推送（Session 47，issue 全部 closed）** → 决策见 decisions.md 2026-07-14「统一阅读面」。#7 架构统一做透：NodeFullView/NodeTreeOverlay 退役、`fullScreen` 状态删除，线性 thread（共享 TurnCard + 视口贴底 Composer）成为全模式唯一阅读/对话面（关 #2/#4）；#3 画布 fixed DockedComposer；#5 首屏卡死修（busy 复位 + streamAlert toast）；#6 乐观占位节点 + 流式锁底。tsc/build ✓ + 隔离实例浏览器实测全绿；prod launchd 已重启。两个 commit：`3b61a2e`（Session 46 锁系）+ `6d40985`（issue 清剿，Closes #2-#7），均未签名（1Password 签名授权在自动化环境不可用，与 3d86cfc 同状态，需要可 rebase 补签）。
 
 ---
 **Session 锁系 + codex 系内多模型已落地并全链路实测（Session 46，未 commit）** → 决策见 decisions.md 2026-07-14。「系」成为一等语义：新建会话自由选系，会话内 claude↔codex 互相置灰（防 resume 断链），系内切换自由；codex 扩成 `codex:<slug>` 复合 id（清单来自 `~/.codex/models_cache.json`，`-m` 透传）。真 spawn 验证 codex:gpt-5.4-mini / 原生 claude / deepseek 三路全通。**codex parity 后续两步（按 ROI）**：P0 = codex native resume（`~/.codex/sessions` rollout jsonl，需实测 CLI resume 语法）；P1 = codex 树分叉（前缀 rollout jsonl 可行性，需实测）；能力矩阵抽象随 P0 一起做。
@@ -132,7 +132,7 @@
 - **验证**：`tsc --noEmit` ✓、`make build` ✓（唯一 warning 为已知 @sm/llm NFT trace）。浏览器实测（快照 DB → `TRELLIS_DB_PATH` 隔离 `next start` :3003 + cookie 过闸 + agent-browser，真实 DB 零触碰）：① project 会话默认线性 + TurnCard 操作行全在；② chat 会话画布 + DockedComposer「回复 #26」chip + 「线性」toggle；③ chat 线性 8 卡 + minimap；④ mock 发送 + 注入 800ms fetch 延迟实锤乐观窗口（占位卡 ~849ms 内以 `optimistic-` id 存在、created 后换真 id）、流式逐帧采样全程锁底、完成后无占位残留；⑤ /api/chat 强制 500：toast「发送失败：HTTP 500」+ 占位回收 + composer 存活；⑥ 首屏同法：按钮从「提交中…」恢复、textarea 可用、输入保留、toast 显示（原 bug 三点全修）；⑦ 首屏正常路径回归（mock 新会话 → canvas）；⑧ 画布点卡 → 线性锚定；⑨ 线性选区 → BranchPopover + 摘到笔记。顺带回归 Session 46 锁系（codex 会话内 claude 系全置灰）。**prod 注意**：本轮 `make build` 替换了 `.next`，已 `launchctl kickstart -k` 重启 com.smokingmouse.trellis（3088：/login 200 + API 200）；3001 上另有 Jul 13 起的手动旧实例未动（内存里旧 build，异常可自行杀）。
 - **返工修复（同日用户反馈）**：线性视图内容不足一屏时输入框跟在内容后「悬在半空」——`sticky bottom-0` 只在内容超出滚动区时生效。改为视口绑定 flex 三段布局（`fixed inset-0 flex flex-col`：header shrink-0 / 滚动区 flex-1 / composer shrink-0 恒贴底）。实测：1 节点短会话 composer 距视口底 12px（=内边距）✓；长会话（10 卡）滚动/锚点自动滚动/锁底回归 ✓。prod 已再次 kickstart。
 - **未实测项**：移动端（pointer:coarse）默认线性只过了代码路径；线性视图长 reference 全文渲染（无折叠）体感待反馈。
-- **Next**: ① 用户验收后 commit（与 Session 46 改动同在工作树）+ close issue #2-#7；② deferred：命令面板参数补全、Stage 18-22。
+- **Next**: ① ~~commit + close~~ 已完成（`3b61a2e` + `6d40985` push，issue #2-#7 自动关闭）；② deferred：命令面板参数补全、Stage 18-22；③ 移动端线性实机体感待反馈。
 
 ### Session 46 (2026-07-14)
 - **Done**: **Session 锁系 + codex 系内多模型**（决策 → decisions.md 2026-07-14）。触发：用户定方向「codex 不能二等公民；真实需求 = 开局选系 + 系内切换，跨系中途切是伪需求」。改动 5 文件，硬约束=不破坏 claude 既有功能：
