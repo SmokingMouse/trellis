@@ -149,6 +149,7 @@
 - **★ Verified Fact：中文路径 worktree 会炸 Turbopack**（与 Session 52 独立撞上同一坑，互证）。ident 截断按字节切、落在多字节字符中间直接 Rust panic（`start byte index N is not a char boundary`，turbopack-core/ident.rs）。`make build` 在中文 worktree 必炸；**dev 模式按 route ident 字节长度选择性炸**——存量 route 都能跑，本 feature 新 route 恰好中招（500）。worktree 目录一律用 ASCII 名（分支名不受影响，炸点只在目录路径）。
 - **边界**：`.env` 等 dotfile 只是不列出，`/api/files` 预览围栏本就放行整个 cwd（现状未收紧，与行内路径可开任意 cwd 文件一致）；chat 无 badge 入口（代码路径未浏览器验，条件分支 trivial）；子目录展开状态在刷新后不保留（v1 取舍）。
 - **收尾追记（同 session）**：feature commit `3a64f4b` → merge main `ace43e3`（progress 双 S51 撞号，本条重编为 S53；sessionStore 与 S52 thinking 改动自动合并，tsc ✓）→ main `make build` ✓（`/api/sessions/[id]/files` 注册）→ prod kickstart（/login 200、API 401 闸正常）。两个中文 worktree 已 `git worktree move` 到 ASCII：`trellis-fix-chat-mode`（原 修复-CHAT-模式问题，移时干净）/ `trellis-workspace-files`（原 增加工作区目录；旧路径留了同名 symlink 保当时会话存活，**确认没有旧会话锚着后可删**）。均未 push。
+- **返工（同日用户反馈「没看到这功能」）**：入口藏在 ModeBadge（状态徽章暗藏可点、视觉零变化）不可发现——连用户都找不到即判不及格。改为 **Header 独立 📁 按钮**（仅有 workspacePath 的会话显示，与笔记按钮同级），ModeBadge 回退纯展示。fix `c9f5682` 已 merge main；隔离实例实测：workspace 会话按钮显示+抽屉正常、chat 会话无按钮。**未重启 prod**——当时另一并行 session 正在 main 工作区活跃开发（Composer/LinearThreadView 有未提交 WIP + 刚重建的 .next，20:41 的 build 已含本 fix），避免替其上线未验证代码；其下次 kickstart 自动带上。
 - **Next**: 用户真机验收（尤其手机远程取件场景）；push 由用户定。
 
 ### Session 52 (2026-07-15)
