@@ -139,7 +139,8 @@
 - **验证**（临时 ASCII worktree + 隔离 dev :3095 + 临时 DB + mock provider，产物已全清）：curl——根/子目录列表正确（dotfile/node_modules/symlink 均不出现，/tmp→/private/tmp realpath 归一）；围栏 `/etc`、symlink 逃逸（`ln -s /etc`）、前缀同胞目录（`ws-testXX`）全 403、相对路径 400、无 workspace session 404；`/api/files` 预览联动 200。agent-browser——badge 点开抽屉、展开子目录、点 report.md 开 FilePreview（markdown 渲染）、**Esc 分层**（第一下关预览第二下关抽屉，FilePreview capture-phase stopPropagation 生效）、390px 视口底部 sheet 正常。`tsc --noEmit` ✓。
 - **★ Verified Fact：中文路径 worktree 会炸 Turbopack**（与 Session 52 独立撞上同一坑，互证）。ident 截断按字节切、落在多字节字符中间直接 Rust panic（`start byte index N is not a char boundary`，turbopack-core/ident.rs）。`make build` 在中文 worktree 必炸；**dev 模式按 route ident 字节长度选择性炸**——存量 route 都能跑，本 feature 新 route 恰好中招（500）。worktree 目录一律用 ASCII 名（分支名不受影响，炸点只在目录路径）。
 - **边界**：`.env` 等 dotfile 只是不列出，`/api/files` 预览围栏本就放行整个 cwd（现状未收紧，与行内路径可开任意 cwd 文件一致）；chat 无 badge 入口（代码路径未浏览器验，条件分支 trivial）；子目录展开状态在刷新后不保留（v1 取舍）。
-- **Next**: 用户真机验收（尤其手机远程取件场景）。合并/build/prod/worktree 挪移状态见本条 merge 后追记。
+- **收尾追记（同 session）**：feature commit `3a64f4b` → merge main `ace43e3`（progress 双 S51 撞号，本条重编为 S53；sessionStore 与 S52 thinking 改动自动合并，tsc ✓）→ main `make build` ✓（`/api/sessions/[id]/files` 注册）→ prod kickstart（/login 200、API 401 闸正常）。两个中文 worktree 已 `git worktree move` 到 ASCII：`trellis-fix-chat-mode`（原 修复-CHAT-模式问题，移时干净）/ `trellis-workspace-files`（原 增加工作区目录；旧路径留了同名 symlink 保当时会话存活，**确认没有旧会话锚着后可删**）。均未 push。
+- **Next**: 用户真机验收（尤其手机远程取件场景）；push 由用户定。
 
 ### Session 52 (2026-07-15)
 - **Done**: **CHAT 模式"假死"修复（thinking 可视化 + effort env 卫生，roadmap D4 解锁）**。根因两层：claude CLI 2.x **默认**先出 thinking 块再出正文（实测 haiku 无任何 effort env 也 thinking），而 SDK/trellis 只透传 `text_delta`、thinking 全丢——UI 对一条一等输出通道结构性失明；叠加 `CLAUDE_CODE_EFFORT_LEVEL=max` 从 occ alias 启动的 shell 穿透进 trellis 进程（SDK streamLines 用 `{...process.env, ...opts.env}` spawn），思考期拉到分钟级把症状放大成"卡死"。
