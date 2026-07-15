@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { Button } from "@/components/ui/Button";
 
 // "Zone" — a full-screen, distraction-free Markdown writing surface for
 // composing long-form input (esp. Feynman-mode explanations). Reusable:
@@ -159,14 +160,14 @@ export function ZoneEditor({
   // `position: fixed` resolve against IT, not the viewport — which clipped
   // Zone to a thin strip. The portal escapes that containing block.
   return createPortal(
-    <div className="fixed inset-0 z-[60] bg-stone-100 dark:bg-stone-950 flex flex-col">
+    <div className="fixed inset-0 z-50 bg-surface-canvas flex flex-col">
       {/* Top bar: title · edit/preview toggle · exit */}
-      <div className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-stone-200 dark:border-stone-800 bg-white/80 dark:bg-stone-900/80 backdrop-blur">
-        <div className="flex items-center gap-2 text-sm text-stone-500 dark:text-stone-400 min-w-0">
+      <div className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-line bg-surface/80 backdrop-blur">
+        <div className="flex items-center gap-2 text-sm text-ink-muted min-w-0">
           <span aria-hidden>⛶</span>
           <span className="truncate">{title}</span>
         </div>
-        <div className="inline-flex rounded-full border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 p-0.5 text-[13px]">
+        <div className="inline-flex rounded-full border border-line bg-surface-muted p-0.5 text-ui">
           {(["edit", "preview"] as const).map((m) => (
             <button
               key={m}
@@ -174,8 +175,8 @@ export function ZoneEditor({
               onClick={() => setMode(m)}
               className={`px-3 py-1 rounded-full transition-colors ${
                 mode === m
-                  ? "bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-sm"
-                  : "text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200"
+                  ? "bg-surface text-ink-strong shadow-raise"
+                  : "text-ink-muted hover:text-ink-strong"
               }`}
             >
               {m === "edit" ? "编辑" : "预览"}
@@ -186,7 +187,7 @@ export function ZoneEditor({
           type="button"
           onClick={onClose}
           title="退出专注模式 (Esc)"
-          className="text-sm text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800"
+          className="text-sm text-ink-muted hover:text-ink-strong px-2 py-1 rounded hover:bg-surface-muted"
         >
           退出 <span className="opacity-60">Esc</span>
         </button>
@@ -194,7 +195,7 @@ export function ZoneEditor({
 
       {/* Toolbar — edit mode only */}
       {mode === "edit" && (
-        <div className="flex items-center gap-1 px-4 sm:px-6 h-11 border-b border-stone-100 dark:border-stone-800/60 bg-white/40 dark:bg-stone-900/40">
+        <div className="flex items-center gap-1 px-4 sm:px-6 h-11 border-b border-line-faint bg-surface/40">
           <div className="max-w-3xl w-full mx-auto flex items-center gap-1">
             {TOOLBAR.map((t) => (
               <button
@@ -204,7 +205,7 @@ export function ZoneEditor({
                 // Keep the textarea selection intact when the button is pressed.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => runAction(t.action)}
-                className="min-w-8 h-8 px-2 rounded-md text-[13px] text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors font-mono"
+                className="min-w-8 h-8 px-2 rounded-md text-ui text-ink-muted hover:bg-surface-muted transition-colors font-mono"
               >
                 {t.label}
               </button>
@@ -223,10 +224,10 @@ export function ZoneEditor({
               onChange={(e) => onChange(e.target.value)}
               onKeyDown={onEditorKey}
               placeholder={placeholder}
-              className="w-full min-h-[60vh] outline-none resize-none bg-transparent text-[16px] leading-[1.8] text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+              className="w-full min-h-[60vh] outline-none resize-none bg-transparent text-reading leading-[1.8] text-ink-strong placeholder:text-ink-faint"
             />
           ) : value.trim() ? (
-            <div className="md-body text-[16px] leading-[1.8]">
+            <div className="md-body text-reading leading-[1.8]">
               <ReactMarkdown
                 remarkPlugins={REMARK_PLUGINS}
                 rehypePlugins={REHYPE_FULL}
@@ -236,7 +237,7 @@ export function ZoneEditor({
               </ReactMarkdown>
             </div>
           ) : (
-            <div className="text-stone-400 dark:text-stone-500 text-sm">
+            <div className="text-ink-faint text-sm">
               还没有内容——切到「编辑」开始写。
             </div>
           )}
@@ -244,18 +245,18 @@ export function ZoneEditor({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-stone-200 dark:border-stone-800 bg-white/80 dark:bg-stone-900/80 backdrop-blur px-4 sm:px-6 h-14 flex items-center justify-between">
-        <div className="text-xs text-stone-400 dark:text-stone-500">
+      <div className="border-t border-line bg-surface/80 backdrop-blur px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="text-xs text-ink-faint">
           ⌘↩ 发送 · Esc 退出 · 支持 Markdown
         </div>
-        <button
+        <Button
           type="button"
+          variant="primary"
           onClick={onSubmit}
           disabled={submitDisabled}
-          className="bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-sm px-5 py-1.5 rounded-md hover:bg-stone-800 dark:hover:bg-stone-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {submitLabel}
-        </button>
+        </Button>
       </div>
     </div>,
     document.body,

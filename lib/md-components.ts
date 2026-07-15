@@ -45,7 +45,7 @@ export const MD_COMPONENTS: Components = {
           openFilePreview(abs);
         },
         className:
-          "nodrag px-1 py-0.5 mx-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-[0.9em] font-mono text-indigo-600 dark:text-indigo-300 underline decoration-dotted decoration-indigo-300 dark:decoration-indigo-700 underline-offset-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer align-baseline",
+          "nodrag px-1 py-0.5 mx-0.5 rounded bg-accent-muted text-[0.9em] font-mono text-accent-ink underline decoration-dotted decoration-accent-line underline-offset-2 hover:bg-accent-line/40 cursor-pointer align-baseline",
       },
       children,
     );

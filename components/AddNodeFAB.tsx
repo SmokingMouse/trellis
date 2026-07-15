@@ -42,7 +42,7 @@ export function AddNodeFAB() {
       {/* bottom-24 clears the docked composer bar (#3) at the viewport foot. */}
       <div ref={wrapRef} className="fixed bottom-24 right-3 z-30">
         {menuOpen && (
-          <div className="absolute bottom-14 right-0 w-56 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-lg shadow-xl py-1 text-sm">
+          <div className="absolute bottom-14 right-0 w-56 bg-surface-raised border border-line rounded-lg shadow-pop py-1 text-sm">
             <MenuItem
               onClick={() => open("question")}
               icon="🧹"
@@ -59,7 +59,7 @@ export function AddNodeFAB() {
         )}
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="h-12 px-4 rounded-full bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 shadow-lg hover:bg-stone-800 dark:hover:bg-stone-300 active:scale-95 transition-transform flex items-center gap-2 text-sm"
+          className="h-12 px-4 rounded-full bg-accent text-ink-inverse shadow-pop hover:bg-accent-strong active:scale-95 transition-transform flex items-center gap-2 text-sm"
           title="新建节点"
           aria-label="新建节点"
           aria-expanded={menuOpen}
@@ -104,14 +104,14 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-stone-50 dark:hover:bg-stone-800/60 text-left"
+      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-surface-muted text-left"
     >
       <span aria-hidden className="text-base leading-none">
         {icon}
       </span>
       <span className="flex-1">
-        <span className="block text-stone-900 dark:text-stone-100">{title}</span>
-        <span className="block text-[11px] text-stone-500 dark:text-stone-400">
+        <span className="block text-ink-strong">{title}</span>
+        <span className="block text-label text-ink-muted">
           {hint}
         </span>
       </span>

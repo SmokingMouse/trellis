@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal } from "@/components/ui/Modal";
+import { IconButton } from "@/components/ui/IconButton";
 
 // CLI 同步 Stage 3：attach picker。浏览本机 Claude Code CLI 会话，勾选 attach 进 trellis。
 // 两个视图：「最近活跃」（跨项目按最后活动时间扁平排，常用的浮顶）+「按项目」（目录分组懒加载）。
@@ -102,13 +104,7 @@ export function CliAttachPicker({
     if (tab === "projects") void loadProjects();
   }, [tab, loadProjects]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Esc 无条件关闭（含搜索框聚焦时）由 Modal 的 closeOnEsc="always" 提供。
 
   const expandDir = useCallback(
     async (dir: string) => {
@@ -210,32 +206,32 @@ export function CliAttachPicker({
     dir: string | null;
     showCwd: boolean;
   }) => (
-    <div className="group flex items-center gap-2 pr-3 h-8 hover:bg-stone-50 dark:hover:bg-stone-800/60">
+    <div className="group flex items-center gap-2 pr-3 h-8 hover:bg-surface-muted">
       <div className="flex-1 min-w-0">
         <div
-          className="truncate text-[12px] text-stone-600 dark:text-stone-300"
+          className="truncate text-ui text-ink-muted"
           title={s.title}
         >
           {s.title}
         </div>
         {showCwd && s.cwd && (
-          <div className="truncate text-[9.5px] text-stone-400" title={s.cwd}>
+          <div className="truncate text-nano text-ink-faint" title={s.cwd}>
             {shortCwd(s.cwd)}
           </div>
         )}
       </div>
-      <span className="shrink-0 text-[10px] tabular-nums text-stone-400">
+      <span className="shrink-0 text-nano tabular-nums text-ink-faint">
         {s.turns}轮 · {fmtDate(s.updatedAt)}
       </span>
       {s.attached ? (
-        <span className="shrink-0 text-[10.5px] text-emerald-600 dark:text-emerald-400 px-1.5">
+        <span className="shrink-0 text-nano text-positive px-1.5">
           ✓ 已 attach
         </span>
       ) : (
         <button
           onClick={() => attach(s.jsonlPath, dir)}
           disabled={busy === s.jsonlPath}
-          className="shrink-0 text-[11px] px-2 py-0.5 rounded bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:bg-stone-700 dark:hover:bg-stone-300 disabled:opacity-50"
+          className="shrink-0 text-label px-2 py-0.5 rounded bg-accent hover:bg-accent-strong text-ink-inverse disabled:opacity-50"
         >
           {busy === s.jsonlPath ? "…" : "attach"}
         </button>
@@ -244,36 +240,23 @@ export function CliAttachPicker({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[8vh] px-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-xl max-h-[80vh] flex flex-col rounded-xl bg-white dark:bg-stone-900 shadow-2xl ring-1 ring-stone-200 dark:ring-stone-700 overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal onClose={onClose} closeOnEsc="always" panelClassName="flex flex-col max-h-[80vh]">
         {/* header */}
-        <div className="shrink-0 px-4 py-3 border-b border-stone-100 dark:border-stone-800 flex items-center gap-2">
-          <span className="text-[13px] font-semibold text-stone-800 dark:text-stone-100">
+        <div className="shrink-0 px-4 py-3 border-b border-line-faint flex items-center gap-2">
+          <span className="text-ui font-semibold text-ink-strong">
             ⇄ Attach 本机 CLI 会话
           </span>
-          <span className="text-[11px] text-stone-400 dark:text-stone-500">
+          <span className="text-label text-ink-faint">
             双向同步
           </span>
-          <button
-            onClick={onClose}
-            className="ml-auto shrink-0 w-6 h-6 flex items-center justify-center rounded text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
-            aria-label="关闭"
-          >
+          <IconButton label="关闭" size="sm" className="ml-auto" onClick={onClose}>
             ✕
-          </button>
+          </IconButton>
         </div>
 
         {/* tabs + search */}
-        <div className="shrink-0 px-3 py-2 border-b border-stone-100 dark:border-stone-800 flex items-center gap-2">
-          <div className="flex rounded-md bg-stone-100 dark:bg-stone-800 p-0.5 text-[11.5px]">
+        <div className="shrink-0 px-3 py-2 border-b border-line-faint flex items-center gap-2">
+          <div className="flex rounded-md bg-surface-muted p-0.5 text-label">
             {(
               [
                 ["recent", "最近活跃"],
@@ -285,8 +268,8 @@ export function CliAttachPicker({
                 onClick={() => setTab(k)}
                 className={`px-2.5 py-1 rounded ${
                   tab === k
-                    ? "bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-100 shadow-sm"
-                    : "text-stone-500 dark:text-stone-400"
+                    ? "bg-surface text-ink-strong shadow-raise"
+                    : "text-ink-muted"
                 }`}
               >
                 {label}
@@ -297,25 +280,25 @@ export function CliAttachPicker({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索标题 / 项目路径…"
-            className="flex-1 min-w-0 h-7 px-2 rounded-md bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-[12px] text-stone-700 dark:text-stone-200 placeholder:text-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-300 dark:focus:ring-stone-600"
+            className="flex-1 min-w-0 h-7 px-2 rounded-md bg-surface-muted border border-line text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-1 focus:ring-line-strong"
           />
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {/* 已 attach */}
           {attached.length > 0 && (
-            <div className="px-3 py-2 border-b border-stone-100 dark:border-stone-800">
-              <div className="px-1 pb-1 text-[10.5px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+            <div className="px-3 py-2 border-b border-line-faint">
+              <div className="px-1 pb-1 text-nano font-medium uppercase tracking-wide text-positive">
                 已 attach ({attached.length})
               </div>
               {attached.map((a) => (
                 <div
                   key={a.id}
-                  className="group flex items-center gap-2 px-2 h-7 rounded-md hover:bg-stone-50 dark:hover:bg-stone-800/60"
+                  className="group flex items-center gap-2 px-2 h-7 rounded-md hover:bg-surface-muted"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0" />
                   <span
-                    className="flex-1 min-w-0 truncate text-[12px] text-stone-700 dark:text-stone-200"
+                    className="flex-1 min-w-0 truncate text-ui text-ink"
                     title={a.sourceJsonlPath ?? a.title}
                   >
                     {a.title}
@@ -323,7 +306,7 @@ export function CliAttachPicker({
                   <button
                     onClick={() => detach(a.id)}
                     disabled={busy === a.id}
-                    className="shrink-0 text-[11px] px-1.5 py-0.5 rounded text-stone-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+                    className="shrink-0 text-label px-1.5 py-0.5 rounded text-ink-muted hover:text-danger hover:bg-danger-muted disabled:opacity-50"
                   >
                     {busy === a.id ? "…" : "detach"}
                   </button>
@@ -335,11 +318,11 @@ export function CliAttachPicker({
           {/* 最近活跃 */}
           {tab === "recent" &&
             (recentFiltered === null ? (
-              <div className="px-4 py-6 text-center text-[12px] text-stone-400">
+              <div className="px-4 py-6 text-center text-ui text-ink-faint">
                 加载中…
               </div>
             ) : recentFiltered.length === 0 ? (
-              <div className="px-4 py-6 text-center text-[12px] text-stone-400">
+              <div className="px-4 py-6 text-center text-ui text-ink-faint">
                 {query ? "无匹配" : "没有可 attach 的 CLI 会话"}
               </div>
             ) : (
@@ -358,11 +341,11 @@ export function CliAttachPicker({
           {/* 按项目 */}
           {tab === "projects" &&
             (projectsFiltered === null ? (
-              <div className="px-4 py-6 text-center text-[12px] text-stone-400">
+              <div className="px-4 py-6 text-center text-ui text-ink-faint">
                 加载中…
               </div>
             ) : projectsFiltered.length === 0 ? (
-              <div className="px-4 py-6 text-center text-[12px] text-stone-400">
+              <div className="px-4 py-6 text-center text-ui text-ink-faint">
                 {query ? "无匹配" : "没有可 attach 的 CLI 会话"}
               </div>
             ) : (
@@ -371,29 +354,29 @@ export function CliAttachPicker({
                   <div key={p.dir}>
                     <button
                       onClick={() => expandDir(p.dir)}
-                      className="w-full flex items-center gap-2 px-3 h-8 hover:bg-stone-50 dark:hover:bg-stone-800/60 text-left"
+                      className="w-full flex items-center gap-2 px-3 h-8 hover:bg-surface-muted text-left"
                     >
-                      <span className="text-[9px] text-stone-400 w-2 shrink-0">
+                      <span className="text-nano text-ink-faint w-2 shrink-0">
                         {openDir === p.dir ? "▾" : "▸"}
                       </span>
                       <span
-                        className="flex-1 min-w-0 truncate text-[12px] text-stone-700 dark:text-stone-200"
+                        className="flex-1 min-w-0 truncate text-ui text-ink"
                         title={p.cwd ?? p.dir}
                       >
                         {shortCwd(p.cwd) || p.dir}
                       </span>
-                      <span className="shrink-0 text-[10.5px] tabular-nums text-stone-400">
+                      <span className="shrink-0 text-nano tabular-nums text-ink-faint">
                         {p.sessionCount}
                       </span>
                     </button>
                     {openDir === p.dir && (
                       <div className="pb-1 pl-6">
                         {!dirSessions[p.dir] ? (
-                          <div className="px-3 py-2 text-[11px] text-stone-400 italic">
+                          <div className="px-3 py-2 text-label text-ink-faint italic">
                             加载中…
                           </div>
                         ) : dirSessions[p.dir].length === 0 ? (
-                          <div className="px-3 py-2 text-[11px] text-stone-400 italic">
+                          <div className="px-3 py-2 text-label text-ink-faint italic">
                             无
                           </div>
                         ) : (
@@ -414,10 +397,9 @@ export function CliAttachPicker({
             ))}
         </div>
 
-        <div className="shrink-0 px-4 py-2 border-t border-stone-100 dark:border-stone-800 text-[10.5px] text-stone-400 dark:text-stone-500">
+        <div className="shrink-0 px-4 py-2 border-t border-line-faint text-nano text-ink-faint">
           提示：同一会话别在 CLI 和 trellis 里同时聊（两边抢写同一文件）。串行使用无碍。
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

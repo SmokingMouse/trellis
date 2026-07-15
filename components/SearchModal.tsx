@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { Modal } from "@/components/ui/Modal";
+import { modeStyle } from "@/lib/mode-style";
 
 // Stage 16: cross-session full-text search modal. ⌘P (Cmd/Ctrl+P) opens
 // it from anywhere; the global keydown listener is owned by this
@@ -186,16 +188,15 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     !loading && debounced.length > 0 && filtered.length === 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-stone-900/40 dark:bg-black/60 flex items-start justify-center pt-[10vh] px-4"
-      onClick={onClose}
+    // closeOnEsc={false}：Esc 由输入框的 onInputKey 自管（避免与键盘导航双触发）。
+    <Modal
+      onClose={onClose}
+      size="lg"
+      closeOnEsc={false}
+      panelClassName="flex flex-col max-h-[80vh]"
     >
-      <div
-        className="w-full max-w-2xl bg-white dark:bg-stone-900 rounded-xl shadow-2xl overflow-hidden border border-transparent dark:border-stone-800 flex flex-col max-h-[80vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
         {/* Input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-100 dark:border-stone-800">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-line-faint">
           <svg
             width="16"
             height="16"
@@ -205,7 +206,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="text-stone-400 dark:text-stone-500 shrink-0"
+            className="text-ink-faint shrink-0"
             aria-hidden
           >
             <circle cx="11" cy="11" r="7" />
@@ -217,15 +218,15 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
             placeholder="搜索所有对话、笔记、参考材料…"
-            className="flex-1 bg-transparent outline-none text-[14px] text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+            className="flex-1 bg-transparent outline-none text-body text-ink-strong placeholder:text-ink-faint"
           />
-          <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-stone-500 dark:text-stone-400 shrink-0">
+          <kbd className="text-nano px-1.5 py-0.5 rounded bg-surface-muted text-ink-muted shrink-0">
             Esc
           </kbd>
         </div>
 
         {/* Facet chips */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-stone-100 dark:border-stone-800 text-[12px]">
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-line-faint text-ui">
           {(["all", "chat", "workspace", "project"] as FacetKey[]).map(
             (f) => (
               <button
@@ -233,8 +234,8 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
                 onClick={() => setFacet(f)}
                 className={`px-2 py-0.5 rounded-full transition-colors ${
                   facet === f
-                    ? "bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900"
-                    : "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                    ? "bg-accent text-ink-inverse"
+                    : "text-ink-muted hover:bg-surface-muted"
                 }`}
               >
                 {facetLabel(f)}
@@ -243,7 +244,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           )}
           <div className="flex-1" />
           {loading && (
-            <span className="text-[11px] text-stone-400 dark:text-stone-500 italic">
+            <span className="text-label text-ink-faint italic">
               搜索中…
             </span>
           )}
@@ -255,32 +256,32 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           className="flex-1 overflow-y-auto"
         >
           {tooShort && (
-            <div className="px-4 py-6 text-[12px] text-stone-400 dark:text-stone-500 italic">
+            <div className="px-4 py-6 text-ui text-ink-faint italic">
               至少输入 {MIN_QUERY} 个字符（trigram 分词器限制）
             </div>
           )}
           {!tooShort && !debounced && (
-            <div className="px-4 py-6 text-[12px] text-stone-400 dark:text-stone-500 italic">
+            <div className="px-4 py-6 text-ui text-ink-faint italic">
               输入关键词搜索所有 session、笔记、参考材料。⌘P 打开 / 关闭。
             </div>
           )}
           {empty && (
-            <div className="px-4 py-6 text-[12px] text-stone-400 dark:text-stone-500 italic">
+            <div className="px-4 py-6 text-ui text-ink-faint italic">
               没有结果
             </div>
           )}
           {filtered.map((r, ri) => (
             <div
               key={r.sessionId}
-              className="border-b border-stone-100 dark:border-stone-800 last:border-b-0"
+              className="border-b border-line-faint last:border-b-0"
             >
-              <div className="px-4 pt-2.5 pb-1.5 flex items-center gap-2 text-[11px]">
-                <span className="text-stone-700 dark:text-stone-200 font-medium truncate">
+              <div className="px-4 pt-2.5 pb-1.5 flex items-center gap-2 text-label">
+                <span className="text-ink font-medium truncate">
                   {r.sessionTitle}
                 </span>
                 <ModeChip mode={r.sessionMode} />
                 {r.sessionWorkspacePath && (
-                  <span className="text-stone-400 dark:text-stone-500 truncate">
+                  <span className="text-ink-faint truncate">
                     {basename(r.sessionWorkspacePath)}
                   </span>
                 )}
@@ -298,15 +299,15 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
                     onClick={() => onJump(r, h)}
                     className={`w-full text-left px-4 py-2 flex items-start gap-2 transition-colors ${
                       active
-                        ? "bg-indigo-50/70 dark:bg-indigo-950/40"
-                        : "hover:bg-stone-50 dark:hover:bg-stone-800/60"
+                        ? "bg-accent-muted/70"
+                        : "hover:bg-surface-muted"
                     }`}
                   >
                     <span className="shrink-0 mt-0.5">
                       {hitIcon(h.sourceKind)}
                     </span>
                     <span
-                      className="text-[12.5px] text-stone-700 dark:text-stone-300 leading-relaxed line-clamp-2"
+                      className="text-ui text-ink-muted leading-relaxed line-clamp-2"
                       // FTS5 already escapes content; <mark> tags are
                       // the only HTML we injected. Trusted.
                       dangerouslySetInnerHTML={{ __html: h.snippet }}
@@ -319,25 +320,20 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Footer hints */}
-        <div className="px-4 py-2 border-t border-stone-100 dark:border-stone-800 text-[11px] text-stone-400 dark:text-stone-500 flex items-center gap-3">
+        <div className="px-4 py-2 border-t border-line-faint text-label text-ink-faint flex items-center gap-3">
           <span>↑↓ 选择</span>
           <span>⏎ 跳转</span>
           <span>Esc 关闭</span>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
 function ModeChip({ mode }: { mode: string }) {
-  const cls =
-    mode === "project"
-      ? "bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300"
-      : mode === "workspace"
-        ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300"
-        : "bg-stone-200 dark:bg-stone-800 text-stone-600 dark:text-stone-300";
+  // 复用 lib/mode-style 的模式配色（badge 含 border-*，故补 border class）。
+  const st = modeStyle(mode);
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[9.5px] uppercase ${cls}`}>
+    <span className={`px-1.5 py-0.5 rounded border text-nano uppercase ${st.badge}`}>
       {mode}
     </span>
   );
@@ -346,13 +342,14 @@ function ModeChip({ mode }: { mode: string }) {
 function hitIcon(kind: Hit["sourceKind"]): React.ReactNode {
   switch (kind) {
     case "node_question":
-      return <span className="text-indigo-500 dark:text-indigo-400">💬</span>;
+      return <span className="text-accent">💬</span>;
     case "node_response":
-      return <span className="text-emerald-500 dark:text-emerald-400">💭</span>;
+      return <span className="text-positive">💭</span>;
     case "node_reference":
-      return <span className="text-amber-500 dark:text-amber-400">📄</span>;
+      return <span className="text-warn">📄</span>;
     case "note":
-      return <span className="text-fuchsia-500 dark:text-fuchsia-400">📝</span>;
+      // 笔记 UI 归一 positive（与正文 emerald note mark 一致）
+      return <span className="text-positive">📝</span>;
   }
 }
 

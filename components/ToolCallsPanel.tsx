@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Pill } from "./ui/Pill";
 import type { ToolCall } from "@/lib/types";
 
 // Stage 17: collapsed visualization of every tool the model invoked
@@ -21,43 +22,43 @@ export function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
   const errorCount = toolCalls.filter((c) => c.status === "error").length;
 
   return (
-    <div className="mb-3 border border-stone-200 dark:border-stone-800 rounded-lg overflow-hidden bg-stone-50/60 dark:bg-stone-900/40">
+    <div className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full px-3 py-2 flex items-center gap-2 text-[12px] hover:bg-stone-100/80 dark:hover:bg-stone-800/60 transition-colors"
+        className="w-full px-3 py-2 flex items-center gap-2 text-ui hover:bg-surface-muted transition-colors"
       >
         <span
-          className="text-stone-400 dark:text-stone-500 transition-transform"
+          className="text-ink-faint transition-transform"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
           ▸
         </span>
-        <span className="font-medium text-stone-700 dark:text-stone-200">
+        <span className="font-medium text-ink">
           🔧 工具调用
         </span>
-        <span className="text-stone-500 dark:text-stone-400 tabular-nums">
+        <span className="text-ink-muted tabular-nums">
           {toolCalls.length}
         </span>
         {runningCount > 0 && (
-          <span className="text-amber-600 dark:text-amber-400">
+          <span className="text-warn-ink">
             · {runningCount} 进行中
           </span>
         )}
         {errorCount > 0 && (
-          <span className="text-rose-600 dark:text-rose-400">
+          <span className="text-danger-ink">
             · {errorCount} 失败
           </span>
         )}
         <span className="flex-1" />
-        <span className="text-[10px] text-stone-400 dark:text-stone-500 hidden sm:inline">
+        <span className="text-nano text-ink-faint hidden sm:inline">
           {open ? "收起" : "展开"}
         </span>
       </button>
 
       {open && (
-        <div className="border-t border-stone-200 dark:border-stone-800 divide-y divide-stone-200/70 dark:divide-stone-800/60">
+        <div className="border-t border-line divide-y divide-line/70">
           {toolCalls.map((tc) => (
             <ToolCallRow key={tc.id} call={tc} />
           ))}
@@ -71,29 +72,29 @@ function ToolCallRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(false);
   const summary = oneLineSummary(call);
   return (
-    <div className="bg-white/60 dark:bg-stone-950/40">
+    <div className="bg-surface/60">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full px-3 py-2 flex items-center gap-2 text-[12px] text-left hover:bg-stone-100/60 dark:hover:bg-stone-800/40 transition-colors"
+        className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted/60 transition-colors"
       >
         <span
-          className="text-stone-400 dark:text-stone-500 transition-transform shrink-0"
+          className="text-ink-faint transition-transform shrink-0"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
           ▸
         </span>
         <StatusPill status={call.status} />
-        <span className="font-mono text-stone-800 dark:text-stone-200 shrink-0">
+        <span className="font-mono text-ink shrink-0">
           {call.name}
         </span>
-        <span className="text-stone-500 dark:text-stone-400 truncate">
+        <span className="text-ink-muted truncate">
           {summary}
         </span>
         <span className="flex-1" />
         {call.durationMs !== null && (
-          <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500 shrink-0">
+          <span className="text-nano tabular-nums text-ink-faint shrink-0">
             {formatDuration(call.durationMs)}
           </span>
         )}
@@ -101,7 +102,7 @@ function ToolCallRow({ call }: { call: ToolCall }) {
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-2">
           <Section label="输入">
-            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 rounded px-2 py-1.5 max-h-72 overflow-auto">
+            <pre className="text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-72 overflow-auto">
               {formatInput(call.input)}
             </pre>
           </Section>
@@ -112,7 +113,7 @@ function ToolCallRow({ call }: { call: ToolCall }) {
           )}
           {call.stderr && (
             <Section label="stderr">
-              <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded px-2 py-1.5 max-h-48 overflow-auto text-rose-900 dark:text-rose-200">
+              <pre className="text-label font-mono whitespace-pre-wrap break-words bg-danger-muted border border-danger-line rounded px-2 py-1.5 max-h-48 overflow-auto text-danger-ink">
                 {call.stderr}
               </pre>
             </Section>
@@ -132,7 +133,7 @@ function Section({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-0.5">
+      <div className="text-nano uppercase tracking-wider text-ink-faint mb-0.5">
         {label}
       </div>
       {children}
@@ -143,22 +144,22 @@ function Section({
 function StatusPill({ status }: { status: ToolCall["status"] }) {
   if (status === "running") {
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 shrink-0">
+      <Pill tone="warn" className="shrink-0">
         运行中
-      </span>
+      </Pill>
     );
   }
   if (status === "error") {
     return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 shrink-0">
+      <Pill tone="danger" className="shrink-0">
         失败
-      </span>
+      </Pill>
     );
   }
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shrink-0">
+    <Pill tone="positive" className="shrink-0">
       完成
-    </span>
+    </Pill>
   );
 }
 
@@ -171,10 +172,10 @@ function OutputView({ text }: { text: string }) {
   const shown = expanded || !tooLong ? text : lines.slice(0, MAX_OUTPUT_LINES).join("\n");
   return (
     <div>
-      <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 rounded px-2 py-1.5 max-h-96 overflow-auto">
+      <pre className="text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-96 overflow-auto">
         {shown}
         {tooLong && !expanded && (
-          <span className="text-stone-400 dark:text-stone-500">
+          <span className="text-ink-faint">
             {"\n…"}
           </span>
         )}
@@ -183,7 +184,7 @@ function OutputView({ text }: { text: string }) {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+          className="mt-1 text-label text-accent-ink hover:underline"
         >
           {expanded
             ? `收起（共 ${lines.length} 行）`

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { Button } from "@/components/ui/Button";
 
 // D1: pick the AI persona (system prompt) for the next new chat session.
 // Chat-mode only — workspace/project derive their persona from CLAUDE.md.
@@ -80,19 +81,20 @@ export function SystemPromptPicker() {
           setOpen((v) => !v);
         }}
         title="设置这个对话的 AI 角色 / 系统提示词"
-        className="px-3 py-1.5 rounded-full border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300 hover:border-stone-400 dark:hover:border-stone-500 transition-colors flex items-center gap-1.5 text-[13px]"
+        className="px-3 py-1.5 rounded-full border border-line bg-surface text-ink-muted hover:border-line-strong transition-colors flex items-center gap-1.5 text-ui"
       >
         <span aria-hidden>🎭</span>
         <span>角色：{label}</span>
-        <span className="text-stone-400" aria-hidden>
+        <span className="text-ink-faint" aria-hidden>
           ▾
         </span>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[340px] bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl p-3 text-left">
-            <div className="text-[12px] text-stone-500 dark:text-stone-400 mb-2">
+          {/* 注：这是锚定触发按钮的居中下拉（非标准居中弹窗），保持手写外壳。 */}
+          <div className="absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[340px] bg-surface border border-line rounded-xl shadow-pop p-3 text-left">
+            <div className="text-ui text-ink-muted mb-2">
               选一个预设角色，或自定义系统提示词（仅 Chat 模式，创建后锁定）
             </div>
             <div className="flex flex-wrap gap-1.5 mb-3">
@@ -105,10 +107,10 @@ export function SystemPromptPicker() {
                     type="button"
                     onClick={() => apply(p.prompt)}
                     title={p.hint}
-                    className={`px-2.5 py-1 rounded-full text-[12px] border transition-colors ${
+                    className={`px-2.5 py-1 rounded-full text-ui border transition-colors ${
                       active
-                        ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
-                        : "bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:border-stone-400"
+                        ? "bg-accent text-ink-inverse border-accent"
+                        : "bg-surface-muted text-ink-muted border-line hover:border-line-strong"
                     }`}
                   >
                     {p.label}
@@ -121,29 +123,31 @@ export function SystemPromptPicker() {
               onChange={(e) => setText(e.target.value)}
               rows={4}
               placeholder="自定义系统提示词……留空则用内置默认"
-              className="w-full px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-[13px] text-stone-800 dark:text-stone-200 placeholder:text-stone-400 outline-none resize-none focus:border-stone-400"
+              className="w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none resize-none focus:border-accent-line"
             />
             <div className="flex items-center justify-end gap-2 mt-2">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   apply(null);
                   setOpen(false);
                 }}
-                className="px-2.5 py-1 text-[12px] text-stone-500 hover:text-stone-900 dark:hover:text-stone-100"
               >
                 重置默认
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="primary"
+                size="sm"
                 onClick={() => {
                   setDraftSystemPrompt(text.trim() ? text : null);
                   setOpen(false);
                 }}
-                className="px-3 py-1 rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[12px] hover:bg-stone-800 dark:hover:bg-stone-300"
               >
                 应用
-              </button>
+              </Button>
             </div>
           </div>
         </>

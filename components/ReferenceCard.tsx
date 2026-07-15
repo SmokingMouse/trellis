@@ -46,7 +46,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
   // crashing the canvas.
   if (!ref) {
     return (
-      <div className="nopan bg-white dark:bg-stone-900 border border-rose-200 dark:border-rose-900 rounded-xl shadow-sm w-[280px] px-4 py-3 text-rose-700 dark:text-rose-300 text-xs">
+      <div className="nopan bg-surface border border-danger-line rounded-card shadow-raise w-[280px] px-4 py-3 text-danger-ink text-xs">
         参考卡片数据缺失
         <Handle type="target" position={Position.Top} />
         <Handle type="source" position={Position.Bottom} />
@@ -88,14 +88,14 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
 
   return (
     <div
-      className={`group relative nopan bg-amber-50/40 dark:bg-amber-950/30 border rounded-xl shadow-sm w-[280px] cursor-pointer transition-shadow ${
+      className={`group relative nopan bg-warn-muted/60 border rounded-card shadow-raise w-[280px] cursor-pointer transition-shadow ${
         isActive
-          ? "border-amber-400 dark:border-amber-600 ring-2 ring-amber-200 dark:ring-amber-900/50 shadow-md"
+          ? "border-warn ring-2 ring-warn-line"
           : isStreaming
-            ? "border-indigo-300 dark:border-indigo-700 ring-2 ring-indigo-100 dark:ring-indigo-900/40"
+            ? "border-accent-line ring-2 ring-accent-muted"
             : fetchError
-              ? "border-rose-300 dark:border-rose-800"
-              : "border-amber-300 dark:border-amber-800"
+              ? "border-danger-line"
+              : "border-warn-line"
       }`}
       onClick={goRead}
       title={ref.sourceUri ?? labelText}
@@ -114,17 +114,17 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
         />
       )}
       <div className="px-4 py-3 flex items-start gap-2.5">
-        <span className="shrink-0 text-[18px] leading-none mt-0.5" aria-hidden>
+        <span className="shrink-0 text-title leading-none mt-0.5" aria-hidden>
           {isStreaming ? <Spinner /> : refIcon(ref)}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-semibold text-stone-900 dark:text-stone-100 leading-tight truncate">
+          <div className="text-reading font-semibold text-ink-strong leading-tight truncate">
             {indexLabel && (
-              <span className="mr-1.5 font-mono text-[11px] text-stone-400 dark:text-stone-500 tabular-nums font-normal inline-flex items-center gap-1 align-middle">
+              <span className="mr-1.5 font-mono text-label text-ink-faint tabular-nums font-normal inline-flex items-center gap-1 align-middle">
                 {indexLabel}
                 {isUnread && (
                   <span
-                    className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                    className="w-1.5 h-1.5 rounded-full bg-unread"
                     aria-label="未读"
                     title="未读"
                   />
@@ -133,19 +133,19 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
             )}
             {labelText}
           </div>
-          <div className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400 truncate">
+          <div className="mt-0.5 text-label text-ink-muted truncate">
             {sourceLine}
           </div>
           {isStreaming ? (
-            <div className="mt-1 text-[11px] text-indigo-700 dark:text-indigo-300 truncate">
+            <div className="mt-1 text-label text-accent-ink truncate">
               {fetchProgress || "启动中…"}
             </div>
           ) : fetchError ? (
-            <div className="mt-1 text-[11px] text-rose-600 dark:text-rose-400 truncate">
+            <div className="mt-1 text-label text-danger truncate">
               ⚠️ {fetchError}
             </div>
           ) : (
-            <div className="mt-1 text-[11px] text-stone-400 dark:text-stone-500 tabular-nums">
+            <div className="mt-1 text-label text-ink-faint tabular-nums">
               {wordCount ? `${wordCount} 字` : "—"}
               {ref.fetchedAt && ref.sourceType !== "paste" && (
                 <span className="ml-1.5 opacity-70">
@@ -158,7 +158,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
         {isStreaming ? (
           <button
             onClick={onCancel}
-            className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-stone-500 dark:text-stone-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-300 active:scale-95 transition-colors"
+            className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-danger-muted hover:text-danger-ink active:scale-95 transition-colors"
             title="停止抓取"
             aria-label="停止抓取"
           >
@@ -169,7 +169,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-stone-500 dark:text-stone-400 hover:bg-amber-100 dark:hover:bg-amber-950/60 hover:text-stone-800 dark:hover:text-stone-200 active:scale-95 disabled:opacity-40 transition-colors"
+              className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-warn-muted hover:text-ink active:scale-95 disabled:opacity-40 transition-colors"
               title="重新抓取"
               aria-label="重新抓取"
             >
@@ -206,7 +206,7 @@ function Spinner() {
       stroke="currentColor"
       strokeWidth="2.4"
       strokeLinecap="round"
-      className="text-indigo-500 animate-spin"
+      className="text-accent animate-spin"
       aria-hidden
     >
       <path d="M21 12a9 9 0 11-6.219-8.56" />

@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
+import { ToastShell } from "@/components/ui/Toast";
 
 // Bottom-right stack of toasts for nodes that finished streaming while the
 // user was not focused on them. Each toast shows "#N 完成" + the topic
@@ -81,24 +82,25 @@ function Toast({
   }, [nodeId, emittedAt]);
 
   return (
-    <div
+    <ToastShell
+      tone="positive"
       onClick={onClick}
-      className="pointer-events-auto bg-white dark:bg-stone-900 border border-emerald-200 dark:border-emerald-900 rounded-lg shadow-lg px-3 py-2 cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors flex items-start gap-2.5 min-w-0"
+      className="px-3 py-2 cursor-pointer hover:border-positive transition-colors flex items-start gap-2.5 min-w-0"
     >
       <span
-        className="shrink-0 w-2 h-2 rounded-full bg-emerald-500 mt-1.5"
+        className="shrink-0 w-2 h-2 rounded-full bg-unread mt-1.5"
         aria-hidden
       />
       <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-medium text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+        <div className="text-ui font-medium text-ink-strong flex items-center gap-1.5">
           {index ? (
-            <span className="font-mono text-stone-400 dark:text-stone-500 tabular-nums">
+            <span className="font-mono text-ink-faint tabular-nums">
               #{index}
             </span>
           ) : null}
           <span>已完成</span>
         </div>
-        <div className="text-[12px] text-stone-500 dark:text-stone-400 truncate">
+        <div className="text-ui text-ink-muted truncate">
           {label}
         </div>
       </div>
@@ -107,12 +109,12 @@ function Toast({
           e.stopPropagation();
           onDismiss();
         }}
-        className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 text-sm leading-none"
+        className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-ink-faint hover:text-ink text-sm leading-none"
         aria-label="关闭"
       >
         ×
       </button>
-    </div>
+    </ToastShell>
   );
 }
 

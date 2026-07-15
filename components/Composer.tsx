@@ -9,6 +9,7 @@ import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
+import { StopButton } from "./ui/StopButton";
 import type { ChatNode } from "@/lib/types";
 
 // #3/#7: the shared always-docked composer. Used by the linear thread's
@@ -156,21 +157,14 @@ export function Composer({
   if (isStreaming && targetNode) {
     return (
       <div className="py-3">
-        <button
+        <StopButton
           onClick={() => abortStream(targetNode.id)}
           disabled={isPending}
-          className="w-full h-[44px] rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-[0.99] transition-colors flex items-center justify-center gap-2 text-[13px] disabled:opacity-60 disabled:hover:bg-white dark:disabled:hover:bg-stone-900 disabled:hover:text-stone-700"
+          className="w-full h-[44px] disabled:opacity-60"
+          label={isPending ? "连接中…" : "停止生成（Esc）"}
           aria-label="停止生成"
           title={isPending ? "正在建立连接…" : "停止生成 (Esc)"}
-        >
-          <span className="inline-block w-2.5 h-2.5 bg-current rounded-[2px]" />
-          {isPending ? "连接中…" : "停止生成"}
-          {!isPending && (
-            <span className="opacity-60 text-[11px] hidden sm:inline">
-              （Esc）
-            </span>
-          )}
-        </button>
+        />
       </div>
     );
   }
@@ -187,7 +181,7 @@ export function Composer({
         />
       )}
       {cmdNotice && (
-        <div className="mb-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+        <div className="mb-1.5 text-label text-warn-ink">
           {cmdNotice}
         </div>
       )}
@@ -197,7 +191,7 @@ export function Composer({
         </div>
       )}
       {att.notice && (
-        <div className="mb-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+        <div className="mb-1.5 text-label text-warn-ink">
           {att.notice}
         </div>
       )}
@@ -225,7 +219,7 @@ export function Composer({
           rows={1}
           disabled={!targetNode}
           placeholder={placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`}
-          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm disabled:opacity-50"
+          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-line-strong bg-surface text-body text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50"
         />
         <input
           ref={fileInputRef}
@@ -240,7 +234,7 @@ export function Composer({
           onClick={() => fileInputRef.current?.click()}
           disabled={!targetNode || att.atLimit}
           title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-stone-500 dark:text-stone-400 flex items-center justify-center disabled:opacity-30 hover:text-stone-800 dark:hover:text-stone-200 hover:border-stone-400 dark:hover:border-stone-500 active:scale-95 transition-all shadow-sm"
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
           aria-label="添加附件"
         >
           <span aria-hidden>📎</span>
@@ -249,7 +243,7 @@ export function Composer({
           onClick={submit}
           disabled={!text.trim() || !targetNode || att.hasUploading}
           title={att.hasUploading ? "等待附件上传…" : undefined}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-accent text-ink-inverse flex items-center justify-center disabled:opacity-30 hover:bg-accent-strong active:scale-95 transition-all shadow-raise"
           aria-label="发送"
         >
           <svg

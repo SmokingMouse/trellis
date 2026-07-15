@@ -65,15 +65,15 @@ export function ThreadMinimap() {
 
   return (
     <div className="fixed right-3 bottom-24 z-40 text-xs">
-      <div className="rounded-lg border border-stone-200/80 dark:border-stone-700 bg-white/90 dark:bg-stone-950/90 shadow-lg backdrop-blur">
+      <div className="rounded-card border border-line/80 bg-surface/90 shadow-pop backdrop-blur">
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          className="w-full px-3 py-2 flex items-center justify-between gap-3 text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-900 rounded-t-lg"
+          className="w-full px-3 py-2 flex items-center justify-between gap-3 text-ink-muted hover:bg-surface-muted rounded-t-card"
           title={collapsed ? "展开树缩略图" : "收起树缩略图"}
         >
           <span className="font-medium">树</span>
-          <span className="text-stone-400 dark:text-stone-500 tabular-nums">
+          <span className="text-ink-faint tabular-nums">
             {collapsed ? "▴" : `${nodes.length} · ▾`}
           </span>
         </button>
@@ -82,7 +82,7 @@ export function ThreadMinimap() {
             width={SVG_W}
             height={SVG_H}
             viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-            className="block border-t border-stone-100 dark:border-stone-800"
+            className="block border-t border-line-faint"
             aria-label="线程树缩略图"
           >
             {nodes.map((n) => {
@@ -97,7 +97,7 @@ export function ThreadMinimap() {
                   y1={a.y}
                   x2={b.x}
                   y2={b.y}
-                  className="stroke-stone-300 dark:stroke-stone-700"
+                  className="stroke-line-strong"
                   strokeWidth="1"
                 />
               );
@@ -128,10 +128,10 @@ export function ThreadMinimap() {
                     r={isActive ? 5 : 3.5}
                     className={
                       isActive
-                        ? "fill-indigo-500 stroke-white dark:stroke-stone-950"
+                        ? "fill-accent stroke-surface"
                         : isUnread
-                          ? "fill-amber-400 stroke-white dark:stroke-stone-950"
-                          : "fill-stone-400 dark:fill-stone-500 stroke-white dark:stroke-stone-950"
+                          ? "fill-unread stroke-surface"
+                          : "fill-ink-faint stroke-surface"
                     }
                     strokeWidth={isActive ? 2 : 1.5}
                   />

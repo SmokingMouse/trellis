@@ -109,12 +109,12 @@ export function SessionTabs() {
   // never leaves dead space on mobile where the sidebar isn't permanent.
   return (
     <div
-      className="fixed top-12 right-0 z-30 h-9 bg-white/85 dark:bg-stone-950/85 backdrop-blur border-b border-stone-200 dark:border-stone-800"
+      className="fixed top-12 right-0 z-30 h-9 bg-surface-canvas/85 backdrop-blur border-b border-line"
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
       <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
-          <div className="self-center pl-1 text-[11px] text-stone-400 dark:text-stone-500 italic">
+          <div className="self-center pl-1 text-label text-ink-faint italic">
             搜索或＋新建打开会话，双击标签固定
           </div>
         )}
@@ -147,9 +147,9 @@ export function SessionTabs() {
             onClick={() => newConversation()}
             title="新建会话（新画布 / 新 session）"
             aria-label="新建会话"
-            className="w-6 h-6 flex items-center justify-center rounded text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-800 dark:hover:text-stone-100"
+            className="w-6 h-6 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong"
           >
-            <span aria-hidden className="text-[15px] leading-none">＋</span>
+            <span aria-hidden className="text-reading leading-none">＋</span>
           </button>
         </div>
       </div>
@@ -200,17 +200,17 @@ function Tab({
           ? `${style.label} · ${session.title}  (⌘${shortcut})${preview ? "\n双击固定" : ""}`
           : `${style.label} · ${session.title}`
       }
-      className={`group relative self-center flex items-center gap-1.5 h-7 pl-2.5 pr-1.5 rounded-md border text-[12px] shrink-0 max-w-[12rem] cursor-pointer transition-colors ${
+      className={`group relative self-center flex items-center gap-1.5 h-7 pl-2.5 pr-1.5 rounded-md border text-ui shrink-0 max-w-[12rem] cursor-pointer transition-colors ${
         running
-          ? // Running tint (indigo) overrides mode bg so "in progress" reads
+          ? // Running tint (accent) overrides mode bg so "in progress" reads
             // unmistakably, active or not. Bottom sweep bar added below.
-            "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800 text-indigo-900 dark:text-indigo-100 font-medium"
+            "bg-accent-muted border-accent-line text-accent-ink font-medium"
           : unread
-            ? // Finished-unread tint (emerald) — loud but static.
-              "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100 font-medium"
+            ? // Finished-unread tint (unread hue) — loud but static.
+              "bg-unread-muted border-unread-line text-unread-ink font-medium"
             : active
               ? `${style.activeBg} ${style.activeBorder} ${style.text} font-medium`
-              : "border-transparent text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+              : "border-transparent text-ink-muted hover:bg-surface-muted"
       }`}
     >
       {/* Leading indicator: spinner while running, else the mode color dot. */}
@@ -222,15 +222,15 @@ function Tab({
       <span className={`truncate ${preview ? "italic" : ""}`}>
         {session.title}
       </span>
-      {/* R3 unread (emerald) — louder than before: solid dot + ring + 「新」.
-          Distinct from the indigo running state; hidden while running again. */}
+      {/* R3 unread (unread hue) — louder than before: solid dot + ring + 「新」.
+          Distinct from the accent running state; hidden while running again. */}
       {unread && !running && (
-        <span className="shrink-0 inline-flex items-center gap-1 pl-0.5 pr-1 h-4 rounded-full bg-emerald-500 dark:bg-emerald-500 text-white text-[9px] font-semibold leading-none ring-1 ring-emerald-300 dark:ring-emerald-700" aria-label="完成·未读">
-          <span className="w-1.5 h-1.5 rounded-full bg-white" aria-hidden />
+        <span className="shrink-0 inline-flex items-center gap-1 pl-0.5 pr-1 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line" aria-label="完成·未读">
+          <span className="w-1.5 h-1.5 rounded-full bg-ink-inverse" aria-hidden />
           新
         </span>
       )}
-      {/* Indigo sliding underline bar — peripheral "this one is running" cue. */}
+      {/* Accent sliding underline bar — peripheral "this one is running" cue. */}
       {running && <span className="trellis-run-bar" aria-hidden />}
       {/* × close — always present, dims until hover to avoid noise. */}
       <button
@@ -241,7 +241,7 @@ function Tab({
         onDoubleClick={(e) => e.stopPropagation()}
         title="关闭标签"
         aria-label="关闭标签"
-        className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-700 dark:hover:text-stone-200 transition-opacity"
+        className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-muted hover:text-ink transition-opacity"
       >
         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
           <path d="M3 3 L9 9 M9 3 L3 9" />

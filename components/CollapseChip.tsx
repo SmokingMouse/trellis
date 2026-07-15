@@ -20,8 +20,8 @@ export function CollapseChip({
 }) {
   const sizeCls =
     variant === "compact"
-      ? "px-1.5 py-0.5 text-[10px]"
-      : "px-1.5 py-0.5 text-[11px]";
+      ? "px-1.5 py-0.5 text-nano"
+      : "px-1.5 py-0.5 text-label";
   return (
     <button
       type="button"
@@ -29,10 +29,10 @@ export function CollapseChip({
       title={collapsed ? `展开 ${count} 个被折叠的节点` : `折叠子树 (${count})`}
       aria-label={collapsed ? "展开子树" : "折叠子树"}
       aria-expanded={!collapsed}
-      className={`absolute -bottom-2 right-2 z-10 inline-flex items-center gap-1 rounded-full border bg-white dark:bg-stone-900 tabular-nums shadow-sm transition-colors ${sizeCls} ${
+      className={`absolute -bottom-2 right-2 z-10 inline-flex items-center gap-1 rounded-full border bg-surface tabular-nums shadow-raise transition-colors ${sizeCls} ${
         collapsed
-          ? "border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40"
-          : "border-stone-300 dark:border-stone-700 text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
+          ? "border-warn-line text-warn-ink hover:bg-warn-muted" /* TODO(w5): 折叠计数 chip 复用 warn hue，语义待裁决 */
+          : "border-line-strong text-ink-muted hover:bg-surface-muted"
       }`}
     >
       <svg

@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { previewKind } from "@/lib/generated-files";
+import { Drawer } from "@/components/ui/Drawer";
+import { IconButton } from "@/components/ui/IconButton";
 
 // Right-side drawer (mobile = bottom sheet) browsing the session's workspace
 // cwd — read-only, lazy per-directory listing via /api/sessions/[id]/files.
@@ -9,8 +11,7 @@ import { previewKind } from "@/lib/generated-files";
 // (the preview fence already whitelists the whole cwd). Entered by clicking
 // the Header ModeBadge on workspace/project sessions.
 //
-// Skeleton mirrors NotesDrawer so transitions / backdrop / breakpoints feel
-// consistent.
+// 外壳（scrim/滑入/Esc）来自 ui/Drawer 原语，与 NotesDrawer 一致。
 
 type Listing = {
   path: string;
@@ -45,81 +46,49 @@ export function WorkspaceFilesDrawer() {
     if (open) setEpoch((e) => e + 1);
   }, [open]);
 
-  // Esc closes (matches every other modal). FilePreview mounts above this
-  // drawer and captures Esc first, so closing a preview doesn't close us.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
+  // Esc-close 由 Drawer 内置（非 capture 监听）。FilePreview mounts above
+  // this drawer and captures Esc first, so closing a preview doesn't close us.
 
   if (!sessionId || !workspacePath) return null;
 
   return (
-    <div
-      className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}
-      aria-hidden={!open}
-    >
-      <div
-        onClick={() => setOpen(false)}
-        className={`absolute inset-0 bg-black/40 sm:bg-black/15 transition-opacity duration-200 ${
-          open ? "opacity-100" : "opacity-0"
-        }`}
-      />
-      <div
-        className={`absolute bg-white dark:bg-stone-900 shadow-2xl flex flex-col overflow-hidden transition-transform duration-200
-          inset-x-0 bottom-0 h-[60vh] rounded-t-2xl
-          sm:inset-x-auto sm:right-2 sm:top-14 sm:bottom-2 sm:w-[360px] sm:h-auto sm:rounded-xl
-          ${
-            open
-              ? "translate-y-0 sm:translate-x-0"
-              : "translate-y-full sm:translate-y-0 sm:translate-x-[calc(100%+0.5rem)]"
-          }`}
-      >
-        <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2 shrink-0">
-          <div className="text-stone-400 dark:text-stone-500 uppercase tracking-wider text-[10px] font-medium">
-            工作区文件
-          </div>
-          <div
-            className="text-stone-400 dark:text-stone-500 text-xs font-mono truncate"
-            title={workspacePath}
-          >
-            · {basename(workspacePath)}
-          </div>
-          <button
-            onClick={() => setEpoch((e) => e + 1)}
-            className="ml-auto text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 text-sm px-1.5 py-0.5"
-            title="刷新"
-            aria-label="刷新"
-          >
-            ⟳
-          </button>
-          <button
-            onClick={() => setOpen(false)}
-            className="text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 text-sm px-2 py-0.5"
-            aria-label="关闭"
-          >
-            ✕
-          </button>
+    <Drawer open={open} onClose={() => setOpen(false)}>
+      <div className="px-4 py-3 border-b border-line flex items-center gap-2 shrink-0">
+        <div className="text-ink-faint uppercase tracking-wider text-nano font-medium">
+          工作区文件
         </div>
-        <div className="flex-1 overflow-y-auto py-2 px-2">
-          {epoch > 0 && (
-            <DirChildren
-              key={`${sessionId}:${epoch}`}
-              sessionId={sessionId}
-              dir={null}
-              depth={0}
-            />
-          )}
+        <div
+          className="text-ink-faint text-xs font-mono truncate"
+          title={workspacePath}
+        >
+          · {basename(workspacePath)}
         </div>
-        <div className="px-4 py-2 border-t border-stone-200 dark:border-stone-800 text-[10.5px] text-stone-400 dark:text-stone-500 shrink-0">
-          只读浏览 · 点击文件预览
-        </div>
+        <IconButton
+          label="刷新"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setEpoch((e) => e + 1)}
+        >
+          ⟳
+        </IconButton>
+        <IconButton label="关闭" size="sm" onClick={() => setOpen(false)}>
+          ✕
+        </IconButton>
       </div>
-    </div>
+      <div className="flex-1 overflow-y-auto py-2 px-2">
+        {epoch > 0 && (
+          <DirChildren
+            key={`${sessionId}:${epoch}`}
+            sessionId={sessionId}
+            dir={null}
+            depth={0}
+          />
+        )}
+      </div>
+      <div className="px-4 py-2 border-t border-line text-nano text-ink-faint shrink-0">
+        只读浏览 · 点击文件预览
+      </div>
+    </Drawer>
   );
 }
 
@@ -165,19 +134,19 @@ function DirChildren({
 
   if (error)
     return (
-      <div className="py-1 text-[12px] text-rose-600 dark:text-rose-400" style={pad}>
+      <div className="py-1 text-ui text-danger" style={pad}>
         {error}
       </div>
     );
   if (listing === null)
     return (
-      <div className="py-1 text-[12px] text-stone-400 dark:text-stone-500" style={pad}>
+      <div className="py-1 text-ui text-ink-faint" style={pad}>
         加载中…
       </div>
     );
   if (listing.dirs.length === 0 && listing.files.length === 0)
     return (
-      <div className="py-1 text-[12px] text-stone-400 dark:text-stone-500" style={pad}>
+      <div className="py-1 text-ui text-ink-faint" style={pad}>
         （空目录）
       </div>
     );
@@ -200,19 +169,19 @@ function DirChildren({
           onClick={() => openFilePreview(f.path)}
           title={f.path}
           style={pad}
-          className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-[12.5px] text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"
+          className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-ui text-ink-muted hover:bg-surface-muted"
         >
           <span className="shrink-0">
             {KIND_ICON[previewKind(f.name)] ?? "📄"}
           </span>
           <span className="flex-1 truncate">{f.name}</span>
-          <span className="shrink-0 text-[10.5px] text-stone-400 dark:text-stone-500 tabular-nums">
+          <span className="shrink-0 text-nano text-ink-faint tabular-nums">
             {fmtSize(f.size)}
           </span>
         </button>
       ))}
       {listing.truncated && (
-        <div className="py-1 text-[11px] text-stone-400 dark:text-stone-500" style={pad}>
+        <div className="py-1 text-label text-ink-faint" style={pad}>
           …条目过多，已截断（前 300 条）
         </div>
       )}
@@ -239,9 +208,9 @@ function DirRow({
         onClick={() => setExpanded((v) => !v)}
         title={path}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
-        className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-[12.5px] text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"
+        className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-ui text-ink-muted hover:bg-surface-muted"
       >
-        <span className="shrink-0 text-[10px] text-stone-400 dark:text-stone-500 w-3 text-center">
+        <span className="shrink-0 text-nano text-ink-faint w-3 text-center">
           {expanded ? "▼" : "▶"}
         </span>
         <span aria-hidden>📁</span>

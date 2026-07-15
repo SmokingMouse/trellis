@@ -9,6 +9,7 @@ import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { Button } from "@/components/ui/Button";
 import {
   useAttachmentUploads,
   MAX_ATTACHMENTS,
@@ -39,10 +40,8 @@ const scrollToActive = (el: HTMLButtonElement | null) => {
   el?.scrollIntoView({ block: "nearest" });
 };
 const suggestionRowClass = (isActive: boolean) =>
-  `w-full text-left px-3 py-2 border-b last:border-b-0 border-stone-100 dark:border-stone-800 ${
-    isActive
-      ? "bg-stone-100 dark:bg-stone-800"
-      : "hover:bg-stone-50 dark:hover:bg-stone-800"
+  `w-full text-left px-3 py-2 border-b last:border-b-0 border-line-faint ${
+    isActive ? "bg-surface-muted" : "hover:bg-surface-muted"
   }`;
 
 export function QuestionInput() {
@@ -228,10 +227,11 @@ export function QuestionInput() {
     >
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-8 justify-center">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400" />
+          {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
           <h1 className="text-2xl font-semibold tracking-tight">Trellis</h1>
         </div>
-        <p className="text-center text-stone-500 dark:text-stone-400 mb-6 text-sm">
+        <p className="text-center text-ink-muted mb-6 text-sm">
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
         <div className="mb-3 flex justify-center">
@@ -244,10 +244,10 @@ export function QuestionInput() {
               type="button"
               onClick={() => setChatEnhanced(!chatEnhanced)}
               title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-              className={`px-3 py-1.5 rounded-full border text-[13px] inline-flex items-center gap-1.5 transition-colors ${
+              className={`px-3 py-1.5 rounded-full border text-ui inline-flex items-center gap-1.5 transition-colors ${
                 chatEnhanced
-                  ? "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200"
-                  : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:border-stone-400 dark:hover:border-stone-500"
+                  ? /* boost 复用 warn hue */ "bg-warn-muted border-warn-line text-warn-ink"
+                  : "border-line text-ink-muted hover:border-line-strong"
               }`}
             >
               <span aria-hidden>⚡</span>
@@ -256,10 +256,10 @@ export function QuestionInput() {
           </div>
         )}
         <div
-          className={`bg-white dark:bg-stone-900 border rounded-xl shadow-sm overflow-hidden transition-colors ${
+          className={`bg-surface border rounded-card shadow-raise overflow-hidden transition-colors ${
             dragOver
-              ? "border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900"
-              : "border-stone-200 dark:border-stone-800"
+              ? "border-accent ring-2 ring-accent-line"
+              : "border-line"
           }`}
           onDragOver={(e) => {
             // Only react to file drags (Files type), ignore text drags.
@@ -297,32 +297,32 @@ export function QuestionInput() {
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
             }
             rows={4}
-            className="w-full px-5 py-4 outline-none resize-none text-[15px] leading-relaxed bg-transparent text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+            className="w-full px-5 py-4 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint"
             disabled={busy}
           />
-          <div className="border-t border-stone-100 dark:border-stone-800 px-4 py-2 flex items-center justify-between gap-3">
-            <div className="text-xs text-stone-400 dark:text-stone-500 flex-1 min-w-0">
+          <div className="border-t border-line-faint px-4 py-2 flex items-center justify-between gap-3">
+            <div className="text-xs text-ink-faint flex-1 min-w-0">
               <button
                 type="button"
                 onClick={() =>
                   setSendKey(sendKey === "enter" ? "mod-enter" : "enter")
                 }
                 title="点击切换发送快捷键（Enter / ⌘Enter）"
-                className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+                className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
               >
                 <span>{sendHint(sendKey)}</span>
                 <span className="opacity-50" aria-hidden>
                   ⇄
                 </span>
               </button>
-              <span className="mx-1.5 text-stone-300 dark:text-stone-600">·</span>
+              <span className="mx-1.5 text-ink-faint">·</span>
               <button
                 type="button"
                 onClick={() =>
                   setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)
                 }
                 title="0 = B-fork 全发（历史存在会话里、缓存友好、不失忆，推荐）；≥1 = 窗口回退，只折叠 N 层历史进提示"
-                className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+                className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
               >
                 <span aria-hidden>📚</span>
                 <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
@@ -341,7 +341,7 @@ export function QuestionInput() {
               onClick={() => setZoneOpen(true)}
               disabled={busy}
               title="进入专注写作模式（全屏 Markdown 编辑 + 预览）"
-              className="text-xs text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800"
+              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
             >
               <span aria-hidden>⛶</span>
               <span className="hidden sm:inline">专注写作</span>
@@ -355,12 +355,13 @@ export function QuestionInput() {
                   ? `已到 ${MAX_ATTACHMENTS} 个上限`
                   : "添加图片 / 文件（粘贴 / 拖拽 / 点击选）"
               }
-              className="text-xs text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-800"
+              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
             >
               <span aria-hidden>📎</span>
               <span className="hidden sm:inline">附件</span>
             </button>
-            <button
+            <Button
+              variant="primary"
               onClick={submit}
               disabled={submitDisabled}
               title={
@@ -368,24 +369,23 @@ export function QuestionInput() {
                   ? `${draftMode === "workspace" ? "Workspace" : "Project"} 模式需要先选择工作区`
                   : undefined
               }
-              className="bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-sm px-4 py-1.5 rounded-md hover:bg-stone-800 dark:hover:bg-stone-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {submitLabel}
-            </button>
+            </Button>
           </div>
         </div>
         {cmdNotice && (
-          <div className="mt-2 text-[12px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-lg px-3 py-2">
             {cmdNotice}
           </div>
         )}
         {att.notice && (
-          <div className="mt-2 text-[12px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-lg px-3 py-2">
             {att.notice}
           </div>
         )}
         {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
-          <div className="mt-2 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-sm overflow-hidden max-h-64 overflow-y-auto">
+          <div className="mt-2 border border-line rounded-lg bg-surface shadow-raise overflow-hidden max-h-64 overflow-y-auto">
             {/* C1: Trellis commands first (first-class, all modes). Selecting
                 a no-arg command runs it immediately; /model (which takes an
                 arg) fills "/model " so the user can type the provider.
@@ -399,9 +399,10 @@ export function QuestionInput() {
                 onClick={() => pickCommand(c)}
                 className={suggestionRowClass(i === slashNav.active)}
               >
-                <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                <div className="text-ui font-mono text-ink flex items-center gap-1.5">
+                  {/* ⚡徽章标识「Trellis 命令」身份（非告警）→ accent-muted */}
                   <span
-                    className="text-[10px] px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans"
+                    className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
                     aria-hidden
                   >
                     ⚡ 命令
@@ -409,14 +410,14 @@ export function QuestionInput() {
                   <span>
                     /{c.name}
                     {c.hint && (
-                      <span className="text-stone-400 dark:text-stone-500">
+                      <span className="text-ink-faint">
                         {" "}
                         {c.hint}
                       </span>
                     )}
                   </span>
                 </div>
-                <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                <div className="text-label text-ink-muted truncate">
                   {c.description}
                 </div>
               </button>
@@ -435,11 +436,11 @@ export function QuestionInput() {
                   matchedCommands.length + i === slashNav.active,
                 )}
               >
-                <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
+                <div className="text-ui font-mono text-ink">
                   /{s.name}
                 </div>
                 {s.description && (
-                  <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                  <div className="text-label text-ink-muted truncate">
                     {s.description}
                   </div>
                 )}
@@ -457,7 +458,7 @@ export function QuestionInput() {
                   setQ(s);
                   ref.current?.focus();
                 }}
-                className="px-3 py-1.5 rounded-full border border-stone-200 dark:border-stone-700 bg-white/60 dark:bg-stone-900/60 text-stone-600 dark:text-stone-300 text-[13px] hover:border-stone-400 dark:hover:border-stone-500 hover:bg-white dark:hover:bg-stone-800 transition-colors"
+                className="px-3 py-1.5 rounded-full border border-line bg-surface/60 text-ink-muted text-ui hover:border-line-strong hover:bg-surface transition-colors"
               >
                 {s}
               </button>
@@ -465,20 +466,20 @@ export function QuestionInput() {
           </div>
         )}
         <div className="mt-5 flex items-center gap-3 justify-center text-xs">
-          <div className="h-px flex-1 max-w-[80px] bg-stone-200 dark:bg-stone-800" />
-          <span className="text-stone-400 dark:text-stone-500">或</span>
-          <div className="h-px flex-1 max-w-[80px] bg-stone-200 dark:bg-stone-800" />
+          <div className="h-px flex-1 max-w-[80px] bg-line" />
+          <span className="text-ink-faint">或</span>
+          <div className="h-px flex-1 max-w-[80px] bg-line" />
         </div>
         <div className="mt-3 flex justify-center">
           <button
             onClick={() => setPickerOpen(true)}
-            className="px-4 py-2 rounded-md text-sm border border-amber-300 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-950/60 active:scale-95 transition-colors flex items-center gap-2"
+            className="px-4 py-2 rounded-md text-sm border border-warn-line bg-warn-muted/60 text-warn-ink hover:bg-warn-muted active:scale-95 transition-colors flex items-center gap-2"
           >
             <span aria-hidden>📄</span>
             <span>从背景材料开始（粘贴 / URL）</span>
           </button>
         </div>
-        <div className="text-center text-xs text-stone-400 dark:text-stone-500 mt-4">
+        <div className="text-center text-xs text-ink-faint mt-4">
           模型在右上角切换 · 默认 Claude Sonnet
         </div>
       </div>

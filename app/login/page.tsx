@@ -38,13 +38,14 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6 bg-stone-100 dark:bg-stone-950 text-stone-900 dark:text-stone-100">
+    <div className="min-h-screen flex items-center justify-center px-6 bg-surface-canvas text-ink-strong">
       <div className="w-full max-w-sm">
         {/* Brand */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400 shadow-sm" />
+          {/* 品牌渐变固定色（原 indigo/fuchsia/amber 500·500·400 的 hex 原值） */}
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24] shadow-raise" />
           <h1 className="mt-4 text-xl font-semibold tracking-tight">Trellis</h1>
-          <p className="mt-1 text-[13px] text-stone-500 dark:text-stone-400">
+          <p className="mt-1 text-ui text-ink-muted">
             图状的 AI 对话
           </p>
         </div>
@@ -52,11 +53,11 @@ export default function LoginPage() {
         {/* Card */}
         <form
           onSubmit={submit}
-          className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-6"
+          className="rounded-card border border-line bg-surface shadow-raise p-6"
         >
           <label
             htmlFor="pw"
-            className="block text-[12px] font-medium text-stone-500 dark:text-stone-400 mb-1.5"
+            className="block text-ui font-medium text-ink-muted mb-1.5"
           >
             访问密码
           </label>
@@ -71,21 +72,21 @@ export default function LoginPage() {
               if (error) setError(null);
             }}
             placeholder="输入密码以继续"
-            className={`w-full h-11 px-3.5 rounded-lg bg-white dark:bg-stone-950 border text-[15px] outline-none transition-colors ${
+            className={`w-full h-11 px-3.5 rounded-field bg-surface-canvas border text-reading outline-none transition-colors ${
               error
-                ? "border-rose-400 dark:border-rose-700 focus:border-rose-500"
-                : "border-stone-300 dark:border-stone-700 focus:border-indigo-400 dark:focus:border-indigo-500"
+                ? "border-danger focus:border-danger"
+                : "border-line-strong focus:border-accent"
             }`}
           />
           {error && (
-            <p className="mt-2 text-[12.5px] text-rose-600 dark:text-rose-400">
+            <p className="mt-2 text-ui text-danger">
               {error}
             </p>
           )}
           <button
             type="submit"
             disabled={busy || !password}
-            className="mt-4 w-full h-11 rounded-lg bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[14px] font-medium hover:bg-stone-800 dark:hover:bg-stone-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            className="mt-4 w-full h-11 rounded-field bg-accent hover:bg-accent-strong text-ink-inverse text-body font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {busy ? (
               <>
@@ -98,7 +99,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-5 text-center text-[11px] text-stone-400 dark:text-stone-500">
+        <p className="mt-5 text-center text-label text-ink-faint">
           受保护的私有部署 · 仅限授权访问
         </p>
       </div>

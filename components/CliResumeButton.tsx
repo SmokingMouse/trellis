@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { Button } from "./ui/Button";
 
 // 「在 CLI 继续」轻量入口：project 模式会话本就是真 claude CLI 会话，点一下把
 // `cd <ws> && claude --resume <id>` 复制到剪贴板，去终端粘贴即可续这条 lineage。
@@ -46,13 +47,15 @@ export function CliResumeButton({ nodeId }: { nodeId: string }) {
           : "⌨ 在 CLI 继续";
 
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="sm"
       onClick={onClick}
       title="复制 cd + claude --resume 命令，到终端粘贴即可在 CLI 续这条对话"
-      className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      className="nodrag"
     >
       {label}
-    </button>
+    </Button>
   );
 }

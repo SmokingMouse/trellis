@@ -2,16 +2,16 @@
 
 // Shared run-status spinner for SessionTabs + SessionSidebar (Wave 4 polish).
 //
-// A small indigo spinning ring (SVG arc + Tailwind animate-spin). Replaces the
-// faint mode-dot `animate-ping` that users couldn't see. Dark mode handled via
-// currentColor + a text-indigo tint at the call site, so the ring inherits.
+// A small accent-tinted spinning ring (SVG arc + Tailwind animate-spin).
+// Replaces the faint mode-dot `animate-ping` that users couldn't see. Theme
+// handled via currentColor + the text-accent tint here, so the ring inherits.
 //
 // `size` is the px diameter of the ring (default 12). Keep tiny so it fits a
 // 28px-tall tab without crowding the title.
 export function RunSpinner({ size = 12 }: { size?: number }) {
   return (
     <span
-      className="inline-flex shrink-0 text-indigo-500 dark:text-indigo-400"
+      className="inline-flex shrink-0 text-accent"
       aria-label="生成中"
       role="status"
     >

@@ -72,7 +72,7 @@ export default function Home() {
 
   if (!hydrated || isMobile === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-stone-400 dark:text-stone-500 text-sm">
+      <div className="min-h-screen flex items-center justify-center text-ink-faint text-sm">
         加载中…
       </div>
     );
@@ -84,7 +84,7 @@ export default function Home() {
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
-        <div className="fixed top-[5.25rem] inset-x-0 z-40 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 px-4 py-2 text-xs text-amber-900 dark:text-amber-200">
+        <div className="fixed top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
           ⚠️ 本地存储不可用：{hydrateError}。可以继续问答，但刷新会丢失历史。
         </div>
       )}
@@ -98,7 +98,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setViewMode("linear")}
-            className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 shadow-md text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800 active:scale-95 transition-transform"
+            className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition-transform"
             title="切换到线性 thread"
           >
             线性

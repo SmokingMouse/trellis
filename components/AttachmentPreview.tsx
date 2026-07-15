@@ -120,10 +120,8 @@ export function AttachmentPreview(props: Props) {
             <div
               key={it.key}
               className={`relative w-20 h-20 rounded-md overflow-hidden border ${
-                it.status === "error"
-                  ? "border-rose-400 dark:border-rose-700"
-                  : "border-stone-200 dark:border-stone-700"
-              } bg-stone-50 dark:bg-stone-900`}
+                it.status === "error" ? "border-danger" : "border-line"
+              } bg-surface-muted`}
             >
               <button
                 type="button"
@@ -160,23 +158,23 @@ export function AttachmentPreview(props: Props) {
                     <span className="text-xl leading-none" aria-hidden>
                       {fileIcon(it.mime)}
                     </span>
-                    <span className="text-[9px] leading-tight text-stone-600 dark:text-stone-300 break-all line-clamp-2 text-center">
+                    <span className="text-nano leading-tight text-ink-muted break-all line-clamp-2 text-center">
                       {it.filename ?? "file"}
                     </span>
                     {fmtSize(it.size) && (
-                      <span className="text-[8px] text-stone-400 dark:text-stone-500">
+                      <span className="text-nano text-ink-faint">
                         {fmtSize(it.size)}
                       </span>
                     )}
                   </span>
                 )}
                 {it.status === "uploading" && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] text-stone-700 dark:text-stone-200 bg-white/40 dark:bg-black/40">
+                  <span className="absolute inset-0 flex items-center justify-center text-nano text-ink bg-surface/40">
                     ↑
                   </span>
                 )}
                 {it.status === "error" && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] text-rose-700 dark:text-rose-200 bg-rose-100/70 dark:bg-rose-950/70 px-1 text-center">
+                  <span className="absolute inset-0 flex items-center justify-center text-nano text-danger-ink bg-danger-muted/70 px-1 text-center">
                     失败
                   </span>
                 )}
@@ -198,7 +196,7 @@ export function AttachmentPreview(props: Props) {
 
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+          className="fixed inset-0 z-50 bg-scrim/80 flex items-center justify-center p-6 cursor-zoom-out"
           onClick={() => setLightbox(null)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}

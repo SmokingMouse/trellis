@@ -208,6 +208,16 @@
 /* Tailwind utility 注册。inline = 在使用处解析 var()，随 .dark /
    [data-theme] 级联（关键，见上）。 */
 @theme inline {
+  /* ── W5.5 闸门：禁用已迁移的原生色族（回归护栏）──
+     组件一律走语义 token；漏写的 bg-stone-500 之类不再生成 utility、
+     视觉上直接显形。品牌固定色用任意值写法（如 from-[#d946ef]）不受影响。 */
+  --color-stone-*: initial;
+  --color-indigo-*: initial;
+  --color-amber-*: initial;
+  --color-rose-*: initial;
+  --color-emerald-*: initial;
+  --color-fuchsia-*: initial;
+
   --color-surface-canvas: var(--surface-canvas);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);

@@ -39,16 +39,16 @@ export function FilePreview() {
   const file = { name: target.name };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-stone-900/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-scrim/70 backdrop-blur-sm">
       {/* top bar */}
-      <div className="shrink-0 flex items-center gap-3 px-4 h-12 bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-700">
+      <div className="shrink-0 flex items-center gap-3 px-4 h-12 bg-surface border-b border-line">
         <span className="text-sm">📄</span>
         <span
-          className="flex-1 truncate text-[13px] font-medium text-stone-800 dark:text-stone-100"
+          className="flex-1 truncate text-ui font-medium text-ink-strong"
           title={target.path}
         >
           {file.name}
-          <span className="ml-2 text-[11px] font-normal text-stone-400">
+          <span className="ml-2 text-label font-normal text-ink-faint">
             {target.path}
           </span>
         </span>
@@ -56,19 +56,19 @@ export function FilePreview() {
           href={url}
           target="_blank"
           rel="noreferrer"
-          className="px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+          className="px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted"
         >
           ↗ 新标签打开
         </a>
         <button
           onClick={onClose}
-          className="px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+          className="px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted"
         >
           ✕ 关闭
         </button>
       </div>
       {/* body */}
-      <div className="flex-1 min-h-0 bg-white dark:bg-stone-950 overflow-hidden">
+      <div className="flex-1 min-h-0 bg-surface-canvas overflow-hidden">
         <PreviewBody kind={kind} url={url} name={file.name} />
       </div>
     </div>,
@@ -100,7 +100,7 @@ function PreviewBody({
   }
   if (kind === "image") {
     return (
-      <div className="w-full h-full overflow-auto flex items-center justify-center p-6 [background:repeating-conic-gradient(#f5f5f4_0%_25%,#fff_0%_50%)_50%/20px_20px] dark:[background:none] dark:bg-stone-900">
+      <div className="w-full h-full overflow-auto flex items-center justify-center p-6 [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/20px_20px] dark:[background:none] dark:bg-surface">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt={name} className="max-w-full max-h-full object-contain" />
       </div>
@@ -136,17 +136,17 @@ function TextPreview({ url, markdown }: { url: string; markdown: boolean }) {
 
   if (error)
     return (
-      <div className="p-6 text-sm text-rose-600 dark:text-rose-400">
+      <div className="p-6 text-sm text-danger">
         读取失败：{error}
       </div>
     );
   if (text === null)
-    return <div className="p-6 text-sm text-stone-400">加载中…</div>;
+    return <div className="p-6 text-sm text-ink-faint">加载中…</div>;
 
   if (markdown)
     return (
       <div className="h-full overflow-auto">
-        <div className="md-body max-w-3xl mx-auto px-6 py-6 text-stone-800 dark:text-stone-200">
+        <div className="md-body max-w-3xl mx-auto px-6 py-6 text-ink">
           <ReactMarkdown
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_FULL}
@@ -159,7 +159,7 @@ function TextPreview({ url, markdown }: { url: string; markdown: boolean }) {
     );
 
   return (
-    <pre className="h-full overflow-auto m-0 p-4 text-[12.5px] leading-relaxed text-stone-800 dark:text-stone-200 font-mono whitespace-pre">
+    <pre className="h-full overflow-auto m-0 p-4 text-ui leading-relaxed text-ink font-mono whitespace-pre">
       {text}
     </pre>
   );

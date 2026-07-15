@@ -6,6 +6,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
 import { MD_COMPONENTS } from "@/lib/md-components";
+import { Button } from "./ui/Button";
 import type { PendingInteraction } from "@/lib/types";
 
 const REMARK_PLUGINS = [remarkGfm];
@@ -55,10 +56,10 @@ export function InteractionForm({
 // Eye-catching container that signals "model is waiting on you".
 function InteractionShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mt-5 rounded-xl border-2 border-indigo-300 dark:border-indigo-700/70 bg-indigo-50/70 dark:bg-indigo-950/30 shadow-sm overflow-hidden">
-      <div className="px-4 py-2 flex items-center gap-2 border-b border-indigo-200/70 dark:border-indigo-800/60 bg-indigo-100/60 dark:bg-indigo-900/30">
+    <div className="mt-5 rounded-card border-2 border-accent-line bg-accent-muted shadow-raise overflow-hidden">
+      <div className="px-4 py-2 flex items-center gap-2 border-b border-accent-line/60 bg-accent-line/30">
         <span className="text-sm">🙋</span>
-        <span className="text-[13px] font-semibold text-indigo-900 dark:text-indigo-200">
+        <span className="text-ui font-semibold text-accent-ink">
           模型在等你回答
         </span>
       </div>
@@ -69,7 +70,7 @@ function InteractionShell({ children }: { children: React.ReactNode }) {
 
 function StaleNotice() {
   return (
-    <div className="text-[13px] text-amber-700 dark:text-amber-300 flex items-center gap-2">
+    <div className="text-ui text-warn-ink flex items-center gap-2">
       <span>⚠️</span>
       <span>会话已失效，请重试</span>
     </div>
@@ -143,11 +144,11 @@ function AskUserQuestionForm({
         return (
           <div key={qi} className="flex flex-col gap-2">
             {q.header && (
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">
+              <div className="text-nano font-semibold uppercase tracking-wide text-accent">
                 {q.header}
               </div>
             )}
-            <div className="text-[14px] font-medium text-stone-900 dark:text-stone-100">
+            <div className="text-body font-medium text-ink-strong">
               {q.question}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -159,10 +160,10 @@ function AskUserQuestionForm({
                     type="button"
                     disabled={submitting}
                     onClick={() => toggle(qi, opt.label, multi)}
-                    className={`w-full text-left px-3 py-2 rounded-lg border transition-colors flex items-start gap-2.5 disabled:opacity-60 ${
+                    className={`w-full text-left px-3 py-2 rounded-field border transition-colors flex items-start gap-2.5 disabled:opacity-60 ${
                       active
-                        ? "border-indigo-400 dark:border-indigo-500 bg-indigo-100/80 dark:bg-indigo-900/40 ring-1 ring-indigo-300/60 dark:ring-indigo-700/50"
-                        : "border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-indigo-300 dark:hover:border-indigo-700"
+                        ? "border-accent bg-accent-line/40 ring-1 ring-accent-line/60"
+                        : "border-line bg-surface hover:border-accent-line"
                     }`}
                   >
                     <span
@@ -170,8 +171,8 @@ function AskUserQuestionForm({
                         multi ? "rounded" : "rounded-full"
                       } ${
                         active
-                          ? "bg-indigo-500 border-indigo-500 text-white"
-                          : "border-stone-300 dark:border-stone-600"
+                          ? "bg-accent border-accent text-ink-inverse"
+                          : "border-line-strong"
                       }`}
                       aria-hidden
                     >
@@ -191,11 +192,11 @@ function AskUserQuestionForm({
                       )}
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-[13.5px] font-medium text-stone-800 dark:text-stone-200">
+                      <span className="block text-body font-medium text-ink">
                         {opt.label}
                       </span>
                       {opt.description && (
-                        <span className="block text-[12px] text-stone-500 dark:text-stone-400 mt-0.5">
+                        <span className="block text-ui text-ink-muted mt-0.5">
                           {opt.description}
                         </span>
                       )}
@@ -212,19 +213,17 @@ function AskUserQuestionForm({
         <StaleNotice />
       ) : (
         <div className="flex items-center gap-3">
-          <button
+          <Button
             type="button"
+            variant="primary"
             onClick={onSubmit}
-            disabled={!allAnswered || submitting}
-            className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-[13px] font-medium hover:bg-indigo-700 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center gap-2"
+            disabled={!allAnswered}
+            loading={submitting}
           >
-            {submitting && (
-              <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            )}
             提交
-          </button>
+          </Button>
           {!allAnswered && (
-            <span className="text-[12px] text-stone-500 dark:text-stone-400">
+            <span className="text-ui text-ink-muted">
               请回答全部问题
             </span>
           )}
@@ -268,7 +267,7 @@ function ExitPlanModeForm({
   return (
     <div className="flex flex-col gap-4">
       {plan && (
-        <div className="md-body text-[14px] text-stone-800 dark:text-stone-200 leading-relaxed max-h-[420px] overflow-y-auto rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-3">
+        <div className="md-body text-body text-ink leading-relaxed max-h-[420px] overflow-y-auto rounded-card border border-line bg-surface px-4 py-3">
           <ReactMarkdown
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_FULL}
@@ -290,42 +289,40 @@ function ExitPlanModeForm({
               placeholder="拒绝理由（可选）— 会传给模型，让它调整计划"
               disabled={submitting !== null}
               rows={3}
-              className="w-full px-3 py-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-[13px] text-stone-800 dark:text-stone-200 placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-indigo-300/60 dark:focus:ring-indigo-700/50 resize-y"
+              className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
             />
           )}
           <div className="flex items-center gap-3">
-            <button
+            <Button
               type="button"
+              variant="primary"
               onClick={() => decide("allow")}
               disabled={submitting !== null}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-[13px] font-medium hover:bg-indigo-700 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2"
+              loading={submitting === "allow"}
             >
-              {submitting === "allow" && (
-                <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              )}
               ✅ 批准执行
-            </button>
+            </Button>
             {showDeny ? (
               <button
                 type="button"
                 onClick={() => decide("deny")}
                 disabled={submitting !== null}
-                className="px-4 py-2 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-[13px] font-medium hover:bg-amber-100 dark:hover:bg-amber-900/50 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2"
+                className="px-4 py-2 rounded-field border border-warn-line bg-warn-muted text-warn-ink text-ui font-medium hover:bg-warn-line/30 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2"
               >
                 {submitting === "deny" && (
-                  <span className="w-3.5 h-3.5 border-2 border-amber-400/40 border-t-amber-600 rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-warn/40 border-t-warn rounded-full animate-spin" />
                 )}
                 ✋ 确认拒绝
               </button>
             ) : (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setShowDeny(true)}
                 disabled={submitting !== null}
-                className="px-4 py-2 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-[13px] font-medium hover:bg-stone-100 dark:hover:bg-stone-800 active:scale-95 transition disabled:opacity-50"
               >
                 ✋ 拒绝
-              </button>
+              </Button>
             )}
           </div>
         </>

@@ -347,24 +347,24 @@ export function LinearThreadView() {
     // a screen of content the composer sat right under the last card,
     // floating mid-screen instead of docked at the bottom.
     <div
-      className="fixed inset-0 pt-[5.25rem] flex flex-col bg-stone-50 dark:bg-stone-950"
+      className="fixed inset-0 pt-[5.25rem] flex flex-col bg-surface-canvas"
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
-      <div className="shrink-0 z-30 border-b border-stone-200/80 dark:border-stone-800 bg-stone-50/90 dark:bg-stone-950/90 backdrop-blur">
+      <div className="shrink-0 z-30 border-b border-line/80 bg-surface-canvas/90 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-stone-400 dark:text-stone-500 flex items-center gap-1.5">
+            <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
               {mode.label} · 线性
             </div>
-            <h1 className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+            <h1 className="truncate text-sm font-semibold text-ink-strong">
               {session.title}
             </h1>
           </div>
           <button
             type="button"
             onClick={() => setViewMode("canvas")}
-            className="shrink-0 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-xs font-medium text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 active:scale-95 transition"
+            className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
           >
             🗺 画布
           </button>
@@ -374,7 +374,7 @@ export function LinearThreadView() {
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
         <main className="max-w-3xl mx-auto px-4 py-5 pb-6 space-y-4">
         {threadData.thread.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-8 text-center text-sm text-stone-500 dark:text-stone-400">
+          <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
             暂无节点
           </div>
         ) : (
@@ -393,28 +393,28 @@ export function LinearThreadView() {
                 key={node.id}
                 ref={setRoundRef(node.id)}
                 data-thread-node-id={node.id}
-                className={`scroll-mt-3 rounded-lg border bg-white dark:bg-stone-900 shadow-sm transition-colors ${
+                className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
                   isActive
-                    ? "border-indigo-300 dark:border-indigo-700 ring-2 ring-indigo-100 dark:ring-indigo-950"
-                    : "border-stone-200 dark:border-stone-800"
+                    ? "border-accent-line ring-2 ring-accent-muted"
+                    : "border-line"
                 }`}
               >
-                <div className="px-4 py-2.5 border-b border-stone-100 dark:border-stone-800 flex items-center gap-2 text-xs">
-                  <span className="font-mono text-stone-400 dark:text-stone-500">
+                <div className="px-4 py-2.5 border-b border-line-faint flex items-center gap-2 text-xs">
+                  <span className="font-mono text-ink-faint">
                     #{nodeIndices[node.id] ?? idx + 1}
                   </span>
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
                       node.status === "streaming"
-                        ? "bg-indigo-500 animate-pulse"
+                        ? "bg-accent animate-pulse"
                         : node.status === "error"
-                          ? "bg-rose-500"
+                          ? "bg-danger"
                           : node.readAt
-                            ? "bg-stone-300 dark:bg-stone-600"
-                            : "bg-amber-400"
+                            ? "bg-line-strong"
+                            : "bg-unread"
                     }`}
                   />
-                  <span className="text-stone-500 dark:text-stone-400">
+                  <span className="text-ink-muted">
                     {node.kind === "reference" ? "Reference" : "Turn"}
                   </span>
                   <div className="ml-auto flex items-center gap-0.5">
@@ -429,8 +429,8 @@ export function LinearThreadView() {
                         }
                         className={`px-1.5 py-1 rounded-md transition-colors ${
                           isBranchTarget
-                            ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50"
-                            : "text-stone-400 dark:text-stone-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:text-indigo-600 dark:hover:text-indigo-400"
+                            ? "text-accent bg-accent-muted"
+                            : "text-ink-faint hover:bg-accent-muted hover:text-accent"
                         }`}
                         title="从此节点分叉提问"
                         aria-label="从此节点分叉提问"
@@ -457,7 +457,7 @@ export function LinearThreadView() {
                       <button
                         type="button"
                         onClick={() => confirmDelete(node.id)}
-                        className="px-1.5 py-1 rounded-md text-stone-400 dark:text-stone-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                        className="px-1.5 py-1 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
                         title="删除节点（含子树）"
                         aria-label="删除节点"
                       >
@@ -485,11 +485,11 @@ export function LinearThreadView() {
                   <TurnCard node={node} />
 
                   {branches.length > 0 && (
-                    <div className="mt-4 pt-2 border-t border-stone-100 dark:border-stone-800">
+                    <div className="mt-4 pt-2 border-t border-line-faint">
                       <button
                         type="button"
                         onClick={() => toggleBranches(node.id)}
-                        className="text-xs font-medium text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100"
+                        className="text-xs font-medium text-fork-ink/80 hover:text-fork-ink"
                       >
                         ↳ {branches.length} 个分支
                       </button>
@@ -500,15 +500,15 @@ export function LinearThreadView() {
                               key={branch.id}
                               type="button"
                               onClick={() => setActiveNode(branch.id)}
-                              className="w-full text-left px-3 py-2 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/70 hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors"
+                              className="w-full text-left px-3 py-2 rounded-card bg-fork-muted border border-fork-line/50 hover:bg-fork-line/25 transition-colors"
                             >
-                              <div className="flex items-center gap-2 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+                              <div className="flex items-center gap-2 text-label text-fork-ink/80">
                                 <span className="font-mono">
                                   #{nodeIndices[branch.id] ?? "?"}
                                 </span>
                                 <span>{branch.kind === "reference" ? "reference" : "branch"}</span>
                               </div>
-                              <div className="mt-0.5 truncate text-xs text-stone-700 dark:text-stone-200">
+                              <div className="mt-0.5 truncate text-xs text-ink">
                                 {branch.topicLabel ?? truncate(branch.question, 120)}
                               </div>
                             </button>
@@ -525,10 +525,10 @@ export function LinearThreadView() {
         </main>
       </div>
 
-      <div className="shrink-0 z-20 border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
+      <div className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4">
           {branchFromNode && (
-            <div className="mt-3 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/40 text-xs text-indigo-800 dark:text-indigo-200">
+            <div className="mt-3 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-accent-line bg-accent-muted text-xs text-accent-ink">
               <span aria-hidden>⑂</span>
               <button
                 type="button"
@@ -546,7 +546,7 @@ export function LinearThreadView() {
               <button
                 type="button"
                 onClick={() => setBranchFrom(null)}
-                className="shrink-0 px-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900/60"
+                className="shrink-0 px-1 rounded hover:bg-accent-line/40"
                 title="取消分叉 (Esc)"
                 aria-label="取消分叉"
               >

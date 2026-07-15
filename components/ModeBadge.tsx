@@ -39,15 +39,15 @@ export function ModeBadge() {
       {/* Mode label hidden on mobile to save space — the icon already
           encodes the mode (chat bubble / chevron / link). Desktop shows
           the word for clarity. */}
-      <span className="hidden sm:inline text-[11px] font-medium">
+      <span className="hidden sm:inline text-label font-medium">
         {cfg.label}
       </span>
       {shortName && (
         <>
-          <span className="hidden sm:inline text-stone-400 dark:text-stone-600">
+          <span className="hidden sm:inline text-ink-faint">
             ·
           </span>
-          <span className="text-[11px] font-mono truncate max-w-[6rem] sm:max-w-[10rem]">
+          <span className="text-label font-mono truncate max-w-[6rem] sm:max-w-[10rem]">
             {shortName}
           </span>
         </>

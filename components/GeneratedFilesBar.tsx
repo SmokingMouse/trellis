@@ -22,7 +22,7 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-stone-400 dark:text-stone-500 mr-0.5">
+      <span className="text-label text-ink-faint mr-0.5">
         本轮生成 ·
       </span>
       {files.map((file) => (
@@ -31,7 +31,7 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
           type="button"
           onClick={() => openFilePreview(file.absPath)}
           title={file.absPath}
-          className="nodrag inline-flex items-center gap-1 px-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 text-[12px] text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+          className="nodrag inline-flex items-center gap-1 px-2 py-1 rounded-md border border-line text-ui text-ink-muted hover:bg-surface-muted hover:border-line-strong transition-colors"
         >
           <span>{KIND_ICON[previewKind(file.name)] ?? "📄"}</span>
           <span className="truncate max-w-[180px]">{file.name}</span>

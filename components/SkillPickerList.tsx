@@ -29,13 +29,11 @@ export function SkillPickerList({
   const activeRef = (el: HTMLButtonElement | null) =>
     el?.scrollIntoView({ block: "nearest" });
   const rowClass = (isActive: boolean) =>
-    `w-full text-left px-3 py-2 border-b last:border-b-0 border-stone-100 dark:border-stone-800 ${
-      isActive
-        ? "bg-stone-100 dark:bg-stone-800"
-        : "hover:bg-stone-50 dark:hover:bg-stone-800"
+    `w-full text-left px-3 py-2 border-b last:border-b-0 border-line-faint ${
+      isActive ? "bg-surface-muted" : "hover:bg-surface-muted"
     }`;
   return (
-    <div className="absolute bottom-full inset-x-0 mb-1 z-10 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+    <div className="absolute bottom-full inset-x-0 mb-1 z-10 border border-line rounded-lg bg-surface shadow-pop overflow-hidden max-h-56 overflow-y-auto">
       {commands.map((c, i) => (
         <button
           key={`cmd-${c.name}`}
@@ -44,9 +42,10 @@ export function SkillPickerList({
           onClick={() => onPickCommand?.(c)}
           className={rowClass(i === activeIndex)}
         >
-          <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+          <div className="text-ui font-mono text-ink flex items-center gap-1.5">
+            {/* ⚡徽章标识「Trellis 命令」身份（非告警）→ accent-muted */}
             <span
-              className="text-[10px] px-1 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-sans"
+              className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
               aria-hidden
             >
               ⚡ 命令
@@ -54,14 +53,14 @@ export function SkillPickerList({
             <span>
               /{c.name}
               {c.hint && (
-                <span className="text-stone-400 dark:text-stone-500">
+                <span className="text-ink-faint">
                   {" "}
                   {c.hint}
                 </span>
               )}
             </span>
           </div>
-          <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+          <div className="text-label text-ink-muted truncate">
             {c.description}
           </div>
         </button>
@@ -74,11 +73,11 @@ export function SkillPickerList({
           onClick={() => onPick(s.name)}
           className={rowClass(commands.length + i === activeIndex)}
         >
-          <div className="text-[13px] font-mono text-stone-800 dark:text-stone-200">
+          <div className="text-ui font-mono text-ink">
             /{s.name}
           </div>
           {s.description && (
-            <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+            <div className="text-label text-ink-muted truncate">
               {s.description}
             </div>
           )}

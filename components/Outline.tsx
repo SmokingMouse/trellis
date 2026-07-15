@@ -80,21 +80,21 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
   const body = (
     <>
       <div className="flex items-center justify-between mb-1.5 px-2">
-        <div className="text-stone-400 dark:text-stone-500 uppercase tracking-wider text-[10px] font-medium">
+        <div className="text-ink-faint uppercase tracking-wider text-nano font-medium">
           思维树
         </div>
         <div className="flex items-center gap-1.5">
           {unreadCount > 0 && (
             <button
               onClick={() => setUnreadOnly((v) => !v)}
-              className={`text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
+              className={`text-nano font-medium tabular-nums px-1.5 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
                 unreadOnly
-                  ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200"
-                  : "text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                  ? "bg-unread-muted text-unread-ink"
+                  : "text-unread-ink hover:bg-unread-muted"
               }`}
               title={unreadOnly ? "显示全部" : "只看未读"}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />
+              <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
               {unreadCount} 未读
             </button>
           )}
@@ -102,7 +102,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
             <button
               onClick={() => setOutlineOpen(false)}
               aria-label="关闭"
-              className="md:hidden w-6 h-6 -mr-1 flex items-center justify-center rounded text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+              className="md:hidden w-6 h-6 -mr-1 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted"
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
                 <path d="M3 3 L9 9 M9 3 L3 9" />
@@ -115,7 +115,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
         <div
           key={t.id}
           className={
-            i > 0 ? "mt-1.5 pt-1.5 border-t border-stone-100 dark:border-stone-800" : undefined
+            i > 0 ? "mt-1.5 pt-1.5 border-t border-line-faint" : undefined
           }
         >
           <TreeRow node={t} branchDepth={0} isBranch={false} indices={indices} unreadOnly={unreadOnly} />
@@ -131,13 +131,13 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
       <>
         {outlineOpen && (
           <div
-            className="md:hidden fixed inset-0 z-40 bg-black/30"
+            className="md:hidden fixed inset-0 z-40 bg-scrim/40"
             onClick={() => setOutlineOpen(false)}
             aria-hidden
           />
         )}
         <aside
-          className={`md:hidden fixed z-50 inset-x-3 top-[60px] bottom-3 bg-white/95 dark:bg-stone-900/95 backdrop-blur border border-stone-200 dark:border-stone-800 rounded-lg p-2 text-xs shadow-xl overflow-y-auto ${
+          className={`md:hidden fixed z-50 inset-x-3 top-[60px] bottom-3 bg-surface/95 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-overlay overflow-y-auto ${
             outlineOpen ? "block" : "hidden"
           }`}
         >
@@ -152,7 +152,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
   // falls back to 0 so the rail sits at its original left-3 = 12px).
   return (
     <aside
-      className="hidden md:block fixed top-[96px] w-60 bg-white/90 dark:bg-stone-900/90 backdrop-blur border border-stone-200 dark:border-stone-800 rounded-lg p-2 text-xs shadow-sm z-30 max-h-[calc(100vh-108px)] overflow-y-auto"
+      className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100vh-108px)] overflow-y-auto"
       style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
     >
       {body}
@@ -203,8 +203,8 @@ function TreeRow({
       <div
         className={`group w-full rounded transition-colors flex items-center ${
           isActive
-            ? "bg-indigo-50 dark:bg-indigo-950/50"
-            : "hover:bg-stone-50 dark:hover:bg-stone-800/60"
+            ? "bg-accent-muted"
+            : "hover:bg-surface-muted"
         }`}
         style={{ paddingLeft: `${4 + branchDepth * 12}px` }}
       >
@@ -214,7 +214,7 @@ function TreeRow({
               e.stopPropagation();
               toggleCollapse(node.id);
             }}
-            className="shrink-0 w-4 h-5 flex items-center justify-center text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300"
+            className="shrink-0 w-4 h-5 flex items-center justify-center text-ink-faint hover:text-ink-muted"
             title={collapsed ? "展开" : "折叠"}
             aria-label={collapsed ? "展开" : "折叠"}
           >
@@ -239,28 +239,28 @@ function TreeRow({
             // (outlineOpen stays false there).
             setOutlineOpen(false);
           }}
-          className={`flex-1 min-w-0 text-left pr-2 py-1 text-[12px] truncate transition-colors flex items-center gap-1 ${
+          className={`flex-1 min-w-0 text-left pr-2 py-1 text-ui truncate transition-colors flex items-center gap-1 ${
             isActive
-              ? "text-indigo-900 dark:text-indigo-200 font-medium"
+              ? "text-accent-ink font-medium"
               : dimReadInUnreadMode
-                ? "text-stone-400 dark:text-stone-600"
-                : "text-stone-600 dark:text-stone-400"
+                ? "text-ink-faint"
+                : "text-ink-muted"
           }`}
           title={
             isReference ? node.reference?.sourceUri ?? undefined : node.question
           }
         >
           {isBranch && (
-            <span className="text-stone-400 dark:text-stone-500">↳</span>
+            <span className="text-ink-faint">↳</span>
           )}
           {index ? (
-            <span className="font-mono text-[10.5px] text-stone-400 dark:text-stone-500 tabular-nums">
+            <span className="font-mono text-nano text-ink-faint tabular-nums">
               #{index}
             </span>
           ) : null}
           {unread && (
             <span
-              className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"
+              className="w-1.5 h-1.5 rounded-full bg-unread shrink-0"
               aria-label="未读"
             />
           )}
@@ -274,7 +274,7 @@ function TreeRow({
               (isReference ? "参考材料" : truncate(node.question, 32))}
           </span>
           {hiddenCount > 0 && (
-            <span className="ml-auto shrink-0 font-mono text-[10px] text-stone-400 dark:text-stone-500 tabular-nums">
+            <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
               ({hiddenCount})
             </span>
           )}
@@ -287,7 +287,7 @@ function TreeRow({
             }}
             title="删除节点（含子树）"
             aria-label="删除节点"
-            className="shrink-0 w-5 h-5 mr-0.5 flex items-center justify-center rounded text-stone-400 dark:text-stone-500 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-400 transition-opacity"
+            className="shrink-0 w-5 h-5 mr-0.5 flex items-center justify-center rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-danger-muted hover:text-danger transition-opacity"
           >
             <svg
               width="10"

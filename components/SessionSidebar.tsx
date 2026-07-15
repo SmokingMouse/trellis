@@ -4,6 +4,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { RunSpinner } from "@/components/RunSpinner";
 import { CliAttachPicker } from "@/components/CliAttachPicker";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
 import { SIDEBAR_W } from "@/lib/workbench-layout";
 import type { Session } from "@/lib/types";
 
@@ -123,7 +125,7 @@ export function SessionSidebar() {
   const renderGroup = (label: string, list: Session[]) =>
     list.length === 0 ? null : (
       <div className="mb-2">
-        <div className="px-2 pt-1 pb-0.5 text-[10px] uppercase tracking-wider font-medium text-stone-400 dark:text-stone-500">
+        <div className="px-2 pt-1 pb-0.5 text-nano uppercase tracking-wider font-medium text-ink-faint">
           {label}
         </div>
         {list.map((s) => (
@@ -163,32 +165,33 @@ export function SessionSidebar() {
   const renderPanel = (onClose: () => void) => (
     <>
       {/* Header: new-session entry (R2) + collapse/close toggle. */}
-      <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-stone-100 dark:border-stone-800 flex items-center gap-1.5">
-        <button
+      <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-line-faint flex items-center gap-1.5">
+        <Button
+          variant="primary"
+          size="sm"
           onClick={onNew}
           title="开一棵全新的树（新画布 / 新 session）"
-          className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[12.5px] font-medium hover:bg-stone-800 dark:hover:bg-stone-300 transition-colors"
+          className="flex-1 h-8"
         >
           <span aria-hidden className="text-base leading-none">＋</span>
           新建会话
-        </button>
-        <button
+        </Button>
+        <IconButton
+          label="收起"
           onClick={onClose}
-          title="收起"
-          aria-label="收起"
-          className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-700 dark:hover:text-stone-200"
+          className="w-7 h-8"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
             <path d="M7.5 2 L3.5 6 L7.5 10" />
           </svg>
-        </button>
+        </IconButton>
       </div>
 
       {/* CLI 同步：attach 本机 Claude Code 会话（双向）。 */}
       <button
         onClick={() => setAttachOpen(true)}
         title="把本机 Claude Code CLI 会话 attach 进来（双向同步）"
-        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-stone-300 dark:border-stone-700 text-[11.5px] text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800 hover:text-stone-700 dark:hover:text-stone-200 transition-colors"
+        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         <span aria-hidden>⇄</span>
         Attach CLI 会话
@@ -196,7 +199,7 @@ export function SessionSidebar() {
 
       <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 ? (
-          <div className="px-3 py-3 text-[11px] text-stone-400 dark:text-stone-500 italic">
+          <div className="px-3 py-3 text-label text-ink-faint italic">
             还没有会话，点上面「新建会话」开始
           </div>
         ) : (
@@ -210,47 +213,47 @@ export function SessionSidebar() {
       {/* Archived view — moved here from SessionPicker (now removed from the
           tab strip). Expand to restore archived sessions. */}
       {archivedCount > 0 && (
-        <div className="shrink-0 border-t border-stone-100 dark:border-stone-800">
+        <div className="shrink-0 border-t border-line-faint">
           <button
             onClick={() => setArchivedOpen((o) => !o)}
-            className="w-full px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+            className="w-full px-2 py-1.5 flex items-center gap-1.5 text-label text-ink-muted hover:bg-surface-muted"
           >
-            <span aria-hidden className="text-[9px]">{archivedOpen ? "▾" : "▸"}</span>
+            <span aria-hidden className="text-nano">{archivedOpen ? "▾" : "▸"}</span>
             <span>🗄 已归档</span>
-            <span className="ml-auto tabular-nums text-stone-400 dark:text-stone-500">
+            <span className="ml-auto tabular-nums text-ink-faint">
               {archivedCount}
             </span>
           </button>
           {archivedOpen && (
             <div className="max-h-48 overflow-y-auto pb-1">
               {archived.length === 0 ? (
-                <div className="px-3 py-2 text-[11px] text-stone-400 dark:text-stone-500 italic">
+                <div className="px-3 py-2 text-label text-ink-faint italic">
                   加载中…
                 </div>
               ) : (
                 archived.map((s) => (
                   <div
                     key={s.id}
-                    className="group mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                    className="group mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 text-ink-muted hover:bg-surface-muted"
                   >
                     <span
                       className={`w-2 h-2 rounded-full shrink-0 opacity-50 ${modeStyle(s.mode).dot}`}
                       aria-hidden
                     />
-                    <span className="flex-1 min-w-0 truncate text-[12px]" title={s.title}>
+                    <span className="flex-1 min-w-0 truncate text-ui" title={s.title}>
                       {s.title}
                     </span>
-                    <button
-                      onClick={() => unarchiveSession(s.id)}
+                    <IconButton
+                      label="恢复"
                       title="恢复（取消归档）"
-                      aria-label="恢复"
-                      className="shrink-0 inline-flex p-1 rounded text-stone-500 dark:text-stone-400 hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
+                      size="sm"
+                      onClick={() => unarchiveSession(s.id)}
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 7v6h6" />
                         <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
                       </svg>
-                    </button>
+                    </IconButton>
                   </div>
                 ))
               )}
@@ -272,7 +275,7 @@ export function SessionSidebar() {
       {/* ── Desktop rail ── permanent, pushes content via --trellis-sb. ── */}
       {sidebarOpen ? (
         <aside
-          className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-white/90 dark:bg-stone-950/90 backdrop-blur border-r border-stone-200 dark:border-stone-800"
+          className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-surface-canvas/90 backdrop-blur border-r border-line"
           style={{ width: SIDEBAR_W }}
         >
           {renderPanel(() => setSidebarOpen(false))}
@@ -283,7 +286,7 @@ export function SessionSidebar() {
           onClick={() => setSidebarOpen(true)}
           title="展开侧栏"
           aria-label="展开侧栏"
-          className="hidden md:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 w-5 h-12 items-center justify-center rounded-r-md bg-white/90 dark:bg-stone-900/90 border border-l-0 border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-200 shadow-sm"
+          className="hidden md:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 w-5 h-12 items-center justify-center rounded-r-md bg-surface/90 border border-l-0 border-line text-ink-faint hover:text-ink shadow-raise"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
             <path d="M4.5 2 L8.5 6 L4.5 10" />
@@ -297,12 +300,12 @@ export function SessionSidebar() {
       {mobileNavOpen && (
         <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
           <div
-            className="absolute inset-0 bg-black/40"
+            className="absolute inset-0 bg-scrim/50"
             onClick={() => setMobileNavOpen(false)}
             aria-hidden
           />
           <aside
-            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-white dark:bg-stone-950 border-r border-stone-200 dark:border-stone-800 shadow-xl"
+            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-surface-canvas border-r border-line shadow-overlay"
           >
             {renderPanel(() => setMobileNavOpen(false))}
           </aside>
@@ -362,25 +365,25 @@ function SidebarRow({
     <div
       className={`group relative mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 cursor-pointer transition-colors overflow-hidden ${
         running
-          ? // Running tint (indigo) + left accent bar (added below). Overrides
+          ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
-            "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-100 font-medium"
+            "bg-accent-muted text-accent-ink font-medium"
           : unread
-            ? // Finished-unread tint (emerald), loud but static.
-              "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 font-medium"
+            ? // Finished-unread tint (unread hue), loud but static.
+              "bg-unread-muted text-unread-ink font-medium"
             : active
               ? `${style.activeBg} ${style.text} font-medium`
-              : "text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+              : "text-ink-muted hover:bg-surface-muted"
       }`}
       onClick={editing ? undefined : onPreview}
       onDoubleClick={editing ? undefined : onPin}
       title={`${style.label} · ${session.title}${running ? "\n生成中…" : unread ? "\n完成·未读" : ""}\n单击预览 · 双击固定`}
     >
-      {/* Left accent bar for the running row (solid indigo; the spinner +
+      {/* Left accent bar for the running row (solid accent; the spinner +
           「生成中」 carry the motion). */}
       {running && (
         <span
-          className="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo-500 dark:bg-indigo-400"
+          className="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"
           aria-hidden
         />
       )}
@@ -408,13 +411,13 @@ function SidebarRow({
             }
           }}
           onBlur={() => onCommit(draft)}
-          className="flex-1 min-w-0 px-1 py-0.5 rounded text-[12px] bg-white dark:bg-stone-950 border border-stone-300 dark:border-stone-600 outline-none focus:border-indigo-400 dark:focus:border-indigo-500 text-stone-900 dark:text-stone-100"
+          className="flex-1 min-w-0 px-1 py-0.5 rounded text-ui bg-surface border border-line-strong outline-none focus:border-accent text-ink-strong"
         />
       ) : (
         <span
-          className={`flex-1 min-w-0 truncate text-[12.5px] ${
+          className={`flex-1 min-w-0 truncate text-ui ${
             // Preview (non-pinned, transient) tabs read italic, like VSCode.
-            preview && !active ? "italic text-stone-500 dark:text-stone-400" : ""
+            preview && !active ? "italic text-ink-muted" : ""
           } ${preview ? "italic" : ""}`}
         >
           {session.title}
@@ -426,15 +429,15 @@ function SidebarRow({
       {session.origin === "cli-import" && !editing && (
         live ? (
           <span
-            className="shrink-0 inline-flex items-center gap-1 text-[8.5px] font-semibold px-1 py-px rounded bg-emerald-500 text-white group-hover:hidden"
+            className="shrink-0 inline-flex items-center gap-1 text-nano font-semibold px-1 py-px rounded bg-positive text-ink-inverse group-hover:hidden"
             title="正被一个活的 claude 进程实时驱动"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-ink-inverse animate-pulse" />
             live
           </span>
         ) : (
           <span
-            className="shrink-0 text-[8.5px] font-semibold px-1 py-px rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 group-hover:hidden"
+            className="shrink-0 text-nano font-semibold px-1 py-px rounded bg-positive-muted text-positive-ink group-hover:hidden"
             title="已 attach 的本机 CLI 会话（双向同步）"
           >
             CLI
@@ -444,17 +447,17 @@ function SidebarRow({
 
       {/* Running label — the sidebar row is wide enough to spell it out. */}
       {running && !editing && (
-        <span className="shrink-0 text-[10px] font-medium text-indigo-600 dark:text-indigo-300 group-hover:hidden">
+        <span className="shrink-0 text-nano font-medium text-accent-ink group-hover:hidden">
           生成中
         </span>
       )}
 
       {/* R3: finished-while-away unread — louder than the old small dot:
-          emerald 「✓ 新」 pill. Distinct from the indigo running state;
+          unread-hue 「✓ 新」 pill. Distinct from the accent running state;
           hidden once running again or while hovering (actions take over). */}
       {unread && !running && !editing && (
         <span
-          className="shrink-0 inline-flex items-center gap-0.5 pl-1 pr-1.5 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-semibold leading-none ring-1 ring-emerald-300 dark:ring-emerald-700 group-hover:hidden"
+          className="shrink-0 inline-flex items-center gap-0.5 pl-1 pr-1.5 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line group-hover:hidden"
           title="完成·未读"
           aria-label="完成·未读"
         >
@@ -510,10 +513,10 @@ function RowIconButton({
       onDoubleClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
-      className={`p-1 rounded text-stone-500 dark:text-stone-400 ${
+      className={`p-1 rounded text-ink-muted ${
         danger
-          ? "hover:bg-rose-50 dark:hover:bg-rose-950/50 hover:text-rose-600 dark:hover:text-rose-300"
-          : "hover:bg-stone-200/70 dark:hover:bg-stone-700 hover:text-stone-900 dark:hover:text-stone-100"
+          ? "hover:bg-danger-muted hover:text-danger"
+          : "hover:bg-surface-muted hover:text-ink-strong"
       }`}
     >
       <svg

@@ -2,8 +2,8 @@
 import type { ButtonHTMLAttributes } from "react";
 
 // 全局按钮原语。主按钮裁决（2026-07-15）：提交/发送类动作统一 primary =
-// accent 填充（旧 stone-900 黑按钮身份废除）——indigo 已是焦点/流式/选中
-// 的既定强调身份，且 accent 随主题换肤。
+// accent 填充（旧黑底按钮身份废除）——accent 已是焦点/流式/选中的既定
+// 强调身份，且随主题换肤。
 //
 // variant:
 //   primary   — accent 实色填充（发送/提交/确认）

@@ -83,26 +83,26 @@ function NoteRow({
   onDelete: () => void;
 }) {
   return (
-    <li className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 overflow-hidden">
+    <li className="rounded-card border border-positive-line/70 bg-positive-muted/60 overflow-hidden">
       <button
         onClick={onJump}
-        className="w-full text-left px-3 py-2 hover:bg-amber-100/60 dark:hover:bg-amber-950/40 active:scale-[0.99] transition-transform"
+        className="w-full text-left px-3 py-2 hover:bg-positive-muted active:scale-[0.99] transition-transform"
       >
-        <div className="text-[13px] text-stone-800 dark:text-stone-200 leading-relaxed whitespace-pre-wrap break-words">
+        <div className="text-ui text-ink leading-relaxed whitespace-pre-wrap break-words">
           {note.quotedText}
         </div>
       </button>
-      <div className="px-3 py-1.5 border-t border-amber-200/70 dark:border-amber-900/40 flex items-center gap-2 text-[10.5px] text-stone-500 dark:text-stone-400">
+      <div className="px-3 py-1.5 border-t border-positive-line/70 flex items-center gap-2 text-nano text-ink-muted">
         <span className="font-mono tabular-nums">
           {sourceIndex ? `#${sourceIndex}` : "—"}
         </span>
-        <span className="text-stone-300 dark:text-stone-600">·</span>
+        <span className="text-ink-faint">·</span>
         <span className="flex-1 truncate" title={sourceTopic}>
           {sourceTopic}
         </span>
         <button
           onClick={onJump}
-          className="shrink-0 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200"
+          className="shrink-0 text-positive hover:text-positive-ink"
           title="跳到原文"
           aria-label="跳到原文"
         >
@@ -110,7 +110,7 @@ function NoteRow({
         </button>
         <button
           onClick={onDelete}
-          className="shrink-0 text-stone-400 dark:text-stone-500 hover:text-rose-600 dark:hover:text-rose-400"
+          className="shrink-0 text-ink-faint hover:text-danger"
           title="删除"
           aria-label="删除"
         >

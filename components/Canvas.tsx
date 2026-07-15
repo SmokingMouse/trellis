@@ -333,7 +333,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
-        className={`w-screen h-screen pt-[5.25rem] bg-gradient-to-b from-stone-50 via-white to-stone-100 dark:from-stone-950 dark:via-stone-950 dark:to-stone-900${
+        className={`w-screen h-screen pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
         // Wave 4: shift the canvas right of the explorer sidebar (var set in
@@ -361,7 +361,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       {/* Always-visible "fit view" floating button — replaces F key on mobile */}
       <button
         onClick={() => fitView({ padding: 0.15, duration: 400 })}
-        className="fixed top-[60px] right-3 z-30 w-10 h-10 rounded-full bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 shadow-md flex items-center justify-center text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 active:scale-95 transition-transform"
+        className="fixed top-[60px] right-3 z-30 w-10 h-10 rounded-full bg-surface border border-line shadow-raise flex items-center justify-center text-ink-muted hover:bg-surface-muted active:scale-95 transition-transform"
         title="回到全局视图 (F / 点击空白)"
         aria-label="回到全局视图"
       >
@@ -416,15 +416,15 @@ function DockedComposer() {
       className="fixed bottom-0 right-0 z-20"
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
-      <div className="border-t border-stone-200/80 dark:border-stone-800 bg-stone-50/95 dark:bg-stone-950/95 backdrop-blur">
+      <div className="border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
         <div className="max-w-2xl mx-auto px-4">
           {target && (
-            <div className="pt-2 -mb-1 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+            <div className="pt-2 -mb-1 flex items-center gap-1.5 text-label text-ink-faint">
               <span>回复</span>
               <span className="font-mono tabular-nums">
                 #{nodeIndices[target.id] ?? "?"}
               </span>
-              <span className="truncate max-w-[280px] text-stone-500 dark:text-stone-400">
+              <span className="truncate max-w-[280px] text-ink-muted">
                 {targetLabel}
               </span>
               <span className="hidden sm:inline">· 点卡片可切换目标</span>

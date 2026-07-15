@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { modeStyle } from "@/lib/mode-style";
 import type { Mode, ProviderId } from "@/lib/llm";
 import { WorkspacePicker } from "./WorkspacePicker";
 
@@ -158,22 +159,19 @@ export function ModePicker() {
       <div
         role="radiogroup"
         aria-label="Context mode"
-        className="inline-flex h-7 rounded-md border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden shrink-0"
+        className="inline-flex h-7 rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
       >
         {OPTIONS.map((opt) => {
           const active = mode === opt.id;
           const { Icon } = opt;
+          const style = modeStyle(opt.id);
           const activeColor =
-            opt.id === "project"
-              ? "bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200"
-              : opt.id === "workspace"
-                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200"
-                : // chat needs higher contrast against the white/stone-900
-                  // outer surface — stone-100 vs white was nearly invisible
-                  // in light mode. stone-200 + a 1px inset ring gives it
-                  // the same visual weight as amber/rose without departing
-                  // from its neutral identity.
-                  "bg-stone-200 dark:bg-stone-700 text-stone-900 dark:text-stone-100 ring-1 ring-inset ring-stone-400/40 dark:ring-stone-500/40";
+            opt.id === "chat"
+              ? // chat 的中性淡底贴着外层 surface 对比不足（历史：muted 灰
+                // 对纯白底近乎不可见），补一圈 inset ring 给它与
+                // workspace/project 同级的视觉重量；色值全走 mode-chat token。
+                `${style.activeBg} ${style.text} ring-1 ring-inset ring-mode-chat-line-strong/40`
+              : `${style.activeBg} ${style.text}`;
           return (
             <button
               key={opt.id}
@@ -181,10 +179,10 @@ export function ModePicker() {
               aria-checked={active}
               title={opt.title}
               onClick={() => handleSelect(opt.id)}
-              className={`px-2 text-[11px] font-medium transition-colors inline-flex items-center gap-1.5 border-l border-stone-300 dark:border-stone-700 first:border-l-0 ${
+              className={`px-2 text-label font-medium transition-colors inline-flex items-center gap-1.5 border-l border-line-strong first:border-l-0 ${
                 active
                   ? activeColor
-                  : "text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
+                  : "text-ink-muted hover:bg-surface-muted"
               }`}
             >
               <Icon />
@@ -198,10 +196,10 @@ export function ModePicker() {
         <button
           onClick={() => setPickerOpen(true)}
           title={workspacePath ?? "请选择工作区目录"}
-          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-[11px] font-medium transition-colors ${
+          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
             workspacePath
-              ? "border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-800"
-              : "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-200 animate-pulse"
+              ? "border-line-strong bg-surface text-ink hover:bg-surface-muted"
+              : "border-danger-line bg-danger-muted text-danger-ink animate-pulse"
           }`}
         >
           <span aria-hidden>📁</span>

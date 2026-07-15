@@ -39,7 +39,7 @@ export function CopyButton({
       aria-label="复制全文"
       className={
         className ??
-        "nodrag px-2 py-0.5 rounded text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+        "nodrag px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
       }
     >
       {copied ? copiedLabel : label}

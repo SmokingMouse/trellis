@@ -87,7 +87,7 @@ export function CardImageButton({
         }}
         disabled={phase === "rendering"}
         title="把这条问答渲染成一张卡片图片并复制到剪贴板"
-        className="nodrag px-2.5 py-1 rounded border border-stone-200 dark:border-stone-700 text-[12px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 transition-colors disabled:opacity-50"
+        className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors disabled:opacity-50"
       >
         {label}
       </button>
@@ -101,15 +101,15 @@ export function CardImageButton({
       >
         <div
           ref={cardRef}
-          className="w-[680px] bg-white dark:bg-stone-900 px-8 py-7"
+          className="w-[680px] bg-surface px-8 py-7"
         >
           <div className="flex items-start gap-3 mb-5">
-            <span className="mt-1 w-1 self-stretch rounded-full bg-indigo-500 shrink-0" />
-            <h3 className="text-[19px] leading-snug font-semibold text-stone-900 dark:text-stone-100">
+            <span className="mt-1 w-1 self-stretch rounded-full bg-accent shrink-0" />
+            <h3 className="text-title leading-snug font-semibold text-ink-strong">
               {title}
             </h3>
           </div>
-          <div className="md-body text-stone-800 dark:text-stone-200">
+          <div className="md-body text-ink">
             <ReactMarkdown
               remarkPlugins={REMARK_PLUGINS}
               rehypePlugins={REHYPE_FULL}
@@ -118,7 +118,7 @@ export function CardImageButton({
               {content}
             </ReactMarkdown>
           </div>
-          <div className="mt-6 pt-3 border-t border-stone-200/70 dark:border-stone-700/70 text-[11px] text-stone-400 dark:text-stone-500">
+          <div className="mt-6 pt-3 border-t border-line/70 text-label text-ink-faint">
             Trellis · 思维树
           </div>
         </div>

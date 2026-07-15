@@ -1,5 +1,8 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
 
 export type WorkspaceEntry = {
   path: string;
@@ -23,20 +26,9 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   const [customPath, setCustomPath] = useState("");
   const [scratchBusy, setScratchBusy] = useState(false);
   const [scratchError, setScratchError] = useState<string | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
 
-  // Esc to close. Don't intercept on inputs — user may want to clear input
-  // text without dismissing the modal.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const tag = (document.activeElement?.tagName ?? "").toLowerCase();
-      if (tag === "input") return;
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Esc-to-close（input 聚焦时不拦截）由 Modal 的 closeOnEsc="outside-inputs"
+  // 默认行为提供，与旧手写监听语义一致。
 
   const pickPath = (p: string) => {
     const trimmed = p.trim();
@@ -70,114 +62,100 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 dark:bg-black/60 backdrop-blur-sm px-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={cardRef}
-        className="w-full max-w-lg bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
-      >
-        <div className="border-b border-stone-100 dark:border-stone-800 px-4 py-3 flex items-center gap-3 shrink-0">
-          <span aria-hidden className="text-lg">
-            📁
+    <Modal onClose={onClose} panelClassName="flex flex-col max-h-[85vh]">
+      <div className="border-b border-line-faint px-4 py-3 flex items-center gap-3 shrink-0">
+        <span aria-hidden className="text-lg">
+          📁
+        </span>
+        <div className="flex-1">
+          <div className="text-sm font-medium">选择工作区</div>
+          <div className="text-xs text-ink-muted">
+            AI 将在该目录下执行工具调用 (cwd)
+          </div>
+        </div>
+        <IconButton label="关闭" onClick={onClose}>
+          ✕
+        </IconButton>
+      </div>
+
+      <div className="border-b border-line-faint px-4 py-2 shrink-0">
+        <button
+          onClick={createScratch}
+          disabled={scratchBusy}
+          className="w-full text-left px-3 py-2 rounded-field border border-dashed border-positive-line bg-positive-muted/60 hover:bg-positive-muted transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
+        >
+          <span aria-hidden className="text-base shrink-0">
+            ✨
           </span>
-          <div className="flex-1">
-            <div className="text-sm font-medium">选择工作区</div>
-            <div className="text-xs text-stone-500 dark:text-stone-400">
-              AI 将在该目录下执行工具调用 (cwd)
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="关闭"
-            className="text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 px-1"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="border-b border-stone-100 dark:border-stone-800 px-4 py-2 shrink-0">
-          <button
-            onClick={createScratch}
-            disabled={scratchBusy}
-            className="w-full text-left px-3 py-2 rounded-lg border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
-          >
-            <span aria-hidden className="text-base shrink-0">
-              ✨
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-positive-ink">
+              {scratchBusy ? "创建中…" : "空白沙箱"}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-emerald-900 dark:text-emerald-200">
-                {scratchBusy ? "创建中…" : "空白沙箱"}
-              </span>
-              <span className="block text-xs text-emerald-700/70 dark:text-emerald-300/60">
-                不挑目录 — 新建一个随机空目录作为 cwd（~/.trellis/scratch/）
-              </span>
+            <span className="block text-xs text-positive-ink/70">
+              不挑目录 — 新建一个随机空目录作为 cwd（~/.trellis/scratch/）
             </span>
-          </button>
-          {scratchError && (
-            <div className="mt-1.5 text-xs text-rose-700 dark:text-rose-300">
-              创建失败: {scratchError}
-            </div>
-          )}
-        </div>
-
-        <div className="border-b border-stone-100 dark:border-stone-800 px-2 pt-2 shrink-0">
-          <div className="flex gap-1">
-            <TabButton
-              active={tab === "recent"}
-              onClick={() => setTab("recent")}
-            >
-              最近
-            </TabButton>
-            <TabButton
-              active={tab === "browse"}
-              onClick={() => setTab("browse")}
-            >
-              浏览
-            </TabButton>
+          </span>
+        </button>
+        {scratchError && (
+          <div className="mt-1.5 text-xs text-danger">
+            创建失败: {scratchError}
           </div>
-        </div>
+        )}
+      </div>
 
-        <div className="flex-1 min-h-0 flex flex-col">
-          {tab === "recent" ? (
-            <RecentTab currentPath={currentPath} onPick={pickPath} />
-          ) : (
-            <BrowseTab currentPath={currentPath} onPick={pickPath} />
-          )}
-        </div>
-
-        <div className="border-t border-stone-100 dark:border-stone-800 px-4 py-3 shrink-0">
-          <div className="text-xs text-stone-500 dark:text-stone-400 mb-2">
-            或手动输入绝对路径：
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={customPath}
-              onChange={(e) => setCustomPath(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  pickPath(customPath);
-                }
-              }}
-              placeholder="/Users/.../some-repo"
-              className="flex-1 px-3 py-1.5 text-sm rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 outline-none focus:border-stone-400 dark:focus:border-stone-500 font-mono"
-            />
-            <button
-              onClick={() => pickPath(customPath)}
-              disabled={!customPath.trim()}
-              className="px-3 py-1.5 text-sm rounded bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              使用
-            </button>
-          </div>
+      <div className="border-b border-line-faint px-2 pt-2 shrink-0">
+        <div className="flex gap-1">
+          <TabButton
+            active={tab === "recent"}
+            onClick={() => setTab("recent")}
+          >
+            最近
+          </TabButton>
+          <TabButton
+            active={tab === "browse"}
+            onClick={() => setTab("browse")}
+          >
+            浏览
+          </TabButton>
         </div>
       </div>
-    </div>
+
+      <div className="flex-1 min-h-0 flex flex-col">
+        {tab === "recent" ? (
+          <RecentTab currentPath={currentPath} onPick={pickPath} />
+        ) : (
+          <BrowseTab currentPath={currentPath} onPick={pickPath} />
+        )}
+      </div>
+
+      <div className="border-t border-line-faint px-4 py-3 shrink-0">
+        <div className="text-xs text-ink-muted mb-2">
+          或手动输入绝对路径：
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={customPath}
+            onChange={(e) => setCustomPath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                pickPath(customPath);
+              }
+            }}
+            placeholder="/Users/.../some-repo"
+            className="flex-1 px-3 py-1.5 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line font-mono"
+          />
+          <Button
+            variant="primary"
+            onClick={() => pickPath(customPath)}
+            disabled={!customPath.trim()}
+          >
+            使用
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -195,8 +173,8 @@ function TabButton({
       onClick={onClick}
       className={`px-3 py-1.5 text-sm rounded-t-md transition-colors ${
         active
-          ? "bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 border-x border-t border-stone-200 dark:border-stone-700 -mb-px"
-          : "text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200"
+          ? "bg-surface text-ink-strong border-x border-t border-line -mb-px"
+          : "text-ink-muted hover:text-ink-strong"
       }`}
     >
       {children}
@@ -253,29 +231,29 @@ function RecentTab({
 
   return (
     <>
-      <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-800 shrink-0">
+      <div className="px-4 py-3 border-b border-line-faint shrink-0">
         <input
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="筛选最近用过的 workspace"
           autoFocus
-          className="w-full px-3 py-1.5 text-sm rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 outline-none focus:border-stone-400 dark:focus:border-stone-500"
+          className="w-full px-3 py-1.5 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line"
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         {loading && (
-          <div className="px-4 py-6 text-sm text-stone-500 dark:text-stone-400 text-center">
+          <div className="px-4 py-6 text-sm text-ink-muted text-center">
             加载中…
           </div>
         )}
         {error && (
-          <div className="px-4 py-3 text-sm text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40">
+          <div className="px-4 py-3 text-sm text-danger-ink bg-danger-muted">
             加载失败: {error}
           </div>
         )}
         {!loading && !error && filtered.length === 0 && (
-          <div className="px-4 py-8 text-sm text-stone-500 dark:text-stone-400 text-center">
+          <div className="px-4 py-8 text-sm text-ink-muted text-center">
             {filter ? "没有匹配的工作区" : "没有最近用过的工作区"}
           </div>
         )}
@@ -287,10 +265,10 @@ function RecentTab({
                 <li key={e.path}>
                   <button
                     onClick={() => onPick(e.path)}
-                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors border-b border-stone-50 dark:border-stone-800/60 last:border-b-0 ${
+                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors border-b border-line-faint last:border-b-0 ${
                       active
-                        ? "bg-amber-50 dark:bg-amber-950/30"
-                        : "hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                        ? "bg-mode-workspace-muted"
+                        : "hover:bg-surface-muted"
                     }`}
                   >
                     <span aria-hidden className="text-base shrink-0">
@@ -300,12 +278,12 @@ function RecentTab({
                       <span className="block text-sm font-medium truncate">
                         {e.shortName}
                       </span>
-                      <span className="block text-xs text-stone-500 dark:text-stone-400 truncate font-mono">
+                      <span className="block text-xs text-ink-muted truncate font-mono">
                         {prettifyHome(e.path)}
                       </span>
                     </span>
                     {active && (
-                      <span className="text-xs text-amber-700 dark:text-amber-300 shrink-0">
+                      <span className="text-xs text-mode-workspace-ink shrink-0">
                         当前
                       </span>
                     )}
@@ -407,20 +385,20 @@ function BrowseTab({
 
   return (
     <>
-      <div className="px-4 py-2 border-b border-stone-100 dark:border-stone-800 shrink-0 flex items-center gap-2 overflow-x-auto whitespace-nowrap text-sm">
+      <div className="px-4 py-2 border-b border-line-faint shrink-0 flex items-center gap-2 overflow-x-auto whitespace-nowrap text-sm">
         {segments.map((seg, i) => (
           <span key={seg.path} className="flex items-center gap-2 shrink-0">
             {i > 0 && (
-              <span className="text-stone-300 dark:text-stone-600">/</span>
+              <span className="text-ink-faint">/</span>
             )}
             {i === segments.length - 1 ? (
-              <span className="font-medium text-stone-900 dark:text-stone-100">
+              <span className="font-medium text-ink-strong">
                 {seg.label}
               </span>
             ) : (
               <button
                 onClick={() => setDir(seg.path)}
-                className="text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200"
+                className="text-ink-muted hover:text-ink-strong"
               >
                 {seg.label}
               </button>
@@ -429,15 +407,15 @@ function BrowseTab({
         ))}
       </div>
 
-      <div className="px-4 py-2 border-b border-stone-100 dark:border-stone-800 shrink-0 flex items-center gap-2">
+      <div className="px-4 py-2 border-b border-line-faint shrink-0 flex items-center gap-2">
         <input
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="筛选当前目录"
-          className="flex-1 px-3 py-1 text-sm rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 outline-none focus:border-stone-400 dark:focus:border-stone-500"
+          className="flex-1 px-3 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line"
         />
-        <label className="text-xs text-stone-500 dark:text-stone-400 flex items-center gap-1 cursor-pointer select-none">
+        <label className="text-xs text-ink-muted flex items-center gap-1 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={showHidden}
@@ -450,12 +428,12 @@ function BrowseTab({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {loading && (
-          <div className="px-4 py-6 text-sm text-stone-500 dark:text-stone-400 text-center">
+          <div className="px-4 py-6 text-sm text-ink-muted text-center">
             加载中…
           </div>
         )}
         {error && (
-          <div className="px-4 py-3 text-sm text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40">
+          <div className="px-4 py-3 text-sm text-danger-ink bg-danger-muted">
             {error}
           </div>
         )}
@@ -464,7 +442,7 @@ function BrowseTab({
             {data.parent && (
               <button
                 onClick={() => setDir(data.parent)}
-                className="w-full text-left px-4 py-2 flex items-center gap-3 text-sm text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800/50 border-b border-stone-50 dark:border-stone-800/60"
+                className="w-full text-left px-4 py-2 flex items-center gap-3 text-sm text-ink-muted hover:bg-surface-muted border-b border-line-faint"
               >
                 <span aria-hidden className="text-base shrink-0">
                   ↑
@@ -473,7 +451,7 @@ function BrowseTab({
               </button>
             )}
             {filteredChildren.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-stone-500 dark:text-stone-400 text-center">
+              <div className="px-4 py-8 text-sm text-ink-muted text-center">
                 {filter
                   ? "无匹配的子目录"
                   : data.children.length === 0
@@ -487,13 +465,13 @@ function BrowseTab({
                   return (
                     <li key={c.path}>
                       <div
-                        className={`w-full flex items-stretch border-b border-stone-50 dark:border-stone-800/60 last:border-b-0 ${
-                          active ? "bg-amber-50 dark:bg-amber-950/30" : ""
+                        className={`w-full flex items-stretch border-b border-line-faint last:border-b-0 ${
+                          active ? "bg-mode-workspace-muted" : ""
                         }`}
                       >
                         <button
                           onClick={() => setDir(c.path)}
-                          className="flex-1 min-w-0 text-left px-4 py-2 flex items-center gap-3 hover:bg-stone-50 dark:hover:bg-stone-800/50 transition-colors"
+                          className="flex-1 min-w-0 text-left px-4 py-2 flex items-center gap-3 hover:bg-surface-muted transition-colors"
                           title="进入此目录"
                         >
                           <span aria-hidden className="text-base shrink-0">
@@ -503,14 +481,14 @@ function BrowseTab({
                             {c.name}
                           </span>
                           {active && (
-                            <span className="text-xs text-amber-700 dark:text-amber-300 shrink-0 ml-auto">
+                            <span className="text-xs text-mode-workspace-ink shrink-0 ml-auto">
                               当前
                             </span>
                           )}
                         </button>
                         <button
                           onClick={() => onPick(c.path)}
-                          className="px-3 text-xs text-stone-500 dark:text-stone-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-l border-stone-100 dark:border-stone-800 transition-colors"
+                          className="px-3 text-xs text-ink-muted hover:text-positive-ink hover:bg-positive-muted border-l border-line-faint transition-colors"
                           title="直接选用此目录"
                         >
                           选用
@@ -522,7 +500,7 @@ function BrowseTab({
               </ul>
             )}
             {data.truncated && (
-              <div className="px-4 py-2 text-xs text-stone-400 dark:text-stone-500 italic">
+              <div className="px-4 py-2 text-xs text-ink-faint italic">
                 子目录过多，已截断显示
               </div>
             )}
@@ -531,16 +509,17 @@ function BrowseTab({
       </div>
 
       {data && !loading && !error && (
-        <div className="px-4 py-2 border-t border-stone-100 dark:border-stone-800 shrink-0 flex items-center gap-2">
-          <span className="text-xs text-stone-500 dark:text-stone-400 font-mono truncate flex-1">
+        <div className="px-4 py-2 border-t border-line-faint shrink-0 flex items-center gap-2">
+          <span className="text-xs text-ink-muted font-mono truncate flex-1">
             {prettifyHomeWith(data.path, data.home)}
           </span>
-          <button
+          <Button
+            variant="primary"
+            className="shrink-0"
             onClick={() => onPick(data.path)}
-            className="px-3 py-1.5 text-sm rounded bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
           >
             使用此目录
-          </button>
+          </Button>
         </div>
       )}
     </>

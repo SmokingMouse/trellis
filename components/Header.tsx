@@ -1,10 +1,13 @@
 "use client";
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
 import { ExportMenu } from "./ExportMenu";
 import { ModeBadge } from "./ModeBadge";
 import { ThemeMenu } from "./ThemeMenu";
+import { Popover } from "@/components/ui/Popover";
+import { IconButton } from "@/components/ui/IconButton";
+import { Button } from "@/components/ui/Button";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import type { ChatNode } from "@/lib/types";
@@ -126,10 +129,10 @@ export function Header() {
     ctx == null
       ? ""
       : ctx.percent >= 80
-        ? "text-rose-600 dark:text-rose-400"
+        ? "text-danger"
         : ctx.percent >= 50
-          ? "text-amber-600 dark:text-amber-400"
-          : "text-stone-500 dark:text-stone-400";
+          ? "text-warn"
+          : "text-ink-muted";
 
   // B3 (/compact degradation): once the focused root's claude session is
   // ≥ 50% full, the 🧠 badge becomes a clickable affordance that opens a
@@ -138,23 +141,7 @@ export function Header() {
   // in the claude CLI / @sm/agent SDK, confirmed by spike). Below 50% the
   // badge stays a plain non-interactive readout to avoid nagging.
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
-  const ctxRef = useRef<HTMLDivElement>(null);
   const ctxActionable = ctx != null && ctx.percent >= 50;
-  useEffect(() => {
-    if (!ctxPopoverOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ctxRef.current?.contains(e.target as Node)) setCtxPopoverOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCtxPopoverOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [ctxPopoverOpen]);
   // If the badge stops being actionable (context dropped / session changed),
   // make sure a stale popover doesn't linger.
   useEffect(() => {
@@ -162,37 +149,37 @@ export function Header() {
   }, [ctxActionable]);
 
   return (
-    <header className="fixed top-0 inset-x-0 h-12 bg-white/85 dark:bg-stone-950/85 backdrop-blur border-b border-stone-200 dark:border-stone-800 flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
+    <header className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
       <div className="flex items-center gap-2 shrink-0">
         {/* Mobile-only: open the session-list drawer. The left sidebar is
             hidden on phones, so this is the only way to see / switch between
             sessions there. */}
-        <button
+        <IconButton
+          label="会话列表"
           onClick={() => setMobileNavOpen(true)}
-          title="会话列表"
-          aria-label="会话列表"
-          className="md:hidden -ml-1 p-1.5 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+          className="md:hidden -ml-1"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <line x1="3" y1="6" x2="21" y2="6" />
             <line x1="3" y1="12" x2="21" y2="12" />
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
-        </button>
-        <div className="w-6 h-6 rounded bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-amber-400" />
+        </IconButton>
+        {/* 品牌渐变固定色（不随主题换肤）：#6366f1 → #d946ef → #fbbf24 */}
+        <div className="w-6 h-6 rounded bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
         <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>
-        <span className="text-stone-300 dark:text-stone-600 hidden sm:inline">/</span>
+        <span className="text-ink-faint hidden sm:inline">/</span>
       </div>
       {/* The session switcher now lives in the always-visible SessionTabs
           bar just below the Header (Wave 1). This spacer keeps the
           right-side controls pinned to the edge. */}
       <div className="flex-1 min-w-0" />
-      <div className="flex items-center gap-2 sm:gap-3 text-xs text-stone-500 dark:text-stone-400 shrink-0">
-        <button
-          onClick={() => setSearchOpen(true)}
+      <div className="flex items-center gap-2 sm:gap-3 text-xs text-ink-muted shrink-0">
+        <IconButton
+          label="搜索"
           title="搜索 (⌘P)"
-          aria-label="搜索"
-          className="px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+          onClick={() => setSearchOpen(true)}
+          className="px-2 py-1"
         >
           <svg
             width="14"
@@ -208,14 +195,13 @@ export function Header() {
             <circle cx="11" cy="11" r="7" />
             <path d="M21 21l-4.3-4.3" />
           </svg>
-        </button>
+        </IconButton>
         {session && (
           <>
-            <button
+            <IconButton
+              label="思维树"
               onClick={() => setOutlineOpen(true)}
-              title="思维树"
-              aria-label="思维树"
-              className="md:hidden px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+              className="md:hidden px-2 py-1"
             >
               <svg
                 width="15"
@@ -235,7 +221,7 @@ export function Header() {
                 <circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none" />
                 <circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none" />
               </svg>
-            </button>
+            </IconButton>
             {session.mode === "chat" && (
               <button
                 onClick={() => setChatEnhanced(!chatEnhanced)}
@@ -243,18 +229,19 @@ export function Header() {
                 aria-label="增强模式"
                 className={`px-2 py-1 rounded inline-flex items-center gap-1 transition-colors ${
                   chatEnhanced
-                    ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300"
-                    : "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                    ? /* boost 复用 warn hue */
+                      "bg-warn-muted text-warn-ink"
+                    : "text-ink-muted hover:bg-surface-muted"
                 }`}
               >
                 <span aria-hidden>⚡</span>
-                <span className="hidden sm:inline text-[11px]">
+                <span className="hidden sm:inline text-label">
                   {chatEnhanced ? "增强·开" : "增强"}
                 </span>
               </button>
             )}
             <span className="hidden md:inline">{nodeCount} 节点</span>
-            <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
+            <span className="hidden md:inline text-ink-faint">·</span>
             <span
               className="hidden md:inline-flex items-center gap-1.5 tabular-nums"
               title={`输入 ${totals.input} · 输出 ${totals.output} · 缓存命中 ${totals.cacheRead}${
@@ -266,7 +253,7 @@ export function Header() {
               <span>↑{formatTokens(totals.input)}</span>
               <span>↓{formatTokens(totals.output)}</span>
               {(totals.cacheRead > 0 || totals.cacheCreation > 0) && (
-                <span className="text-emerald-600 dark:text-emerald-400">
+                <span className="text-positive">
                   ⚡{formatTokens(totals.cacheRead)}
                   {totals.cacheCreation > 0
                     ? `+${formatTokens(totals.cacheCreation)}`
@@ -276,46 +263,49 @@ export function Header() {
             </span>
             {ctx && (
               <>
-                <span className="hidden md:inline text-stone-300 dark:text-stone-600">·</span>
+                <span className="hidden md:inline text-ink-faint">·</span>
                 {ctxActionable ? (
-                  <div className="relative" ref={ctxRef}>
-                    <button
-                      onClick={() => setCtxPopoverOpen((v) => !v)}
-                      className={`inline-flex items-center gap-1 tabular-nums rounded px-1 py-0.5 hover:bg-stone-100 dark:hover:bg-stone-800 ${ctxTone}`}
-                      title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看清空上下文选项。`}
-                      aria-label="上下文占用，点击查看清空选项"
+                  <Popover
+                    open={ctxPopoverOpen}
+                    onClose={() => setCtxPopoverOpen(false)}
+                    panelClassName="w-72 p-3 text-left"
+                    trigger={
+                      <button
+                        onClick={() => setCtxPopoverOpen((v) => !v)}
+                        className={`inline-flex items-center gap-1 tabular-nums rounded px-1 py-0.5 hover:bg-surface-muted ${ctxTone}`}
+                        title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看清空上下文选项。`}
+                        aria-label="上下文占用，点击查看清空选项"
+                      >
+                        🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
+                        {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
+                      </button>
+                    }
+                  >
+                    <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
+                      🧠 上下文占用 {ctx.percent.toFixed(1)}%
+                    </div>
+                    <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
+                      当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
+                      {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
+                      占用越高，模型越慢、缓存越难增长。
+                    </div>
+                    <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
+                      claude CLI 的 <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
+                      在这里暂无原生支持。可改为开一条「新话题」——
+                      全新上下文的根问答，等价{" "}
+                      <code className="px-1 rounded bg-surface-muted">/clear</code>。
+                    </div>
+                    <Button
+                      variant="primary"
+                      className="mt-2.5 w-full"
+                      onClick={() => {
+                        setCtxPopoverOpen(false);
+                        setComposeRootOpen(true);
+                      }}
                     >
-                      🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
-                      {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
-                    </button>
-                    {ctxPopoverOpen && (
-                      <div className="absolute right-0 mt-1.5 w-72 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg shadow-xl p-3 text-left z-50">
-                        <div className="text-[13px] font-semibold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
-                          🧠 上下文占用 {ctx.percent.toFixed(1)}%
-                        </div>
-                        <div className="text-[12px] text-stone-500 dark:text-stone-400 mt-1.5 leading-relaxed">
-                          当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
-                          {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
-                          占用越高，模型越慢、缓存越难增长。
-                        </div>
-                        <div className="text-[11px] text-stone-400 dark:text-stone-500 mt-1.5 leading-relaxed">
-                          claude CLI 的 <code className="px-1 rounded bg-stone-100 dark:bg-stone-800">/compact</code>{" "}
-                          在这里暂无原生支持。可改为开一条「新话题」——
-                          全新上下文的根问答，等价{" "}
-                          <code className="px-1 rounded bg-stone-100 dark:bg-stone-800">/clear</code>。
-                        </div>
-                        <button
-                          onClick={() => {
-                            setCtxPopoverOpen(false);
-                            setComposeRootOpen(true);
-                          }}
-                          className="mt-2.5 w-full bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-[13px] px-3 py-1.5 rounded-md hover:bg-stone-800 dark:hover:bg-stone-300 inline-flex items-center justify-center gap-1.5"
-                        >
-                          🧹 开新话题（清空上下文）
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      🧹 开新话题（清空上下文）
+                    </Button>
+                  </Popover>
                 ) : (
                   <span
                     className={`inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
@@ -330,11 +320,11 @@ export function Header() {
                 (workspace / project). A dedicated button: hiding this behind
                 the ModeBadge chip proved undiscoverable. */}
             {session.workspacePath && (
-              <button
-                onClick={() => setWorkspaceFilesOpen(true)}
+              <IconButton
+                label="工作区文件"
                 title="工作区文件（只读浏览）"
-                aria-label="工作区文件"
-                className="px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center"
+                onClick={() => setWorkspaceFilesOpen(true)}
+                className="px-2 py-1"
               >
                 <svg
                   width="14"
@@ -349,13 +339,12 @@ export function Header() {
                 >
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
-              </button>
+              </IconButton>
             )}
-            <button
+            <IconButton
+              label="笔记"
               onClick={() => setNotesOpen(true)}
-              title="笔记"
-              aria-label="笔记"
-              className="px-2 py-1 rounded text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 inline-flex items-center gap-1.5"
+              className="px-2 py-1 gap-1.5"
             >
               <svg
                 width="14"
@@ -372,11 +361,11 @@ export function Header() {
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               </svg>
               {noteCount > 0 && (
-                <span className="tabular-nums text-[11px]">
+                <span className="tabular-nums text-label">
                   {noteCount}
                 </span>
               )}
-            </button>
+            </IconButton>
             <ExportMenu />
           </>
         )}

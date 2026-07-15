@@ -105,8 +105,8 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
       onPointerDown={(e) => e.preventDefault()}
     >
       {expanded ? (
-        <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg shadow-2xl w-[min(420px,calc(100vw-16px))] overflow-hidden">
-          <div className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-100 dark:border-amber-900 text-[11px] text-amber-900 dark:text-amber-200 truncate">
+        <div className="bg-surface border border-line rounded-lg shadow-pop w-[min(420px,calc(100vw-16px))] overflow-hidden">
+          <div className="px-3 py-1.5 bg-fork-muted border-b border-fork-line text-label text-fork-ink truncate">
             针对「
             <span className="font-medium">
               {selection.text.length > 60
@@ -139,7 +139,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             }}
             placeholder="进一步追问…（可粘贴图片 / 文件）"
             rows={2}
-            className="w-full px-3 py-2 bg-transparent text-stone-900 dark:text-stone-100 outline-none resize-none text-sm placeholder:text-stone-400 dark:placeholder:text-stone-500"
+            className="w-full px-3 py-2 bg-transparent text-ink-strong outline-none resize-none text-sm placeholder:text-ink-faint"
           />
           <input
             ref={fileInputRef}
@@ -150,23 +150,23 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             className="hidden"
           />
           {att.notice && (
-            <div className="px-3 pb-1 text-[11px] text-amber-700 dark:text-amber-300">
+            <div className="px-3 pb-1 text-label text-warn-ink">
               {att.notice}
             </div>
           )}
-          <div className="border-t border-stone-100 dark:border-stone-800 px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
+          <div className="border-t border-line-faint px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={att.atLimit}
               title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : "添加图片 / 文件"}
-              className="px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 mr-auto"
+              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 mr-auto"
             >
               <span aria-hidden>📎</span>
             </button>
             <button
               onClick={onClose}
-              className="px-2 py-0.5 text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100"
+              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong"
             >
               取消
             </button>
@@ -174,7 +174,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
               onClick={submit}
               disabled={!q.trim() || hasUploading}
               title={hasUploading ? "等待附件上传…" : undefined}
-              className="px-2.5 py-0.5 rounded bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 disabled:opacity-40 hover:bg-stone-800 dark:hover:bg-stone-300"
+              className="px-2.5 py-0.5 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
             >
               {hasUploading ? "上传中…" : "提问"}
             </button>
@@ -187,9 +187,9 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
               e.preventDefault();
               onExpand();
             }}
-            className="bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 text-xs rounded-lg shadow-xl px-3 py-2 hover:bg-stone-800 dark:hover:bg-stone-300 flex items-center gap-2 ring-1 ring-stone-700 dark:ring-stone-300"
+            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 hover:bg-accent-strong flex items-center gap-2 ring-1 ring-accent-strong"
           >
-            <kbd className="hidden sm:inline bg-stone-700 dark:bg-stone-300 dark:text-stone-900 px-1.5 py-0.5 rounded text-[10px] font-mono">
+            <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
               ⌘K
             </kbd>
             针对此处提问
@@ -202,7 +202,8 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             disabled={savingNote}
             title="摘到笔记 (⌘D)"
             aria-label="摘到笔记"
-            className="bg-amber-600 dark:bg-amber-500 text-white text-xs rounded-lg shadow-xl px-2.5 py-2 hover:bg-amber-700 dark:hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5 ring-1 ring-amber-700 dark:ring-amber-400"
+            /* 笔记 UI 归一 positive（amber→emerald 有意视觉变化）；positive 无 -strong 档，hover 用 opacity 近似 */
+            className="bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 ring-1 ring-positive-line"
           >
             <svg
               width="13"
@@ -213,7 +214,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             >
               <path d="M12 2C9.243 2 7 4.243 7 7v6.5l-2.707 2.707A1 1 0 0 0 5 18h4v3a1 1 0 1 0 2 0v-3h2v3a1 1 0 1 0 2 0v-3h4a1 1 0 0 0 .707-1.707L17 13.5V7c0-2.757-2.243-5-5-5z" />
             </svg>
-            <kbd className="hidden sm:inline bg-amber-800 dark:bg-amber-700 px-1.5 py-0.5 rounded text-[10px] font-mono">
+            <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
               ⌘D
             </kbd>
           </button>
