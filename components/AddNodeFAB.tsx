@@ -52,7 +52,8 @@ export function AddNodeFAB() {
 
   return (
     <>
-      <div ref={wrapRef} className="fixed bottom-6 right-3 z-30">
+      {/* bottom-24 clears the docked composer bar (#3) at the viewport foot. */}
+      <div ref={wrapRef} className="fixed bottom-24 right-3 z-30">
         {menuOpen && (
           <div className="absolute bottom-14 right-0 w-56 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-lg shadow-xl py-1 text-sm">
             <MenuItem

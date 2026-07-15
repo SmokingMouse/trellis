@@ -128,8 +128,10 @@ export type ViewMode = "canvas" | "linear";
 
 type ViewState = {
   activeNodeId: string | null;
-  fullScreen: boolean;
   viewMode?: ViewMode;
+  // Legacy (pre linear-unification): the fullscreen card reader flag. Read
+  // once for migration (true → viewMode "linear"), never written anymore.
+  fullScreen?: boolean;
 };
 
 function isViewMode(value: unknown): value is ViewMode {
@@ -150,8 +152,8 @@ function loadViewState(sessionId: string): ViewState | null {
     return {
       activeNodeId:
         typeof parsed.activeNodeId === "string" ? parsed.activeNodeId : null,
-      fullScreen: Boolean(parsed.fullScreen),
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : undefined,
+      fullScreen: Boolean(parsed.fullScreen),
     };
   } catch {
     return null;
@@ -289,13 +291,15 @@ type State = {
   // 续期 LIVE_TTL_MS；停写后自动褪去。给侧栏一个 remote-control 式的「● live」脉冲。
   liveSessionIds: Set<string>;
   markSessionLive: (sessionId: string) => void;
-  // Layer 3: when true, render NodeFullView in place of canvas. Mobile
-  // defaults this to true after hydrate; desktop opts in via the expand
-  // button on a canvas card.
-  fullScreen: boolean;
-  // Project sessions default to the linear thread reader; chat/workspace
-  // always stay on the existing canvas/fullscreen path.
+  // #7: the two surfaces. "linear" = the unified reading/chat thread (all
+  // modes; replaced the old NodeFullView fullscreen reader), "canvas" = the
+  // tree structure view. Project sessions default to linear; chat/workspace
+  // default to canvas on desktop, linear on mobile (page effect).
   viewMode: ViewMode;
+  // #5: stream failures that happen before the server creates a node (fetch
+  // refused / non-2xx). There's no node to attach the error to, so it
+  // surfaces through this global slot → StreamAlertToast. Auto-cleared.
+  streamAlert: string | null;
   // Latest progress message per streaming reference node. Set as the
   // claude fetcher emits SSE `progress` events; cleared when the node
   // transitions to status=done. Transient — never persisted.
@@ -428,8 +432,8 @@ type Actions = {
   setDraftWorkspacePath: (path: string | null) => void;
   setDraftSystemPrompt: (prompt: string | null) => void;
   setSendKey: (key: SendKey) => void;
-  setFullScreen: (v: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
+  setStreamAlert: (message: string | null) => void;
   // Stream a new root question.
   // - default (no opts): creates a brand-new session + root node.
   // - attachToCurrentSession=true: adds a parallel root to the current session
@@ -627,8 +631,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       return { liveSessionIds: next };
     });
   },
-  fullScreen: false,
   viewMode: "canvas",
+  streamAlert: null,
   fetchProgress: {},
   pendingScrollAnchor: null,
   doneToasts: [],
@@ -924,33 +928,26 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set({ activeNodeId: nodeId });
   },
 
-  setFullScreen: (v) => {
-    if (v) {
-      set({ fullScreen: true });
+  setViewMode: (mode) => {
+    if (mode === "canvas") {
+      // Returning to canvas: pan to the most-recently-edited node so the
+      // user lands on the freshest work, not whatever the previous
+      // viewport was. Falls back to whatever the user was reading if we
+      // have no edit record yet (e.g. straight after a page reload with
+      // no nodes touched since).
+      const { lastEditedNodeId, nodes, activeNodeId } = get();
+      const focus =
+        lastEditedNodeId && nodes[lastEditedNodeId]
+          ? lastEditedNodeId
+          : activeNodeId;
+      if (focus) get().expandAncestors(focus);
+      set({ viewMode: "canvas", activeNodeId: focus });
       return;
     }
-    // Returning to canvas: pan to the most-recently-edited node so the
-    // user lands on the freshest work, not whatever the previous
-    // viewport was. Falls back to whatever the user was reading if we
-    // have no edit record yet (e.g. straight after a page reload with
-    // no nodes touched since).
-    const { lastEditedNodeId, nodes, activeNodeId } = get();
-    const focus =
-      lastEditedNodeId && nodes[lastEditedNodeId]
-        ? lastEditedNodeId
-        : activeNodeId;
-    if (focus) get().expandAncestors(focus);
-    set({ fullScreen: false, activeNodeId: focus });
+    set({ viewMode: mode });
   },
 
-  setViewMode: (mode) => {
-    const session = get().session;
-    if (session?.mode !== "project") {
-      set({ viewMode: "canvas" });
-      return;
-    }
-    set({ viewMode: mode, fullScreen: false });
-  },
+  setStreamAlert: (message) => set({ streamAlert: message }),
 
   setProvider: (provider) => {
     set({ provider });
@@ -1071,6 +1068,19 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             : {}),
         };
     const attachments = opts?.attachments;
+    // #6: attaching to an existing session renders inside a live view →
+    // optimistic placeholder card. Brand-new sessions stay on the composer
+    // screen until `created` (QuestionInput owns that busy state).
+    const optimisticId = sessionId
+      ? insertOptimisticNode(set, get, {
+          sessionId,
+          parentId: null,
+          question,
+          anchor: null,
+          attachments,
+          focus: true,
+        })
+      : null;
     const controller = new AbortController();
     try {
       await runStream(
@@ -1083,17 +1093,27 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...modeFields,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
-        handleStreamEvent(set, get, { controller }),
+        handleStreamEvent(set, get, { controller, optimisticId }),
         controller.signal,
       );
     } finally {
       releaseStreamController(controller);
+      // Safety net: the stream ended without `created` ever replacing the
+      // placeholder (SSE dropped pre-created). Remove it + surface why.
+      if (optimisticId) {
+        discardOptimisticNode(
+          set,
+          get,
+          optimisticId,
+          "连接中断：问题可能没有发出，请重试",
+        );
+      }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
 
   streamBranch: async (parentId, question, anchor, opts) => {
-    const { provider } = get();
+    const { provider, session } = get();
     // For selection-anchored branches (anchor !== null), keep the user on the
     // parent so they can keep reading; the new child streams in the
     // background and is reachable via the inline <mark>. For plain
@@ -1101,6 +1121,18 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // child so the user sees the response.
     const focusNew = anchor === null;
     const attachments = opts?.attachments;
+    // #6: optimistic placeholder — the card (question + "生成中" dots) pops
+    // the moment the user submits; `created` swaps in the server node.
+    const optimisticId = session
+      ? insertOptimisticNode(set, get, {
+          sessionId: session.id,
+          parentId,
+          question,
+          anchor,
+          attachments,
+          focus: focusNew,
+        })
+      : null;
     const controller = new AbortController();
     try {
       await runStream(
@@ -1114,11 +1146,19 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           chatEnhanced: get().chatEnhanced,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
-        handleStreamEvent(set, get, { focusNew, controller }),
+        handleStreamEvent(set, get, { focusNew, controller, optimisticId }),
         controller.signal,
       );
     } finally {
       releaseStreamController(controller);
+      if (optimisticId) {
+        discardOptimisticNode(
+          set,
+          get,
+          optimisticId,
+          "连接中断：问题可能没有发出，请重试",
+        );
+      }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
@@ -1172,6 +1212,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   abortStream: (nodeId) => {
+    // #6: optimistic placeholder — no server run exists yet, nothing to
+    // abort. The stop affordances disable themselves in this window; this
+    // guard keeps stray calls from posting to a nonexistent node.
+    if (isOptimisticNodeId(nodeId)) return;
     // Stage 17: the SSE reader's local AbortController no longer kills
     // the spawn — it only unsubscribes us from the bus. To actually
     // stop the run we POST /api/chat/[id]/abort, which calls
@@ -1212,6 +1256,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const { nodes } = get();
     for (const n of Object.values(nodes)) {
       if (n.status !== "streaming") continue;
+      // Optimistic placeholders have no server row to reconnect to.
+      if (isOptimisticNodeId(n.id)) continue;
       if (RECONNECT_HANDLES.has(n.id)) continue;
       // A live POST /api/chat reader is still consuming the same server
       // run-bus we'd attach to. Opening a second SSE here would make every
@@ -1278,7 +1324,6 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         if (session) {
           next.session = session;
           next.viewMode = defaultViewModeForSession(session);
-          if (next.viewMode === "linear") next.fullScreen = false;
         } else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
         return next;
       });
@@ -1423,7 +1468,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         noteId,
       },
       activeNodeId: note.sourceNodeId,
-      fullScreen: true,
+      viewMode: "linear",
       notesOpen: false,
     });
   },
@@ -1449,7 +1494,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     get().expandAncestors(nodeId);
     set({
       activeNodeId: nodeId,
-      fullScreen: true,
+      viewMode: "linear",
       pendingScrollAnchor: { nodeId, kind: "search", matchText, matchKind },
     });
   },
@@ -1566,7 +1611,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       nextActive = target.parentId ?? null;
     }
     // Drop lastEditedNodeId if it sits inside the cascade — otherwise
-    // setFullScreen(false) would later try to pan to a node that no
+    // setViewMode("canvas") would later try to pan to a node that no
     // longer exists. Fall back to the deleted subtree's parent if
     // possible so the user still lands near where the edit happened.
     const prevLastEdited = state.lastEditedNodeId;
@@ -1777,6 +1822,86 @@ type Setter = (
 
 type Getter = () => State & Actions;
 
+// #6: optimistic placeholder nodes. Inserted locally the instant the user
+// submits (so the card + question render with zero server round-trip), then
+// swapped for the server row when `created` arrives. The id prefix lets UI
+// spots that need a real server row (abort, retry) detect the pre-created
+// window.
+const OPTIMISTIC_PREFIX = "optimistic-";
+
+export function isOptimisticNodeId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_PREFIX);
+}
+
+function insertOptimisticNode(
+  set: Setter,
+  get: Getter,
+  args: {
+    sessionId: string;
+    parentId: string | null;
+    question: string;
+    anchor: ParentAnchor | null;
+    attachments?: NodeAttachment[];
+    focus: boolean;
+  },
+): string {
+  const id = `${OPTIMISTIC_PREFIX}${crypto.randomUUID()}`;
+  const siblings = Object.values(get().nodes).filter(
+    (n) => n.parentId === args.parentId,
+  );
+  const node: ChatNode = {
+    id,
+    sessionId: args.sessionId,
+    parentId: args.parentId,
+    parentAnchor: args.anchor,
+    question: args.question,
+    response: "",
+    status: "streaming",
+    errorMessage: null,
+    position: { x: 0, y: 0 },
+    tokenCount: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+    createdAt: Date.now(),
+    siblingIndex: siblings.length,
+    topicLabel: null,
+    kind: "qa",
+    reference: null,
+    readAt: null,
+    attachments: args.attachments ?? [],
+    toolCalls: [],
+    pendingInteraction: null,
+  };
+  set((s) => ({
+    nodes: { ...s.nodes, [id]: node },
+    lastEditedNodeId: id,
+    ...(args.focus ? { activeNodeId: id } : {}),
+  }));
+  if (args.parentId) get().expandAncestors(id);
+  return id;
+}
+
+// Remove a placeholder that was never replaced by a server row. No-op when
+// `created` already swapped it out. Optionally surfaces a streamAlert (pass
+// null for silent removal, e.g. user-initiated abort).
+function discardOptimisticNode(
+  set: Setter,
+  get: Getter,
+  id: string,
+  alertMessage: string | null,
+): void {
+  const s = get();
+  const temp = s.nodes[id];
+  if (!temp) return;
+  const nodes = { ...s.nodes };
+  delete nodes[id];
+  set({
+    nodes,
+    activeNodeId: s.activeNodeId === id ? temp.parentId : s.activeNodeId,
+    lastEditedNodeId:
+      s.lastEditedNodeId === id ? temp.parentId : s.lastEditedNodeId,
+    ...(alertMessage ? { streamAlert: alertMessage } : {}),
+  });
+}
+
 // Wave 4: remove a session from every tab-tracking collection (pinned /
 // preview / unread) without touching the active canvas. Used when a
 // non-active session is deleted/archived out from under the workbench.
@@ -1841,18 +1966,16 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
   // overview / root node. Falls back to no focus (canvas) when there's no
   // record or the recorded node has since been deleted.
   const savedView = loadViewState(session.id);
+  // #7: viewMode is now per-session for every mode. Legacy records that only
+  // carried fullScreen=true (the retired NodeFullView reader) migrate to the
+  // linear thread — that's its successor surface.
   const restoredViewMode =
-    session.mode === "project"
-      ? savedView?.viewMode ?? defaultViewModeForSession(session)
-      : "canvas";
+    savedView?.viewMode ??
+    (savedView?.fullScreen ? "linear" : defaultViewModeForSession(session));
   let restoredActive: string | null = null;
   if (savedView?.activeNodeId && map[savedView.activeNodeId]) {
     restoredActive = savedView.activeNodeId;
   }
-  const restoredFull =
-    restoredViewMode === "canvas" &&
-    Boolean(savedView?.fullScreen) &&
-    restoredActive !== null;
   // Make sure the restored node is actually visible in the canvas by
   // un-collapsing any of its ancestors that were persisted collapsed.
   if (restoredActive && collapsed.size > 0) {
@@ -1874,7 +1997,6 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     session,
     nodes: map,
     activeNodeId: restoredActive,
-    fullScreen: restoredFull,
     viewMode: restoredViewMode,
     notes: notes ?? [],
     collapsedNodeIds: collapsed,
@@ -2009,6 +2131,10 @@ function handleStreamEvent(
     // currentNodeId so subsequent delta/done/error events bind to it
     // without waiting for a `created` payload that never arrives.
     seedNodeId?: string;
+    // #6: id of the locally-inserted optimistic placeholder. `created`
+    // removes it (the server node takes its place); a pre-created error
+    // removes it too and routes the message to the global streamAlert.
+    optimisticId?: string | null;
   } = {},
 ) {
   const focusNew = opts.focusNew ?? true;
@@ -2036,15 +2162,19 @@ function handleStreamEvent(
       }
       const node = apiNodeToChatNode(event.node);
       set((s) => {
+        const nodes = { ...s.nodes, [node.id]: node };
+        // #6: the server row replaces the optimistic placeholder.
+        if (opts.optimisticId) delete nodes[opts.optimisticId];
         const next: Partial<State> = {
-          nodes: { ...s.nodes, [node.id]: node },
+          nodes,
           lastEditedNodeId: node.id,
         };
-        if (focusNew) next.activeNodeId = node.id;
+        if (focusNew || s.activeNodeId === opts.optimisticId) {
+          next.activeNodeId = node.id;
+        }
         if (event.session) {
           next.session = event.session;
           next.viewMode = defaultViewModeForSession(event.session);
-          if (next.viewMode === "linear") next.fullScreen = false;
           // Wave 4: a brand-new session enters the workbench as the preview
           // tab (transient) unless the user had already pinned this id.
           if (!s.pinnedSessionIds.includes(event.session.id)) {
@@ -2102,26 +2232,39 @@ function handleStreamEvent(
           lastEditedNodeId: id,
         };
       });
-    } else if (event.type === "error" && currentNodeId) {
-      const id = currentNodeId;
-      const fullText = getStreamPending(id);
-      clearStreamPending(id);
-      cleanupController(id);
-      set((s) => {
-        const n = s.nodes[id];
-        if (!n) return s;
-        return {
-          nodes: {
-            ...s.nodes,
-            [id]: {
-              ...n,
-              response: n.response + fullText,
-              status: "error",
-              errorMessage: event.message,
+    } else if (event.type === "error") {
+      if (currentNodeId) {
+        const id = currentNodeId;
+        const fullText = getStreamPending(id);
+        clearStreamPending(id);
+        cleanupController(id);
+        set((s) => {
+          const n = s.nodes[id];
+          if (!n) return s;
+          return {
+            nodes: {
+              ...s.nodes,
+              [id]: {
+                ...n,
+                response: n.response + fullText,
+                status: "error",
+                errorMessage: event.message,
+              },
             },
-          },
-        };
-      });
+          };
+        });
+      } else {
+        // #5: pre-`created` failure (fetch refused / HTTP non-2xx / server
+        // died before creating the row). There's no node to carry the error
+        // — drop the optimistic placeholder (if any) and surface globally so
+        // the composer isn't left looking dead.
+        if (opts.optimisticId) {
+          discardOptimisticNode(set, get, opts.optimisticId, null);
+        }
+        if (event.message !== "aborted") {
+          set({ streamAlert: `发送失败：${event.message}` });
+        }
+      }
     } else if (event.type === "topic_label") {
       // Patch the label onto the (already-done) node. Arrives ≤8s after done.
       const id = event.nodeId;
@@ -2302,7 +2445,6 @@ function handleRefStreamEvent(
       if (event.session) {
         next.session = event.session;
         next.viewMode = defaultViewModeForSession(event.session);
-        if (next.viewMode === "linear") next.fullScreen = false;
       } else if (s.session) next.session = { ...s.session, updatedAt: Date.now() };
       return next;
     });
@@ -2467,11 +2609,12 @@ async function runStream(
 
 // Persist the active session's last-viewed position (focused node + view
 // layer) on every change, so reopening / switching back restores it. A single
-// module-level subscription spares the many activeNodeId / fullScreen mutation
-// sites (focus, jump, search, keyboard nav, fullscreen toggle…) from each
+// module-level subscription spares the many activeNodeId / viewMode mutation
+// sites (focus, jump, search, keyboard nav, view toggle…) from each
 // having to remember to write. loadSessionInternal seeds the restored values
 // in one atomic set(), so the first fire after a switch just re-persists the
-// same state (idempotent).
+// same state (idempotent). Optimistic placeholders never persist as the
+// last-viewed node — they don't exist after the swap/discard.
 if (typeof window !== "undefined") {
   useSessionStore.subscribe((state, prev) => {
     const sid = state.session?.id;
@@ -2479,14 +2622,15 @@ if (typeof window !== "undefined") {
     if (
       state.session?.id === prev.session?.id &&
       state.activeNodeId === prev.activeNodeId &&
-      state.fullScreen === prev.fullScreen &&
       state.viewMode === prev.viewMode
     ) {
       return;
     }
     persistViewState(sid, {
-      activeNodeId: state.activeNodeId,
-      fullScreen: state.fullScreen,
+      activeNodeId:
+        state.activeNodeId && isOptimisticNodeId(state.activeNodeId)
+          ? null
+          : state.activeNodeId,
       viewMode: state.viewMode,
     });
   });

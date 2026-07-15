@@ -63,7 +63,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   const isCompact = useStore((s) => s.transform[2] < COMPACT_ZOOM_THRESHOLD);
 
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setFullScreen = useSessionStore((s) => s.setFullScreen);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
   const retryNode = useSessionStore((s) => s.retryNode);
   const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
   const showCollapseChip = data.descendantCount > 0;
@@ -79,10 +79,12 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
     // activeNodeId to the parent's id. Defer to win the race.
     window.setTimeout(() => setActiveNode(childId), 0);
   };
-  const goFullScreen = (e: React.MouseEvent) => {
+  // #7: reading happens in the linear thread anchored at this node (the old
+  // fullscreen single-card reader is retired).
+  const goRead = (e: React.MouseEvent) => {
     e.stopPropagation();
     setActiveNode(n.id);
-    setFullScreen(true);
+    setViewMode("linear");
   };
   // While streaming, deltas land on the stream-bus (not in React state).
   // We attach a textContent-only sink to a <pre> ref so each token is one
@@ -144,7 +146,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               ? "ring-amber-300/80 dark:ring-amber-700/60"
               : "ring-stone-200/80 dark:ring-stone-800 hover:ring-stone-300 dark:hover:ring-stone-700"
         }`}
-        onClick={goFullScreen}
+        onClick={goRead}
         title={n.question}
       >
         <Handle type="target" position={Position.Top} />
@@ -284,9 +286,9 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           )}
         </div>
         <button
-          onClick={goFullScreen}
-          title="全屏阅读"
-          aria-label="全屏阅读"
+          onClick={goRead}
+          title="线性阅读"
+          aria-label="线性阅读"
           className="shrink-0 mt-0.5 px-2 h-7 rounded-md bg-white dark:bg-stone-900 border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-900 hover:text-white hover:border-stone-900 dark:hover:bg-stone-100 dark:hover:text-stone-900 dark:hover:border-stone-100 active:scale-95 flex items-center gap-1 text-[11px] font-medium transition-colors shadow-sm"
         >
           <svg
@@ -301,7 +303,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           >
             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
           </svg>
-          全屏
+          阅读
         </button>
       </div>
 

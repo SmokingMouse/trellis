@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-07-14 · 统一阅读面：NodeFullView 退役，线性 thread 成为唯一「阅读/对话面」（issue #7）
+
+**Decision**：三种界面收敛为两个正交面——**画布 = 看结构/分叉操作，线性 thread = 阅读/续聊**，
+所有 mode（chat/workspace/project）通用、可自由切换（顺带关 issue #4/#2）。NodeFullView（全屏
+单卡阅读器）与其专属 NodeTreeOverlay 删除；其全部能力迁入共享 `TurnCard`（可编辑问题 / marks
+锚点注入+跳转 / 再答一版 / 卡片图 / CLI resume / InteractionForm / GeneratedFilesBar）+
+LinearThreadView（⌘K 选区分叉复用 BranchPopover、B 键回父锚点、1s 标记已读、sticky composer）。
+store 的 `fullScreen` 状态整体移除，所有入口（卡片点击/DoneToast/搜索跳转/笔记跳转/移动端）
+改「线性 + 锚定节点」；持久化 ViewState 兼容迁移（旧 fullScreen=true → viewMode linear）。
+**Why**：卡片内阅读 = 线性 thread 锚定单节点的特例；两套 ResponseBody/QuestionBlock/流式管线
+已在重复维护，#4 照旧做会出第三份。删一个面，能力集中一处。
+**Alternatives**：① 保留 NodeFullView、只抽共享组件 —— 拒绝，双入口双状态（fullScreen ×
+viewMode）继续组合爆炸；② chat 模式单独做第三套线性 —— 拒绝，就是重复的来源。
+**配套**：#3 = 画布加 fixed DockedComposer（对 active 节点续聊，不随 dagre 重排跳动）；
+#6 = streamBranch/streamRoot(attach) 乐观占位节点（`optimistic-*`，created 到达换真 id，
+created 前错误回收占位 + 全局 streamAlert toast）+ 线性视图流式锁底（上滚暂停/回底恢复）；
+#5 = QuestionInput busy finally 复位 + created 前错误经 streamAlert 出口（原先被静默丢弃）。
+
+## 2026-07-14 · Session 锁系（claude↔codex）+ codex 系内多模型
+
+**Decision**：「系（ProviderFamily）」升为一等产品语义——session 活跃期间禁止 claude↔codex
+跨系切换（ModelPicker 置灰 +「跨系 · 需新会话」、`/model` 命令同规则拦截），系内（原生
+claude/deepseek/ark 互切、codex:<a>↔codex:<b>）自由；mock 调试豁免。同时 codex 从单一 id
+扩成 `codex:<slug>` 复合 id（清单读 `~/.codex/models_cache.json`，`visibility==='list'`），
+经 CodexBackend 既有 `-m` 透传选模型；裸 `codex` 保留（兼容存量 session，默认 gpt-5.5）。
+**Why**：resume id 按 family 分列存储，跨系切换必然静默断上下文——与其靠文档警告，不如从
+入口封死（选系只发生在新建会话时）。锁 = 派生语义（active session 的下一轮 provider 即
+store.provider），零 schema 改动。
+**Alternatives**：① 允许跨系但弹警告 —— 拒绝，用户会忘，断上下文不可逆。② session 表加
+family 列硬锁 —— 拒绝，session.model 已锁具体模型，family 可派生，加列冗余。③ codex 模型
+静态清单写死代码 —— 拒绝，models_cache.json 是 codex CLI 自维护的活清单，免手工同步。
+**遗留**：codex native resume / 树分叉 parity（P0/P1 已排期见 README），能力矩阵抽象未做
+（下一波）；commands.ts 的跨系闸当前是纵深防御（QuestionInput 仅首屏渲染，session 内实际
+执法点只有 ModelPicker）。
+
 ## 2026-06-16 · CLI 分支对齐 P2 简化：trellis 发起的分叉统一构造前缀 jsonl
 
 **Decision**：P2 不再分 tip→`--fork-session` / 非 tip→前缀 jsonl 两路；所有 trellis 发起的
