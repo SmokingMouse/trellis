@@ -205,6 +205,324 @@
   --mark-note-pulse-ring: #10b981;
 }
 
+/* ───────────────── 主题皮肤（palette）覆盖块 ─────────────────
+   一套主题 = [data-theme=X]（light）+ [data-theme=X].dark 两块；
+   未覆盖的变量回落默认主题。⚠️ 级联规则：light 块设过的变量必须在
+   .dark 块全部重设——[data-theme=X] 声明在 .dark 之后、同优先级，
+   否则 light 值会在暗色下胜出。注册表见 lib/themes.ts。 */
+
+/* paper —— 纸感暖色：米白纸底 + 墨褐文字 + 青墨印章 accent */
+[data-theme="paper"] {
+  --surface-canvas: #f6f1e7;
+  --surface: #fdfaf3;
+  --surface-raised: #fffdf8;
+  --surface-muted: #efe7d8;
+  --scrim: #2c241b;
+  --line: #e4dbc8;
+  --line-strong: #d3c7ae;
+  --line-faint: #efe7d8;
+  --ink: #3d3226;
+  --ink-strong: #2c241b;
+  --ink-muted: #6b5d4a;
+  --ink-faint: #a2947e;
+  --ink-inverse: #fdfaf3;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-ink: #134e4a;
+  --accent-muted: #e3efe9;
+  --accent-line: #afd2c6;
+  --accent-vivid: #14b8a6;
+  --edge: #cfe0d7;
+  --edge-active: #2dd4bf;
+  --code-bg: #2c241b;
+  --code-bar-bg: #3d332a;
+  --code-bar-line: #171310;
+  --code-inline-ink: #a3512b;
+}
+[data-theme="paper"].dark {
+  --surface-canvas: #171310;
+  --surface: #201a15;
+  --surface-raised: #2a221b;
+  --surface-muted: #2a221b;
+  --scrim: #2c241b;
+  --line: #2a221b;
+  --line-strong: #3d332a;
+  --line-faint: #201a15;
+  --ink: #e6ddd0;
+  --ink-strong: #f3ede3;
+  --ink-muted: #b3a48e;
+  --ink-faint: #857762;
+  --ink-inverse: #201a15;
+  --accent: #14b8a6;
+  --accent-strong: #2dd4bf;
+  --accent-ink: #99f6e4;
+  --accent-muted: #113b36;
+  --accent-line: #134e4a;
+  --accent-vivid: #2dd4bf;
+  --edge: #1f4d45;
+  --edge-active: #2dd4bf;
+  --code-bg: #12100c;
+  --code-bar-bg: #201a15;
+  --code-bar-line: #000;
+  --code-inline-ink: #e8b596;
+}
+
+/* terminal —— 终端感：石墨蓝黑 + 荧光青 accent，代码块与底融合 */
+[data-theme="terminal"] {
+  --surface-canvas: #f2f5f7;
+  --surface: #fbfdfe;
+  --surface-raised: #ffffff;
+  --surface-muted: #e8edf1;
+  --scrim: #0b0e11;
+  --line: #dbe3e9;
+  --line-strong: #c3cfd9;
+  --line-faint: #e8edf1;
+  --ink: #17212b;
+  --ink-strong: #0d141b;
+  --ink-muted: #4d6070;
+  --ink-faint: #8fa1b0;
+  --ink-inverse: #ffffff;
+  --accent: #0891b2;
+  --accent-strong: #0e7490;
+  --accent-ink: #164e63;
+  --accent-muted: #e0f2f7;
+  --accent-line: #a5dbe8;
+  --accent-vivid: #06b6d4;
+  --edge: #b9e2ec;
+  --edge-active: #22d3ee;
+  --code-bg: #17212b;
+  --code-bar-bg: #223040;
+  --code-bar-line: #0b0e11;
+  --code-inline-ink: #0e7490;
+}
+[data-theme="terminal"].dark {
+  --surface-canvas: #0b0e11;
+  --surface: #11151a;
+  --surface-raised: #171d24;
+  --surface-muted: #171d24;
+  --scrim: #0b0e11;
+  --line: #1d242c;
+  --line-strong: #2d3843;
+  --line-faint: #11151a;
+  --ink: #d3dae3;
+  --ink-strong: #eef2f6;
+  --ink-muted: #8b98a5;
+  --ink-faint: #5c6873;
+  --ink-inverse: #0b0e11;
+  --accent: #22d3ee;
+  --accent-strong: #67e8f9;
+  --accent-ink: #a5f3fc;
+  --accent-muted: #0e2a33;
+  --accent-line: #155e75;
+  --accent-vivid: #22d3ee;
+  --edge: #164e63;
+  --edge-active: #22d3ee;
+  --code-bg: #0b0e11;
+  --code-bar-bg: #11151a;
+  --code-bar-line: #000;
+  --code-inline-ink: #67e8f9;
+}
+
+/* morandi —— 莫兰迪柔和：灰绿中性 + 雾蓝 accent，状态色全线降饱和 */
+[data-theme="morandi"] {
+  --surface-canvas: #eef0ed;
+  --surface: #f7f8f6;
+  --surface-raised: #fcfcfb;
+  --surface-muted: #e4e8e3;
+  --scrim: #23282a;
+  --line: #d8ddd6;
+  --line-strong: #c2cabf;
+  --line-faint: #e4e8e3;
+  --ink: #333a36;
+  --ink-strong: #24292b;
+  --ink-muted: #66716a;
+  --ink-faint: #9aa59d;
+  --ink-inverse: #f7f8f6;
+  --accent: #6e8ca0;
+  --accent-strong: #5c7789;
+  --accent-ink: #3d505c;
+  --accent-muted: #e3eaee;
+  --accent-line: #bccdd6;
+  --accent-vivid: #85a3b5;
+  --edge: #ccd8de;
+  --edge-active: #85a3b5;
+  --warn: #b98e4e;
+  --warn-ink: #6b5426;
+  --warn-muted: #f3ecdd;
+  --warn-line: #dcc9a3;
+  --danger: #b06561;
+  --danger-strong: #9a4f4c;
+  --danger-ink: #74403d;
+  --danger-muted: #f2e4e3;
+  --danger-line: #d9b6b3;
+  --positive: #7d9d84;
+  --positive-ink: #46604c;
+  --positive-muted: #e6ede7;
+  --positive-line: #bad1bf;
+  --unread: #6f9b8e;
+  --unread-ink: #3f5c54;
+  --unread-muted: #e2edea;
+  --unread-line: #b8d2cb;
+  --fork: #b98e4e;
+  --fork-ink: #6b5426;
+  --fork-muted: #f3ecdd;
+  --fork-line: #dcc9a3;
+  --mode-workspace: #b98e4e;
+  --mode-workspace-ink: #6b5426;
+  --mode-workspace-muted: #f3ecdd;
+  --mode-workspace-line: #dcc9a3;
+  --mode-workspace-line-strong: #c9a86a;
+  --mode-project: #b06561;
+  --mode-project-ink: #74403d;
+  --mode-project-muted: #f2e4e3;
+  --mode-project-line: #d9b6b3;
+  --mode-project-line-strong: #c68985;
+}
+[data-theme="morandi"].dark {
+  --surface-canvas: #1d211f;
+  --surface: #262b28;
+  --surface-raised: #2f3531;
+  --surface-muted: #2f3531;
+  --scrim: #23282a;
+  --line: #2f3531;
+  --line-strong: #3f4741;
+  --line-faint: #262b28;
+  --ink: #d5dad4;
+  --ink-strong: #e8ebe6;
+  --ink-muted: #9ca69e;
+  --ink-faint: #6d776f;
+  --ink-inverse: #262b28;
+  --accent: #8fb0c4;
+  --accent-strong: #a9c4d4;
+  --accent-ink: #c6d9e4;
+  --accent-muted: #263540;
+  --accent-line: #3d5566;
+  --accent-vivid: #8fb0c4;
+  --edge: #3a5060;
+  --edge-active: #8fb0c4;
+  --warn: #cbb27a;
+  --warn-ink: #e8dcbc;
+  --warn-muted: color-mix(in oklab, #4a3d22 45%, transparent);
+  --warn-line: #6b5c36;
+  --danger: #c98984;
+  --danger-strong: #d8a19d;
+  --danger-ink: #ecc9c6;
+  --danger-muted: color-mix(in oklab, #4a2b29 45%, transparent);
+  --danger-line: #6e4441;
+  --positive: #93b39a;
+  --positive-ink: #c8dbcc;
+  --positive-muted: color-mix(in oklab, #2b4032 45%, transparent);
+  --positive-line: #486353;
+  --unread: #8ab3a6;
+  --unread-ink: #c2dcd4;
+  --unread-muted: color-mix(in oklab, #27423b 45%, transparent);
+  --unread-line: #40655b;
+  --fork: #cbb27a;
+  --fork-ink: #e8dcbc;
+  --fork-muted: color-mix(in oklab, #4a3d22 45%, transparent);
+  --fork-line: #6b5c36;
+  --mode-workspace: #cbb27a;
+  --mode-workspace-ink: #e8dcbc;
+  --mode-workspace-muted: color-mix(in oklab, #4a3d22 45%, transparent);
+  --mode-workspace-line: #6b5c36;
+  --mode-workspace-line-strong: #8a7748;
+  --mode-project: #c98984;
+  --mode-project-ink: #ecc9c6;
+  --mode-project-muted: color-mix(in oklab, #4a2b29 45%, transparent);
+  --mode-project-line: #6e4441;
+  --mode-project-line-strong: #8f5a56;
+}
+
+/* contrast —— 高对比：纯白/纯黑底 + 强边框 + AAA 级文字对比 */
+[data-theme="contrast"] {
+  --surface-canvas: #ffffff;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-muted: #f0f0f0;
+  --scrim: #000000;
+  --line: #767676;
+  --line-strong: #1a1a1a;
+  --line-faint: #c8c8c8;
+  --ink: #000000;
+  --ink-strong: #000000;
+  --ink-muted: #2e2e2e;
+  --ink-faint: #575757;
+  --ink-inverse: #ffffff;
+  --accent: #1d24cc;
+  --accent-strong: #151a99;
+  --accent-ink: #10147a;
+  --accent-muted: #e8e9ff;
+  --accent-line: #1d24cc;
+  --accent-vivid: #3a41f0;
+  --edge: #767676;
+  --edge-active: #1d24cc;
+  --warn: #8a5a00;
+  --warn-ink: #5c3c00;
+  --warn-muted: #fff2d4;
+  --warn-line: #8a5a00;
+  --danger: #ba0c2f;
+  --danger-strong: #8f0723;
+  --danger-ink: #7a0a20;
+  --danger-muted: #ffe3e9;
+  --danger-line: #ba0c2f;
+  --positive: #006e3c;
+  --positive-ink: #00552e;
+  --positive-muted: #ddf5e7;
+  --positive-line: #006e3c;
+  --unread: #006e3c;
+  --unread-ink: #00552e;
+  --unread-muted: #ddf5e7;
+  --unread-line: #006e3c;
+  --fork: #8a5a00;
+  --fork-ink: #5c3c00;
+  --fork-muted: #fff2d4;
+  --fork-line: #8a5a00;
+}
+[data-theme="contrast"].dark {
+  --surface-canvas: #000000;
+  --surface: #000000;
+  --surface-raised: #121212;
+  --surface-muted: #1c1c1c;
+  --scrim: #000000;
+  --line: #8a8a8a;
+  --line-strong: #e0e0e0;
+  --line-faint: #3a3a3a;
+  --ink: #ffffff;
+  --ink-strong: #ffffff;
+  --ink-muted: #d6d6d6;
+  --ink-faint: #a8a8a8;
+  --ink-inverse: #000000;
+  --accent: #8f95ff;
+  --accent-strong: #b3b7ff;
+  --accent-ink: #ced0ff;
+  --accent-muted: #14164d;
+  --accent-line: #8f95ff;
+  --accent-vivid: #8f95ff;
+  --edge: #8a8a8a;
+  --edge-active: #8f95ff;
+  --warn: #ffd23e;
+  --warn-ink: #ffe58a;
+  --warn-muted: #3d2f00;
+  --warn-line: #ffd23e;
+  --danger: #ff7a94;
+  --danger-strong: #ffa3b5;
+  --danger-ink: #ffc2cd;
+  --danger-muted: #47000f;
+  --danger-line: #ff7a94;
+  --positive: #4ce08a;
+  --positive-ink: #a1f0c4;
+  --positive-muted: #00331a;
+  --positive-line: #4ce08a;
+  --unread: #4ce08a;
+  --unread-ink: #a1f0c4;
+  --unread-muted: #00331a;
+  --unread-line: #4ce08a;
+  --fork: #ffd23e;
+  --fork-ink: #ffe58a;
+  --fork-muted: #3d2f00;
+  --fork-line: #ffd23e;
+}
+
 /* Tailwind utility 注册。inline = 在使用处解析 var()，随 .dark /
    [data-theme] 级联（关键，见上）。 */
 @theme inline {

@@ -24,6 +24,26 @@ export const PALETTES: PaletteDef[] = [
     label: "默认",
     preview: ["#fafaf9", "#ffffff", "#4f46e5"],
   },
+  {
+    id: "paper",
+    label: "纸感",
+    preview: ["#f6f1e7", "#fdfaf3", "#0f766e"],
+  },
+  {
+    id: "terminal",
+    label: "终端",
+    preview: ["#0b0e11", "#11151a", "#22d3ee"],
+  },
+  {
+    id: "morandi",
+    label: "莫兰迪",
+    preview: ["#eef0ed", "#f7f8f6", "#6e8ca0"],
+  },
+  {
+    id: "contrast",
+    label: "高对比",
+    preview: ["#ffffff", "#f0f0f0", "#1d24cc"],
+  },
 ];
 
 export function isPaletteId(id: string): boolean {
