@@ -1,17 +1,16 @@
 @import "tailwindcss";
 @import "@xyflow/react/dist/style.css";
-@import "highlight.js/styles/github.css" layer(hljs-light);
-@import "highlight.js/styles/github-dark.css" layer(hljs-dark);
+@import "highlight.js/styles/github-dark.css" layer(hljs);
 
 /* Tailwind v4: enable class-based dark variant.
    <html class="dark"> activates `dark:` utilities. ThemeScript in
    layout.tsx sets it before paint to avoid FOUC. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Highlight.js: github.css and github-dark.css both target `.hljs`
-   wrapped in pre/code. Layer them so the dark variant can override. */
-@layer hljs-light, hljs-dark;
-:where(.dark) .hljs { /* re-export dark layer rules unconditionally */ }
+/* Highlight.js：只装 dark 一套 —— 「代码块恒暗」是设计决策（原来的
+   light 层因 layer 顺序恒被 dark 覆盖，本就是死代码，已删）。
+   要让某个主题用浅色代码块，覆盖 --code-* 变量并手写 ~20 行 hljs
+   token 色映射即可，不走双 stylesheet 条件加载。 */
 
 /* ───────────────────────── Design tokens ─────────────────────────
    双层结构：
@@ -96,9 +95,30 @@
   --mode-project-line: oklch(81% 0.117 11.638); /* rose-300 */
   --mode-project-line-strong: oklch(71.2% 0.194 13.428); /* rose-400 */
 
-  /* 兼容别名（W2 收编 html/body 后删除） */
-  --background: var(--surface-canvas);
-  --foreground: var(--ink);
+  /* ── CSS-only 变量（不注册 utility，globals 结构性样式专用） ──
+     accent-vivid：比 accent 亮半档的「光效」档——焦点环/流式光标/
+     run-bar/dots 共用（原值 indigo-500/400，与按钮填充的 600/500 分开） */
+  --accent-vivid: oklch(58.5% 0.233 277.117); /* indigo-500 */
+  --edge: oklch(87% 0.065 274.039); /* indigo-200，react-flow 连线 */
+  --edge-active: oklch(67.3% 0.182 276.935); /* indigo-400 */
+
+  /* 代码块（恒暗）*/
+  --code-bg: #1c1917;
+  --code-ink: #e7e5e4;
+  --code-bar-bg: #292524;
+  --code-bar-line: #0c0a09;
+  --code-inline-ink: #be185d; /* 行内 code 的强调色 */
+
+  /* 文内 mark：fork=分叉锚点(amber 系)，note=笔记/搜索(emerald 系) */
+  --mark-fork-bg: #fde68a;
+  --mark-fork-line: #fbbf24;
+  --mark-fork-hover-bg: #fde68a;
+  --mark-fork-pulse-bg: #fbbf24;
+  --mark-fork-pulse-ring: #f59e0b;
+  --mark-note-bg: #d1fae5;
+  --mark-note-line: #34d399;
+  --mark-note-pulse-bg: #6ee7b7;
+  --mark-note-pulse-ring: #10b981;
 }
 
 .dark {
@@ -161,6 +181,28 @@
   --mode-project-muted: color-mix(in oklab, oklch(27.1% 0.105 12.094) 40%, transparent); /* rose-950/40 */
   --mode-project-line: oklch(45.5% 0.188 13.697); /* rose-800 */
   --mode-project-line-strong: oklch(51.4% 0.222 16.935); /* rose-700 */
+
+  /* CSS-only 变量的 dark 档 */
+  --accent-vivid: oklch(67.3% 0.182 276.935); /* indigo-400 */
+  --edge: oklch(39.8% 0.195 277.366); /* indigo-800 */
+  --edge-active: oklch(67.3% 0.182 276.935); /* indigo-400 */
+
+  --code-bg: #0c0a09;
+  --code-bar-bg: #1c1917;
+  --code-bar-line: #000;
+  --code-inline-ink: #f9a8d4;
+
+  --mark-fork-bg: #78350f;
+  --mark-fork-line: #b45309;
+  --mark-fork-hover-bg: #92400e;
+  --mark-fork-ink: #fef3c7;
+  --mark-fork-pulse-bg: #b45309;
+  --mark-fork-pulse-ring: #d97706;
+  --mark-note-bg: #064e3b;
+  --mark-note-line: #047857;
+  --mark-note-ink: #d1fae5;
+  --mark-note-pulse-bg: #047857;
+  --mark-note-pulse-ring: #10b981;
 }
 
 /* Tailwind utility 注册。inline = 在使用处解析 var()，随 .dark /
@@ -257,25 +299,17 @@ html, body {
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
     "Helvetica Neue", "Segoe UI", sans-serif;
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--surface-canvas);
+  color: var(--ink);
   /* Prevent iOS rubber-banding on body */
   overscroll-behavior: none;
 }
 
-/* React Flow tweaks: lighter grid + softer edges */
+/* React Flow tweaks: lighter grid + softer edges.
+   （原先此处还有一条灰色 edge-path 规则，被下方 indigo 边线规则
+   同优先级后声明恒覆盖，属死代码，已删。） */
 .react-flow__background {
-  background: #fafaf9;
-}
-.dark .react-flow__background {
-  background: #0c0a09;
-}
-.react-flow__edge-path {
-  stroke: #a8a29e;
-  stroke-width: 2;
-}
-.dark .react-flow__edge-path {
-  stroke: #57534e;
+  background: var(--surface-canvas);
 }
 .react-flow__handle {
   opacity: 0;
@@ -296,16 +330,16 @@ html, body {
 
 /* React Flow's controls in dark mode (zoom +/-, fit, etc) */
 .dark .react-flow__controls {
-  background: #1c1917;
-  border-color: #292524;
+  background: var(--surface);
+  border-color: var(--line);
 }
 .dark .react-flow__controls-button {
-  background: #1c1917;
-  border-bottom-color: #292524;
-  color: #e7e5e4;
+  background: var(--surface);
+  border-bottom-color: var(--line);
+  color: var(--ink);
 }
 .dark .react-flow__controls-button:hover {
-  background: #292524;
+  background: var(--surface-muted);
 }
 .dark .react-flow__controls-button svg {
   fill: currentColor;
@@ -329,23 +363,18 @@ html, body {
 .md-body p { margin: 0.55em 0; line-height: 1.7; }
 .md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; }
 .md-body li { margin: 0.25em 0; }
-.md-body strong { color: #1c1917; font-weight: 600; }
-.dark .md-body strong { color: #f5f5f4; }
+.md-body strong { color: var(--ink-strong); font-weight: 600; }
 .md-body code:not(pre code) {
-  background: #f5f5f4;
-  color: #be185d;
+  background: var(--surface-muted);
+  color: var(--code-inline-ink);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.88em;
-  font-family: "JetBrains Mono", "Menlo", monospace;
-}
-.dark .md-body code:not(pre code) {
-  background: #292524;
-  color: #f9a8d4;
+  font-family: var(--font-mono);
 }
 .md-body pre {
-  background: #1c1917 !important;
-  color: #e7e5e4;
+  background: var(--code-bg) !important;
+  color: var(--code-ink);
   padding: 12px 14px;
   border-radius: 8px;
   overflow-x: auto;
@@ -354,14 +383,13 @@ html, body {
   line-height: 1.55;
 }
 .dark .md-body pre {
-  background: #0c0a09 !important;
-  border: 1px solid #292524;
+  border: 1px solid var(--line);
 }
 .md-body pre code {
   background: transparent !important;
   color: inherit;
   padding: 0;
-  font-family: "JetBrains Mono", "Menlo", monospace;
+  font-family: var(--font-mono);
 }
 /* Code block frame: language label + copy button bar above the <pre>.
    The wrapper owns the rounded corners so the bar + pre read as one unit
@@ -381,15 +409,11 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 4px 10px 4px 12px;
-  background: #292524;
-  color: #a8a29e;
+  background: var(--code-bar-bg);
+  color: #a8a29e; /* 恒暗代码块的内部灰阶，theme 无关 */
   font-size: 11px;
-  font-family: "JetBrains Mono", "Menlo", monospace;
-  border-bottom: 1px solid #0c0a09;
-}
-.dark .md-body .md-codeblock-bar {
-  background: #1c1917;
-  border-bottom-color: #000;
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--code-bar-line);
 }
 .md-body .md-codeblock-lang {
   letter-spacing: 0.03em;
@@ -412,12 +436,9 @@ html, body {
    :focus-visible, so this only shows during keyboard navigation — no visual
    noise for mouse users, clear affordance for keyboard users. */
 :focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--accent-vivid);
   outline-offset: 2px;
   border-radius: 3px;
-}
-.dark :focus-visible {
-  outline-color: #818cf8;
 }
 
 /* Canvas (ReactFlow) polish: transparent container so the gradient bg shows
@@ -426,42 +447,34 @@ html, body {
   background: transparent !important;
 }
 .react-flow__edge-path {
-  stroke: #c7d2fe;
+  stroke: var(--edge);
+  stroke-width: 2;
   transition: stroke 150ms;
-}
-.dark .react-flow__edge-path {
-  stroke: #3730a3;
 }
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
-  stroke: #818cf8;
+  stroke: var(--edge-active);
 }
 .md-body h1, .md-body h2, .md-body h3 {
   font-weight: 600;
   margin: 0.9em 0 0.4em;
-  color: #1c1917;
-}
-.dark .md-body h1, .dark .md-body h2, .dark .md-body h3 {
-  color: #f5f5f4;
+  color: var(--ink-strong);
 }
 .md-body h1 { font-size: 1.2em; }
 .md-body h2 { font-size: 1.1em; }
 .md-body h3 { font-size: 1.0em; }
 .md-body mark[data-child-id] { cursor: pointer; transition: background-color 120ms; }
-.md-body mark[data-child-id]:hover { background-color: #fde68a; }
+.md-body mark[data-child-id]:hover { background-color: var(--mark-fork-hover-bg); }
 .md-body mark {
-  background: #fde68a;
+  background: var(--mark-fork-bg);
   color: inherit;
   padding: 1px 3px;
   border-radius: 2px;
-  box-shadow: 0 0 0 1px #fbbf24;
+  box-shadow: 0 0 0 1px var(--mark-fork-line);
 }
 .dark .md-body mark {
-  background: #78350f;
-  color: #fef3c7;
-  box-shadow: 0 0 0 1px #b45309;
+  color: var(--mark-fork-ink);
 }
-.dark .md-body mark[data-child-id]:hover { background-color: #92400e; }
 
 /* Note marks (data-note-id) without a child-id wrapping them get an
    emerald tint to visually separate "I bookmarked this" from "someone
@@ -475,23 +488,19 @@ html, body {
    tint as note marks but rely on the pulse animation alone to draw the
    eye; the mark unmounts when clearScrollAnchor fires. */
 .md-body mark[data-search-id] {
-  background: #d1fae5;
-  box-shadow: 0 0 0 1px #34d399;
+  background: var(--mark-note-bg);
+  box-shadow: 0 0 0 1px var(--mark-note-line);
 }
 .dark .md-body mark[data-search-id] {
-  background: #064e3b;
-  color: #d1fae5;
-  box-shadow: 0 0 0 1px #047857;
+  color: var(--mark-note-ink);
 }
 .md-body mark[data-note-id]:not([data-child-id]) {
-  background: #d1fae5;
-  box-shadow: 0 0 0 1px #34d399;
+  background: var(--mark-note-bg);
+  box-shadow: 0 0 0 1px var(--mark-note-line);
   cursor: default;
 }
 .dark .md-body mark[data-note-id]:not([data-child-id]) {
-  background: #064e3b;
-  color: #d1fae5;
-  box-shadow: 0 0 0 1px #047857;
+  color: var(--mark-note-ink);
 }
 
 /* Tables — wrapped in a horizontally-scrollable div by MD_COMPONENTS so
@@ -501,23 +510,16 @@ html, body {
 .md-body .md-table-wrap {
   overflow-x: auto;
   margin: 0.85em 0;
-  border: 1px solid #e7e5e4;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   /* tasteful subtle scrollbar */
   scrollbar-width: thin;
 }
-.dark .md-body .md-table-wrap {
-  background: #1c1917;
-  border-color: #292524;
-}
 .md-body .md-table-wrap::-webkit-scrollbar { height: 8px; }
 .md-body .md-table-wrap::-webkit-scrollbar-thumb {
-  background: #d6d3d1;
+  background: var(--line-strong);
   border-radius: 4px;
-}
-.dark .md-body .md-table-wrap::-webkit-scrollbar-thumb {
-  background: #44403c;
 }
 .md-body table {
   border-collapse: collapse;
@@ -528,72 +530,59 @@ html, body {
 }
 .md-body th, .md-body td {
   padding: 7px 11px;
-  border-bottom: 1px solid #e7e5e4;
-  border-right: 1px solid #f1ede8;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line-faint); /* 原 #f1ede8，收编到 stone-100 档，1px 下不可辨 */
   text-align: left;
   vertical-align: top;
   word-break: break-word;
   max-width: 360px;
 }
 .dark .md-body th, .dark .md-body td {
-  border-bottom-color: #292524;
-  border-right-color: #292524;
+  border-right-color: var(--line); /* dark 原值内外边框同色 stone-800 */
 }
 .md-body th:last-child, .md-body td:last-child { border-right: none; }
 .md-body tr:last-child td { border-bottom: none; }
 .md-body thead th {
-  background: #f5f5f4;
+  background: var(--surface-muted);
   font-weight: 600;
-  color: #1c1917;
+  color: var(--ink-strong);
   white-space: nowrap;
   position: sticky;
   top: 0;
   z-index: 1;
 }
-.dark .md-body thead th {
-  background: #292524;
-  color: #f5f5f4;
-}
 .md-body tbody tr:nth-child(even) td {
-  background: #fafaf9;
+  background: var(--surface-canvas);
 }
 .dark .md-body tbody tr:nth-child(even) td {
-  background: #1c1917;
+  background: var(--surface); /* dark 原值 = stone-900，即 dark surface */
 }
 
 /* Blockquote */
 .md-body blockquote {
-  border-left: 3px solid #d6d3d1;
-  background: #fafaf9;
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-canvas);
   margin: 0.7em 0;
   padding: 0.4em 0.9em;
-  color: #57534e;
+  color: var(--ink-muted);
 }
 .dark .md-body blockquote {
-  border-left-color: #44403c;
-  background: #1c1917;
-  color: #a8a29e;
+  background: var(--surface); /* dark 原值 = stone-900，即 dark surface */
 }
 .md-body blockquote p { margin: 0.3em 0; }
 
 /* Horizontal rule */
 .md-body hr {
   border: 0;
-  border-top: 1px solid #e7e5e4;
+  border-top: 1px solid var(--line);
   margin: 1.2em 0;
-}
-.dark .md-body hr {
-  border-top-color: #292524;
 }
 
 .streaming-cursor::after {
   content: "▋";
-  color: #6366f1;
+  color: var(--accent-vivid);
   animation: blink 1s step-end infinite;
   margin-left: 1px;
-}
-.dark .streaming-cursor::after {
-  color: #818cf8;
 }
 @keyframes blink { 50% { opacity: 0; } }
 
@@ -601,39 +590,22 @@ html, body {
    mark — clicking "↳ 从「xxx」分叉" on a child (amber pulse) or a note
    in NotesDrawer (emerald pulse). Three cycles, ~1.5s total, so the eye
    latches onto the source sentence. Hue switches by mark kind. */
-@keyframes anchor-pulse-amber {
-  0%, 100% { background-color: #fde68a; box-shadow: 0 0 0 1px #fbbf24; }
-  50%      { background-color: #fbbf24; box-shadow: 0 0 0 3px #f59e0b; }
+/* keyframes 内的 var() 按应用元素的级联解析，dark 值随变量走——
+   原来 amber/emerald × light/dark 四套 keyframes 折半成两套。 */
+@keyframes anchor-pulse-fork {
+  0%, 100% { background-color: var(--mark-fork-bg); box-shadow: 0 0 0 1px var(--mark-fork-line); }
+  50%      { background-color: var(--mark-fork-pulse-bg); box-shadow: 0 0 0 3px var(--mark-fork-pulse-ring); }
 }
-@keyframes anchor-pulse-amber-dark {
-  0%, 100% { background-color: #78350f; box-shadow: 0 0 0 1px #b45309; }
-  50%      { background-color: #b45309; box-shadow: 0 0 0 3px #d97706; }
-}
-@keyframes anchor-pulse-emerald {
-  0%, 100% { background-color: #d1fae5; box-shadow: 0 0 0 1px #34d399; }
-  50%      { background-color: #6ee7b7; box-shadow: 0 0 0 3px #10b981; }
-}
-@keyframes anchor-pulse-emerald-dark {
-  0%, 100% { background-color: #064e3b; box-shadow: 0 0 0 1px #047857; }
-  50%      { background-color: #047857; box-shadow: 0 0 0 3px #10b981; }
+@keyframes anchor-pulse-note {
+  0%, 100% { background-color: var(--mark-note-bg); box-shadow: 0 0 0 1px var(--mark-note-line); }
+  50%      { background-color: var(--mark-note-pulse-bg); box-shadow: 0 0 0 3px var(--mark-note-pulse-ring); }
 }
 .md-body mark.anchor-pulse {
-  animation: anchor-pulse-amber 0.5s ease-in-out 3;
+  animation: anchor-pulse-fork 0.5s ease-in-out 3;
 }
-.dark .md-body mark.anchor-pulse {
-  animation: anchor-pulse-amber-dark 0.5s ease-in-out 3;
-}
-.md-body mark[data-note-id]:not([data-child-id]).anchor-pulse {
-  animation: anchor-pulse-emerald 0.5s ease-in-out 3;
-}
-.dark .md-body mark[data-note-id]:not([data-child-id]).anchor-pulse {
-  animation: anchor-pulse-emerald-dark 0.5s ease-in-out 3;
-}
+.md-body mark[data-note-id]:not([data-child-id]).anchor-pulse,
 .md-body mark[data-search-id].anchor-pulse {
-  animation: anchor-pulse-emerald 0.5s ease-in-out 3;
-}
-.dark .md-body mark[data-search-id].anchor-pulse {
-  animation: anchor-pulse-emerald-dark 0.5s ease-in-out 3;
+  animation: anchor-pulse-note 0.5s ease-in-out 3;
 }
 
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
@@ -657,10 +629,10 @@ html, body {
   height: 2px;
   overflow: hidden;
   border-radius: 9999px;
-  background: rgba(99, 102, 241, 0.18); /* indigo-500 @ low alpha track */
+  background: color-mix(in srgb, var(--accent-vivid) 18%, transparent);
 }
 .dark .trellis-run-bar {
-  background: rgba(129, 140, 248, 0.20);
+  background: color-mix(in srgb, var(--accent-vivid) 20%, transparent);
 }
 .trellis-run-bar::after {
   content: "";
@@ -668,11 +640,8 @@ html, body {
   top: 0; bottom: 0;
   width: 40%;
   border-radius: 9999px;
-  background: #6366f1; /* indigo-500 */
+  background: var(--accent-vivid);
   animation: trellis-run-sweep 1.1s ease-in-out infinite;
-}
-.dark .trellis-run-bar::after {
-  background: #818cf8; /* indigo-400 */
 }
 
 /* Three-dot "生成中" bounce — compact spinner alternative for narrow tabs. */
@@ -683,10 +652,9 @@ html, body {
 .trellis-dots { display: inline-flex; gap: 2px; align-items: center; }
 .trellis-dots > span {
   width: 3px; height: 3px; border-radius: 9999px;
-  background: #6366f1; /* indigo-500 */
+  background: var(--accent-vivid);
   animation: trellis-dot-bounce 1.2s ease-in-out infinite;
 }
-.dark .trellis-dots > span { background: #818cf8; }
 .trellis-dots > span:nth-child(2) { animation-delay: 0.16s; }
 .trellis-dots > span:nth-child(3) { animation-delay: 0.32s; }
 
