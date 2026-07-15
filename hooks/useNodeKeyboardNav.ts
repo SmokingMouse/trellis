@@ -1,16 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-
-function isEditable(el: Element | null): boolean {
-  if (!el) return false;
-  const tag = el.tagName;
-  return (
-    tag === "INPUT" ||
-    tag === "TEXTAREA" ||
-    (el as HTMLElement).isContentEditable
-  );
-}
+import { isEditableTarget } from "@/lib/shortcuts";
 
 // A5: Alt+Arrow keyboard navigation across the node tree. Alt avoids clashing
 // with ReactFlow pan (bare arrows) and the J/K unread nav. Up = parent,
@@ -24,7 +15,7 @@ export function useNodeKeyboardNav() {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.metaKey || e.ctrlKey) return;
       if (!e.key.startsWith("Arrow")) return;
-      if (isEditable(document.activeElement)) return;
+      if (isEditableTarget(document.activeElement)) return;
       if (!activeNodeId) return;
       const node = nodes[activeNodeId];
       if (!node) return;

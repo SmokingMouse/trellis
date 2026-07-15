@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { isEditableTarget } from "@/lib/shortcuts";
 import type { ChatNode } from "@/lib/types";
 
 // Global J / K → jump to next / previous unread node, in createdAt order.
@@ -17,15 +18,7 @@ export function useUnreadNavigation() {
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
-      ) {
-        return;
-      }
+      if (isEditableTarget(e.target)) return;
       const direction: 1 | -1 = e.key === "j" || e.key === "J" ? 1 : -1;
       const store = useSessionStore.getState();
       const target = findNeighborUnread(

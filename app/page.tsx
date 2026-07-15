@@ -16,6 +16,7 @@ import { NotesDrawer } from "@/components/NotesDrawer";
 import { WorkspaceFilesDrawer } from "@/components/WorkspaceFilesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
+import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
@@ -84,7 +85,7 @@ export default function Home() {
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
-        <div className="fixed top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
+        <div className="fixed top-12 md:top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
           ⚠️ 本地存储不可用：{hydrateError}。可以继续问答，但刷新会丢失历史。
         </div>
       )}
@@ -98,7 +99,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setViewMode("linear")}
-            className="fixed top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition-transform"
+            className="fixed top-[60px] md:top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition-transform"
             title="切换到线性 thread"
           >
             线性
@@ -119,6 +120,7 @@ export default function Home() {
       <WorkspaceFilesDrawer />
       <SearchModal />
       <FilePreview />
+      <KeyboardHelp />
     </>
   );
 }

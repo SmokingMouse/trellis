@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
-import { RunSpinner } from "@/components/RunSpinner";
+import { Dots } from "@/components/ui/Dots";
 import { CliAttachPicker } from "@/components/CliAttachPicker";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
@@ -170,11 +170,11 @@ export function SessionSidebar() {
           variant="primary"
           size="sm"
           onClick={onNew}
-          title="开一棵全新的树（新画布 / 新 session）"
+          title="新会话：开一棵全新树（与「🧹 新话题」不同——后者在当前会话内清空上下文）"
           className="flex-1 h-8"
         >
           <span aria-hidden className="text-base leading-none">＋</span>
-          新建会话
+          新会话
         </Button>
         <IconButton
           label="收起"
@@ -200,7 +200,7 @@ export function SessionSidebar() {
       <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 ? (
           <div className="px-3 py-3 text-label text-ink-faint italic">
-            还没有会话，点上面「新建会话」开始
+            还没有会话，点上面「新会话」开始
           </div>
         ) : (
           <>
@@ -300,12 +300,12 @@ export function SessionSidebar() {
       {mobileNavOpen && (
         <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
           <div
-            className="absolute inset-0 bg-scrim/50"
+            className="absolute inset-0 bg-scrim/50 ui-enter-fade"
             onClick={() => setMobileNavOpen(false)}
             aria-hidden
           />
           <aside
-            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-surface-canvas border-r border-line shadow-overlay"
+            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-surface-canvas border-r border-line shadow-overlay ui-enter-slide-left"
           >
             {renderPanel(() => setMobileNavOpen(false))}
           </aside>
@@ -389,7 +389,7 @@ function SidebarRow({
       )}
       {/* Leading indicator: spinner while running, else the mode color dot. */}
       {running ? (
-        <RunSpinner size={12} />
+        <Dots />
       ) : (
         <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} aria-hidden />
       )}

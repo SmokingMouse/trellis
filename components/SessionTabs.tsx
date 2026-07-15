@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
-import { RunSpinner } from "@/components/RunSpinner";
+import { isEditableTarget } from "@/lib/shortcuts";
+import { Dots } from "@/components/ui/Dots";
 import type { Session } from "@/lib/types";
 
 // Workbench Wave 4 — VSCode-style editor tab strip (rewrite of Wave 1).
@@ -85,15 +86,7 @@ export function SessionTabs() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key < "1" || e.key > "9") return;
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
+      if (isEditableTarget(e.target)) return;
       const id = openIds[Number(e.key) - 1];
       if (!id) return;
       e.preventDefault();
@@ -105,11 +98,12 @@ export function SessionTabs() {
 
   // Offset the strip to start right of the sidebar. We read the same
   // --trellis-sb var the content surfaces use (set in page.tsx), which
-  // already folds in the mobile guard + collapsed state — so the strip
-  // never leaves dead space on mobile where the sidebar isn't permanent.
+  // already folds in the mobile guard + collapsed state.
+  // 移动端整条隐藏（hidden md:block）：tab 条与 hamburger 抽屉的会话列表
+  // 功能重叠，还吃掉 2.25rem 纵向空间——手机上会话切换走抽屉。
   return (
     <div
-      className="fixed top-12 right-0 z-30 h-9 bg-surface-canvas/85 backdrop-blur border-b border-line"
+      className="hidden md:block fixed top-12 right-0 z-30 h-9 bg-surface-canvas/85 backdrop-blur border-b border-line"
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
       <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
@@ -145,8 +139,8 @@ export function SessionTabs() {
           {/* Redundant secondary new-session entry. */}
           <button
             onClick={() => newConversation()}
-            title="新建会话（新画布 / 新 session）"
-            aria-label="新建会话"
+            title="新会话（全新树）"
+            aria-label="新会话"
             className="w-6 h-6 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong"
           >
             <span aria-hidden className="text-reading leading-none">＋</span>
@@ -215,7 +209,7 @@ function Tab({
     >
       {/* Leading indicator: spinner while running, else the mode color dot. */}
       {running ? (
-        <RunSpinner size={12} />
+        <Dots />
       ) : (
         <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} aria-hidden />
       )}

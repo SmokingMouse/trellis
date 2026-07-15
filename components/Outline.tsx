@@ -131,14 +131,14 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
       <>
         {outlineOpen && (
           <div
-            className="md:hidden fixed inset-0 z-40 bg-scrim/40"
+            className="md:hidden fixed inset-0 z-40 bg-scrim/40 ui-enter-fade"
             onClick={() => setOutlineOpen(false)}
             aria-hidden
           />
         )}
         <aside
           className={`md:hidden fixed z-50 inset-x-3 top-[60px] bottom-3 bg-surface/95 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-overlay overflow-y-auto ${
-            outlineOpen ? "block" : "hidden"
+            outlineOpen ? "block ui-enter-pop" : "hidden"
           }`}
         >
           {body}

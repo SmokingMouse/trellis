@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
 import { ExportMenu } from "./ExportMenu";
@@ -142,11 +142,6 @@ export function Header() {
   // badge stays a plain non-interactive readout to avoid nagging.
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const ctxActionable = ctx != null && ctx.percent >= 50;
-  // If the badge stops being actionable (context dropped / session changed),
-  // make sure a stale popover doesn't linger.
-  useEffect(() => {
-    if (!ctxActionable) setCtxPopoverOpen(false);
-  }, [ctxActionable]);
 
   return (
     <header className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
@@ -198,6 +193,8 @@ export function Header() {
         </IconButton>
         {session && (
           <>
+            {/* 树形分支 icon——与左侧会话列表 ☰ 明确区分（移动端两个
+                同形三横线曾并列 Header 两端，易混）。 */}
             <IconButton
               label="思维树"
               onClick={() => setOutlineOpen(true)}
@@ -214,12 +211,10 @@ export function Header() {
                 strokeLinejoin="round"
                 aria-hidden
               >
-                <line x1="9" y1="6" x2="21" y2="6" />
-                <line x1="9" y1="12" x2="21" y2="12" />
-                <line x1="9" y1="18" x2="21" y2="18" />
-                <circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none" />
-                <circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none" />
-                <circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none" />
+                <path d="M6 3v12" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
               </svg>
             </IconButton>
             {session.mode === "chat" && (
@@ -264,56 +259,60 @@ export function Header() {
             {ctx && (
               <>
                 <span className="hidden md:inline text-ink-faint">·</span>
-                {ctxActionable ? (
-                  <Popover
-                    open={ctxPopoverOpen}
-                    onClose={() => setCtxPopoverOpen(false)}
-                    panelClassName="w-72 p-3 text-left"
-                    trigger={
-                      <button
-                        onClick={() => setCtxPopoverOpen((v) => !v)}
-                        className={`inline-flex items-center gap-1 tabular-nums rounded px-1 py-0.5 hover:bg-surface-muted ${ctxTone}`}
-                        title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看清空上下文选项。`}
-                        aria-label="上下文占用，点击查看清空选项"
-                      >
-                        🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
-                        {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
-                      </button>
-                    }
-                  >
-                    <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
-                      🧠 上下文占用 {ctx.percent.toFixed(1)}%
-                    </div>
-                    <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
-                      当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
-                      {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
-                      占用越高，模型越慢、缓存越难增长。
-                    </div>
-                    <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
-                      claude CLI 的 <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
-                      在这里暂无原生支持。可改为开一条「新话题」——
-                      全新上下文的根问答，等价{" "}
-                      <code className="px-1 rounded bg-surface-muted">/clear</code>。
-                    </div>
-                    <Button
-                      variant="primary"
-                      className="mt-2.5 w-full"
-                      onClick={() => {
-                        setCtxPopoverOpen(false);
-                        setComposeRootOpen(true);
-                      }}
+                {/* 恒为按钮形态（描边 + hover）——「静默从只读变可点」是
+                    Session 53 批过的反模式；<50% 时 popover 只做只读解释，
+                    ≥50% 才附「开新话题」动作。 */}
+                <Popover
+                  open={ctxPopoverOpen}
+                  onClose={() => setCtxPopoverOpen(false)}
+                  panelClassName="w-72 p-3 text-left"
+                  trigger={
+                    <button
+                      onClick={() => setCtxPopoverOpen((v) => !v)}
+                      className={`inline-flex items-center gap-1 tabular-nums rounded border border-line px-1.5 py-0.5 hover:bg-surface-muted transition-colors ${ctxTone}`}
+                      title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看详情。`}
+                      aria-label="上下文占用，点击查看详情"
+                      aria-expanded={ctxPopoverOpen}
                     >
-                      🧹 开新话题（清空上下文）
-                    </Button>
-                  </Popover>
-                ) : (
-                  <span
-                    className={`inline-flex items-center gap-1 tabular-nums ${ctxTone}`}
-                    title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。`}
-                  >
-                    🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
-                  </span>
-                )}
+                      🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
+                      {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
+                    </button>
+                  }
+                >
+                  <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
+                    🧠 上下文占用 {ctx.percent.toFixed(1)}%
+                  </div>
+                  <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
+                    当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
+                    {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
+                    占用越高，模型越慢、缓存越难增长。
+                  </div>
+                  {ctxActionable ? (
+                    <>
+                      <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
+                        claude CLI 的 <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
+                        在这里暂无原生支持。可改为开一条「新话题」——
+                        全新上下文的根问答，等价{" "}
+                        <code className="px-1 rounded bg-surface-muted">/clear</code>。
+                      </div>
+                      <Button
+                        variant="primary"
+                        className="mt-2.5 w-full"
+                        onClick={() => {
+                          setCtxPopoverOpen(false);
+                          setComposeRootOpen(true);
+                        }}
+                      >
+                        🧹 开新话题（清空上下文）
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
+                      占用尚低，无需处理。≥50% 时这里会提供「🧹 开新话题」
+                      一键清空上下文。
+                    </div>
+                  )}
+                </Popover>
               </>
             )}
             {/* Workspace-files drawer entry — only for sessions with a cwd

@@ -18,6 +18,7 @@ import {
 } from "@/lib/llm";
 import { setThemeMode, setThemePalette } from "@/hooks/useTheme";
 import { PALETTES, isPaletteId } from "@/lib/themes";
+import { openKeyboardHelp } from "@/lib/shortcuts";
 
 // Minimal slice of the store the commands touch — keeps commands.ts free of a
 // direct dependency on the store module (which would pull in browser-only
@@ -55,14 +56,14 @@ export type Command = {
 export const COMMANDS: Command[] = [
   {
     name: "new",
-    description: "开一个全新 session（清空到首屏新建态）",
+    description: "新会话：开一棵全新树（回首屏）",
     run: (store) => {
       store.newConversation();
     },
   },
   {
     name: "clear",
-    description: "当前 session 内起一个清空上下文的新话题 🧹",
+    description: "新话题：当前会话内清空上下文 🧹（树保留）",
     requiresSession: true,
     run: (store) => {
       if (!store.session) return "没有当前 session — 先开一个对话再 /clear";
@@ -109,6 +110,13 @@ export const COMMANDS: Command[] = [
     description: "打开跨 session 切换（搜索）面板",
     run: (store) => {
       store.setSearchOpen(true);
+    },
+  },
+  {
+    name: "help",
+    description: "键盘快捷键一览",
+    run: () => {
+      openKeyboardHelp();
     },
   },
   {

@@ -10,12 +10,14 @@ import {
 } from "@xyflow/react";
 import { useMemo, useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { isEditableTarget } from "@/lib/shortcuts";
 import { ChatNode, type ChildAnchor } from "./ChatNode";
 import { ReferenceCard } from "./ReferenceCard";
 import { AddNodeFAB } from "./AddNodeFAB";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { Outline } from "./Outline";
+import { TargetChip } from "./TargetChip";
 import {
   useSelectionWithin,
   type SelectionInfo,
@@ -193,14 +195,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   // F key → fit to overview. Skip when typing in inputs.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
-      )
-        return;
+      if (isEditableTarget(e.target)) return;
       if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         fitView({ padding: 0.15, duration: 400 });
@@ -333,7 +328,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
-        className={`w-screen h-screen pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
+        className={`w-screen h-screen pt-12 md:pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
         // Wave 4: shift the canvas right of the explorer sidebar (var set in
@@ -419,16 +414,13 @@ function DockedComposer() {
       <div className="border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
         <div className="max-w-2xl mx-auto px-4">
           {target && (
-            <div className="pt-2 -mb-1 flex items-center gap-1.5 text-label text-ink-faint">
-              <span>回复</span>
-              <span className="font-mono tabular-nums">
-                #{nodeIndices[target.id] ?? "?"}
-              </span>
-              <span className="truncate max-w-[280px] text-ink-muted">
-                {targetLabel}
-              </span>
-              <span className="hidden sm:inline">· 点卡片可切换目标</span>
-            </div>
+            <TargetChip
+              icon="⑂"
+              verb="回复"
+              index={nodeIndices[target.id] ?? "?"}
+              label={targetLabel ?? ""}
+              hint="点卡片可切换目标"
+            />
           )}
           <Composer targetNode={target} placeholder="对选中节点继续追问…" />
         </div>

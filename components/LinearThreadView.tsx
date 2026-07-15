@@ -6,6 +6,7 @@ import { buildNodeIndex } from "@/lib/node-index";
 import { subscribeStream } from "@/lib/stream-bus";
 import { modeStyle } from "@/lib/mode-style";
 import { sendHint } from "@/lib/send-key";
+import { isEditableTarget } from "@/lib/shortcuts";
 import {
   useSelectionWithin,
   type SelectionInfo,
@@ -14,6 +15,7 @@ import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
+import { TargetChip } from "./TargetChip";
 import { ThreadMinimap } from "./ThreadMinimap";
 import { TurnCard } from "./TurnCard";
 
@@ -286,14 +288,7 @@ export function LinearThreadView() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "b" && e.key !== "B") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
-      )
-        return;
+      if (isEditableTarget(e.target)) return;
       e.preventDefault();
       jumpToParentAtAnchor(parentId, childId);
     };
@@ -347,7 +342,7 @@ export function LinearThreadView() {
     // a screen of content the composer sat right under the last card,
     // floating mid-screen instead of docked at the bottom.
     <div
-      className="fixed inset-0 pt-[5.25rem] flex flex-col bg-surface-canvas"
+      className="fixed inset-0 pt-12 md:pt-[5.25rem] flex flex-col bg-surface-canvas"
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
       <div className="shrink-0 z-30 border-b border-line/80 bg-surface-canvas/90 backdrop-blur">
@@ -528,31 +523,19 @@ export function LinearThreadView() {
       <div className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
         <div className="max-w-3xl mx-auto px-4">
           {branchFromNode && (
-            <div className="mt-3 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-accent-line bg-accent-muted text-xs text-accent-ink">
-              <span aria-hidden>⑂</span>
-              <button
-                type="button"
-                onClick={() =>
-                  roundRefs.current
-                    .get(branchFromNode.id)
-                    ?.scrollIntoView({ block: "start", behavior: "smooth" })
-                }
-                className="min-w-0 flex-1 text-left truncate hover:underline"
-                title="滚动到该节点"
-              >
-                从 <span className="font-mono">#{nodeIndices[branchFromNode.id] ?? "?"}</span> 分叉 ·{" "}
-                {branchFromNode.topicLabel ?? truncate(branchFromNode.question, 60)}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBranchFrom(null)}
-                className="shrink-0 px-1 rounded hover:bg-accent-line/40"
-                title="取消分叉 (Esc)"
-                aria-label="取消分叉"
-              >
-                ✕
-              </button>
-            </div>
+            <TargetChip
+              icon="⑂"
+              verb="从"
+              suffix="分叉"
+              index={nodeIndices[branchFromNode.id] ?? "?"}
+              label={branchFromNode.topicLabel ?? truncate(branchFromNode.question, 60)}
+              onLabelClick={() =>
+                roundRefs.current
+                  .get(branchFromNode.id)
+                  ?.scrollIntoView({ block: "start", behavior: "smooth" })
+              }
+              onClear={() => setBranchFrom(null)}
+            />
           )}
           <Composer
             targetNode={branchFromNode ?? tipNode}
