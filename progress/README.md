@@ -114,6 +114,12 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 45 (2026-07-15)
+- **Done**: **「空白沙箱」workspace——Project/Workspace 模式不挑目录，一键随机开一个空白上下文的空目录当 cwd**。新 `POST /api/workspaces/scratch`：在 `~/.trellis/scratch/<adj-animal-NN>`（与 `lib/paths.ts` 的 CHAT_SCRATCH 同族约定）非递归 mkdir，slug 碰撞（EEXIST）自动重试；WorkspacePicker header 下方加「✨ 空白沙箱」快捷入口（两个 tab 都可见，创建中禁用 + 失败行内报错），拿到路径走既有 `pickPath`。下游（session 创建/spawn cwd/文件预览围栏/最近列表）零改动——就是一个普通 workspace path，basename=slug 在「最近」里可读。
+- **验证**: 本 worktree（barnacle）首次 bootstrap：`make setup` 中 bun 装 `file:` 的 @sm 两包报 ENOENT，但 `make relink-sdk` 本来就会重建软链，补跑后 `make check` 全绿（这个失败对 setup 无实质影响）。`tsc --noEmit` ✓、`make build` ✓（`/api/workspaces/scratch` 注册）。隔离 dev server（:3097 + 临时 DB）runtime 验证：POST ×2 产出两个独立空目录；**真 claude 全链路**：用 scratch 目录建 project session（haiku）→ SSE created/delta/done 正常、答 PONG!、jsonl 落在 `~/.claude/projects/-Users-smokingmouse--trellis-scratch-<slug>/`。测试产物（server/临时 DB/两个 scratch 目录/claude projects 目录）已全清。
+- **Caveat**: 未浏览器实测 picker 按钮的视觉/交互（按逻辑写，emerald 虚线卡片风格对齐现有 UI）。scratch 目录不自动回收——删 trellis session 不删目录（目录是空的或只有用户要的产物，倾向保守不动；若堆积成噪音再加清理策略）。
+- **Next**: 浏览器实测「✨ 空白沙箱」入口。已合并回 main。
+
 ### Session 44 (2026-07-11)
 - **Done**: **全局 LLM 模型选择接入（结合 `~/sdk`/sm_toolkit 的 endpoints.yaml），并连带把死掉的 `agent-gateway` 依赖迁移彻底解决**。触发：模型选择原来硬编码三档（claude-opus/sonnet/haiku + codex）；调研发现 trellis 依赖的 `agent-gateway`（`file:../../agent-gateway`）本机已缺失、`node_modules` 未装，app 实际处于装不起来的状态。拍板方向：不修复对 agent-gateway 的依赖，而是把它的能力整体拆开摊平进 `~/sdk` 的 `@sm/agent`（agent-gateway 仓库退役），trellis 只依赖 `~/sdk`。
   - `~/sdk`（`@sm/llm`/`@sm/agent`）侧的改动详见 `~/sdk/progress/README.md` 2026-07-11 session（含 self-agent 生产 bot 的零改动兼容验证）。

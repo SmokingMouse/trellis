@@ -21,6 +21,8 @@ type Tab = "recent" | "browse";
 export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("recent");
   const [customPath, setCustomPath] = useState("");
+  const [scratchBusy, setScratchBusy] = useState(false);
+  const [scratchError, setScratchError] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
   // Esc to close. Don't intercept on inputs — user may want to clear input
@@ -41,6 +43,30 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
     if (!trimmed) return;
     onPick(trimmed);
     onClose();
+  };
+
+  // "Blank sandbox": server mkdirs a fresh random empty dir under
+  // ~/.trellis/scratch/ and we pick it like any other workspace path —
+  // downstream (session creation, spawn cwd, previews) needs no special
+  // casing.
+  const createScratch = async () => {
+    if (scratchBusy) return;
+    setScratchBusy(true);
+    setScratchError(null);
+    try {
+      const res = await fetch("/api/workspaces/scratch", { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as {
+        path?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.path) {
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      pickPath(body.path);
+    } catch (err) {
+      setScratchError(err instanceof Error ? err.message : String(err));
+      setScratchBusy(false);
+    }
   };
 
   return (
@@ -71,6 +97,31 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
           >
             ✕
           </button>
+        </div>
+
+        <div className="border-b border-stone-100 dark:border-stone-800 px-4 py-2 shrink-0">
+          <button
+            onClick={createScratch}
+            disabled={scratchBusy}
+            className="w-full text-left px-3 py-2 rounded-lg border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
+          >
+            <span aria-hidden className="text-base shrink-0">
+              ✨
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-emerald-900 dark:text-emerald-200">
+                {scratchBusy ? "创建中…" : "空白沙箱"}
+              </span>
+              <span className="block text-xs text-emerald-700/70 dark:text-emerald-300/60">
+                不挑目录 — 新建一个随机空目录作为 cwd（~/.trellis/scratch/）
+              </span>
+            </span>
+          </button>
+          {scratchError && (
+            <div className="mt-1.5 text-xs text-rose-700 dark:text-rose-300">
+              创建失败: {scratchError}
+            </div>
+          )}
         </div>
 
         <div className="border-b border-stone-100 dark:border-stone-800 px-2 pt-2 shrink-0">
