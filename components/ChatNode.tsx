@@ -28,6 +28,7 @@ import { DeleteCardButton } from "./DeleteCardButton";
 import { CopyButton } from "./CopyButton";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { useSlashNav } from "@/hooks/useSlashNav";
 import { SkillPickerList } from "./SkillPickerList";
 import { ZoneEditor } from "./ZoneEditor";
 
@@ -508,6 +509,13 @@ function FollowupInput({
     q,
     sessionMode !== "chat" || chatEnhanced,
   );
+  const pickSkill = (name: string) => {
+    setQ(`/${name} `);
+    ref.current?.focus();
+  };
+  const slashNav = useSlashNav(matchedSkills.length, q, (i) =>
+    pickSkill(matchedSkills[i].name),
+  );
 
   useEffect(() => {
     ref.current?.focus();
@@ -524,16 +532,15 @@ function FollowupInput({
     <div className="relative border-t border-stone-100 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-900/60">
       <SkillPickerList
         skills={matchedSkills}
-        onPick={(name) => {
-          setQ(`/${name} `);
-          ref.current?.focus();
-        }}
+        onPick={pickSkill}
+        activeIndex={slashNav.active}
       />
       <textarea
         ref={ref}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => {
+          if (slashNav.handleKeyDown(e)) return;
           if (isSendCombo(e, sendKey)) {
             e.preventDefault();
             submit();

@@ -138,7 +138,8 @@
   - `Composer` 接 `matchCommands`（全模式一等，skill 仍 gated on toolCapable）+ 提交拦截 `parseCommand`（裸 /command 本地执行不进 LLM，拦截在 targetNode/isStreaming 闸之前——/new /switch 不需要目标节点）+ cmdNotice 行内提示（下次击键清除）；下拉点选无参命令立即执行、/model 填 `"/model "` 待补参，与 QuestionInput 同约定。
   - **顺手修存量 bug**：`composeRootOpen` 消费从 AddNodeFAB（仅画布挂载）上移到 `page.tsx` 顶层——此前线性视图里 Header B3「开新话题」和 `/clear` 置了 flag 没人消费，静默无效且切回画布时 picker 突然弹出。FAB 只保留自己的菜单流。
 - **验证**: tsc ✓ + `make build` ✓；隔离实例（:3096 + 临时 DB + mock provider，产物已清）agent-browser 实测：线性 Composer 输 `/` 出 5 命令（纯 chat 无 skill）、`/cl` 过滤、点 /clear 在**线性视图**弹 NewQuestionPicker（修复生效）、`/model` 无参回显用法且保留输入、`/model mock` 切换生效+清空输入、增强模式下命令+skill 合并（5 命令+6 skill）、`/switch` 开搜索面板、`/new` 回首屏。
-- **Next**: 用户真机验收；候选 follow-up：下拉键盘导航（↑↓ 选中 + Enter 补全，现仅鼠标点选，首屏同缺）。
+- **Next**: 用户真机验收。
+- **追记（同 session）**: **`/` 下拉键盘导航落地**。新 `hooks/useSlashNav.ts`（↑↓ 循环高亮 + Enter/Tab 选中；query 变化重置到首项、纯方向键不重置；`handleKeyDown` 返回 true 表示已消费——调用方放在 send-combo 判定**之前**，下拉可见时 Enter 选中而非把半截 "/cle" 发给 LLM，无匹配时零干扰）。三个消费方全接：共享 Composer（命令+skill 合并索引）、首屏 QuestionInput（同）、ChatNode 行内追问框（仅 skill）；SkillPickerList/首屏下拉加 `activeIndex` 高亮 + scrollIntoView(nearest) 跟随。浏览器实测（隔离 :3096 + mock，产物已清）：首屏默认高亮首项/↓↓ 移动/↑ 从顶循环到尾/Enter 执行 /switch、"/cl"+Enter 出 no-session notice、含空格 "/model mock" Enter 正常走提交拦截；线性 Composer `/`+↓+Enter 弹「新话题」；增强模式 ↓×5 跨命令到 skill + Tab 补全 "/agent-browser "；"/arch" 过滤后高亮重置 + Enter 真归档。ChatNode 行内框未浏览器验（同 hook 同约定，tsc 过）。tsc ✓ + `make build` ✓。
 
 ### Session 53 (2026-07-15)
 - **Done**: **收敛工作机对 CHAT 修复的四个补丁**（工作机 pull a29f9b5 后仍 0 输出，自行打了四个本地补丁；逐条评估后收敛）：
