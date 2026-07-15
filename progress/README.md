@@ -133,6 +133,15 @@
 
 ## Session Log
 ### Session 53 (2026-07-15)
+- **Done**: **收敛工作机对 CHAT 修复的四个补丁**（工作机 pull a29f9b5 后仍 0 输出，自行打了四个本地补丁；逐条评估后收敛）：
+  - **#1 `--setting-sources ""` 被 runtime 吞空 argv** → 采纳但改形式：SDK 上游化为 `--setting-sources=` 等号写法（sm-toolkit `0326299`），语义不变；工作机临时用的 `=local` 不采纳（通用 SDK 会在真实 cwd 突然加载 .claude/settings.local.json，语义漂移）。本机 bun 1.3.14 实测不吞空 argv（不复现），等号形式对 runtime 差异免疫。
+  - **#2 SDK 手工加 Thinking 事件** → 重复实现，上游 `a3ce7b2` 已有；工作机收敛 = revert 本地 src 改动后 pull + rebuild。
+  - **#3 instrumentation 强制 effort=low（全局）** → 收敛成 **per-mode**：纯对话 chat 在 `modeToRunOptions` 下发 `env:{CLAUDE_CODE_EFFORT_LEVEL:"low"}`（GPT 式即答场景，"你好"不该思考半天）；增强 chat / workspace / project 是干活 agent 保持 CLI 默认不降智；instrumentation 的 scrub 保留（唯一显式下发点 = RunOptions.env，优先级高于继承 env）。
+  - **#4 plist 硬编码 ANTHROPIC_BASE_URL/AUTH_TOKEN/API_KEY** → **不上游，本机严禁照抄**：env 注入优先于 OAuth（sdk Verified Facts），有原生 claude 登录的机器会把原生模型全部劫持到代理。工作机（无原生登录、全走 super-relay）能用但更优解是把 `SUPER_RELAY_AUTH_TOKEN` 放 `~/.agent-gateway.env`（endpoints.yaml env_file 机制，@sm/llm 解析时注入 → ClaudeBackend 按 model per-spawn 注入 base_url+token，多模型路由保持正确）。
+- **验证**: sdk rebuild + 双侧 tsc ✓；`--setting-sources=`/`=local` 裸 CLI 实测均接受；隔离实例（:3124 + 临时 DB + auth cookie 过闸 + 真 claude-haiku）纯 chat：`created→thinking×7→delta→done`、回答正常、usage 齐全——等号参数真 spawn 通过、low effort 下 thinking 秒级且面板可见。prod 已重建 + kickstart。
+- **Next**: 工作机收敛清单（见 sdk progress 同日条目）：①`cd ~/sdk && git checkout -- packages/agent/src && git pull && bun run build`（丢手工补丁换等价上游）②trellis `git checkout -- instrumentation.ts && git pull && make build` + 重启 ③plist 的 ANTHROPIC_* 三行可留可换 env_file 方案（换则删行 + 把 token 写进 ~/.agent-gateway.env）。
+
+### Session 53 (2026-07-15)
 - **Done**: **工作区文件抽屉**（分支/worktree `增加工作区目录`，commit `3a64f4b`）。动机：文件可见性链条缺最后一环——上传（Stage 19）/生成（GeneratedFilesBar 只覆盖回答里提到的路径）/空白沙箱（S49，产物散在 `~/.trellis/scratch` 无入口），远程/手机场景无终端可取件。形态拍板：**按需抽屉（只读浏览 + 预览），不做常驻 IDE 面板**——入口 = Header ModeBadge（有 workspacePath 时变可点 button，chat 保持静态 chip）。
   - 新 `GET /api/sessions/[id]/files?dir=<abs>`：单层非递归列目录，围栏 = session cwd realpath 前缀（`dir` 必须绝对路径；symlink 一律不列，指向 cwd 外的目录 realpath 后 403）；隐藏 dotfiles/node_modules/__pycache__/venv，**保留 dist/build**（agent 产物常落那里，与 workspaces/browse 的隐藏表刻意不同）；单目录 300 条截断标记。
   - 新 `components/WorkspaceFilesDrawer.tsx`（NotesDrawer 同款骨架：桌面右侧 360px / 移动端 60vh 底部 sheet）：惰性展开子目录、文件行显示 kind 图标+大小、点击 `openFilePreview(absPath)` 复用全局 FilePreview（**预览围栏零改动——`sessionAllow` 本就放行整个 cwd**，store 注释里预留的 "future workspace browser" 正是此物）；每次开抽屉 epoch 重挂载强制刷新 + ⟳ 手动刷新。store 加 `workspaceFilesOpen`（UI-only）。

@@ -71,6 +71,12 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
       tools: ["WebSearch", "WebFetch"], // claude 用;codex 无 web,backend 自行忽略
       cwd: req.cwd ?? CHAT_SCRATCH,
       settingSources: false,
+      // 纯对话 = GPT 式即答场景:effort 压到 low,否则默认 effort 下模型对
+      // "你好"级问题也先思考半天(alwaysday1 等端点尤甚),chat 手感差。仅纯
+      // 对话——增强 chat / workspace / project 是干活 agent,保持 CLI 默认不
+      // 降智。instrumentation.ts 已 scrub 继承的 CLAUDE_CODE_EFFORT_LEVEL,
+      // 这里是唯一显式下发点(RunOptions.env 优先级高于继承的进程 env)。
+      env: { CLAUDE_CODE_EFFORT_LEVEL: "low" },
       ...forkOpts,
     };
   }
