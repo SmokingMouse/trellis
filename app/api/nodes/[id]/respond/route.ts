@@ -25,6 +25,8 @@ export async function POST(
     behavior?: unknown;
     updatedInput?: unknown;
     message?: unknown;
+    // 权限确认:true + allow = 本轮内同名工具不再弹卡。
+    alwaysAllowTool?: unknown;
   };
   try {
     body = await req.json();
@@ -42,11 +44,16 @@ export async function POST(
     );
   }
 
-  const result = resolveInteraction(id, body.toolUseId, {
-    behavior: body.behavior,
-    updatedInput: body.updatedInput,
-    message: typeof body.message === "string" ? body.message : undefined,
-  });
+  const result = resolveInteraction(
+    id,
+    body.toolUseId,
+    {
+      behavior: body.behavior,
+      updatedInput: body.updatedInput,
+      message: typeof body.message === "string" ? body.message : undefined,
+    },
+    { alwaysAllowTool: body.alwaysAllowTool === true },
+  );
 
   switch (result) {
     case "ok":

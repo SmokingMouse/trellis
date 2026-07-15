@@ -104,6 +104,12 @@ export type StreamRequest = {
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
   // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
   chatEnhanced?: boolean;
+  // Permission gate: when true (workspace/project, claude family), the spawn
+  // uses --permission-mode default + injected ask rules so mutating tools
+  // (Bash/Write/Edit/…) pause on can_use_tool and wait for the user's
+  // allow/deny (permission card). Only honored when onCanUseTool is present
+  // (codex/mock have no stdio protocol → they keep their current policy).
+  requireApproval?: boolean;
   // chat B-fork: when true (claude family only), the provider persists + resumes
   // the parent node's forked CLI session (--fork-session) so history lives as
   // immutable message blocks the CLI caches — instead of folding it into the

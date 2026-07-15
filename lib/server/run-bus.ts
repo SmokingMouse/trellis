@@ -174,6 +174,9 @@ type RunState = {
   // the abort path call interactionResolver to unpark the promise.
   pendingInteraction: PendingInteraction | null;
   interactionResolver?: (answer: InteractionDecision) => void;
+  // 权限确认:本轮内用户点过「总是允许」的工具名。仅存活于这一次 spawn(每轮
+  // 新进程,权限记忆随 RunState 丢弃);下一轮同工具会重新弹卡。
+  approvedTools: Set<string>;
   subscribers: Set<Subscriber>;
   // Drop the RunState 30s after terminal so memory doesn't accrete. New
   // subscribers after that window go through /api/nodes/[id]/stream
@@ -255,6 +258,10 @@ export function startRun(args: {
   // the claude family — codex/mock have no stdio permission control. When
   // false, ctx.onCanUseTool is undefined and the provider never opens it.
   interactive?: boolean;
+  // 权限确认:true = 本 run 的 can_use_tool 一律暂停弹权限卡(除本轮已「总是
+  // 允许」的工具),false/缺省 = 现状(非交互工具 auto-allow,YOLO)。来自
+  // session.require_approval,只对 interactive(claude 系)run 有意义。
+  requireApproval?: boolean;
   // Optional post-done topic generator. Called with the aggregated
   // text; if it returns a non-empty string we write the label and emit
   // a topic_label event to subscribers. Errors are swallowed.
@@ -278,6 +285,7 @@ export function startRun(args: {
     committedToolCalls: [],
     committedThinking: "",
     pendingInteraction: null,
+    approvedTools: new Set(),
     subscribers: new Set(),
   };
   RUNS.set(args.nodeId, state);
@@ -312,13 +320,18 @@ async function runLoop(
   // provider never opens the stdio permission protocol.
   const onCanUseTool: OnCanUseTool | undefined = args.interactive
     ? async (req) => {
-        // Non-interactive tools (Bash/Read/Write/Edit/…) → instant allow.
-        // This is the★ invariant: workspace/project keep their YOLO bypass —
-        // no UI, no wait, zero stall. Echo input back unchanged.
-        if (!INTERACTIVE_TOOLS.has(req.toolName)) {
+        // Non-interactive tools (Bash/Read/Write/Edit/…):
+        //   YOLO(默认) → instant allow。This is the★ invariant: workspace/
+        //   project keep their bypass — no UI, no wait, zero stall.
+        //   权限确认(requireApproval) → 不放行,落到下面的暂停路径弹权限卡;
+        //   本轮内点过「总是允许」的工具名除外。
+        if (
+          !INTERACTIVE_TOOLS.has(req.toolName) &&
+          (!args.requireApproval || state.approvedTools.has(req.toolName))
+        ) {
           return { behavior: "allow", updatedInput: req.input };
         }
-        // Interactive tool → pause. Record + persist + broadcast, then park
+        // Interactive tool / 待审批工具 → pause. Record + persist + broadcast, then park
         // on a promise the user (POST respond) or abort will resolve.
         const pending: PendingInteraction = {
           toolUseId: req.toolUseId,
@@ -734,6 +747,11 @@ export function resolveInteraction(
   nodeId: string,
   toolUseId: string,
   answer: InteractionDecision,
+  opts?: {
+    // 权限确认:allow 时同时把该工具名记进本轮「总是允许」,后续同名工具不再
+    // 弹卡(只影响这一次 spawn,下一轮重置)。
+    alwaysAllowTool?: boolean;
+  },
 ): "ok" | "no_run" | "no_pending" | "mismatch" {
   const state = RUNS.get(nodeId);
   if (!state || state.status !== "streaming") return "no_run";
@@ -741,6 +759,9 @@ export function resolveInteraction(
     return "no_pending";
   }
   if (state.pendingInteraction.toolUseId !== toolUseId) return "mismatch";
+  if (opts?.alwaysAllowTool && answer.behavior === "allow") {
+    state.approvedTools.add(state.pendingInteraction.toolName);
+  }
   state.interactionResolver(answer);
   return "ok";
 }

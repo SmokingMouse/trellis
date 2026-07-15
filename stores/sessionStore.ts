@@ -47,6 +47,8 @@ const DEFAULT_HISTORY_DEPTH = 0;
 // chat enhanced-mode toggle: when on, chat gets workspace+full (skills + web,
 // YOLO). Global runtime preference, default off. Sent on every chat request.
 const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
+// 权限确认 draft（workspace/project 新会话的开关记忆）。
+const REQUIRE_APPROVAL_KEY = "trellis-require-approval";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 // Workbench Wave 4 (VSCode-style IDE shell):
 // - pinned tabs (ordered) persist across reloads, like VSCode's permanently
@@ -244,6 +246,11 @@ function loadChatEnhanced(): boolean {
   return window.localStorage.getItem(CHAT_ENHANCED_KEY) === "1";
 }
 
+function loadDraftRequireApproval(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(REQUIRE_APPROVAL_KEY) === "1";
+}
+
 // API node → client node (add position field, drop nullable distinction)
 type ApiNode = Omit<ChatNode, "position" | "topicLabel"> & {
   topicLabel?: string | null;
@@ -281,6 +288,9 @@ type State = {
   historyDepth: number;
   // chat enhanced-mode (skills + web, YOLO). Global, default off.
   chatEnhanced: boolean;
+  // 权限确认 draft：新建 workspace/project 会话时是否开审批（创建后锁进
+  // session 行，运行态读 session.requireApproval）。仅 claude 系生效。
+  draftRequireApproval: boolean;
   // Bumps every time the server's session list might have changed —
   // SessionPicker watches this to refetch.
   sessionsRevision: number;
@@ -502,6 +512,8 @@ type Actions = {
       behavior: "allow" | "deny";
       updatedInput?: unknown;
       message?: string;
+      // 权限确认：allow 时同名工具本轮内不再弹卡。
+      alwaysAllowTool?: boolean;
     },
   ) => Promise<{ ok: true } | { ok: false; reason: "stale" | "error" }>;
   // Combined "go to parent + scroll its response to the mark for this
@@ -541,6 +553,7 @@ type Actions = {
   setComposeRootOpen: (open: boolean) => void;
   setHistoryDepth: (n: number) => void;
   setChatEnhanced: (v: boolean) => void;
+  setDraftRequireApproval: (v: boolean) => void;
   // A2: re-ask an existing node's question with an edited wording. Creates a
   // new sibling (same parent + anchor) — original Q&A is preserved (Q1 = B).
   editNode: (nodeId: string, newQuestion: string) => Promise<void>;
@@ -610,6 +623,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   sendKey: SEND_KEY_DEFAULT,
   historyDepth: DEFAULT_HISTORY_DEPTH,
   chatEnhanced: false,
+  draftRequireApproval: false,
   sessionsRevision: 0,
   bumpSessionsRevision: () =>
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 })),
@@ -668,6 +682,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       sendKey: loadSendKey(),
       historyDepth: loadHistoryDepth(),
       chatEnhanced: loadChatEnhanced(),
+      draftRequireApproval: loadDraftRequireApproval(),
     });
     void get().fetchProviderCatalog();
     try {
@@ -1042,6 +1057,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  setDraftRequireApproval: (v) => {
+    set({ draftRequireApproval: v });
+    if (typeof window !== "undefined") {
+      if (v) window.localStorage.setItem(REQUIRE_APPROVAL_KEY, "1");
+      else window.localStorage.removeItem(REQUIRE_APPROVAL_KEY);
+    }
+  },
+
   editNode: async (nodeId, newQuestion) => {
     const node = get().nodes[nodeId];
     if (!node) return;
@@ -1071,6 +1094,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           workspacePath: draftWorkspacePath,
           ...(draftMode === "chat" && draftSystemPrompt
             ? { systemPrompt: draftSystemPrompt }
+            : {}),
+          // 权限确认：仅 workspace/project 有意义；服务端还会按 provider
+          // family 再钳一道（codex/mock 落 false）。
+          ...(draftMode !== "chat" && get().draftRequireApproval
+            ? { requireApproval: true }
             : {}),
         };
     const attachments = opts?.attachments;
@@ -1768,6 +1796,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           behavior: decision.behavior,
           updatedInput: decision.updatedInput,
           message: decision.message,
+          ...(decision.alwaysAllowTool ? { alwaysAllowTool: true } : {}),
         }),
       });
       if (res.ok) return { ok: true };
@@ -2032,6 +2061,8 @@ type ChatRequestBody =
       // D1: chat-mode custom system prompt for a new session.
       systemPrompt?: string | null;
       chatEnhanced?: boolean;
+      // 权限确认（new session 时锁定；服务端按 family/mode 钳制）。
+      requireApproval?: boolean;
       // Stage 15: image attachments uploaded via /api/uploads. Server
       // sanitizes + caps; omitted on retry (server re-reads from DB).
       attachments?: NodeAttachment[];

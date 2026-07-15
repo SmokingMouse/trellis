@@ -1,7 +1,10 @@
 # Trellis Progress
 
 ## Current Focus
-**主题系统 + 界面&交互整体优化（Session 56，分支 `trellis-theme` 8 commits，待用户验收）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**分支已 push（origin/trellis-theme）；merge main 暂缓——main 工作区有另一并行 session 的未提交 WIP（ChatNode/Composer/InteractionForm/QuestionInput 等与本轮迁移同文件），待其落地后再 merge 解冲突。**
+**主题系统 + 界面&交互整体优化（Session 57——原 56 与权限确认撞号重编，分支 `trellis-theme` 已 merge main 权限确认后合入）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**merge 注**：权限确认（04a9c18）的 InteractionForm 权限卡 / ModePicker 新增段为 token 化前写就，随 merge 一并迁移 token（见 S57 log merge 追记）。
+
+---
+**权限确认 Permission Gate（Session 56，已提交推送 `04a9c18` + sdk `924444c`，免签待补）** → [spec](permission-gate.md) / decisions.md 2026-07-15。session 级 `require_approval`（创建锁定，仅 claude 系 workspace/project）：spawn 降 `--permission-mode default` + **ask 规则注入**（硬前提：本机全局 allowlist 裸 `Bash` 会让 can_use_tool 永不触发，实测 ask > allow），可变更工具暂停 → 复用 A路② 管道 → TurnCard 权限卡（允许/本轮总是允许/拒绝+理由）。SDK 加 `RunOptions.askTools`（dist 已重建）。验证全绿：协议探针 + HTTP e2e 四场景 + 浏览器实测；tsc/build ✓，prod 已重启。P1（终端逃生舱 tmux+ttyd）等被绊到再做。**注意：本轮与 S54/S55 在同目录并行，working tree 另有 S55 未 commit 的 Composer/QuestionInput/ChatNode 改动，commit 时需分开摘。**
 
 ---
 **线性视图中间节点分叉（Session 54，已提交推送）**：卡片头 ⑂ 按钮 → reply-to 式 chip 重定向底部 Composer（`streamBranch(节点, q, null)`），补上「线性页面对中间节点自由分叉提问」的缺口（此前只能划线 ⌘K）。隔离实例 mock 全链路浏览器实测 ✓。
@@ -138,7 +141,7 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
-### Session 56 (2026-07-15)
+### Session 57 (2026-07-15，原 56 撞号重编)
 - **Done**: **主题系统 + 界面&交互整体优化**（worktree/分支 `trellis-theme`，基 main ce3481e，8 commits，f464c49..ac54e85）。前置：两份静态审计（视觉设计系统 + 交互流程，各出债务 Top10）+ 用户拍板（三线全做 / 主题系统 / 5 套主题 / 主按钮=accent / 代码字体系统栈）。分 8 wave 执行，决策全录 → [ADR](decisions/2026-07-15-theme-system.md)：
   - **W1-W2 token 层**：globals.css 双层变量（:root/.dark 级联块 + `@theme inline` 注册 utility）——中性族/语义 hue（含 amber 四分、unread/fork 独立 hue）/字号 6 档/圆角 3 档/阴影 3 档；~40 处裸 hex 全变量化；hljs light 死代码删除（「代码块恒暗」据实转正）；`color-scheme` 让 dark 原生滚动条变深（有意改进）。零 diff 验证 = 浏览器 computed-style 逐字节断言 + 截图 diff（残差定位为焦点态/滚动条噪音）。
   - **W3 主题状态**：useTheme {mode,palette}（storage 兼容零迁移）+ 预水合脚本 + ThemeMenu（外观三段 + swatch）+ `/theme` 命令；localStorage 四态矩阵实测。
@@ -148,7 +151,17 @@
   - **W7 交互九项**：①useIsMobile→767px 与 md: 同线（修「窄窗口 sb 不归零挤右半屏」确定性 bug，390px 实测恢复）②「＋新会话（全新树）」vs「🧹 新话题」正名 ③`lib/shortcuts.ts` 注册表 + `?`/`/help` KeyboardHelp 面板 + `isEditableTarget()` 换掉 5 处重复 guard ④RunSpinner 退役统一 Dots ⑤TargetChip 归一画布/线性目标指示 ⑥移动端思维树入口换树形 icon ⑦🧠 徽章恒按钮（<50% 只读弹层）⑧Outline/移动侧栏/FAB 菜单补进场动画 ⑨移动端 SessionTabs 隐藏 + 内容 pt responsive。
 - **验证**: 每 wave tsc + `make build`（共 6 次全绿）；隔离实例（快照 DB /tmp + :3131 + agent-browser）：截图基线→零 diff 断言→5 主题矩阵→390px/桌面回归→**mock 全链路流式回归**（建会话→/model mock→发送→流式 Dots/run-bar/未读 pill→done）✓。测试产物全清（server/快照 DB/浏览器 session；截图留 /tmp/trellis-theme-shots 备查，重启自清）。
 - **坑（工具）**: agent-browser 本轮三次页面莫名跳 about:blank（eval 报错后/带 CSS 选择器的 click 后/daemon 重启丢 media 模拟状态）——重 open 恢复；截图前显式 `set media`，点击用 eval DOM 直点（S54 教训延续）。
-- **Next**: 用户真机验收（重点：手机布局、5 套主题观感、? 面板、新 accent 主按钮）；验收后 merge main + push（commit 均 --no-gpg-sign 待补签）。候选 follow-up：ThreadMinimap 移动端默认折叠（这次发现它在手机上盖内容，未在本轮范围）；terminal 主题可选装 JetBrains Mono。
+- **merge 追记（2026-07-16）**: `git merge origin/main`（权限确认 04a9c18）在 trellis-theme worktree 完成——main 工作区留有并行 session 未提交 WIP（ChatNode/Composer/QuestionInput）不可在彼处操作，故反向 merge 后直接推 `HEAD:main`，prod 工作区本地 main 落后一截由该 session 自行 pull。冲突 3 文件：InteractionForm（对方 icon/title 参数 + 我方 token class 合成）、ModePicker（双 import 都留）、progress（S56 撞号，本轮重编 S57）。**权限确认的新 UI（PermissionForm 权限卡/ModePicker 🛡️ 开关）为 token 化前写就、会被 W5.5 闸门打哑，随 merge 一并迁移 token**（allow=accent 填充、always=accent 淡底、deny=warn、命令块=surface+line，全仓 grep 复归 0）。tsc+build ✓ + 隔离实例 smoke ✓。
+- **Next**: 用户真机验收（重点：手机布局、5 套主题观感、? 面板、新 accent 主按钮、权限卡新配色）；commit 均 --no-gpg-sign 待补签。候选 follow-up：ThreadMinimap 移动端默认折叠（在手机上盖内容，未在本轮范围）；terminal 主题可选装 JetBrains Mono。
+
+### Session 56 (2026-07-15)
+- **Done**: **权限确认（Permission Gate P0）落地** → [spec](permission-gate.md) + decisions.md 2026-07-15。缘起：botmux（tmux 会话常驻/attach 模式）对照讨论 → 拆解出「权限确认不需要终端，stream-json control protocol 是结构化正解」（终端逃生舱=P1 等触发）→ 用户拍板直接实现。
+  - **关键实测发现**：`--permission-mode default` 下本机全局 settings.json 裸 `Bash` allowlist 直接放行、can_use_tool 永不触发——审批必须注入 `--settings '{"permissions":{"ask":[Bash,Write,Edit,MultiEdit,NotebookEdit]}}'`（ask > allow 优先级实测坐实，claude 2.1.207）。
+  - **SDK**（~/sdk，dist 已重建）：`RunOptions.askTools?: string[]` → ClaudeBackend 注入 `--settings`（纯机制，工具名单留 trellis）。
+  - **trellis**：`sessions.require_approval` migration + repo/Session 类型全链；chat route 创建钳制（claude 系 + 非 chat）+ branch/retry 从 session 行读；sdk-adapter approve → permission "default"+askTools（`req.onCanUseTool` 在场才生效，天然隔离 codex/mock）；run-bus dispatcher approve 分支（不再 auto-allow → 复用 A路② PendingInteraction 全管道）+ `approvedTools` per-run「总是允许」+ resolveInteraction opts；respond route `alwaysAllowTool`；UI = ModePicker 🛡️需确认/⚡YOLO 开关（draft localStorage）+ InteractionForm 新 PermissionForm（Bash 命令等宽块/入参 JSON + 允许/本轮总是允许/拒绝+理由）+ ModeBadge 🛡️ 角标。A路② 既有 AskUserQuestion/ExitPlanMode 与 YOLO 会话零变化。
+- **验证**（全绿）：协议探针 allow/deny；隔离实例（:3123 + 临时 DB + 真 claude haiku）HTTP e2e 四场景 = allow 弹卡→执行 / deny 不执行+理由回模型+正常 done / always 两 Bash 只弹一卡 / yolo 零卡回归，mid-pause catchup 带 pendingInteraction（刷新恢复卡片）；agent-browser 实测 开关→建会话→权限卡渲染→允许→执行→答案正确 + Header 🛡️徽章；tsc ✓ + `make build` ✓；prod kickstart（login 200/api 401）。测试产物全清（server/临时 DB/ws/probe/两个 claude projects 测试目录）。
+- **并行注记**：本轮与 S54/S55 同目录并行开发（发现时 S55 已 commit 到 main，另留有未 commit 的 Composer/QuestionInput/ChatNode 小改动）；文件零交集、无冲突，但 **commit 时两批改动需分开摘**（本轮 14 文件 + permission-gate.md；SDK 侧另一 repo 一并 commit）。
+- **Next**: ① ~~commit~~ 已提交推送（trellis `04a9c18` + sm-toolkit `924444c`，均 `--no-gpg-sign` 免签同 3b61a2e 待补签；S55 残留 Composer/QuestionInput/ChatNode 未 commit 改动已分摘留在 working tree）；② P1 候选：终端逃生舱（tmux 包 `claude --resume` + ttyd web 终端，回程复用 CLI sync watcher）等真实需求触发再做；③ 可选 follow-up：权限决议审计日志、三档权限演化（+acceptEdits）。
 
 ### Session 55 (2026-07-15)
 - **Done**: **`/` 命令接入日常对话 Composer + 下拉键盘导航（推翻 S30「追问框刻意不接」的取舍，用户明确要求；worktree `增加工作区目录`，与 S54 撞号重编为 S55）**。共享 `Composer.tsx`（线性 sticky footer + 画布 DockedComposer）此前只接了 skill 补全，`lib/commands.ts` 的 Trellis 命令只有首屏 QuestionInput 能用。三处改动，registry/命令语义零改：

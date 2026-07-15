@@ -160,6 +160,10 @@ export type Session = {
   origin?: string;
   // cli-import 的源 jsonl 路径（UI 提示 / detach 用），否则 null。
   sourceJsonlPath?: string | null;
+  // 权限确认：true = workspace/project 的可变更工具（Bash/Write/Edit…）逐个
+  // 弹权限卡等用户允许/拒绝；false/缺省 = YOLO（现状，含全部存量行）。
+  // 创建时锁定，仅 claude 系 workspace/project 可开。
+  requireApproval?: boolean;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while

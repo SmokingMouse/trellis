@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
+import { providerFamily } from "@/lib/llm";
 import type { Mode, ProviderId } from "@/lib/llm";
 import { WorkspacePicker } from "./WorkspacePicker";
 
@@ -135,10 +136,15 @@ export function ModePicker() {
   const workspacePath = useSessionStore((s) => s.draftWorkspacePath);
   const setWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const provider = useSessionStore((s) => s.provider);
+  const requireApproval = useSessionStore((s) => s.draftRequireApproval);
+  const setRequireApproval = useSessionStore((s) => s.setDraftRequireApproval);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const OPTIONS = optionsFor(provider);
   const needsWorkspace = mode === "workspace" || mode === "project";
+  // 权限确认开关：仅 claude 系的 workspace/project 有意义（chat 无文件工具；
+  // codex 无 stdio 审批协议，显示了也是谎言）。服务端创建时还会再钳一道。
+  const approvalAvailable = needsWorkspace && providerFamily(provider) === "claude";
 
   const handleSelect = (next: Mode) => {
     if (next === mode) return;
@@ -206,6 +212,25 @@ export function ModePicker() {
           <span className="truncate max-w-[10rem] font-mono">
             {workspacePath ? basename(workspacePath) : "选择工作区"}
           </span>
+        </button>
+      )}
+
+      {approvalAvailable && (
+        <button
+          onClick={() => setRequireApproval(!requireApproval)}
+          title={
+            requireApproval
+              ? "需确认：Bash/Write/Edit 等可变更工具逐个弹卡，等你允许/拒绝后才执行（创建会话时锁定）"
+              : "YOLO：工具自动放行（现状默认）。点击切换为需确认——可变更工具执行前先问你"
+          }
+          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
+            requireApproval
+              ? "border-accent-line bg-accent-muted text-accent-ink"
+              : "border-line-strong bg-surface text-ink-faint hover:bg-surface-muted"
+          }`}
+        >
+          <span aria-hidden>{requireApproval ? "🛡️" : "⚡"}</span>
+          <span>{requireApproval ? "需确认" : "YOLO"}</span>
         </button>
       )}
 

@@ -371,6 +371,21 @@ function migrate(db: Database) {
     );
   }
 
+  // 权限确认（P0 permission gate）：1 = 该 session 的 workspace/project 轮次以
+  // --permission-mode default + ask 规则 spawn，可变更类工具（Bash/Write/Edit…）
+  // 暂停等用户在 UI 里允许/拒绝；0 = 现状 YOLO（skip-permissions）。创建时锁定，
+  // 仅 claude 系 workspace/project 可置 1（chat 无文件工具；codex 无 stdio 协议）。
+  const hasRequireApproval = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'require_approval'",
+    )
+    .get();
+  if (!hasRequireApproval) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN require_approval INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+
   // 该节点的 turn 在其 lineage jsonl 里的 turn-start user entry uuid（=
   // ParsedTurn.id）。native isolated project 节点 done 后由 backfillNativeTurnUuid
   // 回填；是 buildPrefixJsonl 在该节点分叉的下刀坐标。NULL = 回填缺失 → 该点分叉
