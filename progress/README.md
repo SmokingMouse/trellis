@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**CHAT 模式"假死"修复 = thinking 可视化 + effort env 卫生（Session 52，本 worktree 未 commit）**：claude 思考期 UI 零反馈像卡死（effort=max 时达分钟级）。双修：① SDK（~/sdk @sm/agent）新增 `EventType.Thinking` 透传 `thinking_delta`，trellis 全链路接力（StreamEvent/RunEvent/catchup → stream-bus thinkingChannel → TurnCard 思考面板 + 画布 ChatNode 指示器）；② `instrumentation.ts` 启动 scrub 从 shell 继承的 `CLAUDE_CODE_EFFORT_LEVEL`。roadmap D4 解锁。隔离实例真 claude 全链路 + 浏览器实测 ✓。
+
+---
 **线性视图滚动已读修复（Session 48，已合入 main，fix commit `51d7dff`）**：已读判定从「仅 anchor 1s」改为 IntersectionObserver 视口停留 1s，滚动阅读即计已读；隔离实例浏览器实测 ✓。
 
 ---
@@ -32,7 +35,7 @@
 **剩余（每项有明确状态，非遗漏）**：
 - C1 PDF/Excel/Word — 二进制需 npm 装 sheetjs/pdf/mammoth 解析（code/text 子集已做）
 - C5 / A6 / B3 — 评估低 ROI 暂缓（理由见 P1/P2 清单，简洁优先）
-- D4 thinking — SDK 无 thinking 事件，blocked；D3 工具闭环 — 疑底层已覆盖待确认
+- ~~D4 thinking — SDK 无 thinking 事件，blocked~~ → 已解（Session 52，SDK 是自家的了）；D3 工具闭环 — 疑底层已覆盖待确认
 - C3 语义检索（Q2 embedding 未决）· C6 图片生成（Q3 倾向不做，走 ai-legion）
 
 **全部待浏览器实测**（dev server 在 3001）。roadmap 的 Stage 20/22（plan 节点/subagent 可视化）仍属功能广度归原 roadmap。本轮补的是交互/UI/对话内核体验维度。
@@ -104,7 +107,7 @@
 - [ ] A6 命令面板 — **评估暂缓**：现有快捷键（J/K 未读、B 回父、F 全屏、⌘K 分叉、⌘P 搜索、Alt+方向导航）已覆盖高频操作，命令面板边际
 - [ ] B3 长回复折叠/TOC — **评估暂缓**：现 max-h 滚动 + 全屏阅读已覆盖核心阅读，TOC 边际（简洁优先）
 - [ ] C2 记忆桥接、C1 文件附件（见上 P0）
-- [ ] D4 thinking 可视化 — **疑似 blocked**：agent-gateway SDK 的 EventType 无 thinking 事件，需 SDK 支持，待确认
+- [x] D4 thinking 可视化（Session 52：@sm/agent 加 `EventType.Thinking` + trellis 全链路 + TurnCard 思考面板/画布指示器；thinking 不落 DB，ephemeral 与 CLI 折叠行为一致）
 - [ ] D3 工具结果闭环 — 待确认：tool result 回灌模型可能 agent-gateway/CLI 已自带，trellis 只做可视化
 - [ ] C3 语义检索 — **开放决策 Q2**（embedding API）未拍板，暂不做
 - [ ] C6 图片生成/语音 — **开放决策 Q3 倾向不做**（付费 API + 偏离单机定位，走 ai-legion skill）
@@ -126,6 +129,22 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 52 (2026-07-15)
+- **Done**: **CHAT 模式"假死"修复（thinking 可视化 + effort env 卫生，roadmap D4 解锁）**。根因两层：claude CLI 2.x **默认**先出 thinking 块再出正文（实测 haiku 无任何 effort env 也 thinking），而 SDK/trellis 只透传 `text_delta`、thinking 全丢——UI 对一条一等输出通道结构性失明；叠加 `CLAUDE_CODE_EFFORT_LEVEL=max` 从 occ alias 启动的 shell 穿透进 trellis 进程（SDK streamLines 用 `{...process.env, ...opts.env}` spawn），思考期拉到分钟级把症状放大成"卡死"。
+  - **SDK 侧**（~/sdk，dist 已重建）：`EventType.Thinking` + ClaudeBackend 映射 `thinking_delta`→Thinking 事件；纯增量，CLIRunner switch 有 default→null，self-agent 无感。
+  - **trellis 链路**：`StreamEvent`/`ProviderEvent`/`RunEvent` 加 `thinking`；run-bus `committedThinking` 累计（**不落 DB**，ephemeral 与 CLI 折叠一致）+ catchup 带 `thinking` 快照（仅 streaming 时）；SSE 两路由泛转发零改动；store 把 thinking 发到 stream-bus 新 `thinkingChannel(nodeId)`（created/done/error/catchup 同步清理）。
+  - **UI**：TurnCard 思考面板——无正文时 dim 面板"思考中…"+ 思考文本流式跟尾（auto-scroll），正文开始后折叠成 `<details>`"🧠 思考过程（N 字）"，done 后整体消失；画布 ChatNode 加 DOM-direct"思考中…"指示器（零 React 重渲染纪律不破）。
+  - **env 卫生**：`instrumentation.ts` 启动时 scrub `CLAUDE_CODE_EFFORT_LEVEL` 并 console.warn（trellis 的 effort 由自己决定=CLI 默认；将来 per-session effort 走 RunOptions.env 显式下发）。
+- **验证**（tsc ✓；隔离实例 :3123 + 临时 DB + 真 claude）：scrub 启动 log ✓；SSE `created→thinking→delta→done`（haiku thinking×6/×17）✓；浏览器（agent-browser + MutationObserver）：TurnCard 面板流式更新（sawThinking=39）+ 折叠态（sawPanel=11）+ done 后消失 ✓、画布指示器 ✓、思考期中途刷新重连恢复面板 ✓。另实测：endpoints.yaml 的 `claude:claude-sonnet-5`/`claude-fable-5` 简单问题不产 thinking（模型自主决定，SSE 无 thinking 事件属正常），legacy `claude-haiku` 稳定 thinking。测试产物全清（server/临时 DB/ASCII 验证 worktree/11 个孤儿 chat-scratch jsonl 核 0 引用后删）。
+- **坑（环境）**: 本 worktree 目录名含中文 → Turbopack `make build` 崩（`start byte index not a char boundary`，asset ident 切 CJK 字节边界）——与改动无关；已在 ASCII 临时 worktree 套同改动 build ✓。**后续 worktree 目录用 ASCII 名**。
+- **Next**: 用户验收后 commit（连同 Session 51 的 anchor 改动一并）；候选 follow-up：codex reasoning 事件同样透传、ModelPicker 对 catalog 外 legacy id（claude-haiku）的显示回退优化。
+
+### Session 51 (2026-07-15)
+- **Done**: **线性视图 anchor 跳转改为对齐卡片头**。树缩略图/分支卡/搜索等触发 `setActiveNode` 后的滚动定位从 `scrollIntoView block:"center"` 改为 `block:"start"`（`LinearThreadView.tsx` anchor effect）+ 卡片 `scroll-mt-3` 留呼吸空间——长卡片居中会落在回答中段，看不到卡片头的 #编号和用户提问。
+- **验证**: tsc ✓；隔离实例（快照 DB + dev :3004 + agent-browser）实测：p2p 会话线性视图点缩略图根节点→视口顶=「#1 · Turn」+提问；点长卡片节点 #8（DHT 长文）→视口顶=卡片头+分叉 banner+提问，不再落中段。测试产物已清。
+- **注**: 本 worktree bun install 装 `file:` @sm 两包同 Session 49 的 ENOENT，已手动 symlink 修复（同 `make relink-sdk` 效果）。
+- **Next**: 用户验收后 commit。
+
 ### Session 50 (2026-07-15)
 - **Done**: **临时文件上传（Stage 19 落地，形态调整为 composer 附件）**。动机：远程操作时快速给 agent 补充文件+上下文（CSV/日志/PDF 等截图之外的东西）。核心设计：**复用 Stage 15 blob 基座零 schema 变更**（`attachments_json` 原样，kind 由 mime 推断），通用文件**不进 provider vision 通道**——tool-capable 模式（workspace/project/chat增强，全是 `--dangerously-skip-permissions`）spawn 前物化到 `~/.trellis/uploads/<nodeId>/<原文件名>` + prompt 末尾注入绝对路径清单，agent 自己 Read/Bash 消费（CSV 能现场跑分析）；纯 chat 文本类 ≤128KB 内联 fenced block、二进制 UI 拦 + 服务端 prompt 注明。`~/sdk` 零改动、codex 路径零改动。
   - 新 `lib/attachments.ts`（客户端/服务端共享 ext↔mime 白名单 ~35 种 + 分类 helpers）；`blobs.ts` 泛化（storeBlob 按 ext、resolveBlobPath 全表、`materializeAttachments` 幂等 staging→retry 免费复用、`readTextBlob`）；uploads POST 收通用文件（multipart 必带文件名，ext 白名单 + 服务端钦定 canonical mime 防浏览器 junk mime）、GET 加 `?name=` Content-Disposition；chat route images/files 分流 + `questionForTopic` 隔离（内联大 CSV 不污染 topic label）。

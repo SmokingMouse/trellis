@@ -12,6 +12,7 @@ import {
   clearStreamPending,
   emitStream,
   getStreamPending,
+  thinkingChannel,
 } from "@/lib/stream-bus";
 import { ancestorsOf, subtreeIds } from "@/lib/collapsed";
 import { type SendKey, SEND_KEY_DEFAULT, isSendKey } from "@/lib/send-key";
@@ -2054,6 +2055,10 @@ type StreamEvent =
       node: ApiNode;
     }
   | { type: "delta"; text: string }
+  // Extended thinking chunk. Streams BEFORE any text delta (claude thinks
+  // first — minutes under high effort). Rendered live in a dim panel, kept
+  // on the stream-bus thinking channel only, dropped at done/error.
+  | { type: "thinking"; text: string }
   | {
       type: "done";
       usage?: {
@@ -2080,6 +2085,9 @@ type StreamEvent =
       response: string;
       status: "streaming" | "done" | "error";
       toolCalls: import("@/lib/types").ToolCall[];
+      // Thinking accumulated so far (streaming runs only; optional because
+      // the DB-fallback reconnect path doesn't carry it — run already dead).
+      thinking?: string;
       // A路②: present when the run is paused on an interactive tool; the UI
       // (third knife) renders the waiting form from it. null otherwise.
       pendingInteraction?: import("@/lib/types").PendingInteraction | null;
@@ -2155,6 +2163,7 @@ function handleStreamEvent(
       // New stream: discard any leftover bus buffer for this id (e.g. from
       // a prior aborted retry) so accumulation starts clean.
       clearStreamPending(event.node.id);
+      clearStreamPending(thinkingChannel(event.node.id));
       // Register the controller now that we know the nodeId. Retry already
       // registered eagerly with the same controller — set() is idempotent.
       if (opts.controller) {
@@ -2191,10 +2200,13 @@ function handleStreamEvent(
       get().expandAncestors(node.id);
     } else if (event.type === "delta" && currentNodeId) {
       emitStream(currentNodeId, event.text);
+    } else if (event.type === "thinking" && currentNodeId) {
+      emitStream(thinkingChannel(currentNodeId), event.text);
     } else if (event.type === "done" && currentNodeId) {
       const id = currentNodeId;
       const fullText = getStreamPending(id);
       clearStreamPending(id);
+      clearStreamPending(thinkingChannel(id));
       cleanupController(id);
       const usage = event.usage ?? {
         input: 0,
@@ -2237,6 +2249,7 @@ function handleStreamEvent(
         const id = currentNodeId;
         const fullText = getStreamPending(id);
         clearStreamPending(id);
+        clearStreamPending(thinkingChannel(id));
         cleanupController(id);
         set((s) => {
           const n = s.nodes[id];
@@ -2289,6 +2302,10 @@ function handleStreamEvent(
       // lived in the bus.
       const id = currentNodeId;
       clearStreamPending(id);
+      // Seed the thinking channel from the snapshot so a reconnecting tab
+      // renders the思考期 immediately (empty string → clean channel).
+      clearStreamPending(thinkingChannel(id));
+      if (event.thinking) emitStream(thinkingChannel(id), event.thinking);
       set((s) => {
         const n = s.nodes[id];
         if (!n) return s;

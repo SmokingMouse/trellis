@@ -5,7 +5,11 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
-import { subscribeStream, getStreamPending } from "@/lib/stream-bus";
+import {
+  subscribeStream,
+  getStreamPending,
+  thinkingChannel,
+} from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
@@ -229,6 +233,31 @@ function QuestionBlock({
   );
 }
 
+// Dim auto-scrolling viewport for the live thinking stream. Pinned to the
+// bottom as text grows (thinking is transient status, not reading material —
+// following the tail beats preserving scroll position).
+function ThinkingScroll({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <div
+      ref={ref}
+      className={`max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-stone-400 dark:text-stone-500 ${className ?? ""}`}
+    >
+      {text}
+    </div>
+  );
+}
+
 function ResponseBody({ node }: { node: ChatNode }) {
   const retryNode = useSessionStore((s) => s.retryNode);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -269,6 +298,32 @@ function ResponseBody({ node }: { node: ChatNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, node.id]);
 
+  // Extended thinking: claude streams a thinking block BEFORE the text block
+  // (minutes under high effort). Same rAF-coalesced bus subscription as the
+  // text deltas, separate channel. Ephemeral — vanishes when the turn ends.
+  const [liveThinking, setLiveThinking] = useState("");
+  useEffect(() => {
+    if (!isStreaming) {
+      setLiveThinking("");
+      return;
+    }
+    let raf = 0;
+    let buf = getStreamPending(thinkingChannel(node.id));
+    setLiveThinking(buf);
+    const flush = () => {
+      raf = 0;
+      setLiveThinking(buf);
+    };
+    const unsub = subscribeStream(thinkingChannel(node.id), (delta) => {
+      buf += delta;
+      if (!raf) raf = requestAnimationFrame(flush);
+    });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      unsub();
+    };
+  }, [isStreaming, node.id]);
+
   return (
     <div
       ref={bodyRef}
@@ -276,6 +331,28 @@ function ResponseBody({ node }: { node: ChatNode }) {
       onClick={onMarkClick}
       className="md-body text-[15px] text-stone-800 dark:text-stone-200 leading-relaxed"
     >
+      {isStreaming && liveThinking && (
+        // The思考期 surface. While no answer text yet: an open dim panel with
+        // the thinking stream (this is what used to look like a dead UI for
+        // up to minutes). Once the answer starts: collapse to a <details>
+        // (uncontrolled so a user toggle sticks). Gone entirely at done.
+        liveText ? (
+          <details className="mb-2">
+            <summary className="cursor-pointer select-none text-[12px] text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300">
+              🧠 思考过程（{liveThinking.length} 字）
+            </summary>
+            <ThinkingScroll text={liveThinking} className="mt-1" />
+          </details>
+        ) : (
+          <div className="mb-2 rounded-md border border-stone-200/70 dark:border-stone-700/60 bg-stone-50/60 dark:bg-stone-800/40 px-3 py-2">
+            <div className="mb-1 flex items-center gap-1.5 text-[12px] text-stone-400 dark:text-stone-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              思考中…
+            </div>
+            <ThinkingScroll text={liveThinking} />
+          </div>
+        )
+      )}
       {isStreaming ? (
         liveText ? (
           <>
@@ -288,7 +365,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
             </ReactMarkdown>
             <span className="streaming-cursor" />
           </>
-        ) : (
+        ) : liveThinking ? null : (
           // First token hasn't arrived yet — show an animated indicator
           // instead of a blank pane (the "no streaming" complaint).
           <div className="flex items-center gap-1.5 py-2 text-stone-400 dark:text-stone-500">
