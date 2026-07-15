@@ -23,14 +23,18 @@ export const viewport: Viewport = {
 
 // Pre-hydration theme application. Runs before React touches the DOM so
 // users never see a flash of the wrong theme (FOUC). Mirrors the same
-// localStorage key + system-pref fallback the runtime hook uses; keep
-// them in sync if you change either.
+// localStorage keys + resolution logic hooks/useTheme.ts uses; keep them
+// in sync if you change either. 'trellis-theme' stores light/dark/system
+// (legacy two-value entries stay valid; missing = system). 'trellis-palette'
+// stores the skin id; 'default' carries no data-theme attribute.
 const themeScript = `
 (function() {
   try {
-    var stored = localStorage.getItem('trellis-theme');
-    var t = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    if (t === 'dark') document.documentElement.classList.add('dark');
+    var m = localStorage.getItem('trellis-theme');
+    var dark = m === 'dark' || (m !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (dark) document.documentElement.classList.add('dark');
+    var p = localStorage.getItem('trellis-palette');
+    if (p && p !== 'default') document.documentElement.setAttribute('data-theme', p);
   } catch (_) {}
 })();
 `;

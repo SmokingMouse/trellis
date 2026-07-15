@@ -16,6 +16,8 @@ import {
   type ProviderId,
   type ProviderInfo,
 } from "@/lib/llm";
+import { setThemeMode, setThemePalette } from "@/hooks/useTheme";
+import { PALETTES, isPaletteId } from "@/lib/themes";
 
 // Minimal slice of the store the commands touch — keeps commands.ts free of a
 // direct dependency on the store module (which would pull in browser-only
@@ -107,6 +109,27 @@ export const COMMANDS: Command[] = [
     description: "打开跨 session 切换（搜索）面板",
     run: (store) => {
       store.setSearchOpen(true);
+    },
+  },
+  {
+    name: "theme",
+    description: "切换外观（light/dark/system）或主题皮肤",
+    hint: "<light|dark|system|主题名>，如 /theme dark、/theme paper",
+    run: (_store, args) => {
+      const raw = args.trim().toLowerCase();
+      const paletteIds = PALETTES.map((p) => p.id);
+      if (!raw) {
+        return `用法：/theme <light|dark|system|${paletteIds.join("|")}>`;
+      }
+      if (raw === "light" || raw === "dark" || raw === "system") {
+        setThemeMode(raw);
+        return;
+      }
+      if (isPaletteId(raw)) {
+        setThemePalette(raw);
+        return;
+      }
+      return `未知主题「${args.trim()}」— 可选 light / dark / system / ${paletteIds.join(" / ")}`;
     },
   },
 ];

@@ -4,7 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
 import { ExportMenu } from "./ExportMenu";
 import { ModeBadge } from "./ModeBadge";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemeMenu } from "./ThemeMenu";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import type { ChatNode } from "@/lib/types";
@@ -382,7 +382,7 @@ export function Header() {
         )}
         <ModeBadge />
         <ModelPicker />
-        <ThemeToggle />
+        <ThemeMenu />
       </div>
     </header>
   );
