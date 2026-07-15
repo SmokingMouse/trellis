@@ -185,16 +185,80 @@ export function LinearThreadView() {
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
   };
 
-  // Mark the anchored node read after the user keeps it on screen for 1s —
-  // same contract the fullscreen reader had. Streaming / error nodes don't
-  // count; only finished replies.
+  // Read tracking: a card counts as read once it stays sufficiently visible
+  // in the scroll viewport for 1s — ≥50% of the card showing, or (for cards
+  // taller than the screen) filling ≥50% of the viewport. The old contract
+  // marked only the anchor node, so scrolling through the thread never
+  // registered reads — you had to click each node in from the canvas.
+  const readTimers = useRef(new Map<string, number>());
+  const visibleIds = useRef(new Set<string>());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const scheduleRead = (id: string) => {
+    if (readTimers.current.has(id)) return;
+    const node = useSessionStore.getState().nodes[id];
+    if (!node || node.status !== "done" || node.readAt) return;
+    readTimers.current.set(
+      id,
+      window.setTimeout(() => {
+        readTimers.current.delete(id);
+        const cur = useSessionStore.getState().nodes[id];
+        if (cur && cur.status === "done" && !cur.readAt) void markNodeRead(id);
+      }, 1000),
+    );
+  };
+  const cancelRead = (id: string) => {
+    const t = readTimers.current.get(id);
+    if (t !== undefined) {
+      window.clearTimeout(t);
+      readTimers.current.delete(id);
+    }
+  };
+
   useEffect(() => {
-    if (!anchorNode) return;
-    if (anchorNode.status !== "done" || anchorNode.readAt) return;
-    const id = anchorNode.id;
-    const t = window.setTimeout(() => markNodeRead(id), 1000);
-    return () => window.clearTimeout(t);
-  }, [anchorNode, markNodeRead]);
+    const rootEl = scrollRef.current;
+    if (!rootEl) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).dataset.threadNodeId;
+          if (!id) continue;
+          const rootH = entry.rootBounds?.height ?? 0;
+          const seen =
+            entry.isIntersecting &&
+            (entry.intersectionRatio >= 0.5 ||
+              (rootH > 0 && entry.intersectionRect.height >= rootH * 0.5));
+          if (seen) {
+            visibleIds.current.add(id);
+            scheduleRead(id);
+          } else {
+            visibleIds.current.delete(id);
+            cancelRead(id);
+          }
+        }
+      },
+      // Fine-grained thresholds so tall cards (whose ratio never reaches 0.5)
+      // still fire when their visible slice crosses half the viewport.
+      { root: rootEl, threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] },
+    );
+    observerRef.current = obs;
+    for (const el of roundRefs.current.values()) obs.observe(el);
+    return () => {
+      obs.disconnect();
+      observerRef.current = null;
+      for (const t of readTimers.current.values()) window.clearTimeout(t);
+      readTimers.current.clear();
+      visibleIds.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
+
+  // A reply that finishes streaming usually sits right in the viewport — no
+  // intersection change fires then, so re-check visible cards on node updates.
+  useEffect(() => {
+    for (const id of visibleIds.current) scheduleRead(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
 
   // `B` jumps back to the anchored node's parent at its anchor mark (same
   // target as clicking the card's "从「…」分叉" banner). Ignores presses while
@@ -238,8 +302,16 @@ export function LinearThreadView() {
   }, [liveSelection]);
 
   const setRoundRef = (id: string) => (el: HTMLDivElement | null) => {
-    if (el) roundRefs.current.set(id, el);
-    else roundRefs.current.delete(id);
+    if (el) {
+      roundRefs.current.set(id, el);
+      observerRef.current?.observe(el);
+    } else {
+      const prev = roundRefs.current.get(id);
+      if (prev) observerRef.current?.unobserve(prev);
+      roundRefs.current.delete(id);
+      visibleIds.current.delete(id);
+      cancelRead(id);
+    }
   };
 
   const toggleBranches = (nodeId: string) => {

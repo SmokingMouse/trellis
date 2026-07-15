@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**线性视图滚动已读修复（Session 48，已合入 main，fix commit `51d7dff`）**：已读判定从「仅 anchor 1s」改为 IntersectionObserver 视口停留 1s，滚动阅读即计已读；隔离实例浏览器实测 ✓。
+
+---
 **GitHub issue #2-#7 六个 issue 一轮清完并已合入 main 推送（Session 47，issue 全部 closed）** → 决策见 decisions.md 2026-07-14「统一阅读面」。#7 架构统一做透：NodeFullView/NodeTreeOverlay 退役、`fullScreen` 状态删除，线性 thread（共享 TurnCard + 视口贴底 Composer）成为全模式唯一阅读/对话面（关 #2/#4）；#3 画布 fixed DockedComposer；#5 首屏卡死修（busy 复位 + streamAlert toast）；#6 乐观占位节点 + 流式锁底。tsc/build ✓ + 隔离实例浏览器实测全绿；prod launchd 已重启。两个 commit：`3b61a2e`（Session 46 锁系）+ `6d40985`（issue 清剿，Closes #2-#7），均未签名（1Password 签名授权在自动化环境不可用，与 3d86cfc 同状态，需要可 rebase 补签）。
 
 ---
@@ -128,6 +131,11 @@
 - **验证**: 本 worktree（barnacle）首次 bootstrap：`make setup` 中 bun 装 `file:` 的 @sm 两包报 ENOENT，但 `make relink-sdk` 本来就会重建软链，补跑后 `make check` 全绿（这个失败对 setup 无实质影响）。`tsc --noEmit` ✓、`make build` ✓（`/api/workspaces/scratch` 注册）。隔离 dev server（:3097 + 临时 DB）runtime 验证：POST ×2 产出两个独立空目录；**真 claude 全链路**：用 scratch 目录建 project session（haiku）→ SSE created/delta/done 正常、答 PONG!、jsonl 落在 `~/.claude/projects/-Users-smokingmouse--trellis-scratch-<slug>/`。测试产物（server/临时 DB/两个 scratch 目录/claude projects 目录）已全清。
 - **Caveat**: 未浏览器实测 picker 按钮的视觉/交互（按逻辑写，emerald 虚线卡片风格对齐现有 UI）。scratch 目录不自动回收——删 trellis session 不删目录（目录是空的或只有用户要的产物，倾向保守不动；若堆积成噪音再加清理策略）。
 - **Next**: 浏览器实测「✨ 空白沙箱」入口。已合并回 main。
+
+### Session 48 (2026-07-15)
+- **Done**: **线性视图滚动已读**（用户反馈「不从画布点进去不算已读」）。根因：`LinearThreadView` 的已读逻辑沿用旧全屏阅读器契约——只对 anchor（active 节点）计 1s 停留，整条 thread 里滚动读过的卡片全漏标。改为 IntersectionObserver 视口级判定：卡片 ≥50% 可见（或超屏长卡占视口 ≥50%）持续 1s → `markNodeRead`；离开视口取消计时（快速滚过不算读）；`nodes` 变化时对可见卡补判（streaming 结束停在屏内的场景，observer 不再触发）；observer 随 `session?.id` 重建，卡片卸载时 unobserve + 清计时器。原 anchor 专属 effect 删除（被视口判定覆盖——anchor 会滚到视口中央）。仅改 `components/LinearThreadView.tsx`。
+- **验证**: tsc ✓ + `make build` ✓（npm run build 会因 bun:sqlite 失败，必须 make/bun）。浏览器实测（快照 DB + 隔离 `next start` :3111 + auth env 置空关闸 + agent-browser，真实 DB 零触碰）：「web3 实践」7 未读基线 → 主链滚动阅读后链上 2 个未读被标 ✓；折叠在「↳ 1 个分支」后的另一条 lineage 5 个未读**不**被误标 ✓；点分支卡切 lineage 再滚 → 全部标已读，minimap 12 点全灰 ✓。
+- **Next**: ① ~~commit~~ 已合入 main（`51d7dff` + merge，免签，同 3b61a2e 待补签）；② 体感调参候选：1s 停留阈值 / 50% 可见阈值；③ 未 push。
 
 ### Session 47 (2026-07-14)
 - **Done**: **GitHub issue #2-#7 全部落地**（用户指令「把所有的 issue 都做了」）。核心 = issue #7 架构统一（决策 → decisions.md 2026-07-14「统一阅读面」），#2/#4 随之关闭；#3/#5/#6 独立修：
