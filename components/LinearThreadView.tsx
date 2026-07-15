@@ -11,7 +11,9 @@ import { getStreamPending, subscribeStream } from "@/lib/stream-bus";
 import { MD_COMPONENTS } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import type { ChatNode } from "@/lib/types";
+import { AttachmentPreview } from "./AttachmentPreview";
 import { CliResumeButton } from "./CliResumeButton";
 import { CopyButton } from "./CopyButton";
 import { InteractionForm } from "./InteractionForm";
@@ -304,10 +306,12 @@ function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
   const abortStream = useSessionStore((s) => s.abortStream);
   const sendKey = useSessionStore((s) => s.sendKey);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = tipNode.status === "streaming";
   // Linear view only ever renders for project sessions, which are always
   // tool-capable — no chatEnhanced gate needed here (unlike QuestionInput).
   const matchedSkills = useSkillSuggestions(text, true);
+  const att = useAttachmentUploads("all");
 
   useEffect(() => {
     if (ref.current) {
@@ -318,9 +322,14 @@ function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
 
   const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed || isStreaming) return;
+    if (!trimmed || isStreaming || att.hasUploading) return;
+    const attachments =
+      att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
     setText("");
-    streamBranch(tipNode.id, trimmed, null);
+    // This composer stays mounted after submit (unlike QuestionInput /
+    // BranchPopover which unmount) — clear so the next turn starts fresh.
+    att.clear();
+    streamBranch(tipNode.id, trimmed, null, { attachments });
   };
 
   if (isStreaming) {
@@ -342,7 +351,18 @@ function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
   }
 
   return (
-    <div className="relative py-3 flex items-end gap-2">
+    <div className="relative py-3">
+      {att.pending.length > 0 && (
+        <div className="mb-2">
+          <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+        </div>
+      )}
+      {att.notice && (
+        <div className="mb-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          {att.notice}
+        </div>
+      )}
+      <div className="flex items-end gap-2">
       {matchedSkills.length > 0 && (
         <div className="absolute bottom-full left-0 right-0 mb-1 z-10 border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-900 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
           {matchedSkills.map((s) => (
@@ -377,13 +397,33 @@ function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
             submit();
           }
         }}
+        onPaste={att.handlePaste}
         rows={1}
-        placeholder={`继续对话…（${sendHint(sendKey)}）`}
+        placeholder={`继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`}
         className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-[14.5px] text-stone-900 dark:text-stone-100 outline-none focus:border-indigo-400 dark:focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/40 placeholder:text-stone-400 dark:placeholder:text-stone-500 transition-shadow shadow-sm"
       />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={att.accept}
+        multiple
+        onChange={att.handlePicked}
+        className="hidden"
+      />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={att.atLimit}
+        title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+        className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 text-stone-500 dark:text-stone-400 flex items-center justify-center disabled:opacity-30 hover:text-stone-800 dark:hover:text-stone-200 hover:border-stone-400 dark:hover:border-stone-500 active:scale-95 transition-all shadow-sm"
+        aria-label="添加附件"
+      >
+        <span aria-hidden>📎</span>
+      </button>
       <button
         onClick={submit}
-        disabled={!text.trim()}
+        disabled={!text.trim() || att.hasUploading}
+        title={att.hasUploading ? "等待附件上传…" : undefined}
         className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 hover:bg-indigo-700 active:scale-95 transition-all shadow-sm"
         aria-label="发送"
       >
@@ -400,6 +440,7 @@ function LinearComposer({ tipNode }: { tipNode: ChatNode }) {
           <path d="M12 19V5M5 12l7-7 7 7" />
         </svg>
       </button>
+      </div>
     </div>
   );
 }
@@ -410,6 +451,11 @@ function QuestionBlock({ node }: { node: ChatNode }) {
       <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
         You
       </div>
+      {node.attachments.length > 0 && (
+        <div className="mb-2">
+          <AttachmentPreview attachments={node.attachments} readOnly />
+        </div>
+      )}
       <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-stone-900 dark:text-stone-100">
         {node.question}
       </div>

@@ -30,7 +30,13 @@ import {
   registerForkLineage,
 } from "@/lib/server/cli-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
-import { resolveBlobPath, isAllowedMime, isValidHash } from "@/lib/server/blobs";
+import {
+  resolveBlobPath,
+  isValidHash,
+  materializeAttachments,
+  readTextBlob,
+} from "@/lib/server/blobs";
+import { isKnownAttachmentMime, isTextMime } from "@/lib/attachments";
 import { sessionCwd } from "@/lib/paths";
 import type { NodeAttachment } from "@/lib/types";
 
@@ -106,7 +112,7 @@ function sanitizeAttachments(raw: unknown): NodeAttachment[] {
     if (!item || typeof item !== "object") continue;
     const a = item as Record<string, unknown>;
     if (typeof a.hash !== "string" || !isValidHash(a.hash)) continue;
-    if (typeof a.mime !== "string" || !isAllowedMime(a.mime)) continue;
+    if (typeof a.mime !== "string" || !isKnownAttachmentMime(a.mime)) continue;
     if (typeof a.size !== "number") continue;
     out.push({
       hash: a.hash,
@@ -133,6 +139,64 @@ function resolveAttachments(
     if (r) resolved.push(r);
   }
   return resolved;
+}
+
+// Pure-chat inline cap for text attachments. ~32k tokens worst case —
+// big enough for real CSV/log samples, small enough to not blow the
+// context window on a single file.
+const INLINE_CAP_BYTES = 128 * 1024;
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Generic (non-image) attachments reach the model as prompt text, shaped
+// by what the mode can do:
+//  - tool-capable (workspace / project / enhanced chat): stage blobs to
+//    ~/.trellis/uploads/<nodeId>/ under their original filenames and list
+//    absolute paths — the agent reads/parses them with its own tools.
+//  - pure chat (web tools only): inline text files bodily (≤ cap); note
+//    anything unreadable so the model doesn't hallucinate the content.
+// Staging is idempotent per nodeId, so retry (which re-reads attachments
+// from the DB) rebuilds the exact same paths.
+function buildFileAttachmentSuffix(
+  nodeId: string,
+  files: NodeAttachment[],
+  toolCapable: boolean,
+): string {
+  if (files.length === 0) return "";
+  if (toolCapable) {
+    const staged = materializeAttachments(nodeId, files);
+    if (staged.length === 0) return "";
+    const lines = staged.map(
+      (s) => `- ${s.path}（${s.mime}, ${fmtSize(s.size)}）`,
+    );
+    return `\n\n[用户上传的附件文件，已保存在本地磁盘，可直接用 Read / Bash 等工具读取：]\n${lines.join("\n")}`;
+  }
+  const parts: string[] = [];
+  for (const f of files) {
+    const name = f.filename ?? `file-${f.hash.slice(0, 8)}`;
+    const text = isTextMime(f.mime)
+      ? readTextBlob(f.hash, INLINE_CAP_BYTES)
+      : null;
+    if (text !== null) {
+      // Four-backtick fence so embedded ``` in the file body can't
+      // break out of the block.
+      parts.push(
+        `文件「${name}」（${f.mime}）的完整内容：\n\`\`\`\`\n${text}\n\`\`\`\``,
+      );
+    } else {
+      const reason = isTextMime(f.mime)
+        ? "超过内联大小上限"
+        : "二进制文件需要文件工具";
+      parts.push(
+        `文件「${name}」（${f.mime}, ${fmtSize(f.size)}）已上传，但纯对话模式无法读取（${reason}）——请提醒用户改用增强模式 / Workspace / Project 再问。`,
+      );
+    }
+  }
+  return `\n\n[用户上传的附件]\n${parts.join("\n\n")}`;
 }
 
 export async function POST(req: Request) {
@@ -310,9 +374,19 @@ export async function POST(req: Request) {
   // column so a codex session can't be handed to `claude --resume`.
   const family = providerFamily(providerId);
   const llm = getProvider(providerId, { mode });
+  // Split attachments: images ride the provider's native vision path
+  // (claude base64 stream-json / codex --image); generic files never
+  // enter it — they reach the model as prompt text (path injection or
+  // inline, see buildFileAttachmentSuffix below once mode is resolved).
+  const imageAttachments = resolvedAttachments.filter((a) =>
+    a.mime.startsWith("image/"),
+  );
+  const fileAttachments = resolvedAttachments.filter(
+    (a) => !a.mime.startsWith("image/"),
+  );
   // Resolve image hashes → on-disk paths once, here. The provider
   // doesn't talk to the blobs module so it can stay free of fs lookups.
-  const providerAttachments = resolveAttachments(resolvedAttachments);
+  const providerAttachments = resolveAttachments(imageAttachments);
 
   // chat B-fork (claude only, depth 0 = default): history lives in the forked
   // CLI session — fold nothing, resume the PARENT node's session. depth>=1 or
@@ -321,6 +395,16 @@ export async function POST(req: Request) {
   const reqDepth = clampDepth((body as { historyDepth?: number }).historyDepth);
   const chatEnhanced =
     (body as { chatEnhanced?: boolean }).chatEnhanced === true;
+  // Generic file attachments → prompt text. Keep the pre-suffix question
+  // for topic labeling so an inlined 100KB CSV doesn't pollute the label
+  // prompt. Injected only into THIS turn (matches images: not re-sent in
+  // folded history; project/B-fork resume keeps it in the CLI session).
+  const questionForTopic = questionForLLM;
+  questionForLLM += buildFileAttachmentSuffix(
+    nodeId,
+    fileAttachments,
+    mode !== "chat" || chatEnhanced,
+  );
   const chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
   // codex chat at depth 0 gets no B-fork — fold history at a sane default depth.
   const foldDepth = reqDepth === 0 ? 4 : reqDepth;
@@ -479,7 +563,7 @@ export async function POST(req: Request) {
       }),
     topicLabel:
       providerId !== "mock"
-        ? (aggregated) => generateTopicLabel(questionForLLM, aggregated)
+        ? (aggregated) => generateTopicLabel(questionForTopic, aggregated)
         : undefined,
   });
 
