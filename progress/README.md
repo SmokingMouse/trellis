@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-**主题系统 + 界面&交互整体优化（Session 56，分支 `trellis-theme` 8 commits，待用户验收）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**未 merge main、未 push。**
+**主题系统 + 界面&交互整体优化（Session 56，分支 `trellis-theme` 8 commits，待用户验收）** → ADR [decisions/2026-07-15-theme-system.md](decisions/2026-07-15-theme-system.md)。语义 token 层（双层变量 + `@theme inline`）+ 5 套主题（默认/纸感/终端/莫兰迪/高对比 × 明暗）+ ThemeMenu/`/theme` 命令 + `components/ui/` 九原语 + 40+ 组件全量迁移（原生色族 utility 已禁用作回归护栏）+ 交互修复九项（断点错位 bug/新会话正名/`?` 快捷键面板/Dots 统一/TargetChip 归一/移动端 SessionTabs 隐藏等）。隔离实例全程验证（computed-style 零 diff 断言 + 截图矩阵 + mock 流式回归）✓。**分支已 push（origin/trellis-theme）；merge main 暂缓——main 工作区有另一并行 session 的未提交 WIP（ChatNode/Composer/InteractionForm/QuestionInput 等与本轮迁移同文件），待其落地后再 merge 解冲突。**
 
 ---
 **线性视图中间节点分叉（Session 54，已提交推送）**：卡片头 ⑂ 按钮 → reply-to 式 chip 重定向底部 Composer（`streamBranch(节点, q, null)`），补上「线性页面对中间节点自由分叉提问」的缺口（此前只能划线 ⌘K）。隔离实例 mock 全链路浏览器实测 ✓。
