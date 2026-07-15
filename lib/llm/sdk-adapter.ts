@@ -31,7 +31,7 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
     // chat B-fork (claude only): persist + resume the parent's forked session so
     // the CLI keeps history as immutable, cache-hit message blocks. forkSession
-    // is honored by agent-gateway only when resume is set, so the first turn
+    // is honored by @sm/agent only when resume is set, so the first turn
     // (resume undefined) spawns a fresh session without --fork-session. codex
     // leaves req.forkSession false → no persist, folded-history path unchanged.
     const forkOpts: RunOptions = req.forkSession
@@ -58,7 +58,7 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     // 纯对话:替换 system prompt + 仅 web 工具。无 workspace(无文件工具)。
     // 但 cwd 必须给 —— B-fork 的 session jsonl 落在 cwd 编码目录,spawn/resume
     // 校验/清理三处必须同一个 cwd。req.cwd = sessionCwd(chat) = CHAT_SCRATCH;
-    // 不设则 agent-gateway 回退进程 cwd(trellis 项目目录),与校验用的 CHAT_SCRATCH
+    // 不设则 @sm/agent 回退进程 cwd(trellis 项目目录),与校验用的 CHAT_SCRATCH
     // 错位 → resume 自愈误判 jsonl 不存在 → 全 fresh → 失忆。cwd 与 workspace
     // 正交:给 cwd 稳定落盘、不给 workspace 保持无文件工具。
     // settingSources:false:稳定 cwd 会让 claude 向上找到项目/全局 CLAUDE.md 污染

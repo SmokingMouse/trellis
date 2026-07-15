@@ -14,6 +14,8 @@ export {
   isProviderId,
   providerFamily,
   contextWindowFor,
+  FAMILY_LABELS,
+  blockedFamilySwitch,
   type ProviderId,
   type ProviderInfo,
   type ProviderFamily,

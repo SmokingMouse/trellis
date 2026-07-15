@@ -10,7 +10,12 @@
 // one dropdown. Commands are first-class (available in every mode); skills are
 // only shown in tool-capable modes.
 
-import { PROVIDERS, type ProviderId, type ProviderInfo } from "@/lib/llm";
+import {
+  PROVIDERS,
+  blockedFamilySwitch,
+  type ProviderId,
+  type ProviderInfo,
+} from "@/lib/llm";
 
 // Minimal slice of the store the commands touch — keeps commands.ts free of a
 // direct dependency on the store module (which would pull in browser-only
@@ -22,6 +27,9 @@ export type CommandStore = {
   setSearchOpen: (open: boolean) => void;
   setComposeRootOpen: (open: boolean) => void;
   setProvider: (provider: ProviderId) => void;
+  // Current effective provider — the model the active session's next turn
+  // would use. /model needs it for the session-family lock check.
+  provider: ProviderId;
   // Live model catalog (GET /api/providers) — falls back to the static
   // PROVIDERS list when empty (e.g. store not yet hydrated).
   providerCatalog: ProviderInfo[];
@@ -71,8 +79,8 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "model",
-    description: "切换模型",
-    hint: "<name>，如 claude-opus / codex / deepseek:deepseek-v4-flash",
+    description: "切换模型（同系内；跨系请开新会话）",
+    hint: "<name>，如 claude-opus / codex:gpt-5.5 / deepseek:deepseek-v4-flash",
     run: (store, args) => {
       const catalog = store.providerCatalog.length > 0 ? store.providerCatalog : PROVIDERS;
       const raw = args.trim().toLowerCase();
@@ -84,6 +92,12 @@ export const COMMANDS: Command[] = [
       if (!id) {
         const ids = catalog.map((p) => p.id).join(" / ");
         return `未知模型「${args.trim()}」— 可选 ${ids}`;
+      }
+      // Session-family lock: same rule as the ModelPicker UI. Resume ids are
+      // family-scoped — a cross-family switch mid-session silently drops the
+      // conversation context, so it's only allowed with no session loaded.
+      if (store.session && blockedFamilySwitch(store.provider, id)) {
+        return `「${id}」与当前会话不同系（claude/codex 上下文互不相通）— 跨系请 /new 开新会话`;
       }
       store.setProvider(id);
     },

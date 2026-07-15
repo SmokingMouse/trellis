@@ -1,4 +1,7 @@
 import "server-only";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { loadEndpoints, listEndpoints } from "@sm/llm";
 import type { ProviderInfo } from "@/lib/llm";
 
@@ -39,10 +42,62 @@ export async function GET() {
     };
   });
 
-  providers.push(
-    { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex", hasKey: true },
-    { id: "mock", label: "Mock", shortLabel: "Mock", note: "调试用", hasKey: true },
-  );
+  providers.push(...codexProviders());
+  providers.push({
+    id: "mock",
+    label: "Mock",
+    shortLabel: "Mock",
+    note: "调试用",
+    hasKey: true,
+  });
 
   return Response.json({ providers });
+}
+
+// Codex-family entries, enumerated from the codex CLI's own model cache
+// (~/.codex/models_cache.json, refreshed by the CLI itself on login/use) —
+// each becomes a "codex:<slug>" composite id that getProvider() turns into
+// `codex -m <slug>`. The bare "codex" id stays first for back-compat:
+// existing sessions have model="codex" locked in the DB, and the picker's
+// current-model display looks itself up by exact id.
+function codexProviders(): ProviderInfo[] {
+  const fallback: ProviderInfo[] = [
+    { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex", hasKey: true },
+  ];
+  try {
+    const raw = fs.readFileSync(
+      path.join(os.homedir(), ".codex", "models_cache.json"),
+      "utf8",
+    );
+    const cache = JSON.parse(raw) as {
+      models?: Array<{
+        slug?: string;
+        display_name?: string;
+        visibility?: string;
+      }>;
+    };
+    const models = (cache.models ?? []).filter(
+      (m) => m.slug && m.visibility === "list",
+    );
+    if (models.length === 0) return fallback;
+    return [
+      {
+        id: "codex",
+        label: "Codex（默认 gpt-5.5）",
+        shortLabel: "Codex",
+        hasKey: true,
+      },
+      ...models.map((m) => ({
+        id: `codex:${m.slug}`,
+        label: `codex · ${m.display_name ?? m.slug}`,
+        shortLabel: m.slug!,
+        hasKey: true,
+      })),
+    ];
+  } catch {
+    // No codex CLI on this machine / unreadable cache — keep the single
+    // legacy entry so existing sessions still render, spawn fails with the
+    // CLI's own error if actually used.
+    return fallback;
+  }
 }
