@@ -171,6 +171,7 @@
   - **键盘导航**：新 `hooks/useSlashNav.ts`（↑↓ 循环高亮 + Enter/Tab 选中；query 变化重置到首项、纯方向键不重置；`handleKeyDown` 返回 true 表示已消费——调用方放在 send-combo 判定**之前**，下拉可见时 Enter 选中而非把半截 "/cle" 发给 LLM，无匹配时零干扰）。三个消费方全接：共享 Composer（命令+skill 合并索引）、首屏 QuestionInput（同）、ChatNode 行内追问框（仅 skill）；下拉加 `activeIndex` 高亮 + scrollIntoView(nearest) 跟随。
 - **验证**: tsc ✓ + `make build` ✓ ×2；隔离实例（:3096 + 临时 DB + mock provider，产物已清）agent-browser 实测两轮：命令轮——线性 Composer 输 `/` 出 5 命令（纯 chat 无 skill）、`/cl` 过滤、点 /clear 在**线性视图**弹 NewQuestionPicker（修复生效）、`/model` 无参回显用法且保留输入、`/model mock` 切换生效+清空输入、增强模式命令+skill 合并（5+6）、`/switch` 开搜索、`/new` 回首屏；键盘轮——默认高亮首项/↓↓ 移动/↑ 循环到尾/Enter 执行 /switch、"/cl"+Enter 出 no-session notice、含空格 "/model mock" Enter 正常走提交拦截、线性 `/`+↓+Enter 弹「新话题」、↓×5 跨命令到 skill + Tab 补全、"/arch" 过滤重置 + Enter 真归档。ChatNode 行内框未浏览器验（同 hook 同约定）。**merge 注**：与 S54 的 Composer 改动（onSubmitted/onEscape/focusToken）自动合并成功，Esc 不被 slashNav 消费、落到 onEscape 语义不冲突。
 - **Next**: 用户真机验收。
+- **追记（2026-07-16 落地 commit）**: S55 残留 WIP——**skill 下拉全模式可见 + 纯 chat 点选自动开增强模式**。三输入框（Composer/QuestionInput/ChatNode 行内）`useSkillSuggestions` 一律全量显示；纯 chat 点 skill 自动 `setChatEnhanced(true)` + cmdNotice「⚡ 已自动开启增强模式」（skill 需要工具，藏下拉读作"skill 坏了"）；QuestionInput skill 列表懒加载去 skillCapable 门槛。主题系统 merge（88fc72d）后 stash pop 零冲突落回，tsc ✓ + 隔离实例浏览器实测 ✓。
 
 ### Session 54 (2026-07-15)
 - **Done**: **线性视图中间节点自由分叉（reply-to 式 chip，方案 A）**。用户痛点：线性页面对中间节点岔开提新问题只能划线 ⌘K（BranchPopover 需要文本锚点，问题与原文无关时被迫造假锚点）；数据层 `streamBranch(parentId, q, null)` 本就支持自由分叉（画布 DockedComposer 在用），纯 UI 缺口。落地（仅改 2 文件，store 零改动）：

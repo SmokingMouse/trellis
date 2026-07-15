@@ -505,11 +505,12 @@ function FollowupInput({
   const sendKey = useSessionStore((s) => s.sendKey);
   const sessionMode = useSessionStore((s) => s.session?.mode);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
-  const matchedSkills = useSkillSuggestions(
-    q,
-    sessionMode !== "chat" || chatEnhanced,
-  );
+  const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
+  // Skills show in every mode; picking one in pure chat auto-enables 增强模式
+  // (per-turn spawn flag — Header badge reflects it) so the skill can run.
+  const matchedSkills = useSkillSuggestions(q, true);
   const pickSkill = (name: string) => {
+    if (sessionMode === "chat" && !chatEnhanced) setChatEnhanced(true);
     setQ(`/${name} `);
     ref.current?.focus();
   };

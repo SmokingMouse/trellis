@@ -89,14 +89,16 @@ export function QuestionInput() {
     ref.current?.focus();
   }, []);
 
-  // C4: lazily load the skill list once the user is in a tool-capable mode.
+  // C4: lazily load the skill list. Skills show in every mode — picking one
+  // in pure chat auto-enables 增强模式 (see pickSkill), so the dropdown never
+  // reads as "skills missing".
   useEffect(() => {
-    if (!skillCapable || skills.length) return;
+    if (skills.length) return;
     fetch("/api/skills")
       .then((r) => r.json())
       .then((d) => setSkills(d.skills ?? []))
       .catch(() => {});
-  }, [skillCapable, skills.length]);
+  }, [skills.length]);
 
   // Stage 14: Workspace / Project draft modes need a workspace path
   // chosen before submit.
@@ -117,13 +119,11 @@ export function QuestionInput() {
     providerCatalog,
   };
 
-  // C4: skill picker — active in workspace/project while the user types a
-  // leading "/name" token (no space yet). Selecting fills "/name " so claude
-  // (which handles skills natively) runs it when sent.
+  // C4: skill picker — active while the user types a leading "/name" token
+  // (no space yet). Selecting fills "/name " so claude (which handles skills
+  // natively) runs it when sent.
   const skillQuery =
-    skillCapable && q.startsWith("/") && !q.includes(" ")
-      ? q.slice(1).toLowerCase()
-      : null;
+    q.startsWith("/") && !q.includes(" ") ? q.slice(1).toLowerCase() : null;
   const matchedSkills =
     skillQuery !== null
       ? skills
@@ -154,6 +154,12 @@ export function QuestionInput() {
     }
   };
   const pickSkill = (name: string) => {
+    // Pure chat spawns without tools — auto-enable 增强模式 so the picked
+    // skill can actually run (the toggle chip above reflects it).
+    if (!skillCapable) {
+      setChatEnhanced(true);
+      setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO）");
+    }
     setQ(`/${name} `);
     ref.current?.focus();
   };

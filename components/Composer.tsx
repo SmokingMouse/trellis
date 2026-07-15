@@ -43,6 +43,7 @@ export function Composer({
   const sendKey = useSessionStore((s) => s.sendKey);
   const sessionMode = useSessionStore((s) => s.session?.mode);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
@@ -53,7 +54,10 @@ export function Composer({
   // handling): workspace/project/enhanced chat take any whitelisted file
   // (staged to disk for the agent); pure chat only images + inlineable text.
   const toolCapable = sessionMode !== "chat" || chatEnhanced;
-  const matchedSkills = useSkillSuggestions(text, toolCapable);
+  // Skills show in every mode — pure chat can't run them as-is, but picking
+  // one auto-enables 增强模式 (per-turn spawn flag), so what's visible is
+  // usable. Hiding them entirely just read as "skills are broken".
+  const matchedSkills = useSkillSuggestions(text, true);
   const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
   // C1: Trellis commands in the docked composer — first-class in every mode
   // (skills stay gated on toolCapable). A bare /command runs locally against
@@ -109,6 +113,13 @@ export function Composer({
     runCommand(c, "");
   };
   const pickSkill = (name: string) => {
+    // Pure chat spawns without tools (WebSearch/WebFetch only) — a skill sent
+    // there can't execute. Flip 增强模式 on pick so the coming turn spawns
+    // with full tools; the Header badge reflects it and the notice says why.
+    if (!toolCapable) {
+      setChatEnhanced(true);
+      setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO，本轮起生效）");
+    }
     setText(`/${name} `);
     ref.current?.focus();
   };
