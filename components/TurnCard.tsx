@@ -200,7 +200,7 @@ function QuestionBlock({
       <div className="w-7 h-7 rounded-full bg-accent text-ink-inverse text-label flex items-center justify-center shrink-0 font-medium shadow-raise">
         你
       </div>
-      <div className="flex-1 text-reading text-ink leading-relaxed pt-1 font-medium whitespace-pre-wrap min-w-0">
+      <div className="flex-1 text-reading text-ink leading-relaxed pt-1 font-medium whitespace-pre-wrap break-words min-w-0">
         {question}
         {attachments.length > 0 && (
           <div className="mt-2 font-normal">
