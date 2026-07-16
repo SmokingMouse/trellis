@@ -16,6 +16,11 @@ import {
 } from "@/lib/stream-bus";
 import { ancestorsOf, subtreeIds } from "@/lib/collapsed";
 import { type SendKey, SEND_KEY_DEFAULT, isSendKey } from "@/lib/send-key";
+import {
+  type ThreadWidth,
+  THREAD_WIDTH_DEFAULT,
+  isThreadWidth,
+} from "@/lib/thread-width";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -49,6 +54,8 @@ const DEFAULT_HISTORY_DEPTH = 0;
 const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
 // 权限确认 draft（project 新会话的开关记忆）。
 const REQUIRE_APPROVAL_KEY = "trellis-require-approval";
+// 线性视图内容列宽度（窄/宽/超宽），全局偏好。
+const THREAD_WIDTH_KEY = "trellis-thread-width";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 // Workbench Wave 4 (VSCode-style IDE shell):
 // - pinned tabs (ordered) persist across reloads, like VSCode's permanently
@@ -271,6 +278,12 @@ function loadDraftRequireApproval(): boolean {
   return window.localStorage.getItem(REQUIRE_APPROVAL_KEY) === "1";
 }
 
+function loadThreadWidth(): ThreadWidth {
+  if (typeof window === "undefined") return THREAD_WIDTH_DEFAULT;
+  const stored = window.localStorage.getItem(THREAD_WIDTH_KEY);
+  return isThreadWidth(stored) ? stored : THREAD_WIDTH_DEFAULT;
+}
+
 // API node → client node (add position field, drop nullable distinction)
 type ApiNode = Omit<ChatNode, "position" | "topicLabel"> & {
   topicLabel?: string | null;
@@ -304,6 +317,8 @@ type State = {
   draftSystemPrompt: string | null;
   // A4: send-key preference, applied live to every chat input.
   sendKey: SendKey;
+  // 线性视图内容列宽度偏好（窄/宽/超宽）。
+  threadWidth: ThreadWidth;
   // D2: ancestor turns folded into chat prompts (1–12).
   historyDepth: number;
   // chat enhanced-mode (skills + web, YOLO). Global, default off.
@@ -476,6 +491,7 @@ type Actions = {
   setDraftWorkspacePath: (path: string | null) => void;
   setDraftSystemPrompt: (prompt: string | null) => void;
   setSendKey: (key: SendKey) => void;
+  setThreadWidth: (width: ThreadWidth) => void;
   setViewMode: (mode: ViewMode) => void;
   setStreamAlert: (message: string | null) => void;
   // Stream a new root question.
@@ -651,6 +667,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   draftWorkspacePath: null,
   draftSystemPrompt: null,
   sendKey: SEND_KEY_DEFAULT,
+  threadWidth: THREAD_WIDTH_DEFAULT,
   historyDepth: DEFAULT_HISTORY_DEPTH,
   chatEnhanced: false,
   draftRequireApproval: false,
@@ -711,6 +728,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftWorkspacePath: loadDraftWorkspace(),
       draftSystemPrompt: loadDraftSystemPrompt(),
       sendKey: loadSendKey(),
+      threadWidth: loadThreadWidth(),
       historyDepth: loadHistoryDepth(),
       chatEnhanced: loadChatEnhanced(),
       draftRequireApproval: loadDraftRequireApproval(),
@@ -1079,6 +1097,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set({ sendKey: key });
     if (typeof window !== "undefined") {
       window.localStorage.setItem(SEND_KEY_KEY, key);
+    }
+  },
+
+  setThreadWidth: (width) => {
+    set({ threadWidth: width });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THREAD_WIDTH_KEY, width);
     }
   },
 

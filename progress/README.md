@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**线性视图内容列宽度可调（Session 62，已提交推送 main，免签待补）**：用户反馈卡片太窄。原三容器（顶栏/卡片列/Composer）锁死 `max-w-3xl`(768px) → 全局偏好三档：窄 768 / 宽 1024（新默认）/ 超宽 1280，localStorage `trellis-thread-width` 持久化（sendKey 同款模式：`lib/thread-width.ts` + store loader/action），切换控件 = 线性视图顶栏「窄/宽/超宽」分段按钮（移动端隐藏——卡片本就贴满屏宽）。画布 ChatNode 维持 600px（dagre 布局基准）不受影响。**设置页评估不做**：现有偏好各有语境化入口（主题=ThemeMenu popover、发送键=composer footer、宽度=线性顶栏），单独一页反而多一跳；偏好再积累到 5+ 项时再考虑 Header ⚙ popover 归拢。tsc ✓ + `make build` ✓ + 隔离实例(:3151 mock)浏览器实测：三档切换宽度正确（768/1024/1070=viewport 减侧栏后封顶）、三容器对齐、reload 恢复档位。
+
+---
 **ThreadMinimap 悬停预览卡（Session 61——原 60 撞号重编，已提交合并推送，免签待补）**：线性视图右下角树缩略图悬停/键盘聚焦节点点位 → 左侧浮出预览卡（#序号 · Turn/Reference + 问题标题 + 回答纯文本摘要，markdown 剥离、代码块/图片丢弃），对齐 ChatGPT 会话 minimap hover 体验；顺带给点位加 r=9 透明命中区（原 r=3.5 难悬停）。tsc ✓ + build ✓ + 隔离实例(:3149 mock)浏览器实测：两点位卡内容各自正确、移开消失、点击导航不受影响。
 
 ---
@@ -153,6 +156,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 62 (2026-07-17)
+- **Done**: 线性视图内容列宽度可调（用户反馈卡片太窄，问能否加宽/可调/设置页）。
+  - 新 `lib/thread-width.ts`：`ThreadWidth` 三档（narrow=max-w-3xl 768 / wide=max-w-5xl 1024 / xwide=max-w-7xl 1280），默认 **wide**（直接兑现「加宽」，可一键调回）。
+  - store：`threadWidth` 偏好 + `setThreadWidth` + hydrate 恢复（key `trellis-thread-width`，全局非 per-session，照 sendKey 模式）。
+  - `LinearThreadView`：三处 `max-w-3xl`（顶栏/main/Composer）换共享 `widthClass` 保持列对齐；顶栏 🗺 画布旁加「窄/宽/超宽」分段控件（`hidden md:flex`——移动端卡片本就贴满屏宽）。
+  - 设置页：评估不做（偏好少且各有语境化入口，简洁优先）；偏好积累多了再上 Header ⚙ popover 归拢。
+- **验证**: tsc ✓ + `make build` ✓；隔离实例（:3151 + 临时 DB + `TRELLIS_AUTH_PASS=` 关闸 + `/model mock`）agent-browser 实测：默认落 wide(1024)、点窄→768、点超宽→顶栏/main/Composer 三容器同宽 1070（viewport 1280 减侧栏后自然封顶，符合预期）、localStorage 写入 ✓、reload 恢复超宽档 ✓、截图目检控件位置/高亮正常。产物已清（browser/server/临时 DB/截图，:3151 已释放）。
+- **Next**: 已提交推送 main（免签待补）；真机验收待用户。注记：readingPosition 存像素 offset，切宽度后卡片高度变化会让旧恢复位置略偏——一次性、无害，未做迁移。
+
 ### Session 61 (2026-07-16，原 60 与并行 session 撞号重编)
 - **Done**: ThreadMinimap 悬停预览卡（用户给了 ChatGPT 会话 minimap hover 截图，要同类功能）。仅改 `components/ThreadMinimap.tsx`：
   - 点位 `g` 加 mouseenter/leave + focus/blur → `hover` state；预览卡绝对定位在面板左侧（`right-full mr-2 w-64`），垂直居中于点位 y（clamp 40..SVG_H−40），`pointer-events-none` 防抢 hover。

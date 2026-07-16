@@ -6,6 +6,10 @@ import { buildNodeIndex } from "@/lib/node-index";
 import { subscribeStream } from "@/lib/stream-bus";
 import { modeStyle } from "@/lib/mode-style";
 import { sendHint } from "@/lib/send-key";
+import {
+  THREAD_WIDTH_CLASS,
+  THREAD_WIDTH_OPTIONS,
+} from "@/lib/thread-width";
 import { isEditableTarget } from "@/lib/shortcuts";
 import {
   useSelectionWithin,
@@ -72,6 +76,8 @@ export function LinearThreadView() {
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const sendKey = useSessionStore((s) => s.sendKey);
+  const threadWidth = useSessionStore((s) => s.threadWidth);
+  const setThreadWidth = useSessionStore((s) => s.setThreadWidth);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -415,6 +421,8 @@ export function LinearThreadView() {
 
   if (!session) return null;
   const mode = modeStyle(session.mode);
+  // Header/cards/composer share one width class so they stay column-aligned.
+  const widthClass = THREAD_WIDTH_CLASS[threadWidth];
 
   return (
     // #3: viewport-bound flex column — header and composer are fixed rails,
@@ -426,7 +434,7 @@ export function LinearThreadView() {
       style={{ left: "var(--trellis-sb, 0px)" }}
     >
       <div className="shrink-0 z-30 border-b border-line/80 bg-surface-canvas/90 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+        <div className={`${widthClass} mx-auto px-4 py-3 flex items-center gap-3`}>
           <div className="min-w-0 flex-1">
             <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
@@ -435,6 +443,29 @@ export function LinearThreadView() {
             <h1 className="truncate text-sm font-semibold text-ink-strong">
               {session.title}
             </h1>
+          </div>
+          {/* 移动端卡片本就贴满屏宽，宽度切换无意义，藏起来省空间 */}
+          <div
+            className="hidden md:flex shrink-0 items-center rounded-field border border-line bg-surface p-0.5"
+            role="group"
+            aria-label="内容宽度"
+          >
+            {THREAD_WIDTH_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setThreadWidth(opt.value)}
+                aria-pressed={threadWidth === opt.value}
+                title={`内容宽度：${opt.label}`}
+                className={`px-2 py-1 rounded-[calc(var(--radius-field)-2px)] text-xs font-medium transition-colors ${
+                  threadWidth === opt.value
+                    ? "bg-accent-muted text-accent-ink"
+                    : "text-ink-faint hover:text-ink hover:bg-surface-muted"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
           <button
             type="button"
@@ -447,7 +478,7 @@ export function LinearThreadView() {
       </div>
 
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-        <main className="max-w-3xl mx-auto px-4 py-5 pb-6 space-y-4">
+        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 space-y-4`}>
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
             暂无节点
@@ -601,7 +632,7 @@ export function LinearThreadView() {
       </div>
 
       <div className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4">
+        <div className={`${widthClass} mx-auto px-4`}>
           {branchFromNode && (
             <TargetChip
               icon="⑂"
