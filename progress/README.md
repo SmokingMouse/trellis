@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**ThreadMinimap 悬停预览卡（Session 61——原 60 撞号重编，已提交合并推送，免签待补）**：线性视图右下角树缩略图悬停/键盘聚焦节点点位 → 左侧浮出预览卡（#序号 · Turn/Reference + 问题标题 + 回答纯文本摘要，markdown 剥离、代码块/图片丢弃），对齐 ChatGPT 会话 minimap hover 体验；顺带给点位加 r=9 透明命中区（原 r=3.5 难悬停）。tsc ✓ + build ✓ + 隔离实例(:3149 mock)浏览器实测：两点位卡内容各自正确、移开消失、点击导航不受影响。
+
+---
 **切 tab 恢复阅读位置 + 长 URL 溢出修复（Session 60，已提交推送 `1d88af7`+`fe13599`，免签待补）**。追加修复：QuestionBlock 缺 `break-words`，URL-encoded 长串无断点横向撑破卡片（隔离实例复现 + 修后量化溢出 -1px ✓）。主功能：线性视图里「浏览 = 滚动」但 activeNodeId 不动，切 tab/刷新回来总落回根节点。落地：① `ViewState` 增 `lastViewed {nodeId, offset}`（视口顶卡片 + 卡内偏移，存进既有 `trellis-view:{sid}`）；② LinearThreadView 滚动 debounce 200ms 记录（store action 带 sessionId 守卫防切换竞态）、session 落地时恢复滚动（restore effect 声明在 anchor-scroll effect 之前，skip flag 防两效果打架；流式 tip 时让位 bottom-lock）；③ store 级 rebase 订阅——同 session 内 activeNodeId 显式变更（画布点卡/分支跳转/搜索命中）把 readingPosition 重置到新锚点，防旧滚动记录压过用户跳转。tsc ✓ + build ✓ + 隔离实例(:3146 mock)浏览器实测四场景全过：滚动到 #4@150px 切 B 回 A 精确恢复（149.75px）/ 跨 reload 恢复 / 画布点 #2 回线性锚定 #2 / 切走切回落 #2（rebase 生效）。
 
 ---
@@ -150,6 +153,14 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 61 (2026-07-16，原 60 与并行 session 撞号重编)
+- **Done**: ThreadMinimap 悬停预览卡（用户给了 ChatGPT 会话 minimap hover 截图，要同类功能）。仅改 `components/ThreadMinimap.tsx`：
+  - 点位 `g` 加 mouseenter/leave + focus/blur → `hover` state；预览卡绝对定位在面板左侧（`right-full mr-2 w-64`），垂直居中于点位 y（clamp 40..SVG_H−40），`pointer-events-none` 防抢 hover。
+  - 卡内容：`#序号`（复用 `buildNodeIndex`）· Turn/Reference + 标题（`topicLabel ?? question` 摘要，clamp 2 行）+ 回答摘要（新增本地 `excerpt()` 剥 markdown——代码块/图片直接丢，clamp 4 行；error→「生成失败」，streaming 空响应→「生成中…」）。
+  - 点位加 r=9 透明命中圈（原 r=3.5 可视点太小难悬停/点击）；悬停节点被删有 guard。
+- **验证**: 本 worktree（preview）原无 node_modules，`bun install` + `make relink-sdk` 后 tsc ✓ + `make build` ✓；隔离实例（:3149 + 临时 DB + `/model mock`）agent-browser 实测：3 节点线性视图，真实鼠标移动悬停两点位 → 各自卡内容正确（标题/摘要/序号）、移开卡消失（查 DOM 元素而非 innerText——正文含同样文案会误判）、点击点位导航照常（active 高亮 + 线程跳转）。产物已清（browser session/server/临时 DB；默认 ~/.trellis/data.db 查证无泄漏）。
+- **Next**: 已提交并合并推送 main（免签待补）。真机验收待用户。候选 follow-up：S57 遗留的「ThreadMinimap 移动端默认折叠」可与本功能一起调（移动端无 hover，预览卡天然不触发，无冲突）。
+
 ### Session 59 (2026-07-16)
 - **Done**: 用户报的两个体验 bug 修复。
   - **①切卡滑动**：`LinearThreadView` anchor 导航 `scrollIntoView` 去掉 `behavior:"smooth"`（长 thread 切卡会肉眼滑过整屏内容才停），TargetChip label 跳转同改。
