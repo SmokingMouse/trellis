@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**切 tab 恢复阅读位置 + 长 URL 溢出修复（Session 60，已提交推送 `1d88af7`+`fe13599`，免签待补）**。追加修复：QuestionBlock 缺 `break-words`，URL-encoded 长串无断点横向撑破卡片（隔离实例复现 + 修后量化溢出 -1px ✓）。主功能：线性视图里「浏览 = 滚动」但 activeNodeId 不动，切 tab/刷新回来总落回根节点。落地：① `ViewState` 增 `lastViewed {nodeId, offset}`（视口顶卡片 + 卡内偏移，存进既有 `trellis-view:{sid}`）；② LinearThreadView 滚动 debounce 200ms 记录（store action 带 sessionId 守卫防切换竞态）、session 落地时恢复滚动（restore effect 声明在 anchor-scroll effect 之前，skip flag 防两效果打架；流式 tip 时让位 bottom-lock）；③ store 级 rebase 订阅——同 session 内 activeNodeId 显式变更（画布点卡/分支跳转/搜索命中）把 readingPosition 重置到新锚点，防旧滚动记录压过用户跳转。tsc ✓ + build ✓ + 隔离实例(:3146 mock)浏览器实测四场景全过：滚动到 #4@150px 切 B 回 A 精确恢复（149.75px）/ 跨 reload 恢复 / 画布点 #2 回线性锚定 #2 / 切走切回落 #2（rebase 生效）。
+
+---
 **Tab 串台 + 卡片切换滑动两 bug 修复（Session 59，已提交推送 `5784ec8`，免签待补）**：①线性视图切卡由 smooth 滚动改瞬时跳转；②串台四连修——`created` 事件加 session guard（发送后立刻切 tab，外 session 节点不再嫁接进当前视图/抢 activeNodeId，reference created/done/refresh 同规）+ `loadSessionInternal` latest-wins 序号（慢的旧加载不再覆盖新切换）+ `useCliSyncEvents` 改读 `getState()` 现值（stale closure 不再把视图拉回运行中的 attached 会话，SSE 也不随切换重建）+ 加载时流式基线修复（POST reader 存活的节点 response 置空防「DB 快照+bus 全量缓冲」拼接重复；存活 reconnect 句柄拆除重挂拿新 catchup）。tsc ✓ + build ✓ + 隔离实例(:3145 mock)浏览器实测：流中切 B 视图零污染、流中切回 A 无重复。
 
 ---
