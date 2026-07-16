@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { layoutNodes } from "@/lib/layout";
+import { buildNodeIndex } from "@/lib/node-index";
 import type { ChatNode } from "@/lib/types";
 
 const NODE_W = 280;
@@ -18,17 +19,40 @@ function nodeSort(a: ChatNode, b: ChatNode) {
   );
 }
 
+// Markdown → plain-text excerpt for the hover preview card. Lossy on purpose:
+// code blocks and images carry no scannable signal at this size, so they drop.
+function excerpt(md: string, max: number) {
+  const text = md
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/(\*{1,3}|_{1,3}|~~)([^*_~]+)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
 export function ThreadMinimap() {
   const nodesMap = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const [collapsed, setCollapsed] = useState(false);
+  // Hovered/focused dot → preview card floating left of the panel, vertically
+  // centered on the dot (y is the dot's SVG-space center, clamped below).
+  const [hover, setHover] = useState<{ id: string; y: number } | null>(null);
 
   const nodes = useMemo(
     () => Object.values(nodesMap).sort(nodeSort),
     [nodesMap],
   );
+  const nodeIndices = useMemo(() => buildNodeIndex(nodesMap), [nodesMap]);
   const activeId = activeNodeId && nodesMap[activeNodeId] ? activeNodeId : nodes[0]?.id;
+  // Guard against the hovered node being deleted out from under the card.
+  const hoverNode = hover ? (nodesMap[hover.id] ?? null) : null;
 
   const geometry = useMemo(() => {
     if (nodes.length === 0) return null;
@@ -78,6 +102,7 @@ export function ThreadMinimap() {
           </span>
         </button>
         {!collapsed && geometry && (
+          <div className="relative">
           <svg
             width={SVG_W}
             height={SVG_H}
@@ -120,8 +145,19 @@ export function ThreadMinimap() {
                       setActiveNode(n.id);
                     }
                   }}
+                  onMouseEnter={() => setHover({ id: n.id, y: p.y })}
+                  onMouseLeave={() =>
+                    setHover((h) => (h?.id === n.id ? null : h))
+                  }
+                  onFocus={() => setHover({ id: n.id, y: p.y })}
+                  onBlur={() =>
+                    setHover((h) => (h?.id === n.id ? null : h))
+                  }
                   className="cursor-pointer outline-none"
                 >
+                  {/* invisible enlarged hit target — the visible dot alone is
+                      too small to hover/click reliably */}
+                  <circle cx={p.x} cy={p.y} r={9} fill="transparent" />
                   <circle
                     cx={p.x}
                     cy={p.y}
@@ -139,6 +175,37 @@ export function ThreadMinimap() {
               );
             })}
           </svg>
+          {hoverNode && hover && (
+            <div
+              className="pointer-events-none absolute right-full mr-2 w-64 rounded-card border border-line bg-surface shadow-pop px-3 py-2.5 text-left"
+              style={{
+                top: Math.min(Math.max(hover.y, 40), SVG_H - 40),
+                transform: "translateY(-50%)",
+              }}
+              aria-hidden
+            >
+              <div className="text-label text-ink-faint font-mono">
+                #{nodeIndices[hoverNode.id] ?? "?"} ·{" "}
+                {hoverNode.kind === "reference" ? "Reference" : "Turn"}
+              </div>
+              <div className="mt-1 text-xs font-semibold text-ink-strong line-clamp-2">
+                {hoverNode.topicLabel ?? excerpt(hoverNode.question, 80)}
+              </div>
+              {(() => {
+                const body =
+                  hoverNode.status === "error"
+                    ? "生成失败"
+                    : excerpt(hoverNode.response, 160) ||
+                      (hoverNode.status === "streaming" ? "生成中…" : "");
+                return body ? (
+                  <div className="mt-1 text-xs leading-relaxed text-ink-muted line-clamp-4">
+                    {body}
+                  </div>
+                ) : null;
+              })()}
+            </div>
+          )}
+          </div>
         )}
       </div>
     </div>

@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**ThreadMinimap 悬停预览卡（Session 61——原 60 撞号重编，已提交合并推送，免签待补）**：线性视图右下角树缩略图悬停/键盘聚焦节点点位 → 左侧浮出预览卡（#序号 · Turn/Reference + 问题标题 + 回答纯文本摘要，markdown 剥离、代码块/图片丢弃），对齐 ChatGPT 会话 minimap hover 体验；顺带给点位加 r=9 透明命中区（原 r=3.5 难悬停）。tsc ✓ + build ✓ + 隔离实例(:3149 mock)浏览器实测：两点位卡内容各自正确、移开消失、点击导航不受影响。
+
+---
 **Tab 串台 + 卡片切换滑动两 bug 修复（Session 59，已提交推送 `5784ec8`，免签待补）**：①线性视图切卡由 smooth 滚动改瞬时跳转；②串台四连修——`created` 事件加 session guard（发送后立刻切 tab，外 session 节点不再嫁接进当前视图/抢 activeNodeId，reference created/done/refresh 同规）+ `loadSessionInternal` latest-wins 序号（慢的旧加载不再覆盖新切换）+ `useCliSyncEvents` 改读 `getState()` 现值（stale closure 不再把视图拉回运行中的 attached 会话，SSE 也不随切换重建）+ 加载时流式基线修复（POST reader 存活的节点 response 置空防「DB 快照+bus 全量缓冲」拼接重复；存活 reconnect 句柄拆除重挂拿新 catchup）。tsc ✓ + build ✓ + 隔离实例(:3145 mock)浏览器实测：流中切 B 视图零污染、流中切回 A 无重复。
 
 ---
@@ -147,6 +150,14 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 61 (2026-07-16，原 60 与并行 session 撞号重编)
+- **Done**: ThreadMinimap 悬停预览卡（用户给了 ChatGPT 会话 minimap hover 截图，要同类功能）。仅改 `components/ThreadMinimap.tsx`：
+  - 点位 `g` 加 mouseenter/leave + focus/blur → `hover` state；预览卡绝对定位在面板左侧（`right-full mr-2 w-64`），垂直居中于点位 y（clamp 40..SVG_H−40），`pointer-events-none` 防抢 hover。
+  - 卡内容：`#序号`（复用 `buildNodeIndex`）· Turn/Reference + 标题（`topicLabel ?? question` 摘要，clamp 2 行）+ 回答摘要（新增本地 `excerpt()` 剥 markdown——代码块/图片直接丢，clamp 4 行；error→「生成失败」，streaming 空响应→「生成中…」）。
+  - 点位加 r=9 透明命中圈（原 r=3.5 可视点太小难悬停/点击）；悬停节点被删有 guard。
+- **验证**: 本 worktree（preview）原无 node_modules，`bun install` + `make relink-sdk` 后 tsc ✓ + `make build` ✓；隔离实例（:3149 + 临时 DB + `/model mock`）agent-browser 实测：3 节点线性视图，真实鼠标移动悬停两点位 → 各自卡内容正确（标题/摘要/序号）、移开卡消失（查 DOM 元素而非 innerText——正文含同样文案会误判）、点击点位导航照常（active 高亮 + 线程跳转）。产物已清（browser session/server/临时 DB；默认 ~/.trellis/data.db 查证无泄漏）。
+- **Next**: 已提交并合并推送 main（免签待补）。真机验收待用户。候选 follow-up：S57 遗留的「ThreadMinimap 移动端默认折叠」可与本功能一起调（移动端无 hover，预览卡天然不触发，无冲突）。
+
 ### Session 59 (2026-07-16)
 - **Done**: 用户报的两个体验 bug 修复。
   - **①切卡滑动**：`LinearThreadView` anchor 导航 `scrollIntoView` 去掉 `behavior:"smooth"`（长 thread 切卡会肉眼滑过整屏内容才停），TargetChip label 跳转同改。
