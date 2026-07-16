@@ -137,7 +137,9 @@ function TextPreview({ url, markdown }: { url: string; markdown: boolean }) {
   if (error)
     return (
       <div className="p-6 text-sm text-danger">
-        读取失败：{error}
+        {error.includes("404")
+          ? "无法读取：文件不存在，或不在本会话可预览范围（workspace + 本会话写过的文件）"
+          : `读取失败：${error}`}
       </div>
     );
   if (text === null)

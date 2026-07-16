@@ -174,7 +174,11 @@ function TextBody({ url, markdown }: { url: string; markdown: boolean }) {
   }, [url]);
 
   if (error)
-    return <div className="px-3 py-2.5 text-xs text-ink-faint">无法读取文件</div>;
+    return (
+      <div className="px-3 py-2.5 text-xs text-ink-faint">
+        无法读取：文件不存在，或不在本会话可预览范围（workspace + 本会话写过的文件）
+      </div>
+    );
   if (text === null)
     return <div className="px-3 py-2.5 text-xs text-ink-faint">加载中…</div>;
 
