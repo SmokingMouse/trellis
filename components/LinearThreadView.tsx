@@ -67,6 +67,7 @@ export function LinearThreadView() {
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const setReadingPosition = useSessionStore((s) => s.setReadingPosition);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
@@ -146,12 +147,45 @@ export function LinearThreadView() {
     if (branchFrom && !nodes[branchFrom.id]) setBranchFrom(null);
   }, [branchFrom, nodes]);
 
+  // Restore the persisted reading position when landing on a session (tab
+  // switch / reload / canvas→linear). The anchor alone can't do this: it
+  // doesn't move while the user scroll-reads, so anchoring would dump every
+  // return at the root card. Declared BEFORE the anchor-scroll effect so the
+  // skip flag is armed by the time that effect runs for the same commit.
+  const skipAnchorScrollRef = useRef(false);
+  useEffect(() => {
+    if (!session?.id) return;
+    // A streaming tip owns the viewport (bottom-lock) — let it win.
+    if (tipStreamingId) return;
+    const pos = useSessionStore.getState().readingPosition;
+    if (!pos) return;
+    const card = roundRefs.current.get(pos.nodeId);
+    const container = scrollRef.current;
+    if (!card || !container) return; // node left the thread → anchor fallback
+    skipAnchorScrollRef.current = true;
+    const id = requestAnimationFrame(() => {
+      const delta =
+        card.getBoundingClientRect().top -
+        container.getBoundingClientRect().top;
+      container.scrollTop += delta + pos.offset;
+    });
+    return () => cancelAnimationFrame(id);
+    // Snapshot semantics: only re-run when the session changes, not on every
+    // node/scroll update within it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
+
   // Anchor navigation → scroll the anchored card into view, top-aligned so
   // the card header (with the question) is what lands in view — centering a
   // card taller than the viewport would drop you mid-answer. Skipped while
   // the anchor IS the streaming tip: the bottom-lock below owns the viewport
   // then.
   useEffect(() => {
+    if (skipAnchorScrollRef.current) {
+      // The session-landing restore above already positioned the viewport.
+      skipAnchorScrollRef.current = false;
+      return;
+    }
     if (!threadData.anchorId) return;
     if (threadData.anchorId === tipStreamingId) return;
     // Instant jump (no smooth): switching cards in a long thread would
@@ -197,11 +231,55 @@ export function LinearThreadView() {
     if (el) el.scrollTop = el.scrollHeight;
   });
 
+  // Reading-position tracker: after the scroll settles, record which card
+  // straddles the viewport's top edge (and how far into it we are) so tab
+  // switches / reloads can land right back there. Debounced — a localStorage
+  // write per scroll frame would be noise; the store action also drops stale
+  // writes if the session switched while the timer was pending.
+  const recordTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (recordTimerRef.current !== null) {
+        window.clearTimeout(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+    };
+  }, [session?.id]);
+
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     followRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+
+    const sid = session?.id;
+    if (!sid) return;
+    if (recordTimerRef.current !== null) {
+      window.clearTimeout(recordTimerRef.current);
+    }
+    recordTimerRef.current = window.setTimeout(() => {
+      recordTimerRef.current = null;
+      const container = scrollRef.current;
+      if (!container) return;
+      const containerTop = container.getBoundingClientRect().top;
+      // Cards are in thread order, tops strictly increasing: the LAST card
+      // whose top is at/above the viewport top is the one being read. When
+      // every card is below the top (scrolled to the very start), fall back
+      // to the first card at offset 0.
+      let picked: { nodeId: string; offset: number } | null = null;
+      for (const n of threadData.thread) {
+        const cardEl = roundRefs.current.get(n.id);
+        if (!cardEl) continue;
+        const top = cardEl.getBoundingClientRect().top - containerTop;
+        if (top <= 1) {
+          picked = { nodeId: n.id, offset: Math.max(0, -top) };
+        } else {
+          if (!picked) picked = { nodeId: n.id, offset: 0 };
+          break;
+        }
+      }
+      if (picked) setReadingPosition(sid, picked);
+    }, 200);
   };
 
   // Read tracking: a card counts as read once it stays sufficiently visible

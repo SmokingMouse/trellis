@@ -135,7 +135,24 @@ type ViewState = {
   // Legacy (pre linear-unification): the fullscreen card reader flag. Read
   // once for migration (true → viewMode "linear"), never written anymore.
   fullScreen?: boolean;
+  // Linear-thread reading position: the card whose top straddles the scroll
+  // viewport's top edge + how many px of it are scrolled past. activeNodeId
+  // alone can't express this — it's the lineage anchor and doesn't move while
+  // the user scrolls/reads, so restoring only it always landed tab switches
+  // back on the root card.
+  lastViewed?: ReadingPosition;
 };
+
+export type ReadingPosition = { nodeId: string; offset: number };
+
+function parseReadingPosition(value: unknown): ReadingPosition | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as { nodeId?: unknown; offset?: unknown };
+  if (typeof v.nodeId !== "string" || typeof v.offset !== "number") {
+    return undefined;
+  }
+  return { nodeId: v.nodeId, offset: Math.max(0, Math.round(v.offset)) };
+}
 
 function isViewMode(value: unknown): value is ViewMode {
   return value === "canvas" || value === "linear";
@@ -157,6 +174,7 @@ function loadViewState(sessionId: string): ViewState | null {
         typeof parsed.activeNodeId === "string" ? parsed.activeNodeId : null,
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : undefined,
       fullScreen: Boolean(parsed.fullScreen),
+      lastViewed: parseReadingPosition(parsed.lastViewed),
     };
   } catch {
     return null;
@@ -388,6 +406,11 @@ type State = {
   // instead of whatever the previous viewport was. In-memory only;
   // on session load we seed from the highest createdAt as a proxy.
   lastEditedNodeId: string | null;
+  // Linear-thread reading position for the CURRENT session (see ViewState.
+  // lastViewed). Written by LinearThreadView's scroll tracker, persisted by
+  // the view-state subscription, seeded back by loadSessionInternal so
+  // switching tabs lands on the card the user was reading, not the root.
+  readingPosition: ReadingPosition | null;
   // ── Workbench Wave 4: VSCode-style IDE shell ────────────────────────
   // The single active session that is *previewed* (single-click in the
   // sidebar / opened transiently). Shown as an italic temporary tab and
@@ -440,6 +463,11 @@ type Actions = {
   unarchiveSession: (sessionId: string) => Promise<void>;
   setNodePosition: (nodeId: string, pos: { x: number; y: number }) => void;
   setActiveNode: (nodeId: string | null) => void;
+  // Record the linear thread's reading position. sessionId guards the
+  // debounced scroll tracker against landing a stale write after a tab
+  // switch (the old session's position must never be filed under the new
+  // session's key).
+  setReadingPosition: (sessionId: string, pos: ReadingPosition) => void;
   setProvider: (provider: ProviderId) => void;
   fetchProviderCatalog: () => Promise<void>;
   // Stage 14: only affects subsequent new-session creation. No-op for
@@ -668,6 +696,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   composeRootOpen: false,
   collapsedNodeIds: new Set(),
   lastEditedNodeId: null,
+  readingPosition: null,
   previewSessionId: null,
   pinnedSessionIds: loadPinned(),
   unreadSessionIds: new Set(),
@@ -742,6 +771,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       notes: [],
       collapsedNodeIds: new Set(),
       lastEditedNodeId: null,
+      readingPosition: null,
       // Wave 4: dropping to the composer screen is a "no tab is active"
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
@@ -949,6 +979,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   setActiveNode: (nodeId) => {
     if (nodeId) get().expandAncestors(nodeId);
     set({ activeNodeId: nodeId });
+  },
+
+  setReadingPosition: (sessionId, pos) => {
+    const s = get();
+    if (s.session?.id !== sessionId) return;
+    const next = { nodeId: pos.nodeId, offset: Math.max(0, Math.round(pos.offset)) };
+    const cur = s.readingPosition;
+    if (cur && cur.nodeId === next.nodeId && cur.offset === next.offset) return;
+    set({ readingPosition: next });
   },
 
   setViewMode: (mode) => {
@@ -2057,6 +2096,13 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
   if (savedView?.activeNodeId && map[savedView.activeNodeId]) {
     restoredActive = savedView.activeNodeId;
   }
+  // Reading position outlives activeNodeId: scrolling through the linear
+  // thread never moves the anchor, so this is what actually encodes "the
+  // card the user last looked at". Dropped if the node has been deleted.
+  const restoredReading =
+    savedView?.lastViewed && map[savedView.lastViewed.nodeId]
+      ? savedView.lastViewed
+      : null;
   // Make sure the restored node is actually visible in the canvas by
   // un-collapsing any of its ancestors that were persisted collapsed.
   if (restoredActive && collapsed.size > 0) {
@@ -2082,6 +2128,7 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     notes: notes ?? [],
     collapsedNodeIds: collapsed,
     lastEditedNodeId,
+    readingPosition: restoredReading,
     ...(sessionProvider ? { provider: sessionProvider } : {}),
   });
 }
@@ -2732,13 +2779,31 @@ async function runStream(
 // same state (idempotent). Optimistic placeholders never persist as the
 // last-viewed node — they don't exist after the swap/discard.
 if (typeof window !== "undefined") {
+  // Re-base the reading position whenever the focused node changes through
+  // explicit navigation within a session (canvas click, branch jump, search
+  // hit, new-stream focus). Without this a stale scroll record from before
+  // the navigation would win the next session-landing restore and "undo"
+  // the jump the user just made. Session switches are excluded — the load
+  // path seeds its own restored position, which may legitimately differ
+  // from the anchor. The nodeId guard makes the nested set() terminate.
+  useSessionStore.subscribe((state, prev) => {
+    if (state.activeNodeId === prev.activeNodeId) return;
+    if (!state.activeNodeId || !state.session) return;
+    if (state.session.id !== prev.session?.id) return;
+    if (state.readingPosition?.nodeId === state.activeNodeId) return;
+    useSessionStore.setState({
+      readingPosition: { nodeId: state.activeNodeId, offset: 0 },
+    });
+  });
+
   useSessionStore.subscribe((state, prev) => {
     const sid = state.session?.id;
     if (!sid) return;
     if (
       state.session?.id === prev.session?.id &&
       state.activeNodeId === prev.activeNodeId &&
-      state.viewMode === prev.viewMode
+      state.viewMode === prev.viewMode &&
+      state.readingPosition === prev.readingPosition
     ) {
       return;
     }
@@ -2748,6 +2813,10 @@ if (typeof window !== "undefined") {
           ? null
           : state.activeNodeId,
       viewMode: state.viewMode,
+      ...(state.readingPosition &&
+      !isOptimisticNodeId(state.readingPosition.nodeId)
+        ? { lastViewed: state.readingPosition }
+        : {}),
     });
   });
 }
