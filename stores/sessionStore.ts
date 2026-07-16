@@ -1516,6 +1516,9 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // — that's why we set the anchor *after* the load resolves.
     if (cur?.id !== sessionId) {
       await loadSessionInternal(sessionId, set);
+      // Mirror loadSession: re-attach SSE for any node still streaming in the
+      // jumped-to session (loadSessionInternal may have torn a stale one down).
+      get().reconnectStreamingNodes();
       // Surface the jumped-to session as a tab (mirror hydrate). Without this
       // the strip keeps showing the previous preview while a different session
       // is active — the tab bar desyncs from what's on screen. On mobile this
@@ -1834,6 +1837,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const { node } = (await res.json()) as { node: ApiNode };
     const local = apiNodeToChatNode(node);
     set((s) => {
+      // 串台 guard: refresh resolving after a session switch — don't graft.
+      if (s.session?.id !== local.sessionId) {
+        return { sessionsRevision: s.sessionsRevision + 1 };
+      }
       const prev = s.nodes[local.id];
       // Preserve canvas position the user has settled on; only patch the
       // reference payload + topicLabel + fetchedAt.
@@ -1964,7 +1971,14 @@ function evictSessionFromTabs(
   });
 }
 
+// Monotonic load token — only the newest in-flight load commits. Without it,
+// a stale slow load (tab switch racing a cli-sync session_updated reload, or
+// two rapid switches) can resolve LAST and flip the view back to the wrong
+// session — the "switched to B but A's running content shows" 串台.
+let loadSeq = 0;
+
 async function loadSessionInternal(sessionId: string, set: Setter) {
+  const seq = ++loadSeq;
   const res = await fetchWithTimeout(`/api/sessions/${sessionId}`, 5000);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const { session, nodes, notes } = (await res.json()) as {
@@ -1972,8 +1986,37 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     nodes: ApiNode[];
     notes?: Note[];
   };
+  // A newer load superseded this one while we were fetching — drop it.
+  if (seq !== loadSeq) return;
   const map: Record<string, ChatNode> = {};
   for (const n of nodes) map[n.id] = apiNodeToChatNode(n);
+  // Streaming nodes with a live LOCAL subscription need their response
+  // baseline repaired — the DB snapshot overlaps what the stream-bus buffer
+  // already holds, and rendering `response + pending` (TurnCard/ChatNode) or
+  // committing `response + fullText` at done would DOUBLE the text:
+  //   • live POST reader (send originated in this browser session): the bus
+  //     buffer holds the FULL text since `created`, so the correct baseline
+  //     is "" — same invariant as the created-time row.
+  //   • live reconnect SSE: its baseline was a past catchup we no longer
+  //     have. Tear it down + clear the bus; the reconnect pass right after
+  //     this load re-attaches and gets a fresh authoritative catchup.
+  for (const n of Object.values(map)) {
+    if (n.status !== "streaming") continue;
+    const live = STREAM_CONTROLLERS.get(n.id);
+    if (!live) continue; // reconnect pass will attach cleanly
+    const rec = RECONNECT_HANDLES.get(n.id);
+    if (rec) {
+      RECONNECT_HANDLES.delete(n.id);
+      if (STREAM_CONTROLLERS.get(n.id) === rec) {
+        STREAM_CONTROLLERS.delete(n.id);
+      }
+      rec.abort();
+      clearStreamPending(n.id);
+      clearStreamPending(thinkingChannel(n.id));
+    } else {
+      map[n.id] = { ...n, response: "" };
+    }
+  }
   // Drop any persisted collapse-ids that no longer correspond to a node
   // (e.g. server-side schema reset, race with delete) so the set never
   // keeps growing with garbage. Re-persist if we trimmed anything.
@@ -2210,6 +2253,15 @@ function handleStreamEvent(
       }
       const node = apiNodeToChatNode(event.node);
       set((s) => {
+        // 串台 guard: the user may have switched sessions while this send was
+        // in flight (send → immediately ⌘1/⌘2 to another tab). Grafting the
+        // node into the CURRENT session's map would make the other tab render
+        // this stream as its own (and focusNew would steal activeNodeId).
+        // Skip the store commit — the run keeps going server-side; switching
+        // back picks it up via loadSession + the live bus buffer. Only applies
+        // when attaching to an existing session (event.session = brand-new
+        // session creation, which intentionally switches the view).
+        if (!event.session && s.session?.id !== node.sessionId) return s;
         const nodes = { ...s.nodes, [node.id]: node };
         // #6: the server row replaces the optimistic placeholder.
         if (opts.optimisticId) delete nodes[opts.optimisticId];
@@ -2490,6 +2542,9 @@ function handleRefStreamEvent(
   if (event.type === "created") {
     const local = apiNodeToChatNode(event.node);
     set((s) => {
+      // 串台 guard (same as handleStreamEvent's created): don't graft a node
+      // into a session the user has since switched away from.
+      if (!event.session && s.session?.id !== local.sessionId) return s;
       const next: Partial<State> = {
         nodes: event.session
           ? { [local.id]: local }
@@ -2513,6 +2568,11 @@ function handleRefStreamEvent(
   } else if (event.type === "done") {
     const local = apiNodeToChatNode(event.node);
     set((s) => {
+      // 串台 guard: a reference finishing after a session switch must not
+      // insert itself into the now-active session's map.
+      if (s.session?.id !== local.sessionId) {
+        return { sessionsRevision: s.sessionsRevision + 1 };
+      }
       const prev = s.nodes[local.id];
       const merged: ChatNode = prev
         ? { ...local, position: prev.position }

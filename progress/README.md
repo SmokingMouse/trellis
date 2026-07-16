@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**Tab 串台 + 卡片切换滑动两 bug 修复（Session 59，未 commit）**：①线性视图切卡由 smooth 滚动改瞬时跳转；②串台四连修——`created` 事件加 session guard（发送后立刻切 tab，外 session 节点不再嫁接进当前视图/抢 activeNodeId，reference created/done/refresh 同规）+ `loadSessionInternal` latest-wins 序号（慢的旧加载不再覆盖新切换）+ `useCliSyncEvents` 改读 `getState()` 现值（stale closure 不再把视图拉回运行中的 attached 会话，SSE 也不随切换重建）+ 加载时流式基线修复（POST reader 存活的节点 response 置空防「DB 快照+bus 全量缓冲」拼接重复；存活 reconnect 句柄拆除重挂拿新 catchup）。tsc ✓ + build ✓ + 隔离实例(:3145 mock)浏览器实测：流中切 B 视图零污染、流中切回 A 无重复。
+
+---
 **模式收敛：砍掉 Workspace 档，chat / project 两档（Session 58，已提交推送 `4818681`，免签待补）** → decisions.md 2026-07-16。用量 0（32 原生 session 无一 workspace）+ 语义被增强 chat / project 双向吃掉。全链路清理（Mode 类型/sdk-adapter/route/store/ModePicker/SearchModal/SessionSidebar/ModeBadge/mode-workspace token 全主题/README 两档文档）+ DB 防御性 migrate（workspace→project，幂等）。tsc ✓ + `make build` ✓ + 隔离实例 HTTP e2e ✓（migration 生效 / chat·project 创建 / 老 `mode:"workspace"` 请求安全回落 chat）。
 
 ---
@@ -144,6 +147,17 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 59 (2026-07-16)
+- **Done**: 用户报的两个体验 bug 修复。
+  - **①切卡滑动**：`LinearThreadView` anchor 导航 `scrollIntoView` 去掉 `behavior:"smooth"`（长 thread 切卡会肉眼滑过整屏内容才停），TargetChip label 跳转同改。
+  - **②tab 串台**（根因 = `handleStreamEvent` `created` 不校验 session 就插入当前 nodes map 并 `focusNew` 抢焦点；发送后立刻切 tab 即复现「另一个 tab 也变成运行，内容是原 tab 的」）：
+    - `created` 加 guard：`!event.session && s.session?.id !== node.sessionId` → 跳过 store 提交（run 服务端继续，切回时 loadSession + bus 缓冲接上；unread 角标由 run 轮询 diff 兜底）；`handleRefStreamEvent` created/done、`refreshReference` 同规。
+    - `loadSessionInternal` 加模块级 `loadSeq` latest-wins：慢的旧加载（cli-sync session_updated 重载、连续快切）resolve 晚不再把视图翻回旧 session。
+    - `useCliSyncEvents`：`event.sessionId === 当前` 判断改读 `useSessionStore.getState()`（原 closure 捕获值在切换窗口期 stale，运行中 attached 会话持续 session_updated 会把视图拉回去）；顺带 SSE 连接不再随每次切 session 重建。
+    - **切走再切回重复文本修复**：`loadSessionInternal` 对仍 streaming 且本地有活订阅的节点——POST reader（bus pending 自 created 起为全量）→ 本地 response 置 ""（恢复 created 基线，防「DB 快照 + pending」拼接翻倍，done 提交同理受益）；活 reconnect 句柄（基线是旧 catchup，已不可考）→ 同步拆除 + 清 bus，靠随后的 reconnect pass 重挂拿新权威 catchup。`jumpToSearchHit` 补调 `reconnectStreamingNodes`。
+- **验证**: tsc ✓ + `make build` ✓；隔离实例（:3145 + 临时 DB + mock，`/model mock`）agent-browser 实测：A 流式中切 B → B 无 streaming cursor/停止按钮、canvas 只有自己节点；流式中切回 A（`backWhileStreaming:true`）→ 继续流、done 后 DB（578 字符 ×1）与可见渲染（marker ×1）均单份。产物已清（browser session/server/临时 DB）。**排查注记（防复踩）**：TurnCard 的 `innerText` 恒为回答约两倍——`CardImageButton` 内有 off-screen 分享卡副本（`left:-99999` + aria-hidden），量 DOM 文本断言时须 clone 后剔除 `[aria-hidden="true"]`，非 bug。另：首轮实测点 ModelPicker 下拉选「Mock 调试用」未生效吃了两次真模型短答，改用 `/model mock` 命令可靠。
+- **Next**: 未 commit（4 文件：LinearThreadView/sessionStore/useCliSyncEvents/progress），用户验收后提交；真机复核两个原始症状。若「串台」仍在，需要精确操作序列——本轮修的是 created 竞态 / 加载竞态 / cli-sync 回拉三条已证实路径。
+
 ### Session 58 (2026-07-16)
 - **Done**: **Workspace 档退役,模式收敛 chat / project 两档** → decisions.md 2026-07-16。证据链:DB 全库 0 workspace 行(原生 chat 21 / project 11);机制上 workspace ≡ project − resume(减掉的恰是仓库干活要的跨轮记忆);「一次性 CLI」定位已被 S55 增强 chat(scratch + full + skill 自动开)吃掉。改动面:
   - 类型/机制:`Mode` 二值联合(types.ts 附退役注记);sdk-adapter 删 workspace 分支、`toStreamEvent` 去掉死参 `mode`(SessionStart 恒透传);route `VALID_MODES` 二值,老 `mode:"workspace"` isMode 兜底回落 chat。

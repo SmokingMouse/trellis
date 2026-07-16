@@ -7,7 +7,6 @@ type CliSyncEvent =
   | { type: "ping" };
 
 export function useCliSyncEvents(): void {
-  const sessionId = useSessionStore((s) => s.session?.id ?? null);
   const loadSession = useSessionStore((s) => s.loadSession);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const markSessionLive = useSessionStore((s) => s.markSessionLive);
@@ -43,7 +42,14 @@ export function useCliSyncEvents(): void {
             // live 感知：收到更新 = 该 session 正被实时写（claude 在驱动它）。
             markSessionLive(event.sessionId);
             bumpSessionsRevision();
-            if (event.sessionId === sessionId) {
+            // Read the ACTIVE session id at event time (not from a captured
+            // prop): during a tab switch the closure value is stale for a few
+            // hundred ms, and a session_updated for the still-streaming old
+            // session would loadSession() the view right back to it — 串台.
+            if (
+              event.sessionId ===
+              useSessionStore.getState().session?.id
+            ) {
               void loadSession(event.sessionId);
             }
           }
@@ -63,5 +69,5 @@ export function useCliSyncEvents(): void {
       if (retryTimer) window.clearTimeout(retryTimer);
       ctrl.abort();
     };
-  }, [bumpSessionsRevision, loadSession, markSessionLive, sessionId]);
+  }, [bumpSessionsRevision, loadSession, markSessionLive]);
 }

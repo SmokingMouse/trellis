@@ -154,10 +154,12 @@ export function LinearThreadView() {
   useEffect(() => {
     if (!threadData.anchorId) return;
     if (threadData.anchorId === tipStreamingId) return;
+    // Instant jump (no smooth): switching cards in a long thread would
+    // otherwise visibly slide through screens of content before settling.
     const id = requestAnimationFrame(() => {
       roundRefs.current
         .get(threadData.anchorId!)
-        ?.scrollIntoView({ block: "start", behavior: "smooth" });
+        ?.scrollIntoView({ block: "start" });
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -532,7 +534,7 @@ export function LinearThreadView() {
               onLabelClick={() =>
                 roundRefs.current
                   .get(branchFromNode.id)
-                  ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                  ?.scrollIntoView({ block: "start" })
               }
               onClear={() => setBranchFrom(null)}
             />
