@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
-import { MD_COMPONENTS } from "@/lib/md-components";
+import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { Button } from "@/components/ui/Button";
 
 // "Zone" — a full-screen, distraction-free Markdown writing surface for
@@ -232,6 +232,7 @@ export function ZoneEditor({
                 remarkPlugins={REMARK_PLUGINS}
                 rehypePlugins={REHYPE_FULL}
                 components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
               >
                 {value}
               </ReactMarkdown>

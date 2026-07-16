@@ -667,6 +667,15 @@ html, body {
 .md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; }
 .md-body li { margin: 0.25em 0; }
 .md-body strong { color: var(--ink-strong); font-weight: 600; }
+/* Tailwind preflight strips link styling — restore it, else links read as
+   plain text. Local-file links add decoration-dotted on top (preview hint). */
+.md-body a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 2px;
+}
+.md-body a:hover { text-decoration-color: currentColor; }
 .md-body code:not(pre code) {
   background: var(--surface-muted);
   color: var(--code-inline-ink);

@@ -18,7 +18,7 @@ import {
   thinkingChannel,
 } from "@/lib/stream-bus";
 import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
-import { MD_COMPONENTS } from "@/lib/md-components";
+import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
@@ -365,6 +365,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_FULL}
             components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
           >
             {n.response}
           </ReactMarkdown>

@@ -11,7 +11,7 @@ import {
   thinkingChannel,
 } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
-import { MD_COMPONENTS } from "@/lib/md-components";
+import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
@@ -363,6 +363,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
               remarkPlugins={REMARK_PLUGINS}
               rehypePlugins={REHYPE_STREAMING}
               components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
             >
               {liveText}
             </ReactMarkdown>
@@ -382,6 +383,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_FULL}
             components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
           >
             {node.response}
           </ReactMarkdown>
@@ -547,6 +549,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
             remarkPlugins={REMARK_PLUGINS}
             rehypePlugins={REHYPE_FULL}
             components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
           >
             {ref.contentMd}
           </ReactMarkdown>

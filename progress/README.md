@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**链接悬浮预览 + 本地文件链接接管（Session 63，已提交推送 main，免签待补）**：markdown 答案里的链接此前是裸 `<a>`（本地路径链接点了 404、样式还被 Tailwind preflight 重置成纯文本）。落地：① `MdLink`（`a` 渲染器）——本地文件 href（绝对路径 / `file://` / workspace 相对，含裸相对名）点击改开既有 FilePreview overlay，外链补 `target=_blank`；② 悬浮 ~250ms 出预览卡（`components/HoverPreview.tsx`，portal + fixed 定位、视口越界翻转、滚动即消失、pointer-events-none）——图片直显、md 渲染、文本截头（增量读 6k 字符即断连，大文件不怕）、html/pdf 只给「点击打开」提示、远程图片链接也可悬浮；③ 行内 code 路径按钮同享悬浮卡；④ `MD_URL_TRANSFORM` 放行 `file:` 协议（react-markdown 默认 sanitizer 会把 file:// href 清空——实测踩到），全部 8 个 ReactMarkdown 调用点接线；⑤ 补 `.md-body a` 基础样式。服务端零改动（复用 `/api/files` 会话白名单，白名单外 hover 显示「无法读取文件」）。tsc ✓ + `make build` ✓（唯一 warning 为 main 已有）+ 隔离实例(:3152 mock)浏览器实测 11 场景全过：md/图片/文本/file:///相对链接悬浮卡、越权 404 优雅降级、外链无卡保跳转、远程图片卡、点击开 overlay 不跳转、移开消失、行内 code 悬浮。
+
+---
 **线性视图内容列宽度可调（Session 62，已提交推送 main，免签待补）**：用户反馈卡片太窄。原三容器（顶栏/卡片列/Composer）锁死 `max-w-3xl`(768px) → 全局偏好三档：窄 768 / 宽 1024（新默认）/ 超宽 1280，localStorage `trellis-thread-width` 持久化（sendKey 同款模式：`lib/thread-width.ts` + store loader/action），切换控件 = 线性视图顶栏「窄/宽/超宽」分段按钮（移动端隐藏——卡片本就贴满屏宽）。画布 ChatNode 维持 600px（dagre 布局基准）不受影响。**设置页评估不做**：现有偏好各有语境化入口（主题=ThemeMenu popover、发送键=composer footer、宽度=线性顶栏），单独一页反而多一跳；偏好再积累到 5+ 项时再考虑 Header ⚙ popover 归拢。tsc ✓ + `make build` ✓ + 隔离实例(:3151 mock)浏览器实测：三档切换宽度正确（768/1024/1070=viewport 减侧栏后封顶）、三容器对齐、reload 恢复档位。
 
 ---

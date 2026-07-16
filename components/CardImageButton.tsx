@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
-import { MD_COMPONENTS } from "@/lib/md-components";
+import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
@@ -114,6 +114,7 @@ export function CardImageButton({
               remarkPlugins={REMARK_PLUGINS}
               rehypePlugins={REHYPE_FULL}
               components={MD_COMPONENTS}
+            urlTransform={MD_URL_TRANSFORM}
             >
               {content}
             </ReactMarkdown>
