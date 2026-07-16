@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-**Tab 串台 + 卡片切换滑动两 bug 修复（Session 59，未 commit）**：①线性视图切卡由 smooth 滚动改瞬时跳转；②串台四连修——`created` 事件加 session guard（发送后立刻切 tab，外 session 节点不再嫁接进当前视图/抢 activeNodeId，reference created/done/refresh 同规）+ `loadSessionInternal` latest-wins 序号（慢的旧加载不再覆盖新切换）+ `useCliSyncEvents` 改读 `getState()` 现值（stale closure 不再把视图拉回运行中的 attached 会话，SSE 也不随切换重建）+ 加载时流式基线修复（POST reader 存活的节点 response 置空防「DB 快照+bus 全量缓冲」拼接重复；存活 reconnect 句柄拆除重挂拿新 catchup）。tsc ✓ + build ✓ + 隔离实例(:3145 mock)浏览器实测：流中切 B 视图零污染、流中切回 A 无重复。
+**Tab 串台 + 卡片切换滑动两 bug 修复（Session 59，已提交推送 `5784ec8`，免签待补）**：①线性视图切卡由 smooth 滚动改瞬时跳转；②串台四连修——`created` 事件加 session guard（发送后立刻切 tab，外 session 节点不再嫁接进当前视图/抢 activeNodeId，reference created/done/refresh 同规）+ `loadSessionInternal` latest-wins 序号（慢的旧加载不再覆盖新切换）+ `useCliSyncEvents` 改读 `getState()` 现值（stale closure 不再把视图拉回运行中的 attached 会话，SSE 也不随切换重建）+ 加载时流式基线修复（POST reader 存活的节点 response 置空防「DB 快照+bus 全量缓冲」拼接重复；存活 reconnect 句柄拆除重挂拿新 catchup）。tsc ✓ + build ✓ + 隔离实例(:3145 mock)浏览器实测：流中切 B 视图零污染、流中切回 A 无重复。
 
 ---
 **模式收敛：砍掉 Workspace 档，chat / project 两档（Session 58，已提交推送 `4818681`，免签待补）** → decisions.md 2026-07-16。用量 0（32 原生 session 无一 workspace）+ 语义被增强 chat / project 双向吃掉。全链路清理（Mode 类型/sdk-adapter/route/store/ModePicker/SearchModal/SessionSidebar/ModeBadge/mode-workspace token 全主题/README 两档文档）+ DB 防御性 migrate（workspace→project，幂等）。tsc ✓ + `make build` ✓ + 隔离实例 HTTP e2e ✓（migration 生效 / chat·project 创建 / 老 `mode:"workspace"` 请求安全回落 chat）。
