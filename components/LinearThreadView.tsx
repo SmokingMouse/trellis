@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { buildNodeIndex } from "@/lib/node-index";
+import { childrenIndex, nodeSort } from "@/lib/tree-panel";
 import { subscribeStream } from "@/lib/stream-bus";
 import { modeStyle } from "@/lib/mode-style";
 import { sendHint } from "@/lib/send-key";
@@ -31,14 +32,6 @@ import { TurnCard } from "./TurnCard";
 // sticky bottom composer continues the displayed lineage — this replaced the
 // old NodeFullView fullscreen reader (issues #2/#4/#7).
 
-function nodeSort(a: ChatNode, b: ChatNode) {
-  return (
-    a.siblingIndex - b.siblingIndex ||
-    a.createdAt - b.createdAt ||
-    a.id.localeCompare(b.id)
-  );
-}
-
 function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
@@ -48,18 +41,6 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
   return Object.values(nodes)
     .filter((n) => !n.parentId)
     .sort(nodeSort)[0] ?? null;
-}
-
-function childrenIndex(nodes: Record<string, ChatNode>) {
-  const byParent = new Map<string, ChatNode[]>();
-  for (const n of Object.values(nodes)) {
-    if (!n.parentId) continue;
-    const arr = byParent.get(n.parentId) ?? [];
-    arr.push(n);
-    byParent.set(n.parentId, arr);
-  }
-  for (const arr of byParent.values()) arr.sort(nodeSort);
-  return byParent;
 }
 
 // How close to the bottom (px) still counts as "following" — scrolling

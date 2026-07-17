@@ -2,9 +2,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
+import { ancestorsOf } from "@/lib/collapsed";
 import { refIcon } from "@/lib/ref-icon";
 import {
   buildTreeEntries,
+  childrenIndex,
   flattenTree,
   groupTrees,
   isUnreadNode,
@@ -36,6 +38,7 @@ export function TreePanel() {
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
+  const treeVisits = useSessionStore((s) => s.treeVisits);
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
@@ -48,7 +51,10 @@ export function TreePanel() {
   const bodyRef = useRef<HTMLDivElement>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
 
-  const entries = useMemo(() => buildTreeEntries(nodesMap), [nodesMap]);
+  const entries = useMemo(
+    () => buildTreeEntries(nodesMap, treeVisits),
+    [nodesMap, treeVisits],
+  );
   const indices = useMemo(() => buildNodeIndex(nodesMap), [nodesMap]);
   const activeRootId = useMemo(() => {
     const anchor = activeNodeId && nodesMap[activeNodeId] ? activeNodeId : null;
@@ -62,6 +68,25 @@ export function TreePanel() {
     () => (activeRootId ? flattenTree(activeRootId, nodesMap) : []),
     [activeRootId, nodesMap],
   );
+  // 当前链（线性视图正在展示的 lineage：祖先 + 锚点 + 首子链）。链外的
+  // 分支行淡显——树内的「冷」不是时间，是「不在你正读的这条线上」。
+  const lineageIds = useMemo(() => {
+    const ids = new Set<string>();
+    const anchor =
+      activeNodeId && nodesMap[activeNodeId] ? activeNodeId : null;
+    if (!anchor) return ids;
+    for (const id of ancestorsOf(anchor, nodesMap)) ids.add(id);
+    ids.add(anchor);
+    const byParent = childrenIndex(nodesMap);
+    let cur = nodesMap[anchor];
+    while (cur) {
+      const child = byParent.get(cur.id)?.[0];
+      if (!child) break;
+      ids.add(child.id);
+      cur = child;
+    }
+    return ids;
+  }, [activeNodeId, nodesMap]);
 
   const filterResults = useMemo(() => {
     if (filter === null) return [];
@@ -247,6 +272,8 @@ export function TreePanel() {
         {activeRows.map(({ node, depth, isBranch }) => {
           const isActive = node.id === activeNodeId;
           const unread = isUnreadNode(node);
+          const offLineage =
+            lineageIds.size > 0 && !lineageIds.has(node.id);
           return (
             <button
               key={node.id}
@@ -258,7 +285,9 @@ export function TreePanel() {
               className={`w-full min-w-0 flex items-center gap-1 pr-2 py-[3px] rounded text-left transition-colors ${
                 isActive
                   ? "bg-accent-muted text-accent-ink font-medium"
-                  : "text-ink-muted hover:bg-surface-muted"
+                  : offLineage
+                    ? "text-ink-faint hover:text-ink-muted hover:bg-surface-muted"
+                    : "text-ink-muted hover:bg-surface-muted"
               }`}
               title={node.question || undefined}
             >

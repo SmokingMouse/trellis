@@ -128,6 +128,48 @@ function persistCollapsed(
   }
 }
 
+// 树面板真热度：per-session { rootId: lastVisitedAt }。导航落到某棵树
+// （setActiveNode / jump*）就给树根打点——重访旧树不长新节点也算「用过」，
+// 补上 createdAt/readAt 代理信号覆盖不到的那一面。localStorage 持久化
+// （lastViewed 同款），load 时按现存根修剪防垃圾堆积。
+const TREE_VISITS_KEY = (sid: string) => `trellis-tree-visits:${sid}`;
+
+function loadTreeVisits(sessionId: string): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(TREE_VISITS_KEY(sessionId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "number") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistTreeVisits(
+  sessionId: string | undefined,
+  visits: Record<string, number>,
+): void {
+  if (typeof window === "undefined" || !sessionId) return;
+  try {
+    if (Object.keys(visits).length === 0) {
+      window.localStorage.removeItem(TREE_VISITS_KEY(sessionId));
+    } else {
+      window.localStorage.setItem(
+        TREE_VISITS_KEY(sessionId),
+        JSON.stringify(visits),
+      );
+    }
+  } catch {
+    /* quota / private mode — non-fatal */
+  }
+}
+
 // Per-session "last viewed position": which node the user was looking at and
 // whether they were in the fullscreen reader vs the canvas. Persisted to
 // localStorage (survives reload / app restart, unlike collapsed which is
@@ -426,6 +468,9 @@ type State = {
   // the view-state subscription, seeded back by loadSessionInternal so
   // switching tabs lands on the card the user was reading, not the root.
   readingPosition: ReadingPosition | null;
+  // 树面板真热度：当前 session 的 { rootId: lastVisitedAt }。导航打点写入，
+  // loadSessionInternal 载入 + 修剪。TreePanel 把它并进树热度。
+  treeVisits: Record<string, number>;
   // ── Workbench Wave 4: VSCode-style IDE shell ────────────────────────
   // The single active session that is *previewed* (single-click in the
   // sidebar / opened transiently). Shown as an italic temporary tab and
@@ -717,6 +762,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   collapsedNodeIds: new Set(),
   lastEditedNodeId: null,
   readingPosition: null,
+  treeVisits: {},
   previewSessionId: null,
   pinnedSessionIds: loadPinned(),
   unreadSessionIds: new Set(),
@@ -793,6 +839,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       collapsedNodeIds: new Set(),
       lastEditedNodeId: null,
       readingPosition: null,
+      treeVisits: {},
       // Wave 4: dropping to the composer screen is a "no tab is active"
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
@@ -998,7 +1045,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setActiveNode: (nodeId) => {
-    if (nodeId) get().expandAncestors(nodeId);
+    if (nodeId) {
+      get().expandAncestors(nodeId);
+      stampTreeVisit(set, get, nodeId);
+    }
     set({ activeNodeId: nodeId });
   },
 
@@ -1556,6 +1606,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   jumpToParentAtAnchor: (parentId, childId) => {
     get().expandAncestors(parentId);
+    stampTreeVisit(set, get, parentId);
     set({
       pendingScrollAnchor: { nodeId: parentId, kind: "child", childId },
       activeNodeId: parentId,
@@ -1566,6 +1617,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const note = get().notes.find((n) => n.id === noteId);
     if (!note) return;
     get().expandAncestors(note.sourceNodeId);
+    stampTreeVisit(set, get, note.sourceNodeId);
     set({
       pendingScrollAnchor: {
         nodeId: note.sourceNodeId,
@@ -1600,6 +1652,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }));
     }
     get().expandAncestors(nodeId);
+    stampTreeVisit(set, get, nodeId);
     set({
       activeNodeId: nodeId,
       viewMode: "linear",
@@ -2032,6 +2085,23 @@ function insertOptimisticNode(
   return id;
 }
 
+// 树访问打点：走到 nodeId 的树根，记 lastVisitedAt 并持久化。找不到根
+// （乐观节点竞态等）静默跳过。
+function stampTreeVisit(set: Setter, get: Getter, nodeId: string): void {
+  const s = get();
+  const nodes = s.nodes;
+  let rootId = nodeId;
+  for (let i = 0; i < 1000; i++) {
+    const cur: ChatNode | undefined = nodes[rootId];
+    if (!cur) return;
+    if (!cur.parentId) break;
+    rootId = cur.parentId;
+  }
+  const visits = { ...s.treeVisits, [rootId]: Date.now() };
+  set({ treeVisits: visits });
+  persistTreeVisits(s.session?.id, visits);
+}
+
 // 走到树根，清本地 hiddenAt（写即复活的客户端镜像）。无雪藏时零开销。
 function reviveTreeLocally(set: Setter, get: Getter, nodeId: string): void {
   const nodes = get().nodes;
@@ -2204,6 +2274,15 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
       collapsed = next;
     }
   }
+  // 树访问打点：载入 + 按现存根修剪（根被删后条目不再堆积）。
+  const savedVisits = loadTreeVisits(session.id);
+  const treeVisits: Record<string, number> = {};
+  let visitsTrimmed = false;
+  for (const [rid, ts] of Object.entries(savedVisits)) {
+    if (map[rid] && !map[rid].parentId) treeVisits[rid] = ts;
+    else visitsTrimmed = true;
+  }
+  if (visitsTrimmed) persistTreeVisits(session.id, treeVisits);
   // Per-session model lock: adopt the loaded session's own model as the active
   // provider so switching away and back doesn't inherit the global picker.
   // Legacy rows (model === null) leave the current provider untouched.
@@ -2217,6 +2296,7 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     collapsedNodeIds: collapsed,
     lastEditedNodeId,
     readingPosition: restoredReading,
+    treeVisits,
     ...(sessionProvider ? { provider: sessionProvider } : {}),
   });
 }

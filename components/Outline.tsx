@@ -3,12 +3,9 @@ import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { refIcon } from "@/lib/ref-icon";
 import { buildNodeIndex } from "@/lib/node-index";
+import { childrenIndex, isUnreadNode } from "@/lib/tree-panel";
 import type { ChatNode } from "@/lib/types";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
-
-function isUnreadNode(n: ChatNode): boolean {
-  return n.status === "done" && !n.readAt;
-}
 
 // Recursive: a tree node passes the "has any unread descendant or self" test
 // when filtering — keeps the parent visible even if it's been read, so the
@@ -32,16 +29,7 @@ function buildForest(
   nodes: Record<string, ChatNode>,
   qaRootId: string,
 ): TreeNode[] {
-  const childrenByParent = new Map<string, ChatNode[]>();
-  for (const n of Object.values(nodes)) {
-    if (!n.parentId) continue;
-    const arr = childrenByParent.get(n.parentId) ?? [];
-    arr.push(n);
-    childrenByParent.set(n.parentId, arr);
-  }
-  for (const arr of childrenByParent.values()) {
-    arr.sort((a, b) => a.siblingIndex - b.siblingIndex);
-  }
+  const childrenByParent = childrenIndex(nodes);
   const attach = (n: ChatNode): TreeNode => ({
     ...n,
     children: (childrenByParent.get(n.id) ?? []).map(attach),
@@ -189,6 +177,9 @@ function TreeRow({
   const unread = isUnreadNode(node);
   const hasChildren = node.children.length > 0;
   const canDelete = sessionRootId !== node.id;
+  // 树面板雪藏的根：画布 Outline 不过滤（画布本就是「看全部」的面），只做
+  // 淡显 + 标注，让两个面的状态语义对得上。
+  const isHiddenRoot = !node.parentId && node.hiddenAt !== null;
   // In "unread only" mode, hide read leaves entirely. A read row with at
   // least one unread descendant stays visible (rendered dim) so the
   // hierarchy doesn't lose context.
@@ -242,7 +233,7 @@ function TreeRow({
           className={`flex-1 min-w-0 text-left pr-2 py-1 text-ui truncate transition-colors flex items-center gap-1 ${
             isActive
               ? "text-accent-ink font-medium"
-              : dimReadInUnreadMode
+              : dimReadInUnreadMode || isHiddenRoot
                 ? "text-ink-faint"
                 : "text-ink-muted"
           }`}
@@ -273,6 +264,11 @@ function TreeRow({
             {node.topicLabel ??
               (isReference ? "参考材料" : truncate(node.question, 32))}
           </span>
+          {isHiddenRoot && (
+            <span className="shrink-0 px-1 rounded bg-surface-muted text-nano text-ink-faint">
+              已隐藏
+            </span>
+          )}
           {hiddenCount > 0 && (
             <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
               ({hiddenCount})

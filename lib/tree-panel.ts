@@ -4,8 +4,9 @@ import type { ChatNode } from "./types";
 // 热区 / 冷组 / 已隐藏 三组树条目，外加当前树的扁平化行列表。
 // 设计要点（见 progress S65 讨论）：
 //   - 树级语义用文字（topicLabel），节点级结构用列表行 —— 点阵 minimap 退役。
-//   - 热度 = 子树内 max(createdAt, readAt)（「最近长过新节点或读过新内容」的
-//     v1 代理；真·最近访问需要 lastVisitedAt，被绊到再加）。
+//   - 热度 = max(子树内 createdAt / readAt, 树根 lastVisitedAt)。前两者是
+//     「长过新节点 / 读过新内容」，visits（store.treeVisits，导航打点）补上
+//     「重访旧树也算用过」的那一面。
 //   - 排名制而非时间阈值：前 HOT_TREE_LIMIT 棵进热区，其余进「更早」。
 //     时间制在休假回来后会全场皆冷，排名制永远有东西可见。
 //   - 手动雪藏（root.hiddenAt）= 强制冷藏，不参与热度排名；其未读也不再
@@ -19,7 +20,7 @@ export type TreeEntry = {
   nodes: ChatNode[];
   count: number;
   unreadCount: number;
-  /** max(createdAt, readAt ?? 0) over subtree */
+  /** max(子树 createdAt / readAt, 树根 lastVisitedAt) */
   heat: number;
   /** 子树内 createdAt 最大的节点 —— 切树时的落点（回到最新工作处） */
   latestNodeId: string;
@@ -44,7 +45,7 @@ export function isUnreadNode(n: ChatNode): boolean {
   return n.status === "done" && !n.readAt;
 }
 
-function nodeSort(a: ChatNode, b: ChatNode) {
+export function nodeSort(a: ChatNode, b: ChatNode) {
   return (
     a.siblingIndex - b.siblingIndex ||
     a.createdAt - b.createdAt ||
@@ -91,9 +92,10 @@ export function treeLabel(root: ChatNode, max = 40): string {
   return q.length > max ? `${q.slice(0, max - 1)}…` : q || "（空）";
 }
 
-/** 整座森林 → 树条目列表，热度降序。 */
+/** 整座森林 → 树条目列表，热度降序。visits = { rootId: lastVisitedAt }。 */
 export function buildTreeEntries(
   nodes: Record<string, ChatNode>,
+  visits: Record<string, number> = {},
 ): TreeEntry[] {
   const byParent = childrenIndex(nodes);
   const roots = Object.values(nodes)
@@ -110,7 +112,7 @@ export function buildTreeEntries(
       const kids = byParent.get(cur.id);
       if (kids) stack.push(...kids);
     }
-    let heat = 0;
+    let heat = visits[root.id] ?? 0;
     let unreadCount = 0;
     let latest = root;
     for (const n of members) {
