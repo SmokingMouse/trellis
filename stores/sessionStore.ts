@@ -416,7 +416,13 @@ type State = {
   // know "#7 完成" is ready to read without context-switching mid-flow.
   // DoneToast component renders these in the bottom-right and auto-clears
   // each entry after the toast component's timer fires.
-  doneToasts: Array<{ nodeId: string; emittedAt: number }>;
+  // kind "waiting" = run 暂停在交互式工具（AskUserQuestion / 权限确认）等
+  // 用户回答——不自动消失，回答 / 终结后由 store 清除。
+  doneToasts: Array<{
+    nodeId: string;
+    emittedAt: number;
+    kind?: "done" | "waiting";
+  }>;
   // Anti-misfire for Esc-to-abort: a single Esc only *arms* a confirm prompt
   // (abortArm); a second Esc within the window actually stops the run. A
   // stray single press can no longer kill a long-running task.
@@ -1341,6 +1347,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
             pendingInteraction: null,
           },
         },
+        // 重跑后旧的 "等你回答" 提醒随之过时。
+        doneToasts: s.doneToasts.filter(
+          (t) => !(t.nodeId === nodeId && t.kind === "waiting"),
+        ),
         lastEditedNodeId: nodeId,
       };
     });
@@ -1917,6 +1927,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     const pending = existing?.pendingInteraction ?? null;
     // Guard: nothing to answer, or the form is already stale against a
     // different toolUseId — treat as stale so the UI dismisses it.
+    const dropWaitingToast = (s: State) =>
+      s.doneToasts.filter(
+        (t) => !(t.nodeId === nodeId && t.kind === "waiting"),
+      );
     if (!pending || pending.toolUseId !== toolUseId) {
       if (existing) {
         set((s) => {
@@ -1924,6 +1938,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           if (!cur) return s;
           return {
             nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: null } },
+            doneToasts: dropWaitingToast(s),
           };
         });
       }
@@ -1936,6 +1951,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       if (!cur) return s;
       return {
         nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: null } },
+        doneToasts: dropWaitingToast(s),
       };
     });
     const restore = () =>
@@ -2530,12 +2546,12 @@ function handleStreamEvent(
         // off and walked away from. De-dupe by id in case retry / branch
         // cycles emit twice.
         const shouldToast = s.activeNodeId !== id;
+        // Always drop any lingering waiting-toast for this node (run 终结了，
+        // "等你回答"过时)；shouldToast 时再叠上 done toast。
+        const others = s.doneToasts.filter((t) => t.nodeId !== id);
         const nextToasts = shouldToast
-          ? [
-              ...s.doneToasts.filter((t) => t.nodeId !== id),
-              { nodeId: id, emittedAt: Date.now() },
-            ]
-          : s.doneToasts;
+          ? [...others, { nodeId: id, emittedAt: Date.now() }]
+          : others;
         return {
           nodes: {
             ...s.nodes,
@@ -2570,6 +2586,10 @@ function handleStreamEvent(
                 errorMessage: event.message,
               },
             },
+            // Run 死了，"等你回答"的 waiting toast 一并过时。
+            doneToasts: s.doneToasts.filter(
+              (t) => !(t.nodeId === id && t.kind === "waiting"),
+            ),
           };
         });
       } else {
@@ -2694,6 +2714,15 @@ function handleStreamEvent(
       set((s) => {
         const n = s.nodes[id];
         if (!n) return s;
+        // 与 done toast 同规：事件到达瞬间不在焦点上就提醒。waiting toast
+        // 不设自动消失（run 阻塞在等用户），回答 / 终结时由 store 清除。
+        const shouldToast = s.activeNodeId !== id;
+        const nextToasts = shouldToast
+          ? [
+              ...s.doneToasts.filter((t) => t.nodeId !== id),
+              { nodeId: id, emittedAt: Date.now(), kind: "waiting" as const },
+            ]
+          : s.doneToasts;
         return {
           nodes: {
             ...s.nodes,
@@ -2706,6 +2735,7 @@ function handleStreamEvent(
               },
             },
           },
+          doneToasts: nextToasts,
         };
       });
     } else if (event.type === "interaction_resolved" && currentNodeId) {
@@ -2722,6 +2752,9 @@ function handleStreamEvent(
             ...s.nodes,
             [id]: { ...n, pendingInteraction: null },
           },
+          doneToasts: s.doneToasts.filter(
+            (t) => !(t.nodeId === id && t.kind === "waiting"),
+          ),
         };
       });
     }

@@ -25,6 +25,10 @@ export type TreeEntry = {
   /** 子树内 createdAt 最大的节点 —— 切树时的落点（回到最新工作处） */
   latestNodeId: string;
   hidden: boolean;
+  /** 子树内有节点正在流式生成（不含暂停等交互的） */
+  hasStreaming: boolean;
+  /** 子树内有节点暂停在交互式工具上等用户（提问 / 权限授权） */
+  hasWaiting: boolean;
 };
 
 export type TreeGroups = {
@@ -43,6 +47,11 @@ export type TreeRowItem = {
 
 export function isUnreadNode(n: ChatNode): boolean {
   return n.status === "done" && !n.readAt;
+}
+
+/** run 暂停在交互式工具上等用户（AskUserQuestion / 计划批准 / 权限授权）。 */
+export function isWaitingNode(n: ChatNode): boolean {
+  return n.pendingInteraction !== null;
 }
 
 export function nodeSort(a: ChatNode, b: ChatNode) {
@@ -115,10 +124,14 @@ export function buildTreeEntries(
     let heat = visits[root.id] ?? 0;
     let unreadCount = 0;
     let latest = root;
+    let hasStreaming = false;
+    let hasWaiting = false;
     for (const n of members) {
       heat = Math.max(heat, n.createdAt, n.readAt ?? 0);
       if (isUnreadNode(n)) unreadCount++;
       if (n.createdAt > latest.createdAt) latest = n;
+      if (isWaitingNode(n)) hasWaiting = true;
+      else if (n.status === "streaming") hasStreaming = true;
     }
     entries.push({
       root,
@@ -128,6 +141,8 @@ export function buildTreeEntries(
       heat,
       latestNodeId: latest.id,
       hidden: root.hiddenAt !== null,
+      hasStreaming,
+      hasWaiting,
     });
   }
   entries.sort((a, b) => b.heat - a.heat || a.root.id.localeCompare(b.root.id));

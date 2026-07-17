@@ -106,6 +106,10 @@ function AskUserQuestionForm({
 
   // selections[i] = set of chosen labels for question i.
   const [selections, setSelections] = useState<Record<number, string[]>>({});
+  // 「其他」自定义回答（工具 schema 约定 Other 选项由 UI 侧提供，模型不出）。
+  // customOn[i] = 该题选中了「其他」；customs[i] = 自定义文本。
+  const [customOn, setCustomOn] = useState<Record<number, boolean>>({});
+  const [customs, setCustoms] = useState<Record<number, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [stale, setStale] = useState(false);
 
@@ -121,21 +125,37 @@ function AskUserQuestionForm({
       // single-select: replace
       return { ...prev, [qi]: cur[0] === label ? [] : [label] };
     });
+    // 单选下选中预设选项 = 放弃「其他」。
+    if (!multi) setCustomOn((prev) => ({ ...prev, [qi]: false }));
   };
 
+  const toggleCustom = (qi: number, multi: boolean) => {
+    setCustomOn((prev) => ({ ...prev, [qi]: !prev[qi] }));
+    // 单选下选中「其他」= 放弃预设选项。
+    if (!multi) setSelections((prev) => ({ ...prev, [qi]: [] }));
+  };
+
+  const answered = (qi: number) =>
+    (selections[qi]?.length ?? 0) > 0 ||
+    (!!customOn[qi] && !!customs[qi]?.trim());
+
   const allAnswered = useMemo(
-    () => questions.every((_, qi) => (selections[qi]?.length ?? 0) > 0),
-    [questions, selections],
+    () => questions.every((_, qi) => answered(qi)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [questions, selections, customOn, customs],
   );
 
   const onSubmit = async () => {
     if (!allAnswered || submitting) return;
     setSubmitting(true);
-    // Build answers map: { [question text]: label (single) | label[] (multi) }
-    const answers: Record<string, string | string[]> = {};
+    // Build answers map: { [question text]: string }. 工具 schema 里 answers
+    // 的值只收 string——多选把所有选中项（含自定义文本）拼成一个串。
+    const answers: Record<string, string> = {};
     questions.forEach((q, qi) => {
-      const chosen = selections[qi] ?? [];
-      answers[q.question] = q.multiSelect ? chosen : chosen[0];
+      const parts = [...(selections[qi] ?? [])];
+      const custom = customOn[qi] ? customs[qi]?.trim() : "";
+      if (custom) parts.push(custom);
+      answers[q.question] = parts.join(", ");
     });
     const res = await respond(nodeId, interaction.toolUseId, {
       behavior: "allow",
@@ -165,6 +185,11 @@ function AskUserQuestionForm({
             )}
             <div className="text-body font-medium text-ink-strong">
               {q.question}
+              {multi && (
+                <span className="ml-1.5 text-ui font-normal text-ink-muted">
+                  （可多选）
+                </span>
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               {(q.options ?? []).map((opt, oi) => {
@@ -219,6 +244,65 @@ function AskUserQuestionForm({
                   </button>
                 );
               })}
+              {/* 「其他」自定义回答——schema 约定该选项由 UI 提供，模型的
+                  options 里永远没有它。多选下可与预设项叠加。 */}
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => toggleCustom(qi, multi)}
+                className={`w-full text-left px-3 py-2 rounded-field border transition-colors flex items-start gap-2.5 disabled:opacity-60 ${
+                  customOn[qi]
+                    ? "border-accent bg-accent-line/40 ring-1 ring-accent-line/60"
+                    : "border-line bg-surface hover:border-accent-line"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 shrink-0 w-4 h-4 flex items-center justify-center border ${
+                    multi ? "rounded" : "rounded-full"
+                  } ${
+                    customOn[qi]
+                      ? "bg-accent border-accent text-ink-inverse"
+                      : "border-line-strong"
+                  }`}
+                  aria-hidden
+                >
+                  {customOn[qi] && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-body font-medium text-ink">
+                    其他
+                  </span>
+                  <span className="block text-ui text-ink-muted mt-0.5">
+                    输入自定义回答
+                  </span>
+                </span>
+              </button>
+              {customOn[qi] && (
+                <textarea
+                  autoFocus
+                  value={customs[qi] ?? ""}
+                  onChange={(e) =>
+                    setCustoms((prev) => ({ ...prev, [qi]: e.target.value }))
+                  }
+                  placeholder="输入你的回答……"
+                  disabled={submitting}
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
+                />
+              )}
             </div>
           </div>
         );

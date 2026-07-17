@@ -10,6 +10,7 @@ import {
   flattenTree,
   groupTrees,
   isUnreadNode,
+  isWaitingNode,
   mdExcerpt,
   rootIdOf,
   treeLabel,
@@ -200,6 +201,15 @@ export function TreePanel() {
           </span>
         )}
         <span className="truncate">{treeLabel(entry.root)}</span>
+        {/* 树级运行状态 rollup：等待输入 > 生成中（等输入更紧急）。折叠行
+            看不见节点级的点，这里补一眼可扫的树级信号。 */}
+        {entry.hasWaiting ? (
+          <span className="shrink-0 text-[10px] animate-pulse" title="有节点在等你回答" aria-label="等待输入">
+            🙋
+          </span>
+        ) : entry.hasStreaming ? (
+          <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="生成中" aria-label="生成中" />
+        ) : null}
         <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
           {entry.count}
         </span>
@@ -295,9 +305,13 @@ export function TreePanel() {
               <span className="shrink-0 font-mono text-nano text-ink-faint tabular-nums">
                 #{indices[node.id] ?? "?"}
               </span>
-              {node.status === "streaming" && (
+              {isWaitingNode(node) ? (
+                <span className="shrink-0 text-[10px] animate-pulse" title="等你回答" aria-label="等待输入">
+                  🙋
+                </span>
+              ) : node.status === "streaming" ? (
                 <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
-              )}
+              ) : null}
               {node.status === "error" && (
                 <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-danger" aria-hidden />
               )}
@@ -493,8 +507,10 @@ export function TreePanel() {
                   const body =
                     hoverNode.status === "error"
                       ? "生成失败"
-                      : mdExcerpt(hoverNode.response, 160) ||
-                        (hoverNode.status === "streaming" ? "生成中…" : "");
+                      : isWaitingNode(hoverNode)
+                        ? "🙋 模型在等你回答"
+                        : mdExcerpt(hoverNode.response, 160) ||
+                          (hoverNode.status === "streaming" ? "生成中…" : "");
                   return body ? (
                     <div className="mt-1 text-xs leading-relaxed text-ink-muted line-clamp-4">
                       {body}
