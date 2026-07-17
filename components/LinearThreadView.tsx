@@ -20,7 +20,7 @@ import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
-import { ThreadMinimap } from "./ThreadMinimap";
+import { TreePanel } from "./TreePanel";
 import { TurnCard } from "./TurnCard";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
@@ -675,7 +675,7 @@ export function LinearThreadView() {
           }}
         />
       )}
-      <ThreadMinimap />
+      <TreePanel />
     </div>
   );
 }

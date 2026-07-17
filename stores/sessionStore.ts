@@ -543,6 +543,9 @@ type Actions = {
   // before the server round-trip finishes — UI feedback is instant; if
   // the POST fails (network glitch, etc.) we silently revert.
   markNodeRead: (nodeId: string) => Promise<void>;
+  // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
+  // 失败回滚。幂等。
+  setTreeHidden: (nodeId: string, hidden: boolean) => Promise<void>;
   // A路③: answer a paused interactive tool (AskUserQuestion / ExitPlanMode).
   // Optimistically clears node.pendingInteraction (the interaction_resolved
   // SSE event also clears it — idempotent). On 404/409 (stale: run no longer
@@ -1291,6 +1294,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         lastEditedNodeId: nodeId,
       };
     });
+    // 写即复活的本地镜像（服务端 resetNodeForRetry 同步清树根 hidden_at）。
+    reviveTreeLocally(set, get, nodeId);
     // Retry knows the nodeId up front, so we can register the controller
     // immediately — no need to wait for the `created` event.
     const controller = new AbortController();
@@ -1821,6 +1826,39 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  setTreeHidden: async (nodeId, hidden) => {
+    // 客户端同样走到根 —— 面板传的本来就是根 id，这里兜底非根调用。
+    const nodes = get().nodes;
+    let rootId = nodeId;
+    for (let i = 0; i < 1000; i++) {
+      const cur: ChatNode | undefined = nodes[rootId];
+      if (!cur) return;
+      if (!cur.parentId) break;
+      rootId = cur.parentId;
+    }
+    const prev = nodes[rootId]?.hiddenAt ?? null;
+    const optimistic = hidden ? Date.now() : null;
+    const patch = (at: number | null) =>
+      set((s) => {
+        const cur = s.nodes[rootId];
+        if (!cur) return s;
+        return { nodes: { ...s.nodes, [rootId]: { ...cur, hiddenAt: at } } };
+      });
+    patch(optimistic);
+    try {
+      const res = await fetch(`/api/nodes/${rootId}/hidden`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { hiddenAt } = (await res.json()) as { hiddenAt: number | null };
+      patch(hiddenAt);
+    } catch {
+      patch(prev); // 回滚，静默失败
+    }
+  },
+
   respondToInteraction: async (nodeId, toolUseId, decision) => {
     const existing = get().nodes[nodeId];
     const pending = existing?.pendingInteraction ?? null;
@@ -1978,14 +2016,39 @@ function insertOptimisticNode(
     attachments: args.attachments ?? [],
     toolCalls: [],
     pendingInteraction: null,
+    hiddenAt: null,
   };
   set((s) => ({
     nodes: { ...s.nodes, [id]: node },
     lastEditedNodeId: id,
     ...(args.focus ? { activeNodeId: id } : {}),
   }));
-  if (args.parentId) get().expandAncestors(id);
+  if (args.parentId) {
+    get().expandAncestors(id);
+    // 写即复活的本地镜像：服务端 createBranchNode 会清树根 hidden_at；
+    // 这里同步乐观清掉，面板立刻把树从「已隐藏」组捞回热区。
+    reviveTreeLocally(set, get, args.parentId);
+  }
   return id;
+}
+
+// 走到树根，清本地 hiddenAt（写即复活的客户端镜像）。无雪藏时零开销。
+function reviveTreeLocally(set: Setter, get: Getter, nodeId: string): void {
+  const nodes = get().nodes;
+  let rootId = nodeId;
+  for (let i = 0; i < 1000; i++) {
+    const cur: ChatNode | undefined = nodes[rootId];
+    if (!cur) return;
+    if (!cur.parentId) break;
+    rootId = cur.parentId;
+  }
+  const root = nodes[rootId];
+  if (!root || root.hiddenAt === null) return;
+  set((s) => {
+    const cur = s.nodes[rootId];
+    if (!cur) return s;
+    return { nodes: { ...s.nodes, [rootId]: { ...cur, hiddenAt: null } } };
+  });
 }
 
 // Remove a placeholder that was never replaced by a server row. No-op when

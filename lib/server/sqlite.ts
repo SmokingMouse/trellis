@@ -406,6 +406,18 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN cli_turn_uuid TEXT");
   }
 
+  // 树面板手动隐藏（雪藏）：仅根节点（parent_id IS NULL）有意义。NULL = 可见；
+  // ms 时间戳 = 用户显式把这棵树收进「已隐藏」组的时刻。强制冷藏、不参与热度
+  // 排名；数据/搜索不受影响。写即复活：树内新增节点（分叉/重试）自动清空。
+  const hasHiddenAt = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'hidden_at'",
+    )
+    .get();
+  if (!hasHiddenAt) {
+    db.exec("ALTER TABLE nodes ADD COLUMN hidden_at INTEGER");
+  }
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

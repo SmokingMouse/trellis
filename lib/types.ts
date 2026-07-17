@@ -134,6 +134,9 @@ export type ChatNode = {
   // (AskUserQuestion / ExitPlanMode) waiting for the user to answer. The UI
   // renders the form from this; POST /api/nodes/[id]/respond clears it.
   pendingInteraction: PendingInteraction | null;
+  // 树面板雪藏标记：仅树根携带语义（分支节点恒 null）。non-null = 用户手动
+  // 隐藏这棵树的时刻；树内新增节点（分叉/重试）自动清空（写即复活）。
+  hiddenAt: number | null;
 };
 
 export type Session = {

@@ -79,6 +79,9 @@ export type ApiNode = {
   toolCalls: ToolCall[];
   // A路②: non-null while a run paused on an interactive tool awaits the user.
   pendingInteraction: PendingInteraction | null;
+  // 树面板雪藏标记。仅根节点携带语义（分支节点恒 null）；non-null = 这棵树被
+  // 用户手动隐藏的时刻。树内新增节点时自动清空（写即复活）。
+  hiddenAt: number | null;
 };
 
 type NodeRow = {
@@ -108,6 +111,7 @@ type NodeRow = {
   attachments_json: string | null;
   tool_calls_json: string | null;
   pending_interaction_json: string | null;
+  hidden_at: number | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
@@ -115,7 +119,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
-       pending_interaction_json`;
+       pending_interaction_json, hidden_at`;
 
 type SessionRow = {
   id: string;
@@ -227,6 +231,7 @@ function rowToNode(r: NodeRow): ApiNode {
     attachments,
     toolCalls,
     pendingInteraction,
+    hiddenAt: r.hidden_at,
   };
 }
 
@@ -644,6 +649,49 @@ export function markNodeRead(nodeId: string, now: number): number | null {
   return now;
 }
 
+// Walk the parent chain up to this node's tree root (parent_id IS NULL).
+// Returns null if the node doesn't exist or the chain is broken/cyclic.
+function treeRootIdOf(db: Database, nodeId: string): string | null {
+  const stmt = db.prepare("SELECT parent_id FROM nodes WHERE id = ?");
+  let cur: string | null = nodeId;
+  for (let i = 0; i < 1000 && cur; i++) {
+    const row = stmt.get(cur) as { parent_id: string | null } | undefined;
+    if (!row) return null;
+    if (row.parent_id === null) return cur;
+    cur = row.parent_id;
+  }
+  return null;
+}
+
+// 树面板雪藏：把 nodeId 所在的整棵树标为隐藏/恢复。标记落在树根行上
+// （分支节点的 hidden_at 恒 NULL）。幂等；返回根 id + 持久化后的 hiddenAt，
+// 节点不存在时返回 null。
+export function setTreeHidden(
+  nodeId: string,
+  hidden: boolean,
+  now: number,
+): { rootId: string; hiddenAt: number | null } | null {
+  const db = getDB();
+  const rootId = treeRootIdOf(db, nodeId);
+  if (!rootId) return null;
+  const hiddenAt = hidden ? now : null;
+  db.prepare("UPDATE nodes SET hidden_at = ? WHERE id = ?").run(
+    hiddenAt,
+    rootId,
+  );
+  return { rootId, hiddenAt };
+}
+
+// 写即复活：树内发生了「写」（新分支/重试）→ 自动解除这棵树的雪藏。纯浏览
+// 不触发（那是 readAt 的事）。createBranchNode / resetNodeForRetry 调用。
+function reviveTreeForNode(db: Database, nodeId: string): void {
+  const rootId = treeRootIdOf(db, nodeId);
+  if (!rootId) return;
+  db.prepare(
+    "UPDATE nodes SET hidden_at = NULL WHERE id = ? AND hidden_at IS NOT NULL",
+  ).run(rootId);
+}
+
 // Claude CLI stores session transcripts at
 // ~/.claude/projects/<encoded-cwd>/<session_id>.jsonl, where encoded-cwd is
 // the absolute cwd with EVERY non-alphanumeric char replaced by "-" (matching
@@ -826,6 +874,8 @@ export function createBranchNode(args: {
       parent.session_id,
       args.question,
     );
+    // 写即复活：在雪藏树里继续提问 = 这棵树重新活了。
+    reviveTreeForNode(db, args.parentId);
   });
   tx();
   return getNode(args.nodeId)!;
@@ -864,6 +914,8 @@ export function resetNodeForRetry(
   db.prepare(
     "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'node_response'",
   ).run(nodeId);
+  // 写即复活：重试也算「写」。
+  reviveTreeForNode(db, nodeId);
   return {
     question: row.question,
     parentAnchor: row.parent_anchor_text

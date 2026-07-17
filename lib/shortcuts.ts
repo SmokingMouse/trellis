@@ -28,6 +28,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "Esc ×2", label: "中止正在生成的回答", scope: "全局" },
   { keys: "?", label: "打开本快捷键面板", scope: "全局" },
   { keys: "B", label: "跳回父节点锚点", scope: "线性视图" },
+  { keys: "⌘J", label: "树面板：过滤跳转本会话节点", scope: "线性视图" },
   { keys: "F", label: "回全局视图（fit view）", scope: "画布" },
   { keys: "⌘K", label: "以选区为锚点分叉追问", scope: "选中文字时" },
   { keys: "⌘D", label: "摘选区为笔记", scope: "选中文字时" },
