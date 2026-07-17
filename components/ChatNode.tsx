@@ -25,6 +25,7 @@ import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector"
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
+import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { CopyButton } from "./CopyButton";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
@@ -163,9 +164,12 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   }, [isStreaming, n.response, data.childAnchors]);
 
   const labelText = n.topicLabel ?? truncate(n.question, 14);
-  // Compact mode: streaming / error nodes always render full so user can see
-  // progress and act. Done nodes at low zoom collapse to a topic card.
-  const showCompact = isCompact && !isStreaming && !isError;
+  // 错误降级：有后代 = 用户已在后续节点续跑/绕过，错误不再是"待处理"状态。
+  const errorSuperseded = isError && data.descendantCount > 0;
+  // Compact mode: streaming / fresh-error nodes always render full so user
+  // can see progress and act. Done nodes — and superseded errors, whose
+  // loud treatment has expired — collapse to a topic card at low zoom.
+  const showCompact = isCompact && !isStreaming && (!isError || errorSuperseded);
 
   if (showCompact) {
     return (
@@ -195,11 +199,13 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         )}
         <span
           className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
-            n.status !== "done"
-              ? "bg-line-strong"
-              : isUnread
-                ? "bg-unread"
-                : "bg-line-strong/70"
+            isError
+              ? "bg-warn"
+              : n.status !== "done"
+                ? "bg-line-strong"
+                : isUnread
+                  ? "bg-unread"
+                  : "bg-line-strong/70"
           }`}
           aria-hidden
           title={n.status === "done" ? (isUnread ? "未读" : "已读") : undefined}
@@ -226,6 +232,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               title="待你回答"
             >
               🙋
+            </span>
+          )}
+          {isError && (
+            <span
+              className="shrink-0 text-warn-ink text-nano"
+              title={
+                n.errorMessage === "aborted"
+                  ? "本轮已手动停止（后续已继续）"
+                  : `本轮中途中断（后续已继续）：${n.errorMessage ?? ""}`
+              }
+            >
+              ⚠
             </span>
           )}
           <ToolCallBadge count={n.toolCalls.length} />
@@ -375,7 +393,11 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             正在生成…
           </div>
         )}
+        {errorSuperseded && (
+          <SupersededErrorNotice nodeId={n.id} errorMessage={n.errorMessage} />
+        )}
         {isError &&
+          !errorSuperseded &&
           (n.errorMessage === "aborted" ? (
             <div className="mt-3 p-2 bg-surface-muted border border-line rounded text-ink-muted text-xs flex items-start gap-2">
               <div className="flex-1">已停止生成</div>

@@ -21,6 +21,7 @@ import { CliResumeButton } from "./CliResumeButton";
 import { CopyButton } from "./CopyButton";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
+import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { ToolCallsPanel } from "./ToolCallsPanel";
 import { Button } from "./ui/Button";
 import { Dots } from "./ui/Dots";
@@ -266,6 +267,14 @@ function ResponseBody({ node }: { node: ChatNode }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const isStreaming = node.status === "streaming";
   const isError = node.status === "error";
+  // 错误降级（见 SupersededErrorNotice）：有子节点 = 用户已续跑/绕过，
+  // 红横幅降级为安静备注。boolean selector，仅在真假翻转时触发重渲染。
+  const hasChildren = useSessionStore((s) => {
+    for (const k in s.nodes) {
+      if (s.nodes[k].parentId === node.id) return true;
+    }
+    return false;
+  });
 
   const { onMarkClick } = useMarkdownBodyMarks({
     bodyRef,
@@ -408,7 +417,14 @@ function ResponseBody({ node }: { node: ChatNode }) {
           正在生成…
         </div>
       )}
+      {isError && hasChildren && (
+        <SupersededErrorNotice
+          nodeId={node.id}
+          errorMessage={node.errorMessage}
+        />
+      )}
       {isError &&
+        !hasChildren &&
         (node.errorMessage === "aborted" ? (
           <div className="mt-3 p-2.5 bg-surface-muted border border-line rounded text-ink-muted text-ui flex items-start gap-2">
             <div className="flex-1">已停止生成</div>
