@@ -14,6 +14,13 @@ import type { ChatNode } from "./types";
 
 export const HOT_TREE_LIMIT = 5;
 
+/** 面板里当前树节点区的展示形态：文字列表 / 图形树（点+连线）。 */
+export type TreePanelView = "list" | "graph";
+
+export function isTreePanelView(v: unknown): v is TreePanelView {
+  return v === "list" || v === "graph";
+}
+
 export type TreeEntry = {
   root: ChatNode;
   /** 子树全体（含根） */

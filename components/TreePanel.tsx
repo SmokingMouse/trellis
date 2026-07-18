@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
 import { ancestorsOf } from "@/lib/collapsed";
+import { layoutNodes } from "@/lib/layout";
 import { refIcon } from "@/lib/ref-icon";
 import {
   buildTreeEntries,
@@ -25,6 +26,17 @@ import type { ChatNode } from "@/lib/types";
 
 const PREVIEW_W = "w-64";
 
+// 当前树的「图形」视图（列表 ↔ 图形可切换，用户找回分叉形状感）。
+// 只画当前树 —— 全森林点阵正是 S65 退役 ThreadMinimap 的原因；树级
+// 语义继续由文字行承担，图形只负责单树的结构直觉。偏好走 store
+// treePanelView（sendKey 同款 localStorage 持久化）。
+const GRAPH_W = 272;
+const GRAPH_MAX_H = 300;
+const GRAPH_PAD = 14;
+// dagre compact 布局的节点尺寸（lib/layout 常量的镜像，仅用于取卡片中心）
+const GRAPH_NODE_W = 280;
+const GRAPH_NODE_H = 90;
+
 type Hover = { nodeId: string; top: number } | null;
 
 function nodeRowLabel(n: ChatNode, max = 30): string {
@@ -40,6 +52,9 @@ export function TreePanel() {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
   const treeVisits = useSessionStore((s) => s.treeVisits);
+
+  const view = useSessionStore((s) => s.treePanelView);
+  const switchView = useSessionStore((s) => s.setTreePanelView);
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
@@ -88,6 +103,50 @@ export function TreePanel() {
     }
     return ids;
   }, [activeNodeId, nodesMap]);
+
+  // 图形视图几何：当前树子树过 dagre compact 布局，投影进面板宽度。
+  // 横向居中（纯链树所有点同 x，不居中会贴左边）。
+  const graphGeometry = useMemo(() => {
+    if (view !== "graph") return null;
+    const entry = entries.find((e) => e.root.id === activeRootId);
+    if (!entry) return null;
+    const laidOut = layoutNodes(entry.nodes, undefined, { compact: true });
+    const centers: Array<[string, { x: number; y: number }]> = [];
+    for (const n of entry.nodes) {
+      const pos = laidOut.get(n.id);
+      if (pos) {
+        centers.push([
+          n.id,
+          { x: pos.x + GRAPH_NODE_W / 2, y: pos.y + GRAPH_NODE_H / 2 },
+        ]);
+      }
+    }
+    if (centers.length === 0) return null;
+    const xs = centers.map(([, p]) => p.x);
+    const ys = centers.map(([, p]) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const scale = Math.min(
+      (GRAPH_W - GRAPH_PAD * 2) / Math.max(1, maxX - minX),
+      (GRAPH_MAX_H - GRAPH_PAD * 2) / Math.max(1, maxY - minY),
+      1,
+    );
+    const spanX = (maxX - minX) * scale;
+    const spanY = (maxY - minY) * scale;
+    const height = Math.max(56, Math.round(spanY + GRAPH_PAD * 2));
+    const offX = (GRAPH_W - spanX) / 2;
+    const offY = (height - spanY) / 2;
+    const points = new Map<string, { x: number; y: number }>();
+    for (const [id, p] of centers) {
+      points.set(id, {
+        x: offX + (p.x - minX) * scale,
+        y: offY + (p.y - minY) * scale,
+      });
+    }
+    return { points, height };
+  }, [view, entries, activeRootId]);
 
   const filterResults = useMemo(() => {
     if (filter === null) return [];
@@ -242,6 +301,99 @@ export function TreePanel() {
     </div>
   );
 
+  // 当前树的图形视图：点 + 连线，点击跳转、悬停出预览卡（与列表行同一套
+  // hover 机制——getBoundingClientRect 对 SVG <g> 一样工作）。状态着色与
+  // 列表行同语义：等输入 warn / 生成中 accent（都带 pulse）/ 错误 danger /
+  // 未读 unread；当前节点加大 + 外圈。
+  const renderTreeGraph = (entry: TreeEntry) => {
+    if (!graphGeometry) return null;
+    const { points, height } = graphGeometry;
+    return (
+      <svg
+        width={GRAPH_W}
+        height={height}
+        viewBox={`0 0 ${GRAPH_W} ${height}`}
+        className="block mx-auto mt-0.5"
+        aria-label="当前树图形视图"
+      >
+        {entry.nodes.map((n) => {
+          if (!n.parentId) return null;
+          const a = points.get(n.parentId);
+          const b = points.get(n.id);
+          if (!a || !b) return null;
+          return (
+            <line
+              key={`e-${n.id}`}
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              className="stroke-line-strong"
+              strokeWidth="1"
+            />
+          );
+        })}
+        {entry.nodes.map((n) => {
+          const p = points.get(n.id);
+          if (!p) return null;
+          const isActive = n.id === activeNodeId;
+          const waiting = isWaitingNode(n);
+          const fill = waiting
+            ? "fill-warn"
+            : n.status === "streaming"
+              ? "fill-accent"
+              : n.status === "error"
+                ? "fill-danger"
+                : isUnreadNode(n)
+                  ? "fill-unread"
+                  : isActive
+                    ? "fill-accent"
+                    : "fill-ink-faint";
+          const pulse =
+            waiting || n.status === "streaming" ? " animate-pulse" : "";
+          return (
+            <g
+              key={n.id}
+              role="button"
+              tabIndex={0}
+              aria-label={n.topicLabel ?? n.question}
+              onClick={() => jumpToNode(n.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  jumpToNode(n.id);
+                }
+              }}
+              onMouseEnter={hoverRow(n.id)}
+              onMouseLeave={leaveRow(n.id)}
+              className="cursor-pointer outline-none"
+            >
+              {/* 透明放大命中区 —— 裸点太小，悬停/点击都难瞄（S61 教训） */}
+              <circle cx={p.x} cy={p.y} r={10} fill="transparent" />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={isActive ? 5 : 3.5}
+                className={`${fill} stroke-surface${pulse}`}
+                strokeWidth={isActive ? 2 : 1.5}
+              />
+              {isActive && (
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={8}
+                  className="fill-none stroke-accent"
+                  strokeWidth="1"
+                  opacity="0.5"
+                />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
   // 当前树：树头行 + 节点行（线性段平铺，真分叉缩进）。
   const activeEntry =
     groups.hot.find((e) => e.root.id === activeRootId) ??
@@ -278,6 +430,9 @@ export function TreePanel() {
           </svg>
         </button>
       </div>
+      {view === "graph" && graphGeometry ? (
+        renderTreeGraph(entry)
+      ) : (
       <div className="mt-0.5">
         {activeRows.map(({ node, depth, isBranch }) => {
           const isActive = node.id === activeNodeId;
@@ -328,6 +483,7 @@ export function TreePanel() {
           );
         })}
       </div>
+      )}
     </div>
   );
 
@@ -349,6 +505,37 @@ export function TreePanel() {
               {collapsed ? `${totalNodes} · ▴` : `${totalNodes} · ▾`}
             </span>
           </button>
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => switchView(view === "list" ? "graph" : "list")}
+              className="shrink-0 px-2 py-2 rounded-t-card text-ink-faint hover:text-ink hover:bg-surface-muted transition-colors"
+              title={
+                view === "list"
+                  ? "当前树切为图形视图（看分叉形状）"
+                  : "当前树切为列表视图"
+              }
+              aria-label={view === "list" ? "切为图形视图" : "切为列表视图"}
+            >
+              {view === "list" ? (
+                /* git-branch：切到图形 */
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="6" cy="5" r="2.5" />
+                  <circle cx="6" cy="19" r="2.5" />
+                  <circle cx="18" cy="12" r="2.5" />
+                  <path d="M6 7.5v9" />
+                  <path d="M6 12h9.5" />
+                </svg>
+              ) : (
+                /* 列表：切回列表 */
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <line x1="4" y1="6" x2="20" y2="6" />
+                  <line x1="4" y1="12" x2="20" y2="12" />
+                  <line x1="4" y1="18" x2="20" y2="18" />
+                </svg>
+              )}
+            </button>
+          )}
           {!collapsed && (
             <button
               type="button"

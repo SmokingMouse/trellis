@@ -21,6 +21,7 @@ import {
   THREAD_WIDTH_DEFAULT,
   isThreadWidth,
 } from "@/lib/thread-width";
+import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -56,6 +57,7 @@ const CHAT_ENHANCED_KEY = "trellis-chat-enhanced";
 const REQUIRE_APPROVAL_KEY = "trellis-require-approval";
 // 线性视图内容列宽度（窄/宽/超宽），全局偏好。
 const THREAD_WIDTH_KEY = "trellis-thread-width";
+const TREE_PANEL_VIEW_KEY = "trellis-tree-panel-view";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 // Workbench Wave 4 (VSCode-style IDE shell):
 // - pinned tabs (ordered) persist across reloads, like VSCode's permanently
@@ -326,6 +328,12 @@ function loadThreadWidth(): ThreadWidth {
   return isThreadWidth(stored) ? stored : THREAD_WIDTH_DEFAULT;
 }
 
+function loadTreePanelView(): TreePanelView {
+  if (typeof window === "undefined") return "list";
+  const stored = window.localStorage.getItem(TREE_PANEL_VIEW_KEY);
+  return isTreePanelView(stored) ? stored : "list";
+}
+
 // API node → client node (add position field, drop nullable distinction)
 type ApiNode = Omit<ChatNode, "position" | "topicLabel"> & {
   topicLabel?: string | null;
@@ -361,6 +369,8 @@ type State = {
   sendKey: SendKey;
   // 线性视图内容列宽度偏好（窄/宽/超宽）。
   threadWidth: ThreadWidth;
+  // 树面板当前树节点区的展示形态（列表/图形）。
+  treePanelView: TreePanelView;
   // D2: ancestor turns folded into chat prompts (1–12).
   historyDepth: number;
   // chat enhanced-mode (skills + web, YOLO). Global, default off.
@@ -543,6 +553,7 @@ type Actions = {
   setDraftSystemPrompt: (prompt: string | null) => void;
   setSendKey: (key: SendKey) => void;
   setThreadWidth: (width: ThreadWidth) => void;
+  setTreePanelView: (view: TreePanelView) => void;
   setViewMode: (mode: ViewMode) => void;
   setStreamAlert: (message: string | null) => void;
   // Stream a new root question.
@@ -722,6 +733,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   draftSystemPrompt: null,
   sendKey: SEND_KEY_DEFAULT,
   threadWidth: THREAD_WIDTH_DEFAULT,
+  treePanelView: "list",
   historyDepth: DEFAULT_HISTORY_DEPTH,
   chatEnhanced: false,
   draftRequireApproval: false,
@@ -784,6 +796,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftSystemPrompt: loadDraftSystemPrompt(),
       sendKey: loadSendKey(),
       threadWidth: loadThreadWidth(),
+      treePanelView: loadTreePanelView(),
       historyDepth: loadHistoryDepth(),
       chatEnhanced: loadChatEnhanced(),
       draftRequireApproval: loadDraftRequireApproval(),
@@ -1163,6 +1176,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set({ threadWidth: width });
     if (typeof window !== "undefined") {
       window.localStorage.setItem(THREAD_WIDTH_KEY, width);
+    }
+  },
+
+  setTreePanelView: (view) => {
+    set({ treePanelView: view });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TREE_PANEL_VIEW_KEY, view);
     }
   },
 
