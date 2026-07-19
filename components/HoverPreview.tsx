@@ -273,6 +273,69 @@ export function MdLink({
   );
 }
 
+// Markdown <img> renderer. Answers routinely embed generated diagrams by
+// their on-disk path (`![图](/Users/…/foo.png)`) — the browser treats that
+// as an http path and 404s into a broken-image glyph. Local srcs (absolute /
+// file:// / workspace-relative) are rewritten through /api/files (same
+// session whitelist as links) and click opens the FilePreview overlay;
+// remote srcs keep their URL. Any load failure degrades to a captioned
+// placeholder instead of the broken glyph. Inline elements only — markdown
+// images live inside <p>.
+export function MdImage(props: {
+  src?: unknown;
+  alt?: string;
+  title?: string;
+  node?: unknown;
+}) {
+  const { src, alt, title } = props;
+  const [failed, setFailed] = useState(false);
+  const srcStr = typeof src === "string" ? src : "";
+  const { session } = useSessionStore.getState();
+  const abs = previewableHref(srcStr, session?.workspacePath ?? null);
+  const sessionId = session?.id ?? null;
+  const local = abs !== null && sessionId !== null;
+
+  if (!srcStr || failed) {
+    return (
+      <span
+        className="inline-flex max-w-full items-baseline gap-1.5 px-2 py-1 rounded bg-surface-muted border border-line-faint text-xs text-ink-faint"
+        title={abs ?? srcStr}
+      >
+        <span aria-hidden>🖼</span>
+        <span className="truncate">
+          {alt || (srcStr.split("/").pop() ?? "图片")}
+        </span>
+        <span className="shrink-0">
+          — 无法预览：文件不存在，或不在本会话可预览范围
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      src={local ? filePreviewUrl(sessionId, abs) : srcStr}
+      alt={alt ?? ""}
+      title={title ?? (local ? abs : undefined)}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      onClick={
+        local
+          ? (e) => {
+              e.stopPropagation();
+              useSessionStore.getState().openFilePreview(abs);
+            }
+          : undefined
+      }
+      className={
+        "nodrag max-w-full max-h-[420px] rounded-card border border-line-faint object-contain" +
+        (local ? " cursor-zoom-in" : "")
+      }
+    />
+  );
+}
+
 // Inline-code file path → click-to-preview button (moved here from
 // md-components so it shares the hover card).
 export function InlineFileButton({

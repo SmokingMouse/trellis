@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**markdown 图片本地路径预览修复（Session 68，emperor worktree，已提交推送，免签待补）**：用户截图报「图没法预览」——答案里 AI 生成的图 `![图](/Users/…/foo.png)` 渲染成破图。根因：S63 链接接管只做了 `a`/`code`，`MD_COMPONENTS` 没有 `img` 渲染器，本地路径 src 被浏览器当 http 路径请求 → 404 破图。落地 `MdImage`（HoverPreview.tsx，全部 8 个 ReactMarkdown 调用点经 MD_COMPONENTS 共享）：① 本地 src（绝对 / file:// / workspace 相对，复用 `previewableHref`）重写走 `/api/files` 会话白名单代理，点击开 FilePreview overlay（cursor-zoom-in + title=路径 + nodrag）；② 远程 URL 原样加载；③ 任何加载失败（白名单外 / 文件不存在 / `~` 路径）降级为「🖼 alt — 无法预览：文件不存在，或不在本会话可预览范围」行内占位（S63 追记同款自解释文案，白名单政策不变），不再露浏览器破图 icon；④ 样式 max-h-[420px] + object-contain + rounded-card 防大图撑爆卡片。tsc ✓ lint 零新增（7 项均基线既有）✓ build ✓ + 隔离实例（:3158/:3159 独立 HOME mock）四形态实测：workspace 绝对路径显示 ✓、file:// 显示 ✓、白名单外降级占位 ✓、远程 URL（icon.svg）原样加载 ✓、点击本地图开 FilePreview overlay ✓、lint 清理后复测两路仍过 ✓。**注**：用户截图会话（#171）不在本机 prod DB——本机各数据源均无该消息，判断来自另一台部署（公司机?），但根因是共享渲染层代码，修复全部署通用。**Next**：用户现场验收；上 prod 需 merge main + build + kickstart。
+
+---
 **节点手动标未读（Session 67，emperor worktree，已提交推送，免签待补）**：用户要求「支持对节点标注未读，卡片和预览树都能操作」。已读机制此前单向（视口停留 1s 自动已读，无手动回退）。落地：① 双入口 toggle——线性视图**卡片头**操作区（⑂ 前，仅 done 节点：已读显「标为未读」实心点 icon / 未读显「标为已读」圆勾 icon）+ **树面板当前树节点行**行尾 hover 按钮（整行 button 改 div.group + 主按钮 + 操作按钮，雪藏按钮同款 pattern；预览卡 pointer-events-none 不承载操作）。② 服务端：repo `markNodeUnread`（read_at 置 NULL）+ `/api/nodes/[id]/read` 加 **DELETE**（POST 标已读的反向资源语义）。③ **关键机制 `unreadHolds`**（store 内存态，不持久化）：手动标未读若卡片仍在视口，1s 后会被 IntersectionObserver 自动标回——hold 挡住 `scheduleRead`（调度点 + timer 回调双检查防 race）；解除时机 = 显式导航到该节点（`setActiveNode`，含树面板跳转）或手动标回已读——邮件语义「瞥见不算读，点开才算」。跨 reload hold 消失属可接受边缘（恢复位置恰停该卡则重新自动已读 = 用户正看着它）。tsc ✓ lint 零新增（5 项均为基线既有）✓ build ✓ + 隔离实例(:3157 mock 5 节点分叉树)实测：API 四项（POST/DELETE 往返 + DB 核实 + 404）✓；浏览器全链路——卡片头标未读→状态点变绿+树面板行未读点同步、**标未读后停留 2.5s 不被回读（hold 生效，卡片/树面板两入口都验）**、树面板行 toggle 双向、点行显式跳转后停留 2.5s 自动已读恢复（hold 解除闭环）、hover 显隐/缩进/链外淡显/active 高亮零回归 ✓。**Next**：用户现场验收（本 worktree 独立 `.next`，未动 prod；上 prod 需 merge main + build + kickstart）。
 
 ---
@@ -174,6 +177,15 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 68 (2026-07-19)
+- **Done**: markdown 答案里图片本地路径破图修复（用户截图报「图没法预览」）。
+  - 根因：`MD_COMPONENTS` 缺 `img` 渲染器——S63 只接管了 `a`（MdLink）和行内 `code`（InlineFileButton），`![alt](/Users/…/foo.png)` 的本地 src 直进 `<img>`，浏览器按 http 路径请求 404。
+  - `components/HoverPreview.tsx` 新增 `MdImage`：`previewableHref` 判本地（绝对 / file:// / workspace 相对）→ `filePreviewUrl` 走 `/api/files` 白名单代理，onClick 开 FilePreview overlay；远程 URL 原样；`onError`/空 src 降级行内占位（🖼 + alt + S63 同款自解释文案）。`lib/md-components.ts` 注册 `img`。
+  - 白名单政策零改动（S63 用户裁定不扩白名单）；服务端零改动。
+- **验证**: tsc ✓ + lint 与基线持平（7 项均既有，途中清掉自己引入的 4 项：img any / _node unused / disable 注释错位）+ `make build` ✓；隔离实例（独立 HOME + mock project 会话，:3158 初测 / :3159 lint 清理后复测）四形态 + 点击 overlay 全过，产物已清（browser session / server / 临时目录）。
+- **排查注记**: 用户截图会话（#171 · Turn）在本机 prod DB（~/.trellis/data.db，全库无 `![` 语法）、CLI jsonl、blobs 均无——应来自另一台部署（公司机）。序号 = `buildNodeIndex` 会话内计数，本机最大会话仅 124 节点，可交叉印证。渲染层代码共享，修复对所有部署生效。
+- **Next**: 用户现场验收；上 prod = merge main + build + kickstart（S66 追记硬规则）。
+
 ### Session 62 (2026-07-17)
 - **Done**: 线性视图内容列宽度可调（用户反馈卡片太窄，问能否加宽/可调/设置页）。
   - 新 `lib/thread-width.ts`：`ThreadWidth` 三档（narrow=max-w-3xl 768 / wide=max-w-5xl 1024 / xwide=max-w-7xl 1280），默认 **wide**（直接兑现「加宽」，可一键调回）。
