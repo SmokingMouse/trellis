@@ -649,6 +649,15 @@ export function markNodeRead(nodeId: string, now: number): number | null {
   return now;
 }
 
+// 手动标回未读（卡片头 / 树面板行的 toggle）。幂等；返回节点是否存在。
+export function markNodeUnread(nodeId: string): boolean {
+  const db = getDB();
+  const existing = db.prepare("SELECT 1 FROM nodes WHERE id = ?").get(nodeId);
+  if (!existing) return false;
+  db.prepare("UPDATE nodes SET read_at = NULL WHERE id = ?").run(nodeId);
+  return true;
+}
+
 // Walk the parent chain up to this node's tree root (parent_id IS NULL).
 // Returns null if the node doesn't exist or the chain is broken/cyclic.
 function treeRootIdOf(db: Database, nodeId: string): string | null {

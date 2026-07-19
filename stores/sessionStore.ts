@@ -487,6 +487,10 @@ type State = {
   // 树面板真热度：当前 session 的 { rootId: lastVisitedAt }。导航打点写入，
   // loadSessionInternal 载入 + 修剪。TreePanel 把它并进树热度。
   treeVisits: Record<string, number>;
+  // 手动标未读的节点（内存，不持久化）：挡住线性视图「视口停留 1s 自动
+  // 已读」——邮件语义，瞥见不算读。显式导航到该节点（setActiveNode）或
+  // 手动标回已读时解除。
+  unreadHolds: Record<string, true>;
   // ── Workbench Wave 4: VSCode-style IDE shell ────────────────────────
   // The single active session that is *previewed* (single-click in the
   // sidebar / opened transiently). Shown as an italic temporary tab and
@@ -605,6 +609,9 @@ type Actions = {
   // before the server round-trip finishes — UI feedback is instant; if
   // the POST fails (network glitch, etc.) we silently revert.
   markNodeRead: (nodeId: string) => Promise<void>;
+  // 手动标回未读（卡片头 / 树面板行的 toggle）。乐观清 readAt + 设
+  // unreadHolds 抑制视口自动回读，失败回滚。仅对已读的 done 节点生效。
+  markNodeUnread: (nodeId: string) => Promise<void>;
   // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
   // 失败回滚。幂等。
   setTreeHidden: (nodeId: string, hidden: boolean) => Promise<void>;
@@ -781,6 +788,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   lastEditedNodeId: null,
   readingPosition: null,
   treeVisits: {},
+  unreadHolds: {},
   previewSessionId: null,
   pinnedSessionIds: loadPinned(),
   unreadSessionIds: new Set(),
@@ -859,6 +867,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       lastEditedNodeId: null,
       readingPosition: null,
       treeVisits: {},
+      unreadHolds: {},
       // Wave 4: dropping to the composer screen is a "no tab is active"
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
@@ -1067,6 +1076,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     if (nodeId) {
       get().expandAncestors(nodeId);
       stampTreeVisit(set, get, nodeId);
+      // 显式导航到手动标未读的节点 = 「点开了」，解除自动已读抑制。
+      if (get().unreadHolds[nodeId]) {
+        set((s) => {
+          const rest = { ...s.unreadHolds };
+          delete rest[nodeId];
+          return { unreadHolds: rest };
+        });
+      }
     }
     set({ activeNodeId: nodeId });
   },
@@ -1875,6 +1892,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   markNodeRead: async (nodeId) => {
+    // 无条件撤 hold：手动/自动标已读都意味着「读了」，抑制没有存在理由。
+    if (get().unreadHolds[nodeId]) {
+      set((s) => {
+        const rest = { ...s.unreadHolds };
+        delete rest[nodeId];
+        return { unreadHolds: rest };
+      });
+    }
     const existing = get().nodes[nodeId];
     if (!existing || existing.readAt) return;
     const optimisticAt = Date.now();
@@ -1905,6 +1930,38 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         const cur = s.nodes[nodeId];
         if (!cur || cur.readAt !== optimisticAt) return s;
         return { nodes: { ...s.nodes, [nodeId]: { ...cur, readAt: null } } };
+      });
+    }
+  },
+
+  markNodeUnread: async (nodeId) => {
+    const existing = get().nodes[nodeId];
+    if (!existing || !existing.readAt) return;
+    const prevReadAt = existing.readAt;
+    set((s) => {
+      const cur = s.nodes[nodeId];
+      if (!cur) return s;
+      return {
+        nodes: { ...s.nodes, [nodeId]: { ...cur, readAt: null } },
+        unreadHolds: { ...s.unreadHolds, [nodeId]: true as const },
+      };
+    });
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/read`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // 回滚：恢复 readAt + 撤 hold，静默失败。仅在没被并发改动时回滚。
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        if (!cur || cur.readAt !== null) return s;
+        const rest = { ...s.unreadHolds };
+        delete rest[nodeId];
+        return {
+          nodes: { ...s.nodes, [nodeId]: { ...cur, readAt: prevReadAt } },
+          unreadHolds: rest,
+        };
       });
     }
   },
