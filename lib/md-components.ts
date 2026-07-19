@@ -1,7 +1,7 @@
 import { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import { createElement } from "react";
 import { CodeBlock } from "@/components/CodeBlock";
-import { InlineFileButton, MdLink } from "@/components/HoverPreview";
+import { InlineFileButton, MdImage, MdLink } from "@/components/HoverPreview";
 import { useSessionStore } from "@/stores/sessionStore";
 import { previewablePath } from "@/lib/generated-files";
 
@@ -28,6 +28,9 @@ export const MD_COMPONENTS: Components = {
   pre: ({ node, ...props }) => createElement(CodeBlock, props),
   // `a` gets local-file smarts + hover peek (see HoverPreview.tsx).
   a: (props: any) => createElement(MdLink, props),
+  // `img` routes local srcs through /api/files and degrades load failures
+  // to a captioned placeholder (see HoverPreview.tsx).
+  img: (props) => createElement(MdImage, props),
   // Inline `code` that names a previewable file inside the active session's
   // workspace becomes click-to-preview (opens the same global overlay as the
   // generated-files chips) with a hover peek. Block code is untouched — it
