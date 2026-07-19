@@ -55,6 +55,7 @@ export function LinearThreadView() {
   const setReadingPosition = useSessionStore((s) => s.setReadingPosition);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
+  const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const sendKey = useSessionStore((s) => s.sendKey);
   const threadWidth = useSessionStore((s) => s.threadWidth);
@@ -280,14 +281,20 @@ export function LinearThreadView() {
 
   const scheduleRead = (id: string) => {
     if (readTimers.current.has(id)) return;
-    const node = useSessionStore.getState().nodes[id];
+    const state = useSessionStore.getState();
+    // 手动标未读的节点不自动回读（unreadHolds）——否则标完未读、卡片还在
+    // 视口里，1s 后就被这里标回。timer 回调再查一次，防调度后才标未读。
+    if (state.unreadHolds[id]) return;
+    const node = state.nodes[id];
     if (!node || node.status !== "done" || node.readAt) return;
     readTimers.current.set(
       id,
       window.setTimeout(() => {
         readTimers.current.delete(id);
-        const cur = useSessionStore.getState().nodes[id];
-        if (cur && cur.status === "done" && !cur.readAt) void markNodeRead(id);
+        const st = useSessionStore.getState();
+        const cur = st.nodes[id];
+        if (cur && cur.status === "done" && !cur.readAt && !st.unreadHolds[id])
+          void markNodeRead(id);
       }, 1000),
     );
   };
@@ -505,6 +512,61 @@ export function LinearThreadView() {
                     {node.kind === "reference" ? "Reference" : "Turn"}
                   </span>
                   <div className="ml-auto flex items-center gap-0.5">
+                    {node.status === "done" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          node.readAt
+                            ? void markNodeUnread(node.id)
+                            : void markNodeRead(node.id)
+                        }
+                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                          node.readAt
+                            ? "text-ink-faint hover:bg-unread-muted hover:text-unread-ink"
+                            : "text-ink-faint hover:bg-surface-muted hover:text-ink"
+                        }`}
+                        title={node.readAt ? "标为未读" : "标为已读"}
+                        aria-label={node.readAt ? "标为未读" : "标为已读"}
+                      >
+                        {node.readAt ? (
+                          /* 点亮未读点：标为未读 */
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            aria-hidden
+                          >
+                            <circle cx="12" cy="12" r="8" />
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="3.5"
+                              fill="currentColor"
+                              stroke="none"
+                            />
+                          </svg>
+                        ) : (
+                          /* 圆内勾：标为已读 */
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <circle cx="12" cy="12" r="8" />
+                            <path d="m9 12 2 2 4-4" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
                     {canBranch && (
                       <button
                         type="button"

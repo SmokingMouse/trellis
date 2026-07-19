@@ -51,6 +51,8 @@ export function TreePanel() {
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
+  const markNodeRead = useSessionStore((s) => s.markNodeRead);
+  const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
   const treeVisits = useSessionStore((s) => s.treeVisits);
 
   const view = useSessionStore((s) => s.treePanelView);
@@ -440,46 +442,83 @@ export function TreePanel() {
           const offLineage =
             lineageIds.size > 0 && !lineageIds.has(node.id);
           return (
-            <button
+            <div
               key={node.id}
-              type="button"
-              onClick={() => jumpToNode(node.id)}
-              onMouseEnter={hoverRow(node.id)}
-              onMouseLeave={leaveRow(node.id)}
-              style={{ paddingLeft: `${8 + depth * 10}px` }}
-              className={`w-full min-w-0 flex items-center gap-1 pr-2 py-[3px] rounded text-left transition-colors ${
-                isActive
-                  ? "bg-accent-muted text-accent-ink font-medium"
-                  : offLineage
-                    ? "text-ink-faint hover:text-ink-muted hover:bg-surface-muted"
-                    : "text-ink-muted hover:bg-surface-muted"
+              className={`group flex items-center rounded transition-colors ${
+                isActive ? "bg-accent-muted" : "hover:bg-surface-muted"
               }`}
-              title={node.question || undefined}
             >
-              {isBranch && <span className="shrink-0 text-ink-faint">↳</span>}
-              <span className="shrink-0 font-mono text-nano text-ink-faint tabular-nums">
-                #{indices[node.id] ?? "?"}
-              </span>
-              {isWaitingNode(node) ? (
-                <span className="shrink-0 text-[10px] animate-pulse" title="等你回答" aria-label="等待输入">
-                  🙋
+              <button
+                type="button"
+                onClick={() => jumpToNode(node.id)}
+                onMouseEnter={hoverRow(node.id)}
+                onMouseLeave={leaveRow(node.id)}
+                style={{ paddingLeft: `${8 + depth * 10}px` }}
+                className={`flex-1 min-w-0 flex items-center gap-1 pr-1 py-[3px] text-left transition-colors ${
+                  isActive
+                    ? "text-accent-ink font-medium"
+                    : offLineage
+                      ? "text-ink-faint hover:text-ink-muted"
+                      : "text-ink-muted"
+                }`}
+                title={node.question || undefined}
+              >
+                {isBranch && <span className="shrink-0 text-ink-faint">↳</span>}
+                <span className="shrink-0 font-mono text-nano text-ink-faint tabular-nums">
+                  #{indices[node.id] ?? "?"}
                 </span>
-              ) : node.status === "streaming" ? (
-                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
-              ) : null}
-              {node.status === "error" && (
-                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-danger" aria-hidden />
+                {isWaitingNode(node) ? (
+                  <span className="shrink-0 text-[10px] animate-pulse" title="等你回答" aria-label="等待输入">
+                    🙋
+                  </span>
+                ) : node.status === "streaming" ? (
+                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
+                ) : null}
+                {node.status === "error" && (
+                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-danger" aria-hidden />
+                )}
+                {unread && (
+                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-unread" aria-label="未读" />
+                )}
+                {node.kind === "reference" && (
+                  <span className="shrink-0" aria-hidden>
+                    {refIcon(node.reference)}
+                  </span>
+                )}
+                <span className="truncate">{nodeRowLabel(node)}</span>
+              </button>
+              {node.status === "done" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    unread
+                      ? void markNodeRead(node.id)
+                      : void markNodeUnread(node.id)
+                  }
+                  className={`shrink-0 px-1.5 py-1 rounded transition-opacity opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-muted ${
+                    unread
+                      ? "text-ink-faint hover:text-ink"
+                      : "text-ink-faint hover:text-unread-ink"
+                  }`}
+                  title={unread ? "标为已读" : "标为未读"}
+                  aria-label={unread ? "标为已读" : "标为未读"}
+                >
+                  {unread ? (
+                    /* 圆内勾：标为已读 */
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <circle cx="12" cy="12" r="8" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                  ) : (
+                    /* 点亮未读点：标为未读 */
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                      <circle cx="12" cy="12" r="8" />
+                      <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
+                    </svg>
+                  )}
+                </button>
               )}
-              {unread && (
-                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-unread" aria-label="未读" />
-              )}
-              {node.kind === "reference" && (
-                <span className="shrink-0" aria-hidden>
-                  {refIcon(node.reference)}
-                </span>
-              )}
-              <span className="truncate">{nodeRowLabel(node)}</span>
-            </button>
+            </div>
           );
         })}
       </div>
