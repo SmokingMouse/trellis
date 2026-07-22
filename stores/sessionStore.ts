@@ -22,6 +22,7 @@ import {
   isThreadWidth,
 } from "@/lib/thread-width";
 import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
+import { uuid } from "@/lib/uuid";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -1708,7 +1709,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // the new note. Swap in the real id once the server responds; on
     // failure, drop the optimistic row and rethrow so the trigger UI can
     // surface a toast / inline error.
-    const tempId = `temp-${crypto.randomUUID()}`;
+    const tempId = `temp-${uuid()}`;
     const optimistic: Note = {
       id: tempId,
       sessionId: session.id,
@@ -2081,7 +2082,7 @@ function insertOptimisticNode(
     focus: boolean;
   },
 ): string {
-  const id = `${OPTIMISTIC_PREFIX}${crypto.randomUUID()}`;
+  const id = `${OPTIMISTIC_PREFIX}${uuid()}`;
   const siblings = Object.values(get().nodes).filter(
     (n) => n.parentId === args.parentId,
   );
