@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { isEditableTarget } from "@/lib/shortcuts";
 
 // Global Esc → abort the in-flight stream, with anti-misfire.
 //
@@ -34,15 +35,9 @@ export function useEscapeAbort() {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
-      ) {
-        return;
-      }
+      // 共享 guard：输入区 + data-keys-yield 让位区（SketchModal 里 Esc
+      // 是 Excalidraw 的取消选择，绝不能在画画时误触中止生成）。
+      if (isEditableTarget(e.target)) return;
       const store = useSessionStore.getState();
       const active = store.activeNodeId;
       const activeNode = active ? store.nodes[active] : null;

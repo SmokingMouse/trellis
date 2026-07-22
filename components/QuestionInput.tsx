@@ -9,6 +9,7 @@ import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { SketchModal } from "./SketchModal";
 import { Button } from "@/components/ui/Button";
 import {
   useAttachmentUploads,
@@ -49,6 +50,7 @@ export function QuestionInput() {
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [zoneOpen, setZoneOpen] = useState(false);
+  const [sketchOpen, setSketchOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [skills, setSkills] = useState<{ name: string; description: string }[]>(
     [],
@@ -366,6 +368,20 @@ export function QuestionInput() {
               <span aria-hidden>📎</span>
               <span className="hidden sm:inline">附件</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setSketchOpen(true)}
+              disabled={busy || att.atLimit}
+              title={
+                att.atLimit
+                  ? `已到 ${MAX_ATTACHMENTS} 个上限`
+                  : "画个草图（导出为图片附件）"
+              }
+              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
+            >
+              <span aria-hidden>✏️</span>
+              <span className="hidden sm:inline">草图</span>
+            </button>
             <Button
               variant="primary"
               onClick={submit}
@@ -489,6 +505,12 @@ export function QuestionInput() {
       </div>
       {pickerOpen && (
         <ReferencePicker onClose={() => setPickerOpen(false)} />
+      )}
+      {sketchOpen && (
+        <SketchModal
+          onClose={() => setSketchOpen(false)}
+          onExport={(blob) => att.startUpload(blob, "sketch.png")}
+        />
       )}
       {zoneOpen && (
         <ZoneEditor

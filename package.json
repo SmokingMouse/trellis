@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@sm/agent": "file:/Users/smokingmouse/sdk/packages/agent",
     "@sm/llm": "file:/Users/smokingmouse/sdk/packages/llm",
     "@xyflow/react": "^12.10.2",

@@ -8,6 +8,7 @@ import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { SketchModal } from "./SketchModal";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
 import { StopButton } from "./ui/StopButton";
 import type { ChatNode } from "@/lib/types";
@@ -38,6 +39,7 @@ export function Composer({
   focusToken?: number | null;
 }) {
   const [text, setText] = useState("");
+  const [sketchOpen, setSketchOpen] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const abortStream = useSessionStore((s) => s.abortStream);
   const sendKey = useSessionStore((s) => s.sendKey);
@@ -250,6 +252,22 @@ export function Composer({
         >
           <span aria-hidden>📎</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setSketchOpen(true)}
+          disabled={!targetNode || att.atLimit}
+          title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
+          aria-label="画个草图"
+        >
+          <span aria-hidden>✏️</span>
+        </button>
+        {sketchOpen && (
+          <SketchModal
+            onClose={() => setSketchOpen(false)}
+            onExport={(blob) => att.startUpload(blob, "sketch.png")}
+          />
+        )}
         <button
           onClick={submit}
           disabled={!text.trim() || !targetNode || att.hasUploading}
