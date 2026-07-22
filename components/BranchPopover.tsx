@@ -101,8 +101,13 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     <div
       className="fixed z-50 max-w-[calc(100vw-16px)]"
       style={{ top, left, transform: "translateX(-50%)" }}
-      onMouseDown={(e) => e.preventDefault()}
-      onPointerDown={(e) => e.preventDefault()}
+      // Collapsed: swallow mousedown so clicking the ⌘K / note buttons keeps
+      // the document text selection alive (the buttons act on it). Expanded:
+      // the selection is already snapshotted into `selection.text`, and this
+      // same preventDefault would block the textarea from placing its caret on
+      // click (mouse click dead, arrow keys still work) — so drop it there.
+      onMouseDown={expanded ? undefined : (e) => e.preventDefault()}
+      onPointerDown={expanded ? undefined : (e) => e.preventDefault()}
     >
       {expanded ? (
         <div className="bg-surface border border-line rounded-lg shadow-pop w-[min(420px,calc(100vw-16px))] overflow-hidden">
