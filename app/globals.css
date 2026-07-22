@@ -775,6 +775,14 @@ html, body {
 .md-body h1 { font-size: 1.2em; }
 .md-body h2 { font-size: 1.1em; }
 .md-body h3 { font-size: 1.0em; }
+/* Branch popover: source-text highlight while composing (CSS Custom
+   Highlight API — painted from BranchPopover so it survives the native
+   selection collapsing on textarea click). Accent-tinted to read like a
+   selection; theme tokens keep it right in light/dark. */
+::highlight(branch-source) {
+  background-color: color-mix(in oklab, var(--accent) 26%, transparent);
+}
+
 .md-body mark[data-child-id] { cursor: pointer; transition: background-color 120ms; }
 .md-body mark[data-child-id]:hover { background-color: var(--mark-fork-hover-bg); }
 .md-body mark {

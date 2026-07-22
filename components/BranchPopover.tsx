@@ -77,6 +77,35 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     }
   }, [expanded]);
 
+  // Keep the source text visibly highlighted while composing. The native
+  // selection can't do this once expanded — clicking the textarea to place
+  // the caret collapses it (that click is exactly what we un-blocked to fix
+  // caret placement). So paint our own via the CSS Custom Highlight API from
+  // the snapshotted Range, and clear the native selection so the two don't
+  // double-paint. Gracefully no-ops on browsers without the API (old Firefox
+  // just shows no highlight — no error).
+  useEffect(() => {
+    if (!expanded) return;
+    const range = selection.range;
+    const cssApi = (
+      globalThis as unknown as {
+        CSS?: { highlights?: { set(k: string, v: unknown): void; delete(k: string): void } };
+      }
+    ).CSS;
+    const HighlightCtor = (globalThis as unknown as { Highlight?: new (r: Range) => unknown })
+      .Highlight;
+    if (!range || !cssApi?.highlights || !HighlightCtor) return;
+    let hl: unknown;
+    try {
+      hl = new HighlightCtor(range);
+    } catch {
+      return;
+    }
+    window.getSelection()?.removeAllRanges();
+    cssApi.highlights.set("branch-source", hl);
+    return () => cssApi.highlights?.delete("branch-source");
+  }, [expanded, selection.range]);
+
   const { doneAttachments, hasUploading } = att;
 
   const submit = async () => {
