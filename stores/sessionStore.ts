@@ -352,7 +352,7 @@ type State = {
   hydrateError: string | null;
   provider: ProviderId;
   // Live model catalog from GET /api/providers (sourced from
-  // ~/.claude/global/endpoints.yaml). Seeded with the static PROVIDERS
+  // endpoints.yaml, optional). Seeded with the static PROVIDERS
   // fallback until the fetch (fired once from hydrate()) resolves.
   providerCatalog: ProviderInfo[];
   // Stage 14: mode is per-session and locked at creation. The runtime
