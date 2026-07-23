@@ -5,6 +5,11 @@ export type SelectionInfo = {
   text: string;
   rect: DOMRect;
   nodeId: string;
+  // Snapshot of the selected Range, so the popover can paint its own
+  // highlight (CSS Custom Highlight API) that survives the native selection
+  // collapsing when the textarea is clicked. Cloned so later selectionchange
+  // events don't mutate it. May be undefined in browsers without Range.
+  range?: Range;
 };
 
 // Watches the document for text selections inside elements marked with
@@ -46,7 +51,7 @@ export function useSelectionWithin(): SelectionInfo | null {
       // Some Ranges over wrapped lines return zero-rects on the first call.
       // Skip those — selectionchange will fire again with a real rect.
       if (rect.width === 0 && rect.height === 0) return;
-      setInfo({ text, rect, nodeId });
+      setInfo({ text, rect, nodeId, range: range.cloneRange() });
     };
     const handler = () => {
       // Coalesce rapid selectionchange events
