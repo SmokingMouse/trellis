@@ -13,6 +13,7 @@ import type {
   ReferenceMeta,
   ReferencePayload,
   ToolCall,
+  SubagentMeta,
   PendingInteraction,
 } from "@/lib/types";
 
@@ -1020,6 +1021,51 @@ export function markToolCallDone(args: {
     JSON.stringify(list),
     args.nodeId,
   );
+}
+
+// Stage 22: merge a sub-agent progress patch into the Task/Agent call that
+// spawned it. Same read-patch-write shape as markToolCallDone; the merge is
+// shallow and additive (a later progress-only patch must not wipe the summary
+// an earlier phase already delivered), and undefined values are dropped so a
+// missing key never erases a known one.
+export function patchToolCallAgent(args: {
+  nodeId: string;
+  toolCallId: string;
+  patch: SubagentMeta;
+}): void {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT tool_calls_json FROM nodes WHERE id = ?")
+    .get(args.nodeId) as { tool_calls_json: string | null } | undefined;
+  if (!row?.tool_calls_json) return;
+  let list: ToolCall[];
+  try {
+    const parsed = JSON.parse(row.tool_calls_json);
+    if (!Array.isArray(parsed)) return;
+    list = parsed as ToolCall[];
+  } catch {
+    return;
+  }
+  const idx = list.findIndex((c) => c.id === args.toolCallId);
+  if (idx === -1) return;
+  const cur = list[idx];
+  list[idx] = { ...cur, agent: mergeAgentMeta(cur.agent, args.patch) };
+  db.prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?").run(
+    JSON.stringify(list),
+    args.nodeId,
+  );
+}
+
+// Shared by repo + run-bus: additive shallow merge with undefined stripped.
+export function mergeAgentMeta(
+  cur: SubagentMeta | undefined,
+  patch: SubagentMeta,
+): SubagentMeta {
+  const next: SubagentMeta = { ...cur };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) (next as Record<string, unknown>)[k] = v;
+  }
+  return next;
 }
 
 export function getNodeToolCalls(nodeId: string): ToolCall[] {

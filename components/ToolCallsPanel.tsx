@@ -11,10 +11,20 @@ import type { ToolCall } from "@/lib/types";
 // Each row is its own disclosure that shows pretty-printed input and
 // truncated output. Long outputs (Bash logs especially) clamp to
 // MAX_OUTPUT_LINES and show a "展开 X 行" toggle.
+//
+// Stage 22: this panel now shows the MAIN agent's calls only. The caller
+// (TurnCard) splits the raw list with splitToolChain(); sub-agent work goes
+// to SubagentPanel, which reuses ToolCallRow for the nested rows.
 
 const MAX_OUTPUT_LINES = 200;
 
-export function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
+export function ToolCallsPanel({
+  toolCalls,
+  hasSubagents = false,
+}: {
+  toolCalls: ToolCall[];
+  hasSubagents?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   if (toolCalls.length === 0) return null;
 
@@ -36,7 +46,7 @@ export function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
           ▸
         </span>
         <span className="font-medium text-ink">
-          🔧 工具调用
+          🔧 工具调用{hasSubagents && "（主 agent）"}
         </span>
         <span className="text-ink-muted tabular-nums">
           {toolCalls.length}
@@ -68,7 +78,7 @@ export function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCall[] }) {
   );
 }
 
-function ToolCallRow({ call }: { call: ToolCall }) {
+export function ToolCallRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(false);
   const summary = oneLineSummary(call);
   return (
@@ -206,6 +216,10 @@ function oneLineSummary(call: ToolCall): string {
     if (typeof o.url === "string") return o.url; // WebFetch
     if (typeof o.query === "string") return o.query; // WebSearch/Grep
     if (typeof o.pattern === "string") return o.pattern; // Glob/Grep
+    // Last resort before raw JSON: Agent/Task (and a few others) label
+    // themselves here. Checked after `command` so Bash still shows its
+    // command rather than its description.
+    if (typeof o.description === "string") return o.description;
   }
   const flat = JSON.stringify(i);
   if (!flat) return "";
@@ -220,7 +234,7 @@ function formatInput(input: unknown): string {
   }
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)} s`;

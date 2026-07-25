@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -13,6 +13,7 @@ import {
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
+import { splitToolChain } from "@/lib/subagents";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -21,6 +22,7 @@ import { CliResumeButton } from "./CliResumeButton";
 import { CopyButton } from "./CopyButton";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
+import { SubagentPanel } from "./SubagentPanel";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { ToolCallsPanel } from "./ToolCallsPanel";
 import { Button } from "./ui/Button";
@@ -80,7 +82,10 @@ export function TurnCard({ node }: { node: ChatNode }) {
         question={node.question}
         attachments={node.attachments}
       />
-      <ToolCallsPanel toolCalls={node.toolCalls} />
+      {/* Stage 22: delegated work gets its own section above the main
+          agent's chain; without the split, a sub-agent's tools were
+          interleaved into 🔧 工具调用 with nothing marking them as its. */}
+      <ToolChain node={node} />
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
           imperative <mark> injection inside react-markdown's output diverges
           from React's virtual tree, so when the node prop changes in-place
@@ -98,6 +103,19 @@ export function TurnCard({ node }: { node: ChatNode }) {
           interaction={node.pendingInteraction}
         />
       )}
+    </>
+  );
+}
+
+function ToolChain({ node }: { node: ChatNode }) {
+  const { main, groups } = useMemo(
+    () => splitToolChain(node.toolCalls),
+    [node.toolCalls],
+  );
+  return (
+    <>
+      <SubagentPanel groups={groups} live={node.status === "streaming"} />
+      <ToolCallsPanel toolCalls={main} hasSubagents={groups.length > 0} />
     </>
   );
 }

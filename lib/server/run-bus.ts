@@ -4,6 +4,8 @@ import {
   appendToolCallStart,
   finalizeNode,
   markToolCallDone,
+  mergeAgentMeta,
+  patchToolCallAgent,
   setNodeTopicLabel,
   setRootResumeIdForNode,
   setNodeResumeId,
@@ -12,7 +14,7 @@ import {
   persistPendingInteraction,
   clearPendingInteraction,
 } from "./repo";
-import type { ToolCall, PendingInteraction } from "@/lib/types";
+import type { ToolCall, SubagentMeta, PendingInteraction } from "@/lib/types";
 import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
 // A路②: tools that pause the run and require a user answer. Every other tool
@@ -85,6 +87,7 @@ export type RunEvent =
       name: string;
       input: unknown;
       startedAt: number;
+      parentToolUseId?: string | null;
     }
   | {
       type: "tool_call_done";
@@ -94,6 +97,8 @@ export type RunEvent =
       isError: boolean;
       endedAt: number;
     }
+  // Stage 22: sub-agent progress/report patch for the Task/Agent call `id`.
+  | { type: "tool_call_update"; id: string; agent: SubagentMeta }
   // A路②: a run paused on an interactive tool, broadcast so the UI renders the
   // waiting form; interaction_resolved when the user's answer continues it.
   | {
@@ -150,6 +155,12 @@ type RunState = {
   // updates this BEFORE going to subscribers, so a racing subscribe()
   // snapshot can't miss a tool call that's already been persisted.
   committedToolCalls: ToolCall[];
+  // Stage 22: sub-agent patches whose target tool call hasn't been seen yet.
+  // A single generator emits in order (the Agent tool_use always precedes its
+  // task_* lines), so this should stay empty — it exists so a CLI version that
+  // reorders them degrades to "progress shows up late" instead of "silently
+  // dropped". Drained when the matching tool_call_start lands.
+  pendingAgentPatches: Map<string, SubagentMeta>;
   // Thinking accumulated this run. In-memory only (no DB column) — shipped
   // in catchup so late subscribers see the思考期; dropped with the RunState.
   committedThinking: string;
@@ -211,6 +222,7 @@ export type ProviderEvent =
       name: string;
       input: unknown;
       startedAt: number;
+      parentToolUseId?: string | null;
     }
   | {
       type: "tool_call_done";
@@ -219,7 +231,8 @@ export type ProviderEvent =
       stderr: string | null;
       isError: boolean;
       endedAt: number;
-    };
+    }
+  | { type: "tool_call_update"; id: string; agent: SubagentMeta };
 
 // Caller hands us:
 //   - the nodeId (where deltas accumulate via appendNodeResponse)
@@ -283,6 +296,7 @@ export function startRun(args: {
     status: "streaming",
     committedText: "",
     committedToolCalls: [],
+    pendingAgentPatches: new Map(),
     committedThinking: "",
     pendingInteraction: null,
     approvedTools: new Set(),
@@ -431,10 +445,19 @@ async function runLoop(
           durationMs: null,
           startedAt: event.startedAt,
           endedAt: null,
+          parentToolUseId: event.parentToolUseId ?? null,
         };
         // De-dup: if the CLI ever re-emits the same tool_use id (hasn't
         // been observed, but cheap to guard) keep the first.
         if (!state.committedToolCalls.some((c) => c.id === tc.id)) {
+          // Stage 22: a patch that arrived before its target (see
+          // pendingAgentPatches) folds in now, so it ships with the start
+          // event instead of being lost.
+          const early = state.pendingAgentPatches.get(tc.id);
+          if (early) {
+            tc.agent = mergeAgentMeta(undefined, early);
+            state.pendingAgentPatches.delete(tc.id);
+          }
           state.committedToolCalls.push(tc);
           try {
             appendToolCallStart({ nodeId: args.nodeId, call: tc });
@@ -447,7 +470,13 @@ async function runLoop(
             name: tc.name,
             input: tc.input,
             startedAt: tc.startedAt,
+            // Hand-built payload — the field has to be repeated here or the
+            // live view stays flat and only a reload shows the nesting.
+            parentToolUseId: tc.parentToolUseId,
           });
+          if (early) {
+            broadcast(state, { type: "tool_call_update", id: tc.id, agent: tc.agent! });
+          }
         }
       } else if (event.type === "tool_call_done") {
         const idx = state.committedToolCalls.findIndex(
@@ -484,6 +513,32 @@ async function runLoop(
             isError: event.isError,
             endedAt: event.endedAt,
           });
+        }
+      } else if (event.type === "tool_call_update") {
+        // Stage 22: sub-agent progress/report. Same commit-before-broadcast
+        // discipline as the two above. The merged meta is a fresh object —
+        // catchup ships a shallow copy of each call, so mutating in place
+        // would retroactively edit snapshots already handed to subscribers.
+        const idx = state.committedToolCalls.findIndex((c) => c.id === event.id);
+        if (idx === -1) {
+          state.pendingAgentPatches.set(
+            event.id,
+            mergeAgentMeta(state.pendingAgentPatches.get(event.id), event.agent),
+          );
+        } else {
+          const cur = state.committedToolCalls[idx];
+          const agent = mergeAgentMeta(cur.agent, event.agent);
+          state.committedToolCalls[idx] = { ...cur, agent };
+          try {
+            patchToolCallAgent({
+              nodeId: args.nodeId,
+              toolCallId: event.id,
+              patch: event.agent,
+            });
+          } catch {
+            /* best-effort */
+          }
+          broadcast(state, { type: "tool_call_update", id: event.id, agent });
         }
       }
     }

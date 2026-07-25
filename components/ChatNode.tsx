@@ -22,7 +22,8 @@ import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
-import type { ChatNode as ChatNodeData } from "@/lib/types";
+import type { ChatNode as ChatNodeData, ToolCall } from "@/lib/types";
+import { splitToolChain, subagentLabel } from "@/lib/subagents";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
@@ -246,7 +247,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               ⚠
             </span>
           )}
-          <ToolCallBadge count={n.toolCalls.length} />
+          <ToolCallBadge toolCalls={n.toolCalls} />
           <TokenMeta tokenCount={n.tokenCount} variant="compact" />
         </div>
         <Handle type="source" position={Position.Bottom} />
@@ -491,7 +492,7 @@ function NodeFooter({
         </>
       ) : (
         <>
-          <ToolCallBadge count={node.toolCalls.length} />
+          <ToolCallBadge toolCalls={node.toolCalls} />
           <TokenMeta tokenCount={node.tokenCount} variant="full" />
           {node.response && (
             <CopyButton
@@ -630,14 +631,29 @@ function truncate(s: string, n: number) {
 // (which rarely invoke tools) don't grow extra clutter. Click is
 // non-interactive — drill-down lives in ToolCallsPanel inside the
 // fullscreen view.
-function ToolCallBadge({ count }: { count: number }) {
-  if (count <= 0) return null;
+//
+// Stage 22: 🔧 counts the main agent only; delegated work gets its own 🤖
+// count, so a turn that fanned out to sub-agents reads as such at a glance
+// instead of just showing an inflated tool number.
+function ToolCallBadge({ toolCalls }: { toolCalls: ToolCall[] }) {
+  const { main, groups } = splitToolChain(toolCalls);
+  if (main.length === 0 && groups.length === 0) return null;
   return (
-    <span
-      className="shrink-0 inline-flex items-center gap-0.5 text-nano tabular-nums text-ink-muted"
-      title={`本节点共调用 ${count} 个工具`}
-    >
-      🔧{count}
+    <span className="shrink-0 inline-flex items-center gap-1 text-nano tabular-nums text-ink-muted">
+      {main.length > 0 && (
+        <span title={`主 agent 共调用 ${main.length} 个工具`}>
+          🔧{main.length}
+        </span>
+      )}
+      {groups.length > 0 && (
+        <span
+          title={`派了 ${groups.length} 个子 Agent：${groups
+            .map((g) => subagentLabel(g.meta))
+            .join("、")}`}
+        >
+          🤖{groups.length}
+        </span>
+      )}
     </span>
   );
 }

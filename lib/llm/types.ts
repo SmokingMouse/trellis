@@ -1,3 +1,5 @@
+import type { SubagentMeta } from "@/lib/types";
+
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -53,6 +55,8 @@ export type StreamEvent =
       name: string;
       input: unknown;
       startedAt: number;
+      // Stage 22: set when a sub-agent (not the main agent) made this call.
+      parentToolUseId?: string | null;
     }
   | {
       type: "tool_call_done";
@@ -61,6 +65,15 @@ export type StreamEvent =
       stderr: string | null;
       isError: boolean;
       endedAt: number;
+    }
+  // Stage 22: patch的语义 —— 子 agent 的进度/报告分多个 phase 陆续到达，每次只
+  // 带自己那几个字段，消费端浅合并进对应 tool call 的 agent。不复用 start（双层
+  // 按 id 去重会吞掉重发）也不复用 done（done 置终态，而最终报告先于真正的
+  // tool_result 到达，混用会提前终结那条调用）。
+  | {
+      type: "tool_call_update";
+      id: string;
+      agent: SubagentMeta;
     };
 
 // A路②: interaction_required / interaction_resolved are NOT provider stream

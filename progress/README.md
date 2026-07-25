@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**子 Agent 链可视化 = Stage 22（Session 69，emperor worktree，未 commit 待验收）**：用户反馈「只渲染了工具链，没有子 Agent 链，不友好」。**根因实测**（真 claude 抓流，已固化 `scripts/fixtures/subagent-stream.jsonl`）：① 主 agent 派活 = 一条名为 **`Agent`**（老版 `Task`）的普通 tool_use；② 子 agent 自己的工具带 `parent_tool_use_id`，而 SDK 压根不看这个字段 → **子 agent 的 Bash/Read 被平铺混进主链，看不出归属**；③ 另有 `system` 的 `task_started/progress/updated/notification` 四事件被 SDK 整个丢弃，里面躺着 subagent_type / 完整 prompt / 实时进度(last_tool_name·tool_uses·tokens) / **最终报告 summary**——白扔；④ 子 agent 正文不走 delta，不污染答案正文（改动面因此收窄）。落地：**SDK** 加 `EventType.Task` + ToolCall 透传 `parentToolUseId`（`task_updated` 只有 task_id 无 tool_use_id，run() 内维护 taskId→toolUseId map 补齐）；**trellis** `ToolCall` 加可选 `parentToolUseId`/`agent: SubagentMeta`（复用 tool_calls JSON 列，**零 migration**）+ 新 patch 事件 `tool_call_update`（不复用 start/done：start 双层按 id 去重会吞、done 置终态而 summary 早于真 tool_result 到达）+ repo `patchToolCallAgent` + run-bus commit-before-broadcast 同款纪律（含 `pendingAgentPatches` 乱序兜底）；**UI** 新 `lib/subagents.ts`（纯数据 split，孤儿回落顶层 + 限深防环）+ `components/SubagentPanel.tsx`——**子 Agent 独立成区**放在 🔧 工具调用 上方（用户选定形态），折叠态即显实时行「🤖 general-purpose 正在 Bash · 3 工具 · 36k · 16.0s ●」，展开 = 任务 prompt + 缩进子工具链 + 它交回的报告；主面板标题改「🔧 工具调用（主 agent）」，画布徽标拆成 🔧n/🤖n。**验证**：tsc ✓ build ✓ + `bun scripts/test-subagent-chain.ts` 11 项全链路断言 ALL PASS（fixture 经真 SDK 解析 → toStreamEvent → 合并 → split）+ 隔离实例(:3160 独立 HOME + 真 claude project)浏览器实测：实时 5×tool_call_update、落库层级正确、折叠/展开渲染、**计时真在走**(7.0→12.0→16.0s；此刻子 agent 卡在 `sleep 12` 里没有 progress 事件，正是 ticker 存在的理由)、reload 从 DB 恢复层级、无子 agent 会话零回归（标题不带「（主 agent）」）、abort 落 `error/aborted` 不炸。**踩到并修**：abort 后 Agent 调用永停 `running`（既有通病），会让计时器在死 run 上永远往上跳 → 改成 `live = node.status === "streaming"` 才算运行中，否则显「已中断」pill（改 DB 造出该状态实测 ✓）。**Next**：用户现场验收 → commit；上 prod 需 merge main + build + kickstart。
+
+---
 **markdown 图片本地路径预览修复（Session 68，emperor worktree，已提交推送，免签待补）**：用户截图报「图没法预览」——答案里 AI 生成的图 `![图](/Users/…/foo.png)` 渲染成破图。根因：S63 链接接管只做了 `a`/`code`，`MD_COMPONENTS` 没有 `img` 渲染器，本地路径 src 被浏览器当 http 路径请求 → 404 破图。落地 `MdImage`（HoverPreview.tsx，全部 8 个 ReactMarkdown 调用点经 MD_COMPONENTS 共享）：① 本地 src（绝对 / file:// / workspace 相对，复用 `previewableHref`）重写走 `/api/files` 会话白名单代理，点击开 FilePreview overlay（cursor-zoom-in + title=路径 + nodrag）；② 远程 URL 原样加载；③ 任何加载失败（白名单外 / 文件不存在 / `~` 路径）降级为「🖼 alt — 无法预览：文件不存在，或不在本会话可预览范围」行内占位（S63 追记同款自解释文案，白名单政策不变），不再露浏览器破图 icon；④ 样式 max-h-[420px] + object-contain + rounded-card 防大图撑爆卡片。tsc ✓ lint 零新增（7 项均基线既有）✓ build ✓ + 隔离实例（:3158/:3159 独立 HOME mock）四形态实测：workspace 绝对路径显示 ✓、file:// 显示 ✓、白名单外降级占位 ✓、远程 URL（icon.svg）原样加载 ✓、点击本地图开 FilePreview overlay ✓、lint 清理后复测两路仍过 ✓。**注**：用户截图会话（#171）不在本机 prod DB——本机各数据源均无该消息，判断来自另一台部署（公司机?），但根因是共享渲染层代码，修复全部署通用。**Next**：用户现场验收；上 prod 需 merge main + build + kickstart。
 
 ---
@@ -131,7 +134,7 @@
 **Wave 3 (Week 5-6) — 树状结构优势放大**
 - [ ] Stage 20: Plan 节点 type（计划-步骤-子节点联动，对齐 Plan → Execute → Verify → Learn）
 - [ ] Stage 21: Memory 桥接（节点 ↔ ~/.claude/memory/ 双向）
-- [ ] Stage 22 (可选): Subagent 子树可视化
+- [x] Stage 22: Subagent 可视化（Session 69，未 commit）——子 Agent 独立成区：`lib/subagents.ts` 分组 + `SubagentPanel` 折叠态实时行/展开态 prompt·子工具链·报告；SDK 侧 `EventType.Task` + `parentToolUseId`。形态是「面板内分区」而非原设想的画布子树——子 agent 是一轮内的执行细节，做成画布节点会污染思维树语义
 
 ### GPT 替代体验优化 → [optimization-roadmap.md](optimization-roadmap.md)
 体验深度维度（交互手感 / UI 精致 / 对话内核），与上面功能广度互补。第一阶段 P0：
@@ -177,6 +180,17 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 69 (2026-07-25)
+- **Done**: 子 Agent 链可视化（Stage 22）。用户：「只渲染了工具链，没有子 Agent 链，感觉不是很友好」。
+  - **协议实测**（先抓真流再动手，`scripts/fixtures/subagent-stream.jsonl`）：派活 = 名为 `Agent` 的 tool_use（老版 `Task`，input 带 description/prompt/subagent_type）；子 agent 的工具行带 `parent_tool_use_id`；`system` 的 task_started/progress/updated/notification 四行携 subagent_type·prompt·last_tool_name·usage·**summary**；子 agent 正文不走 stream_event delta。
+  - **SDK**（`~/sdk/packages/agent`）：`EventType.Task` 归一四个 subtype（run() 内 taskId→toolUseId map 补齐 `task_updated` 缺失的 tool_use_id，补不上就丢）；ToolCall 事件透传 `parentToolUseId`。改完 `bunx tsc --build` 重建 dist。
+  - **trellis 数据层**：`ToolCall` 加可选 `parentToolUseId` / `agent: SubagentMeta`（复用 tool_calls JSON 列 → 零 migration，catchup/持久化白嫖）；新 StreamEvent `tool_call_update`（patch 语义，四处同构定义）；repo `patchToolCallAgent` + `mergeAgentMeta`（剔 undefined，只并不换）；run-bus 新分支照抄 commit→DB→broadcast 纪律，`pendingAgentPatches` 兜住乱序，**手搓的 broadcast payload 补 parentToolUseId**（漏了就是直播扁平、刷新才嵌套）。
+  - **UI**：`lib/subagents.ts` 纯数据 split（孤儿 parent 回落顶层、限深防环、meta 缺失时从 tool input 回填、done 后描述回落原始任务而非最后一步）；`components/SubagentPanel.tsx` 独立成区置于 🔧 之上；`ToolCallsPanel` 导出 `ToolCallRow`/`formatDuration` 复用 + 有子 agent 时标题加「（主 agent）」；ChatNode 徽标拆 🔧n/🤖n。
+- **验证**: tsc ✓ build ✓；`bun scripts/test-subagent-chain.ts` 11 项 ALL PASS（fixture 灌进真 SDK 后端 → toStreamEvent → 合并 → split，含 shim 假 `claude` 上 PATH）；隔离实例 :3160（独立 HOME + 真 claude project 会话）浏览器实测七场景全绿（见 Current Focus）。产物已清（browser session / server / 隔离 HOME 保留）。
+- **踩到并修**: abort 后 Agent 调用永停 `running`（既有通病，任何未完工具皆然）→ 计时器会在死 run 上永远往上跳。改判据为 `live = node.status === "streaming"`，非 live 的 running 显「已中断」pill；改 DB 造状态验证该分支。
+- **环境注记**: 干活期间 `~/sdk` 有另一进程在跑 merge（`apps/harbor` 7 文件冲突），我的 SDK 源码改动被覆盖过一次（dist 尚存 → src/dist 一度不一致）。已补回并重建、离线回放复验一致；未碰其 merge。**若 ~/sdk 那边 merge 收尾时丢了 `EventType.Task` / `parentToolUseId`，trellis 侧会静默退化成老的扁平链**（UI 不报错，只是永远没有子 Agent 区）——复查命令：`grep -c "TASK_SUBTYPES" ~/sdk/packages/agent/dist/backends/claude.js`。
+- **Next**: 用户现场验收 → commit（本轮未 commit）；上 prod = merge main + build + kickstart。
+
 ### Session 68 (2026-07-19)
 - **Done**: markdown 答案里图片本地路径破图修复（用户截图报「图没法预览」）。
   - 根因：`MD_COMPONENTS` 缺 `img` 渲染器——S63 只接管了 `a`（MdLink）和行内 `code`（InlineFileButton），`![alt](/Users/…/foo.png)` 的本地 src 直进 `<img>`，浏览器按 http 路径请求 404。

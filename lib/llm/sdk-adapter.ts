@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { EventType, type AgentEvent, type RunOptions } from "@sm/agent";
+import type { SubagentMeta } from "@/lib/types";
 import type { Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 
@@ -120,7 +121,19 @@ export function toStreamEvent(e: AgentEvent): StreamEvent | null {
         name: String(e.data.name ?? ""),
         input: e.data.input,
         startedAt: Date.now(),
+        parentToolUseId: (e.data.parentToolUseId as string | null) ?? null,
       };
+    case EventType.Task: {
+      // 子 agent 生命周期 → 挂回派生它的那条 Agent 调用（data.toolUseId，SDK 已
+      // 保证非空）。phase/taskId 不进 UI 数据，其余字段原样浅合并；SDK 侧已剔过
+      // undefined（patch 语义下留着会抹掉先前 phase 的值）。
+      const { phase, taskId, toolUseId, ...rest } = e.data as Record<string, unknown>;
+      void phase;
+      if (!toolUseId) return null;
+      const agent = rest as SubagentMeta;
+      if (taskId) agent.taskId = String(taskId);
+      return { type: "tool_call_update", id: String(toolUseId), agent };
+    }
     case EventType.ToolCallDone:
       return {
         type: "tool_call_done",

@@ -56,6 +56,28 @@ export type NodeAttachment = {
 // string blobs — UI decides how to format (JSON pretty-print for
 // structured inputs, monospace block + scroll for Bash stdout, etc.).
 export type ToolCallStatus = "running" | "done" | "error";
+
+// Stage 22 (subagent visualization): metadata for a Task/Agent tool call —
+// the invocation that spawns a sub-agent. Sourced from claude's `system`
+// task_started / task_progress / task_updated / task_notification lines
+// (see @sm/agent EventType.Task), which carry live progress the tool_use
+// block alone doesn't have. Every field optional: the CLI feeds them in
+// across phases (prompt at start, usage during, summary at the end), and
+// old rows / other backends have none of it.
+export type SubagentMeta = {
+  taskId?: string;
+  subagentType?: string;   // "general-purpose" | "Explore" | custom agent name
+  description?: string;    // short label; live-updated to the current step
+  prompt?: string;         // the full task handed to the sub-agent
+  status?: string;         // "completed" | "failed" | ... (from task_updated)
+  lastToolName?: string;   // tool the sub-agent is running right now
+  totalTokens?: number;
+  toolUses?: number;
+  durationMs?: number;
+  summary?: string;        // the sub-agent's final report
+  outputFile?: string;
+};
+
 export type ToolCall = {
   // The CLI's id (e.g. "toolu_017sqa1c..."). Stable across the start +
   // result events so the UI can merge them.
@@ -74,6 +96,14 @@ export type ToolCall = {
   // Server-side timestamps for ordering + duration computation.
   startedAt: number;
   endedAt: number | null;
+  // Stage 22: non-null when this call was made *by a sub-agent* rather than
+  // the main agent — it carries the tool_use id of the Task/Agent call that
+  // spawned it. Absent/null = main agent (all pre-Stage-22 rows). The UI
+  // groups children under their parent instead of one flat chain.
+  parentToolUseId?: string | null;
+  // Stage 22: present only on the Task/Agent call itself — live progress and
+  // final report of the sub-agent it spawned.
+  agent?: SubagentMeta;
 };
 
 // A路②: a paused interactive-tool prompt awaiting a user answer. Set while

@@ -2492,6 +2492,9 @@ type StreamEvent =
       name: string;
       input: unknown;
       startedAt: number;
+      // Stage 22: set when a sub-agent made the call; groups it under the
+      // Task/Agent call with that id instead of the flat main chain.
+      parentToolUseId?: string | null;
     }
   | {
       type: "tool_call_done";
@@ -2500,6 +2503,13 @@ type StreamEvent =
       stderr: string | null;
       isError: boolean;
       endedAt: number;
+    }
+  // Stage 22: sub-agent progress / final report, merged onto the Task/Agent
+  // call by id. Patch semantics — arrives repeatedly as the sub-agent works.
+  | {
+      type: "tool_call_update";
+      id: string;
+      agent: import("@/lib/types").SubagentMeta;
     }
   // A路②: the run paused on an interactive tool (AskUserQuestion /
   // ExitPlanMode). interaction_required carries the prompt for the UI to
@@ -2755,6 +2765,7 @@ function handleStreamEvent(
                   durationMs: null,
                   startedAt: event.startedAt,
                   endedAt: null,
+                  parentToolUseId: event.parentToolUseId ?? null,
                 },
               ],
             },
@@ -2781,6 +2792,22 @@ function handleStreamEvent(
           endedAt: event.endedAt,
           durationMs: Math.max(0, event.endedAt - cur.startedAt),
         };
+        return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
+      });
+    } else if (event.type === "tool_call_update" && currentNodeId) {
+      // Stage 22: sub-agent progress/report for a Task/Agent call. Merge —
+      // never replace — so a late progress-only patch can't wipe a summary
+      // an earlier phase already delivered. Missing target = skip (same
+      // reasoning as tool_call_done above).
+      const id = currentNodeId;
+      set((s) => {
+        const n = s.nodes[id];
+        if (!n) return s;
+        const idx = n.toolCalls.findIndex((c) => c.id === event.id);
+        if (idx === -1) return s;
+        const cur = n.toolCalls[idx];
+        const next = n.toolCalls.slice();
+        next[idx] = { ...cur, agent: { ...cur.agent, ...event.agent } };
         return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
       });
     } else if (event.type === "interaction_required" && currentNodeId) {
