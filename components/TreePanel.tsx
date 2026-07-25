@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
-import { ancestorsOf } from "@/lib/collapsed";
+import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
 import { layoutNodes } from "@/lib/layout";
 import { refIcon } from "@/lib/ref-icon";
 import {
@@ -14,7 +14,9 @@ import {
   isWaitingNode,
   mdExcerpt,
   rootIdOf,
+  subtreeRollup,
   treeLabel,
+  type HiddenRollup,
   type TreeEntry,
 } from "@/lib/tree-panel";
 import type { ChatNode } from "@/lib/types";
@@ -36,6 +38,11 @@ const GRAPH_PAD = 14;
 // dagre compact 布局的节点尺寸（lib/layout 常量的镜像，仅用于取卡片中心）
 const GRAPH_NODE_W = 280;
 const GRAPH_NODE_H = 90;
+// 缩放上限。dagre 的 rank 间距在原尺寸下是 126px —— 点少时（树本来就小，
+// 或刚被折叠剩几个）不设限就会把两个点拉开一屏，折叠反而"越折越空"。
+// 0.4 ≈ 50px 行距，与密树自然落到的 ~34px 同一量级；密树 scale 本就低于
+// 此值，不受影响。
+const GRAPH_MAX_SCALE = 0.4;
 
 type Hover = { nodeId: string; top: number } | null;
 
@@ -79,6 +86,7 @@ export function TreePanel() {
     [nodesMap, treeVisits],
   );
   const indices = useMemo(() => buildNodeIndex(nodesMap), [nodesMap]);
+  const byParent = useMemo(() => childrenIndex(nodesMap), [nodesMap]);
   const activeRootId = useMemo(() => {
     const anchor = activeNodeId && nodesMap[activeNodeId] ? activeNodeId : null;
     return anchor ? rootIdOf(anchor, nodesMap) : entries[0]?.root.id ?? null;
@@ -101,7 +109,6 @@ export function TreePanel() {
     if (!anchor) return ids;
     for (const id of ancestorsOf(anchor, nodesMap)) ids.add(id);
     ids.add(anchor);
-    const byParent = childrenIndex(nodesMap);
     let cur = nodesMap[anchor];
     while (cur) {
       const child = byParent.get(cur.id)?.[0];
@@ -110,7 +117,7 @@ export function TreePanel() {
       cur = child;
     }
     return ids;
-  }, [activeNodeId, nodesMap]);
+  }, [activeNodeId, nodesMap, byParent]);
 
   // 图形视图几何：当前树子树过 dagre compact 布局，投影进面板宽度。
   // 横向居中（纯链树所有点同 x，不居中会贴左边）。
@@ -118,9 +125,14 @@ export function TreePanel() {
     if (view !== "graph") return null;
     const entry = entries.find((e) => e.root.id === activeRootId);
     if (!entry) return null;
-    const laidOut = layoutNodes(entry.nodes, undefined, { compact: true });
+    // 折叠的子树整块退出布局 —— 折叠在图形视图的价值就是「腾地方」：点少了
+    // scale 就大了，剩下的形状才看得清。折叠点自己留下，带 +N 角标。
+    const hidden = hiddenByCollapse(collapsedNodeIds, nodesMap);
+    const visible = entry.nodes.filter((n) => !hidden.has(n.id));
+    if (visible.length === 0) return null;
+    const laidOut = layoutNodes(visible, undefined, { compact: true });
     const centers: Array<[string, { x: number; y: number }]> = [];
-    for (const n of entry.nodes) {
+    for (const n of visible) {
       const pos = laidOut.get(n.id);
       if (pos) {
         centers.push([
@@ -139,7 +151,7 @@ export function TreePanel() {
     const scale = Math.min(
       (GRAPH_W - GRAPH_PAD * 2) / Math.max(1, maxX - minX),
       (GRAPH_MAX_H - GRAPH_PAD * 2) / Math.max(1, maxY - minY),
-      1,
+      GRAPH_MAX_SCALE,
     );
     const spanX = (maxX - minX) * scale;
     const spanY = (maxY - minY) * scale;
@@ -153,8 +165,8 @@ export function TreePanel() {
         y: offY + (p.y - minY) * scale,
       });
     }
-    return { points, height };
-  }, [view, entries, activeRootId]);
+    return { points, height, visible };
+  }, [view, entries, activeRootId, collapsedNodeIds, nodesMap]);
 
   const filterResults = useMemo(() => {
     if (filter === null) return [];
@@ -309,13 +321,28 @@ export function TreePanel() {
     </div>
   );
 
+  // 折叠角标（+N）的配色：藏起来的东西里等输入 > 生成中 > 未读 > 纯计数，
+  // 与列表折叠行同一优先级 —— 折叠不该把状态一起藏掉。
+  const rollupFill = (r: HiddenRollup) =>
+    r.waiting
+      ? "fill-warn animate-pulse"
+      : r.streaming
+        ? "fill-accent animate-pulse"
+        : r.unread > 0
+          ? "fill-unread-ink"
+          : "fill-ink-faint";
+
   // 当前树的图形视图：点 + 连线，点击跳转、悬停出预览卡（与列表行同一套
   // hover 机制——getBoundingClientRect 对 SVG <g> 一样工作）。状态着色与
   // 列表行同语义：等输入 warn / 生成中 accent（都带 pulse）/ 错误 danger /
   // 未读 unread；当前节点加大 + 外圈。
-  const renderTreeGraph = (entry: TreeEntry) => {
+  // 折叠：有子节点的点带一个 ⊖ 小按钮（悬停才显，否则纯链树上每个点都挂一
+  // 个纽扣太吵；触摸设备无 hover，常显）；已折叠的点常显 ⊕ + 「+N」角标，
+  // 否则折完就没有回头路了。按钮圆心落在点自己的 r=10 命中区内，鼠标从点
+  // 移到按钮不会丢 hover（丢了按钮就闪没）。
+  const renderTreeGraph = () => {
     if (!graphGeometry) return null;
-    const { points, height } = graphGeometry;
+    const { points, height, visible } = graphGeometry;
     return (
       <svg
         width={GRAPH_W}
@@ -324,7 +351,7 @@ export function TreePanel() {
         className="block mx-auto mt-0.5"
         aria-label="当前树图形视图"
       >
-        {entry.nodes.map((n) => {
+        {visible.map((n) => {
           if (!n.parentId) return null;
           const a = points.get(n.parentId);
           const b = points.get(n.id);
@@ -341,7 +368,7 @@ export function TreePanel() {
             />
           );
         })}
-        {entry.nodes.map((n) => {
+        {visible.map((n) => {
           const p = points.get(n.id);
           if (!p) return null;
           const isActive = n.id === activeNodeId;
@@ -359,41 +386,129 @@ export function TreePanel() {
                     : "fill-ink-faint";
           const pulse =
             waiting || n.status === "streaming" ? " animate-pulse" : "";
+          const hasKids = (byParent.get(n.id)?.length ?? 0) > 0;
+          const isCollapsed = hasKids && collapsedNodeIds.has(n.id);
+          const roll = isCollapsed ? subtreeRollup(n.id, byParent) : null;
+          // 贴右缘时按钮和角标翻到左侧 —— SVG viewport 默认裁剪溢出。
+          const side = p.x > GRAPH_W - 36 ? -1 : 1;
+          const hx = p.x + side * 9;
+          const toggle = () => {
+            toggleCollapse(n.id);
+            setHover(null);
+          };
           return (
             <g
               key={n.id}
-              role="button"
-              tabIndex={0}
-              aria-label={n.topicLabel ?? n.question}
-              onClick={() => jumpToNode(n.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  jumpToNode(n.id);
-                }
-              }}
+              className="group"
               onMouseEnter={hoverRow(n.id)}
               onMouseLeave={leaveRow(n.id)}
-              className="cursor-pointer outline-none"
             >
-              {/* 透明放大命中区 —— 裸点太小，悬停/点击都难瞄（S61 教训） */}
-              <circle cx={p.x} cy={p.y} r={10} fill="transparent" />
-              <circle
-                cx={p.x}
-                cy={p.y}
-                r={isActive ? 5 : 3.5}
-                className={`${fill} stroke-surface${pulse}`}
-                strokeWidth={isActive ? 2 : 1.5}
-              />
-              {isActive && (
+              <g
+                role="button"
+                tabIndex={0}
+                aria-label={n.topicLabel ?? n.question}
+                onClick={() => jumpToNode(n.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    jumpToNode(n.id);
+                  }
+                }}
+                className="cursor-pointer outline-none"
+              >
+                {/* 透明放大命中区 —— 裸点太小，悬停/点击都难瞄（S61 教训） */}
+                <circle cx={p.x} cy={p.y} r={10} fill="transparent" />
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={8}
-                  className="fill-none stroke-accent"
-                  strokeWidth="1"
-                  opacity="0.5"
+                  r={isActive ? 5 : 3.5}
+                  className={`${fill} stroke-surface${pulse}`}
+                  strokeWidth={isActive ? 2 : 1.5}
                 />
+                {isActive && (
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={8}
+                    className="fill-none stroke-accent"
+                    strokeWidth="1"
+                    opacity="0.5"
+                  />
+                )}
+              </g>
+              {hasKids && (
+                <g
+                  role="button"
+                  tabIndex={isCollapsed ? 0 : -1}
+                  aria-label={
+                    isCollapsed
+                      ? `展开 ${roll?.count ?? 0} 个被折叠的节点`
+                      : "折叠子树"
+                  }
+                  aria-expanded={!isCollapsed}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggle();
+                    }
+                  }}
+                  className={`cursor-pointer outline-none ${
+                    isCollapsed
+                      ? ""
+                      : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+                  }`}
+                >
+                  <title>
+                    {isCollapsed
+                      ? `展开 ${roll?.count ?? 0} 个被折叠的节点`
+                      : "折叠子树"}
+                  </title>
+                  <circle cx={hx} cy={p.y} r={6} fill="transparent" />
+                  <circle
+                    cx={hx}
+                    cy={p.y}
+                    r={4.5}
+                    className="fill-surface stroke-line-strong hover:fill-surface-muted"
+                    strokeWidth="1"
+                  />
+                  <line
+                    x1={hx - 2.2}
+                    y1={p.y}
+                    x2={hx + 2.2}
+                    y2={p.y}
+                    className="stroke-ink-muted"
+                    strokeWidth="1.2"
+                    strokeLinecap="round"
+                  />
+                  {isCollapsed && (
+                    <line
+                      x1={hx}
+                      y1={p.y - 2.2}
+                      x2={hx}
+                      y2={p.y + 2.2}
+                      className="stroke-ink-muted"
+                      strokeWidth="1.2"
+                      strokeLinecap="round"
+                    />
+                  )}
+                </g>
+              )}
+              {roll && (
+                <text
+                  x={p.x + side * 16}
+                  y={p.y + 3}
+                  textAnchor={side > 0 ? "start" : "end"}
+                  fontSize="8"
+                  className={`pointer-events-none font-mono tabular-nums ${rollupFill(roll)}`}
+                >
+                  +{roll.count}
+                  {roll.unread > 0 ? ` ·${roll.unread}` : ""}
+                </text>
               )}
             </g>
           );
@@ -439,7 +554,7 @@ export function TreePanel() {
         </button>
       </div>
       {view === "graph" && graphGeometry ? (
-        renderTreeGraph(entry)
+        renderTreeGraph()
       ) : (
       <div className="mt-0.5">
         {activeRows.map(({ node, depth, isBranch, hasChildren, collapsed, hiddenRollup }) => {

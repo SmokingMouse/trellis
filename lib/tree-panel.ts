@@ -44,6 +44,17 @@ export type TreeGroups = {
   hidden: TreeEntry[];
 };
 
+/**
+ * 折叠处回显被藏起来的东西 —— 折叠不该把状态一起藏掉。列表行的「+N · 未读
+ * 数 · 🙋」和图形视图折叠点的角标共用这一份。
+ */
+export type HiddenRollup = {
+  count: number;
+  unread: number;
+  waiting: boolean;
+  streaming: boolean;
+};
+
 export type TreeRowItem = {
   node: ChatNode;
   /** 缩进 = 祖先真分叉（>1 子）个数；线性段平铺（与 Outline 同规则） */
@@ -55,12 +66,7 @@ export type TreeRowItem = {
   /** 本行处于折叠态（后代行未渲染） */
   collapsed: boolean;
   /** 折叠时被藏起的后代 rollup；展开态为 null */
-  hiddenRollup: {
-    count: number;
-    unread: number;
-    waiting: boolean;
-    streaming: boolean;
-  } | null;
+  hiddenRollup: HiddenRollup | null;
 };
 
 export function isUnreadNode(n: ChatNode): boolean {
@@ -193,6 +199,30 @@ export function groupTrees(
   return { hot, cold, hidden };
 }
 
+/** 某节点全部后代（不含自身）的 rollup。byParent = childrenIndex(nodes)。 */
+export function subtreeRollup(
+  nodeId: string,
+  byParent: Map<string, ChatNode[]>,
+): HiddenRollup {
+  const acc: HiddenRollup = {
+    count: 0,
+    unread: 0,
+    waiting: false,
+    streaming: false,
+  };
+  const dig = (pid: string) => {
+    for (const k of byParent.get(pid) ?? []) {
+      acc.count++;
+      if (isUnreadNode(k)) acc.unread++;
+      if (isWaitingNode(k)) acc.waiting = true;
+      else if (k.status === "streaming") acc.streaming = true;
+      dig(k.id);
+    }
+  };
+  dig(nodeId);
+  return acc;
+}
+
 /**
  * 当前树扁平化为面板行：线性段平铺，仅真分叉处缩进一级（与 Outline 同规）。
  * collapsedIds（画布/Outline 同一套 store.collapsedNodeIds）里的节点不下钻，
@@ -205,20 +235,6 @@ export function flattenTree(
 ): TreeRowItem[] {
   const byParent = childrenIndex(nodes);
   const rows: TreeRowItem[] = [];
-  const rollup = (id: string): NonNullable<TreeRowItem["hiddenRollup"]> => {
-    const acc = { count: 0, unread: 0, waiting: false, streaming: false };
-    const dig = (pid: string) => {
-      for (const k of byParent.get(pid) ?? []) {
-        acc.count++;
-        if (isUnreadNode(k)) acc.unread++;
-        if (isWaitingNode(k)) acc.waiting = true;
-        else if (k.status === "streaming") acc.streaming = true;
-        dig(k.id);
-      }
-    };
-    dig(id);
-    return acc;
-  };
   const walk = (n: ChatNode, depth: number, isBranch: boolean) => {
     const kids = byParent.get(n.id) ?? [];
     const collapsed = kids.length > 0 && (collapsedIds?.has(n.id) ?? false);
@@ -228,7 +244,7 @@ export function flattenTree(
       isBranch,
       hasChildren: kids.length > 0,
       collapsed,
-      hiddenRollup: collapsed ? rollup(n.id) : null,
+      hiddenRollup: collapsed ? subtreeRollup(n.id, byParent) : null,
     });
     if (collapsed) return;
     const fork = kids.length > 1;

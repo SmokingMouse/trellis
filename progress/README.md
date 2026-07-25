@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**树面板「图形视图」补折叠（Session 74）**：用户「能增加一个树节点折叠的功能吗」→ 反问澄清落在**树面板的图形视图**（画布 chip / Outline 三角 / 树面板列表行 S69 都已有，唯独图形视图当时刻意跳过——「图形是看形状的总览面」）。落地：① `graphGeometry` 先用 `hiddenByCollapse` 把折叠子树**整块剔出再进 dagre**——折叠在图形视图的价值就是腾地方，剩下的点因此重新占满面板；② 有子节点的点挂 ⊖ 小按钮、**悬停才显**（纯链树每点都挂纽扣太吵），已折叠的点**常显** ⊕ +「+N ·未读」角标（折完得有回头路；rollup 与列表折叠行同优先级 waiting>streaming>unread——折叠不该把状态一起藏掉）；③ 按钮圆心落在点自己的 r=10 命中区**之内**（鼠标从点移到按钮不能丢 hover，丢了按钮就闪没）；贴右缘时按钮+角标翻到左侧（SVG viewport 默认裁溢出）；触摸设备走 `[@media(hover:none)]` 常显；④ rollup 从 `flattenTree` 内部闭包提成 `subtreeRollup`，与列表共用一份语义。**顺带修一处既有别扭**：缩放上限 1 → `GRAPH_MAX_SCALE=0.4`——dagre 原尺寸 rank 间距 126px，折剩两三个点时不设限会把它们拉开一屏，「越折越空」（实测折剩 2 点：行距 126→50px、SVG 高 154→78px；9 点密树 scale 本就 ~0.27，行距 34px 不变）。**验证**：tsc ✓ lint ✓ + emperor worktree `bun --bun run build` ✓（独立 `.next`，未碰 prod）+ 隔离实例 :3164（emperor worktree + `TRELLIS_DB_PATH` 沙箱 + `env -u TRELLIS_AUTH_PASS` 关闸 + 直插 SQLite 造 11 节点三分叉树、4 个未读）agent-browser 实测十一项全绿：叶子无按钮/非叶有按钮（DOM 逐节点核）、悬停显 ⊖、**从冷位置直接移到按钮再点 = 折叠而非跳转**（pointer-events 传导这环最易塌，专门这么打）、折 n2 剩 2 点带「+7 ·2」、展开还原、折 n3 落 sessionStorage 且 reload 保持、切列表视图同节点显「展开子树 +2 1」（两视图共用 `collapsedNodeIds`）、点 dot 照常跳转 + 悬停预览卡无回归、⌘J 跳进被折叠的 n5 自动展开祖先、右缘节点角标实测 218..242 未越 272 边界、折根节点剩 1 点「+10 ·2」不炸。**Next**：用户现场验收；上 prod = 主目录 `make build` + `launchctl kickstart -k`。
+
+---
 **子 Agent 链可视化 = Stage 22（Session 73——原编 69，与「树面板折叠子树」撞号重编；已合 main 推送，**已上 prod**）**：用户反馈「只渲染了工具链，没有子 Agent 链，不友好」。**根因实测**（真 claude 抓流，已固化 `scripts/fixtures/subagent-stream.jsonl`）：① 主 agent 派活 = 一条名为 **`Agent`**（老版 `Task`）的普通 tool_use；② 子 agent 自己的工具带 `parent_tool_use_id`，而 SDK 压根不看这个字段 → **子 agent 的 Bash/Read 被平铺混进主链，看不出归属**；③ 另有 `system` 的 `task_started/progress/updated/notification` 四事件被 SDK 整个丢弃，里面躺着 subagent_type / 完整 prompt / 实时进度(last_tool_name·tool_uses·tokens) / **最终报告 summary**——白扔；④ 子 agent 正文不走 delta，不污染答案正文（改动面因此收窄）。落地：**SDK 侧**（`EventType.Task` + ToolCall 透传 `parentToolUseId`）即 S72 追记⑤ 里那两处「publish 时的未提交改动」，**实测只有 `@smokingmouse/agent@0.3.1` 带，`0.3.0` 不带**——本仓 bun.lock 已提到 0.3.1，锁回 0.3.0 会让子 Agent 区静默消失（UI 不报错，只是永远空）；**trellis** `ToolCall` 加可选 `parentToolUseId`/`agent: SubagentMeta`（复用 tool_calls JSON 列，**零 migration**）+ 新 patch 事件 `tool_call_update`（不复用 start/done：start 双层按 id 去重会吞、done 置终态而 summary 早于真 tool_result 到达）+ repo `patchToolCallAgent` + run-bus commit-before-broadcast 同款纪律（含 `pendingAgentPatches` 乱序兜底）；**UI** 新 `lib/subagents.ts`（纯数据 split，孤儿回落顶层 + 限深防环）+ `components/SubagentPanel.tsx`——**子 Agent 独立成区**放在 🔧 工具调用 上方（用户选定形态），折叠态即显实时行「🤖 general-purpose 正在 Bash · 3 工具 · 36k · 16.0s ●」，展开 = 任务 prompt + 缩进子工具链 + 它交回的报告；主面板标题改「🔧 工具调用（主 agent）」，画布徽标拆成 🔧n/🤖n。**验证**：tsc ✓ build ✓ + `bun scripts/test-subagent-chain.ts` 11 项全链路断言 ALL PASS（fixture 经真 SDK 解析 → toStreamEvent → 合并 → split）+ 隔离实例(:3160 独立 HOME + 真 claude project)浏览器实测：实时 5×tool_call_update、落库层级正确、折叠/展开渲染、**计时真在走**(7.0→12.0→16.0s；此刻子 agent 卡在 `sleep 12` 里没有 progress 事件，正是 ticker 存在的理由)、reload 从 DB 恢复层级、无子 agent 会话零回归（标题不带「（主 agent）」）、abort 落 `error/aborted` 不炸。**踩到并修**：abort 后 Agent 调用永停 `running`（既有通病），会让计时器在死 run 上永远往上跳 → 改成 `live = node.status === "streaming"` 才算运行中，否则显「已中断」pill（改 DB 造出该状态实测 ✓）。**上 prod 已完成**（2026-07-25）：`learning/trellis` 里 `bun install`（0.3.0→0.3.1，不装就等于没做这个功能）→ `make build` → `launchctl kickstart -k`，三步一起做（bun install 会在 prod 进程活着时换 node_modules，属 S66 同类「运行中换文件」，不可拆开）。验活：`/` 401（闸在）+ `/login` 200 + 服务 `state=running`、日志无报错 + `.next` chunk 内含「它交回的报告」= 新代码确实进了这次 build。**Next**：用户现场验收（prod 开一轮会派子 agent 的 project 提问即可）。
 
 ---
@@ -195,9 +198,18 @@
 ## Verified Facts
 
 - **prod 跑在 `/Users/smokingmouse/python/learning/trellis`**（launchd plist 的 `WorkingDirectory`，S73 实测）。所以 S66 那条「build 后必须 kickstart prod」**只对主目录成立**——在 emperor / preview 等 worktree 里 `make build` 用的是各自的 `.next`，碰不到 prod，不需要也不该去 kickstart。
+- **Tailwind 的 `group-hover:` / `[@media(hover:none)]:` 在 SVG 元素上照常生效**（S74 实测：`<g class="group">` 的子元素能吃到 group-hover；`@media (hover: none)` 块在编译产物里排在 `.opacity-0` / `.pointer-events-none` 之后，同特异性后来者胜 → 触摸设备上"悬停才显"的控件会常显可点）。所以 SVG 里的悬停控件不必走 React state。
 - **`@smokingmouse/agent` 0.3.0 不含 `EventType.Task` / `parentToolUseId`，0.3.1 才含**（`npm pack` 解包 grep 实测，S73）。子 Agent 区依赖它；版本退回 0.3.0 时 UI 不报错、只是永远空。各部署目录 `bun install` 后建议核一句：`grep -c 'Task: "task"' node_modules/@smokingmouse/agent/dist/events.js`。
 
 ## Session Log
+### Session 74 (2026-07-26)
+- **Done**: 树面板图形视图补上折叠子树（列表视图 S69 已有，本轮补齐另一半）。需求原话「能增加一个树节点折叠的功能吗」含糊——先摸清折叠已存在于画布/Outline/树面板列表三处，再反问定位到图形视图，没有重复造。
+  - `components/TreePanel.tsx`：`graphGeometry` 加 `hiddenByCollapse` 过滤后再喂 `layoutNodes`（折叠子树整块退出布局，剩余点重新占满面板）+ 返回 `visible` 供渲染；每个非叶点挂 ⊖/⊕ 按钮子 `<g>`（`e.stopPropagation()` 与跳转分开）、折叠点常显 + `+N ·未读` `<text>` 角标；`GRAPH_MAX_SCALE=0.4` 取代原来的 `1`。
+  - `lib/tree-panel.ts`：`subtreeRollup(nodeId, byParent)` + `HiddenRollup` 从 `flattenTree` 内部闭包提出来共用；TreePanel 顺带把 `childrenIndex` 收成一个 memo（原来 lineageIds 里每次重建）。
+- **设计取舍**: 按钮**悬停才显**——纯链树上每个点都有子节点，常显等于每点挂一颗纽扣；已折叠的点必须常显，否则折完无回头路。按钮圆心放在 `p.x ± 9`（点自己 r=10 命中区之内），移过去不会触发 mouseleave 把按钮闪没；同一 `<g class="group">` 下用 CSS `group-hover:` 而非 React state，省掉每次悬停的重渲染。
+- **验证**: tsc ✓ lint ✓ build ✓（emperor worktree）；隔离实例 :3164 浏览器实测十一项（见 Current Focus），含"从冷位置直接点按钮"这条最易塌的路径。测完已清：browser session close / dev server kill / 临时 DB 删 / emperor worktree `git checkout` 复原。
+- **Next**: 用户现场验收；上 prod 需主目录 build + kickstart。
+
 ### Session 73 (2026-07-25，原编 69，与 S69「树面板折叠子树」撞号重编)
 - **Done**: 子 Agent 链可视化（Stage 22）。用户：「只渲染了工具链，没有子 Agent 链，感觉不是很友好」。
   - **协议实测**（先抓真流再动手，`scripts/fixtures/subagent-stream.jsonl`）：派活 = 名为 `Agent` 的 tool_use（老版 `Task`，input 带 description/prompt/subagent_type）；子 agent 的工具行带 `parent_tool_use_id`；`system` 的 task_started/progress/updated/notification 四行携 subagent_type·prompt·last_tool_name·usage·**summary**；子 agent 正文不走 stream_event delta。
