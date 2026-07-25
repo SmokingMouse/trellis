@@ -8,7 +8,7 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { isEditableTarget } from "@/lib/shortcuts";
 import { ChatNode, type ChildAnchor } from "./ChatNode";
@@ -67,6 +67,23 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   // LoD threshold) slide smoothly without that initial fly-in.
   const [layoutReady, setLayoutReady] = useState(false);
 
+  // Per-node "peek": expand a compact card into its full form in place, on
+  // the canvas, without jumping to the linear reader. Multiple can be open at
+  // once. Folded into layoutKey so dagre reflows neighbors (the expanded card
+  // is taller AND wider than a compact one — see layoutNodes' measured
+  // width/height handling). Ids are per-session-unique (UUIDs), so a peeked id
+  // from another session simply never matches the current node map — no reset
+  // needed, and switching back to a session restores its peeked cards.
+  const [peekedIds, setPeekedIds] = useState<Set<string>>(new Set());
+  const togglePeek = useCallback((id: string) => {
+    setPeekedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // LoD-aware: layout shrinks when zoom drops below the threshold so
   // overview cards (compact form) sit close together — selector returns a
   // boolean so we only re-layout on threshold crossings, not every wheel.
@@ -86,8 +103,10 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         .join("|") +
       (isCompact ? ":c" : ":f") +
       "|h=" +
-      [...hiddenIds].sort().join(","),
-    [nodeMap, isCompact, hiddenIds],
+      [...hiddenIds].sort().join(",") +
+      "|p=" +
+      [...peekedIds].sort().join(","),
+    [nodeMap, isCompact, hiddenIds, peekedIds],
   );
 
   const { getNodes } = useReactFlow();
@@ -98,7 +117,9 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
     );
     if (visibleNodes.length === 0) return;
     // Wait one tick so React Flow has rendered + measured heights of any
-    // newly-added/changed nodes before we re-run Dagre.
+    // newly-added/changed nodes before we re-run Dagre. Peeked cards use a
+    // fixed reserved footprint (see layoutNodes' forceFullIds), so a single
+    // pass already reflows descendants correctly — no measurement retry needed.
     const t = window.setTimeout(() => {
       const heights = new Map<string, number>();
       for (const fn of getNodes()) {
@@ -107,6 +128,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       }
       const positions = layoutNodes(visibleNodes, heights, {
         compact: isCompact,
+        forceFullIds: peekedIds,
       });
       for (const [id, pos] of positions) {
         const cur = nodeMap[id];
@@ -259,6 +281,10 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
             id: n.id,
             type: isReference ? "reference" : "chat",
             position: n.position,
+            // Peeked cards float above neighbors — a wide expanded card can
+            // briefly overlap during reflow, and it should never sit under the
+            // small cards around it.
+            zIndex: peekedIds.has(n.id) ? 1000 : undefined,
             data: isReference
               ? {
                   node: n,
@@ -275,6 +301,8 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
                   index,
                   descendantCount,
                   collapsed,
+                  isPeeked: peekedIds.has(n.id),
+                  onTogglePeek: togglePeek,
                 },
             draggable: false,
           };
@@ -287,6 +315,8 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       hiddenIds,
       descendantCounts,
       collapsedNodeIds,
+      peekedIds,
+      togglePeek,
     ],
   );
 
@@ -311,11 +341,37 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
 
   useEffect(() => {
     setPopover((prev) => {
+      // A canvas card only exposes a selectable body when it renders full —
+      // peeked, streaming, or an unsuperseded error (mirrors ChatNode's
+      // showCompact).
+      const rendersFull = (id: string) => {
+        const n = nodeMap[id];
+        return (
+          !!n &&
+          (peekedIds.has(id) ||
+            n.status === "streaming" ||
+            (n.status === "error" && (descendantCounts[id] ?? 0) === 0))
+        );
+      };
+      // Expanded popover stays sticky — it composes off snapshots
+      // (selection.text/rect), so a collapsing card mustn't discard in-progress
+      // typing. Checked FIRST so the close-gate below only touches the
+      // collapsed (two-button) popover.
       if (prev?.expanded) return prev;
-      if (liveSelection) return { selection: liveSelection, expanded: false };
+      // Collapsed popover whose card stopped rendering full (e.g. the user hit
+      // 收起 without dismissing first): its selectable body is gone, so close
+      // it — otherwise the buttons hang on the canvas.
+      if (prev && !rendersFull(prev.selection.nodeId)) return null;
+      if (liveSelection && rendersFull(liveSelection.nodeId)) {
+        // Keep the same object when the selection is unchanged, so nodeMap
+        // ticks (e.g. another node streaming) don't churn a re-render while a
+        // popover is open. (prev is non-expanded here — expanded returned above.)
+        if (prev && prev.selection === liveSelection) return prev;
+        return { selection: liveSelection, expanded: false };
+      }
       return null;
     });
-  }, [liveSelection]);
+  }, [liveSelection, peekedIds, nodeMap, descendantCounts]);
 
   const closePopover = () => {
     setPopover(null);

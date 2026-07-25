@@ -15,6 +15,12 @@ export const COMPACT_ZOOM_THRESHOLD = 999;
 // Full-mode dimensions (current behavior).
 const NODE_WIDTH_FULL = 600;
 export const NODE_HEIGHT_ESTIMATE = 480;
+
+// A peeked card is rendered at this FIXED height (content scrolls inside it),
+// so the layout can reserve an exact footprint — no measurement round-trip,
+// so descendants get pushed clear of it in a single pass. ChatNode pins the
+// card to the same height; keep the two in sync.
+export const PEEK_CARD_HEIGHT = 480;
 const RANK_SEP_FULL = 100;
 const NODE_SEP_FULL = 80;
 
@@ -28,9 +34,10 @@ const NODE_SEP_COMPACT = 24;
 export function layoutNodes(
   nodes: ChatNode[],
   measuredHeights?: Map<string, number>,
-  opts: { compact?: boolean } = {},
+  opts: { compact?: boolean; forceFullIds?: Set<string> } = {},
 ): Map<string, { x: number; y: number }> {
   const compact = opts.compact ?? false;
+  const forceFull = opts.forceFullIds;
   const NW = compact ? NODE_WIDTH_COMPACT : NODE_WIDTH_FULL;
   const NH_DEFAULT = compact ? NODE_HEIGHT_COMPACT : NODE_HEIGHT_ESTIMATE;
   const rankSep = compact ? RANK_SEP_COMPACT : RANK_SEP_FULL;
@@ -55,13 +62,23 @@ export function layoutNodes(
   // TALLER than the compact default (= a not-actually-compact card), while
   // keeping uniform packing for genuinely compact cards.
   const heightFor = (id: string) => {
+    // Peeked cards render at a fixed height (content scrolls inside), so
+    // reserve exactly that — deterministic, no dependence on the lagging
+    // measurement, so descendants reflow correctly on the first pass.
+    if (forceFull?.has(id)) return PEEK_CARD_HEIGHT;
     if (!compact) return measuredHeights?.get(id) ?? NH_DEFAULT;
     const m = measuredHeights?.get(id);
     return m && m > NH_DEFAULT ? m : NH_DEFAULT;
   };
 
+  // A peeked card renders as the fixed 600px full card even on a compact
+  // canvas, where everyone else packs at the uniform 280px slot — reserve its
+  // real width so it doesn't overlap its horizontal siblings.
+  const widthFor = (id: string) =>
+    forceFull?.has(id) ? NODE_WIDTH_FULL : NW;
+
   for (const n of nodes) {
-    g.setNode(n.id, { width: NW, height: heightFor(n.id) });
+    g.setNode(n.id, { width: widthFor(n.id), height: heightFor(n.id) });
   }
   for (const n of nodes) {
     if (n.parentId) g.setEdge(n.parentId, n.id);
@@ -74,7 +91,7 @@ export function layoutNodes(
     const dn = g.node(n.id);
     if (!dn) continue;
     positions.set(n.id, {
-      x: dn.x - NW / 2,
+      x: dn.x - widthFor(n.id) / 2,
       y: dn.y - heightFor(n.id) / 2,
     });
   }
