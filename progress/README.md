@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**外部 PR 清仓：#10 IME 回车守卫 + #11 画布 peek 原地展开（Session 72，已 merge 推送 GitHub）**：Aaron 两个 open PR 审毕合入。① **#10**：BranchPopover textarea 的 Enter 判定前加 IME 组合守卫（`isComposing || keyCode===229` 直接 return）——中文输入法给英文串上屏的回车不再误触发分叉提交；单文件 5 行，主 composer 走 ⌘Enter 本就不受影响。② **#11**：画布 compact 小卡加「展开预览」按钮 → 该卡就地渲染成 600px 完整卡（`PEEK_CARD_HEIGHT=480` 固定高、body flex-fill 内滚），`layoutNodes` 加 `forceFullIds` 按确定宽高预留 footprint，dagre 单趟让开兄弟/顶开后代；可多卡同开、「收起」折回；选区 popover 加 rendersFull 门控（收起后关闭滞留按钮，expanded 态 sticky 不丢输入）。**审查要点已核**：`data-chat-node-id` 只在 ChatNode/TurnCard 上且 Canvas 与 LinearThreadView 互斥挂载——popover 新门控不影响线性视图、reference 卡本就无选区路径。验证：两 PR 合并树 tsc ✓、lint 零新增（Canvas 2 项 setState-in-effect 为 main 基线既有）、隔离 worktree build ✓、隔离实例（:3163 独立 DB + mock provider）浏览器实测——两节点树点「展开预览」：完整卡原地出现（600×480 z=1000）、子节点 y=556 让位无重叠、不跳线性；「收起」后子节点回位 y=166 ✓。**注意**：本地 main 领先 origin 3 个 commit（S71 的 npm 化三连）仍不能 push——`@smokingmouse/agent`/`llm` npm 404 未发布，push 闸依然是用户 `npm login`；已把远端 PR merge rebase 到本地 3 commit 之下，合并树 tsc ✓。**Next**：用户 npm login → publish → 两仓 push（S71 流程不变）；PR 功能上 prod 需 build + kickstart。
+
+---
 **npm 化部署 + 应用内模型配置（Session 71，已 commit `8816dae`+`dbb7c41`，publish 阻塞在 npm login）**：部署去摩擦两连。① **依赖 npm 化**：`@sm/*` file: 绝对路径依赖 → `@smokingmouse/agent`+`@smokingmouse/llm` `^0.3.0`（~/sdk 已备好 0.3.0 + MIT + 泄露闸全验——npm pack 真打包清单只有 dist+LICENSE+README，无 key/个人路径/apps；npm org `sm` 被占故换 scope，改名波及两仓全部 import）；Makefile 引导链（setup/sdk-build/patch-deps/relink-sdk）退役成 `bun install`，新增 `link-sdk`/`unlink-sdk` 本地改 SDK 用；README Quickstart 重写。endpoints.yaml 搜索序变 `$SM_ENDPOINTS_PATH` → `~/.config/sm/endpoints.yaml` → legacy `~/.claude/global/`（本机零迁移）。`/api/providers` 优雅降级：yaml 缺失或 yaml 无 native provider 时原生 Opus/Sonnet/Haiku 恒在（新手裸 claude 登录全功能，不再 500）。② **模型配置 UI**：ModelPicker 尾行「⚙ 管理模型…」→ ModelConfigModal（provider 增改删表单）；服务端 `lib/server/model-config.ts` 用 yaml Document API 编辑（保留手写注释），key 只进 env_file（`~/.config/sm/.env` 0600）+ process.env 永不回显，保存 `clearEndpointsCache()`（@smokingmouse/llm 0.3.0 新导出）热生效。tsc ✓ lint 零新增 ✓ 隔离 worktree build ✓ + 隔离实例(:3162, SM_ENDPOINTS_PATH+TRELLIS_DB_PATH 沙箱)实测：API 八项（fallback/创建/key 写入+0600/注释保留/脱敏 grep 零命中/热刷新/校验报错/删除）+ 浏览器全链路（登录→picker→管理模型→添加 uiprov+key→列表 ✓key已配→picker 无刷新出现 uiprov·ui-model-1/2 且原生档共存）全绿。**踩点三个**：(a) Header `backdrop-blur` 劫持 fixed 后代 containing block——Modal 从 picker 内打开必须 createPortal 挂 body（SketchModal 同款）；(b) 伪 HOME 隔离与 turbopack root/共享 node_modules symlink 冲突（"points out of the filesystem root"）——改用真 HOME + `SM_ENDPOINTS_PATH`/`TRELLIS_DB_PATH` env 隔离；(c) agent-browser `click @ref` 对 popover footer 按钮失效（popover 关但 onClick 不触发；同 popover 模型行正常）——裸坐标 mouse down/up 与程序化 .click() 都正常 = playwright actionability 环境怪癖非产品 bug（S70 Excalidraw 同类）。**Next**：用户 `npm login`（npmjs.com 账号名需 `smokingmouse`）→ publish llm+agent → trellis 全新 bun install 从 registry 实测 → make build + kickstart prod 验活 → 两仓 push。
 
 ---
@@ -186,6 +189,13 @@
 - [ ] (deferred) Level B 多 session in-memory store 重构 / C2 per-session model
 
 ## Session Log
+### Session 72 (2026-07-25)
+- **Done**: 清仓 Aaron 两个 open PR（无 open issue）。#10 `fix(popover): IME 组合输入的回车不触发发送`（BranchPopover 单文件 IME 守卫）+ #11 `feat(canvas): 卡片原地展开预览(peek)`（Canvas/ChatNode/layout 三文件：compact 卡「展开预览」→ 原地 600×480 完整卡，`forceFullIds` 确定 footprint 单趟 reflow，多卡同开/收起折回，popover rendersFull 门控），均 `gh pr merge --merge` 合入并已在 GitHub 推送。
+- **Review 要点**: #11 popover 门控最大风险 = 误伤其他选区路径，已排除——`data-chat-node-id` 仅 ChatNode（画布）/TurnCard（线性）携带，Canvas 与 LinearThreadView 互斥挂载，reference 卡无该属性；`rendersFull` 与 ChatNode `showCompact`（含 S64 errorSuperseded）语义镜像一致。#11 顺带的 FollowupInput 焦点环 px-1.5 wrapper 为无害 drive-by。
+- **验证**: 合并树（origin/main + 两 PR）tsc ✓、touched 4 文件 lint 零新增（Canvas 2 项 `set-state-in-effect` 与 main 基线逐条对齐）、隔离 worktree（~/trellis-prcheck-tmp 共享 node_modules）`bun --bun run build` ✓；隔离实例 :3163（`TRELLIS_DB_PATH` 沙箱 + `env -u TRELLIS_AUTH_PASS` 关闸 + mock provider）agent-browser 全链路：建 2 节点树 → #1「展开预览」→ DOM 实测 peek 卡 600×480 z=1000、子卡 y=556（480+40 起点 +36 间距）无重叠、URL/视图不变未跳线性 →「收起」→ 两卡回 280×47、子卡回位 y=166。产物已清（browser session/server/worktree/临时 DB）。
+- **仓库状态注记**: S71 三 commit（npm 化 + 模型配置）本地未 push（`@smokingmouse/*` npm 404，publish 闸未过）；已 `git rebase origin/main` 把它们叠到 PR merge 之上，rebase 后合并树 tsc ✓。shell 环境自带 `TRELLIS_AUTH_PASS/TOKEN` export——隔离实例起服务须 `env -u` 显式剥离，否则 401（本轮踩到）。
+- **Next**: 用户 npm login → publish llm+agent → 两仓 push（S71 Next 原样）；PR 两功能上 prod = build + kickstart；#11 真机手感验收（peek 与 hover 预览卡并存的观感）。
+
 ### Session 68 (2026-07-19)
 - **Done**: markdown 答案里图片本地路径破图修复（用户截图报「图没法预览」）。
   - 根因：`MD_COMPONENTS` 缺 `img` 渲染器——S63 只接管了 `a`（MdLink）和行内 `code`（InlineFileButton），`![alt](/Users/…/foo.png)` 的本地 src 直进 `<img>`，浏览器按 http 路径请求 404。
