@@ -163,6 +163,11 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             onChange={(e) => setQ(e.target.value)}
             onPaste={att.handlePaste}
             onKeyDown={(e) => {
+              // Ignore the Enter that commits an IME composition (e.g. typing
+              // "gnss" in a Chinese IME and pressing Enter to accept the raw
+              // letters): that keydown reports key "Enter" but isComposing /
+              // keyCode 229 — treating it as submit fires the branch mid-input.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 submit();
