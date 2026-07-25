@@ -207,22 +207,38 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
   - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成登录
 - 完全不装 CLI 也能启动——provider picker 选 `Mock`，返回固定假回复，仅用于看 UI
 
-Trellis 的 LLM/CLI 运行时层来自独立仓库 [`sm-toolkit`](https://github.com/SmokingMouse/sm-toolkit)（`@sm/agent` + `@sm/llm`），以 `file:` 依赖指向本机的 `~/sdk`。`make setup` 会自动 clone/build 它、把 `package.json` 里的路径对齐到本机实际位置，再装 trellis 自己的依赖——一条命令搞定，不用手动两步走。
+Trellis 的 LLM/CLI 运行时层是普通 npm 依赖（[`@smokingmouse/agent`](https://www.npmjs.com/package/@smokingmouse/agent) + [`@smokingmouse/llm`](https://www.npmjs.com/package/@smokingmouse/llm)，源码在 [`sm-toolkit`](https://github.com/SmokingMouse/sm-toolkit)），`bun install` 一步装完，无需额外 clone/build 任何仓库。
 
 ### 跑起来
 
 ```bash
 git clone https://github.com/SmokingMouse/trellis.git
 cd trellis
-make setup   # clone/build ~/sdk（sm-toolkit）+ 对齐依赖路径 + bun install + 前置检查
+make setup   # = bun install + 前置检查
 make dev
 ```
 
-`~/sdk` 已经存在但不在默认位置？`make setup SDK_HOME=/your/path`。只想看当前环境缺什么、不装任何东西：`make check`。
+只想看当前环境缺什么、不装任何东西：`make check`。
 
-强烈建议走 `make`，不建议手动拼这几步——bun 对 `file:` 依赖的处理有两个不直观的坑（细节见 `next.config.ts` 和 `Makefile` 顶部注释）：① bun 默认把依赖目录内每个文件单独软链回源目录，Turbopack 解析不了这种 `package.json`，必须转成单层目录软链（`make setup`/`relink-sdk` 处理）；② `bun run dev/build/start` 不会把 Next/Turbopack 内部起的 worker 进程也纳入 bun 运行时，导致 `bun:sqlite`（`lib/server/sqlite.ts` 用）解析不到，必须用 `bun --bun run dev`（`make dev`/`make build`/`make start` 已经这么做了）。
+唯一的运行时注意点：必须用 `bun --bun run dev`（`make dev`/`make build`/`make start` 已经这么做了）——`bun run` 不会把 Next/Turbopack 内部起的 worker 进程纳入 bun 运行时，导致 `bun:sqlite`（`lib/server/sqlite.ts` 用）解析不到。
 
 打开 http://localhost:3000，第一次输入问题即创建 session。想 attach 已有 CLI 会话：左侧 sidebar →「Attach CLI 会话」。
+
+### 第三方模型（可选）
+
+原生 claude / codex 走 CLI 登录态，零配置。想接 Anthropic 兼容的第三方端点（deepseek / kimi / ark …）：
+
+```bash
+mkdir -p ~/.config/sm
+cp node_modules/@smokingmouse/llm/endpoints.example.yaml ~/.config/sm/endpoints.yaml
+# 编辑它：填你自己的 provider / 模型清单，API key 只写环境变量名，key 本体放 env
+```
+
+搜索顺序 `$SM_ENDPOINTS_PATH` → `~/.config/sm/endpoints.yaml` → `~/.claude/global/endpoints.yaml`（legacy）。改完重启即出现在模型 picker。
+
+### 本地开发 SDK（可选）
+
+要改 `sm-toolkit` 本体时：clone 到 `~/sdk`，`make link-sdk` 把两个包软链过来（`bun install` 会冲掉软链，重跑即可）；`make unlink-sdk` 回到 registry 版本。
 
 ### 生产构建
 

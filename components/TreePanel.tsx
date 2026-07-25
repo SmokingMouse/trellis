@@ -54,6 +54,11 @@ export function TreePanel() {
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
   const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
   const treeVisits = useSessionStore((s) => s.treeVisits);
+  // 折叠子树与画布 / Outline 共用同一套 collapsedNodeIds —— 「这个子树折
+  // 起来了」是树的状态而非某个视图的状态；持久化 / 新子自动展开 / 跳转自动
+  // 展开祖先（setActiveNode → expandAncestors）全部免费继承。
+  const collapsedNodeIds = useSessionStore((s) => s.collapsedNodeIds);
+  const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
 
   const view = useSessionStore((s) => s.treePanelView);
   const switchView = useSessionStore((s) => s.setTreePanelView);
@@ -83,8 +88,9 @@ export function TreePanel() {
     [entries, activeRootId],
   );
   const activeRows = useMemo(
-    () => (activeRootId ? flattenTree(activeRootId, nodesMap) : []),
-    [activeRootId, nodesMap],
+    () =>
+      activeRootId ? flattenTree(activeRootId, nodesMap, collapsedNodeIds) : [],
+    [activeRootId, nodesMap, collapsedNodeIds],
   );
   // 当前链（线性视图正在展示的 lineage：祖先 + 锚点 + 首子链）。链外的
   // 分支行淡显——树内的「冷」不是时间，是「不在你正读的这条线上」。
@@ -436,7 +442,7 @@ export function TreePanel() {
         renderTreeGraph(entry)
       ) : (
       <div className="mt-0.5">
-        {activeRows.map(({ node, depth, isBranch }) => {
+        {activeRows.map(({ node, depth, isBranch, hasChildren, collapsed, hiddenRollup }) => {
           const isActive = node.id === activeNodeId;
           const unread = isUnreadNode(node);
           const offLineage =
@@ -447,13 +453,35 @@ export function TreePanel() {
               className={`group flex items-center rounded transition-colors ${
                 isActive ? "bg-accent-muted" : "hover:bg-surface-muted"
               }`}
+              style={{ paddingLeft: `${2 + depth * 10}px` }}
             >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  onClick={() => toggleCollapse(node.id)}
+                  className="shrink-0 w-4 self-stretch flex items-center justify-center text-ink-faint hover:text-ink-muted"
+                  title={collapsed ? "展开子树" : "折叠子树"}
+                  aria-label={collapsed ? "展开子树" : "折叠子树"}
+                >
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 12 12"
+                    className={`transition-transform ${collapsed ? "" : "rotate-90"}`}
+                    fill="currentColor"
+                    aria-hidden
+                  >
+                    <path d="M3 2 L9 6 L3 10 Z" />
+                  </svg>
+                </button>
+              ) : (
+                <span className="shrink-0 w-4" aria-hidden />
+              )}
               <button
                 type="button"
                 onClick={() => jumpToNode(node.id)}
                 onMouseEnter={hoverRow(node.id)}
                 onMouseLeave={leaveRow(node.id)}
-                style={{ paddingLeft: `${8 + depth * 10}px` }}
                 className={`flex-1 min-w-0 flex items-center gap-1 pr-1 py-[3px] text-left transition-colors ${
                   isActive
                     ? "text-accent-ink font-medium"
@@ -486,6 +514,39 @@ export function TreePanel() {
                   </span>
                 )}
                 <span className="truncate">{nodeRowLabel(node)}</span>
+                {/* 折叠行 rollup：藏起来的后代数量 + 运行/未读信号（折叠树
+                    行同款语义：等输入 > 生成中）。折叠不该把状态一起藏掉。 */}
+                {hiddenRollup && (
+                  <>
+                    {hiddenRollup.waiting ? (
+                      <span
+                        className="shrink-0 text-[10px] animate-pulse"
+                        title="折叠的分支里有节点在等你回答"
+                        aria-label="折叠分支等待输入"
+                      >
+                        🙋
+                      </span>
+                    ) : hiddenRollup.streaming ? (
+                      <span
+                        className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse"
+                        title="折叠的分支里在生成"
+                        aria-label="折叠分支生成中"
+                      />
+                    ) : null}
+                    <span
+                      className="shrink-0 font-mono text-nano text-ink-faint tabular-nums"
+                      title={`已折叠 ${hiddenRollup.count} 个节点`}
+                    >
+                      +{hiddenRollup.count}
+                    </span>
+                    {hiddenRollup.unread > 0 && (
+                      <span className="shrink-0 inline-flex items-center gap-0.5 text-nano font-medium text-unread-ink tabular-nums">
+                        <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
+                        {hiddenRollup.unread}
+                      </span>
+                    )}
+                  </>
+                )}
               </button>
               {node.status === "done" && (
                 <button

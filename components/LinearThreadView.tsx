@@ -191,9 +191,14 @@ export function LinearThreadView() {
   // subscribe directly and pin scrollTop per animation frame while following.
   useEffect(() => {
     if (!tipStreamingId) return;
-    followRef.current = true;
     const el = scrollRef.current;
     if (!el) return;
+    // 新 tip 开始流式时不无条件抢滚动：只有 tip 就是当前锚点（用户自己发起
+    // 的追问会把焦点落在新节点上）、或视口本来就贴底（正在跟读）才开启跟随。
+    // 正在上方读旧卡片时，后台启动的运行（CLI 同步轮次等）不把人拽到底部。
+    followRef.current =
+      threadData.anchorId === tipStreamingId ||
+      el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
     let raf = 0;
     const pin = () => {
       raf = 0;
@@ -209,6 +214,9 @@ export function LinearThreadView() {
       if (raf) cancelAnimationFrame(raf);
       unsub();
     };
+    // anchorId is a snapshot at tip-change time: anchor moves mid-stream are
+    // handled by onScroll's follow recomputation, not by re-running this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipStreamingId]);
 
   // Store-driven growth while streaming (tool-call panel rows, interaction

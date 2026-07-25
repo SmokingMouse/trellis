@@ -10,7 +10,10 @@ export function isEditableTarget(t: EventTarget | null): boolean {
     el &&
     (el.tagName === "INPUT" ||
       el.tagName === "TEXTAREA" ||
-      el.isContentEditable)
+      el.isContentEditable ||
+      // 整块让位区：容器自带整套键盘交互（如 SketchModal 里的 Excalidraw，
+      // r/o/a/t/Esc… 与 J/K/B/F/Esc 会互相踩），区内事件全部让位。
+      el.closest?.("[data-keys-yield]"))
   );
 }
 

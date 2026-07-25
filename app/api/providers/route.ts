@@ -2,16 +2,19 @@ import "server-only";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadEndpoints, listEndpoints } from "@sm/llm";
+import { loadEndpoints, listEndpoints } from "@smokingmouse/llm";
 import type { ProviderInfo } from "@/lib/llm";
 
-// Live model catalog for the picker, sourced from the same global
-// ~/.claude/global/endpoints.yaml every other sm_toolkit-based project reads
-// (via @sm/llm). Server-only: this is the one place the YAML/env-file/API
-// keys get touched — the client only ever sees ids + hasKey booleans.
+// Live model catalog for the picker, sourced from endpoints.yaml (via
+// @smokingmouse/llm; search order $SM_ENDPOINTS_PATH → ~/.config/sm/
+// endpoints.yaml → legacy ~/.claude/global/endpoints.yaml). The file is
+// OPTIONAL — a fresh deploy with just a logged-in claude CLI has none, and
+// gets the native tier catalog below instead of a 500. Server-only: this is
+// the one place the YAML/env-file/API keys get touched — the client only
+// ever sees ids + hasKey booleans.
 //
 // Filtered to entries usable through the claude CLI shell (see
-// @sm/agent's ClaudeBackend model resolution): a provider needs either no
+// @smokingmouse/agent's ClaudeBackend model resolution): a provider needs either no
 // override URL at all (native claude) or an anthropic_url. openai_url-only
 // providers (e.g. gemini) can't be routed through `claude --model` — the CLI
 // speaks the Anthropic Messages API, not OpenAI chat-completions — so they're
@@ -22,10 +25,41 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const config = loadEndpoints();
-  const endpoints = listEndpoints(config).filter((e) => e.anthropic_url || !e.openai_url);
+  const providers: ProviderInfo[] = yamlProviders();
+  providers.push(...codexProviders());
+  providers.push({
+    id: "mock",
+    label: "Mock",
+    shortLabel: "Mock",
+    note: "调试用",
+    hasKey: true,
+  });
 
-  const providers: ProviderInfo[] = endpoints.map((e) => {
+  return Response.json({ providers });
+}
+
+// The CLI's native tier aliases (legacy ids, resolved to bare "opus"/
+// "sonnet"/"haiku" by @smokingmouse/agent's ClaudeBackend). Served when the
+// yaml can't supply a native claude entry — no yaml at all, OR a yaml whose
+// providers are all third-party (typical for one created via the in-app
+// model-config UI): native claude works regardless of the yaml, so it must
+// never vanish from the picker.
+const NATIVE_TIERS: ProviderInfo[] = [
+  { id: "claude-opus", label: "Claude Opus", shortLabel: "Opus", hasKey: true },
+  { id: "claude-sonnet", label: "Claude Sonnet", shortLabel: "Sonnet", hasKey: true },
+  { id: "claude-haiku", label: "Claude Haiku", shortLabel: "Haiku", hasKey: true },
+];
+
+function yamlProviders(): ProviderInfo[] {
+  let config: ReturnType<typeof loadEndpoints>;
+  try {
+    config = loadEndpoints();
+  } catch {
+    return [...NATIVE_TIERS];
+  }
+  const endpoints = listEndpoints(config).filter((e) => e.anthropic_url || !e.openai_url);
+  const hasNative = endpoints.some((e) => !e.anthropic_url && !e.openai_url);
+  const fromYaml = endpoints.map((e) => {
     // Native entries (no anthropic_url/openai_url override — currently just
     // the "claude" provider) spawn the ambient `claude` CLI unmodified, which
     // authenticates via `claude login` OAuth, not an API key env var.
@@ -41,17 +75,7 @@ export async function GET() {
       hasKey: native ? true : e.hasKey,
     };
   });
-
-  providers.push(...codexProviders());
-  providers.push({
-    id: "mock",
-    label: "Mock",
-    shortLabel: "Mock",
-    note: "调试用",
-    hasKey: true,
-  });
-
-  return Response.json({ providers });
+  return hasNative ? fromYaml : [...NATIVE_TIERS, ...fromYaml];
 }
 
 // Codex-family entries, enumerated from the codex CLI's own model cache

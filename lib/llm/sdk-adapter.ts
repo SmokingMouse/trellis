@@ -1,14 +1,14 @@
-// trellis ↔ @sm/agent(~/sdk)SDK 的转换层。
+// trellis ↔ @smokingmouse/agent(~/sdk)SDK 的转换层。
 // SDK 暴露细粒度 RunOptions(机制)+ 统一 AgentEvent;trellis 在这里把自己的
 // mode(策略)映射成 RunOptions,把 AgentEvent 转回自己的 StreamEvent。
 // 这一层是"反向依赖 SDK"的关键:SDK 不认 trellis 的 mode/prompt,全部留在此。
-// 模型/endpoints.yaml 解析已经下沉进 SDK 的 ClaudeBackend 内部(见 @sm/agent/backends/
+// 模型/endpoints.yaml 解析已经下沉进 SDK 的 ClaudeBackend 内部(见 @smokingmouse/agent/backends/
 // claude.ts)——这里的 `model` 字段只是原样透传,不在这一层再手动解析 endpoint/拼 env。
 
 import os from "node:os";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { EventType, type AgentEvent, type RunOptions } from "@sm/agent";
+import { EventType, type AgentEvent, type RunOptions } from "@smokingmouse/agent";
 import type { SubagentMeta } from "@/lib/types";
 import type { Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
@@ -42,7 +42,7 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
     // chat B-fork (claude only): persist + resume the parent's forked session so
     // the CLI keeps history as immutable, cache-hit message blocks. forkSession
-    // is honored by @sm/agent only when resume is set, so the first turn
+    // is honored by @smokingmouse/agent only when resume is set, so the first turn
     // (resume undefined) spawns a fresh session without --fork-session. codex
     // leaves req.forkSession false → no persist, folded-history path unchanged.
     const forkOpts: RunOptions = req.forkSession
@@ -69,7 +69,7 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     // 纯对话:替换 system prompt + 仅 web 工具。无 workspace(无文件工具)。
     // 但 cwd 必须给 —— B-fork 的 session jsonl 落在 cwd 编码目录,spawn/resume
     // 校验/清理三处必须同一个 cwd。req.cwd = sessionCwd(chat) = CHAT_SCRATCH;
-    // 不设则 @sm/agent 回退进程 cwd(trellis 项目目录),与校验用的 CHAT_SCRATCH
+    // 不设则 @smokingmouse/agent 回退进程 cwd(trellis 项目目录),与校验用的 CHAT_SCRATCH
     // 错位 → resume 自愈误判 jsonl 不存在 → 全 fresh → 失忆。cwd 与 workspace
     // 正交:给 cwd 稳定落盘、不给 workspace 保持无文件工具。
     // settingSources:false:稳定 cwd 会让 claude 向上找到项目/全局 CLAUDE.md 污染

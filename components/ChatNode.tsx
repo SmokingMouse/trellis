@@ -17,7 +17,7 @@ import {
   getStreamPending,
   thinkingChannel,
 } from "@/lib/stream-bus";
-import { COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
+import { COMPACT_ZOOM_THRESHOLD, PEEK_CARD_HEIGHT } from "@/lib/layout";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
@@ -52,6 +52,10 @@ export type ChatFlowNode = Node<
     descendantCount: number;
     // Whether this node's subtree is currently folded.
     collapsed: boolean;
+    // Peek: render this node's full card in place on the canvas (instead of
+    // the compact topic card) without switching to the linear reader.
+    isPeeked: boolean;
+    onTogglePeek: (id: string) => void;
   },
   "chat"
 >;
@@ -170,7 +174,11 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   // Compact mode: streaming / fresh-error nodes always render full so user
   // can see progress and act. Done nodes — and superseded errors, whose
   // loud treatment has expired — collapse to a topic card at low zoom.
-  const showCompact = isCompact && !isStreaming && (!isError || errorSuperseded);
+  const showCompact =
+    isCompact &&
+    !isStreaming &&
+    (!isError || errorSuperseded) &&
+    !data.isPeeked;
 
   if (showCompact) {
     return (
@@ -187,6 +195,33 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       >
         <Handle type="target" position={Position.Top} />
         <DeleteCardButton nodeId={n.id} />
+        {/* Peek toggle: a hover-only corner chip matching DeleteCardButton's
+            circle, parked just left of the ✕ — same visual language, no
+            content-row clutter. */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onTogglePeek(n.id);
+          }}
+          title="展开预览（留在画布）"
+          aria-label="展开预览"
+          className="absolute -top-2 right-4 z-10 w-5 h-5 rounded-full border bg-surface border-line-strong text-ink-muted shadow-raise opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-ink hover:text-ink-inverse hover:border-ink transition-opacity flex items-center justify-center"
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
         {showCollapseChip && (
           <CollapseChip
             collapsed={data.collapsed}
@@ -257,7 +292,13 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 
   return (
     <div
+      // When shown because of peek, pin to a fixed height and let the body
+      // flex-fill + scroll inside — so the card's on-canvas footprint is a
+      // known constant the layout can reserve exactly (see PEEK_CARD_HEIGHT).
+      style={data.isPeeked ? { height: PEEK_CARD_HEIGHT } : undefined}
       className={`group relative nopan bg-surface border rounded-card shadow-raise w-[600px] transition-all ${
+        data.isPeeked ? "flex flex-col" : ""
+      } ${
         isStreaming
           ? "border-accent-line ring-4 ring-accent-muted"
           : isActive
@@ -315,7 +356,15 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         <div className="w-7 h-7 rounded-full bg-accent text-ink-inverse text-label flex items-center justify-center mt-0.5 shrink-0 font-medium">
           你
         </div>
-        <div className="flex-1 text-body text-ink leading-relaxed pt-1 font-medium min-w-0">
+        <div
+          className={`flex-1 text-body text-ink leading-relaxed pt-1 font-medium min-w-0 ${
+            // Peek pins the whole card to PEEK_CARD_HEIGHT with the body as the
+            // flex-fill scroll area. A long question / many attachments would
+            // otherwise grow this header unbounded, pushing the card past its
+            // reserved footprint and over the child below — so cap + scroll it.
+            data.isPeeked ? "max-h-[200px] overflow-y-auto" : ""
+          }`}
+        >
           {indexLabel && (
             <span className="mr-1.5 font-mono text-ui text-ink-faint tabular-nums font-normal inline-flex items-center gap-1">
               {indexLabel}
@@ -335,6 +384,32 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             </div>
           )}
         </div>
+        {data.isPeeked && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onTogglePeek(n.id);
+            }}
+            title="收起预览"
+            aria-label="收起预览"
+            className="shrink-0 mt-0.5 px-2 h-7 rounded-md bg-surface border border-line-strong text-ink-muted hover:bg-ink hover:text-ink-inverse hover:border-ink active:scale-95 flex items-center gap-1 text-label font-medium transition-colors shadow-raise"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M18 15l-6-6-6 6" />
+            </svg>
+            收起
+          </button>
+        )}
         <button
           onClick={goRead}
           title="线性阅读"
@@ -361,7 +436,9 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         ref={bodyRef}
         data-chat-node-id={n.id}
         onClick={onMarkClick}
-        className="px-5 py-4 md-body text-body text-ink-muted max-h-[420px] overflow-y-auto nodrag nowheel nopan"
+        className={`px-5 py-4 md-body text-body text-ink-muted overflow-y-auto nodrag nowheel nopan ${
+          data.isPeeked ? "flex-1 min-h-0" : "max-h-[420px]"
+        }`}
       >
         {isStreaming ? (
           <>
@@ -445,6 +522,7 @@ export const ChatNode = memo(ChatNodeImpl, (prev, next) => {
   if (prev.data.node !== next.data.node) return false;
   if (prev.data.isActive !== next.data.isActive) return false;
   if (prev.data.collapsed !== next.data.collapsed) return false;
+  if (prev.data.isPeeked !== next.data.isPeeked) return false;
   if (prev.data.descendantCount !== next.data.descendantCount) return false;
   const a = prev.data.childAnchors;
   const b = next.data.childAnchors;
@@ -560,24 +638,30 @@ function FollowupInput({
         onPick={pickSkill}
         activeIndex={slashNav.active}
       />
-      <textarea
-        ref={ref}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => {
-          if (slashNav.handleKeyDown(e)) return;
-          if (isSendCombo(e, sendKey)) {
-            e.preventDefault();
-            submit();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onClose();
-          }
-        }}
-        placeholder={`对整段回复继续追问…（${sendHint(sendKey)}）`}
-        rows={2}
-        className="w-full px-5 py-3 outline-none resize-none text-sm bg-transparent text-ink placeholder:text-ink-faint"
-      />
+      {/* px-1.5 insets the full-width textarea so its :focus-visible outline
+          (globals.css — 2px solid + 2px offset, a non-layered rule utilities
+          can't override) stays inside the card border instead of poking past
+          it. */}
+      <div className="px-1.5">
+        <textarea
+          ref={ref}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (slashNav.handleKeyDown(e)) return;
+            if (isSendCombo(e, sendKey)) {
+              e.preventDefault();
+              submit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onClose();
+            }
+          }}
+          placeholder={`对整段回复继续追问…（${sendHint(sendKey)}）`}
+          rows={2}
+          className="w-full px-3.5 py-3 outline-none resize-none text-sm bg-transparent text-ink placeholder:text-ink-faint"
+        />
+      </div>
       <div className="px-3 py-1.5 flex items-center justify-end gap-2 text-xs">
         <button
           onClick={() => setZoneOpen(true)}

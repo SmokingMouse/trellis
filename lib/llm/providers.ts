@@ -1,8 +1,8 @@
 // Client-safe provider metadata. No Node-only imports here.
 //
 // ProviderId used to be a closed union of 5 literals. It's now widened to a
-// plain string: the real catalog is sourced live from ~/.claude/global/
-// endpoints.yaml (via @sm/llm, server-only — see app/api/providers/route.ts)
+// plain string: the real catalog is sourced live from endpoints.yaml
+// (via @smokingmouse/llm, server-only — see app/api/providers/route.ts)
 // and can contain arbitrary "<provider>:<model>" composite ids (e.g.
 // "deepseek:deepseek-v4-flash"), not just the 3 hardcoded Claude tiers. The
 // legacy literals ("claude-opus"/"claude-sonnet"/"claude-haiku"/"codex"/
@@ -33,7 +33,7 @@ export const DEFAULT_PROVIDER: ProviderId = "claude-opus";
 // synchronously available at this module's import time (it needs node:fs,
 // and this file is explicitly client-safe/Node-free). Real validity is
 // enforced server-side when the id is actually resolved to a backend (see
-// ClaudeBackend's model resolution in @sm/agent) — an unknown/stale id
+// ClaudeBackend's model resolution in @smokingmouse/agent) — an unknown/stale id
 // surfaces as a chat error there instead of being silently rejected here.
 export function isProviderId(s: unknown): s is ProviderId {
   return typeof s === "string" && s.length > 0;

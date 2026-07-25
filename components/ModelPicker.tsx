@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Popover } from "@/components/ui/Popover";
+import { ModelConfigModal } from "@/components/ModelConfigModal";
 import {
   PROVIDERS,
   FAMILY_LABELS,
@@ -28,6 +29,7 @@ export function ModelPicker() {
   // belongs.
   const sessionActive = useSessionStore((s) => s.session !== null);
   const [open, setOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
 
   const current = catalog.find((p) => p.id === provider) ?? catalog[0] ?? PROVIDERS[0];
 
@@ -46,6 +48,7 @@ export function ModelPicker() {
   }, [catalog]);
 
   return (
+    <>
     <Popover
       open={open}
       onClose={() => setOpen(false)}
@@ -112,6 +115,17 @@ export function ModelPicker() {
           })}
         </div>
       ))}
+      <button
+        onClick={() => {
+          setOpen(false);
+          setConfigOpen(true);
+        }}
+        className="w-full text-left px-3 py-2 border-t border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong"
+      >
+        ⚙ 管理模型…
+      </button>
     </Popover>
+    {configOpen && <ModelConfigModal onClose={() => setConfigOpen(false)} />}
+    </>
   );
 }

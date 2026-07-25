@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { ClaudeBackend } from "@sm/agent";
+import { ClaudeBackend } from "@smokingmouse/agent";
 import { toStreamEvent } from "@/lib/llm/sdk-adapter";
 import { splitToolChain } from "@/lib/subagents";
 import type { ToolCall } from "@/lib/types";

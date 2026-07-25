@@ -50,6 +50,17 @@ export type TreeRowItem = {
   depth: number;
   /** 是否分叉子（父节点 >1 子）—— 决定 ↳ 标记 */
   isBranch: boolean;
+  /** 有子节点 —— 决定是否给折叠箭头 */
+  hasChildren: boolean;
+  /** 本行处于折叠态（后代行未渲染） */
+  collapsed: boolean;
+  /** 折叠时被藏起的后代 rollup；展开态为 null */
+  hiddenRollup: {
+    count: number;
+    unread: number;
+    waiting: boolean;
+    streaming: boolean;
+  } | null;
 };
 
 export function isUnreadNode(n: ChatNode): boolean {
@@ -182,16 +193,44 @@ export function groupTrees(
   return { hot, cold, hidden };
 }
 
-/** 当前树扁平化为面板行：线性段平铺，仅真分叉处缩进一级（与 Outline 同规）。 */
+/**
+ * 当前树扁平化为面板行：线性段平铺，仅真分叉处缩进一级（与 Outline 同规）。
+ * collapsedIds（画布/Outline 同一套 store.collapsedNodeIds）里的节点不下钻，
+ * 该行携带被藏后代的 rollup（数量 / 未读 / 等输入 / 生成中）供折叠行回显。
+ */
 export function flattenTree(
   rootId: string,
   nodes: Record<string, ChatNode>,
+  collapsedIds?: ReadonlySet<string>,
 ): TreeRowItem[] {
   const byParent = childrenIndex(nodes);
   const rows: TreeRowItem[] = [];
+  const rollup = (id: string): NonNullable<TreeRowItem["hiddenRollup"]> => {
+    const acc = { count: 0, unread: 0, waiting: false, streaming: false };
+    const dig = (pid: string) => {
+      for (const k of byParent.get(pid) ?? []) {
+        acc.count++;
+        if (isUnreadNode(k)) acc.unread++;
+        if (isWaitingNode(k)) acc.waiting = true;
+        else if (k.status === "streaming") acc.streaming = true;
+        dig(k.id);
+      }
+    };
+    dig(id);
+    return acc;
+  };
   const walk = (n: ChatNode, depth: number, isBranch: boolean) => {
-    rows.push({ node: n, depth, isBranch });
     const kids = byParent.get(n.id) ?? [];
+    const collapsed = kids.length > 0 && (collapsedIds?.has(n.id) ?? false);
+    rows.push({
+      node: n,
+      depth,
+      isBranch,
+      hasChildren: kids.length > 0,
+      collapsed,
+      hiddenRollup: collapsed ? rollup(n.id) : null,
+    });
+    if (collapsed) return;
     const fork = kids.length > 1;
     for (const k of kids) walk(k, depth + (fork ? 1 : 0), fork);
   };

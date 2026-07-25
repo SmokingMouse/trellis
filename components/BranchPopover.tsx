@@ -77,6 +77,35 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     }
   }, [expanded]);
 
+  // Keep the source text visibly highlighted while composing. The native
+  // selection can't do this once expanded — clicking the textarea to place
+  // the caret collapses it (that click is exactly what we un-blocked to fix
+  // caret placement). So paint our own via the CSS Custom Highlight API from
+  // the snapshotted Range, and clear the native selection so the two don't
+  // double-paint. Gracefully no-ops on browsers without the API (old Firefox
+  // just shows no highlight — no error).
+  useEffect(() => {
+    if (!expanded) return;
+    const range = selection.range;
+    const cssApi = (
+      globalThis as unknown as {
+        CSS?: { highlights?: { set(k: string, v: unknown): void; delete(k: string): void } };
+      }
+    ).CSS;
+    const HighlightCtor = (globalThis as unknown as { Highlight?: new (r: Range) => unknown })
+      .Highlight;
+    if (!range || !cssApi?.highlights || !HighlightCtor) return;
+    let hl: unknown;
+    try {
+      hl = new HighlightCtor(range);
+    } catch {
+      return;
+    }
+    window.getSelection()?.removeAllRanges();
+    cssApi.highlights.set("branch-source", hl);
+    return () => cssApi.highlights?.delete("branch-source");
+  }, [expanded, selection.range]);
+
   const { doneAttachments, hasUploading } = att;
 
   const submit = async () => {
@@ -101,8 +130,13 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     <div
       className="fixed z-50 max-w-[calc(100vw-16px)]"
       style={{ top, left, transform: "translateX(-50%)" }}
-      onMouseDown={(e) => e.preventDefault()}
-      onPointerDown={(e) => e.preventDefault()}
+      // Collapsed: swallow mousedown so clicking the ⌘K / note buttons keeps
+      // the document text selection alive (the buttons act on it). Expanded:
+      // the selection is already snapshotted into `selection.text`, and this
+      // same preventDefault would block the textarea from placing its caret on
+      // click (mouse click dead, arrow keys still work) — so drop it there.
+      onMouseDown={expanded ? undefined : (e) => e.preventDefault()}
+      onPointerDown={expanded ? undefined : (e) => e.preventDefault()}
     >
       {expanded ? (
         <div className="bg-surface border border-line rounded-lg shadow-pop w-[min(420px,calc(100vw-16px))] overflow-hidden">
@@ -129,6 +163,11 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             onChange={(e) => setQ(e.target.value)}
             onPaste={att.handlePaste}
             onKeyDown={(e) => {
+              // Ignore the Enter that commits an IME composition (e.g. typing
+              // "gnss" in a Chinese IME and pressing Enter to accept the raw
+              // letters): that keydown reports key "Enter" but isComposing /
+              // keyCode 229 — treating it as submit fires the branch mid-input.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 submit();
