@@ -1,6 +1,9 @@
 # Trellis Progress
 
 ## Current Focus
+**ExitPlanMode 批准链路修复（Session 75）**：用户报 prod 上批准计划报 `ZodError: expected record at updatedInput, received undefined`，自诊为「Claude Code 与 Trellis 的协议版本偏差」。**实为 Trellis 自身 bug**，且定位到确切一行：`ExitPlanModeForm.decide`（`components/InteractionForm.tsx:507`）allow 分支只发 `{behavior, message}`，**漏了 `updatedInput`**——另两处交互表单（AskUserQuestion:162、权限卡:385）都带了，所以只有计划审批炸。链路：表单 → `respondToInteraction`（`updatedInput: undefined` 原样 POST）→ respond route 转发 → run-bus resolver → `@smokingmouse/agent` 的 stdio 桥 `dist/backends/claude.js:227` `...(r.updatedInput !== undefined ? {...} : {})` **把整个 key 抹掉** → Claude Code 收到裸 `{behavior:"allow"}` → Zod 炸。`bypassPermissions` 躲不掉，因为 ExitPlanMode 在 `INTERACTIVE_TOOLS` 里、必走暂停路径；deny 分支只需 `message` 故不受影响。**三处改动**：① 表单 allow 补 `updatedInput: interaction.input`（真 bug）；② run-bus resolver 加兜底——allow 且 `updatedInput` 不是合法 record（非 null 非数组的 object）就回填 `req.input`，把「表单层漏传」这类错误挡在 SDK 之前；③ 修掉 respond route 注释里那句把人带沟里的「for ExitPlanMode allow/deny is enough」（错误前提正是它固化的）。**验证**（见 Verified Facts 的版本闸）：tsc ✓ lint ✓ + **同版本 A/B 实测**——隔离实例 :3164（沙箱 DB + 关认证闸）按老客户端姿势直打 API（`{behavior:"allow"}` 不带 updatedInput），未修版 ExitPlanMode `isError=true` 且返回**逐字复现用户报错**的 ZodError、模型转头重发 ExitPlanMode 卡死；修复版同一路径 `isError=false`「User has approved your plan」、续跑写出 hello.txt、`done` 收尾。**Next**：用户决定是否提交（当前改动在 main 工作区未提交，提交需先切分支）；prod 生效需主目录 `make build` + `launchctl kickstart -k`。
+
+---
 **树面板「图形视图」补折叠（Session 74）**：用户「能增加一个树节点折叠的功能吗」→ 反问澄清落在**树面板的图形视图**（画布 chip / Outline 三角 / 树面板列表行 S69 都已有，唯独图形视图当时刻意跳过——「图形是看形状的总览面」）。落地：① `graphGeometry` 先用 `hiddenByCollapse` 把折叠子树**整块剔出再进 dagre**——折叠在图形视图的价值就是腾地方，剩下的点因此重新占满面板；② 有子节点的点挂 ⊖ 小按钮、**悬停才显**（纯链树每点都挂纽扣太吵），已折叠的点**常显** ⊕ +「+N ·未读」角标（折完得有回头路；rollup 与列表折叠行同优先级 waiting>streaming>unread——折叠不该把状态一起藏掉）；③ 按钮圆心落在点自己的 r=10 命中区**之内**（鼠标从点移到按钮不能丢 hover，丢了按钮就闪没）；贴右缘时按钮+角标翻到左侧（SVG viewport 默认裁溢出）；触摸设备走 `[@media(hover:none)]` 常显；④ rollup 从 `flattenTree` 内部闭包提成 `subtreeRollup`，与列表共用一份语义。**顺带修一处既有别扭**：缩放上限 1 → `GRAPH_MAX_SCALE=0.4`——dagre 原尺寸 rank 间距 126px，折剩两三个点时不设限会把它们拉开一屏，「越折越空」（实测折剩 2 点：行距 126→50px、SVG 高 154→78px；9 点密树 scale 本就 ~0.27，行距 34px 不变）。**验证**：tsc ✓ lint ✓ + emperor worktree `bun --bun run build` ✓（独立 `.next`，未碰 prod）+ 隔离实例 :3164（emperor worktree + `TRELLIS_DB_PATH` 沙箱 + `env -u TRELLIS_AUTH_PASS` 关闸 + 直插 SQLite 造 11 节点三分叉树、4 个未读）agent-browser 实测十一项全绿：叶子无按钮/非叶有按钮（DOM 逐节点核）、悬停显 ⊖、**从冷位置直接移到按钮再点 = 折叠而非跳转**（pointer-events 传导这环最易塌，专门这么打）、折 n2 剩 2 点带「+7 ·2」、展开还原、折 n3 落 sessionStorage 且 reload 保持、切列表视图同节点显「展开子树 +2 1」（两视图共用 `collapsedNodeIds`）、点 dot 照常跳转 + 悬停预览卡无回归、⌘J 跳进被折叠的 n5 自动展开祖先、右缘节点角标实测 218..242 未越 272 边界、折根节点剩 1 点「+10 ·2」不炸。**Next**：用户现场验收；上 prod = 主目录 `make build` + `launchctl kickstart -k`。
 
 ---
@@ -199,9 +202,21 @@
 
 - **prod 跑在 `/Users/smokingmouse/python/learning/trellis`**（launchd plist 的 `WorkingDirectory`，S73 实测）。所以 S66 那条「build 后必须 kickstart prod」**只对主目录成立**——在 emperor / preview 等 worktree 里 `make build` 用的是各自的 `.next`，碰不到 prod，不需要也不该去 kickstart。
 - **Tailwind 的 `group-hover:` / `[@media(hover:none)]:` 在 SVG 元素上照常生效**（S74 实测：`<g class="group">` 的子元素能吃到 group-hover；`@media (hover: none)` 块在编译产物里排在 `.opacity-0` / `.pointer-events-none` 之后，同特异性后来者胜 → 触摸设备上"悬停才显"的控件会常显可点）。所以 SVG 里的悬停控件不必走 React state。
+- **「allow 不带 `updatedInput`」是否炸，取决于 Claude Code 版本**（S75 同机 A/B 实测）：**2.1.183 直接炸** `ZodError: expected record at updatedInput, received undefined`，工具结果 `isError=true`，模型会转头重发 ExitPlanMode 卡死；**2.1.207 容忍**，同样的裸 `{behavior:"allow"}` 一路放行到批准。所以**这个 bug 会随 CLI 升级自行"消失"，但不能靠升级掩盖**——schema 是判别联合，allow 分支要 record，永远回传 `updatedInput`（不改写就原样回 `req.input`）。复现要点：`npm i @anthropic-ai/claude-code@<ver> --prefix /tmp/ccX` 后 `PATH=/tmp/ccX/node_modules/.bin:$PATH` 起服务即可钉版本（agent 从 PATH 取 `claude`）。
+- **`next dev` 的 dev 产物在 `.next/dev/` 子目录，不碰同目录的 prod 构建**（S75 实测：主目录跑完 dev，`.next/BUILD_ID` 与全部 prod manifest 的 mtime 保持 S73 的 7-25 22:13 不变）。所以主目录起隔离 dev 实例是安全的——**但 `make build` 不是**，那个会真覆盖 prod 产物。
 - **`@smokingmouse/agent` 0.3.0 不含 `EventType.Task` / `parentToolUseId`，0.3.1 才含**（`npm pack` 解包 grep 实测，S73）。子 Agent 区依赖它；版本退回 0.3.0 时 UI 不报错、只是永远空。各部署目录 `bun install` 后建议核一句：`grep -c 'Task: "task"' node_modules/@smokingmouse/agent/dist/events.js`。
 
+## Open Failures
+- **主目录 `next dev` 起的实例前端永远停在「加载中…」，React 从不 hydrate**（S75，:3164 实测）。证据：`document.body.firstElementChild` 上 `__react*` fiber key 数 = 0（纯 SSR HTML）、全部 `_next` chunk 均 200、console 无 error、`/api/sessions` 只有 curl 打的没有浏览器打的（说明 effect 从未跑）、`matchMedia` 正常。**已排除**是 S75 改动引入——`git stash` 回干净 main 后同样复现。**假设**（未验）：Turbopack 那条 `Parsing CSS source code failed`（`app/globals.css` 的 `::highlight(branch-source)` 被判非法伪元素，dev 日志里刷了 7 次）打断了 client bundle 的执行链。**下个 session 先打这个**：临时注释掉该 CSS 规则重起 dev，看 fiber 是否挂上；挂上即坐实，那条规则要么换写法要么加 `@supports` 包一层。prod（`next start`）不受影响，:3088 实测正常。
+
 ## Session Log
+### Session 75 (2026-07-26)
+- **Done**: 修 ExitPlanMode 批准报 ZodError（详见 Current Focus）。用户带着「Trellis 与 Claude Code 协议版本偏差」的自诊来，**结论推翻了它**：是 Trellis 自己三处交互表单里唯独计划审批漏传 `updatedInput`。改 `components/InteractionForm.tsx`（真 bug）+ `lib/server/run-bus.ts`（resolver 兜底回填）+ respond route 的误导注释。
+- **设计取舍**: 没有把 `lib/llm/types.ts` 的 `updatedInput?: unknown` 收紧成判别联合（allow 强制 record）——那样能在编译期拦住这类漏传，但 respond route 收的是不可信 HTTP JSON、终究要运行时校验一遍，而 run-bus 那道兜底已经把这个位置守死了。为编译期好看做一圈波及面更大的重构不划算，留作独立一刀。
+- **验证**: 关键在**对照组**。第一次 A/B 用本机默认 CLI(2.1.207)跑，未修版竟然也全绿——说明测法当时**没有区分力**，差点误判「已修好」。查出本机是 2.1.207 而用户报错在 2.1.183，把 183 装进 `/tmp/cc183` 用 PATH 钉版本重打：未修版逐字复现用户的 ZodError + 模型重发 ExitPlanMode 卡死，修复版一次通过并续跑写文件。**教训**：跨版本 bug 的对照组必须钉住报障者的版本，否则"绿"毫无信息量。
+- **未做**: 浏览器点击态验证被一个**既有的** dev-mode hydration 故障挡住（见 Open Failures），故改走 API 直打——反而更强，因为它直接复刻了老客户端的错误 payload，同时验到了服务端兜底。表单那一改属静态可核（与另两处已 work 的表单同构）。测完已清：dev server kill / 沙箱 DB 删 / 临时 workspace 删 / `/tmp/cc183` 删 / browser session close / `.next/dev` 残留清；prod :3088 复核仍 401 正常、`.next/BUILD_ID` 未变。
+- **Next**: 用户决定是否提交（在 main 未提交，提交需先切分支）；要在 prod 生效需主目录 `make build` + `launchctl kickstart -k`。
+
 ### Session 74 (2026-07-26)
 - **Done**: 树面板图形视图补上折叠子树（列表视图 S69 已有，本轮补齐另一半）。需求原话「能增加一个树节点折叠的功能吗」含糊——先摸清折叠已存在于画布/Outline/树面板列表三处，再反问定位到图形视图，没有重复造。
   - `components/TreePanel.tsx`：`graphGeometry` 加 `hiddenByCollapse` 过滤后再喂 `layoutNodes`（折叠子树整块退出布局，剩余点重新占满面板）+ 返回 `visible` 供渲染；每个非叶点挂 ⊖/⊕ 按钮子 `<g>`（`e.stopPropagation()` 与跳转分开）、折叠点常显 + `+N ·未读` `<text>` 角标；`GRAPH_MAX_SCALE=0.4` 取代原来的 `1`。

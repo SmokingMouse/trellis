@@ -506,6 +506,9 @@ function ExitPlanModeForm({
     setSubmitting(behavior);
     const res = await respond(nodeId, interaction.toolUseId, {
       behavior,
+      // allow 必须回传 updatedInput（SDK 侧 schema 要求 record，缺了会
+      // ZodError 打断整个 run）。计划审批不改写入参，原样回传即可。
+      ...(behavior === "allow" ? { updatedInput: interaction.input } : {}),
       message:
         behavior === "deny" && reason.trim() ? reason.trim() : undefined,
     });
