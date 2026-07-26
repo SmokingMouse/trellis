@@ -8,9 +8,11 @@ export const dynamic = "force-dynamic";
 //
 // The frontend constructs updatedInput — for AskUserQuestion that's the
 // original input plus the chosen answers map (e.g. { ...input, answers: { ...
-// } }); for ExitPlanMode allow/deny is enough. The server doesn't parse
-// updatedInput — it forwards the decision verbatim to the SDK callback, which
-// resumes the model in place.
+// } }); every other allow just echoes the original input back. behavior
+// "allow" ALWAYS needs a record here — the SDK's schema rejects undefined
+// (run-bus backfills as a last resort). The server doesn't parse updatedInput
+// — it forwards the decision to the SDK callback, which resumes the model in
+// place.
 //
 // 200 on resolve; 404 when there's no live run for this node; 409 when nothing
 // is pending or a different toolUseId is awaiting (stale client).

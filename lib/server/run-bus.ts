@@ -379,7 +379,19 @@ async function runLoop(
               type: "interaction_resolved",
               toolUseId: req.toolUseId,
             });
-            resolve(answer);
+            // 兜底:SDK 的 allow 分支要求 updatedInput 是 record,缺失/非法
+            // 会在 SDK 侧抛 ZodError 并打断整个 run。表单层漏传(或手工
+            // POST 乱传)时回填原始入参——不改写等价于原样放行。
+            const updated = answer.updatedInput;
+            const validInput =
+              typeof updated === "object" &&
+              updated !== null &&
+              !Array.isArray(updated);
+            resolve(
+              answer.behavior === "allow" && !validInput
+                ? { ...answer, updatedInput: req.input }
+                : answer,
+            );
           };
         });
       }
