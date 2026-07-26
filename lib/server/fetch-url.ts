@@ -1,5 +1,6 @@
 import "server-only";
 import type { ProviderId } from "@/lib/llm";
+import { providerFamily } from "@/lib/llm/providers";
 import type { ReferenceMeta } from "@/lib/types";
 import {
   fetchUrlViaClaude,
@@ -31,7 +32,9 @@ export async function* fetchUrlEvents(
   provider: ProviderId,
   signal?: AbortSignal,
 ): AsyncGenerator<FetchEvent> {
-  if (provider === "codex") {
+  // Family check, not literal equality — "codex:<model>" composite ids
+  // (Session 46) must route here too, not fall through to the claude CLI.
+  if (providerFamily(provider) === "codex") {
     yield* fetchUrlViaCodex(url, signal) as AsyncGenerator<CodexFetchEvent>;
     return;
   }

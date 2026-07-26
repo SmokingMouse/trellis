@@ -52,7 +52,7 @@ export function CliResumeButton({ nodeId }: { nodeId: string }) {
       variant="secondary"
       size="sm"
       onClick={onClick}
-      title="复制 cd + claude --resume 命令，到终端粘贴即可在 CLI 续这条对话"
+      title="复制 cd + CLI 续聊命令（claude --resume / codex resume），到终端粘贴即可续这条对话"
       className="nodrag"
     >
       {label}

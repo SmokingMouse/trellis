@@ -652,6 +652,17 @@ async function runLoop(
       } catch {
         /* best-effort —— 缺失只让该点分叉降级线性 resume */
       }
+      // codex 版：回填该轮在 rollout 里的 user-message 序号（分叉下刀坐标）。
+      // 函数内部按 origin/已回填自筛，非 codex run 不会有 codex_session_id
+      // lineage 可解析，天然 no-op；仍按 family 闸一道少扫一次盘。
+      if (args.resumeFamily === "codex") {
+        try {
+          const { backfillCodexTurnOrdinal } = await import("./codex-fork");
+          await backfillCodexTurnOrdinal(args.nodeId);
+        } catch {
+          /* best-effort —— 同上，降级线性 */
+        }
+      }
     }
 
     // Close every still-attached subscriber and drop the state after a

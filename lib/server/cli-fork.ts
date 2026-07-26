@@ -10,6 +10,8 @@ import {
   claudeSessionPath,
   isLineageIsolated,
 } from "./repo";
+import { codexLineageForNode } from "./codex-fork";
+import { providerFamily, DEFAULT_PROVIDER } from "@/lib/llm";
 
 type ContentBlock = {
   type: string;
@@ -173,7 +175,7 @@ export function attachedLineageForNode(nodeId: string): AttachedLineage | null {
 // 主链 tip（CLI --resume 本就只跟主链——树内分叉走 P2 的前缀 jsonl，不在本入口范围）。
 export function cliResumeForNode(
   nodeId: string,
-): { cwd: string; resumeId: string } | null {
+): { cwd: string; resumeId: string; family: "claude" | "codex" } | null {
   const db = getDB();
   const node = db
     .prepare("SELECT session_id FROM nodes WHERE id = ?")
@@ -183,21 +185,31 @@ export function cliResumeForNode(
   if (!session || session.mode !== "project" || !session.workspacePath) {
     return null;
   }
+  // codex 系 project：rollout 就是真 codex CLI 会话，出 `codex resume <sid>`。
+  // attach（cli-import）是 claude 专属域，codex 不会有。
+  const family = providerFamily(session.model ?? DEFAULT_PROVIDER);
+  if (family === "codex") {
+    const resumeId = isLineageIsolated(session.id)
+      ? codexLineageForNode(nodeId)?.lineageSid ?? null
+      : getRootResumeIdForNode(nodeId, "codex", session.workspacePath);
+    if (!resumeId) return null;
+    return { cwd: session.workspacePath, resumeId, family: "codex" };
+  }
   if (session.origin === "cli-import") {
     const lin = attachedLineageForNode(nodeId);
     if (!lin || !fs.existsSync(lin.sourceJsonlPath)) return null;
-    return { cwd: session.workspacePath, resumeId: lin.lineageSid };
+    return { cwd: session.workspacePath, resumeId: lin.lineageSid, family: "claude" };
   }
   // isolated（per-lineage）native 会话：续到该节点所属 lineage（fork 分支各有
   // 自己的 sid，root sid 只覆盖主 lineage）；legacy 会话维持 root sid 旧路径。
   if (isLineageIsolated(session.id)) {
     const lin = nativeLineageForNode(nodeId, session.workspacePath);
     if (!lin) return null;
-    return { cwd: session.workspacePath, resumeId: lin.lineageSid };
+    return { cwd: session.workspacePath, resumeId: lin.lineageSid, family: "claude" };
   }
   const resumeId = getRootResumeIdForNode(nodeId, "claude", session.workspacePath);
   if (!resumeId) return null;
-  return { cwd: session.workspacePath, resumeId };
+  return { cwd: session.workspacePath, resumeId, family: "claude" };
 }
 
 function ownerTurnFactory(rawLines: RawLine[]) {

@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { providerFamily } from "@/lib/llm";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
@@ -56,10 +57,15 @@ export function Composer({
   // handling): project/enhanced chat take any whitelisted file
   // (staged to disk for the agent); pure chat only images + inlineable text.
   const toolCapable = sessionMode !== "chat" || chatEnhanced;
-  // Skills show in every mode — pure chat can't run them as-is, but picking
-  // one auto-enables 增强模式 (per-turn spawn flag), so what's visible is
-  // usable. Hiding them entirely just read as "skills are broken".
-  const matchedSkills = useSkillSuggestions(text, true);
+  const provider = useSessionStore((s) => s.provider);
+  // Skills show in every claude-family mode — pure chat can't run them as-is,
+  // but picking one auto-enables 增强模式 (per-turn spawn flag), so what's
+  // visible is usable. codex 系隐藏：列表来自 ~/.claude/skills，codex CLI 不认
+  // /skill 语法，发出去只是字面 "/foo"。
+  const matchedSkills = useSkillSuggestions(
+    text,
+    providerFamily(provider) === "claude",
+  );
   const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
   // C1: Trellis commands in the docked composer — first-class in every mode
   // (skills stay gated on toolCapable). A bare /command runs locally against
@@ -71,7 +77,6 @@ export function Composer({
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setProvider = useSessionStore((s) => s.setProvider);
-  const provider = useSessionStore((s) => s.provider);
   const providerCatalog = useSessionStore((s) => s.providerCatalog);
   // Transient note when a command no-ops (e.g. unknown /model arg) or echoes
   // its usage. Cleared on the next keystroke.

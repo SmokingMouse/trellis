@@ -8,6 +8,7 @@ import { ZoneEditor } from "./ZoneEditor";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSlashNav } from "@/hooks/useSlashNav";
+import { providerFamily } from "@/lib/llm";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { SketchModal } from "./SketchModal";
 import { Button } from "@/components/ui/Button";
@@ -123,9 +124,12 @@ export function QuestionInput() {
 
   // C4: skill picker — active while the user types a leading "/name" token
   // (no space yet). Selecting fills "/name " so claude (which handles skills
-  // natively) runs it when sent.
+  // natively) runs it when sent. claude 系专属：列表来自 ~/.claude/skills，
+  // codex CLI 不认 /skill 语法，展示了只会以字面 "/foo" 发给模型。
   const skillQuery =
-    q.startsWith("/") && !q.includes(" ") ? q.slice(1).toLowerCase() : null;
+    providerFamily(provider) === "claude" && q.startsWith("/") && !q.includes(" ")
+      ? q.slice(1).toLowerCase()
+      : null;
   const matchedSkills =
     skillQuery !== null
       ? skills
@@ -329,7 +333,7 @@ export function QuestionInput() {
                 onClick={() =>
                   setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)
                 }
-                title="0 = B-fork 全发（历史存在会话里、缓存友好、不失忆，推荐）；≥1 = 窗口回退，只折叠 N 层历史进提示"
+                title="0 = 全发（历史存在 CLI 会话里、缓存友好、不失忆，推荐；claude 走 --fork-session，codex 走 resume+前缀 rollout）；≥1 = 窗口回退，只折叠 N 层历史进提示"
                 className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
               >
                 <span aria-hidden>📚</span>
