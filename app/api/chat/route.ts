@@ -29,6 +29,10 @@ import {
   nativeLineageForNode,
   registerForkLineage,
 } from "@/lib/server/cli-fork";
+import {
+  buildCodexPrefixRollout,
+  codexLineageForNode,
+} from "@/lib/server/codex-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import {
   resolveBlobPath,
@@ -421,10 +425,47 @@ export async function POST(req: Request) {
     mode !== "chat" || chatEnhanced,
   );
   const chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
-  // codex chat at depth 0 gets no B-fork — fold history at a sane default depth.
+  // codex chat（B-fork 等价，depth 0）：codex 无 --fork-session，但 `codex exec
+  // resume` 线性续聊 + 前缀 rollout 分叉可以拼出同一语义（分支互相隔离、历史住
+  // 在 CLI session 里不折叠）。handled=false = 父节点没有可解析的 rollout
+  // （存量会话 / rollout 被清）→ 回落折叠窗口，行为同旧。
+  let codexChatHandled = false;
+  let codexChatSid: string | null = null;
+  if (mode === "chat" && family === "codex" && reqDepth === 0) {
+    const chatParentId =
+      body.kind === "branch"
+        ? body.parentNodeId
+        : body.kind === "retry"
+          ? (getNode(nodeId)?.parentId ?? null)
+          : null;
+    if (!chatParentId) {
+      // root 首轮（或 root 重试）：fresh + persistence，sid 由 session_init 落本节点
+      codexChatHandled = true;
+    } else {
+      const lin = codexLineageForNode(chatParentId);
+      if (lin) {
+        codexChatHandled = true;
+        if (lin.isRolloutTip && !hasOtherChild(chatParentId, nodeId)) {
+          codexChatSid = lin.lineageSid; // 线性续：resume 同 rollout（sid 不变）
+        } else if (lin.nodeTurnOrdinal) {
+          // 真分叉（含 retry——旧回答已 append 进共享 rollout，必须切掉）
+          const built = buildCodexPrefixRollout(lin.rolloutPath, lin.nodeTurnOrdinal);
+          if (built) {
+            setNodeResumeId(nodeId, family, built.newSid);
+            codexChatSid = built.newSid;
+          } else {
+            codexChatSid = lin.lineageSid; // 构造失败：降级线性（上下文只多不错）
+          }
+        } else {
+          codexChatSid = lin.lineageSid; // ordinal 回填缺失：降级线性
+        }
+      }
+    }
+  }
+  // codex chat at depth>=1 / unresolvable — fold history at a sane default depth.
   const foldDepth = reqDepth === 0 ? 4 : reqDepth;
   const history =
-    chatBFork || mode === "project"
+    chatBFork || codexChatHandled || mode === "project"
       ? []
       : buildHistoryForNode(nodeId, { maxDepth: foldDepth });
   // Resume id (StreamRequest.claudeSessionId — legacy name, value is the active
@@ -520,13 +561,52 @@ export async function POST(req: Request) {
       claudeSessionId = null; // root / 新话题：fresh lineage
     }
   }
+  // codex 版 per-lineage 隔离：与上面 claude 块同构，engine 换 codex-fork
+  // （rollout 无 uuid 链，下刀坐标 = user-message 序号）。存量 codex project
+  // （iso=0）不迁移，走下方旧路径（全树共享 root rollout）。retry 与 claude 同
+  // 纪律：线性 resume 自己/祖先的 lineage（旧回答留在 rollout，上下文只多不错）。
+  if (
+    !attachedHandled &&
+    !nativeIsolated &&
+    mode === "project" &&
+    family === "codex" &&
+    resolvedOrigin === "native" &&
+    isLineageIsolated(trellisSessionId)
+  ) {
+    nativeIsolated = true;
+    if (body.kind === "branch") {
+      const lin = codexLineageForNode(body.parentNodeId);
+      if (!lin) {
+        claudeSessionId = null; // 祖先链无可用 lineage → fresh，本节点成新头
+      } else if (lin.isRolloutTip && !hasOtherChild(body.parentNodeId, nodeId)) {
+        claudeSessionId = lin.lineageSid;
+      } else if (lin.nodeTurnOrdinal) {
+        const built = buildCodexPrefixRollout(lin.rolloutPath, lin.nodeTurnOrdinal);
+        if (built) {
+          setNodeResumeId(nodeId, family, built.newSid);
+          claudeSessionId = built.newSid;
+        } else {
+          claudeSessionId = lin.lineageSid;
+        }
+      } else {
+        claudeSessionId = lin.lineageSid;
+      }
+    } else if (body.kind === "retry") {
+      const lin = codexLineageForNode(nodeId);
+      claudeSessionId = lin?.lineageSid ?? null;
+    } else {
+      claudeSessionId = null; // root / 新话题：fresh lineage
+    }
+  }
   if (!attachedHandled && !nativeIsolated) {
     claudeSessionId =
       mode === "project"
         ? getRootResumeIdForNode(nodeId, family, spawnCwd)
         : chatBFork
           ? getParentResumeId(nodeId, family, spawnCwd)
-          : null;
+          : codexChatHandled
+            ? codexChatSid
+            : null;
   }
 
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
@@ -553,7 +633,7 @@ export async function POST(req: Request) {
         ? claudeSessionId
           ? undefined
           : "node"
-        : chatBFork
+        : chatBFork || codexChatHandled
           ? "node"
           : mode === "project"
             ? claudeSessionId
@@ -573,14 +653,16 @@ export async function POST(req: Request) {
         cwd: spawnCwd,
         systemPrompt: resolvedSystemPrompt,
         chatEnhanced,
-        forkSession: chatBFork,
+        // claude B-fork 与 codex chat resume 共用这面旗：sdk-adapter 据此开
+        // persistence+resume（--fork-session 本身 codex backend 会忽略）。
+        forkSession: chatBFork || codexChatHandled,
         requireApproval: resolvedRequireApproval,
         attachments: providerAttachments,
         onCanUseTool: ctx?.onCanUseTool,
       }),
     topicLabel:
       providerId !== "mock"
-        ? (aggregated) => generateTopicLabel(questionForTopic, aggregated)
+        ? (aggregated) => generateTopicLabel(questionForTopic, aggregated, family)
         : undefined,
   });
 

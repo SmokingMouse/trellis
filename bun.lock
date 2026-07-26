@@ -7,7 +7,7 @@
       "dependencies": {
         "@dagrejs/dagre": "^3.0.0",
         "@excalidraw/excalidraw": "^0.18.1",
-        "@smokingmouse/agent": "^0.3.1",
+        "@smokingmouse/agent": "^0.3.2",
         "@smokingmouse/llm": "^0.3.0",
         "@xyflow/react": "^12.10.2",
         "highlight.js": "^11.11.1",
@@ -291,7 +291,7 @@
 
     "@rtsao/scc": ["@rtsao/scc@1.1.0", "https://registry.npmmirror.com/@rtsao/scc/-/scc-1.1.0.tgz", {}, "sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g=="],
 
-    "@smokingmouse/agent": ["@smokingmouse/agent@0.3.1", "", { "dependencies": { "@smokingmouse/llm": "^0.3.0" } }, "sha512-OqzqtdPIcaRZc/ypJnE1iH6MAV1XlQlsBfWvmRnylHwiG7YMKWTgQBodB5GFiM7ZhVq2M3tSlUQUYAfnfSz8LA=="],
+    "@smokingmouse/agent": ["@smokingmouse/agent@0.3.2", "", { "dependencies": { "@smokingmouse/llm": "^0.3.0" } }, "sha512-kmwoyOcTnav1+E+NWdRq82DFnyb/M9Kd7bFp1QLBvwAv5M1MVGzLo/hQqnQ1deUySLBMVfMy2iGhBT25rYxB9Q=="],
 
     "@smokingmouse/llm": ["@smokingmouse/llm@0.3.0", "", { "dependencies": { "yaml": "^2.7.1" } }, "sha512-IAQfK3emDx4fYpdmviav1T75dvgxoVI8zuYpJCXQImJe2d5RdSQYmC8O+AvIOFr227vWbJ08gM5wBUPXLqzodQ=="],
 

@@ -406,6 +406,19 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN cli_turn_uuid TEXT");
   }
 
+  // codex 版的分叉下刀坐标（cli_turn_uuid 的镜像）：该节点那轮在其 lineage
+  // rollout 里的 user-message 序号（1-based）。codex rollout 没有 uuid 链，
+  // append-only 日志里序号即稳定坐标；done 后由 backfillCodexTurnOrdinal 回填。
+  // NULL = 回填缺失 → 该点分叉降级线性 resume。
+  const hasCodexTurnOrdinal = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'codex_turn_ordinal'",
+    )
+    .get();
+  if (!hasCodexTurnOrdinal) {
+    db.exec("ALTER TABLE nodes ADD COLUMN codex_turn_ordinal INTEGER");
+  }
+
   // 树面板手动隐藏（雪藏）：仅根节点（parent_id IS NULL）有意义。NULL = 可见；
   // ms 时间戳 = 用户显式把这棵树收进「已隐藏」组的时刻。强制冷藏、不参与热度
   // 排名；数据/搜索不受影响。写即复活：树内新增节点（分叉/重试）自动清空。

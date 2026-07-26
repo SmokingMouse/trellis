@@ -60,7 +60,7 @@ type Option = {
 };
 
 function optionsFor(provider: ProviderId): Option[] {
-  if (provider === "codex") {
+  if (providerFamily(provider) === "codex") {
     return [
       {
         id: "chat",
@@ -74,7 +74,7 @@ function optionsFor(provider: ProviderId): Option[] {
         label: "Project",
         Icon: LinkIcon,
         title:
-          "Project：整棵 trellis 树共享一个 codex session（线性多轮历史）。MCP/tools 全开。rollout 在 ~/.codex/sessions/。",
+          "Project：一条岔一个 codex session（分叉=前缀 rollout 新 lineage）。MCP/tools 全开。rollout 在 ~/.codex/sessions/，删除 trellis session 时清理。",
       },
     ];
   }

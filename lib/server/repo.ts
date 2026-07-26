@@ -4,6 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
+import { codexRolloutExists, deleteCodexRollout } from "./codex-fork";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import type {
@@ -427,6 +428,12 @@ export function deleteSession(id: string): void {
        WHERE session_id = ? AND claude_session_id IS NOT NULL`,
     )
     .all(id) as { claude_session_id: string }[];
+  const codexIdRows = db
+    .prepare(
+      `SELECT DISTINCT codex_session_id FROM nodes
+       WHERE session_id = ? AND codex_session_id IS NOT NULL`,
+    )
+    .all(id) as { codex_session_id: string }[];
   db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   // FK cascade nukes nodes/notes but the FTS virtual table isn't on the
   // FK graph — do it explicitly.
@@ -441,6 +448,9 @@ export function deleteSession(id: string): void {
         // jsonl may have been moved/deleted manually — best effort.
       }
     }
+    // codex rollouts leak the same way (linear codex chains share one sid —
+    // hence DISTINCT). Path is found by id scan, cwd-independent.
+    for (const r of codexIdRows) deleteCodexRollout(r.codex_session_id);
   }
 }
 
@@ -453,13 +463,27 @@ function resumeColumnForFamily(family: ProviderFamily): string | null {
   return null; // mock
 }
 
+// Family-dispatched "can this resume id still be honored?" check. claude keeps
+// its historical convention: only validated when the caller passed a
+// workspacePath (undefined = opted out). codex rollouts are cwd-independent —
+// validate whenever asked (scan ~/.codex/sessions by id).
+function resumeTargetExists(
+  family: ProviderFamily,
+  id: string,
+  workspacePath?: string | null,
+): boolean {
+  if (family === "claude") {
+    return workspacePath === undefined || claudeJsonlExists(id, workspacePath);
+  }
+  if (family === "codex") return codexRolloutExists(id);
+  return true; // mock — unreachable (no resume column)
+}
+
 // True iff the claude CLI transcript for `id` still exists on disk. Used to
 // self-heal: historically-polluted rows (a codex id stranded in
 // claude_session_id before family isolation) and rows whose jsonl was
 // manually cleaned both fail this check, so we fall back to a fresh session
-// instead of feeding `claude --resume` an id it can't honor. Only meaningful
-// for the claude family — codex transcript paths embed a date we can't derive
-// from the id alone, so codex skips this check.
+// instead of feeding `claude --resume` an id it can't honor.
 export function claudeJsonlExists(
   id: string,
   workspacePath: string | null,
@@ -515,15 +539,7 @@ export function getRootResumeIdForNode(
     if (row.parent_id === null) {
       const id = row.resume_id;
       if (!id) return null;
-      // claude: validate the transcript exists before handing it to
-      // --resume. codex: path embeds a date, can't validate by id — trust it.
-      if (
-        family === "claude" &&
-        workspacePath !== undefined &&
-        !claudeJsonlExists(id, workspacePath)
-      ) {
-        return null;
-      }
+      if (!resumeTargetExists(family, id, workspacePath)) return null;
       return id;
     }
     cur = row.parent_id;
@@ -597,13 +613,7 @@ export function getParentResumeId(
     .get(self.parent_id) as { resume_id: string | null } | undefined;
   const id = prow?.resume_id;
   if (!id) return null;
-  if (
-    family === "claude" &&
-    workspacePath !== undefined &&
-    !claudeJsonlExists(id, workspacePath)
-  ) {
-    return null; // stale/cleaned transcript — fall back to fresh
-  }
+  if (!resumeTargetExists(family, id, workspacePath)) return null; // stale/cleaned — fresh
   return id;
 }
 
@@ -914,7 +924,8 @@ export function resetNodeForRetry(
          token_cache_read = 0, token_cache_creation = 0,
          token_context = NULL,
          tool_calls_json = NULL,
-         pending_interaction_json = NULL
+         pending_interaction_json = NULL,
+         codex_turn_ordinal = NULL
      WHERE id = ?`,
   ).run(nodeId);
   // The old response is gone; remove it from FTS so stale text doesn't
@@ -1692,6 +1703,12 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
        WHERE id IN (${placeholders}) AND claude_session_id IS NOT NULL`,
     )
     .all(...ids) as { claude_session_id: string }[];
+  const codexIdRows = db
+    .prepare(
+      `SELECT DISTINCT codex_session_id FROM nodes
+       WHERE id IN (${placeholders}) AND codex_session_id IS NOT NULL`,
+    )
+    .all(...ids) as { codex_session_id: string }[];
   const tx = db.transaction(() => {
     if (noteIds.length) {
       db.prepare(
@@ -1719,6 +1736,20 @@ export function deleteNodeSubtree(nodeId: string): DeleteNodeResult {
         fs.unlinkSync(claudeSessionPath(r.claude_session_id, cwd));
       } catch {
         // jsonl may have been moved/deleted manually — best effort.
+      }
+    }
+  }
+  if (session && session.origin !== "cli-import" && codexIdRows.length) {
+    // codex resume keeps the SAME sid down a linear chain, so nodes outside
+    // the deleted subtree (ancestors) may still hold this id — only unlink
+    // rollouts nobody references anymore. (claude B-fork ids are per-node
+    // unique via --fork-session, so it never needs this check.)
+    const stillUsed = db.prepare(
+      "SELECT 1 FROM nodes WHERE codex_session_id = ? LIMIT 1",
+    );
+    for (const r of codexIdRows) {
+      if (!stillUsed.get(r.codex_session_id)) {
+        deleteCodexRollout(r.codex_session_id);
       }
     }
   }

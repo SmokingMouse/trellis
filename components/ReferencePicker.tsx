@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { providerFamily } from "@/lib/llm";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
@@ -17,7 +18,7 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
   const createReference = useSessionStore((s) => s.createReference);
   const provider = useSessionStore((s) => s.provider);
   const fetcherDescription =
-    provider === "codex"
+    providerFamily(provider) === "codex"
       ? "由本机 codex CLI + 已配置的 MCP servers / plugins 决定怎么抓——YOLO 模式下它能直接 spawn feishu-cli、yt-dlp、curl 等工具。需要授权的平台预先 auth login 即可。"
       : "由本机 claude + 已安装的 skills 决定怎么抓——飞书文档自动走 feishu-cli，YouTube 走字幕 skill，普通网页走 web-fetch，等等。需要授权的平台预先 auth login 即可。";
   const firstField = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);

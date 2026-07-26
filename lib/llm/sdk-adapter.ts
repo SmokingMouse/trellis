@@ -40,11 +40,14 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
   const approve = req.requireApproval === true && !!req.onCanUseTool;
   if (mode === "chat") {
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
-    // chat B-fork (claude only): persist + resume the parent's forked session so
-    // the CLI keeps history as immutable, cache-hit message blocks. forkSession
-    // is honored by @smokingmouse/agent only when resume is set, so the first turn
-    // (resume undefined) spawns a fresh session without --fork-session. codex
-    // leaves req.forkSession false → no persist, folded-history path unchanged.
+    // chat B-fork: persist + resume the parent's forked session so the CLI
+    // keeps history as immutable, cache-hit message blocks. forkSession is
+    // honored by ClaudeBackend only when resume is set, so the first turn
+    // (resume undefined) spawns a fresh session without --fork-session.
+    // codex rides the same flag since 2026-07-26: CodexBackend ignores
+    // forkSession itself but honors persistence+resume（`codex exec resume`，
+    // 分叉隔离由 route 侧的前缀 rollout 完成）; depth>=1 / 存量会话仍走
+    // folded-history（req.forkSession=false）。
     const forkOpts: RunOptions = req.forkSession
       ? {
           persistence: true,
