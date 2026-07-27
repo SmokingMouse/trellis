@@ -232,6 +232,7 @@
 - **「allow 不带 `updatedInput`」是否炸，取决于 Claude Code 版本**（S75 同机 A/B 实测）：**2.1.183 直接炸** `ZodError: expected record at updatedInput, received undefined`，工具结果 `isError=true`，模型会转头重发 ExitPlanMode 卡死；**2.1.207 容忍**，同样的裸 `{behavior:"allow"}` 一路放行到批准。所以**这个 bug 会随 CLI 升级自行"消失"，但不能靠升级掩盖**——schema 是判别联合，allow 分支要 record，永远回传 `updatedInput`（不改写就原样回 `req.input`）。复现要点：`npm i @anthropic-ai/claude-code@<ver> --prefix /tmp/ccX` 后 `PATH=/tmp/ccX/node_modules/.bin:$PATH` 起服务即可钉版本（agent 从 PATH 取 `claude`）。
 - **`next dev` 的 dev 产物在 `.next/dev/` 子目录，不碰同目录的 prod 构建**（S75 实测：主目录跑完 dev，`.next/BUILD_ID` 与全部 prod manifest 的 mtime 保持 S73 的 7-25 22:13 不变）。所以主目录起隔离 dev 实例是安全的——**但 `make build` 不是**，那个会真覆盖 prod 产物。
 - **`@smokingmouse/agent` 0.3.0 不含 `EventType.Task` / `parentToolUseId`，0.3.1 才含**（`npm pack` 解包 grep 实测，S73）。子 Agent 区依赖它；版本退回 0.3.0 时 UI 不报错、只是永远空。各部署目录 `bun install` 后建议核一句：`grep -c 'Task: "task"' node_modules/@smokingmouse/agent/dist/events.js`。
+- **「tab 点不开」八成是流式渲染风暴卡死主线程，不是点击逻辑坏了**（S78 实测，swift-wren-91）：根因链 = ① store 的 `nodes` 是单个对象，流式期间每个 SSE 事件（catchup/tool_call_*）都 `{ ...s.nodes, [id]: {...} }` 换整个对象；② `LinearThreadView`/`Canvas` 都 `useSessionStore(s => s.nodes)` 订阅整个对象 → 每事件全树/全图重渲；③ `TurnCard` 流式态每帧对整段 response 跑 `rehypeHighlight`（几百 KB 是杀手）。三者叠加，长 run（百级 tool calls、几百 KB response）必卡死。**修法三件套**：tool_call 类事件用 `requestAnimationFrame` 合批成每帧一次 `set()`（终端事件 done/error 仍即时）+ 流式态 `REHYPE_STREAMING=[]` 不跑高亮（done 态再跑）+ `TurnCard` 加 `React.memo`。Canvas 侧若 `ChatNode` 已 `memo` 且 `layoutKey` 不跟 tool_calls 走，则天然免疫大半。诊断时先 `curl /api/sessions/[id]` 看节点数/tool_calls 量/response 大小，再看 store 事件提交频率，比在 UI 上瞎点靠谱。
 
 ## Open Failures
 - **主目录 `next dev` 起的实例前端永远停在「加载中…」，React 从不 hydrate**（S75，:3164 实测）。证据：`document.body.firstElementChild` 上 `__react*` fiber key 数 = 0（纯 SSR HTML）、全部 `_next` chunk 均 200、console 无 error、`/api/sessions` 只有 curl 打的没有浏览器打的（说明 effect 从未跑）、`matchMedia` 正常。**已排除**是 S75 改动引入——`git stash` 回干净 main 后同样复现。**假设**（未验）：Turbopack 那条 `Parsing CSS source code failed`（`app/globals.css` 的 `::highlight(branch-source)` 被判非法伪元素，dev 日志里刷了 7 次）打断了 client bundle 的执行链。**下个 session 先打这个**：临时注释掉该 CSS 规则重起 dev，看 fiber 是否挂上；挂上即坐实，那条规则要么换写法要么加 `@supports` 包一层。prod（`next start`）不受影响，:3088 实测正常。
@@ -641,3 +642,15 @@
 - **Next**: 浏览器实测 A 路③全链路(AskUserQuestion 单/多选 + ExitPlanMode 批准/拒绝 + 失效态 + 画布徽章)。
 
 （Session 1–31 已归档，见 `archive.md`）
+
+### Session 78（2026-07-27，流式渲染风暴修复）
+- **触发**: 用户报「swift-wren-91 这个项目的 tab 点不开了」+ 顺手审 bug。定位到根因不是侧栏/标签页逻辑（行可点、onPreview/onPin 全对），而是**流式期间 UI 被卡死**——点下去主线程在忙，表现像「点不开」。
+- **根因（真 DB + 真会话探针坐实）**: swift-wren-91 是暂存区下的 workspace（非 project），挂 1 个 project 模式 session（7a720cc6…），末节点 bef90d7d 有 **195 个 tool calls（392KB）+ thinking 34KB+**，整 session 接口 2.6MB。流式期间每个 SSE 事件（catchup / tool_call_start / done / update）都用展开语法 `{ ...s.nodes, [id]: {...} }` 替换**整个 `nodes` 对象**，而 `LinearThreadView`（`s.nodes`）与 `Canvas`（`s.nodes`）都订阅整个对象 → 每事件「全树重渲 + 全图重布局」。实测 30s 内 96 个事件持续轰击，且流式时 `TurnCard` 每帧对**整段** response 跑 `rehypeHighlight`（几百 KB）→ 主线程卡死。run 结束后（14 done / 2 error / 0 streaming）tab 恢复正常，但下次长流式必复现。
+- **Done（1+2 治本，挡住渲染风暴）**:
+  - **① tool_call 类事件合批提交**（`stores/sessionStore.ts`）：新增 `scheduleNodePatch` + 每帧一次 `set()` 的微调度（`PENDING_NODE_PATCHES` 缓冲 + `requestAnimationFrame` flush，单帧多节点折叠成一次 store 通知）。`catchup` / `tool_call_start` / `tool_call_done` / `tool_call_update` 四类高频事件改走合批；`done`/`error`/`interaction_required` 等终端事件仍即时提交（状态翻转要立刻反映，且不在高频路径）。`emitStream` 的 thinking/delta 本就绕过 React state 直推，不受影响。
+  - **② 流式态不跑 rehypeHighlight**（`components/TurnCard.tsx`）：`REHYPE_STREAMING` 从 `[rehypeHighlight]` 改成 `[]`，高亮只在 done 态（`REHYPE_FULL`）跑一次——这是单帧最大头，流式高亮性价比极低（与当年跳过 rehypeRaw 同一逻辑）。
+  - **③ TurnCard 加 React.memo**：线性 thread 订阅整个 `nodes`，合批后仍每帧一次重渲；memo 后仅引用变化的（流式）节点重渲，其余 15 张已完成卡（含 `REHYPE_FULL` 高亮）直接跳过。
+  - **Canvas 侧**：`ChatNode` 本就 `memo` + 自定义比较器（只看 `data.node` 引用），所以合批后只有正在流式的那张卡重渲，其余 15 张不重渲；`layoutKey` 只跟 status/拓扑走，tool_call 事件不触发 dagre 重布局——画布侧天然已免疫大半，未再改动。
+- **验证**: `tsc --noEmit` 全量零错 ✓；lint 无新增（仅 3 项既有 `set-state-in-effect` 基线警告，非本次引入）。
+- **遗留 / 可选后续（未做，按性价比排序）**: ① 大 response 流式时 `liveThinking` 全文灌 DOM 仍可能卡（34KB+），可加截断/虚拟化；② 错误节点 4aaedfa1（ConnectionRefused）的 response 里混进原始 `<thinking>…` 标签，done 态 rehypeRaw 会当真 HTML 处理（目前没崩但是脏数据 + 潜在异常源），可在写入侧拦一道 + 清存量；③ 给渲染层加 error boundary，防组件崩溃白屏。
+- **Next**: 用户现场验收——开一个长流式 project 会话（或重放 swift-wren-91），边流边切 tab / 切画布应不再卡死。改动在 main 工作区未提交。

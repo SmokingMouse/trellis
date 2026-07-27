@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -31,11 +31,11 @@ import { StopButton } from "./ui/StopButton";
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
-// A1: while streaming we render markdown live but skip rehypeRaw — mid-stream
-// text often contains a half-typed HTML tag, and raw-HTML parsing on each
-// frame is both wasteful and can throw on malformed fragments. Highlighting
-// alone is enough for the live view; the final render uses REHYPE_FULL.
-const REHYPE_STREAMING = [rehypeHighlight];
+// 流式期间只做最小 rehype：rehypeRaw 跳过（半行 HTML 标签既浪费又可能抛错），
+// rehypeHighlight 也跳过——它会在每一帧对**整段** response 重跑语法高亮，
+// 几百 KB 的长回复能把主线程卡死，正是「tab 点不开」的主因。高亮只在 done
+// 态（REHYPE_FULL）跑一次，性价比远高于边流式边高亮。
+const REHYPE_STREAMING: typeof REHYPE_FULL = [];
 
 // #7: the single "turn" reading/interaction surface, shared by every place a
 // node is read in full (the linear thread is the only consumer today — the
@@ -44,7 +44,11 @@ const REHYPE_STREAMING = [rehypeHighlight];
 // tool-call panel, mark-injected markdown body with live streaming, the
 // action row (CLI resume / regenerate / card image / copy), generated files,
 // and the paused-interaction form.
-export function TurnCard({ node }: { node: ChatNode }) {
+// React.memo：线性 thread 订阅整个 `nodes` 对象，流式期间每个 tool_call
+// 事件（合批后仍是每帧一次）都会让父组件重渲。未变的节点（同引用）直接跳
+// 过——避免 15 张已完成卡片每次都重跑 REHYPE_FULL 语法高亮。只有正在流式
+// 的节点引用每帧更新，正常重渲（且流式态已不跑高亮，成本低）。
+export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const hasParent = useSessionStore((s) =>
     Boolean(node.parentId && s.nodes[node.parentId]),
@@ -105,7 +109,7 @@ export function TurnCard({ node }: { node: ChatNode }) {
       )}
     </>
   );
-}
+});
 
 function ToolChain({ node }: { node: ChatNode }) {
   const { main, groups } = useMemo(

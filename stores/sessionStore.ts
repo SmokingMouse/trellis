@@ -2525,6 +2525,55 @@ type StreamEvent =
     }
   | { type: "interaction_resolved"; toolUseId: string };
 
+// 流式期间的 node patch 合批：catchup / tool_call_start / tool_call_done /
+// tool_call_update 这类事件在一次 run 里能以每秒数个的速率轰过来，每个都
+// 展开语法替换整个 `nodes` 对象 → 所有订阅 `s.nodes` 的视图（线性 thread、
+// 画布）每事件重渲整棵树/整图。长 run（几百 tool calls、几百 KB response）
+// 会把主线程卡死，表现就是「tab 点不开」。
+//
+// 解法：把同一帧内对同一节点的多次修改攒成一个 patch 队列，每帧最多 commit
+// 一次 `set()`。终端事件（done/error/interaction_required）仍即时提交——它们
+// 是状态翻转，要立刻反映在 UI 上，且不在高频路径上。
+//
+// patch 是 (当前节点) => 新节点 的纯函数；队列内顺序应用，所以一帧内多个
+// tool_call 事件会被折叠成一次 store 通知。
+type NodePatch = (n: ChatNode) => ChatNode;
+const PENDING_NODE_PATCHES = new Map<string, NodePatch[]>();
+let NODE_FLUSH_SCHEDULED = false;
+
+function scheduleNodePatch(id: string, patch: NodePatch) {
+  const arr = PENDING_NODE_PATCHES.get(id);
+  if (arr) arr.push(patch);
+  else PENDING_NODE_PATCHES.set(id, [patch]);
+  if (NODE_FLUSH_SCHEDULED) return;
+  NODE_FLUSH_SCHEDULED = true;
+  const flush = () => {
+    NODE_FLUSH_SCHEDULED = false;
+    if (PENDING_NODE_PATCHES.size === 0) return;
+    const batches = new Map<string, NodePatch[]>(PENDING_NODE_PATCHES);
+    PENDING_NODE_PATCHES.clear();
+    useSessionStore.setState((s) => {
+      let nextNodes: Record<string, ChatNode> | null = null;
+      for (const [nid, patches] of batches) {
+        const cur = s.nodes[nid];
+        if (!cur) continue;
+        let merged = cur;
+        for (const p of patches) merged = p(merged);
+        if (merged === cur) continue;
+        if (!nextNodes) nextNodes = { ...s.nodes };
+        nextNodes[nid] = merged;
+      }
+      if (!nextNodes) return s;
+      return { nodes: nextNodes };
+    });
+  };
+  if (typeof requestAnimationFrame !== "undefined") {
+    requestAnimationFrame(flush);
+  } else {
+    Promise.resolve().then(flush);
+  }
+}
+
 function handleStreamEvent(
   set: Setter,
   get: Getter,
@@ -2720,23 +2769,17 @@ function handleStreamEvent(
       // renders the思考期 immediately (empty string → clean channel).
       clearStreamPending(thinkingChannel(id));
       if (event.thinking) emitStream(thinkingChannel(id), event.thinking);
-      set((s) => {
-        const n = s.nodes[id];
-        if (!n) return s;
-        return {
-          nodes: {
-            ...s.nodes,
-            [id]: {
-              ...n,
-              response: event.response,
-              toolCalls: event.toolCalls,
-              // A路②: sync the paused-interaction state on reconnect so a
-              // refreshed / late tab re-renders (or clears) the waiting form.
-              pendingInteraction: event.pendingInteraction ?? null,
-            },
-          },
-        };
-      });
+      // 合批提交：response + toolCalls 快照可能几百 KB，每个 catchup 都裸
+      // `set()` 会让整棵树/整图重渲。攒进本帧 patch，与同帧 tool_call 事件
+      // 一起 commit。
+      scheduleNodePatch(id, (n) => ({
+        ...n,
+        response: event.response,
+        toolCalls: event.toolCalls,
+        // A路②: sync the paused-interaction state on reconnect so a
+        // refreshed / late tab re-renders (or clears) the waiting form.
+        pendingInteraction: event.pendingInteraction ?? null,
+      }));
       // The terminal event (done/error) for non-streaming catchups
       // arrives in the very next iteration; nothing else to do here.
     } else if (event.type === "tool_call_start" && currentNodeId) {
@@ -2745,32 +2788,25 @@ function handleStreamEvent(
       // re-broadcast), skip — server-side de-dup is the source of
       // truth.
       const id = currentNodeId;
-      set((s) => {
-        const n = s.nodes[id];
-        if (!n) return s;
-        if (n.toolCalls.some((c) => c.id === event.id)) return s;
+      scheduleNodePatch(id, (n) => {
+        if (n.toolCalls.some((c) => c.id === event.id)) return n;
         return {
-          nodes: {
-            ...s.nodes,
-            [id]: {
-              ...n,
-              toolCalls: [
-                ...n.toolCalls,
-                {
-                  id: event.id,
-                  name: event.name,
-                  input: event.input,
-                  output: null,
-                  stderr: null,
-                  status: "running",
-                  durationMs: null,
-                  startedAt: event.startedAt,
-                  endedAt: null,
-                  parentToolUseId: event.parentToolUseId ?? null,
-                },
-              ],
+          ...n,
+          toolCalls: [
+            ...n.toolCalls,
+            {
+              id: event.id,
+              name: event.name,
+              input: event.input,
+              output: null,
+              stderr: null,
+              status: "running",
+              durationMs: null,
+              startedAt: event.startedAt,
+              endedAt: null,
+              parentToolUseId: event.parentToolUseId ?? null,
             },
-          },
+          ],
         };
       });
     } else if (event.type === "tool_call_done" && currentNodeId) {
@@ -2778,11 +2814,9 @@ function handleStreamEvent(
       // start event is missing (rare race or catchup edge), skip
       // silently — UI is informational, not contractual.
       const id = currentNodeId;
-      set((s) => {
-        const n = s.nodes[id];
-        if (!n) return s;
+      scheduleNodePatch(id, (n) => {
         const idx = n.toolCalls.findIndex((c) => c.id === event.id);
-        if (idx === -1) return s;
+        if (idx === -1) return n;
         const cur = n.toolCalls[idx];
         const next = n.toolCalls.slice();
         next[idx] = {
@@ -2793,7 +2827,7 @@ function handleStreamEvent(
           endedAt: event.endedAt,
           durationMs: Math.max(0, event.endedAt - cur.startedAt),
         };
-        return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
+        return { ...n, toolCalls: next };
       });
     } else if (event.type === "tool_call_update" && currentNodeId) {
       // Stage 22: sub-agent progress/report for a Task/Agent call. Merge —
@@ -2801,15 +2835,13 @@ function handleStreamEvent(
       // an earlier phase already delivered. Missing target = skip (same
       // reasoning as tool_call_done above).
       const id = currentNodeId;
-      set((s) => {
-        const n = s.nodes[id];
-        if (!n) return s;
+      scheduleNodePatch(id, (n) => {
         const idx = n.toolCalls.findIndex((c) => c.id === event.id);
-        if (idx === -1) return s;
+        if (idx === -1) return n;
         const cur = n.toolCalls[idx];
         const next = n.toolCalls.slice();
         next[idx] = { ...cur, agent: { ...cur.agent, ...event.agent } };
-        return { nodes: { ...s.nodes, [id]: { ...n, toolCalls: next } } };
+        return { ...n, toolCalls: next };
       });
     } else if (event.type === "interaction_required" && currentNodeId) {
       // A路②: the run paused — stash the prompt so the UI (third knife) can
