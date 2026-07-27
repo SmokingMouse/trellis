@@ -296,7 +296,9 @@
     - **Tailscale 一直在跑**（`macmini` 100.102.237.93 / `aliyun` 100.77.207.43 / iphone17 / macbook-pro）。
     - **五路实测**：`127.0.0.1` 2.3ms · 局域网 `192.168.10.134` 4.3ms · **Tailscale `100.102.237.93` 4.6ms** · `.cn` 326ms（首次冷握手 10.6s）· `.cc` 1241ms。
   - **结论/建议**：本机用 `127.0.0.1:3088`；**任何设备（手机/公司机/MacBook）只要在 tailnet 上就用 `http://100.102.237.93:3088` —— 4.6ms，与局域网同级，且不经任何第三方**。想继续用域名则需要两件事同时做：clash 加 `DOMAIN-SUFFIX,smokingmouse.cn,DIRECT`，且让该域名在 tailnet 内解析到 Tailscale IP（MagicDNS / split-DNS），否则 DIRECT 之后仍然是绕阿里云北京的 326ms。
-- **Next**: 用户复测（现只剩一套进程：gate 32246 + next 32247）。
+- **已合并上线（同日）**：`trevally` → `main`（merge `4bf66ef`，`--no-ff` 保住工作线形状），主 checkout tsc ✓ + `make build` ✓；prod 交回 launchd（`launchctl load com.smokingmouse.trellis`），进程形态 launchd → `bun server.ts -p 3088`（大门）→ `next start -p 3187`（内部只绑 127.0.0.1）；验活 / 401 · /login 200 · /term/ 401。**未 push**（推送需用户签名授权）。
+- **Cloudflare 隧道已按用户要求关闭**（`launchctl unload com.smokingmouse.cloudflared`，配置备份 `~/.cloudflared/config.yml.bak-20260727-213648`）。副作用：`files.smokingmouse.cc` 真掉线（`.cn` 侧 502 未配通）；`ip.smokingmouse.cc` 变 530 而 **blog-publish skill 有 5 处引用它**，下次发博客验活会报错（服务没死，`ip.home.smokingmouse.cn` 200，只是地址过时）。另一条隧道 `cloudflared-trader` 未动。访问路径见 `~/.claude/global/workspace.md` 新增的「对外访问路径」节。
+- **Next**: 用户验收 + **停一周看判据**（worktree 里的 session 数 > 0）再决定 P2 与 S2/S3/S4。唯一未覆盖的验证：ttyd 在 launchd 环境下的懒启动（需登录态才触发，我测不到）。
 
 ### Session 75 (2026-07-26)
 - **Done**: 修 ExitPlanMode 批准报 ZodError（详见 Current Focus）。用户带着「Trellis 与 Claude Code 协议版本偏差」的自诊来，**结论推翻了它**：是 Trellis 自己三处交互表单里唯独计划审批漏传 `updatedInput`。改 `components/InteractionForm.tsx`（真 bug）+ `lib/server/run-bus.ts`（resolver 兜底回填）+ respond route 的误导注释。
