@@ -13,6 +13,7 @@ import { DoneToast } from "@/components/DoneToast";
 import { AbortToast } from "@/components/AbortToast";
 import { StreamAlertToast } from "@/components/StreamAlertToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
+import { TerminalPanel } from "@/components/TerminalPanel";
 import { WorkspaceFilesDrawer } from "@/components/WorkspaceFilesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
@@ -24,7 +25,6 @@ import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
-import { SIDEBAR_W } from "@/lib/workbench-layout";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
@@ -38,7 +38,6 @@ export default function Home() {
   // linear view too, where the canvas FAB is unmounted.
   const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
-  const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const isMobile = useIsMobile();
   useEscapeAbort();
   useUnreadNavigation();
@@ -53,15 +52,8 @@ export default function Home() {
     hydrate();
   }, [hydrate]);
 
-  // Wave 4: publish the effective left offset (sidebar width on desktop when
-  // open, else 0) as a CSS variable so every full-bleed surface (Canvas /
-  // LinearThreadView / QuestionInput) and the Outline rail can shift right by
-  // it without each re-deriving the breakpoint. Mobile keeps offset 0 — the
-  // sidebar is a non-permanent overlay there.
-  useEffect(() => {
-    const offset = !isMobile && sidebarOpen ? SIDEBAR_W : 0;
-    document.documentElement.style.setProperty("--trellis-sb", `${offset}px`);
-  }, [isMobile, sidebarOpen]);
+  // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
+  // 这里再按常量发一份就会打架）。
 
   // #7: mobile lands on the linear thread (the standard phone chat flow) for
   // every mode whenever the user arrives on a (different) session. They can
@@ -116,6 +108,9 @@ export default function Home() {
       <DoneToast />
       <AbortToast />
       <StreamAlertToast />
+      {/* S1 P1：工作区终端。自己判断有没有 workspace（chat 会话直接返回 null），
+          所以不在这里加条件 —— 它还要负责在没打开时渲染右下角那个「▲ 终端」把手。 */}
+      {session && <TerminalPanel />}
       <NotesDrawer />
       <WorkspaceFilesDrawer />
       <SearchModal />

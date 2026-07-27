@@ -5,6 +5,7 @@ import fs from "node:fs";
 import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
 import { codexRolloutExists, deleteCodexRollout } from "./codex-fork";
+import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import type {
@@ -34,6 +35,9 @@ export type ApiSession = {
   mode: string;
   // null in 'chat' mode (no cwd binding); absolute path otherwise.
   workspacePath: string | null;
+  // S1：归属的 workspace（侧栏三级分组用）。**不是 workspacePath 的替代** ——
+  // 后者才是 spawn cwd 的真源。null = 未归组（chat、或目录已不存在归不了类）。
+  workspaceId: string | null;
   // D1: custom system prompt locked at creation (chat mode only).
   // null = use DEFAULT_SYSTEM_PROMPT.
   systemPrompt: string | null;
@@ -131,6 +135,7 @@ type SessionRow = {
   updated_at: number;
   context_mode: string;
   workspace_path: string | null;
+  workspace_id: string | null;
   system_prompt: string | null;
   archived: number;
   model: string | null;
@@ -140,7 +145,7 @@ type SessionRow = {
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
-       context_mode, workspace_path, system_prompt, archived, model,
+       context_mode, workspace_path, workspace_id, system_prompt, archived, model,
        origin, source_jsonl_path, require_approval`;
 
 function rowToNode(r: NodeRow): ApiNode {
@@ -237,6 +242,20 @@ function rowToNode(r: NodeRow): ApiNode {
   };
 }
 
+// S1：路径 → workspace id，永不抛。归组是分组视图的锦上添花，任何失败
+// （目录消失 / git 不可用 / 权限）都只该让 session 落到「未归组」，
+// 而不是把创建会话这条主链路带崩。
+function resolveWorkspaceId(absPath: string): string | null {
+  try {
+    const id = ensureWorkspaceForPath(absPath);
+    if (id) touchWorkspace(id);
+    return id;
+  } catch (e) {
+    console.warn(`[trellis] workspace resolve failed for ${absPath}:`, e);
+    return null;
+  }
+}
+
 function rowToSession(r: SessionRow): ApiSession {
   return {
     id: r.id,
@@ -246,6 +265,7 @@ function rowToSession(r: SessionRow): ApiSession {
     updatedAt: r.updated_at,
     mode: r.context_mode,
     workspacePath: r.workspace_path,
+    workspaceId: r.workspace_id,
     systemPrompt: r.system_prompt,
     archived: r.archived === 1,
     model: r.model,
@@ -760,14 +780,21 @@ export function createSessionWithRoot(args: {
     args.attachments && args.attachments.length > 0
       ? JSON.stringify(args.attachments)
       : null;
+  // S1：归组。在事务**外**解析 —— ensureWorkspaceForPath 要 spawn git，
+  // 放进事务里会让写锁多握几十毫秒。解析失败（目录消失/无 git）返回 null，
+  // session 照常创建、只是不归组：归属是锦上添花，绝不该拦住发消息。
+  const workspaceId = workspacePath
+    ? resolveWorkspaceId(workspacePath)
+    : null;
   const tx = db.transaction(() => {
     // 新建 project session 一律走 per-lineage 隔离（spec:
     // progress/project-lineage-isolation-spec.md）；存量行保持 0（旧共享语义）。
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
-                             context_mode, workspace_path, system_prompt, model,
+                             context_mode, workspace_path, workspace_id,
+                             system_prompt, model,
                              lineage_isolation, require_approval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -776,6 +803,7 @@ export function createSessionWithRoot(args: {
       args.now,
       mode,
       workspacePath,
+      workspaceId,
       systemPrompt,
       model,
       mode === "project" ? 1 : 0,
@@ -1332,11 +1360,12 @@ export function createSessionWithReference(args: {
   const status = args.status ?? "done";
   const mode = args.mode ?? "chat";
   const workspacePath = args.workspacePath ?? null;
+  const workspaceId = workspacePath ? resolveWorkspaceId(workspacePath) : null;
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
-                             context_mode, workspace_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                             context_mode, workspace_path, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -1345,6 +1374,7 @@ export function createSessionWithReference(args: {
       args.now,
       mode,
       workspacePath,
+      workspaceId,
     );
 
     db.prepare(

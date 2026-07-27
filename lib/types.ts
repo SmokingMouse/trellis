@@ -169,6 +169,30 @@ export type ChatNode = {
   hiddenAt: number | null;
 };
 
+// S1：侧栏三级分组的骨架，随 /api/sessions 一起下发（服务端真源在
+// lib/server/workspaces.ts，那边有 server-only 不能给客户端 import）。
+export type WorkspaceSummary = {
+  id: string;
+  projectId: string;
+  name: string;
+  path: string;
+  /** main | worktree | plain */
+  kind: string;
+  gitBranch: string | null;
+  /** discovered | worktree-scan | trellis */
+  createdBy: string;
+  lastUsedAt: number | null;
+  sessionCount: number;
+};
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  clusterKey: string;
+  gitRemote: string | null;
+  workspaces: WorkspaceSummary[];
+};
+
 export type Session = {
   id: string;
   title: string;
@@ -181,6 +205,10 @@ export type Session = {
   mode: string;
   // null in chat mode (no cwd binding); absolute path otherwise.
   workspacePath: string | null;
+  // S1：归属的 workspace，驱动侧栏三级分组。null = 未归组（chat，或
+  // workspacePath 指向的目录已不存在）。**不是 workspacePath 的替代** ——
+  // 后者才是 spawn cwd 的真源。
+  workspaceId?: string | null;
   // D1: custom system prompt locked at creation (chat mode only).
   // null = use the built-in default.
   systemPrompt: string | null;
