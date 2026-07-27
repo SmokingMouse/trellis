@@ -427,7 +427,13 @@ export function LinearThreadView() {
     // floating mid-screen instead of docked at the bottom.
     <div
       className="fixed inset-0 pt-12 md:pt-[5.25rem] flex flex-col bg-surface-canvas"
-      style={{ left: "var(--trellis-sb, 0px)" }}
+      // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
+      // 发布，与 --trellis-sb 同一套模式（一个变量、多个消费者）；面板关闭时
+      // 是 0px，等于没这回事。
+      style={{
+        left: "var(--trellis-sb, 0px)",
+        bottom: "var(--trellis-term-h, 0px)",
+      }}
     >
       <div className="shrink-0 z-30 border-b border-line/80 bg-surface-canvas/90 backdrop-blur">
         <div className={`${widthClass} mx-auto px-4 py-3 flex items-center gap-3`}>

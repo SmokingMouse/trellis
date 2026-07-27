@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDB } from "./sqlite";
 import { importCliLineage, type ImportResult } from "./cli-import-db";
+import { ensureWorkspaceForPath } from "./workspaces";
 import { parseCliSessionJsonl } from "./cli-import";
 import { discoverLineage, type DiscoveredLineage } from "./cli-discover";
 import { deleteSession } from "./repo";
@@ -57,18 +58,29 @@ function seedLineage(discovered: DiscoveredLineage, trellisSessionId = discovere
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   const rootNodeId = (roots[0] ?? parsed.turns[0]).id;
   const mode = parsed.cwd ? "project" : "chat";
+  // S1 归组。这是**高频**路径（jsonl 每次变动都到这儿），但对已登记目录
+  // ensureWorkspaceForPath 走纯 SELECT 快路径、不 spawn git，代价可忽略。
+  let workspaceId: string | null = null;
+  if (parsed.cwd) {
+    try {
+      workspaceId = ensureWorkspaceForPath(parsed.cwd);
+    } catch {
+      workspaceId = null;
+    }
+  }
 
   const tx = db.transaction(() => {
     db.prepare(
       `INSERT INTO sessions
          (id, title, root_node_id, created_at, updated_at, context_mode,
-          workspace_path, origin, source_jsonl_path, synced_uuid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?)
+          workspace_path, workspace_id, origin, source_jsonl_path, synced_uuid)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          root_node_id = excluded.root_node_id,
          updated_at = excluded.updated_at,
          workspace_path = excluded.workspace_path,
+         workspace_id = COALESCE(excluded.workspace_id, sessions.workspace_id),
          source_jsonl_path = excluded.source_jsonl_path,
          synced_uuid = excluded.synced_uuid`,
     ).run(
@@ -79,6 +91,7 @@ function seedLineage(discovered: DiscoveredLineage, trellisSessionId = discovere
       parsed.updatedAt,
       mode,
       parsed.cwd,
+      workspaceId,
       root.path,
       parsed.lastUuid,
     );

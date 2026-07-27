@@ -6,8 +6,29 @@ import { Dots } from "@/components/ui/Dots";
 import { CliAttachPicker } from "@/components/CliAttachPicker";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
-import { SIDEBAR_W } from "@/lib/workbench-layout";
-import type { Session } from "@/lib/types";
+import {
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  loadSidebarWidth,
+  persistSidebarWidth,
+} from "@/lib/workbench-layout";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import type { ProjectSummary, Session } from "@/lib/types";
+
+// S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
+// 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
+// 一进来就得手动展开才能看见东西是更差的默认。
+const COLLAPSE_KEY = "trellis-sidebar-collapsed";
+
+function loadCollapsed(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
 
 // Workbench Wave 4 — VSCode-style left explorer sidebar (R1 + R2 + R3).
 //
@@ -46,6 +67,11 @@ export function SessionSidebar() {
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
   const [attachOpen, setAttachOpen] = useState(false);
+  // 新建 worktree 的行内表单：值 = 正在建的 projectId，null = 没在建
+  const [wtFor, setWtFor] = useState<string | null>(null);
+  const [wtBranch, setWtBranch] = useState("");
+  const [wtBusy, setWtBusy] = useState(false);
+  const [wtError, setWtError] = useState<string | null>(null);
 
   // Zero-latency running state for the active session (derive from live nodes
   // rather than waiting for the /api/runs poll); non-active rows use the poll.
@@ -56,7 +82,55 @@ export function SessionSidebar() {
     runningIds.has(id) || (id === activeId && activeRunning);
 
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  // 惰性初值直接读 localStorage（store 里 loadSidebarOpen 同款），不走 effect。
+  // 不会 hydration 不匹配：projects 初值是 []、靠 fetch 填，首屏一个分组行都不
+  // 渲染，折叠状态在 fetch 回来之前根本不可见。
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const [width, setWidth] = useState<number>(loadSidebarWidth);
+  const [resizing, setResizing] = useState(false);
+  const isMobile = useIsMobile();
+
+  // 侧栏自己拥有宽度，就由它来发布 --trellis-sb（原先在 page.tsx 里按常量发，
+  // 宽度一旦可拖拽，两处就会打架）。所有消费者读的仍是同一个变量，不用改。
+  useEffect(() => {
+    const offset = !isMobile && sidebarOpen ? width : 0;
+    document.documentElement.style.setProperty("--trellis-sb", `${offset}px`);
+  }, [isMobile, sidebarOpen, width]);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) =>
+      setWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, e.clientX)));
+    const onUp = () => {
+      setResizing(false);
+      setWidth((w) => {
+        persistSidebarWidth(w);
+        return w;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [resizing]);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const toggleCollapsed = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* 隐私模式下写不进去，折叠状态退化成只在本次会话内有效 */
+      }
+      return next;
+    });
+  };
   // Archived view (replaces SessionPicker's "显示已归档" toggle). Count comes
   // free from the main list response; the archived rows are fetched lazily
   // only when the footer is expanded.
@@ -74,6 +148,7 @@ export function SessionSidebar() {
         if (!cancelled) {
           setSessions(data.sessions ?? []);
           setArchivedCount(data.archivedCount ?? 0);
+          setProjects(data.projects ?? []);
         }
       })
       .catch(() => {
@@ -107,57 +182,227 @@ export function SessionSidebar() {
     setMobileNavOpen(false);
   }, [activeId, setMobileNavOpen]);
 
-  const { chat, work } = useMemo(() => {
+  // S1：三级分组。sessions 已按 updated_at DESC 到手，下面只做归位不重排，
+  // 所以每个 workspace 内部天然保持「最近活跃在前」。
+  //
+  // 三个去处：
+  //   chat      —— 无 workspace 绑定，仍是平铺一组（它本来就没有「项目」语义）
+  //   projects  —— 按 workspace_id 归位
+  //   orphans   —— 有 workspace_path 但归不了组（目录已被删）。不能默默吞掉，
+  //                否则用户会以为会话丢了。
+  const { chat, byWorkspace, orphans } = useMemo(() => {
+    const known = new Set(
+      projects.flatMap((p) => p.workspaces.map((w) => w.id)),
+    );
     const chat: Session[] = [];
-    const work: Session[] = [];
+    const orphans: Session[] = [];
+    const byWorkspace = new Map<string, Session[]>();
     for (const s of sessions) {
-      if ((s.mode || "chat") === "chat") chat.push(s);
-      else work.push(s);
+      if ((s.mode || "chat") === "chat" && !s.workspaceId) {
+        chat.push(s);
+        continue;
+      }
+      const wid = s.workspaceId;
+      if (wid && known.has(wid)) {
+        const list = byWorkspace.get(wid) ?? [];
+        list.push(s);
+        byWorkspace.set(wid, list);
+      } else {
+        orphans.push(s);
+      }
     }
-    return { chat, work };
-  }, [sessions]);
+    return { chat, byWorkspace, orphans };
+  }, [sessions, projects]);
+
+  const createWorktree = async (projectId: string) => {
+    const branch = wtBranch.trim();
+    if (!branch) return;
+    setWtBusy(true);
+    setWtError(null);
+    try {
+      const r = await fetch("/api/workspaces/worktree", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId, branch }),
+      }).then((x) => x.json());
+      if (r.error) {
+        setWtError(r.error);
+        return;
+      }
+      setWtFor(null);
+      setWtBranch("");
+      bumpSessionsRevision(); // 侧栏重拉，新 worktree 当场出现
+    } catch {
+      setWtError("网络错误");
+    } finally {
+      setWtBusy(false);
+    }
+  };
+
+  const removeWorktree = async (w: { id: string; name: string }) => {
+    const r = await fetch(`/api/workspaces/worktree?workspaceId=${w.id}`, {
+      method: "DELETE",
+    }).then((x) => x.json());
+    if (r.dirty) {
+      if (
+        !confirm(
+          `「${w.name}」有未提交的改动：\n\n${r.dirty.join("\n")}\n\n仍要删除？（改动会丢失，不可恢复）`,
+        )
+      )
+        return;
+      await fetch(`/api/workspaces/worktree?workspaceId=${w.id}&force=1`, {
+        method: "DELETE",
+      });
+    } else if (r.error) {
+      alert(`删除失败：${r.error}`);
+      return;
+    }
+    bumpSessionsRevision();
+  };
 
   const onNew = () => {
     newConversation();
     setEditingId(null);
   };
 
-  const renderGroup = (label: string, list: Session[]) =>
-    list.length === 0 ? null : (
-      <div className="mb-2">
-        <div className="px-2 pt-1 pb-0.5 text-nano uppercase tracking-wider font-medium text-ink-faint">
-          {label}
-        </div>
-        {list.map((s) => (
-          <SidebarRow
-            key={s.id}
-            session={s}
-            active={s.id === activeId}
-            preview={s.id === previewId}
-            running={isRunning(s.id)}
-            unread={unreadIds.has(s.id)}
-            live={liveSessionIds.has(s.id)}
-            editing={editingId === s.id}
-            onPreview={() => previewSession(s.id)}
-            onPin={() => pinSession(s.id)}
-            onStartEdit={() => setEditingId(s.id)}
-            onCancelEdit={() => setEditingId(null)}
-            onCommit={async (next) => {
-              setEditingId(null);
-              if (next.trim() && next.trim() !== s.title) {
-                await renameSession(s.id, next);
-              }
-            }}
-            onArchive={() => archiveSession(s.id)}
-            onDelete={() => {
-              if (confirm("永久删除这个对话？\n（节点不可恢复）")) {
-                deleteSession(s.id);
-              }
-            }}
-          />
-        ))}
+  // 单行渲染。indent 让它能在 Chat（平铺）与 Project→Workspace（缩两级）
+  // 两种上下文里复用同一个组件，缩进不进 SidebarRow 内部。
+  const renderRow = (s: Session, indent = 0) => (
+    <SidebarRow
+      key={s.id}
+      session={s}
+      indent={indent}
+      active={s.id === activeId}
+      preview={s.id === previewId}
+      running={isRunning(s.id)}
+      unread={unreadIds.has(s.id)}
+      live={liveSessionIds.has(s.id)}
+      editing={editingId === s.id}
+      onPreview={() => previewSession(s.id)}
+      onPin={() => pinSession(s.id)}
+      onStartEdit={() => setEditingId(s.id)}
+      onCancelEdit={() => setEditingId(null)}
+      onCommit={async (next) => {
+        setEditingId(null);
+        if (next.trim() && next.trim() !== s.title) {
+          await renameSession(s.id, next);
+        }
+      }}
+      onArchive={() => archiveSession(s.id)}
+      onDelete={() => {
+        if (confirm("永久删除这个对话？\n（节点不可恢复）")) {
+          deleteSession(s.id);
+        }
+      }}
+    />
+  );
+
+  // Chat 与「未归组」也可折叠。用合成 id 走 projects 那套同一个 collapsed 集合，
+  // 免得为两个扁平分组再开一份状态。
+  const renderGroup = (id: string, label: string, list: Session[]) => {
+    if (list.length === 0) return null;
+    const isCollapsed = collapsed.has(id);
+    return (
+      <div className="mb-1.5">
+        <GroupRow
+          level={0}
+          collapsed={isCollapsed}
+          label={label}
+          title={`${label} · ${list.length} 个会话`}
+          badge={isCollapsed ? String(list.length) : null}
+          onToggle={() => toggleCollapsed(id)}
+        />
+        {!isCollapsed && list.map((s) => renderRow(s, 1))}
       </div>
     );
+  };
+
+  // S1 三级：Project → Workspace → Session。折叠子树时把「藏了几个会话」
+  // 回显出来（与树面板折叠行同语义 —— 折叠不该把状态一起藏掉）。
+  const renderProjects = () =>
+    projects.map((p) => {
+      const pCollapsed = collapsed.has(p.id);
+      const pCount = p.workspaces.reduce(
+        (n, w) => n + (byWorkspace.get(w.id)?.length ?? 0),
+        0,
+      );
+      return (
+        <div key={p.id} className="mb-1.5">
+          <GroupRow
+            level={0}
+            collapsed={pCollapsed}
+            label={p.name}
+            title={`${p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${p.workspaces.length} 个工作区 · ${pCount} 个会话`}
+            badge={pCollapsed && pCount > 0 ? String(pCount) : null}
+            onToggle={() => toggleCollapsed(p.id)}
+            // 只有 git 项目能开 worktree（暂存区 / 主目录这类 plain 项目不行）
+            onAdd={
+              p.workspaces.some((w) => w.kind !== "plain")
+                ? () => {
+                    setWtFor(p.id);
+                    setWtBranch("");
+                    setWtError(null);
+                  }
+                : undefined
+            }
+          />
+          {wtFor === p.id && (
+            <div className="mx-1 mb-1 pl-4 pr-2 py-1.5 rounded-md bg-surface-muted">
+              <input
+                autoFocus
+                value={wtBranch}
+                onChange={(e) => setWtBranch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createWorktree(p.id);
+                  if (e.key === "Escape") setWtFor(null);
+                }}
+                placeholder="分支名（回车创建 · Esc 取消）"
+                className="w-full px-1.5 py-1 rounded text-ui bg-surface border border-line-strong outline-none focus:border-accent text-ink-strong"
+              />
+              <div className="mt-1 text-nano text-ink-faint">
+                {wtBusy
+                  ? "创建中…"
+                  : wtError
+                    ? <span className="text-danger">{wtError}</span>
+                    : "已有同名分支则直接检出，否则新建；目录落在主 checkout 的同级"}
+              </div>
+            </div>
+          )}
+          {!pCollapsed &&
+            p.workspaces.map((w) => {
+              const list = byWorkspace.get(w.id) ?? [];
+              const wCollapsed = collapsed.has(w.id);
+              return (
+                <div key={w.id}>
+                  <GroupRow
+                    level={1}
+                    collapsed={wCollapsed}
+                    label={w.name}
+                    // 有 session 才可折叠；空的（worktree 扫出来还没用过）
+                    // 没有子内容，给三角就是个骗人的开关。
+                    toggleable={list.length > 0}
+                    tag={w.kind === "worktree" ? "worktree" : null}
+                    muted={list.length === 0}
+                    title={`${w.path}${w.gitBranch ? `\n分支 ${w.gitBranch}` : ""}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
+                    badge={
+                      wCollapsed && list.length > 0 ? String(list.length) : null
+                    }
+                    onToggle={() => toggleCollapsed(w.id)}
+                    // 只有 trellis 自己 worktree add 出来的才允许从 UI 删磁盘；
+                    // 发现来的（用户在 CLI 里建的）不给这个按钮。
+                    onRemove={
+                      w.createdBy === "trellis" && w.kind === "worktree"
+                        ? () => void removeWorktree(w)
+                        : undefined
+                    }
+                  />
+                  {!wCollapsed && list.map((s) => renderRow(s, 2))}
+                </div>
+              );
+            })}
+        </div>
+      );
+    });
 
   // The panel body (new-session + grouped list + archived footer) is shared by
   // the desktop rail and the mobile drawer. `onClose` wires the header chevron
@@ -204,8 +449,11 @@ export function SessionSidebar() {
           </div>
         ) : (
           <>
-            {renderGroup("Chat", chat)}
-            {renderGroup("Project", work)}
+            {renderProjects()}
+            {renderGroup("__chat", "Chat", chat)}
+            {/* 归不了组的 project 会话：目录已被删，或存量行压根没记 cwd。
+                单列一组而不是悄悄隐藏，否则用户会以为会话丢了。 */}
+            {renderGroup("__orphans", "未归组", orphans)}
           </>
         )}
       </div>
@@ -276,9 +524,15 @@ export function SessionSidebar() {
       {sidebarOpen ? (
         <aside
           className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-surface-canvas/90 backdrop-blur border-r border-line"
-          style={{ width: SIDEBAR_W }}
+          style={{ width }}
         >
           {renderPanel(() => setSidebarOpen(false))}
+          {/* 右边缘拖拽调宽 */}
+          <div
+            onMouseDown={() => setResizing(true)}
+            className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-accent/40"
+            aria-hidden
+          />
         </aside>
       ) : (
         // Collapsed → thin re-open affordance so the rail can be brought back.
@@ -315,8 +569,96 @@ export function SessionSidebar() {
   );
 }
 
+// S1：Project / Workspace 的分组行。两级共用一个组件，靠 level 调缩进与字重
+// —— 项目行是这棵树的骨架（强），工作区行是它的分支（弱）。
+//
+// 外层刻意是 div 而非 button：行上要挂「+ 新建 worktree」「删除」这类操作，
+// button 里套 button 是非法 HTML（SidebarRow 同款处理）。
+function GroupRow({
+  level,
+  collapsed,
+  label,
+  title,
+  badge,
+  tag,
+  muted,
+  toggleable = true,
+  onToggle,
+  onAdd,
+  onRemove,
+}: {
+  level: 0 | 1;
+  collapsed: boolean;
+  label: string;
+  title: string;
+  badge: string | null;
+  tag?: string | null;
+  muted?: boolean;
+  toggleable?: boolean;
+  onToggle: () => void;
+  onAdd?: () => void;
+  onRemove?: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-1 pr-1 h-6 rounded-md ${
+        toggleable ? "hover:bg-surface-muted" : ""
+      } ${muted ? "opacity-60" : ""}`}
+    >
+      <button
+        onClick={toggleable ? onToggle : undefined}
+        title={title}
+        className={`flex-1 min-w-0 flex items-center gap-1 h-6 text-left ${
+          toggleable ? "" : "cursor-default"
+        } ${
+          level === 0
+            ? "pl-1.5 text-ui font-medium text-ink-strong"
+            : "pl-4 text-label text-ink-muted"
+        }`}
+      >
+        <span
+          aria-hidden
+          className={`w-2.5 shrink-0 text-nano text-ink-faint transition-transform ${
+            collapsed ? "" : "rotate-90"
+          } ${toggleable ? "" : "opacity-0"}`}
+        >
+          ▸
+        </span>
+        <span className="flex-1 min-w-0 truncate">{label}</span>
+      </button>
+      {tag && (
+        <span className="shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint group-hover:hidden">
+          {tag}
+        </span>
+      )}
+      {badge && (
+        <span className="shrink-0 text-nano tabular-nums text-ink-faint group-hover:hidden">
+          {badge}
+        </span>
+      )}
+      {(onAdd || onRemove) && (
+        <div className="shrink-0 hidden group-hover:flex items-center gap-0.5">
+          {onAdd && (
+            <RowIconButton title="在这个项目下新建 worktree" onClick={onAdd}>
+              <path d="M12 5v14M5 12h14" />
+            </RowIconButton>
+          )}
+          {onRemove && (
+            <RowIconButton title="删除这个 worktree（未提交改动会先拦一次）" danger onClick={onRemove}>
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </RowIconButton>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarRow({
   session,
+  indent = 0,
   active,
   preview,
   running,
@@ -332,6 +674,8 @@ function SidebarRow({
   onDelete,
 }: {
   session: Session;
+  /** 0 = 平铺（Chat / 未归组），2 = 挂在 Project → Workspace 下 */
+  indent?: number;
   active: boolean;
   preview: boolean;
   running: boolean;
@@ -363,6 +707,7 @@ function SidebarRow({
 
   return (
     <div
+      style={indent ? { marginLeft: 4 + indent * 8 } : undefined}
       className={`group relative mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 cursor-pointer transition-colors overflow-hidden ${
         running
           ? // Running tint (accent) + left accent bar (added below). Overrides

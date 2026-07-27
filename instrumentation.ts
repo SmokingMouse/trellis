@@ -15,6 +15,16 @@ export async function register() {
     );
     delete process.env.CLAUDE_CODE_EFFORT_LEVEL;
   }
+  // S1：把存量 session 按目录归进 Project/Workspace。放这里而不是 sqlite.ts 的
+  // migrate()，是因为它要 spawn git —— migrate() 至今是纯 SQL，别把子进程塞进去。
+  // 幂等 + 整段吞异常，失败只是「没归组」，不拦启动。
+  const { backfillWorkspaces } = await import("./lib/server/workspaces");
+  const filled = backfillWorkspaces();
+  if (filled.sessions > 0) {
+    console.log(
+      `[trellis] workspace backfill: ${filled.sessions} session(s) across ${filled.paths} dir(s)`,
+    );
+  }
   const { startContextBackfill } = await import(
     "./lib/server/context-backfill"
   );

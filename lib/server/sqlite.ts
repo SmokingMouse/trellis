@@ -456,6 +456,59 @@ function migrate(db: Database) {
     );
   `);
 
+  // S1（progress/project-workspace-layer.md）：把「执行环境」提升为一等实体，
+  // session 从平铺变成 Project → Workspace → Session 三级。
+  //
+  // 关键纪律：**sessions.workspace_path 保留不删**。它是 spawn cwd 的唯一真源
+  // （lib/paths.ts:18 sessionCwd），且 cli-import 反向从 jsonl 的 cwd 推它。
+  // 下面的 workspace_id 只是「归属指针」，不是替代 —— 这样 spawn / resume /
+  // claude 前缀 jsonl 分叉 / codex 前缀 rollout 四条链路零改动。
+  //
+  // cluster_key 是聚类的去重键，与 git_remote 刻意分开两列：
+  //   有 remote  → 归一化后的 remote URL（同 repo 的所有 worktree 天然同值）
+  //   无 remote  → `git rev-parse --git-common-dir` 的路径（纯本地 repo 也能聚）
+  //   非 git     → 父目录路径（scratch 特判）
+  // git_remote 只存真实 remote 供显示，可为 NULL；用它当唯一键会让后两类无法去重。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      cluster_key TEXT NOT NULL UNIQUE,
+      git_remote TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      git_branch TEXT,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS workspaces_project ON workspaces(project_id);
+  `);
+
+  // ON DELETE SET NULL（而非 CASCADE）：移除一个 workspace 不该连坐删掉它下面的
+  // 会话历史 —— 那些 session 仍持有 workspace_path、仍能正常 resume，只是回到
+  // 「未归组」状态。这正是「workspace_path 才是真源」的设计在删除路径上的体现。
+  const hasSessionWorkspaceId = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'workspace_id'",
+    )
+    .get();
+  if (!hasSessionWorkspaceId) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL",
+    );
+  }
+
   // Stage 16: FTS5 cross-session full-text search. Single virtual table
   // covers question / response / reference / note text. trigram tokenizer
   // is the FTS5-builtin pick for mixed CJK + ASCII: 3-char sliding window

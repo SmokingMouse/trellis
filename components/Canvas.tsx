@@ -390,7 +390,12 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         // Wave 4: shift the canvas right of the explorer sidebar (var set in
         // page.tsx; 0 on mobile / when collapsed). box-border keeps the
         // element 100vw while the inner ReactFlow area shrinks by the pad.
-        style={{ paddingLeft: "var(--trellis-sb, 0px)", boxSizing: "border-box" }}
+        // paddingBottom 同理让出终端面板高度，否则画布下缘被面板盖住。
+        style={{
+          paddingLeft: "var(--trellis-sb, 0px)",
+          paddingBottom: "var(--trellis-term-h, 0px)",
+          boxSizing: "border-box",
+        }}
       >
         <ReactFlow
           nodes={flowNodes}
@@ -464,8 +469,13 @@ function DockedComposer() {
 
   return (
     <div
-      className="fixed bottom-0 right-0 z-20"
-      style={{ left: "var(--trellis-sb, 0px)" }}
+      className="fixed right-0 z-20"
+      // S1 P1: docked composer 坐在终端面板之上（--trellis-term-h 由
+      // TerminalPanel 发布；关闭时 0px = 贴底，与原来一致）。
+      style={{
+        left: "var(--trellis-sb, 0px)",
+        bottom: "var(--trellis-term-h, 0px)",
+      }}
     >
       <div className="border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
         <div className="max-w-2xl mx-auto px-4">

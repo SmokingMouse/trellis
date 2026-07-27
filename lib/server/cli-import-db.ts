@@ -5,6 +5,7 @@
 import "server-only";
 import { getDB } from "./sqlite";
 import { parseCliSessionJsonl } from "./cli-import";
+import { ensureWorkspaceForPath } from "./workspaces";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
 
 export type ImportResult = {
@@ -178,18 +179,30 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
     db.prepare("SELECT 1 FROM nodes WHERE session_id = ? LIMIT 1").get(trellisSessionId),
   );
 
+  // S1 归组。事务外解析（可能 spawn git），失败只落「未归组」不影响导入。
+  // 上面的 upsert 用 COALESCE 兜底，避免一次解析失败把已有归属清成 NULL。
+  let workspaceId: string | null = null;
+  if (rootParsed.parsed.cwd) {
+    try {
+      workspaceId = ensureWorkspaceForPath(rootParsed.parsed.cwd);
+    } catch {
+      workspaceId = null;
+    }
+  }
+
   const tx = db.transaction(() => {
     // ── session upsert（FK：必须先于 nodes）──────────────────────────────
     db.prepare(
       `INSERT INTO sessions
          (id, title, root_node_id, created_at, updated_at, context_mode,
-          workspace_path, origin, source_jsonl_path, synced_uuid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?)
+          workspace_path, workspace_id, origin, source_jsonl_path, synced_uuid)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          root_node_id = excluded.root_node_id,
          updated_at = excluded.updated_at,
          workspace_path = excluded.workspace_path,
+         workspace_id = COALESCE(excluded.workspace_id, sessions.workspace_id),
          source_jsonl_path = excluded.source_jsonl_path,
          synced_uuid = excluded.synced_uuid`,
     ).run(
@@ -200,6 +213,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
       rootParsed.parsed.updatedAt,
       mode,
       rootParsed.parsed.cwd,
+      workspaceId,
       rootPath,
       rootParsed.parsed.lastUuid,
     );
