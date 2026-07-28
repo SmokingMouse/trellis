@@ -136,10 +136,23 @@ async function bootNext(): Promise<boolean> {
     stdout: "inherit",
     stderr: "inherit",
   });
-  if (await waitFor(NEXT_PORT, 60_000)) return true;
-  console.error(`[trellis] next did not listen on ${NEXT_PORT} within 60s`);
+  // 和「子进程直接退出」赛跑。只等端口的话，启动即崩的 Next（比如 .next 不存在）
+  // 也要干等满 60s 才被判失败 —— 那 60s 里维护页会一直说「正在启动」，退避重启
+  // 也压根没开始。实测这种崩溃 1s 内就退出了。
+  const proc = nextProc;
+  const listened = await Promise.race([
+    waitFor(NEXT_PORT, 60_000),
+    proc.exited.then(() => false),
+  ]);
+  if (listened) return true;
+  lastExitCode = proc.exitCode;
+  console.error(
+    proc.exitCode !== null
+      ? `[trellis] next exited during startup (code=${proc.exitCode})`
+      : `[trellis] next did not listen on ${NEXT_PORT} within 60s`,
+  );
   try {
-    nextProc.kill();
+    proc.kill();
   } catch {
     /* 已经没了 */
   }
@@ -265,8 +278,12 @@ function nextStatus(): "ready" | "starting" | "down" {
 function maintenancePage(detailed: boolean): Response {
   const st = readDeployState();
   const status = nextStatus();
+  // 只有「正在进行中的部署」才有资格解释当前的不可用。上周那次失败的部署留下的
+  // deploy-state 不该给今天的一次无关崩溃贴上「本次更新失败」的标签。
+  const fresh =
+    st !== null && Date.now() - Date.parse(st.updatedAt) < 30 * 60_000;
   const headline =
-    st && st.phase !== "done" && st.phase !== "idle"
+    fresh && st.phase !== "done" && st.phase !== "idle"
       ? { preflight: "正在检查", stage: "正在准备新版本", install: "正在安装依赖", build: "正在构建", smoke: "正在预检新版本", backup: "正在备份数据库", switch: "正在切换版本", verify: "正在验活", rollback: "正在回滚", failed: "本次更新失败", broken: "更新失败且回滚未成功", done: "", idle: "" }[st.phase] ?? "正在更新"
       : status === "down"
         ? "服务启动失败"

@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-07-28 · 上线机制：release 目录 + 原子软链切换，不做零停机热切
+
+**Decision**：部署换成 `~/.trellis/releases/<ts>-<sha>/` + `current` 软链原子切换（`make deploy`，
+`scripts/deploy.ts` 十阶段）。新版本先在 release 目录里 `bun install` + `next build`，再用真 DB 的
+`VACUUM INTO` 快照起临时实例做 smoke（/login、/、/api/providers、/api/sessions 四断言 + 「没杀掉
+prod ttyd」回归断言），过了才备份数据库、换软链、kickstart、验活；验活不过自动回滚到 `previous`。
+launchd 的 `WorkingDirectory` 指向 `current`（软链每次 spawn 重新解析），仓库目录退回纯开发用途。
+**Why**：原来在运行目录里原地 build 是不可逆的——build 失败当场把 prod 打成半死，build 成功忘了
+kickstart 就是「内存旧模块 + 磁盘新文件」混跑（S66 实测），且没有回滚路径。本仓库恰好适合搬运：
+全仓 `process.cwd()` 零命中、状态全在 `~/.trellis` 与 `~/.claude`、`migrate()` 全是加法 DDL。
+**Alternatives**：① **零停机热切**（网关常驻不重启、双 Next 并存、健康检查后切上游、排空旧连接）
+—— 拒绝。两个 Next 同时活着会在共享 `~/.trellis` 上三处互撞：`migrate()` 里的 streaming→error 收尸
+（`sqlite.ts:531`，每进程首次开库就跑，会判死另一实例正在跑的 run）、ttyd 互杀、cli-sync watcher
+双写同一批 jsonl 行；三处都得先改造，而实测切换窗口只有 0.2s（且期间是维护页不是连接被拒），
+不值这个复杂度。② **无人值守自动更新** —— 拒绝，用户明确要「更新要我批准」；检测与准备可以自动，
+切换必须是显式动作。③ 跨 release 硬链接复用 `node_modules` —— 不做，bun 本来就从全局 cache 硬链，
+实测 `bun install --frozen-lockfile` 0.6s，没有可优化的东西。
+
 ## 2026-07-16 · 砍掉 Workspace 档：上下文模式收敛为 chat / project 两档
 
 **Decision**：`Mode = "chat" | "project"`，Workspace（一次性 CLI、每轮无状态）整档退役。

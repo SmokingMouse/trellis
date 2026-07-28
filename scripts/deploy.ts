@@ -413,7 +413,9 @@ async function switchTo(dir: string): Promise<void> {
 
 async function verify(): Promise<boolean> {
   phase("verify", `轮询 127.0.0.1:${GATE_PORT}`);
-  const deadline = Date.now() + 90_000;
+  // 实测冷启动（网关 + 预构建的 Next）约 1.1s，60s 足够宽；再放宽只是让坏版本
+  // 多躺一会儿 —— 这段时间是真的不可用，回滚要等它走完。
+  const deadline = Date.now() + 60_000;
   let sawGate = false;
   while (Date.now() < deadline) {
     const h = await httpGet(`http://127.0.0.1:${GATE_PORT}/__gate/health`, 2000);

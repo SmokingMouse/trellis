@@ -253,13 +253,41 @@ cp node_modules/@smokingmouse/llm/endpoints.example.yaml ~/.config/sm/endpoints.
 
 ### 生产构建
 
+单机随手跑一把：
+
 ```bash
 make build && make start   # 固定 -p 3088；等价 bun --bun run build && bun --bun run start -- -p 3088
 ```
 
 数据落 `~/.trellis/data.db`（SQLite WAL，自动迁移）。卸载只需删掉这个目录。
 
-> ⚠️ 升级/重新 build 后，若用 `next start` 长驻服务，记得**重启进程**——运行中的 `next start` 持有旧 build 的 chunk 清单，`.next` 被重建后会 chunk 不一致导致白屏。
+### 长驻部署与升级
+
+如果 Trellis 是常驻服务（launchd / systemd），**不要**在它正在运行的那个目录里 `make build` 再重启：`next build` 会就地改掉运行中的 `.next`，build 失败就把服务打成半死，build 成功却忘了重启则是「内存里旧模块 + 磁盘上新文件」混跑（页面能开但交互全挂）。而且没有回滚路径。
+
+改用 `make deploy`：
+
+```bash
+make deploy              # 部署当前 HEAD
+make deploy REF=v1.2.0   # 部署指定 ref
+make rollback            # 切回上一个 release
+make deploy-status       # 看 current / previous 与上次部署状态
+```
+
+它做的事：把目标 commit 导出到 `~/.trellis/releases/<sha>/` 里装依赖并 build（**全程不碰正在跑的服务**）→ 用真数据库的一致性快照起一个临时实例，验证它真的能启动、能出页面、能读现网数据 → 备份数据库 → 原子换 `~/.trellis/current` 软链 + 重启 → 验活；验活不过**自动回滚**到上一个 release。
+
+任何一步失败都不会动到正在跑的版本。实测切换窗口 ≈ 0.2s，且期间返回的是维护页而不是连接被拒——网关进程先占住端口、再拉起 Next，Next 起不来时它不会跟着自杀，而是退避重启并出 503 维护页（未登录只显示「正在更新」，版本号与日志要登录后才看得到）。`GET /__gate/health` 给出网关与 Next 的真实状态。
+
+首次启用需要把常驻服务的工作目录指向软链，一次性：
+
+```bash
+make deploy            # 先建出第一个 release
+make install-launchd   # 把 launchd 的 WorkingDirectory 改成 ~/.trellis/current（会先备份原 plist）
+```
+
+之后仓库目录就只是开发用的 checkout 了，在里面 build 不再影响线上。应急回滚不依赖仓库：`~/.trellis/bin/rollback.sh`。
+
+> 有会话正在生成时 `make deploy` 会拒绝执行并列出是哪些（切换会中断它们）。确认要切就加 `FORCE=1`。
 
 ---
 
