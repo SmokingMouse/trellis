@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-上线机制已换成 release 目录 + 原子切换 + 自动回滚（待用户确认后 `make install-launchd` 切 prod）；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
+上线机制已换成 release 目录 + 原子切换 + 自动回滚并已切 prod（`make deploy`）；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
 
 ## Goals
 ### 工作平台化：Project/Workspace/Agent/隔离（2026-07-27 脑爆）→ [ADR](decisions/2026-07-27-project-workspace-layer.md)

@@ -19,7 +19,11 @@
   - ttyd ✓：隔离实例走完整 reap 路径后 prod ttyd（pid 25990）存活；优雅停机收走自己那个 + 清登记；SIGKILL 后重启**接管同一 pid**（9321），不泄漏不漂移。
   - `install-launchd` 的 plist 改写在副本上 dry-run 过（diff 只动一行，`plutil -lint` OK）。tsc ✓ lint ✓ build ✓。收尾已拆除沙箱 job/plist/目录与三个测试 commit，prod 核对 517 节点 / 0 streaming / tmux 存活 / :3088 200。
 - **翻车与真收获**: 沙箱第一次 smoke 失败追了很久——现象是网关 `/login` 超时但 Next 直连正常。**一度误判成 http_proxy**（A/B 曾支持该假设，实为端口被上一轮残留进程占住造成的假信号；教训：每次 A/B 前必须 `lsof` 验端口空、`pkill` 后要确认真的死了）。加探针看到**一次 curl 触发 260 次 fetch handler**，才钉死真因是 Host 透传导致网关自我循环。
-- **Next**: **prod 尚未切换**——`make install-launchd` 未执行（它会重启 prod 并把运行目录挪到 `~/.trellis/current`），等用户确认。切换后 facts.md 里「prod 跑在 python/learning/trellis」那条要同步改写。
+- **切 prod（同日，用户「开始吧」）**：main 快进合并 arrowworm（纯 FF）→ `make deploy` → `make install-launchd`。**真上线又踩出两个自家 bug，都已修 + 已写进 facts.md**：
+  - **① `git archive` 带不走未跟踪文件 → 认证闸静默关掉**。凭证在 `.env.local`（bun 从 cwd 自动加载）里，被 gitignore 忽略，release 里没有 → `auth OFF`，而本机配着 3088 的公网隧道。**症状极隐蔽：服务活得好好的、页面全能开、健康检查全绿，唯一差别是日志一行 `auth ON`→`auth OFF`**——原来那套全是 200 断言，一个都发现不了。修：真源挪 `~/.trellis/shared/` + `linkShared()` 软链进每个 release；`/__gate/health` 加 `auth` 字段；smoke 改认证感知（带 cookie 验闸后页面）+ **反向断言「无 cookie 的 `/api/sessions` 必须 401」**；verify 断言「闸不许 on→off」。
+  - **② `launchctl bootout` 异步，bootstrap 撞上未消失的旧 job** 报 `Bootstrap failed: 5: I/O error`，而失败分支只打印「用备份还原」却没真还原 → **prod 停了约一分钟**（手工 bootstrap 救回）。修：轮询到 job 真查不到再 bootstrap（带重试），失败时真的回滚 plist 并重新拉起。
+  - **终态**：prod 跑在 `~/.trellis/current` → `releases/20260728T091203-23099f885`，`auth ON`、`/` 无 cookie 401、517 节点 / 44 会话 / tmux 终端存活；修复后完整重跑一遍 deploy 全绿（含新增的两条闸断言），**457 次轮询里只有 1 次非 200（0.2s 的 503 维护页）**。顺手清掉失去主人的旧 ttyd 25990（tmux 不受影响）。
+- **Next**: 现场验收（开一轮对话 + 开个终端）。可选：把已完工的 Goals 块轮转进 archive（README 仍 12.5KB，Goals 占 11KB）；P2 新版本通知（cron + phone-push）未做。
 
 ### Session 78（2026-07-27，流式渲染风暴修复）
 - **触发**: 用户报「swift-wren-91 这个项目的 tab 点不开了」+ 顺手审 bug。定位到根因不是侧栏/标签页逻辑（行可点、onPreview/onPin 全对），而是**流式期间 UI 被卡死**——点下去主线程在忙，表现像「点不开」。
