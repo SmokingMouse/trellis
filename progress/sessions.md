@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 80 / 79 / 78 / 77 / 75）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 81 / 80 / 79 / 78 / 77）。更早的见 `archive.md`。
+
+### Session 81（2026-07-28，工作区选择器加「新建文件夹」）
+- **触发**: 用户「指定 Project 目录时，能增加一个功能，新建文件夹吗」。摸清现状：选择器已有三条造目录/选目录的路（空白沙箱 = 随机名、worktree = 分支名且必须在 git 项目下、浏览/最近/手输 = 只能选已存在的），**唯独缺「我说在哪、我说叫什么」**——开新项目正是这个形状。
+- **Done**: 新 `app/api/workspaces/mkdir/route.ts`（`POST {parent,name}` → 非递归 `mkdirSync`）+ `components/WorkspacePicker.tsx` 浏览 tab 工具栏加「＋ 新建文件夹」，展开行内表单（前缀显示当前目录、回车提交、Esc 取消），成功即 `onPick` 新路径并关窗——**创建后直接选用**，因为在这个 modal 里造目录的唯一理由就是拿它当 workspace。
+- **闸**: 名字必须是**单个路径段**（含 `/` / NUL / `.` / `..` / 首尾空白 / >255 全拒），parent 必须绝对路径且实为目录；非递归 mkdir 让 EEXIST 冒出来成 409 而不是静默复用别人的目录；EACCES/EPERM → 403。
+- **验证**: tsc ✓ / lint 32 = 基线 ✓；API 八例 curl 实测（正常、重复 409、`../escaped` 被拒且磁盘上确实没逃出去、空名、相对 parent、parent 不存在、只读 fs、中文名 ✓）；dev 实例 :3099 **浏览器真跑**：切 Project → 浏览 tab → 按钮在 → 输 `ai-coding` 得行内红字「已存在」→ 改新名回车 → 磁盘目录出现 + modal 关闭 + 工具栏 chip 变 `trellis-mkdir-uitest` + 「开始探索」解禁。测试目录/browser session/dev 实例均已清理，prod :3088 未触碰。
+- **Next**: 用户验收。未 commit（`components/WorkspacePicker.tsx` + 新 route 目录）。上 prod 走 `make deploy`。
 
 ### Session 80（2026-07-28，侧栏三级层次重排 + workspace 空层平铺）
 - **触发**: 用户贴侧栏截图，只说了五个字「显示效果很差，层次结构」。
@@ -117,11 +124,4 @@
 - **已合并上线（同日）**：`trevally` → `main`（merge `4bf66ef`，`--no-ff` 保住工作线形状），主 checkout tsc ✓ + `make build` ✓；prod 交回 launchd（`launchctl load com.smokingmouse.trellis`），进程形态 launchd → `bun server.ts -p 3088`（大门）→ `next start -p 3187`（内部只绑 127.0.0.1）；验活 / 401 · /login 200 · /term/ 401。**未 push**（推送需用户签名授权）。
 - **Cloudflare 隧道已按用户要求关闭**（`launchctl unload com.smokingmouse.cloudflared`，配置备份 `~/.cloudflared/config.yml.bak-20260727-213648`）。副作用：`files.smokingmouse.cc` 真掉线（`.cn` 侧 502 未配通）；`ip.smokingmouse.cc` 变 530 而 **blog-publish skill 有 5 处引用它**，下次发博客验活会报错（服务没死，`ip.home.smokingmouse.cn` 200，只是地址过时）。另一条隧道 `cloudflared-trader` 未动。访问路径见 `~/.claude/global/workspace.md` 新增的「对外访问路径」节。
 - **Next**: 用户验收 + **停一周看判据**（worktree 里的 session 数 > 0）再决定 P2 与 S2/S3/S4。唯一未覆盖的验证：ttyd 在 launchd 环境下的懒启动（需登录态才触发，我测不到）。
-
-### Session 75 (2026-07-26)
-- **Done**: 修 ExitPlanMode 批准报 ZodError（详见 Current Focus）。用户带着「Trellis 与 Claude Code 协议版本偏差」的自诊来，**结论推翻了它**：是 Trellis 自己三处交互表单里唯独计划审批漏传 `updatedInput`。改 `components/InteractionForm.tsx`（真 bug）+ `lib/server/run-bus.ts`（resolver 兜底回填）+ respond route 的误导注释。
-- **设计取舍**: 没有把 `lib/llm/types.ts` 的 `updatedInput?: unknown` 收紧成判别联合（allow 强制 record）——那样能在编译期拦住这类漏传，但 respond route 收的是不可信 HTTP JSON、终究要运行时校验一遍，而 run-bus 那道兜底已经把这个位置守死了。为编译期好看做一圈波及面更大的重构不划算，留作独立一刀。
-- **验证**: 关键在**对照组**。第一次 A/B 用本机默认 CLI(2.1.207)跑，未修版竟然也全绿——说明测法当时**没有区分力**，差点误判「已修好」。查出本机是 2.1.207 而用户报错在 2.1.183，把 183 装进 `/tmp/cc183` 用 PATH 钉版本重打：未修版逐字复现用户的 ZodError + 模型重发 ExitPlanMode 卡死，修复版一次通过并续跑写文件。**教训**：跨版本 bug 的对照组必须钉住报障者的版本，否则"绿"毫无信息量。
-- **未做**: 浏览器点击态验证被一个**既有的** dev-mode hydration 故障挡住（见 Open Failures），故改走 API 直打——反而更强，因为它直接复刻了老客户端的错误 payload，同时验到了服务端兜底。表单那一改属静态可核（与另两处已 work 的表单同构）。测完已清：dev server kill / 沙箱 DB 删 / 临时 workspace 删 / `/tmp/cc183` 删 / browser session close / `.next/dev` 残留清；prod :3088 复核仍 401 正常、`.next/BUILD_ID` 未变。
-- **Next**: 用户决定是否提交（在 main 未提交，提交需先切分支）；要在 prod 生效需主目录 `make build` + `launchctl kickstart -k`。
 
