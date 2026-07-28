@@ -227,6 +227,38 @@ async function stage(sha: string, short: string): Promise<string> {
   return dir;
 }
 
+/**
+ * 把运行期配置挂进新 release。
+ *
+ * `git archive` 只导出**已跟踪**的文件，而 trellis 的认证凭证住在 `.env.local`
+ * 里（bun 从 cwd 自动加载），那个文件被 `.gitignore` 忽略。第一次真上线就踩了：
+ * release 里没有它 → `TRELLIS_AUTH_PASS` 缺失 → **网关的认证闸静默关掉**，
+ * 公网隧道后面的平台直接裸奔。日志里只有一行 `auth OFF` 的差别。
+ *
+ * 所以这类文件的真源挪到 `~/.trellis/shared/`，每个 release 软链过去 —— 配置
+ * 不再跟着某一个 checkout 走，也不会被下一次 `git archive` 甩掉。
+ */
+function linkShared(dir: string): void {
+  const shared = path.join(P.root, "shared");
+  let names: string[];
+  try {
+    names = fs.readdirSync(shared);
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    const target = path.join(shared, n);
+    const link = path.join(dir, n);
+    try {
+      fs.rmSync(link, { force: true });
+    } catch {
+      /* 没有就算了 */
+    }
+    fs.symlinkSync(target, link);
+    log(`   ← shared/${n}`);
+  }
+}
+
 async function install(dir: string): Promise<void> {
   phase("install", "bun install");
   // bun 默认就是从全局 cache 硬链接进 node_modules，所以每个 release 各装一份
@@ -411,7 +443,19 @@ async function switchTo(dir: string): Promise<void> {
   await kickstart();
 }
 
-async function verify(): Promise<boolean> {
+/** 网关当前的认证闸状态；老网关没有这个字段时返回 null（不参与断言）。 */
+async function gateAuthState(): Promise<"on" | "off" | null> {
+  const h = await httpGet(`http://127.0.0.1:${GATE_PORT}/__gate/health`, 3000);
+  if (!h || h.status !== 200) return null;
+  try {
+    const a = JSON.parse(h.body).auth;
+    return a === "on" || a === "off" ? a : null;
+  } catch {
+    return null;
+  }
+}
+
+async function verify(authBefore?: "on" | "off" | null): Promise<boolean> {
   phase("verify", `轮询 127.0.0.1:${GATE_PORT}`);
   // 实测冷启动（网关 + 预构建的 Next）约 1.1s，60s 足够宽；再放宽只是让坏版本
   // 多躺一会儿 —— 这段时间是真的不可用，回滚要等它走完。
@@ -424,6 +468,15 @@ async function verify(): Promise<boolean> {
       try {
         if (JSON.parse(h.body).next === "ready") {
           log("   ✓ /__gate/health next=ready");
+          // 闸不许从开变关。凭证来自未跟踪文件（见 linkShared），漏带的表现
+          // 就是这一下 —— 服务活得好好的，只是不再拦人了。
+          const after = await gateAuthState();
+          if (authBefore === "on" && after === "off") {
+            log("   × 认证闸从 on 变成了 off —— 极可能是运行期配置没被带进 release");
+            log(`     检查 ${path.join(P.root, "shared")} 与 ${P.current} 里的软链`);
+            return false;
+          }
+          if (after) log(`   ✓ 认证闸 ${after}`);
           return true;
         }
       } catch {
@@ -521,14 +574,18 @@ async function cmdDeploy(ref: string, force: boolean): Promise<number> {
       log(`   ! 本次切换不会真正生效 —— 部署完跑一次 make install-launchd`);
     }
 
+    // 切换前记下闸的状态，切换后要比对（见 linkShared）
+    const authBefore = await gateAuthState();
+
     dir = await stage(sha, short);
+    linkShared(dir);
     await install(dir);
     await build(dir);
     await smoke(dir);
     backup();
     await switchTo(dir);
 
-    if (!(await verify())) {
+    if (!(await verify(authBefore))) {
       log("   验活失败，自动回滚");
       if (await rollback()) {
         phase("failed", `${short} 验活失败，已回滚到上一个版本`);
@@ -601,14 +658,40 @@ async function cmdInstallLaunchd(): Promise<number> {
   console.log(`原 plist 备份在 ${backup}`);
 
   const uid = process.getuid?.();
-  await run(["launchctl", "bootout", `gui/${uid}/${LABEL}`], { quiet: true });
-  const r = await run(["launchctl", "bootstrap", `gui/${uid}`, plist]);
-  if (r.code !== 0) {
-    console.error("bootstrap 失败，plist 已改但服务没起来 —— 用备份还原");
+  const ok = await reloadJob(plist, uid);
+  if (!ok) {
+    // 这里失败 = 服务停着。**必须真的还原**，不能只打印一句「用备份还原」
+    // 就撂挑子（第一次真上线时就是这样，prod 停了一分钟）。
+    console.error("bootstrap 失败 —— 正在用备份还原 plist 并重新拉起");
+    fs.copyFileSync(backup, plist);
+    const back = await reloadJob(plist, uid);
+    console.error(back ? "已还原到改动前的状态" : `还原也失败了，手工跑：launchctl bootstrap gui/${uid} ${plist}`);
     return 1;
   }
   console.log("已重新加载 launchd job");
   return 0;
+}
+
+/**
+ * bootout + bootstrap。
+ *
+ * **`bootout` 是异步的** —— 它返回时 job 未必真的消失了，紧接着 bootstrap 会撞上
+ * 还在的旧 job 报 `Bootstrap failed: 5: Input/output error`，然后服务就那么停着。
+ * 第一次真上线踩的就是这个。所以要等它真消失，再带重试地 bootstrap。
+ */
+async function reloadJob(plist: string, uid: number | undefined): Promise<boolean> {
+  await run(["launchctl", "bootout", `gui/${uid}/${LABEL}`], { quiet: true });
+  for (let i = 0; i < 25; i++) {
+    const p = await run(["launchctl", "print", `gui/${uid}/${LABEL}`], { quiet: true });
+    if (p.code !== 0) break; // 查不到了 = 真的卸载完了
+    await Bun.sleep(200);
+  }
+  for (let i = 0; i < 5; i++) {
+    const r = await run(["launchctl", "bootstrap", `gui/${uid}`, plist], { quiet: i < 4 });
+    if (r.code === 0) return true;
+    await Bun.sleep(500 * (i + 1));
+  }
+  return false;
 }
 
 function cmdStatus(): number {

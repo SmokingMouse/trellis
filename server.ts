@@ -373,6 +373,10 @@ Bun.serve<TermSocket>({
         gate: "up",
         next: nextStatus(),
         consecutiveFailures,
+        // 认证闸开没开。不是秘密（一个 401 就暴露了），但部署流水线要靠它做
+        // 「切换前后闸状态不许 on→off」的断言 —— 凭证来自 .env.local 这类
+        // 未跟踪文件，一旦没被带进 release，闸会静默关掉。
+        auth: gateOn ? "on" : "off",
       };
       if (authed(req)) {
         const st = readDeployState();
