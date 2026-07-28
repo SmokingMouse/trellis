@@ -703,7 +703,17 @@ export function TreePanel() {
   );
 
   return (
-    <div className="fixed right-3 bottom-24 z-40 text-xs">
+    // 右下角是一条堆栈，终端在最底层（把手 / 浮层 / 底部分栏三态高度都由
+    // TerminalPanel 发布成 --trellis-term-stack），树面板踩着它往上排。
+    // 原来这里写死 bottom-24(96px)，而把手占 88~116px —— 差 8px 直接压在一起。
+    // clamp 的上界是硬保证：终端被拖到 720px 高时也不许把树面板顶出视口，
+    // 宁可被盖住（拖矮就回来），也不能让控件够不着。
+    <div
+      className="fixed right-3 z-40 text-xs transition-[bottom] duration-150"
+      style={{
+        bottom: "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
+      }}
+    >
       <div className="rounded-card border border-line/80 bg-surface/95 shadow-pop backdrop-blur">
         <div className="flex items-center">
           <button

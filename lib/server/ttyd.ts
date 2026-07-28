@@ -5,7 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  firstWorkingExecutable,
+  probeExecutable,
+  probeSummary,
+  type ProbeResult,
   TTYD_CANDIDATES,
   TTYD_HOST_DEPENDENCY_NOTE,
   TTYD_MISSING_MESSAGE,
@@ -27,20 +29,23 @@ import {
 // 不依赖 PATH 解析。
 const TMUX_CANDIDATES = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"];
 
-function firstExisting(paths: string[], probeArg: string): string | null {
-  return firstWorkingExecutable(paths, probeArg);
-}
-
-let _tmux: string | null | undefined;
+// **只缓存成功，不缓存失败**。原来是 `if (_x === undefined) _x = probe()`，
+// 把 null 也一并记住了 —— 一次瞬时探测失败（fork EAGAIN / 4s 超时）就把
+// 「未找到 ttyd」焊死到进程重启为止，而磁盘上 ttyd 好端端在那儿，界面还一直
+// 在喊「brew install ttyd」。不对称是有理由的：探到路径是稳定事实（二进制不会
+// 自己跑掉），探不到不是（可能只是那一瞬间 fork 不出来）。
+let _tmux: string | null = null;
 export function tmuxBin(): string | null {
-  if (_tmux === undefined) _tmux = firstExisting(TMUX_CANDIDATES, "-V");
+  if (!_tmux) _tmux = probeExecutable("tmux", TMUX_CANDIDATES, "-V").path;
   return _tmux;
 }
 
-let _ttyd: string | null | undefined;
-function ttydBin(): string | null {
-  if (_ttyd === undefined) _ttyd = firstExisting(TTYD_CANDIDATES, "--version");
-  return _ttyd;
+let _ttyd: string | null = null;
+function ttydProbe(): ProbeResult {
+  if (_ttyd) return { path: _ttyd, tried: [] };
+  const r = probeExecutable("ttyd", TTYD_CANDIDATES, "--version");
+  if (r.path) _ttyd = r.path;
+  return r;
 }
 
 // ttyd 会读 http_proxy —— 本机 clash 把它污染成非 `ads:port` 格式时会刷
@@ -67,6 +72,9 @@ type State = {
   starting: Promise<number | null> | null;
   /** 拉不起来的原因，给 UI 显示真话而不是干转圈 */
   error: string | null;
+  /** 排查用的证据（探了哪些路径、各自为什么不行）。与 error 分开，
+   *  是为了让界面主行保持一句话，细节收进折叠区。 */
+  errorDetail: string | null;
 };
 
 const state: State = {
@@ -75,6 +83,7 @@ const state: State = {
   adoptedPid: null,
   starting: null,
   error: null,
+  errorDetail: null,
 };
 
 function portFree(port: number): Promise<boolean> {
@@ -241,21 +250,26 @@ export function startTtyd(): Promise<number | null> {
       state.port = adopted.ttydPort;
       state.adoptedPid = adopted.pid;
       state.error = null;
+      state.errorDetail = null;
       console.log(
         `[trellis] adopted existing ttyd on 127.0.0.1:${adopted.ttydPort} (pid ${adopted.pid})`,
       );
       return adopted.ttydPort;
     }
 
-    const ttyd = ttydBin();
+    const probe = ttydProbe();
+    const ttyd = probe.path;
     const tmux = tmuxBin();
     if (!ttyd) {
+      const detail = probeSummary(probe);
       state.error = TTYD_MISSING_MESSAGE;
-      console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}`);
+      state.errorDetail = detail;
+      console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}｜探测：${detail}`);
       return null;
     }
     if (!tmux) {
       state.error = "未找到 tmux（安装：brew install tmux）";
+      state.errorDetail = null;
       return null;
     }
     // 先收尸再选端口 —— 否则孤儿占着 7681，新实例只能漂到 7682，越漂越远。
@@ -268,6 +282,7 @@ export function startTtyd(): Promise<number | null> {
     const port = await pickPort();
     if (!port) {
       state.error = "7681-7720 无空闲端口";
+      state.errorDetail = null;
       return null;
     }
 
@@ -290,6 +305,7 @@ export function startTtyd(): Promise<number | null> {
         state.proc = null;
         state.port = null;
         state.error = `ttyd 退出（code=${code}）`;
+        state.errorDetail = null;
       }
     });
     state.proc = proc;
@@ -302,6 +318,7 @@ export function startTtyd(): Promise<number | null> {
       if (await listening(port)) {
         state.port = port;
         state.error = null;
+        state.errorDetail = null;
         writeRecord({
           ttydPort: port,
           pid: proc.pid ?? -1,
@@ -314,6 +331,7 @@ export function startTtyd(): Promise<number | null> {
       await new Promise((r) => setTimeout(r, 250));
     }
     state.error = "ttyd 启动超时（15s 未监听）";
+    state.errorDetail = null;
     try {
       proc.kill();
     } catch {
@@ -330,8 +348,12 @@ export function startTtyd(): Promise<number | null> {
   return p;
 }
 
-export function ttydStatus(): { port: number | null; error: string | null } {
-  return { port: state.port, error: state.error };
+export function ttydStatus(): {
+  port: number | null;
+  error: string | null;
+  errorDetail: string | null;
+} {
+  return { port: state.port, error: state.error, errorDetail: state.errorDetail };
 }
 
 export function stopTtyd(): void {
