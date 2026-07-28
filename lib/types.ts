@@ -193,6 +193,21 @@ export type ProjectSummary = {
   workspaces: WorkspaceSummary[];
 };
 
+/**
+ * 两个「伪项目」的 cluster key —— 它们不是用户心里的项目，是 project-cluster
+ * 为兜住无处安放的 cwd 造出来的档位，其 workspace 那一层恒不携带信息：
+ *
+ * - `trellis:scratch`：~/.trellis/scratch/* 是 trellis 为无 cwd 的会话现造的
+ *   一次性目录，名字（`mellow-lynx-90`）从随机词表拼出，对用户毫无所指。
+ * - `trellis:home`：家目录自成一档，其下永远只有一个 workspace，名字就是
+ *   家目录的 basename（`smokingmouse`）—— 和项目名「主目录」说的是同一件事。
+ *
+ * 侧栏据此把这两个项目平铺成两级。真源判定在 lib/server/project-cluster.ts
+ * （那边有 node 依赖，不能给客户端 import，所以键提到这里共享）。
+ */
+export const SCRATCH_CLUSTER_KEY = "trellis:scratch";
+export const HOME_CLUSTER_KEY = "trellis:home";
+
 export type Session = {
   id: string;
   title: string;

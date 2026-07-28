@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY } from "@/lib/types";
 
 // S1（progress/project-workspace-layer.md）：把一个绝对路径归到某个「项目」下。
 //
@@ -132,7 +133,7 @@ export function clusterPath(absPath: string): ClusterResult | null {
   // dir:/Users），荒谬。家目录自成一档。
   if (real === fs.realpathSync(os.homedir())) {
     return {
-      clusterKey: "trellis:home",
+      clusterKey: HOME_CLUSTER_KEY,
       projectName: "主目录",
       gitRemote: null,
       workspaceName: base,
@@ -145,7 +146,7 @@ export function clusterPath(absPath: string): ClusterResult | null {
   // 生成的一次性目录，聚成一个「暂存区」项目，别按父目录当真项目对待。
   if (real === SCRATCH_ROOT || real.startsWith(SCRATCH_ROOT + path.sep)) {
     return {
-      clusterKey: "trellis:scratch",
+      clusterKey: SCRATCH_CLUSTER_KEY,
       projectName: "暂存区",
       gitRemote: null,
       workspaceName: base,
