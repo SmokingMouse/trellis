@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-上线机制已换成 release 目录 + 原子切换 + 自动回滚并已切 prod（`make deploy`）；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
+更新扳机已从命令行挪进设置页（`/settings` 点一下就发，仍是显式动作）；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
 
 ## Goals
 
