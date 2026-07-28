@@ -23,6 +23,7 @@ import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { AUTH_COOKIE } from "../lib/auth-cookie";
 import {
   deployPaths,
   readDeployState,
@@ -106,13 +107,38 @@ async function mustRun(cmd: string[], opts?: Parameters<typeof run>[1]) {
 async function httpGet(
   url: string,
   timeoutMs = 5000,
+  cookie?: string | null,
 ): Promise<{ status: number; body: string } | null> {
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const r = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: cookie ? { cookie } : {},
+    });
     return { status: r.status, body: await r.text() };
   } catch {
     return null;
   }
+}
+
+/**
+ * 从 release 自己的 env 文件里取认证 token，拼成 cookie 给 smoke 用。
+ *
+ * 不这么做的话 smoke 只能验到 `/login`：闸开着时其余路径一律 401，而闸恰恰
+ * 是**默认开着**的（凭证经 shared/.env.local 进来，bun 从 cwd 自动加载，删
+ * spawn 环境变量拦不住）。值不落日志。
+ */
+function smokeCookie(dir: string): string | null {
+  for (const f of [".env.local", ".env"]) {
+    try {
+      const m = fs
+        .readFileSync(path.join(dir, f), "utf8")
+        .match(/^\s*TRELLIS_AUTH_TOKEN\s*=\s*(.+)$/m);
+      if (m) return `${AUTH_COOKIE}=${m[1].trim().replace(/^["']|["']$/g, "")}`;
+    } catch {
+      /* 没这个文件 */
+    }
+  }
+  return null;
 }
 
 /** prod ttyd 的 pid 集合。smoke 前后各取一次，用来证明没误杀。 */
@@ -367,6 +393,20 @@ async function smoke(dir: string): Promise<void> {
       throw new Error("smoke 失败：新版本起不来");
     }
 
+    const cookie = smokeCookie(dir);
+    const authOn = await (async () => {
+      const h = await httpGet(`http://127.0.0.1:${gatePort}/__gate/health`, 3000);
+      try {
+        return h ? JSON.parse(h.body).auth === "on" : false;
+      } catch {
+        return false;
+      }
+    })();
+    if (authOn && !cookie) {
+      throw new Error("smoke 失败：闸是开的但取不到 TRELLIS_AUTH_TOKEN，无法验证闸后的页面");
+    }
+    log(`   闸 ${authOn ? "on（带 cookie 验闸后页面）" : "off"}`);
+
     const checks: [string, (r: { status: number; body: string }) => boolean][] = [
       ["/login", (r) => r.status === 200],
       ["/", (r) => r.status === 200],
@@ -382,11 +422,23 @@ async function smoke(dir: string): Promise<void> {
       ["/api/sessions", (r) => r.status === 200],
     ];
     for (const [p, ok] of checks) {
-      const r = await httpGet(`http://127.0.0.1:${gatePort}${p}`, 15_000);
+      const r = await httpGet(`http://127.0.0.1:${gatePort}${p}`, 15_000, cookie);
       if (!r || !ok(r)) {
         throw new Error(`smoke 失败：${p} → ${r ? r.status : "无响应"}`);
       }
       log(`   ✓ ${p}`);
+    }
+
+    // 闸开着就得真的拦得住。这条正对着本次踩的坑：服务活得好好的、页面全能开，
+    // 只是不再拦人了 —— 上面那些 200 一个都发现不了。
+    if (authOn) {
+      const naked = await httpGet(`http://127.0.0.1:${gatePort}/api/sessions`, 10_000);
+      if (!naked || naked.status !== 401) {
+        throw new Error(
+          `smoke 失败：闸声称是开的，但无 cookie 的 /api/sessions 返回 ${naked ? naked.status : "无响应"}（应 401）`,
+        );
+      }
+      log("   ✓ 无 cookie 的 /api/sessions → 401（闸真的拦得住）");
     }
   } finally {
     await kill();
