@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 79 / 78 / 77 / 75 / 74）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 80 / 79 / 78 / 77 / 75）。更早的见 `archive.md`。
+
+### Session 80（2026-07-28，侧栏三级层次重排 + workspace 空层平铺）
+- **触发**: 用户贴侧栏截图，只说了五个字「显示效果很差，层次结构」。
+- **根因（量出来的，不是审美判断）**: 三级树的视觉权重**倒挂** —— Project `12.5px/medium/ink-strong`、Workspace `11px/normal/ink-muted`、Session `12.5px/normal/ink-muted`，**子级比父级还重**；行高同向倒挂（group 24px < session 28px）。三个放大器叠上去：① 缩进只有 6/16/20px，三级几乎共线；② group 行通栏而 session 行是内缩 pill，宽度打架；③ 每行一个 8px 满色 mode dot，成了整栏最强视觉元素，把层次压平。
+- **Done ①（视觉层）**: 层次改由「缩进 + 引导线 + 字重」承担，**字号退出**（三级统一 `text-ui`）。新增 `ROW_H`/`PAD()`/`CHEVRON_MID()` 几何常量 + `IndentGuide`（子树左侧竖引导线，对齐父行三角中心 —— 这是三级树能被一眼分组的关键）；行高统一 26px、全部改通栏 pill（高亮不再随层级越缩越窄）；权重阶梯 `semibold/ink-strong` → `medium/ink` → `normal/ink-muted`；mode dot 8px 满色 → 6px `opacity-55`；分组间距 `mb-1.5` → `mb-3`。
+- **Done ②（信息架构，用户看完第一版后拍板「展开平铺吧」）**: **workspace 那一层显不显示，取决于它携不携带信息**，而不是层级图上画了几层。三种零信息情形折叠成两级：`trellis:scratch`（`mellow-lynx-90` 这类名字从随机词表拼出）、`trellis:home`（workspace 名就是项目名「主目录」的另一种说法）、唯一 workspace 且与项目同名（`.claude` → `.claude`）。**刻意排除 `kind === 'worktree'`** —— 那说明项目在多工作区并行，层级是真的，所以 trellis 自己保持三级。规则**可逆**：多出第二个 workspace 自动恢复。两个兜底：平铺后 path 没别处可看 → 挪进 project 行 tooltip；**零会话不平铺**，否则剩个底下空无一物的项目行。
+- **顺带**: 两个 cluster key 提到 `lib/types.ts` 共享（`project-cluster.ts` 带 `server-only` 不能给客户端 import，原先是字面量散在两处）。
+- **验证**: `tsc --noEmit` 零错 ✓；lint 无新增（1 项既有 `set-state-in-effect` 基线）；**真 DB 起 dev 实例 :3199 浏览器实测**：明暗两套主题各截图核验（两级引导线均渲染、权重不再倒挂）；平铺后暂存区/`.claude`/主目录三个项目变两级而 trellis 保持三级；折叠开关在平铺项目上仍正常（折叠隐藏 / 展开还原，行数对得上）；点平铺出来的会话正常加载且 header 仍显示 workspace 名（信息未丢）。实例与 browser session 已清理。
+- **注**: `scripts/test-project-cluster.ts` 在 worktree 裸 `bun` 下跑不起来（`server-only` 解析报错），**stash 后基线同样失败 = 预存在的环境问题**，非本次引入。
+- **Next**: 已 commit + 合并 main + 推送；prod 生效需 `make deploy`。
 
 ### Session 79（2026-07-28，上线机制重做：release 目录 + 原子切换 + 自动回滚 + 网关维护页）
 - **触发**: 用户「现在自动更新机制做的不太友好，失败了平台就用不了了，并且更新过程中平台就不受控了」。查下来**根本不存在自动更新机制**——上线就是在 launchd 正在跑的那个目录里手工 `bun install` + `make build` + `kickstart`。用户四条痛点全选（失败不能致命 / 更新期间可控 / 可观测 / 要我批准），拍板接受确定停机窗口、**不做零停机热切**（理由见 decisions.md 2026-07-28）。
@@ -112,10 +122,3 @@
 - **未做**: 浏览器点击态验证被一个**既有的** dev-mode hydration 故障挡住（见 Open Failures），故改走 API 直打——反而更强，因为它直接复刻了老客户端的错误 payload，同时验到了服务端兜底。表单那一改属静态可核（与另两处已 work 的表单同构）。测完已清：dev server kill / 沙箱 DB 删 / 临时 workspace 删 / `/tmp/cc183` 删 / browser session close / `.next/dev` 残留清；prod :3088 复核仍 401 正常、`.next/BUILD_ID` 未变。
 - **Next**: 用户决定是否提交（在 main 未提交，提交需先切分支）；要在 prod 生效需主目录 `make build` + `launchctl kickstart -k`。
 
-### Session 74 (2026-07-26)
-- **Done**: 树面板图形视图补上折叠子树（列表视图 S69 已有，本轮补齐另一半）。需求原话「能增加一个树节点折叠的功能吗」含糊——先摸清折叠已存在于画布/Outline/树面板列表三处，再反问定位到图形视图，没有重复造。
-  - `components/TreePanel.tsx`：`graphGeometry` 加 `hiddenByCollapse` 过滤后再喂 `layoutNodes`（折叠子树整块退出布局，剩余点重新占满面板）+ 返回 `visible` 供渲染；每个非叶点挂 ⊖/⊕ 按钮子 `<g>`（`e.stopPropagation()` 与跳转分开）、折叠点常显 + `+N ·未读` `<text>` 角标；`GRAPH_MAX_SCALE=0.4` 取代原来的 `1`。
-  - `lib/tree-panel.ts`：`subtreeRollup(nodeId, byParent)` + `HiddenRollup` 从 `flattenTree` 内部闭包提出来共用；TreePanel 顺带把 `childrenIndex` 收成一个 memo（原来 lineageIds 里每次重建）。
-- **设计取舍**: 按钮**悬停才显**——纯链树上每个点都有子节点，常显等于每点挂一颗纽扣；已折叠的点必须常显，否则折完无回头路。按钮圆心放在 `p.x ± 9`（点自己 r=10 命中区之内），移过去不会触发 mouseleave 把按钮闪没；同一 `<g class="group">` 下用 CSS `group-hover:` 而非 React state，省掉每次悬停的重渲染。
-- **验证**: tsc ✓ lint ✓ build ✓（emperor worktree）；隔离实例 :3164 浏览器实测十一项（见 Current Focus），含"从冷位置直接点按钮"这条最易塌的路径。测完已清：browser session close / dev server kill / 临时 DB 删 / emperor worktree `git checkout` 复原。
-- **Next**: 用户现场验收；上 prod 需主目录 build + kickstart。
