@@ -13,7 +13,12 @@ import {
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { ProjectSummary, Session } from "@/lib/types";
+import {
+  HOME_CLUSTER_KEY,
+  SCRATCH_CLUSTER_KEY,
+  type ProjectSummary,
+  type Session,
+} from "@/lib/types";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
 // 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
@@ -303,7 +308,7 @@ export function SessionSidebar() {
     if (list.length === 0) return null;
     const isCollapsed = collapsed.has(id);
     return (
-      <div className="mb-1.5">
+      <div className="mb-3">
         <GroupRow
           level={0}
           collapsed={isCollapsed}
@@ -312,13 +317,19 @@ export function SessionSidebar() {
           badge={isCollapsed ? String(list.length) : null}
           onToggle={() => toggleCollapsed(id)}
         />
-        {!isCollapsed && list.map((s) => renderRow(s, 1))}
+        {!isCollapsed && (
+          <IndentGuide level={0}>{list.map((s) => renderRow(s, 1))}</IndentGuide>
+        )}
       </div>
     );
   };
 
   // S1 三级：Project → Workspace → Session。折叠子树时把「藏了几个会话」
   // 回显出来（与树面板折叠行同语义 —— 折叠不该把状态一起藏掉）。
+  //
+  // 但三级不是恒定的：workspace 那一层**不带信息时就该消失**，否则它只是
+  // 白占一级缩进、把真正要扫的会话往里推。两种不带信息的情形（见 isFlat）
+  // 走两级渲染 —— Project → Session 直挂。
   const renderProjects = () =>
     projects.map((p) => {
       const pCollapsed = collapsed.has(p.id);
@@ -326,13 +337,29 @@ export function SessionSidebar() {
         (n, w) => n + (byWorkspace.get(w.id)?.length ?? 0),
         0,
       );
+      // 平铺时各 workspace 的会话汇到一起，重新按最近活跃排 —— 每个 list
+      // 内部有序不代表拼起来有序。
+      const flatList = isFlat(p)
+        ? p.workspaces
+            .flatMap((w) => byWorkspace.get(w.id) ?? [])
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+        : [];
+      // 一个会话都没有就别平铺 —— 那会剩下个底下空无一物的项目行，
+      // 还不如留着那条灰的 workspace 行说明「这里还没开过会话」。
+      const flat = flatList.length > 0;
       return (
-        <div key={p.id} className="mb-1.5">
+        <div key={p.id} className="mb-3">
           <GroupRow
             level={0}
             collapsed={pCollapsed}
             label={p.name}
-            title={`${p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${p.workspaces.length} 个工作区 · ${pCount} 个会话`}
+            title={`${p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${
+              // 平铺掉 workspace 行后，路径没别处可看了 —— 挪进 project 的
+              // tooltip，别让它随那一级一起消失。
+              flat && p.workspaces.length === 1
+                ? `${p.workspaces[0].path}\n`
+                : `${p.workspaces.length} 个工作区 · `
+            }${pCount} 个会话`}
             badge={pCollapsed && pCount > 0 ? String(pCount) : null}
             onToggle={() => toggleCollapsed(p.id)}
             // 只有 git 项目能开 worktree（暂存区 / 主目录这类 plain 项目不行）
@@ -368,8 +395,14 @@ export function SessionSidebar() {
               </div>
             </div>
           )}
-          {!pCollapsed &&
-            p.workspaces.map((w) => {
+          {!pCollapsed && flat && (
+            <IndentGuide level={0}>
+              {flatList.map((s) => renderRow(s, 1))}
+            </IndentGuide>
+          )}
+          {!pCollapsed && !flat && (
+          <IndentGuide level={0}>
+            {p.workspaces.map((w) => {
               const list = byWorkspace.get(w.id) ?? [];
               const wCollapsed = collapsed.has(w.id);
               return (
@@ -396,10 +429,16 @@ export function SessionSidebar() {
                         : undefined
                     }
                   />
-                  {!wCollapsed && list.map((s) => renderRow(s, 2))}
+                  {!wCollapsed && list.length > 0 && (
+                    <IndentGuide level={1}>
+                      {list.map((s) => renderRow(s, 2))}
+                    </IndentGuide>
+                  )}
                 </div>
               );
             })}
+          </IndentGuide>
+          )}
         </div>
       );
     });
@@ -482,10 +521,11 @@ export function SessionSidebar() {
                 archived.map((s) => (
                   <div
                     key={s.id}
-                    className="group mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 text-ink-muted hover:bg-surface-muted"
+                    style={{ paddingLeft: PAD(0), height: ROW_H }}
+                    className="group mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-muted hover:bg-surface-muted"
                   >
                     <span
-                      className={`w-2 h-2 rounded-full shrink-0 opacity-50 ${modeStyle(s.mode).dot}`}
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 opacity-50 ${modeStyle(s.mode).dot}`}
                       aria-hidden
                     />
                     <span className="flex-1 min-w-0 truncate text-ui" title={s.title}>
@@ -569,6 +609,54 @@ export function SessionSidebar() {
   );
 }
 
+// 这个项目的 workspace 那一层该不该显示。判据是**它有没有携带信息**，
+// 不是「好不好看」—— 两种情形下它恒为零信息，显示出来只是白占一级缩进、
+// 把真正要扫的会话往里推：
+//
+//   ① 两个伪项目（暂存区 / 主目录，见 types.ts 那两个 key）：workspace
+//      名要么是随机词表拼的，要么就是项目名的另一种说法。
+//   ② 唯一 workspace 且与项目同名（`.claude` → `.claude`）：纯重复层。
+//      刻意排除 worktree —— 那说明项目正在多工作区并行，层级是真的。
+//
+// 平铺可逆：②的项目一旦多出一个 workspace 就自动恢复三级。
+function isFlat(p: ProjectSummary): boolean {
+  if (p.clusterKey === SCRATCH_CLUSTER_KEY) return true;
+  if (p.clusterKey === HOME_CLUSTER_KEY) return true;
+  const only = p.workspaces.length === 1 ? p.workspaces[0] : null;
+  return !!only && only.name === p.name && only.kind !== "worktree";
+}
+
+// ── 三级树的几何 ──────────────────────────────────────────────────────
+// 层次由「缩进 + 引导线 + 字重」承担，**不由字号**：三级同为 text-ui。
+// 之前 workspace 用 11px 而 session 用 12.5px，父级比子级还轻，层次是倒挂的。
+//
+// 行一律通栏 pill（mx-1 + 圆角），只有内容缩进 —— 这样 hover / 选中高亮不会
+// 随层级越缩越窄，长标题也不会在深层被挤没。
+const ROW_H = 26; // 三级统一行高；原先 group 24 / session 28 又是一处倒挂
+const PAD = (level: number) => 6 + level * 12; // 内容缩进：6 / 18 / 30
+const CHEVRON_MID = (level: number) => 4 /* mx-1 */ + PAD(level) + 5;
+
+// 子树左侧的竖引导线，对齐父行三角的中心。文件树的标准读法：一眼看出
+// 「这几行归谁管」，比单纯拉大缩进更省横向空间。
+function IndentGuide({
+  level,
+  children,
+}: {
+  level: 0 | 1;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative">
+      <span
+        aria-hidden
+        className="absolute top-0 bottom-0 w-px bg-line"
+        style={{ left: CHEVRON_MID(level) }}
+      />
+      {children}
+    </div>
+  );
+}
+
 // S1：Project / Workspace 的分组行。两级共用一个组件，靠 level 调缩进与字重
 // —— 项目行是这棵树的骨架（强），工作区行是它的分支（弱）。
 //
@@ -601,19 +689,21 @@ function GroupRow({
 }) {
   return (
     <div
-      className={`group flex items-center gap-1 pr-1 h-6 rounded-md ${
+      className={`group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
         toggleable ? "hover:bg-surface-muted" : ""
-      } ${muted ? "opacity-60" : ""}`}
+      } ${muted ? "opacity-75" : ""}`}
+      style={{ height: ROW_H }}
     >
       <button
         onClick={toggleable ? onToggle : undefined}
         title={title}
-        className={`flex-1 min-w-0 flex items-center gap-1 h-6 text-left ${
+        style={{ paddingLeft: PAD(level) }}
+        className={`flex-1 min-w-0 flex items-center gap-1 h-full text-left text-ui ${
           toggleable ? "" : "cursor-default"
         } ${
           level === 0
-            ? "pl-1.5 text-ui font-medium text-ink-strong"
-            : "pl-4 text-label text-ink-muted"
+            ? "font-semibold text-ink-strong"
+            : "font-medium text-ink"
         }`}
       >
         <span
@@ -674,7 +764,7 @@ function SidebarRow({
   onDelete,
 }: {
   session: Session;
-  /** 0 = 平铺（Chat / 未归组），2 = 挂在 Project → Workspace 下 */
+  /** 缩进层级：1 = 挂在 Chat / 未归组下，2 = 挂在 Project → Workspace 下 */
   indent?: number;
   active: boolean;
   preview: boolean;
@@ -707,8 +797,8 @@ function SidebarRow({
 
   return (
     <div
-      style={indent ? { marginLeft: 4 + indent * 8 } : undefined}
-      className={`group relative mx-1 rounded-md flex items-center gap-1.5 pl-2 pr-1 h-7 cursor-pointer transition-colors overflow-hidden ${
+      style={{ paddingLeft: PAD(indent), height: ROW_H }}
+      className={`group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         running
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -736,7 +826,13 @@ function SidebarRow({
       {running ? (
         <Dots />
       ) : (
-        <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} aria-hidden />
+        // 6px + 半透明，而非原来 8px 满色：一栏几十行、每行一个饱和色点，
+        // 点会盖过标题成为最强视觉元素，把层次压平。它只编码 mode（二值），
+        // 不值这个权重 —— 降到「余光可辨、不抢焦点」即可。
+        <span
+          className={`w-1.5 h-1.5 rounded-full shrink-0 opacity-55 ${style.dot}`}
+          aria-hidden
+        />
       )}
 
       {editing ? (
