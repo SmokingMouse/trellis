@@ -21,6 +21,14 @@
   <a href="#它解决什么">介绍</a> · <a href="#核心特性">核心特性</a> · <a href="#与-cli-双向打通">CLI 打通</a> · <a href="#quickstart">Quickstart</a> · <a href="#两种上下文模式详解">上下文模式</a> · <a href="#技术架构">技术架构</a> · <a href="#键盘快捷键">快捷键</a>
 </p>
 
+## 30 秒跑起来
+
+1. 安装依赖：`make setup`
+2. 启动服务：`make dev`
+3. 访问地址：`http://localhost:3000`
+
+前置依赖和进阶说明见下方 [Quickstart](#quickstart)。
+
 ---
 
 <p align="center">
