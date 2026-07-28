@@ -41,6 +41,34 @@ if (!hasTtyd()) {
   console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}`);
 }
 
+// 转发给上游时**必须换掉 Host**（S79 花了很久才钉死的一个坑）。
+//
+// 症状：从开发 shell 里起的实例，`/` 和 `/login` 全部超时无响应，而直接打
+// 内部 Next 端口一切正常；大门自己的 /__gate/health 也正常。日志显示一次
+// curl 打进来会触发**几百次** fetch handler 调用，user-agent 全是 curl。
+//
+// 机制：环境里存在 http_proxy 时（本机 clash 会塞 127.0.0.1:7897），bun 的
+// fetch 按**请求头里的 Host** 而不是 URL 的 authority 去决定连谁 —— 于是
+// `Host: 127.0.0.1:3088` 让大门把请求发回了自己，自我循环直到超时。实测隔离
+// 到单个请求头：只带 host → 超时，去掉 host 的全套真实请求头 → 200。
+//
+// prod 至今没炸只是因为 launchd 不继承 shell 环境（没有 http_proxy）——
+// 换句话说这是个**潜伏的坑**，不是本次改动引入的（HEAD~1 的大门实测同样中招）。
+// 进程内 delete process.env.http_proxy 没用，bun 在用户代码跑之前就把代理
+// 配置定死了。所以修在请求头这一侧，顺带也是反向代理本来就该有的行为。
+//
+// 原始 Host 走 x-forwarded-host 传下去，别让 Next 丢掉「用户是从哪个域名来的」
+// —— 公网隧道下 /login 的重定向要靠它拼绝对地址（见 proxy.ts）。
+function upstreamHeaders(h: Headers, upstreamHost: string): Headers {
+  const out = new Headers(h);
+  const original = h.get("host");
+  if (original && !h.has("x-forwarded-host")) {
+    out.set("x-forwarded-host", original);
+  }
+  out.set("host", upstreamHost);
+  return out;
+}
+
 // 与 proxy.ts 同一套判据：两个变量任一缺失 = 闸关（本地开发免摩擦）。
 // /term 不走 Next，所以 proxy.ts 那个 middleware 管不到它，闸得在这里自己把。
 const PASS = process.env.TRELLIS_AUTH_PASS;
@@ -360,7 +388,7 @@ Bun.serve<TermSocket>({
 
       const r = await fetch(`http://127.0.0.1:${port}${path}${url.search}`, {
         method: req.method,
-        headers: req.headers,
+        headers: upstreamHeaders(req.headers, `127.0.0.1:${port}`),
         body: req.body,
         redirect: "manual",
         // @ts-expect-error bun 需要 duplex 才能流式转发请求体
@@ -377,7 +405,7 @@ Bun.serve<TermSocket>({
     try {
       const r = await fetch(`${NEXT_UP}${url.pathname}${url.search}`, {
         method: req.method,
-        headers: req.headers,
+        headers: upstreamHeaders(req.headers, `127.0.0.1:${NEXT_PORT}`),
         body: req.body,
         redirect: "manual",
         // @ts-expect-error bun 需要 duplex 才能流式转发请求体
