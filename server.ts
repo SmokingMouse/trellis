@@ -19,6 +19,12 @@
 import { spawn, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
 import { hasTtyd, TTYD_HOST_DEPENDENCY_NOTE } from "./lib/ttyd-dependency";
+import {
+  deployPaths,
+  readDeployState,
+  readReleaseInfo,
+  tailLog,
+} from "./lib/deploy-state";
 
 const argv = process.argv.slice(2);
 const pIdx = argv.findIndex((a) => a === "-p" || a === "--port");
@@ -52,7 +58,20 @@ function authed(req: Request): boolean {
 }
 
 // ── Next 子进程 ────────────────────────────────────────────────────────────
+//
+// 大门比 Next 活得久（S79）。原本 Next 一挂大门就 `process.exit(1)`，靠
+// launchd 的 KeepAlive 拉起来 —— 而 plist 没有 ThrottleInterval，坏版本会被
+// 无限 respawn，浏览器侧只剩 connection refused，看不到任何原因。现在改成：
+// 大门先占住端口，Next 自己带退避重启，起不来就出维护页说人话。
 let nextProc: Subprocess | null = null;
+let nextReady = false;
+let consecutiveFailures = 0;
+let lastExitCode: number | null = null;
+let shuttingDown = false;
+
+// 一次性口令，只下发给自己 spawn 的 Next —— 排空钩子
+// （app/api/internal/shutdown）靠它认人。
+const SHUTDOWN_TOKEN = crypto.randomUUID();
 
 async function portOpen(port: number): Promise<boolean> {
   try {
@@ -77,33 +96,92 @@ async function waitFor(port: number, timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function startNext() {
+/** spawn 一次 Next 并等它监听。返回是否起来了。 */
+async function bootNext(): Promise<boolean> {
   nextProc = spawn({
     cmd: ["bun", "--bun", "node_modules/.bin/next", "start", "-p", String(NEXT_PORT), "-H", "127.0.0.1"],
-    env: { ...process.env, PORT: String(NEXT_PORT) },
+    env: {
+      ...process.env,
+      PORT: String(NEXT_PORT),
+      TRELLIS_SHUTDOWN_TOKEN: SHUTDOWN_TOKEN,
+    },
     stdout: "inherit",
     stderr: "inherit",
-    // Next 挂了整个 trellis 就没了，别装作还活着 —— 直接退出让 launchd 拉起来。
-    onExit(_p, code) {
-      console.error(`[trellis] next exited (code=${code}) — shutting down gate`);
-      process.exit(code ?? 1);
-    },
   });
-  if (!(await waitFor(NEXT_PORT, 60_000))) {
-    console.error(`[trellis] next did not listen on ${NEXT_PORT} within 60s`);
-    process.exit(1);
+  if (await waitFor(NEXT_PORT, 60_000)) return true;
+  console.error(`[trellis] next did not listen on ${NEXT_PORT} within 60s`);
+  try {
+    nextProc.kill();
+  } catch {
+    /* 已经没了 */
   }
-  console.log(`[trellis] next ready on 127.0.0.1:${NEXT_PORT}`);
+  return false;
+}
+
+// 起不来就退避重试，永不放弃 —— launchd 重启一遍也是同样的结果，还会把大门
+// 一起带走（连维护页都没了）。指数退避封顶 30s。
+async function superviseNext(): Promise<void> {
+  let backoff = 1000;
+  while (!shuttingDown) {
+    const startedAt = Date.now();
+    if (await bootNext()) {
+      nextReady = true;
+      consecutiveFailures = 0;
+      // 新的 Next = ttyd 可能落在别的端口上，作废缓存（见 resolveTtydPort）。
+      ttydPort = null;
+      console.log(`[trellis] next ready on 127.0.0.1:${NEXT_PORT}`);
+      await nextProc!.exited;
+      nextReady = false;
+      if (shuttingDown) return;
+      lastExitCode = nextProc?.exitCode ?? null;
+      console.error(`[trellis] next exited (code=${lastExitCode}) — restarting`);
+      // 之前活够久 = 偶发崩溃，别背着上一轮的退避惩罚。
+      if (Date.now() - startedAt > 60_000) backoff = 1000;
+    } else {
+      consecutiveFailures++;
+    }
+    if (shuttingDown) return;
+    await Bun.sleep(backoff);
+    backoff = Math.min(30_000, backoff * 2);
+  }
+}
+
+// 优雅停机：先让 Next 排空（abort 在跑的 run、收走 ttyd），再 kill。
+// 不排空的话，spawn 出去的 claude/codex 会 reparent 到 launchd 继续跑、继续
+// 写 jsonl、继续烧 token，DB 里那行还卡在 streaming。
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (nextReady) {
+    try {
+      await fetch(`${NEXT_UP}/api/internal/shutdown`, {
+        method: "POST",
+        headers: {
+          "x-trellis-shutdown": SHUTDOWN_TOKEN,
+          // 这条路由同样盖在 proxy.ts 的 cookie 闸下面。大门手里就有 TOKEN。
+          ...(gateOn ? { cookie: `${AUTH_COOKIE}=${TOKEN}` } : {}),
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      /* 排空是尽力而为，超时/失败照样往下走 kill */
+    }
+  }
+  try {
+    nextProc?.kill();
+  } catch {
+    /* 已经没了 */
+  }
+  await Promise.race([
+    nextProc?.exited ?? Promise.resolve(0),
+    Bun.sleep(3000),
+  ]);
+  process.exit(0);
 }
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
-    try {
-      nextProc?.kill();
-    } catch {
-      /* 已经没了 */
-    }
-    process.exit(0);
+    void shutdown();
   });
 }
 
@@ -143,8 +221,86 @@ function passthroughHeaders(h: Headers): Headers {
   return out;
 }
 
+// ── 维护页 ─────────────────────────────────────────────────────────────────
+// Next 没就绪时的门面。要点：**未认证的访客只看得到「正在更新」**，sha /
+// 日志 / 路径只在带着有效 cookie 时才渲染 —— 这台机器挂着公网隧道，stderr
+// 里什么都有。
+function esc(s: string): string {
+  return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+}
+
+function nextStatus(): "ready" | "starting" | "down" {
+  if (nextReady) return "ready";
+  return consecutiveFailures > 0 ? "down" : "starting";
+}
+
+function maintenancePage(detailed: boolean): Response {
+  const st = readDeployState();
+  const status = nextStatus();
+  const headline =
+    st && st.phase !== "done" && st.phase !== "idle"
+      ? { preflight: "正在检查", stage: "正在准备新版本", install: "正在安装依赖", build: "正在构建", smoke: "正在预检新版本", backup: "正在备份数据库", switch: "正在切换版本", verify: "正在验活", rollback: "正在回滚", failed: "本次更新失败", broken: "更新失败且回滚未成功", done: "", idle: "" }[st.phase] ?? "正在更新"
+      : status === "down"
+        ? "服务启动失败"
+        : "服务正在启动";
+
+  const detail = detailed
+    ? `
+    <dl>
+      <dt>网关</dt><dd>up · :${PORT}</dd>
+      <dt>Next</dt><dd>${status}${consecutiveFailures ? ` · 连续失败 ${consecutiveFailures} 次` : ""}${lastExitCode !== null ? ` · 上次退出码 ${lastExitCode}` : ""}</dd>
+      ${st ? `<dt>部署阶段</dt><dd>${esc(st.phase)} · ${esc(st.message)}</dd>` : ""}
+      ${st?.sha ? `<dt>目标版本</dt><dd><code>${esc(st.sha)}</code></dd>` : ""}
+      ${st?.previousSha ? `<dt>回滚目标</dt><dd><code>${esc(st.previousSha)}</code></dd>` : ""}
+    </dl>
+    <p class="hint">回滚命令：<code>${esc(deployPaths().bin)}/rollback.sh</code></p>
+    ${(() => {
+      const t = tailLog(st?.logFile ?? null);
+      return t ? `<pre>${esc(t)}</pre>` : "";
+    })()}`
+    : `<p class="hint">服务恢复后本页会自动刷新。</p>`;
+
+  return new Response(
+    `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>trellis · ${esc(headline)}</title>
+<meta http-equiv="refresh" content="5">
+<style>
+:root{color-scheme:dark light}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1115;color:#e6e8ec;
+     font:15px/1.6 ui-sans-serif,-apple-system,"PingFang SC",system-ui,sans-serif}
+main{max-width:760px;padding:32px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:#8b93a1;margin:0 0 20px}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0 0 16px}
+dt{color:#8b93a1}
+code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:#161a21;border:1px solid #232936;border-radius:8px;padding:12px;overflow:auto;
+    max-height:320px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#c3cad6}
+.hint{color:#8b93a1;font-size:13px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#e0a03a;margin-right:8px;
+     animation:p 1.4s ease-in-out infinite}
+@keyframes p{50%{opacity:.25}}
+</style></head><body><main>
+<h1><span class="dot"></span>${esc(headline)}</h1>
+<p class="sub">trellis 暂时不可用，网关还在。</p>
+${detail}
+</main></body></html>`,
+    {
+      status: 503,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "retry-after": "5",
+        "cache-control": "no-store",
+      },
+    },
+  );
+}
+
 // ── 大门 ───────────────────────────────────────────────────────────────────
-await startNext();
+// 注意顺序：**先占端口再拉 Next**。反过来的话，Next 起不来的那 60s 里外面
+// 连的是一个不存在的端口（connection refused），维护页根本没机会出现。
+void superviseNext();
 
 // 每条 WS 连接随身带的上下文：目标 ttyd 端口 / 路径，以及上游连接与
 // 「上游还没连上时」的待发队列。
@@ -164,8 +320,30 @@ Bun.serve<TermSocket>({
   async fetch(req, server) {
     const url = new URL(req.url);
 
+    // 网关自己的健康面。**不经 Next**，所以 Next 挂着的时候它照样准确 ——
+    // 部署脚本的 verify 和 daily-health 都指望这一条。粗粒度状态对谁都公开
+    // （它就是「服务活没活」，不含任何内部信息），版本详情要认证。
+    if (url.pathname === "/__gate/health") {
+      const body: Record<string, unknown> = {
+        gate: "up",
+        next: nextStatus(),
+        consecutiveFailures,
+      };
+      if (authed(req)) {
+        const st = readDeployState();
+        body.deploy = st ? { phase: st.phase, sha: st.sha } : null;
+        body.release = readReleaseInfo(deployPaths().current);
+        body.lastExitCode = lastExitCode;
+      }
+      return Response.json(body, {
+        headers: { "cache-control": "no-store" },
+      });
+    }
+
     if (url.pathname === "/term" || url.pathname.startsWith("/term/")) {
       if (!authed(req)) return new Response("Unauthorized", { status: 401 });
+      // /term 的端口发现要问 Next，Next 不在就没得问。
+      if (!nextReady) return maintenancePage(authed(req));
       const port = await resolveTtydPort(req.headers.get("cookie") ?? "");
       if (!port) {
         return new Response("终端未就绪（ttyd 未启动）", { status: 503 });
@@ -194,18 +372,25 @@ Bun.serve<TermSocket>({
       });
     }
 
-    const r = await fetch(`${NEXT_UP}${url.pathname}${url.search}`, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      redirect: "manual",
-      // @ts-expect-error bun 需要 duplex 才能流式转发请求体
-      duplex: "half",
-    });
-    return new Response(r.body, {
-      status: r.status,
-      headers: passthroughHeaders(r.headers),
-    });
+    if (!nextReady) return maintenancePage(authed(req));
+
+    try {
+      const r = await fetch(`${NEXT_UP}${url.pathname}${url.search}`, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        redirect: "manual",
+        // @ts-expect-error bun 需要 duplex 才能流式转发请求体
+        duplex: "half",
+      });
+      return new Response(r.body, {
+        status: r.status,
+        headers: passthroughHeaders(r.headers),
+      });
+    } catch {
+      // Next 正好在这一刻死了（nextReady 还没翻）——别把裸 500 丢给用户。
+      return maintenancePage(authed(req));
+    }
   },
 
   // 消息级 WS 转发（不是字节级）：ttyd 的协议就是普通的二进制/文本帧，

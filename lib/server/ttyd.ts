@@ -1,6 +1,9 @@
 import "server-only";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   firstWorkingExecutable,
   TTYD_CANDIDATES,
@@ -59,12 +62,20 @@ function cleanEnv(): NodeJS.ProcessEnv {
 type State = {
   port: number | null;
   proc: ChildProcess | null;
+  /** 接管来的 ttyd 没有 ChildProcess 句柄，只能按 pid 收（见 adoptOwn） */
+  adoptedPid: number | null;
   starting: Promise<number | null> | null;
   /** 拉不起来的原因，给 UI 显示真话而不是干转圈 */
   error: string | null;
 };
 
-const state: State = { port: null, proc: null, starting: null, error: null };
+const state: State = {
+  port: null,
+  proc: null,
+  adoptedPid: null,
+  starting: null,
+  error: null,
+};
 
 function portFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -85,47 +96,120 @@ function listening(port: number): Promise<boolean> {
 
 // ttyd 是 trellis spawn 出来的子进程，但**不会随父进程一起死**：实测 kill 掉
 // trellis 后，旧 ttyd 仍在原端口 LISTEN 变成孤儿，下次启动 pickPort 跳过被占的
-// 端口漂到下一个 —— 每重启一次泄漏一个进程 + 一个端口。
+// 端口漂到下一个 —— 每重启一次泄漏一个进程 + 一个端口。所以要收尸。
 //
-// 所以启动前先按签名清一遍。签名用 `titleFixed trellis`（我们自己下发的
-// ttyd client option），足够独特，不会误杀用户自己跑的 ttyd。
-// **只杀真正的孤儿**：父进程已死的那些。
+// 但「谁是孤儿」这个判据踩过一次坑，值得写清楚：
 //
-// 光按签名杀是错的 —— 签名认不出「这个 ttyd 是谁家的」。同时跑两个 trellis
-// （prod + 一个隔离实例，或两个 worktree 实例）时，后启动的会把先启动的那个
-// ttyd 杀掉，用户的终端就此死亡、下次连接要重付一次 shell 启动
-// （实测：复用已有 tmux session 首字节 8ms，全新 session 588ms —— 差的全是
-// 交互式 zsh 的启动开销）。
+// 原判据是 PPID —— 父死后子进程 reparent 到 launchd，所以 `ppid == 1` 即孤儿。
+// **这个假设在本机不成立**：实测 prod 正在服务的 ttyd（pid 25990）ppid 就是 1，
+// 而它的 trellis 实例（next start pid 76269）活得好好的、子进程列表是空的
+// （Next 的 route handler 可能跑在一个会被回收的 worker 里，spawn 出来的 ttyd
+// 于是提前 reparent）。后果：**每起一个隔离测试实例都会 SIGTERM 掉 prod 的终端**。
 //
-// 判据用 PPID：父进程死掉后子进程会被 reparent 到 launchd（PID 1），
-// 所以 `ppid == 1` 就是「它的 trellis 已经不在了」，而被活着的实例持有的
-// ttyd 其 ppid 是那个实例的 pid。精确、无需额外标记。
-function reapOrphans(): number {
-  const found = spawnSync(
-    "pgrep",
-    ["-f", "ttyd .*titleFixed trellis"],
-    { encoding: "utf8", timeout: 4000 },
-  );
-  if (found.error || !found.stdout) return 0;
-  let n = 0;
-  for (const line of found.stdout.trim().split("\n")) {
-    const pid = Number(line.trim());
-    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
-    const ppidOut = spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], {
-      encoding: "utf8",
-      timeout: 4000,
-    });
-    const ppid = Number((ppidOut.stdout ?? "").trim());
-    if (ppid !== 1) continue; // 还有活着的主人，不是孤儿
+// 新判据不猜进程树，改成显式登记：拉起 ttyd 时把 `{ttydPort, pid, ownerPort}`
+// 写进 ~/.trellis/ttyd/<ttydPort>.json，ownerPort = 本 trellis 实例 Next 的内部
+// 端口（server.ts 通过 env PORT 下发，prod=3187、smoke=3998，天然唯一）。
+// 「主人还在不在」= 探 ownerPort 有没有人监听，与进程树无关。
+//
+// 三条规则：
+//   1. 有登记且 ownerPort 仍在监听 → 别人家活着的，绝不碰；
+//   2. 有登记且 ownerPort 已死 → 真孤儿，杀掉 + 删登记；
+//   3. **没有登记的一律不杀** —— 认不出主人时保守放过（顶多占个端口，
+//      pickPort 会绕开），比误杀用户正在用的终端便宜得多。
+const TTYD_REG_DIR = path.join(os.homedir(), ".trellis", "ttyd");
+
+type TtydRecord = {
+  ttydPort: number;
+  pid: number;
+  /** 本实例 Next 的内部端口；null = 认不出主人（dev 直跑），永不被他人回收 */
+  ownerPort: number | null;
+  startedAt: string;
+};
+
+/** 本实例的身份。server.ts spawn Next 时下发 PORT=<NEXT_PORT>。 */
+function ownerPort(): number | null {
+  const p = Number(process.env.PORT);
+  return Number.isInteger(p) && p > 0 ? p : null;
+}
+
+function readRecords(): TtydRecord[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(TTYD_REG_DIR);
+  } catch {
+    return [];
+  }
+  const out: TtydRecord[] = [];
+  for (const n of names) {
+    if (!n.endsWith(".json")) continue;
     try {
-      process.kill(pid, "SIGTERM");
+      const r = JSON.parse(
+        fs.readFileSync(path.join(TTYD_REG_DIR, n), "utf8"),
+      ) as TtydRecord;
+      if (Number.isInteger(r?.ttydPort)) out.push(r);
+    } catch {
+      /* 半截/损坏的登记，忽略 */
+    }
+  }
+  return out;
+}
+
+function recordPath(ttydPort: number): string {
+  return path.join(TTYD_REG_DIR, `${ttydPort}.json`);
+}
+
+function writeRecord(r: TtydRecord): void {
+  try {
+    fs.mkdirSync(TTYD_REG_DIR, { recursive: true });
+    fs.writeFileSync(recordPath(r.ttydPort), JSON.stringify(r));
+  } catch {
+    /* 登记失败不该拦着终端可用 —— 代价只是这个 ttyd 将来没人替它收尸 */
+  }
+}
+
+function dropRecord(ttydPort: number): void {
+  try {
+    fs.unlinkSync(recordPath(ttydPort));
+  } catch {
+    /* 本来就没有 */
+  }
+}
+
+async function reapOrphans(): Promise<number> {
+  let n = 0;
+  const mine = ownerPort();
+  for (const r of readRecords()) {
+    if (r.ownerPort === null) continue; // 认不出主人，规则 3
+    if (r.ownerPort === mine) continue; // 自己上一条命的登记，交给 adopt 处理
+    if (await listening(r.ownerPort)) continue; // 规则 1：主人还活着
+    try {
+      process.kill(r.pid, "SIGTERM"); // 规则 2
       n++;
     } catch {
       /* 已经没了 */
     }
+    dropRecord(r.ttydPort);
   }
   if (n > 0) console.log(`[trellis] reaped ${n} orphan ttyd process(es)`);
   return n;
+}
+
+/**
+ * 上一条命留下的 ttyd 还在监听就直接接管，不再新起一个。
+ *
+ * 崩溃重启（没走到 stopTtyd）后本来会留一个占着 7681 的孤儿，而它的 ownerPort
+ * 正是重启后的自己 —— 谁也回收不掉。接管既堵住这个泄漏，又顺带让「trellis 重启
+ * 不丢终端」变成零重连成本（tmux session 和 ttyd 进程都还是原来那个）。
+ */
+async function adoptOwn(): Promise<TtydRecord | null> {
+  const mine = ownerPort();
+  if (mine === null) return null;
+  for (const r of readRecords()) {
+    if (r.ownerPort !== mine) continue;
+    if (await listening(r.ttydPort)) return r;
+    dropRecord(r.ttydPort); // 记录过期了
+  }
+  return null;
 }
 
 async function pickPort(): Promise<number | null> {
@@ -152,6 +236,17 @@ export function startTtyd(): Promise<number | null> {
   if (state.starting) return state.starting;
 
   state.starting = (async () => {
+    const adopted = await adoptOwn();
+    if (adopted) {
+      state.port = adopted.ttydPort;
+      state.adoptedPid = adopted.pid;
+      state.error = null;
+      console.log(
+        `[trellis] adopted existing ttyd on 127.0.0.1:${adopted.ttydPort} (pid ${adopted.pid})`,
+      );
+      return adopted.ttydPort;
+    }
+
     const ttyd = ttydBin();
     const tmux = tmuxBin();
     if (!ttyd) {
@@ -164,7 +259,11 @@ export function startTtyd(): Promise<number | null> {
       return null;
     }
     // 先收尸再选端口 —— 否则孤儿占着 7681，新实例只能漂到 7682，越漂越远。
-    if (reapOrphans() > 0) await new Promise((r) => setTimeout(r, 300));
+    // 钉死了端口（smoke / 隔离实例）就整段跳过：这种实例只该管自己那一个端口，
+    // 不该对别人家的 ttyd 有任何动作。
+    if (!process.env.TRELLIS_TTYD_PORT) {
+      if ((await reapOrphans()) > 0) await new Promise((r) => setTimeout(r, 300));
+    }
 
     const port = await pickPort();
     if (!port) {
@@ -186,6 +285,7 @@ export function startTtyd(): Promise<number | null> {
       { env: cleanEnv(), stdio: "ignore", detached: false },
     );
     proc.on("exit", (code) => {
+      dropRecord(port);
       if (state.proc === proc) {
         state.proc = null;
         state.port = null;
@@ -202,6 +302,12 @@ export function startTtyd(): Promise<number | null> {
       if (await listening(port)) {
         state.port = port;
         state.error = null;
+        writeRecord({
+          ttydPort: port,
+          pid: proc.pid ?? -1,
+          ownerPort: ownerPort(),
+          startedAt: new Date().toISOString(),
+        });
         console.log(`[trellis] ttyd listening on 127.0.0.1:${port}`);
         return port;
       }
@@ -237,7 +343,15 @@ export function stopTtyd(): void {
     } catch {
       /* 忽略 */
     }
+  } else if (state.adoptedPid !== null) {
+    try {
+      process.kill(state.adoptedPid, "SIGTERM");
+    } catch {
+      /* 已经没了 */
+    }
   }
+  if (state.port !== null) dropRecord(state.port);
   state.proc = null;
+  state.adoptedPid = null;
   state.port = null;
 }

@@ -15,7 +15,10 @@
 
 SDK_HOME ?= $(HOME)/sdk
 
-.PHONY: setup check dev build start clean link-sdk unlink-sdk help
+.PHONY: setup check dev build start clean link-sdk unlink-sdk help \
+        deploy rollback deploy-status releases install-launchd
+
+REF ?= HEAD
 
 help:
 	@echo "make setup      — bun install + prereq check"
@@ -26,6 +29,15 @@ help:
 	@echo "make link-sdk   — dev only: symlink @smokingmouse/{agent,llm} to a local sm-toolkit checkout (SDK_HOME=$(SDK_HOME))"
 	@echo "make unlink-sdk — undo link-sdk, back to registry versions"
 	@echo "make clean      — remove node_modules"
+	@echo ""
+	@echo "── 上线（scripts/deploy.ts）──"
+	@echo "make deploy           — 部署 HEAD：新目录里 build + 预检 + 原子切换 + 验活失败自动回滚"
+	@echo "make deploy REF=<ref> — 部署指定 ref"
+	@echo "make deploy FORCE=1   — 有会话正在生成时也强切（默认拒绝）"
+	@echo "make rollback         — 切回上一个 release"
+	@echo "make deploy-status    — current/previous 与上次部署状态"
+	@echo "make releases         — 列出保留的 release"
+	@echo "make install-launchd  — 一次性：把 launchd 的 WorkingDirectory 指向 ~/.trellis/current"
 
 setup:
 	bun install
@@ -77,3 +89,20 @@ start: build
 
 clean:
 	rm -rf node_modules
+
+# 上线。**不要**再在这个目录里 `make build` 然后 kickstart —— 那套原地换 .next
+# 的做法正是本机制要取代的东西（S66 踩过：进程内旧模块 + 磁盘新文件混跑）。
+deploy:
+	bun scripts/deploy.ts $(REF) $(if $(FORCE),--force,)
+
+rollback:
+	bun scripts/deploy.ts rollback
+
+deploy-status:
+	@bun scripts/deploy.ts status
+
+releases:
+	@bun scripts/deploy.ts releases
+
+install-launchd:
+	bun scripts/deploy.ts install-launchd
