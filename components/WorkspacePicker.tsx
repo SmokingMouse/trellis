@@ -323,6 +323,12 @@ function BrowseTab({
   const [error, setError] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [filter, setFilter] = useState("");
+  // Inline "new folder" form: creates a dir under the dir we're viewing and
+  // picks it straight away — the only reason to make one from here is to use
+  // it as the workspace.
+  const [newName, setNewName] = useState<string | null>(null);
+  const [mkdirBusy, setMkdirBusy] = useState(false);
+  const [mkdirError, setMkdirError] = useState<string | null>(null);
 
   // Initial location: if there's already a workspace selected, jump to it
   // so the user can see siblings + drill nearby. Otherwise let the server
@@ -339,6 +345,8 @@ function BrowseTab({
     setLoading(true);
     setError(null);
     setFilter("");
+    setNewName(null);
+    setMkdirError(null);
     const qs = new URLSearchParams();
     if (dir) qs.set("path", dir);
     if (showHidden) qs.set("showHidden", "true");
@@ -375,6 +383,29 @@ function BrowseTab({
     if (!data) return [];
     return buildBreadcrumb(data.path, data.home);
   }, [data]);
+
+  const createDir = async () => {
+    const name = (newName ?? "").trim();
+    if (!data || !name || mkdirBusy) return;
+    setMkdirBusy(true);
+    setMkdirError(null);
+    try {
+      const res = await fetch("/api/workspaces/mkdir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent: data.path, name }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        path?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.path) throw new Error(body.error ?? `HTTP ${res.status}`);
+      onPick(body.path);
+    } catch (err) {
+      setMkdirError(err instanceof Error ? err.message : String(err));
+      setMkdirBusy(false);
+    }
+  };
 
   const filteredChildren = useMemo(() => {
     if (!data) return [];
@@ -424,7 +455,58 @@ function BrowseTab({
           />
           隐藏目录
         </label>
+        <button
+          onClick={() => {
+            setMkdirError(null);
+            setNewName((n) => (n === null ? "" : null));
+          }}
+          disabled={!data || loading}
+          className="shrink-0 px-2 py-1 text-xs rounded border border-line-strong text-ink-muted hover:text-ink-strong hover:bg-surface-muted disabled:opacity-40 transition-colors"
+          title="在当前目录下新建文件夹"
+        >
+          ＋ 新建文件夹
+        </button>
       </div>
+
+      {newName !== null && data && (
+        <div className="px-4 py-2 border-b border-line-faint shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-faint font-mono truncate max-w-[45%]">
+              {prettifyHomeWith(data.path, data.home)}/
+            </span>
+            <input
+              type="text"
+              value={newName}
+              autoFocus
+              disabled={mkdirBusy}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void createDir();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setNewName(null);
+                }
+              }}
+              placeholder="新文件夹名"
+              className="flex-1 min-w-0 px-2 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line font-mono"
+            />
+            <Button
+              variant="primary"
+              className="shrink-0"
+              onClick={() => void createDir()}
+              disabled={!newName.trim() || mkdirBusy}
+            >
+              {mkdirBusy ? "创建中…" : "创建并使用"}
+            </Button>
+          </div>
+          {mkdirError && (
+            <div className="mt-1.5 text-xs text-danger">{mkdirError}</div>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {loading && (
