@@ -1,6 +1,12 @@
 import "server-only";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
+import {
+  firstWorkingExecutable,
+  TTYD_CANDIDATES,
+  TTYD_HOST_DEPENDENCY_NOTE,
+  TTYD_MISSING_MESSAGE,
+} from "@/lib/ttyd-dependency";
 
 // S1 P1（progress/project-workspace-layer.md）：工作区终端的后端进程。
 //
@@ -17,14 +23,9 @@ import { createConnection } from "node:net";
 // （`_zsh_tmux_plugin_run: command not found`），所以一律走绝对路径，
 // 不依赖 PATH 解析。
 const TMUX_CANDIDATES = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"];
-const TTYD_CANDIDATES = ["/opt/homebrew/bin/ttyd", "/usr/local/bin/ttyd", "/usr/bin/ttyd"];
 
 function firstExisting(paths: string[], probeArg: string): string | null {
-  for (const p of paths) {
-    const r = spawnSync(p, [probeArg], { encoding: "utf8", timeout: 4000 });
-    if (!r.error) return p;
-  }
-  return null;
+  return firstWorkingExecutable(paths, probeArg);
 }
 
 let _tmux: string | null | undefined;
@@ -154,7 +155,8 @@ export function startTtyd(): Promise<number | null> {
     const ttyd = ttydBin();
     const tmux = tmuxBin();
     if (!ttyd) {
-      state.error = "未找到 ttyd（安装：brew install ttyd）";
+      state.error = TTYD_MISSING_MESSAGE;
+      console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}`);
       return null;
     }
     if (!tmux) {

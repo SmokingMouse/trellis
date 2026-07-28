@@ -36,6 +36,7 @@ check:
 	@command -v bun  >/dev/null && echo "✓ bun  ($$(bun -v))"  || echo "✗ bun not found — https://bun.sh"
 	@command -v claude >/dev/null && echo "✓ claude CLI installed" || echo "✗ claude CLI not found — npm i -g @anthropic-ai/claude-code && claude login"
 	@command -v codex  >/dev/null && echo "✓ codex CLI installed (optional)" || echo "… codex CLI not found (optional — codex provider won't work without it)"
+	@command -v ttyd   >/dev/null && echo "✓ ttyd installed (Web terminal)" || echo "✗ ttyd not found — Web terminal depends on host ttyd; install: brew install ttyd"
 	@if [ -n "$$SM_ENDPOINTS_PATH" ] && [ -f "$$SM_ENDPOINTS_PATH" ]; then \
 		echo "✓ endpoints.yaml ($$SM_ENDPOINTS_PATH)"; \
 	elif [ -f "$(HOME)/.config/sm/endpoints.yaml" ]; then \

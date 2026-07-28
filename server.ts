@@ -18,6 +18,7 @@
 
 import { spawn, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
+import { hasTtyd, TTYD_HOST_DEPENDENCY_NOTE } from "./lib/ttyd-dependency";
 
 const argv = process.argv.slice(2);
 const pIdx = argv.findIndex((a) => a === "-p" || a === "--port");
@@ -29,6 +30,10 @@ const PORT =
 // Next 挪到一个只监听 127.0.0.1 的内部端口 —— 外面只应该看得见大门。
 const NEXT_PORT = Number(process.env.TRELLIS_NEXT_PORT) || PORT + 99;
 const NEXT_UP = `http://127.0.0.1:${NEXT_PORT}`;
+
+if (!hasTtyd()) {
+  console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}`);
+}
 
 // 与 proxy.ts 同一套判据：两个变量任一缺失 = 闸关（本地开发免摩擦）。
 // /term 不走 Next，所以 proxy.ts 那个 middleware 管不到它，闸得在这里自己把。

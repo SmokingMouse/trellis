@@ -213,6 +213,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 - 至少装一个 LLM CLI（Trellis 不直接打 API，是 spawn 本机 CLI）：
   - [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)：`npm i -g @anthropic-ai/claude-code` → `claude` 可用并已登录
   - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成登录
+- Web 终端功能依赖宿主机安装 [ttyd](https://github.com/tsl0922/ttyd)。macOS 安装：`brew install ttyd`
 - 完全不装 CLI 也能启动——provider picker 选 `Mock`，返回固定假回复，仅用于看 UI
 
 Trellis 的 LLM/CLI 运行时层是普通 npm 依赖（[`@smokingmouse/agent`](https://www.npmjs.com/package/@smokingmouse/agent) + [`@smokingmouse/llm`](https://www.npmjs.com/package/@smokingmouse/llm)，源码在 [`sm-toolkit`](https://github.com/SmokingMouse/sm-toolkit)），`bun install` 一步装完，无需额外 clone/build 任何仓库。
@@ -227,6 +228,8 @@ make dev
 ```
 
 只想看当前环境缺什么、不装任何东西：`make check`。
+
+若未安装 `ttyd`，Trellis 仍可启动，但 Web 终端不可用；启动/部署日志与终端面板会提示 `ttyd` 缺失和 `brew install ttyd` 安装命令。Trellis 不会自动执行安装命令。
 
 唯一的运行时注意点：必须用 `bun --bun run dev`（`make dev`/`make build`/`make start` 已经这么做了）——`bun run` 不会把 Next/Turbopack 内部起的 worker 进程纳入 bun 运行时，导致 `bun:sqlite`（`lib/server/sqlite.ts` 用）解析不到。
 
