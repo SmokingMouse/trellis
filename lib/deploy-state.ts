@@ -61,6 +61,35 @@ export type DeployState = {
   logFile: string | null;
 };
 
+/** 已经落定的阶段；其余都算「还在跑」。 */
+const SETTLED: DeployPhase[] = ["idle", "done", "failed", "broken"];
+
+/**
+ * 这份 deploy-state 还能不能解释「此刻」。
+ *
+ * 上周那次失败的部署不该给今天一次无关的崩溃贴上「本次更新失败」的标签。
+ * 30 分钟远大于实测的部署时长（约 11s），够宽。
+ */
+export function isDeployStateFresh(
+  s: DeployState | null,
+  now = Date.now(),
+): s is DeployState {
+  return s !== null && now - Date.parse(s.updatedAt) < 30 * 60_000;
+}
+
+/**
+ * 有没有一个部署正在进行。
+ *
+ * 必须**同时**看阶段和时效：被 kill 掉的部署会把 `phase` 永远停在 `build`，
+ * 只看阶段就再也发不起下一次；只看时效则刚跑完的 `done` 会被误判成在跑。
+ */
+export function isDeployRunning(
+  s: DeployState | null,
+  now = Date.now(),
+): s is DeployState {
+  return isDeployStateFresh(s, now) && !SETTLED.includes(s.phase);
+}
+
 export function readDeployState(): DeployState | null {
   try {
     const raw = fs.readFileSync(deployPaths().state, "utf8");

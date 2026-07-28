@@ -21,6 +21,7 @@ import { AUTH_COOKIE } from "./lib/auth-cookie";
 import { hasTtyd, TTYD_HOST_DEPENDENCY_NOTE } from "./lib/ttyd-dependency";
 import {
   deployPaths,
+  isDeployStateFresh,
   readDeployState,
   readReleaseInfo,
   tailLog,
@@ -278,10 +279,9 @@ function nextStatus(): "ready" | "starting" | "down" {
 function maintenancePage(detailed: boolean): Response {
   const st = readDeployState();
   const status = nextStatus();
-  // 只有「正在进行中的部署」才有资格解释当前的不可用。上周那次失败的部署留下的
-  // deploy-state 不该给今天的一次无关崩溃贴上「本次更新失败」的标签。
-  const fresh =
-    st !== null && Date.now() - Date.parse(st.updatedAt) < 30 * 60_000;
+  // 只有「正在进行中的部署」才有资格解释当前的不可用。判据提到 deploy-state.ts
+  // 共享 —— 设置页的「能不能再发一次更新」问的是同一个问题，两处不能各判各的。
+  const fresh = isDeployStateFresh(st);
   const headline =
     fresh && st.phase !== "done" && st.phase !== "idle"
       ? { preflight: "正在检查", stage: "正在准备新版本", install: "正在安装依赖", build: "正在构建", smoke: "正在预检新版本", backup: "正在备份数据库", switch: "正在切换版本", verify: "正在验活", rollback: "正在回滚", failed: "本次更新失败", broken: "更新失败且回滚未成功", done: "", idle: "" }[st.phase] ?? "正在更新"

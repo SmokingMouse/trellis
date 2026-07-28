@@ -21,6 +21,11 @@ const PIN_KEY = "trellis-term-pinned";
 const MIN_H = 120;
 const MAX_H = 720;
 const DEFAULT_H = 260;
+// 右下角浮层的几何。把手和浮层都抬到 composer 之上（收起终端后马上要用的
+// 就是输入框，不能盖）。这两个值同时决定「终端在右下角占到多高」——
+// 见下面 --trellis-term-stack 的注释。
+const FLOAT_BOTTOM = 88;
+const HANDLE_H = 28; // h-7
 
 type Terminal = { session: string; index: number };
 
@@ -58,6 +63,10 @@ export function TerminalPanel() {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [cwd, setCwd] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 探测证据（探了哪些路径、各自为什么不行）。跟 error 分开显示：主行一句话，
+  // 细节收进折叠区 —— 平时不碍眼，真出事时不用去翻服务端日志。
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [ready, setReady] = useState(false);
 
   const open = Boolean(workspaceId && openSet.has(workspaceId));
@@ -108,17 +117,35 @@ export function TerminalPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [workspaceId, toggleOpen]);
 
-  // 把面板高度发布成 CSS 变量，让 LinearThreadView / Canvas 让出底部空间
-  // （与 --trellis-sb 同一套模式：一个变量，多个消费者，不各自重算断点）。
-  // 只有**钉住**态才让内容区让位。浮层态盖在内容之上、零常驻占用 ——
-  // 这正是「更轻」的全部含义。
+  // 发布两个 CSS 变量（与 --trellis-sb 同一套模式：一个变量，多个消费者，
+  // 不各自重算断点）。**两个语义别混**：
+  //
+  //   --trellis-term-h     底部被占掉、**内容区要让出来**的高度。只有钉住态
+  //                        才 >0 —— 浮层态盖在内容之上、零常驻占用，这正是
+  //                        「更轻」的全部含义。消费者：LinearThreadView / Canvas。
+  //
+  //   --trellis-term-stack 终端在**右下角**实际占到多高（含收起时的把手）。
+  //                        右下角是一条堆栈：终端在最底层，别的浮层踩着它往上排。
+  //                        缺这个变量正是 TreePanel 和终端把手压在一起的原因 ——
+  //                        树面板写死 bottom-24(96px)，把手在 88~116px，差 8px 就撞上。
   useEffect(() => {
     const h = open && pinned ? height : 0;
     document.documentElement.style.setProperty("--trellis-term-h", `${h}px`);
+    // 纯 chat 会话没有 workspace，整个终端不存在（下面 early return null），
+    // 堆栈高度就是 0，树面板回到它原来的位置。
+    const stack = !workspaceId
+      ? 0
+      : !open
+        ? FLOAT_BOTTOM + HANDLE_H
+        : pinned
+          ? height
+          : FLOAT_BOTTOM + height;
+    document.documentElement.style.setProperty("--trellis-term-stack", `${stack}px`);
     return () => {
       document.documentElement.style.setProperty("--trellis-term-h", "0px");
+      document.documentElement.style.setProperty("--trellis-term-stack", "0px");
     };
-  }, [open, height, pinned]);
+  }, [open, height, pinned, workspaceId]);
 
   const addTerminal = useCallback(async () => {
     if (!workspaceId) return;
@@ -129,6 +156,7 @@ export function TerminalPanel() {
     }).then((x) => x.json());
     if (r.error && !r.ready) {
       setError(r.error);
+      setErrorDetail(r.errorDetail ?? null);
       return;
     }
     setReady(Boolean(r.ready));
@@ -139,39 +167,59 @@ export function TerminalPanel() {
     setActiveSession(r.session);
   }, [workspaceId]);
 
-  // 拉终端列表 + ttyd 端口。只在面板真打开时才请求 —— GET 会懒启动 ttyd 进程，
-  // 纯 chat 用户不该因为路过而多出一个常驻进程。
+  // 拉终端列表 + ttyd 端口。抽成 callback 是为了让「重试」按钮能复用同一条路 ——
+  // 服务端现在不再缓存探测失败（lib/server/ttyd.ts），所以重试是真的会重新探，
+  // 不像以前那样只能重启进程。
+  // 保持 .then 链而不是 async/await：setState 必须待在回调里，
+  // react-hooks/set-state-in-effect 才不会把 effect 里的这次调用判成同步 setState。
+  const loadTerminals = useCallback(
+    (signal?: { cancelled: boolean }): Promise<void> => {
+      if (!workspaceId) return Promise.resolve();
+      return fetch(`/api/terminals?workspaceId=${encodeURIComponent(workspaceId)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (signal?.cancelled) return;
+          setReady(Boolean(d.ready));
+          setCwd(d.cwd ?? null);
+          setError(d.error ?? null);
+          setErrorDetail(d.errorDetail ?? null);
+          const list: Terminal[] = d.terminals ?? [];
+          setTerminals(list);
+          setActiveSession((cur) =>
+            cur && list.some((t) => t.session === cur)
+              ? cur
+              : (list[0]?.session ?? null),
+          );
+          // **刻意不自动创建**。原来这里会在列表为空时自动开一个，理由是
+          // 「别让用户对着空面板再点一次」—— 那个理由建立在「创建很便宜」上，
+          // 而实测**新建一个终端要 588ms**（全新 tmux session 要跑一遍交互式
+          // zsh；复用已有 session 只要 8ms）。于是形成一个恶性循环：叉掉终端 →
+          // 切走再切回 → 列表为空 → 又自动建一个，每次重付 588ms，还在 tmux 里
+          // 堆一地 session。创建必须是显式的。
+        })
+        .catch(() => {
+          if (!signal?.cancelled) setError("拉取终端列表失败");
+        });
+    },
+    [workspaceId],
+  );
+
+  // 只在面板真打开时才请求 —— GET 会懒启动 ttyd 进程，纯 chat 用户不该因为
+  // 路过而多出一个常驻进程。
   useEffect(() => {
     if (!open || !workspaceId) return;
-    let cancelled = false;
-    fetch(`/api/terminals?workspaceId=${encodeURIComponent(workspaceId)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (cancelled) return;
-        setReady(Boolean(d.ready));
-        setCwd(d.cwd ?? null);
-        setError(d.error ?? null);
-        const list: Terminal[] = d.terminals ?? [];
-        setTerminals(list);
-        setActiveSession((cur) =>
-          cur && list.some((t) => t.session === cur)
-            ? cur
-            : (list[0]?.session ?? null),
-        );
-        // **刻意不自动创建**。原来这里会在列表为空时自动开一个，理由是
-        // 「别让用户对着空面板再点一次」—— 那个理由建立在「创建很便宜」上，
-        // 而实测**新建一个终端要 588ms**（全新 tmux session 要跑一遍交互式
-        // zsh；复用已有 session 只要 8ms）。于是形成一个恶性循环：叉掉终端 →
-        // 切走再切回 → 列表为空 → 又自动建一个，每次重付 588ms，还在 tmux 里
-        // 堆一地 session。创建必须是显式的。
-      })
-      .catch(() => {
-        if (!cancelled) setError("拉取终端列表失败");
-      });
+    const signal = { cancelled: false };
+    void loadTerminals(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
-  }, [open, workspaceId, addTerminal]);
+  }, [open, workspaceId, loadTerminals]);
+
+  const retryTerminals = useCallback(async () => {
+    setRetrying(true);
+    await loadTerminals();
+    setRetrying(false);
+  }, [loadTerminals]);
 
   const closeTerminal = useCallback(
     async (s: string) => {
@@ -229,7 +277,10 @@ export function TerminalPanel() {
       <button
         onClick={toggleOpen}
         title="打开终端（⌃`）"
-        className="hidden md:flex fixed bottom-[88px] right-4 z-40 items-center gap-1.5 h-7 px-2.5 rounded-full bg-surface/90 backdrop-blur border border-line shadow-raise text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
+        // bottom 走常量而不是 bottom-[88px]：它和 --trellis-term-stack 是同一个
+        // 数，写两处必然漂。
+        style={{ bottom: FLOAT_BOTTOM }}
+        className="hidden md:flex fixed right-4 z-40 items-center gap-1.5 h-7 px-2.5 rounded-full bg-surface/90 backdrop-blur border border-line shadow-raise text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
       >
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M4 17l6-5-6-5M12 19h8" />
@@ -258,7 +309,7 @@ export function TerminalPanel() {
               right: 16,
               // 抬到 composer 之上：盖住对话是 Quake 终端的常态（用完即走），
               // 但盖住输入框不行 —— 那是你收起终端后马上要用的东西。
-              bottom: 88,
+              bottom: FLOAT_BOTTOM,
               height,
               width: "min(880px, calc(100vw - var(--trellis-sb, 0px) - 48px))",
             }
@@ -338,7 +389,24 @@ export function TerminalPanel() {
       {/* 主体 */}
       <div className="flex-1 min-h-0 relative">
         {error && !ready ? (
-          <div className="p-3 text-label text-danger">终端不可用：{error}</div>
+          <div className="p-3 space-y-2">
+            <div className="text-label text-danger">终端不可用：{error}</div>
+            {errorDetail && (
+              <details className="text-nano text-ink-faint">
+                <summary className="cursor-pointer hover:text-ink-muted">探测详情</summary>
+                <div className="mt-1 font-mono break-all whitespace-pre-wrap">
+                  {errorDetail}
+                </div>
+              </details>
+            )}
+            <button
+              onClick={retryTerminals}
+              disabled={retrying}
+              className="h-7 px-2.5 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
+            >
+              {retrying ? "重试中…" : "重试"}
+            </button>
+          </div>
         ) : terminals === null ? (
           <div className="p-3 text-label text-ink-faint italic">准备中…</div>
         ) : !ready || !activeSession ? (
