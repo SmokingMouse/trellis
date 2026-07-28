@@ -4,6 +4,13 @@
 
 ## Session Log
 
+### Session 75 (2026-07-26)
+- **Done**: 修 ExitPlanMode 批准报 ZodError。用户带着「Trellis 与 Claude Code 协议版本偏差」的自诊来，**结论推翻了它**：是 Trellis 自己三处交互表单里唯独计划审批漏传 `updatedInput`。改 `components/InteractionForm.tsx`（真 bug）+ `lib/server/run-bus.ts`（resolver 兜底回填）+ respond route 的误导注释。
+- **设计取舍**: 没有把 `lib/llm/types.ts` 的 `updatedInput?: unknown` 收紧成判别联合（allow 强制 record）——那样能在编译期拦住这类漏传，但 respond route 收的是不可信 HTTP JSON、终究要运行时校验一遍，而 run-bus 那道兜底已经把这个位置守死了。为编译期好看做一圈波及面更大的重构不划算，留作独立一刀。
+- **验证**: 关键在**对照组**。第一次 A/B 用本机默认 CLI(2.1.207)跑，未修版竟然也全绿——说明测法当时**没有区分力**，差点误判「已修好」。查出本机是 2.1.207 而用户报错在 2.1.183，把 183 装进 `/tmp/cc183` 用 PATH 钉版本重打：未修版逐字复现用户的 ZodError + 模型重发 ExitPlanMode 卡死，修复版一次通过并续跑写文件。**教训**：跨版本 bug 的对照组必须钉住报障者的版本，否则"绿"毫无信息量。
+- **未做**: 浏览器点击态验证被一个**既有的** dev-mode hydration 故障挡住（见 Open Failures），故改走 API 直打——反而更强，因为它直接复刻了老客户端的错误 payload，同时验到了服务端兜底。表单那一改属静态可核（与另两处已 work 的表单同构）。测完已清：dev server kill / 沙箱 DB 删 / 临时 workspace 删 / `/tmp/cc183` 删 / browser session close / `.next/dev` 残留清；prod :3088 复核仍 401 正常、`.next/BUILD_ID` 未变。
+- **Next**: 用户决定是否提交（在 main 未提交，提交需先切分支）；要在 prod 生效需主目录 `make build` + `launchctl kickstart -k`。
+
 ### Session 74 (2026-07-26)
 - **Done**: 树面板图形视图补上折叠子树（列表视图 S69 已有，本轮补齐另一半）。需求原话「能增加一个树节点折叠的功能吗」含糊——先摸清折叠已存在于画布/Outline/树面板列表三处，再反问定位到图形视图，没有重复造。
   - `components/TreePanel.tsx`：`graphGeometry` 加 `hiddenByCollapse` 过滤后再喂 `layoutNodes`（折叠子树整块退出布局，剩余点重新占满面板）+ 返回 `visible` 供渲染；每个非叶点挂 ⊖/⊕ 按钮子 `<g>`（`e.stopPropagation()` 与跳转分开）、折叠点常显 + `+N ·未读` `<text>` 角标；`GRAPH_MAX_SCALE=0.4` 取代原来的 `1`。
