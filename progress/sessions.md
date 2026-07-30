@@ -1,6 +1,19 @@
 # Session Log
 
-最近 5 条，倒序（Session 82 / 81 / 80 / 79 / 78）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 83 / 82 / 81 / 80 / 79）。更早的见 `archive.md`。
+
+### Session 83（2026-07-30，动线渲染重做：三类 task 分家 + 工具渲染注册表）
+- **触发**: 用户贴截图「子 Agent 的动线展示还是很不友好，workflow 也没展示出来」，要求参考 riba / happyclaw 讨论一版方案。
+- **先证伪了截图的表象**：那两个「子 Agent」**根本不是子 Agent，是慢 Bash**。根因单一 —— `lib/subagents.ts:57` 拿 `c.agent !== undefined` 当「这是子 Agent」的判据，而 CLI 对**三种**东西发同一套 `system/task_*`：`local_agent` / `local_bash` / `local_workflow`。判别位 `task_type` 被丢两次（SDK `taskData()` 没抽 + adapter `void phase`）。
+- **实测拿的证据（不是读代码推的）**: 两次真跑 `claude -p … --output-format stream-json` 录流。① 后台 Bash 与**前台慢 `sleep 12`** 都发 `task_started{task_type:"local_bash"}`，且 `task_notification.summary` 就是描述回声 → 老代码 `report = summary ?? output` 短路掉真 stdout。② Workflow 发 `task_type:"local_workflow"` + `workflow_name`，**并且 `task_progress` 上挂着 `workflow_progress` 全量快照**（phase 列表 + 每个 agent 的 label/phaseTitle/state/model/tokens/durationMs/resultPreview）。二进制里 `strings` 也印证了三个字面量。
+- **这条实测直接推翻了原方案的一个前提**：Workflow 面板**不需要读磁盘**。用户已批准的「磁盘 adapter」因此本轮不建（L3 才用得上，现在建就是空转抽象）。
+- **Done L0（事件层）**: SDK 0.3.3 补抽 `task_type`/`workflow_name`/`workflow_progress`；adapter 停止丢 `phase`/`taskId`；`SubagentMeta` → `TaskMeta`（它描述的从来不只是子 agent）。
+- **Done L1（视图模型）**: `splitToolChain → {main, groups}` 两个平铺列表换成一棵 `buildToolTree → ToolNode{call, kind, meta, children, report}`。kind 四级降级链：`taskType` → 工具名/有子节点 → **taskId 首字母 a/b/w** → tool。前缀那级是关键 —— 它让修复**不等 SDK 发版**就在存量数据上生效。
+- **Done L2（渲染注册表）**: `lib/tool-registry.ts` 元数据表（30+ 工具各一行，不写 React）+ `components/tools/views/` 组件表（只有 Diff/Todo/Workflow/Subagent 四个）。抄了两条别人踩过的铁律：`canRender` 说不行就降级 RawView（注册表永远炸不了）、**错误永不隐藏**。
+- **Done L3（动线布局）**: 单一时间线取代「🔧 主链 + 🤖 子 Agent」两个抽屉 —— 分区把时间顺序切断了，正是「动线不友好」的另一半。删 `ToolCallsPanel.tsx` / `SubagentPanel.tsx` / `lib/subagents.ts`，不留双版本。
+- **实施中挖出两个计划外的**: ① SDK `stdout ?? content`，空 stdout 顶掉 content —— 和分组吞并叠加才是「命令结果彻底消失」的完整成因。② 失败的行必须默认展开，否则「错误永不隐藏」只是口号（渲染冒烟测试逼出来的）。
+- **验证**: `test-tool-tree.ts` 34 项 + `test-timeline-render.tsx` 45 项 ALL PASS（三个真 fixture 各覆盖一种 task_type，后两个是本次录的）；**生产库回放** 21 条误判 Bash 全部归位、20 条输出恢复可见、4 个真子 Agent 不回归；tsc ✓ lint ✓ build ✓。
+- **Next**: 浏览器人工验收（尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点）。上线**必须先发 `@smokingmouse/agent@0.3.3`**，否则 release 装回 0.3.2 → Workflow 面板降级成原始视图（分类不塌，前缀链兜得住）。
 
 ### Session 82（2026-07-29，设置页 + 点击更新 · 右下角重叠 · ttyd 探测脆点）
 - **触发**: 用户「之前的设置页面的那波更新好像不见了……搞了一个设置页，支持自动更新，也把终端移到了顶部，不和树预览图冲突」。
@@ -56,15 +69,3 @@
   - **② `launchctl bootout` 异步，bootstrap 撞上未消失的旧 job** 报 `Bootstrap failed: 5: I/O error`，而失败分支只打印「用备份还原」却没真还原 → **prod 停了约一分钟**（手工 bootstrap 救回）。修：轮询到 job 真查不到再 bootstrap（带重试），失败时真的回滚 plist 并重新拉起。
   - **终态**：prod 跑在 `~/.trellis/current` → `releases/20260728T091203-23099f885`，`auth ON`、`/` 无 cookie 401、517 节点 / 44 会话 / tmux 终端存活；修复后完整重跑一遍 deploy 全绿（含新增的两条闸断言），**457 次轮询里只有 1 次非 200（0.2s 的 503 维护页）**。顺手清掉失去主人的旧 ttyd 25990（tmux 不受影响）。
 - **Next**: 现场验收（开一轮对话 + 开个终端）。可选：把已完工的 Goals 块轮转进 archive（README 仍 12.5KB，Goals 占 11KB）；P2 新版本通知（cron + phone-push）未做。
-
-### Session 78（2026-07-27，流式渲染风暴修复）
-- **触发**: 用户报「swift-wren-91 这个项目的 tab 点不开了」+ 顺手审 bug。定位到根因不是侧栏/标签页逻辑（行可点、onPreview/onPin 全对），而是**流式期间 UI 被卡死**——点下去主线程在忙，表现像「点不开」。
-- **根因（真 DB + 真会话探针坐实）**: swift-wren-91 是暂存区下的 workspace（非 project），挂 1 个 project 模式 session（7a720cc6…），末节点 bef90d7d 有 **195 个 tool calls（392KB）+ thinking 34KB+**，整 session 接口 2.6MB。流式期间每个 SSE 事件（catchup / tool_call_start / done / update）都用展开语法 `{ ...s.nodes, [id]: {...} }` 替换**整个 `nodes` 对象**，而 `LinearThreadView`（`s.nodes`）与 `Canvas`（`s.nodes`）都订阅整个对象 → 每事件「全树重渲 + 全图重布局」。实测 30s 内 96 个事件持续轰击，且流式时 `TurnCard` 每帧对**整段** response 跑 `rehypeHighlight`（几百 KB）→ 主线程卡死。run 结束后（14 done / 2 error / 0 streaming）tab 恢复正常，但下次长流式必复现。
-- **Done（1+2 治本，挡住渲染风暴）**:
-  - **① tool_call 类事件合批提交**（`stores/sessionStore.ts`）：新增 `scheduleNodePatch` + 每帧一次 `set()` 的微调度（`PENDING_NODE_PATCHES` 缓冲 + `requestAnimationFrame` flush，单帧多节点折叠成一次 store 通知）。`catchup` / `tool_call_start` / `tool_call_done` / `tool_call_update` 四类高频事件改走合批；`done`/`error`/`interaction_required` 等终端事件仍即时提交（状态翻转要立刻反映，且不在高频路径）。`emitStream` 的 thinking/delta 本就绕过 React state 直推，不受影响。
-  - **② 流式态不跑 rehypeHighlight**（`components/TurnCard.tsx`）：`REHYPE_STREAMING` 从 `[rehypeHighlight]` 改成 `[]`，高亮只在 done 态（`REHYPE_FULL`）跑一次——这是单帧最大头，流式高亮性价比极低（与当年跳过 rehypeRaw 同一逻辑）。
-  - **③ TurnCard 加 React.memo**：线性 thread 订阅整个 `nodes`，合批后仍每帧一次重渲；memo 后仅引用变化的（流式）节点重渲，其余 15 张已完成卡（含 `REHYPE_FULL` 高亮）直接跳过。
-  - **Canvas 侧**：`ChatNode` 本就 `memo` + 自定义比较器（只看 `data.node` 引用），所以合批后只有正在流式的那张卡重渲，其余 15 张不重渲；`layoutKey` 只跟 status/拓扑走，tool_call 事件不触发 dagre 重布局——画布侧天然已免疫大半，未再改动。
-- **验证**: `tsc --noEmit` 全量零错 ✓；lint 无新增（仅 3 项既有 `set-state-in-effect` 基线警告，非本次引入）。
-- **遗留 / 可选后续（未做，按性价比排序）**: ① 大 response 流式时 `liveThinking` 全文灌 DOM 仍可能卡（34KB+），可加截断/虚拟化；② 错误节点 4aaedfa1（ConnectionRefused）的 response 里混进原始 `<thinking>…` 标签，done 态 rehypeRaw 会当真 HTML 处理（目前没崩但是脏数据 + 潜在异常源），可在写入侧拦一道 + 清存量；③ 给渲染层加 error boundary，防组件崩溃白屏。
-- **Next**: 用户现场验收——开一个长流式 project 会话（或重放 swift-wren-91），边流边切 tab / 切画布应不再卡死。改动在 main 工作区未提交。

@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-更新扳机已从命令行挪进设置页（`/settings` 点一下就发，仍是显式动作）；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
+工具动线重做完（三类 task 分家 + 渲染注册表 + 单一时间线，见 [spec](agent-flow-rendering.md)），待浏览器验收 + 发 SDK 0.3.3 才能上线；S1 工作平台化的 P0+P1 已上线，正停一周看行为判据。
 
 ## Goals
 

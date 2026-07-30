@@ -14,7 +14,7 @@ import {
   persistPendingInteraction,
   clearPendingInteraction,
 } from "./repo";
-import type { ToolCall, SubagentMeta, PendingInteraction } from "@/lib/types";
+import type { ToolCall, TaskMeta, PendingInteraction } from "@/lib/types";
 import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
 // A路②: tools that pause the run and require a user answer. Every other tool
@@ -98,7 +98,7 @@ export type RunEvent =
       endedAt: number;
     }
   // Stage 22: sub-agent progress/report patch for the Task/Agent call `id`.
-  | { type: "tool_call_update"; id: string; agent: SubagentMeta }
+  | { type: "tool_call_update"; id: string; agent: TaskMeta }
   // A路②: a run paused on an interactive tool, broadcast so the UI renders the
   // waiting form; interaction_resolved when the user's answer continues it.
   | {
@@ -160,7 +160,7 @@ type RunState = {
   // task_* lines), so this should stay empty — it exists so a CLI version that
   // reorders them degrades to "progress shows up late" instead of "silently
   // dropped". Drained when the matching tool_call_start lands.
-  pendingAgentPatches: Map<string, SubagentMeta>;
+  pendingAgentPatches: Map<string, TaskMeta>;
   // Thinking accumulated this run. In-memory only (no DB column) — shipped
   // in catchup so late subscribers see the思考期; dropped with the RunState.
   committedThinking: string;
@@ -232,7 +232,7 @@ export type ProviderEvent =
       isError: boolean;
       endedAt: number;
     }
-  | { type: "tool_call_update"; id: string; agent: SubagentMeta };
+  | { type: "tool_call_update"; id: string; agent: TaskMeta };
 
 // Caller hands us:
 //   - the nodeId (where deltas accumulate via appendNodeResponse)
@@ -527,7 +527,8 @@ async function runLoop(
           });
         }
       } else if (event.type === "tool_call_update") {
-        // Stage 22: sub-agent progress/report. Same commit-before-broadcast
+        // Background-task progress/report — sub-agent, long-running Bash, or
+        // Workflow; `agent.taskType` says which. Same commit-before-broadcast
         // discipline as the two above. The merged meta is a fresh object —
         // catchup ships a shallow copy of each call, so mutating in place
         // would retroactively edit snapshots already handed to subscribers.

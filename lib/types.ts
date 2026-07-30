@@ -57,25 +57,79 @@ export type NodeAttachment = {
 // structured inputs, monospace block + scroll for Bash stdout, etc.).
 export type ToolCallStatus = "running" | "done" | "error";
 
-// Stage 22 (subagent visualization): metadata for a Task/Agent tool call —
-// the invocation that spawns a sub-agent. Sourced from claude's `system`
-// task_started / task_progress / task_updated / task_notification lines
-// (see @sm/agent EventType.Task), which carry live progress the tool_use
-// block alone doesn't have. Every field optional: the CLI feeds them in
-// across phases (prompt at start, usage during, summary at the end), and
-// old rows / other backends have none of it.
-export type SubagentMeta = {
+// The three things claude spawns as a background "task". All three announce
+// themselves through the *same* system/task_* lines, so `taskType` is the only
+// honest way to tell them apart — see the comment on TaskMeta.
+export type TaskKind = "local_agent" | "local_bash" | "local_workflow";
+
+// One entry of a workflow's progress snapshot. The CLI emits the whole array
+// fresh (not a delta) on `task_progress`, roughly once a second, so replacing
+// it wholesale is correct. Two entry shapes observed in the wild; anything
+// else the CLI grows later simply fails both `.type` filters and is ignored.
+export type WorkflowPhaseEntry = {
+  type: "workflow_phase";
+  index: number;
+  title: string;
+};
+
+export type WorkflowAgentEntry = {
+  type: "workflow_agent";
+  index: number;
+  label: string;           // agent()'s `label` opt — the node name in the tree
+  phaseIndex?: number;
+  phaseTitle?: string;
+  agentId?: string;
+  model?: string;
+  fallbackModel?: string;
+  state?: string;          // "start" | "done" | ... (CLI-side, not enumerated)
+  queuedAt?: number;
+  startedAt?: number;
+  lastProgressAt?: number;
+  attempt?: number;
+  promptPreview?: string;
+  tokens?: number;
+  toolCalls?: number;
+  durationMs?: number;
+  resultPreview?: string;
+};
+
+export type WorkflowProgressEntry = WorkflowPhaseEntry | WorkflowAgentEntry;
+
+// Metadata for a tool call that spawned a background task. Sourced from
+// claude's `system` task_started / task_progress / task_updated /
+// task_notification lines (see @sm/agent EventType.Task), which carry live
+// progress the tool_use block alone doesn't have. Every field optional: the
+// CLI feeds them in across phases (taskType + prompt at start, usage during,
+// summary at the end), and old rows / other backends have none of it.
+//
+// ⚠️ This is NOT "sub-agent metadata", though it was named that until we
+// learned better. A slow *foreground* Bash gets the exact same treatment
+// (task_type: local_bash) — as does Workflow. Treating "has task meta" as
+// "is a sub-agent" is what made command output vanish: the row got claimed
+// into a sub-agent group whose report field preferred `summary`, and for a
+// local_bash the summary is just the description echoed back.
+export type TaskMeta = {
   taskId?: string;
+  // Only present on task_started — later phases patch onto the same row, so
+  // the merged meta keeps it. Absent = pre-0.3.3 SDK or a non-claude backend;
+  // callers fall back to the taskId prefix (a/b/w) then to the tool name.
+  taskType?: TaskKind;
+  phase?: string;          // "started" | "progress" | "updated" | "completed"
   subagentType?: string;   // "general-purpose" | "Explore" | custom agent name
   description?: string;    // short label; live-updated to the current step
-  prompt?: string;         // the full task handed to the sub-agent
+  prompt?: string;         // the full task handed over (the script, for workflows)
   status?: string;         // "completed" | "failed" | ... (from task_updated)
   lastToolName?: string;   // tool the sub-agent is running right now
   totalTokens?: number;
   toolUses?: number;
   durationMs?: number;
-  summary?: string;        // the sub-agent's final report
+  // The task's final report. Trustworthy for local_agent only — for
+  // local_bash it's the description echoed back, and for local_workflow it's
+  // 'Dynamic workflow "..." completed'. Never show it in place of output.
+  summary?: string;
   outputFile?: string;
+  workflowName?: string;   // meta.name from the workflow script
+  workflowProgress?: WorkflowProgressEntry[];
 };
 
 export type ToolCall = {
@@ -101,9 +155,11 @@ export type ToolCall = {
   // spawned it. Absent/null = main agent (all pre-Stage-22 rows). The UI
   // groups children under their parent instead of one flat chain.
   parentToolUseId?: string | null;
-  // Stage 22: present only on the Task/Agent call itself — live progress and
-  // final report of the sub-agent it spawned.
-  agent?: SubagentMeta;
+  // Present when this call spawned a background task — a sub-agent, a
+  // long-running Bash, or a Workflow. `agent.taskType` says which; the field
+  // name is a historical misnomer kept to avoid a data migration (it is
+  // serialized into nodes.tool_calls_json).
+  agent?: TaskMeta;
 };
 
 // A路②: a paused interactive-tool prompt awaiting a user answer. Set while
