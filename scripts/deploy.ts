@@ -198,6 +198,77 @@ function activeRuns(): { id: string; sessionId: string }[] {
   }
 }
 
+/**
+ * 部署行为由这几个文件决定 —— 也就是「正在跑的这套流程」自己的身份。
+ * 它们必须与被部署的那个 sha 对齐，否则「改了部署流程」这件事本身永远不生效。
+ */
+const MACHINERY = [
+  "scripts/deploy.ts",
+  "lib/deploy-supervisor.ts",
+  "lib/deploy-state.ts",
+];
+
+/** 某个 commit 里这个路径的 blob sha；null = 那个版本里没有这个文件。 */
+async function blobInCommit(sha: string, p: string): Promise<string | null> {
+  const r = await run(["git", "rev-parse", `${sha}:${p}`], { quiet: true });
+  return r.code === 0 ? r.stdout.trim() : null;
+}
+
+/** 磁盘上这个文件的 blob sha（= 本次真正在执行的那份代码）。 */
+async function blobOnDisk(p: string): Promise<string | null> {
+  if (!fs.existsSync(path.join(REPO, p))) return null;
+  const r = await run(["git", "hash-object", p], { quiet: true });
+  return r.code === 0 ? r.stdout.trim() : null;
+}
+
+/**
+ * 「干活的这套部署流程」是不是被部署那个版本里的那一套。
+ *
+ * 这是 S86 连栽两次的坑：脚本从**工作树**跑，而界面「更新到最新」部署的是
+ * `origin/main`（`app/api/update/route.ts:55` 的默认值）。于是 fetch 到了新
+ * commit、release 里装的是新代码，干活的却还是工作树里那份旧脚本 —— 修的正是
+ * 部署流程本身时，改动静默失效，报错一模一样地再来一遍。
+ *
+ * 区分两种不一致，只拦真正会骗人的那种：
+ *   落后（HEAD 是目标的祖先）→ 拦。新版流程压根没参与，本次部署名不副实。
+ *   本地未提交改动 → 只提醒。开发时的常态，且磁盘上这份就是你想跑的那份。
+ */
+async function checkMachinery(sha: string, force: boolean): Promise<void> {
+  const stale: string[] = [];
+  const edited: string[] = [];
+  for (const p of MACHINERY) {
+    const [inTarget, inHead, onDisk] = await Promise.all([
+      blobInCommit(sha, p),
+      blobInCommit("HEAD", p),
+      blobOnDisk(p),
+    ]);
+    if (onDisk === inTarget) continue;
+    (inHead === inTarget ? edited : stale).push(p);
+  }
+
+  if (edited.length > 0) {
+    log(`   ! 部署流程有未提交改动（${edited.join(" / ")}）—— 本次跑的是磁盘上这份`);
+  }
+  if (stale.length === 0) return;
+
+  const short = sha.slice(0, 9);
+  const files = stale.join(" / ");
+  const behind = await run(["git", "merge-base", "--is-ancestor", "HEAD", sha], {
+    quiet: true,
+  });
+  if (behind.code !== 0) {
+    // 目标不是工作树的后代（按老 sha 回滚、部署别的分支）—— 不一致是意料之中的。
+    log(`   ! ${files} 与 ${short} 里的版本不同 —— 本次仍用工作树这份流程跑`);
+    return;
+  }
+  const msg =
+    `工作树的部署流程落后于 ${short}（${files}）—— 本次会用**工作树这份旧流程**` +
+    `去部署新代码，流程自身的改动不会生效。先 git pull --ff-only 再重跑`;
+  if (!force) throw new Error(`${msg}；确认要用旧流程就加 --force`);
+  log(`   ! ${msg}`);
+  log("   ! --force：用旧流程继续");
+}
+
 async function preflight(ref: string, force: boolean): Promise<{ sha: string; short: string }> {
   phase("preflight", `解析 ${ref}`);
 
@@ -215,6 +286,8 @@ async function preflight(ref: string, force: boolean): Promise<{ sha: string; sh
   if (dirty.stdout.trim()) {
     log(`   ! 工作区有未提交改动，它们不会进本次 release（部署的是 ${short}）`);
   }
+
+  await checkMachinery(sha, force);
 
   const running = activeRuns();
   if (running.length > 0) {
