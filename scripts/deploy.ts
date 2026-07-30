@@ -14,10 +14,14 @@
 //   bun scripts/deploy.ts rollback            切回上一个 release
 //   bun scripts/deploy.ts status              当前状态
 //   bun scripts/deploy.ts releases            列出 release
-//   bun scripts/deploy.ts install-launchd     把 launchd 指向 <root>/current
+//   bun scripts/deploy.ts install-service     把常驻服务的工作目录指向 <root>/current
 //
 // 环境变量：TRELLIS_DEPLOY_ROOT（产物根，演练用）/ TRELLIS_DEPLOY_LABEL /
-// TRELLIS_DEPLOY_PORT（网关端口，验活用）。
+// TRELLIS_DEPLOY_PORT（网关端口，验活用）/ TRELLIS_DEPLOY_UNIT（systemd unit 名）/
+// TRELLIS_DEPLOY_SUPERVISOR（强制 launchd|systemd）。
+//
+// 两台实例的长驻方式不是一回事（本机 launchd / BOE devbox systemd user unit），
+// 差异全收在 lib/deploy-supervisor.ts —— 这个文件里不写 platform 分支。
 
 import { Database } from "bun:sqlite";
 import fs from "node:fs";
@@ -31,9 +35,10 @@ import {
   type DeployPhase,
   type DeployState,
 } from "../lib/deploy-state";
+import { resolveSupervisor } from "../lib/deploy-supervisor";
 
 const P = deployPaths();
-const LABEL = process.env.TRELLIS_DEPLOY_LABEL || "com.smokingmouse.trellis";
+const SV = resolveSupervisor();
 const GATE_PORT = Number(process.env.TRELLIS_DEPLOY_PORT) || 3088;
 const REPO = process.cwd();
 const PROD_DB =
@@ -169,10 +174,6 @@ function atomicSymlink(target: string, link: string): void {
   fs.renameSync(tmp, link);
 }
 
-async function kickstart(): Promise<void> {
-  await run(["launchctl", "kickstart", "-k", `gui/${process.getuid?.()}/${LABEL}`]);
-}
-
 // ── 阶段 ───────────────────────────────────────────────────────────────────
 
 /**
@@ -225,6 +226,28 @@ async function preflight(ref: string, force: boolean): Promise<{ sha: string; sh
       );
     }
     log("   ! --force：无视活跃会话继续");
+  }
+
+  // ── 重启通路必须在**碰任何东西之前**验通 ──
+  // 整套设计只有一个承诺：「switch 之前失败 = prod 一根汗毛没动」。而重启是 switch
+  // 的最后一步，它要是到那时才发现跑不了（S86：Linux 上没有 launchctl），失败就
+  // 恰好落在承诺的缝里 —— 软链已经翻过去、服务还是旧的。所以宁可在这里问一次。
+  const probe = await SV.probe(run);
+  if (!probe.ok) throw new Error(`${SV.name} 用不了：${probe.reason}`);
+  log(`   ${SV.name}`);
+
+  const wd = await SV.workingDirectory(run);
+  if (!wd) {
+    log(`   ! 读不出 ${SV.name} 的工作目录，无法确认本次切换会生效`);
+  } else if (path.resolve(wd) !== path.resolve(P.current)) {
+    // 拦而不是只警告：这种状态下重启只会让服务在**原目录**里重新起一遍，与部署的
+    // 那个 sha 毫无关系 —— 一次「看着成功、其实换了个无关版本」的上线比失败更坏。
+    const msg =
+      `${SV.name} 的工作目录是 ${wd}，不是 ${P.current} —— 本次切换不会生效` +
+      `（重启只是让服务在原目录里重来一遍）。先跑一次 make install-service`;
+    if (!force) throw new Error(`${msg}；确认要继续就加 --force`);
+    log(`   ! ${msg}`);
+    log("   ! --force：照样继续");
   }
 
   log(`   目标 ${short}`);
@@ -492,7 +515,7 @@ async function switchTo(dir: string): Promise<void> {
   }
   atomicSymlink(dir, P.current);
   installRollbackScript();
-  await kickstart();
+  await SV.restart(run);
 }
 
 /** 网关当前的认证闸状态；老网关没有这个字段时返回 null（不参与断言）。 */
@@ -556,9 +579,16 @@ async function rollback(): Promise<boolean> {
     log("   × 没有可回滚的 previous");
     return false;
   }
+  // 重启方式先问清楚再翻软链。翻了却重启不了 = 磁盘上是新版本、内存里是旧版本，
+  // 比不回滚更糟（S86 就是这么留下一个「current 指向没人跑的 release」的现场）。
+  const p = await SV.probe(run);
+  if (!p.ok) {
+    log(`   × 回滚前置检查不过（${SV.name}）：${p.reason}`);
+    return false;
+  }
   phase("rollback", `current → ${path.basename(target)}`);
   atomicSymlink(target, P.current);
-  await kickstart();
+  await SV.restart(run);
   return await verify();
 }
 
@@ -592,13 +622,12 @@ function installRollbackScript(): void {
 # trellis 应急回滚。由 scripts/deploy.ts 生成，不依赖仓库、不依赖 bun。
 set -eu
 ROOT="${P.root}"
-LABEL="${LABEL}"
 [ -L "$ROOT/previous" ] || { echo "没有 previous，无法回滚"; exit 1; }
 TARGET=$(readlink "$ROOT/previous")
 [ -d "$TARGET" ] || { echo "previous 指向的目录不存在：$TARGET"; exit 1; }
 ln -s "$TARGET" "$ROOT/current.tmp.$$"
 mv -f "$ROOT/current.tmp.$$" "$ROOT/current"
-launchctl kickstart -k "gui/$(id -u)/$LABEL"
+${SV.restartShell()}
 echo "已回滚到 $TARGET"
 `,
     { mode: 0o755 },
@@ -619,12 +648,6 @@ async function cmdDeploy(ref: string, force: boolean): Promise<number> {
   let dir: string | null = null;
   try {
     const { sha, short } = await preflight(ref, force);
-
-    const wd = await launchdWorkingDirectory();
-    if (wd && path.resolve(wd) !== path.resolve(P.current)) {
-      log(`   ! launchd 的 WorkingDirectory 还是 ${wd}`);
-      log(`   ! 本次切换不会真正生效 —— 部署完跑一次 make install-launchd`);
-    }
 
     // 切换前记下闸的状态，切换后要比对（见 linkShared）
     const authBefore = await gateAuthState();
@@ -662,95 +685,70 @@ async function cmdDeploy(ref: string, force: boolean): Promise<number> {
   }
 }
 
-async function launchdWorkingDirectory(): Promise<string | null> {
-  const plist = path.join(
-    os.homedir(),
-    "Library/LaunchAgents",
-    `${LABEL}.plist`,
-  );
-  try {
-    const xml = fs.readFileSync(plist, "utf8");
-    const m = xml.match(
-      /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/,
-    );
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-async function cmdInstallLaunchd(): Promise<number> {
-  const plist = path.join(os.homedir(), "Library/LaunchAgents", `${LABEL}.plist`);
-  if (!fs.existsSync(plist)) {
-    console.error(`找不到 ${plist}`);
+/**
+ * 一次性：把常驻服务的工作目录指向 `<root>/current`。
+ *
+ * 跑完这一下，仓库目录就退化成纯开发用的 checkout —— 在里面 build 不再碰线上。
+ * plist 还是 systemd unit、kickstart 还是 daemon-reload，都由 supervisor 决定。
+ */
+async function cmdInstallService(): Promise<number> {
+  const file = await SV.unitFile(run);
+  if (!file) {
+    console.error(`找不到 ${SV.name} 的服务定义文件`);
     return 1;
   }
   if (!fs.existsSync(P.current)) {
     console.error(`${P.current} 还不存在 —— 先跑一次 make deploy`);
     return 1;
   }
-  const xml = fs.readFileSync(plist, "utf8");
-  const m = xml.match(/<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/);
-  if (!m) {
-    console.error("plist 里没有 WorkingDirectory，不敢自动改");
-    return 1;
-  }
-  if (path.resolve(m[1]) === path.resolve(P.current)) {
+  const before = await SV.workingDirectory(run);
+  if (before && path.resolve(before) === path.resolve(P.current)) {
     console.log(`已经指向 ${P.current}，无需改动`);
     return 0;
   }
-  const backup = `${plist}.bak-${Date.now()}`;
-  fs.copyFileSync(plist, backup);
-  const next = xml.replace(
-    /(<key>WorkingDirectory<\/key>\s*<string>)[^<]*(<\/string>)/,
-    `$1${P.current}$2`,
-  );
-  fs.writeFileSync(plist, next);
-  console.log(`WorkingDirectory: ${m[1]} → ${P.current}`);
-  console.log(`原 plist 备份在 ${backup}`);
 
-  const uid = process.getuid?.();
-  const ok = await reloadJob(plist, uid);
-  if (!ok) {
-    // 这里失败 = 服务停着。**必须真的还原**，不能只打印一句「用备份还原」
-    // 就撂挑子（第一次真上线时就是这样，prod 停了一分钟）。
-    console.error("bootstrap 失败 —— 正在用备份还原 plist 并重新拉起");
-    fs.copyFileSync(backup, plist);
-    const back = await reloadJob(plist, uid);
-    console.error(back ? "已还原到改动前的状态" : `还原也失败了，手工跑：launchctl bootstrap gui/${uid} ${plist}`);
+  let backup: string;
+  try {
+    backup = SV.setWorkingDirectory(file, P.current);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
     return 1;
   }
-  console.log("已重新加载 launchd job");
-  return 0;
+  console.log(`${file}`);
+  console.log(`WorkingDirectory: ${before ?? "(读不出)"} → ${P.current}`);
+  console.log(`原文件备份在 ${backup}`);
+
+  if (await SV.reload(run)) {
+    console.log(`已重新加载 ${SV.name}`);
+    return 0;
+  }
+  // 这里失败 = 服务停着。**必须真的还原**，不能只打印一句「用备份还原」就撂挑子
+  // （S79 第一次真上线时就是这样，prod 停了一分钟）。
+  console.error("重新加载失败 —— 正在用备份还原并重新拉起");
+  fs.copyFileSync(backup, file);
+  const back = await SV.reload(run);
+  console.error(
+    back ? "已还原到改动前的状态" : `还原也失败了，服务现在停着 —— 手工检查 ${file}`,
+  );
+  return 1;
 }
 
-/**
- * bootout + bootstrap。
- *
- * **`bootout` 是异步的** —— 它返回时 job 未必真的消失了，紧接着 bootstrap 会撞上
- * 还在的旧 job 报 `Bootstrap failed: 5: Input/output error`，然后服务就那么停着。
- * 第一次真上线踩的就是这个。所以要等它真消失，再带重试地 bootstrap。
- */
-async function reloadJob(plist: string, uid: number | undefined): Promise<boolean> {
-  await run(["launchctl", "bootout", `gui/${uid}/${LABEL}`], { quiet: true });
-  for (let i = 0; i < 25; i++) {
-    const p = await run(["launchctl", "print", `gui/${uid}/${LABEL}`], { quiet: true });
-    if (p.code !== 0) break; // 查不到了 = 真的卸载完了
-    await Bun.sleep(200);
-  }
-  for (let i = 0; i < 5; i++) {
-    const r = await run(["launchctl", "bootstrap", `gui/${uid}`, plist], { quiet: i < 4 });
-    if (r.code === 0) return true;
-    await Bun.sleep(500 * (i + 1));
-  }
-  return false;
-}
-
-function cmdStatus(): number {
+async function cmdStatus(): Promise<number> {
   const st = readDeployState();
   console.log(`根目录      ${P.root}`);
   console.log(`current     ${symlinkTarget(P.current) ?? "(未设置)"}`);
   console.log(`previous    ${symlinkTarget(P.previous) ?? "(无)"}`);
+  // 长驻方式两台不一样，且「工作目录指没指对」决定部署到底生不生效 —— 一眼能看见
+  // 比事后翻日志强。
+  const probe = await SV.probe(run);
+  const wd = probe.ok ? await SV.workingDirectory(run) : null;
+  console.log(`长驻服务    ${SV.name}${probe.ok ? "" : ` × ${probe.reason}`}`);
+  if (probe.ok) {
+    const ok = wd && path.resolve(wd) === path.resolve(P.current);
+    console.log(
+      `工作目录    ${wd ?? "(读不出)"}${ok ? "" : `  ← 不是 ${P.current}，部署不会生效`}`,
+    );
+  }
   console.log(
     `部署状态    ${st ? `${st.phase} · ${st.message} · ${st.updatedAt}` : "(无记录)"}`,
   );
@@ -789,13 +787,16 @@ switch (sub) {
     code = (await rollback()) ? 0 : 1;
     break;
   case "status":
-    code = cmdStatus();
+    code = await cmdStatus();
     break;
   case "releases":
     code = cmdReleases();
     break;
+  // install-launchd 是旧名字（那时只有 macOS 一台）。留着当别名，肌肉记忆和文档
+  // 里都有它。
+  case "install-service":
   case "install-launchd":
-    code = await cmdInstallLaunchd();
+    code = await cmdInstallService();
     break;
   default:
     code = await cmdDeploy(sub || "HEAD", force);

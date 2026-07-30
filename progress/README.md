@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S1 三个堵点与工具动线重做均已改完待验收（后者上线前先发 SDK 0.3.3）；CLI 镜像会话的「永久正在生成…」也已修（S85，两台实例都要重部才生效）。
+两台实例都待重部（S85 修复未生效）；devbox 部署通路刚跨平台修好（S86），先在那儿实跑 install-service + deploy。S1 堵点与动线重做待验收。
 
 ## Goals
 

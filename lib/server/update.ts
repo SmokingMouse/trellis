@@ -10,6 +10,7 @@ import {
   type DeployState,
   type ReleaseInfo,
 } from "@/lib/deploy-state";
+import { resolveSupervisor } from "@/lib/deploy-supervisor";
 import { getDB } from "@/lib/server/sqlite";
 
 // 应用内更新（设置页「检查更新 / 更新到最新」）的服务端。
@@ -20,8 +21,9 @@ import { getDB } from "@/lib/server/sqlite";
 //
 // 两个必须绕开的机关，都写在下面对应函数的注释里：
 //   1. release 里没有 .git（git archive 导出的），部署脚本只能在**开发仓库**里跑；
-//   2. 部署到 switch 阶段会 kickstart 掉正在跑这段代码的进程，所以子进程必须
-//      脱离本进程的会话，否则它会跟着一起死，验活和自动回滚全丢。
+//   2. 部署到 switch 阶段会重启掉正在跑这段代码的进程，所以子进程必须脱离本进程，
+//      否则它会跟着一起死，验活和自动回滚全丢。**「脱离」在两台机器上不是一回事**
+//      —— launchd 下换会话就够，systemd 下得换 cgroup（见 spawnDeploy）。
 
 /** 部署脚本要在这个 git 仓库里跑；prod 的 release 目录不是仓库。 */
 const REPO_ENV = "TRELLIS_REPO_DIR";
@@ -182,16 +184,20 @@ export type TriggerResult =
   | { ok: false; reason: string };
 
 /**
- * 按下扳机。
+ * 派生部署脚本，并让它**活过自己触发的那次服务重启**。
  *
- * **detached: true 是这整个功能的关键**，不是随手加的选项。部署走到 switch 阶段
- * 会 `launchctl kickstart -k` —— 那杀的正是跑着这个函数的进程。子进程若还在本
- * 进程的会话里，就会被一起带走，于是 verify 和「验活失败自动回滚」这两层安全网
- * 全部失效，坏版本原地留在 current 上。setsid 让它换一个会话，父进程死了它照跑。
+ * `detached: true` 不是随手加的选项。部署走到 switch 阶段会重启服务 —— 那杀的正是
+ * 跑着这个函数的进程。子进程若还留在本进程名下，就会被一起带走，于是 verify 和
+ * 「验活失败自动回滚」这两层安全网全部失效，坏版本原地留在 current 上（S82 实测）。
+ *
+ * **但「脱离」在两台机器上不是一回事**（S86）：launchd 下 setsid 换个会话就够；
+ * systemd 默认 KillMode=control-group 是按 **cgroup** 杀的，换会话不换 cgroup，
+ * `systemctl restart` 照样把部署进程带走。所以 Linux 上要先经 systemd-run 起一个
+ * transient scope 换掉 cgroup（前缀由 supervisor 给，见 lib/deploy-supervisor.ts）。
  *
  * 同理 stdio 全部重定向到文件：父进程一死，管道那头没人读，写日志会 EPIPE。
  */
-export function startUpdate(opts: { ref?: string; force?: boolean }): TriggerResult {
+function spawnDeploy(args: string[], kind: "trigger" | "rollback"): TriggerResult {
   const repo = resolveRepo();
   if (!repo.ok) return { ok: false, reason: repo.problem.hint };
 
@@ -200,10 +206,40 @@ export function startUpdate(opts: { ref?: string; force?: boolean }): TriggerRes
     return { ok: false, reason: `已经有一个部署在跑（${st.phase}：${st.message}）` };
   }
 
+  // process.execPath 就是当前的 bun 可执行文件 —— 比赌 PATH 里有 bun 可靠
+  // （launchd / systemd 给的 PATH 与登录 shell 不是一回事）。
+  const argv = [path.join(repo.dir, "scripts", "deploy.ts"), ...args];
+  const prefix = resolveSupervisor().detachPrefix();
+  if (prefix.length > 0) {
+    // 探针**真的起一个空 scope**，而不是问 `--version`：systemd-run 装着但 dbus
+    // session / XDG_RUNTIME_DIR 不对时它照样跑不起来，而那种失败会晚到 switch
+    // 阶段才发作 —— 正是这里要防的东西。
+    const probe = spawnSync(prefix[0], [...prefix.slice(1), "--", "true"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (probe.error || probe.status !== 0) {
+      const why = probe.error
+        ? ((probe.error as NodeJS.ErrnoException).code ?? probe.error.message)
+        : (probe.stderr || "").trim() || `exit ${probe.status}`;
+      return {
+        ok: false,
+        reason:
+          `跑不了 ${prefix[0]}（${why}）—— 界面触发的部署会在切换时被服务重启一起杀掉，` +
+          `连带丢掉验活和自动回滚。请改用命令行：cd ${repo.dir} && make deploy`,
+      };
+    }
+  }
+  const cmd = prefix.length > 0 ? prefix[0] : process.execPath;
+  const cmdArgs =
+    prefix.length > 0
+      ? [...prefix.slice(1), "--", process.execPath, ...argv]
+      : argv;
+
   const P = deployPaths();
   fs.mkdirSync(P.logs, { recursive: true });
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
-  const logFile = path.join(P.logs, `trigger-${stamp}.log`);
+  const logFile = path.join(P.logs, `${kind}-${stamp}.log`);
 
   let fd: number;
   try {
@@ -220,17 +256,12 @@ export function startUpdate(opts: { ref?: string; force?: boolean }): TriggerRes
   delete env.TRELLIS_TTYD_PORT;
 
   try {
-    // process.execPath 就是当前的 bun 可执行文件 —— 比赌 PATH 里有 bun 可靠
-    // （launchd 的 PATH 与登录 shell 不是一回事）。
-    const child = spawn(
-      process.execPath,
-      [
-        path.join(repo.dir, "scripts", "deploy.ts"),
-        opts.ref || "HEAD",
-        ...(opts.force ? ["--force"] : []),
-      ],
-      { cwd: repo.dir, detached: true, stdio: ["ignore", fd, fd], env },
-    );
+    const child = spawn(cmd, cmdArgs, {
+      cwd: repo.dir,
+      detached: true,
+      stdio: ["ignore", fd, fd],
+      env,
+    });
     child.unref();
     return { ok: true, logFile, pid: child.pid ?? null };
   } catch (e) {
@@ -244,43 +275,15 @@ export function startUpdate(opts: { ref?: string; force?: boolean }): TriggerRes
   }
 }
 
-/** 回滚到 previous。和 startUpdate 同一套脱离逻辑（rollback 同样会 kickstart）。 */
+/** 按下扳机。 */
+export function startUpdate(opts: { ref?: string; force?: boolean }): TriggerResult {
+  return spawnDeploy(
+    [opts.ref || "HEAD", ...(opts.force ? ["--force"] : [])],
+    "trigger",
+  );
+}
+
+/** 回滚到 previous。同一套脱离逻辑（rollback 同样会重启服务）。 */
 export function startRollback(): TriggerResult {
-  const repo = resolveRepo();
-  if (!repo.ok) return { ok: false, reason: repo.problem.hint };
-  const st = readDeployState();
-  if (isDeployRunning(st)) {
-    return { ok: false, reason: `已经有一个部署在跑（${st.phase}）` };
-  }
-  const P = deployPaths();
-  fs.mkdirSync(P.logs, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
-  const logFile = path.join(P.logs, `rollback-${stamp}.log`);
-  let fd: number;
-  try {
-    fd = fs.openSync(logFile, "a");
-  } catch (e) {
-    return { ok: false, reason: `打不开日志文件：${e instanceof Error ? e.message : String(e)}` };
-  }
-  const env = { ...process.env };
-  delete env.PORT;
-  delete env.TRELLIS_NEXT_PORT;
-  delete env.TRELLIS_TTYD_PORT;
-  try {
-    const child = spawn(
-      process.execPath,
-      [path.join(repo.dir, "scripts", "deploy.ts"), "rollback"],
-      { cwd: repo.dir, detached: true, stdio: ["ignore", fd, fd], env },
-    );
-    child.unref();
-    return { ok: true, logFile, pid: child.pid ?? null };
-  } catch (e) {
-    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
-  } finally {
-    try {
-      fs.closeSync(fd);
-    } catch {
-      /* 忽略 */
-    }
-  }
+  return spawnDeploy(["rollback"], "rollback");
 }
