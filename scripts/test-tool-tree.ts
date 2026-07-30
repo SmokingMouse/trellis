@@ -99,6 +99,21 @@ function section(name: string) {
   console.log(`\n── ${name}`);
 }
 
+// SDK 闸：taskType / workflowProgress / 空 stdout 让位 content 三项都在
+// @smokingmouse/agent ≥0.3.3。装着 0.3.2 时下面会红一片，但根因是**依赖没到位**
+// 而不是代码退化 —— 先说清楚，省得下一个人对着 9 条红断言查一小时。
+{
+  const probe = await replay("bash-task-stream.jsonl");
+  if (!probe.some((n) => n.meta.taskType)) {
+    console.log(
+      "\n⚠️  当前 @smokingmouse/agent 没有透传 task_type —— 需要 ≥0.3.3。\n" +
+        "   分类靠 taskId 前缀仍然正确，但 workflowProgress 拿不到、\n" +
+        "   且空 stdout 会把 content 顶掉（后台命令输出为空）。\n" +
+        "   本地开发：make link-sdk；上线前：发 0.3.3 再 bun install。",
+    );
+  }
+}
+
 // ── local_agent ──────────────────────────────────────────────────────────
 {
   const tree = await replay("subagent-stream.jsonl");
