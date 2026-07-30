@@ -162,9 +162,13 @@ toolUseId, parentAgentId, spawnDepth}`，`toolUseId` 直接 join 主线的 Task 
 ## 遗留
 
 - SDK `@smokingmouse/agent@0.3.3` **只 bump 了版本号，没发 npm**。当前靠 `make link-sdk`
-  跑本地包。**上线前必须发版并 `bun install` 回注册表版本**，否则 release 目录装的
-  还是 0.3.2（功能不塌 —— 前缀降级链兜得住，但 `workflowProgress` 拿不到，
-  Workflow 会降级成原始视图）。
+  跑本地包。**上线前必须发版**，这不是可选项 —— 在 0.3.2 上实测（main worktree，
+  registry 版本）：
+  - ✅ 三类 task 的**分类全对**（taskId 前缀链兜住），`report` 不再吞 output
+  - ❌ `workflowProgress` 拿不到 → Workflow 降级成原始视图
+  - ❌ **空 stdout 仍会把 content 顶掉** —— 后台命令 / 无输出命令的输出还是空的。
+    也就是说「结果不可见」这个 bug 在 0.3.2 上只修好了一半。
+  `scripts/test-tool-tree.ts` 开头有版本闸，装着 0.3.2 时会打印提示再红。
 - L3 磁盘钻进（读 `<sessionId>/subagents/agent-*.jsonl` 看子 agent 完整对话）未做。
 
 ## 参考调研
