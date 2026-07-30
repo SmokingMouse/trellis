@@ -14,7 +14,8 @@
   - `lib/server/update.ts`：**systemd 下 `detached: true` 不够** —— 默认 KillMode=control-group 按 cgroup 杀，换会话不换 cgroup，`systemctl restart` 会把正在跑部署的进程一起带走，verify 与自动回滚双双失效（launchd 上 S82 修过一次，这是 Linux 上的新一份）。改经 `systemd-run --user --collect --quiet --scope` 换 cgroup，探针**真起一个空 scope**（systemd-run 在位但 dbus / XDG_RUNTIME_DIR 不对时照样跑不起来），不过就明说「改用命令行 make deploy」。顺带把 `startUpdate`/`startRollback` 两份 95% 重复的 spawn 合成 `spawnDeploy`。
 - **验证**（本机造 systemd 桩环境实跑：`TRELLIS_DEPLOY_SUPERVISOR=systemd` + PATH 里放桩 `systemctl` + `TRELLIS_DEPLOY_ROOT=/tmp/…` + 复刻 BOE 现状的桩 unit）：① mac 真 launchd 路径 `deploy-status` 照旧认出 job 与工作目录 ✓；② WD 指着 `/data00/…/trellis` 时 deploy **在 preflight 就拒绝**、`current` 未动 ✓；③ `install-service` 正确改写 `WorkingDirectory=` → `daemon-reload` → `restart` → 查 `ActiveState` ✓；④ rollback 走完探针→翻软链→重启→验活（验活打本机真网关 3088，✓）；⑤ 桩收到的 11 条调用序列与预期逐条对齐 ✓；⑥ **复刻事故现场**（PATH 里既无 launchctl 也无 systemctl）→ 报错落在 preflight、`current` 一根汗毛没动 ✓；⑦ 两套 `rollback.sh` 从**真源码模板**渲染 + `sh -n` 通过 ✓。tsc 零错。
 - **边界（诚实）**: **没在 BOE 上实跑过** —— 本机 ssh 不到公司 devbox（`~/.ssh/config` 里只有 bwg / vultr-tokyo）。systemd 分支的证据 = 桩环境 + `update-trellis.sh:74` 那串已被实践证明的命令，不是现场。`update-trellis.sh` 的 BOE 分支（原地 build）**先留着当退路**，等 deploy 在 BOE 上跑通一次再退役 —— 那才是「不留双版本」的时机。
-- **Next**: BOE 上两步 `cd ~/trellis && git pull && bun scripts/deploy.ts install-service` → `make deploy`（跑前 export 代理，`bun install` 要出网）；本机 prod 也待重部。
+- **合并与推送**: `deploy-cross-platform` → `main`（`--no-ff` merge `41b4390`，保住工作线形状），已推 `bffeda9..41b4390`。**两台实例都还没重部**。
+- **Next**: BOE 上两步 `cd ~/trellis && git pull && bun scripts/deploy.ts install-service` → `make deploy`（跑前 export 代理，`bun install` 要出网）。注意 `install-service` 那一步就会让服务重启进 `~/.trellis/current` —— 也就是 11:18 那次建好却没跑上的 `20260730T111814-bffeda99b`，**S85 的修复到这一步即生效**，第二步才是发这次的 supervisor 修复。本机 prod 走 `make deploy`。
 
 ### Session 85（2026-07-30，镜像会话的「永久正在生成…」— CLI 注入劫走回复）
 - **触发**: 用户截图一条 attach 的 CLI 镜像 turn：6 个工具全标「完成」，底下却一直转「正在生成…」。问「为啥显示完成了，但实际卡在这个界面」。
