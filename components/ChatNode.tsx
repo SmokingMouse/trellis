@@ -23,7 +23,12 @@ import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode as ChatNodeData, ToolCall } from "@/lib/types";
-import { splitToolChain, subagentLabel } from "@/lib/subagents";
+import {
+  buildToolTree,
+  countToolTree,
+  subagentLabel,
+  walkToolTree,
+} from "@/lib/tool-tree";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
@@ -711,29 +716,30 @@ function truncate(s: string, n: number) {
 // Stage 17: small badge that surfaces tool-call count on the canvas
 // card + fullscreen footer. Hidden when count is 0 so chat-mode nodes
 // (which rarely invoke tools) don't grow extra clutter. Click is
-// non-interactive — drill-down lives in ToolCallsPanel inside the
+// non-interactive — drill-down lives in the timeline inside the
 // fullscreen view.
 //
-// Stage 22: 🔧 counts the main agent only; delegated work gets its own 🤖
-// count, so a turn that fanned out to sub-agents reads as such at a glance
-// instead of just showing an inflated tool number.
+// 🔧 is every call in the turn; delegation gets its own 🤖 / ⚙ count so a turn
+// that fanned out reads as such at a glance instead of just showing an
+// inflated tool number.
 function ToolCallBadge({ toolCalls }: { toolCalls: ToolCall[] }) {
-  const { main, groups } = splitToolChain(toolCalls);
-  if (main.length === 0 && groups.length === 0) return null;
+  const tree = buildToolTree(toolCalls);
+  const counts = countToolTree(tree);
+  if (counts.total === 0) return null;
+  const labels = walkToolTree(tree)
+    .filter((n) => n.kind === "subagent")
+    .map((n) => subagentLabel(n.meta));
   return (
     <span className="shrink-0 inline-flex items-center gap-1 text-nano tabular-nums text-ink-muted">
-      {main.length > 0 && (
-        <span title={`主 agent 共调用 ${main.length} 个工具`}>
-          🔧{main.length}
+      <span title={`本轮共 ${counts.total} 次工具调用`}>🔧{counts.total}</span>
+      {counts.subagents > 0 && (
+        <span title={`派了 ${counts.subagents} 个子 Agent：${labels.join("、")}`}>
+          🤖{counts.subagents}
         </span>
       )}
-      {groups.length > 0 && (
-        <span
-          title={`派了 ${groups.length} 个子 Agent：${groups
-            .map((g) => subagentLabel(g.meta))
-            .join("、")}`}
-        >
-          🤖{groups.length}
+      {counts.workflows > 0 && (
+        <span title={`跑了 ${counts.workflows} 个 Workflow`}>
+          ⚙{counts.workflows}
         </span>
       )}
     </span>

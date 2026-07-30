@@ -1,5 +1,5 @@
 "use client";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -13,7 +13,6 @@ import {
 import { refIcon } from "@/lib/ref-icon";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
-import { splitToolChain } from "@/lib/subagents";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -23,9 +22,8 @@ import { CopyButton } from "./CopyButton";
 import { EmptyResponseNotice } from "./EmptyResponseNotice";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
-import { SubagentPanel } from "./SubagentPanel";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
-import { ToolCallsPanel } from "./ToolCallsPanel";
+import { ToolTimeline } from "./tools/ToolTimeline";
 import { Button } from "./ui/Button";
 import { Dots } from "./ui/Dots";
 import { StopButton } from "./ui/StopButton";
@@ -87,10 +85,13 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
         question={node.question}
         attachments={node.attachments}
       />
-      {/* Stage 22: delegated work gets its own section above the main
-          agent's chain; without the split, a sub-agent's tools were
-          interleaved into 🔧 工具调用 with nothing marking them as its. */}
-      <ToolChain node={node} />
+      {/* One chronological timeline of everything the turn did — delegated
+          work nests under the call that spawned it rather than being pulled
+          out into a parallel panel. */}
+      <ToolTimeline
+        toolCalls={node.toolCalls}
+        live={node.status === "streaming"}
+      />
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
           imperative <mark> injection inside react-markdown's output diverges
           from React's virtual tree, so when the node prop changes in-place
@@ -111,19 +112,6 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
     </>
   );
 });
-
-function ToolChain({ node }: { node: ChatNode }) {
-  const { main, groups } = useMemo(
-    () => splitToolChain(node.toolCalls),
-    [node.toolCalls],
-  );
-  return (
-    <>
-      <SubagentPanel groups={groups} live={node.status === "streaming"} />
-      <ToolCallsPanel toolCalls={main} hasSubagents={groups.length > 0} />
-    </>
-  );
-}
 
 // D5: regenerate the same question as a NEW sibling (a second "version"),
 // rather than overwriting in place like retry. The branch entries in the

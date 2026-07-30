@@ -2514,7 +2514,7 @@ type StreamEvent =
   | {
       type: "tool_call_update";
       id: string;
-      agent: import("@/lib/types").SubagentMeta;
+      agent: import("@/lib/types").TaskMeta;
     }
   // A路②: the run paused on an interactive tool (AskUserQuestion /
   // ExitPlanMode). interaction_required carries the prompt for the UI to
@@ -2834,10 +2834,12 @@ function handleStreamEvent(
         return { ...n, toolCalls: next };
       });
     } else if (event.type === "tool_call_update" && currentNodeId) {
-      // Stage 22: sub-agent progress/report for a Task/Agent call. Merge —
-      // never replace — so a late progress-only patch can't wipe a summary
-      // an earlier phase already delivered. Missing target = skip (same
-      // reasoning as tool_call_done above).
+      // Background-task progress for the call that spawned it — a sub-agent,
+      // a long-running Bash, or a Workflow. Merge — never replace — so a late
+      // progress-only patch can't wipe a taskType/summary an earlier phase
+      // already delivered (taskType only ever arrives on task_started, so a
+      // replacing write would lose the one field that classifies the row).
+      // Missing target = skip (same reasoning as tool_call_done above).
       const id = currentNodeId;
       scheduleNodePatch(id, (n) => {
         const idx = n.toolCalls.findIndex((c) => c.id === event.id);

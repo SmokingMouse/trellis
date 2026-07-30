@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S1 三个堵点（触屏点不到 / 侧栏说谎 / 无 git 感知）已改完待验收；CLI 镜像会话的「永久正在生成…」也已修（S84，两台实例都要重部才生效）。
+S1 三个堵点与工具动线重做均已改完待验收（后者上线前先发 SDK 0.3.3）；CLI 镜像会话的「永久正在生成…」也已修（S85，两台实例都要重部才生效）。
 
 ## Goals
 
@@ -20,8 +20,8 @@ S1 三个堵点（触屏点不到 / 侧栏说谎 / 无 git 感知）已改完待
 
 - `facts.md` — 已验证事实（改代码前读）
 - `failures.md` — 待查 / 已结案失败（排查 bug 前读）
-- `sessions.md` — 最近 5 条 session log（Session 83/82/81/80/79）
-- `archive.md` — 更早的 session log（Session 78–1）+ Goals 归档 + 历史 Current Focus 栈
+- `sessions.md` — 最近 5 条 session log（Session 84/83/82/81/80）
+- `archive.md` — 更早的 session log（Session 79–1）+ Goals 归档 + 历史 Current Focus 栈
 - `decisions.md` · `decisions/` — 轻量决策日志 / 重量 ADR
 - `blocks/` — 并行 worktree 独占进度块
 - 其余 `*.md` 均为 feature spec，被上面的 Goals 指到时才读（`ls progress/` 即清单）

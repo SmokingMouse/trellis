@@ -25,7 +25,7 @@
 - **逐轮渲染**（每个 thread 节点一块，纵向堆叠、整体可滚动）：
   - 问题：复用现有问题展示样式（「You」头 + question 文本；reference 节点渲染成参考卡片，简化可只显标题 + 链接）。
   - 回答：`<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeHighlight]} components={MD_COMPONENTS}>{node.response}</ReactMarkdown>`（与 NodeFullView 一致；import 同款）。
-  - 工具调用：`<ToolCallsPanel toolCalls={node.toolCalls} />`（直接复用）。
+  - 工具调用：`<ToolCallsPanel toolCalls={node.toolCalls} />`（直接复用）。**S84 起改为 `<ToolTimeline>`（`components/tools/`），`ToolCallsPanel` 已删。**
   - 动作行：复用 `CliResumeButton`/`CopyButton`（可选，放每轮回答下）。
   - **分叉展开**：该节点的 children 里、不等于 thread 中下一个节点的那些 = 分支。有则渲染「↳ N 个分支」按钮，点开列出（每条显其 question 截断 + #index），点击 `setActiveNode(分支id)`。
   - streaming 节点：response 用流式文本（可简化为 `node.response` + 光标；live 实时不是本轮重点，done 后正确即可）。
@@ -55,7 +55,7 @@
 
 - **只影响 project 会话**。chat/workspace 的 canvas + NodeFullView 全屏路径**零改动**。
 - 不改解析/spawn/DB 任何后端。纯前端视图层。
-- 复用既有：`MD_COMPONENTS`(`@/lib/md-components`)、`ToolCallsPanel`、`ancestorsOf`(`@/lib/collapsed`)、`layoutNodes`(`@/lib/layout`)、`CliResumeButton`/`CopyButton`。不重造 markdown/工具渲染。
+- 复用既有：`MD_COMPONENTS`(`@/lib/md-components`)、`ToolCallsPanel`（S84 起是 `ToolTimeline`）、`ancestorsOf`(`@/lib/collapsed`)、`layoutNodes`(`@/lib/layout`)、`CliResumeButton`/`CopyButton`。不重造 markdown/工具渲染。
 - 不破坏现有 store 选择器订阅模式（用 `useSessionStore((s)=>...)` 细粒度订阅，别整对象订阅致全 re-render）。
 
 ## 验收

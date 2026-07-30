@@ -15,7 +15,7 @@ import type {
   ReferenceMeta,
   ReferencePayload,
   ToolCall,
-  SubagentMeta,
+  TaskMeta,
   PendingInteraction,
 } from "@/lib/types";
 
@@ -1070,7 +1070,7 @@ export function markToolCallDone(args: {
 export function patchToolCallAgent(args: {
   nodeId: string;
   toolCallId: string;
-  patch: SubagentMeta;
+  patch: TaskMeta;
 }): void {
   const db = getDB();
   const row = db
@@ -1097,10 +1097,10 @@ export function patchToolCallAgent(args: {
 
 // Shared by repo + run-bus: additive shallow merge with undefined stripped.
 export function mergeAgentMeta(
-  cur: SubagentMeta | undefined,
-  patch: SubagentMeta,
-): SubagentMeta {
-  const next: SubagentMeta = { ...cur };
+  cur: TaskMeta | undefined,
+  patch: TaskMeta,
+): TaskMeta {
+  const next: TaskMeta = { ...cur };
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) (next as Record<string, unknown>)[k] = v;
   }
