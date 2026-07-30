@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S1 判据实测未达标（worktree 里 0 个 session），根因是新建 worktree 的按钮在触屏上永远点不到；可达性、侧栏漂移、git 感知三项已改完待验收。
+S1 三个堵点（触屏点不到 / 侧栏说谎 / 无 git 感知）已改完待验收；CLI 镜像会话的「永久正在生成…」也已修（S84，两台实例都要重部才生效）。
 
 ## Goals
 

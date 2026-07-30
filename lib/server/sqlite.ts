@@ -528,6 +528,21 @@ function migrate(db: Database) {
     );
   `);
 
+  // 一次性数据迁移，用 PRAGMA user_version 记进度（0 = 从没跑过）。
+  const schemaVersion = (
+    db.query("PRAGMA user_version").get() as { user_version: number }
+  ).user_version;
+  if (schemaVersion < 1) {
+    // v1：CLI 同步的 turn 切分判据变了（cli-import.ts:isTurnStart 现在按
+    // isMeta / promptSource 排除 CLI 注入的 user 消息）。存量镜像会话是按旧判据
+    // 导的——真 turn 的回复被假 turn 劫走，留下一堆「有工具、无回复」的僵尸节点。
+    // 这里作废增量游标，强制下次 importCliLineage 全量重导；假节点由 import 事务
+    // 里的清理逻辑顺带删。不作废不行：allUnchanged 判定会直接跳过整个重写，存量
+    // 永远修不好。
+    db.exec("UPDATE cli_lineages SET synced_uuid = NULL");
+    db.exec("PRAGMA user_version = 1");
+  }
+
   // Reap dangling streams from a previous server crash, exactly once on boot.
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted',

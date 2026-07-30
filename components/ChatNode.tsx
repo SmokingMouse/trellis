@@ -33,6 +33,7 @@ import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { SkillPickerList } from "./SkillPickerList";
 import { ZoneEditor } from "./ZoneEditor";
+import { EmptyResponseNotice } from "./EmptyResponseNotice";
 
 // Plugin arrays at module scope so identity is stable across renders.
 const REMARK_PLUGINS = [remarkGfm];
@@ -466,10 +467,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             {n.response}
           </ReactMarkdown>
         ) : (
-          <div className="text-ink-faint italic flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-positive rounded-full animate-pulse" />
-            正在生成…
-          </div>
+          <EmptyResponseNotice hasToolCalls={(n.toolCalls?.length ?? 0) > 0} />
         )}
         {errorSuperseded && (
           <SupersededErrorNotice nodeId={n.id} errorMessage={n.errorMessage} />
