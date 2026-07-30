@@ -16,7 +16,7 @@
 SDK_HOME ?= $(HOME)/sdk
 
 .PHONY: setup check dev build start clean link-sdk unlink-sdk help \
-        deploy rollback deploy-status releases install-launchd
+        deploy rollback deploy-status releases install-service install-launchd
 
 REF ?= HEAD
 
@@ -35,9 +35,9 @@ help:
 	@echo "make deploy REF=<ref> — 部署指定 ref"
 	@echo "make deploy FORCE=1   — 有会话正在生成时也强切（默认拒绝）"
 	@echo "make rollback         — 切回上一个 release"
-	@echo "make deploy-status    — current/previous 与上次部署状态"
+	@echo "make deploy-status    — current/previous、长驻服务与上次部署状态"
 	@echo "make releases         — 列出保留的 release"
-	@echo "make install-launchd  — 一次性：把 launchd 的 WorkingDirectory 指向 ~/.trellis/current"
+	@echo "make install-service  — 一次性：把常驻服务（launchd / systemd user unit）的工作目录指向 ~/.trellis/current"
 
 setup:
 	bun install
@@ -104,5 +104,8 @@ deploy-status:
 releases:
 	@bun scripts/deploy.ts releases
 
-install-launchd:
-	bun scripts/deploy.ts install-launchd
+install-service:
+	bun scripts/deploy.ts install-service
+
+# 旧名字（那时只有 macOS 一台）。留着当别名。
+install-launchd: install-service

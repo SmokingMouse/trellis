@@ -282,12 +282,14 @@ make deploy-status       # 看 current / previous 与上次部署状态
 
 ```bash
 make deploy            # 先建出第一个 release
-make install-launchd   # 把 launchd 的 WorkingDirectory 改成 ~/.trellis/current（会先备份原 plist）
+make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current（会先备份原定义文件）
 ```
 
 之后仓库目录就只是开发用的 checkout 了，在里面 build 不再影响线上。应急回滚不依赖仓库：`~/.trellis/bin/rollback.sh`。
 
-> 有会话正在生成时 `make deploy` 会拒绝执行并列出是哪些（切换会中断它们）。确认要切就加 `FORCE=1`。
+**macOS / Linux 都支持**：重启走 launchd（`launchctl kickstart -k`）还是 systemd user unit（`systemctl --user restart`）按平台自动判定，unit 名默认取 label 的最后一段（`com.smokingmouse.trellis` → `trellis.service`，用 `TRELLIS_DEPLOY_UNIT` 覆盖）。`make deploy-status` 会把认到的那套连同它当前的工作目录一起打出来。
+
+> 两种情况 `make deploy` 会**拒绝执行**，都可以 `FORCE=1` 强行继续：① 有会话正在生成（切换会中断它们，会列出是哪些）；② 常驻服务的工作目录不是 `~/.trellis/current`（这种状态下重启只是让服务在原目录里重来一遍，跟部署的那个 sha 没关系）。
 
 ---
 
