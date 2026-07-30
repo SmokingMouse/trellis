@@ -11,7 +11,14 @@ export const dynamic = "force-dynamic";
 // S1 P2：在项目下直接开 / 收 worktree。
 //
 // POST   { projectId, branch, ref? } → git worktree add <同级目录>/<branch> -b <branch> [ref]
-// DELETE ?workspaceId=…&force=0|1   → git worktree remove（未提交改动默认拒删）
+// DELETE ?workspaceId=…              → **只预演**，回传将被删掉的东西
+// DELETE ?workspaceId=…&force=1      → 真删（git worktree remove）
+//
+// 删磁盘只对 `created_by='trellis'` 的行开放（UI 侧的门槛），用户自己在 CLI 里
+// 建的 worktree 该在 CLI 里删。至于「列表里留着已不存在的行」，那由重扫的
+// 自动 prune 解决（lib/server/workspaces.ts 的 registerSiblingWorktrees），
+// 不需要一个手动的「移除」动作 —— 实测过：手动摘掉一个目录仍在的行，
+// 下一次重扫就把它加回来了，那种按钮点了等于没点。
 //
 // 落盘位置刻意是**同级兄弟目录**（`<主 checkout 的父目录>/<branch>`）：
 // 用户现有的 sole/trevally 就这么放，`git worktree add` 的习惯也是；
@@ -24,6 +31,35 @@ function git(cwd: string, args: string[]) {
     timeout: 30_000,
     env: { ...process.env, http_proxy: "", https_proxy: "", ALL_PROXY: "" },
   });
+}
+
+/**
+ * 取一条**非空**的 git 错误信息。
+ *
+ * `spawnSync` 在 cwd 不存在时既不给 status 也不给 stderr（实测
+ * `{error: "ENOENT ... posix_spawn 'git'", status: undefined, stderr: null}`），
+ * 只看 stderr/stdout 会得到空串 —— 界面上就是「失败了但不说为什么」。
+ */
+function gitError(
+  r: ReturnType<typeof git>,
+  fallback: string,
+): string {
+  return (r.stderr || r.stdout || r.error?.message || fallback).trim();
+}
+
+/** 这个 workspace 下有没有正在生成的会话 —— 删掉它的目录会把 run 打断。 */
+function streamingCount(workspaceId: string): number {
+  try {
+    const row = getDB()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM nodes n JOIN sessions s ON s.id = n.session_id
+         WHERE n.status = 'streaming' AND s.workspace_id = ?`,
+      )
+      .get(workspaceId) as { n: number } | undefined;
+    return row?.n ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** 分支名不能带路径穿越/空白 —— 它会直接变成磁盘上的目录名。 */
@@ -52,12 +88,18 @@ export async function POST(req: Request) {
   const db = getDB();
   // 从这个项目里挑一个 git 工作区当 `git worktree add` 的执行点。优先主
   // checkout —— 它一定在，且它的父目录就是我们要落盘的地方。
-  const base = db
-    .prepare(
-      `SELECT path FROM workspaces WHERE project_id = ? AND kind IN ('main','worktree')
-       ORDER BY CASE kind WHEN 'main' THEN 0 ELSE 1 END LIMIT 1`,
-    )
-    .get(projectId) as { path: string } | undefined;
+  //
+  // 必须逐个验存活：workspace 行会指向已被删掉的目录（我们刻意保留行，让
+  // 会话历史不连坐），拿这种路径当 cwd 会让 spawnSync 直接 ENOENT，
+  // 而那条错误路径上 stderr 是 null、报出来是一句空话。
+  const base = (
+    db
+      .prepare(
+        `SELECT path FROM workspaces WHERE project_id = ? AND kind IN ('main','worktree')
+         ORDER BY CASE kind WHEN 'main' THEN 0 ELSE 1 END`,
+      )
+      .all(projectId) as { path: string }[]
+  ).find((c) => fs.existsSync(c.path));
   if (!base) {
     return Response.json(
       { error: "这个项目下没有 git 工作区，无法新建 worktree" },
@@ -81,7 +123,7 @@ export async function POST(req: Request) {
   const r = git(base.path, args);
   if (r.status !== 0) {
     return Response.json(
-      { error: (r.stderr || r.stdout || "git worktree add 失败").trim() },
+      { error: gitError(r, "git worktree add 失败") },
       { status: 500 },
     );
   }
@@ -105,6 +147,28 @@ export async function DELETE(req: Request) {
     | { path: string; kind: string; created_by: string }
     | undefined;
   if (!ws) return Response.json({ error: "workspace not found" }, { status: 404 });
+
+  // 会话不连坐删：workspace_id 是 ON DELETE SET NULL，那些 session 仍持有
+  // workspace_path、仍能 resume，只是回到未归组。
+  const dropRow = () =>
+    db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
+
+  // ① 目录已经不在了 —— 没有 git 可跑，直接摘行。
+  //
+  // 这条以前是死路：spawnSync 在不存在的 cwd 下 status 是 undefined，于是
+  // `dirty.status === 0` 为假 → 脏改动闸被**静默跳过**，接着终端已经被杀，
+  // 最后 `r.status !== 0` 成立返回 500，而 DELETE FROM 永不执行。
+  // 净效果：僵尸行永远删不掉，且每点一次白杀一次终端。
+  //
+  // 终端要收 —— tmux 是终端列表的真源，摘掉行却留着 session，就会在 tmux 里
+  // 堆一地再也无人认领的孤儿。
+  if (!fs.existsSync(ws.path)) {
+    killWorkspaceTerminals(workspaceId);
+    dropRow();
+    return Response.json({ ok: true, gone: true });
+  }
+
+  // ② 真删磁盘。只对 worktree，且要过三道闸。
   if (ws.kind !== "worktree") {
     return Response.json(
       { error: "只能删 worktree —— 主 checkout 和普通目录不归 trellis 管" },
@@ -112,25 +176,46 @@ export async function DELETE(req: Request) {
     );
   }
 
-  // 未提交改动拒删（除非显式 force）。丢掉别人几小时的活是不可逆的，
-  // 这道闸比「少点一次确认」值钱得多。
-  if (!force) {
-    const dirty = git(ws.path, ["status", "--porcelain"]);
-    if (dirty.status === 0 && dirty.stdout.trim()) {
-      return Response.json(
-        {
-          error: "有未提交的改动",
-          dirty: dirty.stdout.trim().split("\n").slice(0, 20),
-        },
-        { status: 409 },
-      );
-    }
+  const running = streamingCount(workspaceId);
+  if (running > 0) {
+    return Response.json(
+      { error: `这个工作区下还有 ${running} 个会话正在生成，停下来再删` },
+      { status: 409 },
+    );
   }
 
-  // 先收终端再删目录：tmux 是终端列表的真源，留下指向已消失目录的 session
-  // 就会一直脏下去（这是 P1 留的那个悬空调用点）。
-  killWorkspaceTerminals(workspaceId);
+  if (!force) {
+    // force=0 一律**只预演、绝不执行**。删目录不可逆，而这个按钮在触屏上是
+    // 常显的（见 SessionSidebar 的 pointer-coarse 分支），误触代价太大 ——
+    // 「干净就直接删」实测下来就是点一下目录就没了，连问都不问。
+    //
+    // `--ignored=matching` 一次拿全两类：会拦人的（改动 / 未跟踪）和会被
+    // **静默**删掉的（被 .gitignore 忽略的）。后者才是真正的数据风险 ——
+    // `git worktree remove` 不把 ignored 文件当障碍，连目录一起删；而本仓库
+    // .gitignore 里就有 `.env*`（凭证，S79 丢过一次导致认证闸静默关闭）
+    // 和 `/.claude/`（本地 settings）。git status 默认根本不列它们。
+    const st = git(ws.path, ["status", "--porcelain", "--ignored=matching"]);
+    const lines =
+      st.status === 0
+        ? st.stdout.split("\n").map((l) => l.trimEnd()).filter(Boolean)
+        : [];
+    const ignored = lines.filter((l) => l.startsWith("!!"));
+    const dirty = lines.filter((l) => !l.startsWith("!!"));
+    return Response.json(
+      {
+        preview: true,
+        path: ws.path,
+        dirty: dirty.slice(0, 20),
+        dirtyCount: dirty.length,
+        ignored: ignored.map((l) => l.slice(3)).slice(0, 20),
+        ignoredCount: ignored.length,
+      },
+      { status: 409 },
+    );
+  }
 
+  // 删成功了再收终端。反过来（原实现的顺序）会在 git 失败时把终端白白杀掉，
+  // 而那次操作明明什么也没删成。
   const r = git(ws.path, [
     "worktree",
     "remove",
@@ -139,12 +224,11 @@ export async function DELETE(req: Request) {
   ]);
   if (r.status !== 0) {
     return Response.json(
-      { error: (r.stderr || r.stdout || "git worktree remove 失败").trim() },
+      { error: gitError(r, "git worktree remove 失败") },
       { status: 500 },
     );
   }
-  // 会话不连坐删：workspace_id 是 ON DELETE SET NULL，那些 session 仍持有
-  // workspace_path、仍能 resume，只是回到未归组。
-  db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
+  killWorkspaceTerminals(workspaceId);
+  dropRow();
   return Response.json({ ok: true });
 }
