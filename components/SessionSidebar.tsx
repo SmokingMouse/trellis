@@ -72,6 +72,8 @@ export function SessionSidebar() {
   const unarchiveSession = useSessionStore((s) => s.unarchiveSession);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
+  const setDraftMode = useSessionStore((s) => s.setDraftMode);
+  const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const [attachOpen, setAttachOpen] = useState(false);
   // 新建 worktree 的行内表单：值 = 正在建的 projectId，null = 没在建
   const [wtFor, setWtFor] = useState<string | null>(null);
@@ -261,6 +263,23 @@ export function SessionSidebar() {
     return { chat, byWorkspace, orphans };
   }, [sessions, projects]);
 
+  // 落到「在这个目录下开新会话」的草稿态。侧栏里所有「＋」最终都汇到这里 ——
+  // 新建 worktree 之后、以及在一个已有 workspace 行上直接开会话。
+  //
+  // 这一步是必需的而不是锦上添花：draftWorkspacePath 是从 localStorage 恢复的
+  // **上次用过的**路径，不覆盖的话用户点完＋看到的是上一个目录，得再去
+  // WorkspacePicker 里把刚才那个找回来 —— 而它恰恰不在「最近」列表里。
+  const startSessionIn = (workspacePath: string) => {
+    setDraftMode("project");
+    setDraftWorkspacePath(workspacePath);
+    newConversation();
+    setEditingId(null);
+    // 抽屉是覆盖层，不收起来就正好挡住刚落下去的 composer。这里显式收，
+    // 不能靠 activeId 那个 effect —— 从 composer 态点过来 activeId 本来就是
+    // null，不变就不触发。
+    setMobileNavOpen(false);
+  };
+
   const createWorktree = async (projectId: string) => {
     const branch = wtBranch.trim();
     if (!branch) return;
@@ -279,6 +298,11 @@ export function SessionSidebar() {
       setWtFor(null);
       setWtBranch("");
       bumpSessionsRevision(); // 侧栏重拉，新 worktree 当场出现
+      // 服务端算出的落点直接接住。以前这里把 r.path 丢了，用户就得拿眼睛把
+      // 同一个路径从侧栏搬到 WorkspacePicker 里再选一次 —— 同一个 picker 里
+      // 「空白沙箱」「新建文件夹」早就是「创建并使用」，worktree 是唯一一个
+      // 建完不选的。
+      if (r.path) startSessionIn(r.path);
     } catch {
       setWtError("网络错误");
     } finally {
@@ -501,6 +525,12 @@ export function SessionSidebar() {
                       wCollapsed && list.length > 0 ? String(list.length) : null
                     }
                     onToggle={() => toggleCollapsed(w.id)}
+                    // 「0 会话（还没在这里开过会话）」那行以前是条死路：看得见、
+                    // 点不动、没有任何办法从它进到会话里。＋ 在这一级就是它的
+                    // 出口，也是**已有** worktree（CLI 里建的、上次建完没用的）
+                    // 唯一一个不用过 WorkspacePicker 的入口。
+                    onAdd={() => startSessionIn(w.path)}
+                    addTitle="在这个工作区下开新会话"
                     // 删磁盘只给 trellis 自己 worktree add 出来的 —— 用户在 CLI 里
                     // 建的该在 CLI 里删。至于「列表里留着已不存在的行」，由重扫的
                     // 自动 prune 解决，不需要一个手动的「移除」入口（实测过：
@@ -785,6 +815,7 @@ function GroupRow({
   toggleable = true,
   onToggle,
   onAdd,
+  addTitle = "在这个项目下新建 worktree",
   onRemove,
 }: {
   level: 0 | 1;
@@ -798,6 +829,8 @@ function GroupRow({
   toggleable?: boolean;
   onToggle: () => void;
   onAdd?: () => void;
+  /** ＋ 在两级上意思不同：project 级是「开 worktree」，workspace 级是「开会话」 */
+  addTitle?: string;
   onRemove?: () => void;
 }) {
   return (
@@ -862,7 +895,7 @@ function GroupRow({
       {(onAdd || onRemove) && (
         <div className="shrink-0 hidden group-hover:flex pointer-coarse:flex items-center gap-0.5">
           {onAdd && (
-            <RowIconButton title="在这个项目下新建 worktree" onClick={onAdd}>
+            <RowIconButton title={addTitle} onClick={onAdd}>
               <path d="M12 5v14M5 12h14" />
             </RowIconButton>
           )}
