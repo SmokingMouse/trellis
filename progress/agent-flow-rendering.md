@@ -161,14 +161,15 @@ toolUseId, parentAgentId, spawnDepth}`，`toolUseId` 直接 join 主线的 Task 
 
 ## 遗留
 
-- SDK `@smokingmouse/agent@0.3.3` **只 bump 了版本号，没发 npm**。当前靠 `make link-sdk`
-  跑本地包。**上线前必须发版**，这不是可选项 —— 在 0.3.2 上实测（main worktree，
-  registry 版本）：
-  - ✅ 三类 task 的**分类全对**（taskId 前缀链兜住），`report` 不再吞 output
-  - ❌ `workflowProgress` 拿不到 → Workflow 降级成原始视图
-  - ❌ **空 stdout 仍会把 content 顶掉** —— 后台命令 / 无输出命令的输出还是空的。
-    也就是说「结果不可见」这个 bug 在 0.3.2 上只修好了一半。
-  `scripts/test-tool-tree.ts` 开头有版本闸，装着 0.3.2 时会打印提示再红。
+- ~~SDK 未发版~~ **已发 `@smokingmouse/agent@0.3.3`**（2026-07-30），trellis 依赖收紧到
+  `^0.3.3` 并解链回注册表版本，全套验证在真 registry 包上复跑通过。
+  依赖是硬的，不是可选升级 —— 0.3.2 上实测：分类靠 taskId 前缀链仍然全对、
+  `report` 不再吞 output，但 `workflowProgress` 拿不到（Workflow 降级成原始视图），
+  且**空 stdout 仍会把 content 顶掉**（后台 / 无输出命令的输出还是空的），
+  即「结果不可见」只修好一半。`scripts/test-tool-tree.ts` 开头留了版本闸兜这个。
+- **浏览器人工验收未做** —— 本 session 无浏览器工具。数据层与渲染输出（HTML 断言）
+  都验过了，但流式态观感（面板自动展开 / 运行中子 Agent 自动展开 / LiveHeader
+  取最深运行节点）和视觉效果只能人跑一遍。
 - L3 磁盘钻进（读 `<sessionId>/subagents/agent-*.jsonl` 看子 agent 完整对话）未做。
 
 ## 参考调研

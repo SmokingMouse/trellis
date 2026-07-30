@@ -11,7 +11,7 @@
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@excalidraw/excalidraw": "^0.18.1",
-    "@smokingmouse/agent": "^0.3.2",
+    "@smokingmouse/agent": "^0.3.3",
     "@smokingmouse/llm": "^0.3.0",
     "@xyflow/react": "^12.10.2",
     "highlight.js": "^11.11.1",
