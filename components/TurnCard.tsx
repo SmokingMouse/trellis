@@ -19,6 +19,7 @@ import { AttachmentPreview } from "./AttachmentPreview";
 import { CardImageButton } from "./CardImageButton";
 import { CliResumeButton } from "./CliResumeButton";
 import { CopyButton } from "./CopyButton";
+import { EmptyResponseNotice } from "./EmptyResponseNotice";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
@@ -422,10 +423,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
           <GeneratedFilesBar node={node} />
         </>
       ) : (
-        <div className="text-ink-faint italic flex items-center gap-2">
-          <span className="w-1.5 h-1.5 bg-positive rounded-full animate-pulse" />
-          正在生成…
-        </div>
+        <EmptyResponseNotice hasToolCalls={node.toolCalls.length > 0} />
       )}
       {isError && hasChildren && (
         <SupersededErrorNotice

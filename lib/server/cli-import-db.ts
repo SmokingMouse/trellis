@@ -3,6 +3,7 @@
 // 幂等：节点 id = CLI turn 的 uuid（确定性），重复同步走 ON CONFLICT 更新、不产重复行。
 // 详见 progress/cli-sync.md。
 import "server-only";
+import { existsSync } from "node:fs";
 import { getDB } from "./sqlite";
 import { parseCliSessionJsonl } from "./cli-import";
 import { ensureWorkspaceForPath } from "./workspaces";
@@ -64,13 +65,28 @@ function lineageRows(trellisSessionId: string): LineageRow[] {
 }
 
 function parseLineages(rows: LineageRow[]): ParsedLineage[] {
+  return parseLineagesChecked(rows).parsed;
+}
+
+// 「读不到」和「读到了但没内容」必须分开。前者意味着我们对这条 lineage 的
+// turn 集合**一无所知** —— 拿这种残缺集合去做「不在集合里就删」的清理，会把整条
+// lineage 的节点全剥掉（CLI transcript 过期 / 用户清理 / fork jsonl 被删都会走
+// 到这里，不是理论风险）。所以解析失败必须能被调用方看见。
+function parseLineagesChecked(rows: LineageRow[]): {
+  parsed: ParsedLineage[];
+  anyUnreadable: boolean;
+} {
   const out: ParsedLineage[] = [];
+  let anyUnreadable = false;
   for (const row of rows) {
     const parsed = parseCliSessionJsonl(row.jsonl_path);
-    if (!parsed || parsed.turns.length === 0) continue;
+    if (!parsed || parsed.turns.length === 0) {
+      if (!existsSync(row.jsonl_path)) anyUnreadable = true;
+      continue;
+    }
     out.push({ row, parsed });
   }
-  return out;
+  return { parsed: out, anyUnreadable };
 }
 
 function unionTurns(parsedRows: ParsedLineage[]): ParsedTurn[] {
@@ -141,7 +157,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
     return { sessionId: trellisSessionId, status: "skipped-native", turns: 0 };
   }
 
-  const parsedRows = parseLineages(rows);
+  const { parsed: parsedRows, anyUnreadable } = parseLineagesChecked(rows);
   if (parsedRows.length === 0) {
     return { sessionId: trellisSessionId, status: "empty", turns: 0 };
   }
@@ -225,8 +241,8 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          (id, session_id, parent_id, parent_anchor_text, question, response,
           status, error_message, sibling_index, token_input, token_output,
           token_cache_read, token_cache_creation, token_context, created_at,
-          kind, tool_calls_json, claude_session_id)
-       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?)
+          kind, tool_calls_json, claude_session_id, cli_turn_uuid)
+       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          parent_id = excluded.parent_id,
@@ -239,7 +255,8 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          token_cache_creation = excluded.token_cache_creation,
          token_context = excluded.token_context,
          tool_calls_json = excluded.tool_calls_json,
-         claude_session_id = excluded.claude_session_id`,
+         claude_session_id = excluded.claude_session_id,
+         cli_turn_uuid = excluded.cli_turn_uuid`,
     );
 
     const ftsDel = db.prepare(
@@ -265,6 +282,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
         t.createdAt,
         t.toolCalls.length ? JSON.stringify(t.toolCalls) : null,
         turnLineageSids.get(t.id) ?? trellisSessionId,
+        t.id,
       );
       // 重建该节点的全文索引（先删后插，幂等）。
       ftsDel.run(t.id);
@@ -272,6 +290,50 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
         ftsIns.run(t.question, "node_question", t.id, trellisSessionId);
       if (t.response.trim())
         ftsIns.run(t.response, "node_response", t.id, trellisSessionId);
+    }
+
+    // 清理「上一版解析建出、这一版不再认可」的节点（判据变更后残留的假 turn，
+    // 它们带着当年被劫走的那份回复，和现在归位到真 turn 的那份重复）。
+    // 这是**删用户可见数据**，四道闸缺一不可：
+    //   id 出现在 jsonl 的 entry uuid 集合里 —— 「这节点当年就是从这个 jsonl 建出来
+    //     的」。import 建的节点 id 恒等于某条 entry 的 uuid；trellis 自己建的节点 id
+    //     是本地生成的 v4，绝不在里面。**绝不能用 claude_session_id 代替**：
+    //     attached 会话里从非 tip 分叉时，chat/route.ts 的 setNodeResumeId 会给
+    //     trellis 的临时节点写上 sid，而 reconcileAttachedTurn 只在 run 正常 done 时
+    //     兜底 —— 用 sid 当判据会删掉用户打断的那一轮里他自己敲的问题。
+    //     （也比 cli_turn_uuid 强：那列是这次才开始写的，存量节点没有。）
+    //   status != 'streaming' —— 不碰正在跑的 run
+    //   无子节点 —— 上面 upsert 已把真子 turn 的 parent 提升走；还挂着孩子说明用户
+    //     在它上面分叉过，保守放过
+    //   !anyUnreadable —— 有 lineage 的 jsonl 读不到时，turnIdSet 是残缺的，
+    //     「不在集合里就删」会把那条 lineage 的节点整片剥掉。transcript 过期 / 用户
+    //     清理 jsonl 都会走到这儿，而 v1 迁移作废游标后每个 attached 会话都要重导
+    //     一次 —— 没这道闸，升级后第一次启动就是一次批量销毁。
+    if (!anyUnreadable) {
+      const turnIdSet = new Set(turns.map((t) => t.id));
+      const jsonlUuids = new Set<string>();
+      for (const item of parsedRows) {
+        for (const u of item.parsed.entryUuids) jsonlUuids.add(u);
+      }
+      const staleLeaves = db.prepare(
+        `SELECT id FROM nodes
+         WHERE session_id = ?
+           AND status != 'streaming'
+           AND NOT EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = nodes.id)`,
+      );
+      const delNode = db.prepare("DELETE FROM nodes WHERE id = ?");
+      // 从叶子往上逐层剥。假 turn 会串成链（旧解析里 A假 → B假 → 真），一轮只能
+      // 删掉当时的叶子 B；A 那时还挂着 B 当孩子，得等下一轮才轮到它。每轮至少删
+      // 一个，删不动就退出，不会空转。
+      for (;;) {
+        const batch = (staleLeaves.all(trellisSessionId) as { id: string }[])
+          .filter((r) => jsonlUuids.has(r.id) && !turnIdSet.has(r.id));
+        if (batch.length === 0) break;
+        for (const r of batch) {
+          ftsDel.run(r.id);
+          delNode.run(r.id);
+        }
+      }
     }
 
     const updateCursor = db.prepare(

@@ -4,6 +4,19 @@
 
 ## Session Log
 
+### Session 80（2026-07-28，侧栏三级层次重排 + workspace 空层平铺）
+- **触发**: 用户贴侧栏截图，只说了五个字「显示效果很差，层次结构」。
+- **根因（量出来的，不是审美判断）**: 三级树的视觉权重**倒挂** —— Project `12.5px/medium/ink-strong`、Workspace `11px/normal/ink-muted`、Session `12.5px/normal/ink-muted`，**子级比父级还重**；行高同向倒挂（group 24px < session 28px）。三个放大器叠上去：① 缩进只有 6/16/20px，三级几乎共线；② group 行通栏而 session 行是内缩 pill，宽度打架；③ 每行一个 8px 满色 mode dot，成了整栏最强视觉元素，把层次压平。
+- **Done ①（视觉层）**: 层次改由「缩进 + 引导线 + 字重」承担，**字号退出**（三级统一 `text-ui`）。新增 `ROW_H`/`PAD()`/`CHEVRON_MID()` 几何常量 + `IndentGuide`（子树左侧竖引导线，对齐父行三角中心 —— 这是三级树能被一眼分组的关键）；行高统一 26px、全部改通栏 pill（高亮不再随层级越缩越窄）；权重阶梯 `semibold/ink-strong` → `medium/ink` → `normal/ink-muted`；mode dot 8px 满色 → 6px `opacity-55`；分组间距 `mb-1.5` → `mb-3`。
+- **Done ②（信息架构，用户看完第一版后拍板「展开平铺吧」）**: **workspace 那一层显不显示，取决于它携不携带信息**，而不是层级图上画了几层。三种零信息情形折叠成两级：`trellis:scratch`（`mellow-lynx-90` 这类名字从随机词表拼出）、`trellis:home`（workspace 名就是项目名「主目录」的另一种说法）、唯一 workspace 且与项目同名（`.claude` → `.claude`）。**刻意排除 `kind === 'worktree'`** —— 那说明项目在多工作区并行，层级是真的，所以 trellis 自己保持三级。规则**可逆**：多出第二个 workspace 自动恢复。两个兜底：平铺后 path 没别处可看 → 挪进 project 行 tooltip；**零会话不平铺**，否则剩个底下空无一物的项目行。
+- **顺带**: 两个 cluster key 提到 `lib/types.ts` 共享（`project-cluster.ts` 带 `server-only` 不能给客户端 import，原先是字面量散在两处）。
+- **验证**: `tsc --noEmit` 零错 ✓；lint 无新增（1 项既有 `set-state-in-effect` 基线）；**真 DB 起 dev 实例 :3199 浏览器实测**：明暗两套主题各截图核验（两级引导线均渲染、权重不再倒挂）；平铺后暂存区/`.claude`/主目录三个项目变两级而 trellis 保持三级；折叠开关在平铺项目上仍正常（折叠隐藏 / 展开还原，行数对得上）；点平铺出来的会话正常加载且 header 仍显示 workspace 名（信息未丢）。实例与 browser session 已清理。
+- **注**: `scripts/test-project-cluster.ts` 在 worktree 裸 `bun` 下跑不起来（`server-only` 解析报错），**stash 后基线同样失败 = 预存在的环境问题**，非本次引入。
+- **合并与上线（同日）**: `madtom` → `main`（`--no-ff` 合并 `56eb54b`，保住工作线形状），推送 `8f03bf9..56eb54b`；主 checkout tsc ✓ + build ✓ 后 `make deploy` 上线 `20260728T100813-56eb54b45`。**上线后核验**：`/` 401 · `/login` 200 · `/__gate/health` `{gate:up, next:ready, auth:on}`；release 目录里源码带新符号（`IndentGuide`/`isFlat`/`HOME_CLUSTER_KEY` 共 13 处）、构建产物含 `opacity-55`；真 DB 44 会话 / 517 节点 / 6 项目 / 13 工作区 / 0 streaming（与上线前一致）；**tmux 终端跨部署存活**。进程形态 launchd → `bun server.ts -p 3088` → `next start -p 3187`（只绑 127.0.0.1）。
+- **自己踩了一次已记录在案的坑**: 核验时 `tmux list-sessions | wc -l` 得 0，差点写成「终端清零」——`tmux` 被 oh-my-zsh 函数遮蔽（facts.md 早有此条），走 `/opt/homebrew/bin/tmux` 才看到那个活着的 session。**验证命令也得挑真源**。
+- **顺带记一笔（非本次引入）**: build 有两类既有告警，构建本身通过：① `globals.css` 里 `::highlight(branch-source)` 的 `color-mix(in lab, …)` 解析告警；② `next.config.ts` ← `lib/server/blobs.ts` ← `/api/uploads/[hash]` 这条链触发 NFT「whole project traced」告警（blobs 里有动态 fs 路径）。两者都在我改动之外，暂未处理。
+- **Next**: 用户现场验收侧栏（浏览器强刷一次拿新 chunk）。
+
 ### Session 79（2026-07-28，上线机制重做：release 目录 + 原子切换 + 自动回滚 + 网关维护页）
 - **触发**: 用户「现在自动更新机制做的不太友好，失败了平台就用不了了，并且更新过程中平台就不受控了」。查下来**根本不存在自动更新机制**——上线就是在 launchd 正在跑的那个目录里手工 `bun install` + `make build` + `kickstart`。用户四条痛点全选（失败不能致命 / 更新期间可控 / 可观测 / 要我批准），拍板接受确定停机窗口、**不做零停机热切**（理由见 decisions.md 2026-07-28）。
 - **落地**:

@@ -180,8 +180,11 @@ export function reimport(full: string): void {
     if (res && (res.status === "updated" || res.status === "imported")) {
       publishCliSessionUpdated(res.sessionId);
     }
-  } catch {
-    // 单文件失败不掀翻 watcher
+  } catch (err) {
+    // 单文件失败不掀翻 watcher —— 但绝不能连声都不吭。这是镜像会话唯一的更新
+    // 通道，它一失败界面就永久停在旧快照上，而用户看到的只是一个不再动的 turn。
+    // 无日志的话根本无从判断「是 CLI 还没写」还是「同步早就死了」。
+    console.error("[trellis] cli-sync reimport failed:", full, err);
   }
 }
 

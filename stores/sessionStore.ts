@@ -707,7 +707,11 @@ const STREAM_CONTROLLERS = new Map<string, AbortController>();
 // CLI 同步 live 感知：每个 session 的「褪去」定时器 + live 续期窗口。模块级（不进
 // React state），markSessionLive 收到新事件就清旧定时器、重置 TTL。
 const LIVE_TIMERS = new Map<string, ReturnType<typeof setTimeout>>();
-const LIVE_TTL_MS = 12_000;
+// 60s 而非 12s：信号源是「jsonl 又被写了」，而 CLI 跑一条长 Bash / 长 Task 期间
+// 根本不写盘。实测真实 transcript 的相邻条目间隔，13.78% 超过 12s（1408 次超过
+// 60s，最长 3576s）—— 12s 的窗口会让一个明明在跑的会话反复「诈死」，侧栏 live
+// 灯闪烁，且 EmptyResponseNotice 会据此断言这轮没有输出。
+const LIVE_TTL_MS = 60_000;
 // Insertion-ordered list — last entry is the most recently started stream.
 // Map.keys() preserves insertion order so we don't need a separate array.
 
