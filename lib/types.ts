@@ -250,6 +250,23 @@ export type ProjectSummary = {
 };
 
 /**
+ * S1 P2：workspace 的实时 git 状态，走 `/api/workspaces/git-status` 单独一路
+ * （服务端真源在 lib/server/git-status.ts，那边有 server-only 不能给客户端 import）。
+ *
+ * 与 `WorkspaceSummary.gitBranch` 的分工：那个是登记时写下的缓存、只在启动时
+ * 刷新，运行期切分支看不见；这个是当场问 git 拿的。
+ */
+export type WorkspaceGitStatus = {
+  id: string;
+  /** detached HEAD / 非 git → null */
+  branch: string | null;
+  /** 改动 + 未跟踪的文件数（不含被 .gitignore 忽略的） */
+  dirty: number;
+  /** 分支已并入主干且工作区干净 —— 可以安全回收 */
+  reclaimable: boolean;
+};
+
+/**
  * 两个「伪项目」的 cluster key —— 它们不是用户心里的项目，是 project-cluster
  * 为兜住无处安放的 cwd 造出来的档位，其 workspace 那一层恒不携带信息：
  *

@@ -249,9 +249,16 @@ builtin，Makefile:5-9）。另有独立约束：Next App Router 的 route handl
 
 - **P0 ✅ 已落地（Session 77）**：两表 + 迁移 + 自动聚类 + 侧栏三级（不含 git 状态、不含终端）
 - **P1 ✅ 已落地（Session 77）**：终端（ttyd 懒启动 + iframe 直连 + 底部分栏 + 多终端 tab）
-- **P2**：git 状态角标 + 新建/回收 workspace
+- **P2a ✅ 已落地（Session 77 的 P1''，提前做了）**：新建 / 回收 workspace
+- **P2b ✅ 已落地（Session 83）**：git 状态角标（分支 · 脏文件数 · 可回收）
 
-P0+P1 交付后停下来看一周数据，再决定 P2 和 S2/S3/S4。
+P0+P1 交付后停下来看一周数据，再决定 S2/S3/S4。
+
+> **首轮数据出来了：判据未达标**（上线 3 天，worktree 里 0 个 session，同期 CLI 里 1204 个 jsonl）。
+> Session 83 查出根因不是缺功能而是**能力不可达** —— 新建 worktree 的按钮锁在 `hidden group-hover:flex`
+> 里，而 group-hover 自带 `@media (hover:hover)`，触屏上永不匹配，`created_by='trellis'` 行数实测为 0
+> （上线至今零使用）。连同「侧栏显示已删除的 worktree、且看不见 CLI 里新建的」一并修掉后重新计时。
+> 详见 `sessions.md` 的 Session 83。
 
 ---
 

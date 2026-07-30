@@ -18,6 +18,7 @@ import {
   SCRATCH_CLUSTER_KEY,
   type ProjectSummary,
   type Session,
+  type WorkspaceGitStatus,
 } from "@/lib/types";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
@@ -164,6 +165,47 @@ export function SessionSidebar() {
     };
   }, [activeId, sessionsRevision]);
 
+  // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
+  //
+  // 不并进 /api/sessions 是刻意的 —— 那条在流式期间是 ~1.6 次/秒的热循环，
+  // 把 spawn git 塞进去会拖垮 SSE；而角标晚一百毫秒出现没人在意。
+  //
+  // 这一路还顺带触发服务端重扫兄弟 worktree，所以它也是「CLI 里新建的
+  // worktree 出现在侧栏」的通道。重扫真有增删时 bump 一次让骨架重拉；
+  // 重扫幂等，第二趟 added/pruned 归零，不会反复触发。
+  const [gitStatus, setGitStatus] = useState<Map<string, WorkspaceGitStatus>>(
+    () => new Map(),
+  );
+  const [gitNonce, setGitNonce] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/workspaces/git-status")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        setGitStatus(
+          new Map(
+            ((data.statuses ?? []) as WorkspaceGitStatus[]).map((s) => [s.id, s]),
+          ),
+        );
+        if (data.rescan?.added || data.rescan?.pruned) bumpSessionsRevision();
+      })
+      .catch(() => {
+        /* 角标是锦上添花，拉不到就不显示 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionsRevision, gitNonce, bumpSessionsRevision]);
+
+  // 切回浏览器时刷一次 —— git 状态几乎总是在**别处**（终端里）被改变的，
+  // 而「从终端切回来」正是它可能已经变了的那一刻。比定时轮询精准且省。
+  useEffect(() => {
+    const onFocus = () => setGitNonce((n) => n + 1);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   // Lazy-load archived rows only while the footer is open. Re-runs on any
   // mutation (sessionsRevision) so unarchiving instantly removes the row.
   useEffect(() => {
@@ -244,22 +286,45 @@ export function SessionSidebar() {
     }
   };
 
+  // 两阶段：先问服务端「删了会没掉什么」，弹给用户看，确认了再带 force=1 回去。
+  // 服务端在不带 force 时**只预演不执行** —— 删目录不可逆，而这个按钮在触屏上
+  // 是常显的，不能点一下目录就没了。
   const removeWorktree = async (w: { id: string; name: string }) => {
     const r = await fetch(`/api/workspaces/worktree?workspaceId=${w.id}`, {
       method: "DELETE",
     }).then((x) => x.json());
-    if (r.dirty) {
-      if (
-        !confirm(
-          `「${w.name}」有未提交的改动：\n\n${r.dirty.join("\n")}\n\n仍要删除？（改动会丢失，不可恢复）`,
-        )
+    if (r.ok) {
+      // 目录本来就不在了，服务端直接摘了行。
+      bumpSessionsRevision();
+      return;
+    }
+    if (!r.preview) {
+      alert(`删除失败：${r.error ?? "未知错误"}`);
+      return;
+    }
+    // 两类分开说：dirty 是会丢的活；ignored 是 .env / 本地 settings 这类
+    // 不进版本库、但删了很痛的东西 —— `git worktree remove` 不当它们是障碍，
+    // 连目录一起删，而 git status 默认根本不列它们。
+    const parts: string[] = [];
+    if (r.dirtyCount)
+      parts.push(`未提交的改动（${r.dirtyCount} 项）：\n${r.dirty.join("\n")}`);
+    if (r.ignoredCount)
+      parts.push(
+        `被 .gitignore 忽略、但会一并删掉（${r.ignoredCount} 项）：\n${r.ignored.join("\n")}`,
+      );
+    const detail = parts.length ? `\n\n${parts.join("\n\n")}` : "\n\n工作区是干净的。";
+    if (
+      !confirm(
+        `删除 worktree「${w.name}」？\n${r.path}${detail}\n\n目录会从磁盘上移除，不可恢复（分支本身保留）。`,
       )
-        return;
-      await fetch(`/api/workspaces/worktree?workspaceId=${w.id}&force=1`, {
-        method: "DELETE",
-      });
-    } else if (r.error) {
-      alert(`删除失败：${r.error}`);
+    )
+      return;
+    const f = await fetch(
+      `/api/workspaces/worktree?workspaceId=${w.id}&force=1`,
+      { method: "DELETE" },
+    ).then((x) => x.json());
+    if (f.error) {
+      alert(`删除失败：${f.error}`);
       return;
     }
     bumpSessionsRevision();
@@ -414,15 +479,32 @@ export function SessionSidebar() {
                     // 有 session 才可折叠；空的（worktree 扫出来还没用过）
                     // 没有子内容，给三角就是个骗人的开关。
                     toggleable={list.length > 0}
-                    tag={w.kind === "worktree" ? "worktree" : null}
+                    // 有实时分支可显示时就不再挂「worktree」这个静态标签 ——
+                    // 分支名信息量大得多，而一行里放不下两样。
+                    tag={
+                      w.kind === "worktree" && !gitStatus.get(w.id)?.branch
+                        ? "worktree"
+                        : null
+                    }
+                    git={gitStatus.get(w.id) ?? null}
                     muted={list.length === 0}
-                    title={`${w.path}${w.gitBranch ? `\n分支 ${w.gitBranch}` : ""}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
+                    title={`${w.path}${(() => {
+                      const g = gitStatus.get(w.id);
+                      const br = g?.branch ?? w.gitBranch;
+                      return [
+                        br ? `\n分支 ${br}` : "",
+                        g?.dirty ? `\n${g.dirty} 个文件有改动或未跟踪` : "",
+                        g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以回收" : "",
+                      ].join("");
+                    })()}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
                     badge={
                       wCollapsed && list.length > 0 ? String(list.length) : null
                     }
                     onToggle={() => toggleCollapsed(w.id)}
-                    // 只有 trellis 自己 worktree add 出来的才允许从 UI 删磁盘；
-                    // 发现来的（用户在 CLI 里建的）不给这个按钮。
+                    // 删磁盘只给 trellis 自己 worktree add 出来的 —— 用户在 CLI 里
+                    // 建的该在 CLI 里删。至于「列表里留着已不存在的行」，由重扫的
+                    // 自动 prune 解决，不需要一个手动的「移除」入口（实测过：
+                    // 手动摘掉目录仍在的行，下次重扫就把它加回来了）。
                     onRemove={
                       w.createdBy === "trellis" && w.kind === "worktree"
                         ? () => void removeWorktree(w)
@@ -662,6 +744,35 @@ function IndentGuide({
 //
 // 外层刻意是 div 而非 button：行上要挂「+ 新建 worktree」「删除」这类操作，
 // button 里套 button 是非法 HTML（SidebarRow 同款处理）。
+/**
+ * workspace 行右侧的 git 角标：分支 · 脏文件数 · 可回收。
+ *
+ * 这一行以前只有目录名和一个静态的「worktree」标签 —— 也就是说，三个并行
+ * 工作区摆在一起，你看不出哪个有未提交的活、哪个已经可以清掉了。
+ */
+function GitBadge({
+  git,
+  label,
+}: {
+  git: WorkspaceGitStatus;
+  label: string;
+}) {
+  // 分支名和目录名相同时不重复显示 —— worktree 通常同名，重复只是噪音。
+  const branch = git.branch && git.branch !== label ? git.branch : null;
+  if (!branch && !git.dirty && !git.reclaimable) return null;
+  return (
+    <span className="shrink-0 flex items-center gap-1 text-nano md:group-hover:hidden">
+      {branch && (
+        <span className="text-ink-faint truncate max-w-24">{branch}</span>
+      )}
+      {git.dirty > 0 && (
+        <span className="text-warn tabular-nums">●{git.dirty}</span>
+      )}
+      {git.reclaimable && <span className="text-positive">✓</span>}
+    </span>
+  );
+}
+
 function GroupRow({
   level,
   collapsed,
@@ -669,6 +780,7 @@ function GroupRow({
   title,
   badge,
   tag,
+  git,
   muted,
   toggleable = true,
   onToggle,
@@ -681,6 +793,7 @@ function GroupRow({
   title: string;
   badge: string | null;
   tag?: string | null;
+  git?: WorkspaceGitStatus | null;
   muted?: boolean;
   toggleable?: boolean;
   onToggle: () => void;
@@ -716,25 +829,49 @@ function GroupRow({
         </span>
         <span className="flex-1 min-w-0 truncate">{label}</span>
       </button>
+      {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 ——
+          Tailwind 的 group-hover 自带 `@media (hover:hover)` 包装，触屏上
+          这条规则根本不匹配，于是那里三者共存。挤不下由 label 的 truncate
+          吸收，这是可接受的降级。 */}
       {tag && (
         <span className="shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint group-hover:hidden">
           {tag}
         </span>
       )}
+      {git && <GitBadge git={git} label={label} />}
       {badge && (
         <span className="shrink-0 text-nano tabular-nums text-ink-faint group-hover:hidden">
           {badge}
         </span>
       )}
+      {/* 判据是「有没有 hover 能力」，不是「屏幕多宽」。
+          原来只有 `hidden group-hover:flex`，而移动端抽屉与桌面 rail 复用同一份
+          renderPanel —— Tailwind 的 group-hover 自带 `@media (hover:hover)`
+          包装，触屏上那条规则根本不匹配，于是这两个按钮**永远点不到**。
+          实测后果：上线至今 workspaces.created_by='trellis' 行数为 0，
+          「新建 worktree」入口一次都没被成功用过，而这正是 S1 判据未达标最直接
+          的原因。所以补的是 `pointer-coarse:flex`（触屏常显），不是 `md:` 断点
+          —— iPad / 触屏笔记本是**大屏且无 hover**，按宽度判会漏掉它们。
+
+          写成「基础态 hidden + 两条互斥的显示规则」而不是「基础 flex + 隐藏
+          规则」，是被实测逼出来的：`pointer-fine:hidden` 在产物 CSS 里排在
+          `group-hover:flex` **之后**（offset 55476 vs 47049），两者特异性又
+          相同（`:where()` 计 0），于是隐藏反过来把 hover 显示覆盖掉，鼠标设备
+          上按钮再也出不来 —— 比原来的 bug 还糟。现在两条规则都是「显示」，
+          谁先谁后都不影响结果。 */}
       {(onAdd || onRemove) && (
-        <div className="shrink-0 hidden group-hover:flex items-center gap-0.5">
+        <div className="shrink-0 hidden group-hover:flex pointer-coarse:flex items-center gap-0.5">
           {onAdd && (
             <RowIconButton title="在这个项目下新建 worktree" onClick={onAdd}>
               <path d="M12 5v14M5 12h14" />
             </RowIconButton>
           )}
           {onRemove && (
-            <RowIconButton title="删除这个 worktree（未提交改动会先拦一次）" danger onClick={onRemove}>
+            <RowIconButton
+              title="删除这个 worktree（会先列出将被删掉的东西）"
+              danger
+              onClick={onRemove}
+            >
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
               <path d="M10 11v6M14 11v6" />
