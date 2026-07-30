@@ -1,6 +1,19 @@
 # Session Log
 
-最近 5 条，倒序（Session 83 / 82 / 81 / 80 / 79）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 84 / 83 / 82 / 81 / 80）。更早的见 `archive.md`。
+
+### Session 84（2026-07-30，动线渲染重做：三类 task 分家 + 工具渲染注册表）
+- **触发**: 用户贴截图「子 Agent 的动线展示还是很不友好，workflow 也没展示出来」，要求参考 riba / happyclaw 讨论一版方案。
+- **先证伪了截图的表象**：那两个「子 Agent」**根本不是子 Agent，是慢 Bash**。根因单一 —— `lib/subagents.ts:57` 拿 `c.agent !== undefined` 当「这是子 Agent」的判据，而 CLI 对**三种**东西发同一套 `system/task_*`：`local_agent` / `local_bash` / `local_workflow`。判别位 `task_type` 被丢两次（SDK `taskData()` 没抽 + adapter `void phase`）。
+- **实测拿的证据（不是读代码推的）**: 两次真跑 `claude -p … --output-format stream-json` 录流。① 后台 Bash 与**前台慢 `sleep 12`** 都发 `task_started{task_type:"local_bash"}`，且 `task_notification.summary` 就是描述回声 → 老代码 `report = summary ?? output` 短路掉真 stdout。② Workflow 发 `task_type:"local_workflow"` + `workflow_name`，**并且 `task_progress` 上挂着 `workflow_progress` 全量快照**（phase 列表 + 每个 agent 的 label/phaseTitle/state/model/tokens/durationMs/resultPreview）。二进制里 `strings` 也印证了三个字面量。
+- **这条实测直接推翻了原方案的一个前提**：Workflow 面板**不需要读磁盘**。用户已批准的「磁盘 adapter」因此本轮不建（L3 才用得上，现在建就是空转抽象）。
+- **Done L0（事件层）**: SDK 0.3.3 补抽 `task_type`/`workflow_name`/`workflow_progress`；adapter 停止丢 `phase`/`taskId`；`SubagentMeta` → `TaskMeta`（它描述的从来不只是子 agent）。
+- **Done L1（视图模型）**: `splitToolChain → {main, groups}` 两个平铺列表换成一棵 `buildToolTree → ToolNode{call, kind, meta, children, report}`。kind 四级降级链：`taskType` → 工具名/有子节点 → **taskId 首字母 a/b/w** → tool。前缀那级是关键 —— 它让修复**不等 SDK 发版**就在存量数据上生效。
+- **Done L2（渲染注册表）**: `lib/tool-registry.ts` 元数据表（30+ 工具各一行，不写 React）+ `components/tools/views/` 组件表（只有 Diff/Todo/Workflow/Subagent 四个）。抄了两条别人踩过的铁律：`canRender` 说不行就降级 RawView（注册表永远炸不了）、**错误永不隐藏**。
+- **Done L3（动线布局）**: 单一时间线取代「🔧 主链 + 🤖 子 Agent」两个抽屉 —— 分区把时间顺序切断了，正是「动线不友好」的另一半。删 `ToolCallsPanel.tsx` / `SubagentPanel.tsx` / `lib/subagents.ts`，不留双版本。
+- **实施中挖出两个计划外的**: ① SDK `stdout ?? content`，空 stdout 顶掉 content —— 和分组吞并叠加才是「命令结果彻底消失」的完整成因。② 失败的行必须默认展开，否则「错误永不隐藏」只是口号（渲染冒烟测试逼出来的）。
+- **验证**: `test-tool-tree.ts` 34 项 + `test-timeline-render.tsx` 45 项 ALL PASS（三个真 fixture 各覆盖一种 task_type，后两个是本次录的）；**生产库回放** 21 条误判 Bash 全部归位、20 条输出恢复可见、4 个真子 Agent 不回归；tsc ✓ lint ✓ build ✓。
+- **Next**: 浏览器人工验收（尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点）。上线**必须先发 `@smokingmouse/agent@0.3.3`**，否则 release 装回 0.3.2 → Workflow 面板降级成原始视图（分类不塌，前缀链兜得住）。
 
 ### Session 83（2026-07-30，worktree 可用性：能力不可达 + 侧栏说谎 + git 感知）
 - **触发**: 用户「讨论下怎么把 workspace 这个功能完善一下」。先查真库判据（S1 定的是行为指标「一周内 worktree 里 session 数 > 0」）：上线 3 天，trellis 里只新建 1 个 session（暂存区，贴了个 X 链接）、**worktree 里 0 个**，同期 CLI 里 1204 个 jsonl。判据未达标。
@@ -50,26 +63,3 @@
 - **自己踩了一次已记录在案的坑**: 核验时 `tmux list-sessions | wc -l` 得 0，差点写成「终端清零」——`tmux` 被 oh-my-zsh 函数遮蔽（facts.md 早有此条），走 `/opt/homebrew/bin/tmux` 才看到那个活着的 session。**验证命令也得挑真源**。
 - **顺带记一笔（非本次引入）**: build 有两类既有告警，构建本身通过：① `globals.css` 里 `::highlight(branch-source)` 的 `color-mix(in lab, …)` 解析告警；② `next.config.ts` ← `lib/server/blobs.ts` ← `/api/uploads/[hash]` 这条链触发 NFT「whole project traced」告警（blobs 里有动态 fs 路径）。两者都在我改动之外，暂未处理。
 - **Next**: 用户现场验收侧栏（浏览器强刷一次拿新 chunk）。
-
-### Session 79（2026-07-28，上线机制重做：release 目录 + 原子切换 + 自动回滚 + 网关维护页）
-- **触发**: 用户「现在自动更新机制做的不太友好，失败了平台就用不了了，并且更新过程中平台就不受控了」。查下来**根本不存在自动更新机制**——上线就是在 launchd 正在跑的那个目录里手工 `bun install` + `make build` + `kickstart`。用户四条痛点全选（失败不能致命 / 更新期间可控 / 可观测 / 要我批准），拍板接受确定停机窗口、**不做零停机热切**（理由见 decisions.md 2026-07-28）。
-- **落地**:
-  - **`scripts/deploy.ts`（新，十阶段）**：preflight（只读查活跃 run，有就拒绝，`--force` 才过）→ stage（`git archive` 到 `~/.trellis/releases/<ts>-<sha>`）→ install → build → **smoke**（真 DB 的 `VACUUM INTO` 快照起临时实例，四断言 + 「没杀掉 prod ttyd」回归断言）→ backup → switch（原子换软链 + kickstart）→ verify → 失败自动 rollback → gc。全程写 `deploy-state.json` + 日志。
-  - **`lib/deploy-state.ts`（新）**：部署脚本与网关之间的共享面。刻意不进 sqlite——网关要在「数据库那份代码本身可能就是坏的」时候还能工作。
-  - **`server.ts`**：先占端口再拉 Next；Next 挂了退避重启而不是 `process.exit`（原来靠 launchd KeepAlive 无限 respawn，外面只剩 connection refused）；未就绪出 503 维护页（未认证只显示「正在更新」，sha/日志/回滚命令要认证——这台机器挂着公网隧道）；新增 `/__gate/health`；转发时改写 Host（见 facts.md 的潜伏坑）。
-  - **`app/api/internal/shutdown`（新）**：排空钩子。做成**路由**而不是进程内 SIGTERM handler，因为 run-bus 的 `RUNS` 是模块级 Map，`instrumentation.ts` 里注册的 handler 未必和 route handler 处在同一个模块实例，拿错实例就是对着空 Map 排空。
-  - **`lib/server/ttyd.ts`**：修 `reapOrphans` 误杀（facts.md 已改写原条目）+ 新增「接管自己上一条命留下的 ttyd」。
-  - Makefile 加 `deploy`/`rollback`/`deploy-status`/`releases`/`install-launchd`；README 补「长驻部署与升级」。
-- **验证（全程零触碰 prod：沙箱 `TRELLIS_DEPLOY_ROOT=~/.trellis-deploytest` + 独立 launchd label + :3999）**：
-  - 正路径 ✓：11s 走完，**不可用窗口实测 ≤0.2s**（104 次 200ms 轮询里只有 1 次非 200，且是 **503 维护页而非连接被拒**）。
-  - build 失败 ✓ / smoke 失败（启动即崩）✓：`current` 未动、prod 全程 200。
-  - 切换后验活失败 → **自动回滚** ✓（构造「只在 launchd 环境下 `process.exit(3)`」的 commit，过 smoke 栽在 verify，回滚后 200）。
-  - 维护页 ✓：未认证视图对 sha / 绝对路径 / rollback.sh / Error **四项 grep 全 0**；认证后 sha×2、rollback.sh×1；健康面未认证只给粗粒度。
-  - ttyd ✓：隔离实例走完整 reap 路径后 prod ttyd（pid 25990）存活；优雅停机收走自己那个 + 清登记；SIGKILL 后重启**接管同一 pid**（9321），不泄漏不漂移。
-  - `install-launchd` 的 plist 改写在副本上 dry-run 过（diff 只动一行，`plutil -lint` OK）。tsc ✓ lint ✓ build ✓。收尾已拆除沙箱 job/plist/目录与三个测试 commit，prod 核对 517 节点 / 0 streaming / tmux 存活 / :3088 200。
-- **翻车与真收获**: 沙箱第一次 smoke 失败追了很久——现象是网关 `/login` 超时但 Next 直连正常。**一度误判成 http_proxy**（A/B 曾支持该假设，实为端口被上一轮残留进程占住造成的假信号；教训：每次 A/B 前必须 `lsof` 验端口空、`pkill` 后要确认真的死了）。加探针看到**一次 curl 触发 260 次 fetch handler**，才钉死真因是 Host 透传导致网关自我循环。
-- **切 prod（同日，用户「开始吧」）**：main 快进合并 arrowworm（纯 FF）→ `make deploy` → `make install-launchd`。**真上线又踩出两个自家 bug，都已修 + 已写进 facts.md**：
-  - **① `git archive` 带不走未跟踪文件 → 认证闸静默关掉**。凭证在 `.env.local`（bun 从 cwd 自动加载）里，被 gitignore 忽略，release 里没有 → `auth OFF`，而本机配着 3088 的公网隧道。**症状极隐蔽：服务活得好好的、页面全能开、健康检查全绿，唯一差别是日志一行 `auth ON`→`auth OFF`**——原来那套全是 200 断言，一个都发现不了。修：真源挪 `~/.trellis/shared/` + `linkShared()` 软链进每个 release；`/__gate/health` 加 `auth` 字段；smoke 改认证感知（带 cookie 验闸后页面）+ **反向断言「无 cookie 的 `/api/sessions` 必须 401」**；verify 断言「闸不许 on→off」。
-  - **② `launchctl bootout` 异步，bootstrap 撞上未消失的旧 job** 报 `Bootstrap failed: 5: I/O error`，而失败分支只打印「用备份还原」却没真还原 → **prod 停了约一分钟**（手工 bootstrap 救回）。修：轮询到 job 真查不到再 bootstrap（带重试），失败时真的回滚 plist 并重新拉起。
-  - **终态**：prod 跑在 `~/.trellis/current` → `releases/20260728T091203-23099f885`，`auth ON`、`/` 无 cookie 401、517 节点 / 44 会话 / tmux 终端存活；修复后完整重跑一遍 deploy 全绿（含新增的两条闸断言），**457 次轮询里只有 1 次非 200（0.2s 的 503 维护页）**。顺手清掉失去主人的旧 ttyd 25990（tmux 不受影响）。
-- **Next**: 现场验收（开一轮对话 + 开个终端）。可选：把已完工的 Goals 块轮转进 archive（README 仍 12.5KB，Goals 占 11KB）；P2 新版本通知（cron + phone-push）未做。

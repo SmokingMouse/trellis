@@ -1,4 +1,4 @@
-import type { SubagentMeta } from "@/lib/types";
+import type { TaskMeta } from "@/lib/types";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -73,7 +73,7 @@ export type StreamEvent =
   | {
       type: "tool_call_update";
       id: string;
-      agent: SubagentMeta;
+      agent: TaskMeta;
     };
 
 // A路②: interaction_required / interaction_resolved are NOT provider stream

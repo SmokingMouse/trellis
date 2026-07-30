@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { EventType, type AgentEvent, type RunOptions } from "@smokingmouse/agent";
-import type { SubagentMeta } from "@/lib/types";
+import type { TaskMeta } from "@/lib/types";
 import type { Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 
@@ -127,14 +127,18 @@ export function toStreamEvent(e: AgentEvent): StreamEvent | null {
         parentToolUseId: (e.data.parentToolUseId as string | null) ?? null,
       };
     case EventType.Task: {
-      // 子 agent 生命周期 → 挂回派生它的那条 Agent 调用（data.toolUseId，SDK 已
-      // 保证非空）。phase/taskId 不进 UI 数据，其余字段原样浅合并；SDK 侧已剔过
-      // undefined（patch 语义下留着会抹掉先前 phase 的值）。
-      const { phase, taskId, toolUseId, ...rest } = e.data as Record<string, unknown>;
-      void phase;
+      // 后台 task 生命周期 → 挂回派生它的那条调用（data.toolUseId，SDK 已保证非
+      // 空）。字段原样浅合并；SDK 侧已剔过 undefined（patch 语义下留着会抹掉先前
+      // phase 的值）。
+      //
+      // phase/taskId 曾经在这里被丢掉，是「慢 Bash 被当成子 Agent」的一半成因：
+      // 真正的判别位 taskType 只在 task_started 出现，阶段信息一丢就再也分不清一
+      // 条 task 是什么。现在两个都留 —— taskId 的首字母（a/b/w）还是 SDK 没抽
+      // taskType 时（旧版本 / 其他后端）的兜底判据。
+      const { toolUseId, ...rest } = e.data as Record<string, unknown>;
       if (!toolUseId) return null;
-      const agent = rest as SubagentMeta;
-      if (taskId) agent.taskId = String(taskId);
+      const agent = rest as TaskMeta;
+      if (agent.taskId !== undefined) agent.taskId = String(agent.taskId);
       return { type: "tool_call_update", id: String(toolUseId), agent };
     }
     case EventType.ToolCallDone:
