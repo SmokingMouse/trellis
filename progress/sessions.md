@@ -36,7 +36,8 @@
 - **实施中挖出两个计划外的**: ① SDK `stdout ?? content`，空 stdout 顶掉 content —— 和分组吞并叠加才是「命令结果彻底消失」的完整成因。② 失败的行必须默认展开，否则「错误永不隐藏」只是口号（渲染冒烟测试逼出来的）。
 - **验证**: `test-tool-tree.ts` 34 项 + `test-timeline-render.tsx` 45 项 ALL PASS（三个真 fixture 各覆盖一种 task_type，后两个是本次录的）；**生产库回放** 21 条误判 Bash 全部归位、20 条输出恢复可见、4 个真子 Agent 不回归；tsc ✓ lint ✓ build ✓。
 - **合并后在 main worktree（registry 版 0.3.2）实测，纠正一个我先前说轻了的判断**：分类确实全对（前缀链兜住）、report 不再吞 output，**但 `stdout ?? content` 那个修复也在 SDK 里** —— 0.3.2 上后台/无输出命令的输出仍是空串。所以「结果不可见」在 0.3.2 上只修好一半，发版不是锦上添花。`test-tool-tree.ts` 开头加了版本闸，装 0.3.2 时先打印提示再红。
-- **Next**: 浏览器人工验收（尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点）。上线**必须先发 `@smokingmouse/agent@0.3.3`**。
+- **收尾**: `@smokingmouse/agent@0.3.3` 已发 npm，trellis 依赖收紧到 `^0.3.3` + 解链回注册表版本，全套验证在真 registry 包上复跑通过（tsc / 79 项断言 / build 全绿，版本闸不再告警）。main 已推 origin。
+- **Next**: **浏览器人工验收**（本 session 无浏览器工具，只能人跑）—— 尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点。之后 `make deploy` 上 prod。
 
 ### Session 83（2026-07-30，worktree 可用性：能力不可达 + 侧栏说谎 + git 感知）
 - **触发**: 用户「讨论下怎么把 workspace 这个功能完善一下」。先查真库判据（S1 定的是行为指标「一周内 worktree 里 session 数 > 0」）：上线 3 天，trellis 里只新建 1 个 session（暂存区，贴了个 X 链接）、**worktree 里 0 个**，同期 CLI 里 1204 个 jsonl。判据未达标。
