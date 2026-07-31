@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 // S1 P2：在项目下直接开 / 收 worktree。
 //
+// GET                                → 可作为起点的 checkout 列表（谁能开 worktree）
 // POST   { projectId, branch, ref? } → git worktree add <同级目录>/<branch> -b <branch> [ref]
 // DELETE ?workspaceId=…              → **只预演**，回传将被删掉的东西
 // DELETE ?workspaceId=…&force=1      → 真删（git worktree remove）
@@ -71,6 +72,80 @@ function badBranch(b: string): string | null {
   return null;
 }
 
+/** 一个项目里能当 `git worktree add` 执行点的 checkout。 */
+export type WorktreeBase = {
+  projectId: string;
+  projectName: string;
+  /** 执行点（主 checkout 优先） */
+  path: string;
+  /** 新 worktree 的落点父目录 —— 前端拿它做「会建在哪」的实时预览 */
+  parent: string;
+  branch: string | null;
+};
+
+/**
+ * 从一个项目里挑执行点。优先主 checkout —— 它一定在，且它的父目录就是我们
+ * 要落盘的地方。
+ *
+ * 必须逐个验存活：workspace 行会指向已被删掉的目录（我们刻意保留行，让会话
+ * 历史不连坐），拿这种路径当 cwd 会让 spawnSync 直接 ENOENT，而那条错误路径
+ * 上 stderr 是 null、报出来是一句空话。
+ *
+ * GET 和 POST 共用同一个函数，是为了让「下拉里列出来的项目」与「POST 真能建
+ * 成的项目」永远是同一批 —— 两处各写一遍 SQL 迟早会漂移成「列表里有、点了报
+ * 没有 git 工作区」。
+ */
+function pickBase(
+  projectId: string,
+  db: ReturnType<typeof getDB>,
+): WorktreeBase | null {
+  const rows = db
+    .prepare(
+      `SELECT w.path AS path, w.git_branch AS branch, p.name AS projectName
+         FROM workspaces w JOIN projects p ON p.id = w.project_id
+        WHERE w.project_id = ? AND w.kind IN ('main','worktree')
+        ORDER BY CASE w.kind WHEN 'main' THEN 0 ELSE 1 END`,
+    )
+    .all(projectId) as { path: string; branch: string | null; projectName: string }[];
+  const hit = rows.find((c) => fs.existsSync(c.path));
+  if (!hit) return null;
+  return {
+    projectId,
+    projectName: hit.projectName,
+    path: hit.path,
+    parent: path.dirname(hit.path),
+    branch: hit.branch,
+  };
+}
+
+/**
+ * 哪些项目能开 worktree —— WorkspacePicker 的「从哪个 repo 起」下拉数据源。
+ *
+ * 刻意不复用 listProjectTree()：那份为侧栏做了「只留有会话或非 discovered 的
+ * workspace」的可见性过滤，一个 discovered 且零会话的主 checkout 会被它藏掉，
+ * 于是项目在下拉里消失、而 POST 明明建得成。这里要的是「能不能建」，不是
+ * 「该不该显示」。
+ */
+function listBases(db: ReturnType<typeof getDB>): WorktreeBase[] {
+  const projects = db
+    .prepare(
+      `SELECT DISTINCT w.project_id AS id,
+              MAX(COALESCE(w.last_used_at, 0)) AS recency
+         FROM workspaces w
+        WHERE w.kind IN ('main','worktree')
+        GROUP BY w.project_id
+        ORDER BY recency DESC`,
+    )
+    .all() as { id: string; recency: number }[];
+  return projects
+    .map((p) => pickBase(p.id, db))
+    .filter((b): b is WorktreeBase => b !== null);
+}
+
+export async function GET() {
+  return Response.json({ bases: listBases(getDB()) });
+}
+
 export async function POST(req: Request) {
   let body: { projectId?: string; branch?: string; ref?: string };
   try {
@@ -86,20 +161,7 @@ export async function POST(req: Request) {
   if (bad) return Response.json({ error: bad }, { status: 400 });
 
   const db = getDB();
-  // 从这个项目里挑一个 git 工作区当 `git worktree add` 的执行点。优先主
-  // checkout —— 它一定在，且它的父目录就是我们要落盘的地方。
-  //
-  // 必须逐个验存活：workspace 行会指向已被删掉的目录（我们刻意保留行，让
-  // 会话历史不连坐），拿这种路径当 cwd 会让 spawnSync 直接 ENOENT，
-  // 而那条错误路径上 stderr 是 null、报出来是一句空话。
-  const base = (
-    db
-      .prepare(
-        `SELECT path FROM workspaces WHERE project_id = ? AND kind IN ('main','worktree')
-         ORDER BY CASE kind WHEN 'main' THEN 0 ELSE 1 END`,
-      )
-      .all(projectId) as { path: string }[]
-  ).find((c) => fs.existsSync(c.path));
+  const base = pickBase(projectId, db);
   if (!base) {
     return Response.json(
       { error: "这个项目下没有 git 工作区，无法新建 worktree" },
@@ -107,7 +169,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const target = path.join(path.dirname(base.path), branch);
+  const target = path.join(base.parent, branch);
   if (fs.existsSync(target)) {
     return Response.json({ error: `目录已存在：${target}` }, { status: 409 });
   }

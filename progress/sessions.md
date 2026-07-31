@@ -1,6 +1,21 @@
 # Session Log
 
-最近 5 条，倒序（Session 86 / 85 / 84 / 83 / 82）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 87 / 86 / 85 / 84 / 83）。更早的见 `archive.md`。
+
+### Session 87（2026-07-31，worktree 建完即用：把「用眼睛搬路径」那一步删掉）
+- **触发**: 用户「感觉现在 Worktree 的启动还是不是很流畅。我得在对应目录下新建，然后在创建的时候又指定这个新的目录。」
+- **诊断（不是感觉问题，是数据被丢了）**: 建 worktree 与开 session 在代码里是**两条互不相连的链路**。服务端 `worktree/route.ts:133` 返回了 `{ok, workspaceId, path}`，`SessionSidebar.tsx:274` 收到，**下一行就丢**，只 `bumpSessionsRevision()`。于是用户必须把同一个路径用眼睛从侧栏搬到 `WorkspacePicker` 里再找一遍。更糟：它**不在「最近」列表里** —— `recent/route.ts` 两个数据源（`sessions` 表 / `~/.claude/projects` 目录）都以「已经有 session」为前提，刚 `git worktree add` 出来的目录**结构性**进不去，第一次只能走「浏览」一级级点或手打绝对路径。
+- **决定性对照**: 同一个 picker 里，「空白沙箱」(`WorkspacePicker.tsx:57`) 和「新建文件夹」(`:403`) 早就是 `创建 → pickPath(path)`，后者按钮字面写着**「创建并使用」**。**worktree 是唯一一个建完不选的创建动作** —— 疏漏而非设计。
+- **入口形态（用户选的）**: 两边都通，共用同一个底层动作。
+- **Done**:
+  - `worktree/route.ts`：抽出 `pickBase()`（GET/POST 共用，防「下拉里有、点了说没有 git 工作区」的漂移）+ 新增 `GET` 返回可作起点的 checkout 列表（含 `parent`，给前端做落点预览）。**刻意不复用 `listProjectTree()`** —— 那份的 `visible()` 会藏掉 discovered 且零会话的主 checkout，那是「该不该显示」，这里要的是「能不能建」。
+  - `SessionSidebar.tsx`：新 `startSessionIn(path)` = `setDraftMode("project")` + `setDraftWorkspacePath(path)` + `newConversation()` + 显式收移动端抽屉（不能靠 `activeId` 那个 effect，从 composer 态点过来 activeId 本来就是 null，不变不触发）。建完 worktree 接住 `r.path` 落进去；**workspace 行也挂上 ＋**（`GroupRow` 加 `addTitle`，两级语义不同），让「0 会话」那条以前点不动的灰行有了出口 —— 这也是**已有** worktree（CLI 里建的）唯一不用过 picker 的入口。
+  - `WorkspacePicker.tsx`：第三个「创建并使用」——「🌿 新建 worktree 并使用」，含 base repo 下拉（默认按**同父目录**命中当前工作区所属 repo，从一个 worktree 里再开平行 worktree 也选得对）、分支名、**落点路径实时回显**（分支名会原样变成磁盘目录名，建之前看得见比建完解释「它去哪了」有用）。
+  - `recent/route.ts`：补第三路数据源 `readWorktreesWithoutSessions()`（`created_by != 'discovered'` 且无 session），口径与侧栏 `visible()` 一致；顺带修 `deriveShortName` —— worktree 与主 checkout 共用 package.json，实测四个 worktree 在列表里**全叫 "trellis"**，只能靠灰色路径分辨；判据用「`.git` 是文件不是目录」（linked worktree 的特征，比 `git rev-parse` 便宜且不 spawn），命中就取目录名 = 分支名。
+- **验证（dev 实例 :3099，prod :3088 零触碰已复核）**: tsc ✓ / lint 32 = 基线 ✓ / `next build` ✓（顺带确认 route 文件里 `export type` 不违反 Next 的导出约束）。**浏览器实跑三条动线**：① workspace 行 ＋ → 直接落 composer，Project 模式 + 工作区 = 该 worktree（`localStorage.trellis-workspace` 核过是完整路径）✓；② picker 里建 → modal 关 + 工作区已是新 worktree ✓；③ 侧栏项目行 ＋ 输分支名回车 → 直接落 composer ✓。**实跑中发现并当场补的两个**：picker 建完没 bump 侧栏（新 worktree 要等下次刷新才现身，已补 `bumpSessionsRevision()` 并复验）；短名歧义（改后列表读 `wt-sidebar-test / wt-picker-test / wt-smoke-test / main-2`，与侧栏一致）。收尾：4 个测试 worktree 走 DELETE force=1 清掉（顺带验了删除路径没被新 ＋ 挤坏）、测试分支 `git branch -D`、DB 无残留、browser session 已关、dev 实例已停。
+- **未做（有意）**: 平铺态（`isFlat`，单 workspace 与项目同名）的项目行没有「在这里开会话」—— 它的 ＋ 仍是「新建 worktree」，一行放两个按钮会挤。该场景由 picker 的「最近」覆盖。API 支持但 UI 仍未接线的 `ref`（从哪个 ref 起）也仍未接 —— 与本次抱怨无关。
+- **合并与推送**: `worktree-create-and-use` → `main`（`--no-ff` merge `3462480`，保住工作线形状），已推 `ccfca62..3462480`。上个 session 遗留在工作树的 `facts.md`（子 agent 内部调用不落主 jsonl，S84 探针）与本次无关，单独一条 `6208988` 留档、没并进功能 commit。
+- **Next**: 用户验收 —— 侧栏项目行 ＋ 建 worktree 应当**直接落到新会话**且工作区已选中；workspace 行悬停多出一个 ＋ 可直接开会话；选工作区的 modal 里多出「🌿 新建 worktree 并使用」。**两台实例仍待重部**（S85/S86/S87 三批修复都还没上线），BOE 上先跑 S86 记的两步。本机 prod 走 `make deploy`。
 
 ### Session 86（2026-07-30，部署流水线跨平台：devbox 上 `make deploy` 死在 launchctl）
 - **触发**: 用户只贴了一张 BOE devbox 的部署日志截图 —— `switch: current → 20260730T111814-bffeda99b` 之后紧接着 `× Executable not found in $PATH: "launchctl"` → `failed`。没有一句文字。
@@ -72,16 +87,3 @@
 - **验证（隔离实例 :3399 + 真库 VACUUM INTO 副本，prod 零触碰已复核）**: tsc ✓ / lint 32 = 基线 ✓ / build ✓。**僵尸自动清理 + 隐身修复端到端成立**：boot 后 `arrowworm`/`madtom`/`trevally` 三行消失，`main-2`/`main-3`/`main-4` 出现（后两个是本 session 期间别处新建的真 worktree，等于在动态变化的环境里验了一次）。**reclaimable 黄金对拍集 6/6 全过**（`wolffish`→可回收；`main-2`/`main-3`/`main-4`/主 checkout/`.claude`→不可回收）。删除四路径：force=0 只预演不删 ✓、`.env.local` 被正确列进 ignored 清单 ✓、正在生成的会话拦住 ✓、force=1 真删且**会话未连坐**（workspace_id→NULL）✓。浏览器层：桌面态 5 个按钮容器 `display:none`、hover 目标行后变 `flex`(w=19) 且其余行不受影响 ✓；侧栏渲染 `main-2 ●6`（正是本次改的 6 个文件）/ `main-3 ●2` / `trellis` 显示分支 `main` ✓。收尾：实例与 browser session 已关、测试 worktree 已清、prod DB 修改时间仍是 7-29、`:3088` 401、`current` 软链未动、tmux 会话未被误杀。
 - **两个未能实测的边界（工具限制，已知）**: ① `pointer-coarse` 的真实触屏行为 —— `agent-browser` 的 `set device` 只改 viewport/UA，不设置 pointer/hover media 特性，故只做到「产物 CSS 规则 + 条件 + 顺序」三层确证 + 桌面路径实测；② dev 模式下页面卡在「加载中…」（既有的 `::highlight` PostCSS 告警所致，S80 已记录，非本次引入），验证全程走 production 模式。
 - **Next**: 用户验收 —— 手机上打开侧栏，项目行的「＋」应当直接可见可点；桌面 hover 行为不变。改动未 commit（6 个文件：`SessionSidebar.tsx` / `worktree/route.ts` / `workspaces.ts` / `git-status.ts`🆕 / `git-status/route.ts`🆕 / `types.ts`），在 `main-2` worktree。上 prod 走 `make deploy`。
-
-### Session 82（2026-07-29，设置页 + 点击更新 · 右下角重叠 · ttyd 探测脆点）
-- **触发**: 用户「之前的设置页面的那波更新好像不见了……搞了一个设置页，支持自动更新，也把终端移到了顶部，不和树预览图冲突」。
-- **先证伪了前提**：那一版**在这个仓库里从不存在**。查了 git 全 ref + 悬空对象 + 所有 reflog、另外两个 clone（`~/ai-coding/trellis`、已被清空的 Harbor worktree `harbor-worktrees/trellis-c_pi9krbkm5y`）、`~/.claude/projects` 全部 CLI 历史、`~/.codex/sessions` 306MB 全部 rollout、Harbor 控制面 DB、GitHub 全部远端分支与 PR —— 零命中。反而查到两条**明确不做**的旧记录：`archive.md` 的「设置页评估不做」(S62) 与 `decisions.md` 的「无人值守自动更新——拒绝」(S79)。**但用户记的那个冲突是真的**，而且一直没修。
-- **Done ①（右下角重叠）**: 机制本来就有 —— `TerminalPanel` 早就在发 `--trellis-term-h`，只是 `TreePanel` 写死 `bottom-24` 没订阅。新增 `--trellis-term-stack`（终端在右下角占到多高，覆盖把手/浮层/钉住三态），`TreePanel` 改 `clamp(6rem, calc(var(--trellis-term-stack,0px) + 0.5rem), 50vh)`。clamp 上界是硬保证：终端拖到 720px 高也不许把树面板顶出视口。**没有把终端搬到顶部**——贴底是 VS Code/devtools 的通用语法，搬顶反而怪。
-- **Done ②（ttyd 探测）**: 根因不是「没装」（实测 `/opt/homebrew/bin/ttyd` 探得到、prod 日志也没有 boot 期告警），而是 `ttydBin()` **把失败也缓存了** —— 一次瞬时失败就焊死到进程重启。改成只缓存成功 + PATH 兜底 + 逐候选记失败原因（`EACCES` 与「不存在」必须分得开）+ 面板加「重试」按钮和「探测详情」折叠区。
-- **Done ③（设置页 + 点击更新）**: 新 `/settings`（Header ⚙）+ `lib/server/update.ts` + `/api/update`。**不重新实现部署**，只是 detached 派生 `scripts/deploy.ts`。三个机关见 decisions.md 与 facts.md。
-- **验证（隔离实例 :3299 + 沙箱 deploy root，prod 零触碰）**: tsc ✓ / lint 32 = 基线 ✓ / build ✓；**重叠前后对照**（浏览器真 rect）：写死 `bottom-24` 时重叠 20px，改后三态 gap 均 8px 且 `overlap=false`（收起 stack=116 / 浮层 348 / 钉住 260，`termH` 只在钉住态为 260 ✓）；ttyd 探测四例（候选命中 / PATH 兜底找到只在 `~/.bun/bin` 的二进制 / 不存在 / **无执行位报 EACCES** ✓）；真开终端 → ttyd 起在隔离端口 7950、iframe 挂载正常；**detached 存活实测**：父进程 `kill -9` 后子进程 `ppid=1` 并在父死后 6 秒写出结果；**扳机端到端**：POST 后 preflight → stage → install → build 全过，release 真 stage 进沙箱，界面实时显示阶段与进度条、运行中「更新到最新」按钮自动禁用，**到 build 即掐断，绝不让它走到 switch**（沙箱 label 是不存在的 `...-UITEST-nonexistent`，双保险）。收尾：实例/ttyd/browser session/沙箱目录全清，prod 复核 517 节点 / 44 会话 / 0 streaming、`current` 未动、`auth ON`。
-- **一次自摆乌龙**: 第一次量重叠时同步改 `style.bottom` 立刻读 rect，得到「改前也不重叠」的假结论 —— 是我自己加的 `transition-[bottom]` 让读到的是动画起点。关掉过渡 + 等一帧才拿到真值。**给元素加过渡后，同步测几何就不可信了。**
-- **合并与上线（同日）**: `wolffish` → `main`（`--no-ff` 合并 `e67e0d7`），推送 `56619dd..e67e0d7`；`make deploy` 上线 `20260728T185244-e67e0d729`。**上线后核验**：`/` 401 · `/login` 200 · `/settings` 401 · `/api/update` 401（后两条正是 RCE 入口该有的样子）；`{gate:up, next:ready, auth:on}`；release 里三个新文件都在、构建产物含 `--trellis-term-stack`；**tmux 两个终端跨部署存活且 `created` 时间戳未变**；517 节点 / 44 会话 / 0 streaming；`previous` 指向 `...-56eb54b45` 可回滚。smoke 六条断言全过（含「无 cookie 的 `/api/sessions` → 401」与「prod ttyd 未受影响」）。用户已把 `TRELLIS_REPO_DIR` 写进 `~/.trellis/shared/.env.local`，**实测新进程 env 里读到了**（`ps -E` 核）→ 设置页按钮可点。
-- **注**: build 仍有两类既有告警（`globals.css` 的 `color-mix(in lab, …)` 解析告警、`next.config.ts ← lib/server/blobs.ts` 触发的 NFT「whole project traced」），S80 已记录，非本次引入。
-- **Next**: 用户现场验收 —— 打开 ⚙ 设置页看版本与更新，右下角树面板与终端把手不再叠。下次上线可以直接在界面上点。
-
