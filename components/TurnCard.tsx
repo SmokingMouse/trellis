@@ -273,6 +273,18 @@ function ThinkingScroll({
   );
 }
 
+// S88：@提及的一次性外援标记。刻意只说「由 @提及的 Agent 作答」而不查名字 ——
+// 节点只存 agent id，为一枚 chip 去 fetch 每个节点的 agent 名不值当，而且被删掉的
+// agent 会让历史节点渲染出一片空白。语义（这轮不是主线人格答的）已经传达到了。
+function MentionChip() {
+  return (
+    <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent-muted text-accent-ink text-label">
+      <span aria-hidden>🎭</span>
+      <span>这一轮由 @提及的 Agent 单独作答（主线人格不变）</span>
+    </div>
+  );
+}
+
 function ResponseBody({ node }: { node: ChatNode }) {
   const retryNode = useSessionStore((s) => s.retryNode);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -354,6 +366,10 @@ function ResponseBody({ node }: { node: ChatNode }) {
       onClick={onMarkClick}
       className="md-body text-reading text-ink leading-relaxed"
     >
+      {/* S88 @提及：这一轮是外援答的，标出来 —— 否则读者会以为主线人格变了。
+          会话级人设（agentScope==='session'）刻意不挂 chip：每张卡都挂一枚是
+          噪音，那个显示在 Header 的 ModeBadge 上。 */}
+      {node.agentScope === "mention" && <MentionChip />}
       {isStreaming && liveThinking && (
         // The思考期 surface. While no answer text yet: an open dim panel with
         // the thinking stream (this is what used to look like a dead UI for

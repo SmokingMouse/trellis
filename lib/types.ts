@@ -223,6 +223,10 @@ export type ChatNode = {
   // 树面板雪藏标记：仅树根携带语义（分支节点恒 null）。non-null = 用户手动
   // 隐藏这棵树的时刻；树内新增节点（分叉/重试）自动清空（写即复活）。
   hiddenAt: number | null;
+  // S88：这一轮由哪个 Agent 作答。'mention' = @提及的单轮外援（TurnCard 挂 chip）；
+  // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
+  agentId?: string | null;
+  agentScope?: "session" | "mention" | null;
 };
 
 // S1：侧栏三级分组的骨架，随 /api/sessions 一起下发（服务端真源在
@@ -313,6 +317,9 @@ export type Session = {
   // 弹权限卡等用户允许/拒绝；false/缺省 = YOLO（现状，含全部存量行）。
   // 创建时锁定，仅 claude 系 project 可开。
   requireApproval?: boolean;
+  // S88 会话人设（agents.id）。null/缺省 = 默认 Agent（老路，行为一字不变）。
+  // 创建时锁定；**live 引用** —— agent 定义改了老会话跟着变。
+  agentId?: string | null;
 };
 
 // Notebook entry: a quoted excerpt the user captured from a node while

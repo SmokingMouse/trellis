@@ -14,15 +14,22 @@ export function SkillPickerList({
   onPick,
   commands = [],
   onPickCommand,
+  agents = [],
+  onPickAgent,
   activeIndex = -1,
 }: {
   skills: { name: string; description: string }[];
   onPick: (name: string) => void;
   commands?: Command[];
   onPickCommand?: (command: Command) => void;
+  // S88: `@slug` 提及 —— 把这一轮定向丢给某个 Agent。与 commands/skills
+  // **互斥出现**（前两者绑开头的 `/`，这个绑开头的 `@`），所以索引空间不重叠，
+  // agents 分组的 activeIndex 直接从 0 起算，不必再叠加偏移。
+  agents?: { slug: string; name: string; description: string }[];
+  onPickAgent?: (slug: string) => void;
   activeIndex?: number;
 }) {
-  if (!skills.length && !commands.length) return null;
+  if (!skills.length && !commands.length && !agents.length) return null;
   // Keep the keyboard highlight visible inside the scrollable list. Ref
   // callbacks re-run per render, but scrollIntoView(nearest) on an already
   // visible element is a no-op.
@@ -63,6 +70,29 @@ export function SkillPickerList({
           <div className="text-label text-ink-muted truncate">
             {c.description}
           </div>
+        </button>
+      ))}
+      {agents.map((a, i) => (
+        <button
+          key={`agent-${a.slug}`}
+          type="button"
+          ref={i === activeIndex ? activeRef : undefined}
+          onClick={() => onPickAgent?.(a.slug)}
+          className={rowClass(i === activeIndex)}
+        >
+          <div className="text-ui font-mono text-ink flex items-center gap-1.5">
+            <span
+              className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
+              aria-hidden
+            >
+              🎭 单轮
+            </span>
+            <span>@{a.slug}</span>
+            <span className="text-ink-faint font-sans">{a.name}</span>
+          </div>
+          {a.description && (
+            <div className="text-label text-ink-muted truncate">{a.description}</div>
+          )}
         </button>
       ))}
       {skills.map((s, i) => (

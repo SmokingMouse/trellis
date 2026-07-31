@@ -33,4 +33,23 @@ export async function register() {
     "./lib/server/cli-sync-watcher"
   );
   startCliSyncWatcher();
+  // S88：自定义 Agent 的 SDK 能力探测。放在调度器之前 —— SDK 版本不对时，多传的
+  // RunOptions 字段会被 TS 的结构类型放过、被运行时**静默丢弃**：agent 完全不生效，
+  // 但 spawn 正常、回答正常、零报错。这是整套里最难查的一类故障，必须在启动时喊。
+  try {
+    const { ClaudeBackend } = await import("@smokingmouse/agent");
+    const caps = new ClaudeBackend().capabilities() as { customAgents?: boolean };
+    if (!caps.customAgents) {
+      console.error(
+        "[trellis] ⚠️ @smokingmouse/agent 版本过低（缺 customAgents）——自定义 Agent 的" +
+          "人设/工具/技能会被静默忽略。dev 下跑 `make link-sdk`；上线前需先发布新版 SDK。",
+      );
+    }
+  } catch {
+    /* 探测失败不拦启动 */
+  }
+  const { installDefaultChannels } = await import("./lib/server/notify");
+  installDefaultChannels();
+  const { startTaskScheduler } = await import("./lib/server/task-scheduler");
+  startTaskScheduler();
 }

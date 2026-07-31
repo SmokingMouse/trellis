@@ -1,6 +1,20 @@
 # Session Log
 
-最近 5 条，倒序（Session 87 / 86 / 85 / 84 / 83）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 88 / 87 / 86 / 85 / 84）。更早的见 `archive.md`。
+
+### Session 88（2026-07-31，自定义 Agent 层 + 自动化任务：A1-A4 与 T1-T4 全量落地）
+- **触发**: 用户要「给 Trellis 加 Agent 管理（配提示词、技能等）+ 配置自动化任务」，追问后定死范围：一路做到 cron，但抽象要先立住 —— 后续的飞书群绑定、多 agent 讨论组都长在同一层上。中途下 `/goal` 要求一次全做完。
+- **用户的一问推翻了初始方案**：我原本按「读写 `~/.claude/agents/*.md`」提案，用户问「不能把这套抽出来吗？非得放系统 .claude 目录？不能给 SDK 一个路径让它自动绑定？」——**实测证明能**：`--agents '<json>'`（内联注入并激活为主 agent，零 fs 操作）与 `--plugin-dir <任意路径>`（agent + skill 整包）。我此前说的「技能没法按 agent 裁剪」是**错的**。
+- **六条架构决策**（详见 `decisions/2026-07-31-custom-agents.md`，完整设计在 `custom-agents-plan.md`）：DB 为真相源 spawn 时物化 · `agent_id IS NULL` 就是默认 Agent（不建行，物理上杜绝默认路径回归）· 隔离度按 agent 可选 · **agent 只改「人设 + 能力面」绝不碰「上下文与身份」** · 任务与 cron 同表同执行路径只换触发器 · 任务执行落在 session/nodes 上不另造渲染。
+- **Done**:
+  - **SDK**（跨仓 `~/sdk`）：`RunOptions` 加 `agent / agents / pluginDirs / disallowedTools / strictMcp / extraArgs`；argv 顺序焊死；`--disallowedTools` 逗号连接**不展开变参**（variadic 会吞后续 flag）；`environmentSkills:false` 与自定义 agent 互斥保护；`capabilities().customAgents` 供版本探测。`extraArgs` 把发布链从「每加一个 flag 发一次版」降成一次性成本。
+  - **A1-A4**：agents 表 + 三个新列 + 5 个 builtin 种子（文案抽到 `lib/agent-presets.ts` 当 schema 与 UI 的唯一真相源）· `applyAgent()` 统一后处理（三个 mode 分支一行不动）· 内容寻址 pack + symlink 技能 · `/settings/agents` 管理页 · `@提及` 单轮派活（`ephemeral`：不 resume 不 fork 不落盘）。
+  - **T1-T4**：`lib/cron.ts` 纯匹配器（**不写「推算下一次」只写「这一分钟匹不匹配」**，绕开月末/跨年/dom-dow OR 语义）+ 48 项单测 · 四张表 + `task_runs` 对称 boot reap · `run-bus` 的 `onSettled` 钩子 · 调度器对齐整分 tick + catch-up 只补最近一次 · 通知出口（`NotifyChannel` + 命令模板）· fs / git ls-remote / session_done 三种触发器 + 两道自触发防护 · `--max-budget-usd` 经 `extraArgs` 通电。
+- **验证**（dev server + **prod DB 的 VACUUM 只读快照**，prod 库 mtime 未变）：A1 四条端到端（人设在 project 生效 / 工具白名单只剩 Read·Grep·Glob / 本机 skill 不可见 / **不选 agent 的会话一字不变**）· A2 pack 里的 skill 可用且本机其余 80 个消失 · A4 `@translator` 只出译文而**主线下一轮仍是严谨工程师** · 僵尸 run 被 boot reap 收成 `error/interrupted` · **漏跑 5 个槽位只补 1 条** · 唯一索引挡住重复插入（`SQLITE_CONSTRAINT_UNIQUE`）· cron 槽位对齐整分而手动不对齐 · 通知失败推送/成功不推 · fs `.md` 触发而 `.txt` 被过滤 · 自触发被 400 挡 · 用假 `claude` 抓 argv 确认顺序与逗号连接全对。cron 48/48，tsc 零错。
+- **挖出三个真问题**（全写进 `facts.md`）：① cwd 不存在 → `spawn claude` 的 ENOENT 是**异步 uncaughtException**，逃得出 run-bus 的 try/catch → 节点永远 streaming、任务被 skip 策略永久锁死；② **Next 的 instrumentation 与 route handler 不共享模块实例** —— 「在 instrumentation 注册渠道、在 route 扇出」一条都发不出去且零报错；③ 技能靠 `Skill` 工具调起，配了工具白名单就静默失效，且修的时候要同时喂 `--tools` 与 pack frontmatter（第一版只补一处，行为纹丝不动）。
+- **教训（流程）**：本 session 全程在 `main-2` worktree 里跑，却**没先查有没有并行 session** —— 结果与另一个 session 撞了 S87 编号，且双方都改了 `sessions.md`/`README.md`/`facts.md`/`archive.md`（`parallel-worktree.md` 明令并行期只写 `progress/blocks/<slug>.md`）。收尾时按规则做了串行处理：共享文件退回基线 → 只提交源码 → merge 对方 → 再把自己的内容按 S88 叠上去。**代码层零重叠**（对方动 workspaces/worktree UI），否则代价会大得多。
+- **未做 / 边界**: SDK **没发 npm** —— `make deploy` 在新 release 里 `bun install` 会冲掉 `make link-sdk`，所以本机 prod 与两台远端都用不了。发布是对外不可逆动作，等用户点头。lint 比基线多 3 处 `react-hooks/set-state-in-effect`（on-mount 取数，与既有 19 处同形状，未为规则扭曲代码）。
+- **Next**: ① 确认后 `npm publish @smokingmouse/agent@0.4.0` + trellis `package.json` bump → `make deploy` 本机 → BOE；② 两台实例仍待重部。
 
 ### Session 87（2026-07-31，worktree 建完即用：把「用眼睛搬路径」那一步删掉）
 - **触发**: 用户「感觉现在 Worktree 的启动还是不是很流畅。我得在对应目录下新建，然后在创建的时候又指定这个新的目录。」
@@ -70,20 +84,3 @@
 - **合并后在 main worktree（registry 版 0.3.2）实测，纠正一个我先前说轻了的判断**：分类确实全对（前缀链兜住）、report 不再吞 output，**但 `stdout ?? content` 那个修复也在 SDK 里** —— 0.3.2 上后台/无输出命令的输出仍是空串。所以「结果不可见」在 0.3.2 上只修好一半，发版不是锦上添花。`test-tool-tree.ts` 开头加了版本闸，装 0.3.2 时先打印提示再红。
 - **收尾**: `@smokingmouse/agent@0.3.3` 已发 npm，trellis 依赖收紧到 `^0.3.3` + 解链回注册表版本，全套验证在真 registry 包上复跑通过（tsc / 79 项断言 / build 全绿，版本闸不再告警）。main 已推 origin。
 - **Next**: **浏览器人工验收**（本 session 无浏览器工具，只能人跑）—— 尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点。之后 `make deploy` 上 prod。
-
-### Session 83（2026-07-30，worktree 可用性：能力不可达 + 侧栏说谎 + git 感知）
-- **触发**: 用户「讨论下怎么把 workspace 这个功能完善一下」。先查真库判据（S1 定的是行为指标「一周内 worktree 里 session 数 > 0」）：上线 3 天，trellis 里只新建 1 个 session（暂存区，贴了个 X 链接）、**worktree 里 0 个**，同期 CLI 里 1204 个 jsonl。判据未达标。
-- **用户给的根因**（比我预设的方向更准）: 「trellis worktree 不好用，感知和交互都很费劲」+「一个项目开多个 worktree 并行，但**不想在操作上特别感知这件事**」。据此拍板：新建会话时默认不开 worktree、一键可开；分支已合入主干就提示回收。
-- **调查改写了诊断 —— 不是缺能力，是能力不可达**: 新建/删除 worktree 的入口 S1 早就做了（`SessionSidebar.tsx:222/247`），但 `workspaces.created_by='trellis'` 行数**实测为 0**，即上线至今一次都没被成功用过。根因是 `:730` 的 `hidden group-hover:flex` —— Tailwind 的 group-hover 自带 `@media (hover:hover)` 包装，而移动端抽屉与桌面 rail **复用同一份 renderPanel**，触屏上那条规则永不匹配 → 按钮**永远点不到**（用户挂公网隧道，手机访问是常态）。原计划要做的「新入口 + git 角标」全是在这个堵点之上加东西。
-- **Done ①（可达性）**: 改成 `hidden group-hover:flex pointer-coarse:flex`。判据是「有没有 hover 能力」而不是「屏幕多宽」—— iPad / 触屏笔记本是大屏无 hover，按 `md:` 断点判会漏掉它们。
-- **Done ②（侧栏说谎）**: `visible()` 加路径存在校验（带 5s TTL，防未挂载网络盘在 ~1.6 次/秒的热路径上阻塞 stat）；`registerSiblingWorktrees` 从只进不出改成**同时 prune**（「不在 git worktree list」+「目录确实不存在」双条件，缺后者则 git 一失败就会清空好行）；重扫从 boot-only 提取成 `rescanWorktrees` 并挂到 git 状态接口（原来 CLI 里新建的 worktree 要重启才现身）；`ensureWorkspaceForPath` 的 INSERT 加 `ON CONFLICT(path) DO NOTHING`（按需触发引入了并发）+ `created_by` 按 rank 只升不降（否则重建同名 worktree 后 trellis 自己建的也删不掉）。
-- **Done ③（git 感知）**: 新增 `lib/server/git-status.ts` + `GET /api/workspaces/git-status`，出 `{branch, dirty, reclaimable}`，前端异步拉、渐进填角标（分支名 / 橙色 ●N 脏文件数 / 绿色 ✓ 可回收）。**刻意不并进 `/api/sessions`** —— 那条在流式期间是 ~1.6 次/秒（依赖 sessionsRevision ← cli-sync 600ms 合并窗口），塞 spawn git 会拖垮 SSE。全程 `execFile` promise 版，不照抄现存的 `spawnSync`。砍掉 ahead/behind：实测**只有 main 有 upstream**，任务分支全没有，`branch.ab` 结构性无输出。
-- **Done ④（删除路径修脆点）**: `force=0` 改成**只预演绝不执行**（实测原实现对干净 worktree 点一下目录就没了，连问都不问，而按钮现在触屏常显）；预演回传 `--ignored=matching` 拿到的两类清单 —— dirty 是会丢的活，**ignored 是 `.env*` / `/.claude/` 这类会被静默删掉的东西**（S79 丢过一次 `.env.local` 导致认证闸静默关闭）；加「正在生成的会话」拦截闸；杀终端从 git remove **之前**挪到之后（原顺序在 git 失败时白杀终端）。
-- **实测钉死的三条（都推翻了我的初版设计）**:
-  - **`merge-base --is-ancestor` 判「已合并」会误删正在用的工作区** —— `main-2`（刚建、没提交、正在用）与 `wolffish`（真做完已合并）返回**同一个值**。改用 `origin/main` 当基准同样错：实测 `origin/main`(67e172b) ≠ 本地 main(edd3c4e)，fetch 一跑就发生。最终判据 = **分支 tip 是某个 merge commit 的第二父**（`rev-list --merges --parents --ancestry-path`）+ 基准用**本地**主干 + 工作区干净。已知漏报 squash/rebase 合并（方向安全，代码里写死了注释）。
-  - **默认分支必须逐 repo 探测**：trellis → `origin/main`，`~/.claude` → `origin/master`。写死 "main" 会让后者全错。
-  - **CSS 变体顺序陷阱**：第一版写 `flex pointer-fine:hidden group-hover:flex`，产物里 `pointer-fine:hidden`(55476) 排在 `group-hover:flex`(47049) **之后**且特异性相同（`:where()` 计 0）→ 隐藏反过来覆盖 hover 显示，鼠标设备上按钮再也出不来，**比原 bug 还糟**。改成「基础态 hidden + 两条互斥的显示规则」后谁先谁后都不影响。
-- **砍掉的一个功能（实测逼的）**: 一度做了「从列表移除」（只摘记录不删磁盘）给 CLI 建的 worktree 用。实测发现摘掉一个目录仍在的行，**下一次 rescan 就把它加回来了**（`added:1`）—— 点了等于没点，比没有更糟。于是删掉前后端，改由 rescan 的自动 prune 兜底，清理范围扩到所有 `kind='worktree'`。
-- **验证（隔离实例 :3399 + 真库 VACUUM INTO 副本，prod 零触碰已复核）**: tsc ✓ / lint 32 = 基线 ✓ / build ✓。**僵尸自动清理 + 隐身修复端到端成立**：boot 后 `arrowworm`/`madtom`/`trevally` 三行消失，`main-2`/`main-3`/`main-4` 出现（后两个是本 session 期间别处新建的真 worktree，等于在动态变化的环境里验了一次）。**reclaimable 黄金对拍集 6/6 全过**（`wolffish`→可回收；`main-2`/`main-3`/`main-4`/主 checkout/`.claude`→不可回收）。删除四路径：force=0 只预演不删 ✓、`.env.local` 被正确列进 ignored 清单 ✓、正在生成的会话拦住 ✓、force=1 真删且**会话未连坐**（workspace_id→NULL）✓。浏览器层：桌面态 5 个按钮容器 `display:none`、hover 目标行后变 `flex`(w=19) 且其余行不受影响 ✓；侧栏渲染 `main-2 ●6`（正是本次改的 6 个文件）/ `main-3 ●2` / `trellis` 显示分支 `main` ✓。收尾：实例与 browser session 已关、测试 worktree 已清、prod DB 修改时间仍是 7-29、`:3088` 401、`current` 软链未动、tmux 会话未被误杀。
-- **两个未能实测的边界（工具限制，已知）**: ① `pointer-coarse` 的真实触屏行为 —— `agent-browser` 的 `set device` 只改 viewport/UA，不设置 pointer/hover media 特性，故只做到「产物 CSS 规则 + 条件 + 顺序」三层确证 + 桌面路径实测；② dev 模式下页面卡在「加载中…」（既有的 `::highlight` PostCSS 告警所致，S80 已记录，非本次引入），验证全程走 production 模式。
-- **Next**: 用户验收 —— 手机上打开侧栏，项目行的「＋」应当直接可见可点；桌面 hover 行为不变。改动未 commit（6 个文件：`SessionSidebar.tsx` / `worktree/route.ts` / `workspaces.ts` / `git-status.ts`🆕 / `git-status/route.ts`🆕 / `types.ts`），在 `main-2` worktree。上 prod 走 `make deploy`。

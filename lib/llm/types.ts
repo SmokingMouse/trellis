@@ -76,6 +76,24 @@ export type StreamEvent =
       agent: TaskMeta;
     };
 
+// S88: 一次 spawn 要用的 Agent，已由 lib/server/agent-pack.ts 物化完毕。
+// 「定义」（DB 里的 AgentRecord）与「怎么喂给 CLI」（这个类型）刻意分开：
+// route 负责查库 + 物化，sdk-adapter 只做纯翻译、不碰 IO。
+export type AgentSpawn = {
+  /** claude --agent 的值，也是 pack 里 agents/<slug>.md 的文件名 */
+  slug: string;
+  /** 无技能的 agent 走内联 JSON（零 fs 操作）；有技能的走物化好的 pluginDir。二选一。 */
+  agentsJson?: string;
+  pluginDir?: string;
+  /** true = 读本机 CLAUDE.md / settings / skill / MCP；false = 隔离（三者全无） */
+  inheritEnv: boolean;
+  model?: string | null;
+  tools?: string[] | null;
+  disallowedTools?: string[] | null;
+  permission?: "full" | "default" | "readonly" | "auto-edit" | null;
+  requireApproval?: boolean | null;
+};
+
 // A路②: interaction_required / interaction_resolved are NOT provider stream
 // events — interactive tools flow through the onCanUseTool callback, and
 // run-bus synthesizes those two events onto its own bus + SSE wire. They live
@@ -112,6 +130,18 @@ export type StreamRequest = {
   // D1: chat-mode custom system prompt. null/undefined → provider uses
   // DEFAULT_SYSTEM_PROMPT. Ignored by project (it uses CLAUDE.md).
   systemPrompt?: string | null;
+  // S88: 本轮由哪个自定义 Agent 作答。由 route 从 sessions.agent_id（会话人设）
+  // 或 @提及解析、物化后传入；null/undefined = 默认 Agent，执行链走今天的老路。
+  // 与 systemPrompt 互斥 —— applyAgent 会把 systemPrompt 删掉（见 sdk-adapter.ts）。
+  agent?: AgentSpawn | null;
+  // S88 @提及：这次 spawn 是一次性的 —— 不落盘、不 resume、不 fork。
+  // 与 agent 正交：agent 管「谁答」，这个管「这次身份是不是临时的」。
+  // 刻意不塞进 applyAgent —— 那一层的铁律是绝不碰上下文与身份。
+  ephemeral?: boolean;
+  // S88：透传给 SDK 的 extraArgs 逃生舱（当前只用于任务的 --max-budget-usd）。
+  // 只允许从结构化配置派生，绝不接用户自由文本 —— 否则可从后门塞
+  // --dangerously-skip-permissions 绕过审批闸。
+  extraArgs?: string[];
   // chat "enhanced mode": when true, chat gets a scratch workspace + full
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
   // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).

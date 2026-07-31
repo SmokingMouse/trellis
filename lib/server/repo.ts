@@ -55,6 +55,11 @@ export type ApiSession = {
   // 权限确认：true = project 轮次的可变更工具需用户逐个允许/拒绝
   // （权限卡）。创建时锁定；false = YOLO（默认，含全部存量行）。
   requireApproval: boolean;
+  // S88：会话人设。null = 默认 Agent（执行链走今天的老路，一行不变）。
+  // 创建时锁定，与 mode/workspace/systemPrompt 同纪律。**live 引用**：agent 定义
+  // 被改了老会话跟着变（用户改 agent 的动机就是「上次答得不好，改了再问」），
+  // 想知道当时是谁答的看 nodes.agent_id。
+  agentId: string | null;
 };
 
 export type ApiNode = {
@@ -88,6 +93,10 @@ export type ApiNode = {
   // 树面板雪藏标记。仅根节点携带语义（分支节点恒 null）；non-null = 这棵树被
   // 用户手动隐藏的时刻。树内新增节点时自动清空（写即复活）。
   hiddenAt: number | null;
+  // S88：这一轮由哪个 Agent 作答。'mention' = @提及的单轮外援（UI 挂 chip）；
+  // 'session' = 会话人设（不挂 chip，否则每张卡都有一枚是噪音）。
+  agentId: string | null;
+  agentScope: "session" | "mention" | null;
 };
 
 type NodeRow = {
@@ -118,6 +127,8 @@ type NodeRow = {
   tool_calls_json: string | null;
   pending_interaction_json: string | null;
   hidden_at: number | null;
+  agent_id: string | null;
+  agent_scope: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
@@ -125,7 +136,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
-       pending_interaction_json, hidden_at`;
+       pending_interaction_json, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
   id: string;
@@ -142,11 +153,12 @@ type SessionRow = {
   origin: string;
   source_jsonl_path: string | null;
   require_approval: number;
+  agent_id: string | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, require_approval`;
+       origin, source_jsonl_path, require_approval, agent_id`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -239,6 +251,8 @@ function rowToNode(r: NodeRow): ApiNode {
     toolCalls,
     pendingInteraction,
     hiddenAt: r.hidden_at,
+    agentId: r.agent_id,
+    agentScope: r.agent_scope === "mention" ? "mention" : r.agent_scope === "session" ? "session" : null,
   };
 }
 
@@ -272,6 +286,7 @@ function rowToSession(r: SessionRow): ApiSession {
     origin: r.origin ?? "native",
     sourceJsonlPath: r.source_jsonl_path,
     requireApproval: r.require_approval === 1,
+    agentId: r.agent_id,
   };
 }
 
@@ -329,7 +344,10 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const want = opts?.archived ? 1 : 0;
   const rows = db
     .prepare(
-      `SELECT ${SESSION_COLS} FROM sessions WHERE archived = ?
+      // S88: kind='task' 是自动化任务的常驻会话，不该挤进用户的侧栏
+      // （一个每日任务一个月能产 30 个节点，但它只有 1 个会话）。任务页从
+      // task_runs 那侧进，点进去仍是同一个 session 的正常渲染。
+      `SELECT ${SESSION_COLS} FROM sessions WHERE archived = ? AND kind = 'user'
        ORDER BY updated_at DESC`,
     )
     .all(want) as SessionRow[];
@@ -340,7 +358,7 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
 export function countArchivedSessions(): number {
   const db = getDB();
   const row = db
-    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE archived = 1")
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind = 'user'")
     .get() as { n: number };
   return row.n;
 }
@@ -598,6 +616,21 @@ export function setRootResumeIdForNode(
 // inheriting the parent's history KV cache while branching into an isolated
 // session (so sibling branches don't cross-pollute). Called from run-bus on
 // session_init for chat mode, every turn (not just the first).
+/** S88：记下这一轮实际由哪个 Agent 作答。
+ *
+ * agent 定义是 **live 引用**（改了定义，引用它的老会话跟着变），所以这一列是
+ * 事后唯一能追溯「当时是谁答的」的线索 —— 会话级人设也记，不只 @提及。
+ * scope='mention' = 这一轮由外援单独作答、主线人格不变（UI 据此挂 chip）。 */
+export function setNodeAgent(
+  nodeId: string,
+  agentId: string,
+  scope: "session" | "mention",
+): void {
+  getDB()
+    .prepare("UPDATE nodes SET agent_id = ?, agent_scope = ? WHERE id = ?")
+    .run(agentId, scope, nodeId);
+}
+
 export function setNodeResumeId(
   nodeId: string,
   family: ProviderFamily,
@@ -768,6 +801,7 @@ export function createSessionWithRoot(args: {
   systemPrompt?: string | null;
   model?: string | null;
   requireApproval?: boolean;
+  agentId?: string | null;
   attachments?: NodeAttachment[];
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
@@ -776,6 +810,7 @@ export function createSessionWithRoot(args: {
   const systemPrompt = args.systemPrompt ?? null;
   const model = args.model ?? null;
   const requireApproval = args.requireApproval === true;
+  const agentId = args.agentId ?? null;
   const attachmentsJson =
     args.attachments && args.attachments.length > 0
       ? JSON.stringify(args.attachments)
@@ -793,8 +828,8 @@ export function createSessionWithRoot(args: {
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
                              context_mode, workspace_path, workspace_id,
                              system_prompt, model,
-                             lineage_isolation, require_approval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             lineage_isolation, require_approval, agent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -808,6 +843,7 @@ export function createSessionWithRoot(args: {
       model,
       mode === "project" ? 1 : 0,
       requireApproval ? 1 : 0,
+      agentId,
     );
 
     db.prepare(

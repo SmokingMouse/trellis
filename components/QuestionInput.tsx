@@ -3,7 +3,8 @@ import { useState, useRef, useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ReferencePicker } from "./ReferencePicker";
 import { ModePicker } from "./ModePicker";
-import { SystemPromptPicker, FEYNMAN_PROMPT } from "./SystemPromptPicker";
+import { AgentPicker } from "./AgentPicker";
+import { FEYNMAN_PROMPT } from "@/lib/agent-presets";
 import { ZoneEditor } from "./ZoneEditor";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
@@ -62,8 +63,11 @@ export function QuestionInput() {
   const draftMode = useSessionStore((s) => s.draftMode);
   const draftSystemPrompt = useSessionStore((s) => s.draftSystemPrompt);
   const draftWorkspacePath = useSessionStore((s) => s.draftWorkspacePath);
+  const draftAgentId = useSessionStore((s) => s.draftAgentId);
   // 费曼考官角色：输入框从「问问题」翻转成「讲解你的理解」。
-  const isFeynman = draftSystemPrompt === FEYNMAN_PROMPT;
+  // S88 后费曼有两种来源：内置 agent（builtin-feynman）或存量的裸 systemPrompt。
+  const isFeynman =
+    draftAgentId === "builtin-feynman" || draftSystemPrompt === FEYNMAN_PROMPT;
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   // C4: skill picker shows whenever the agent can run skills — project
@@ -251,7 +255,7 @@ export function QuestionInput() {
         </div>
         {draftMode === "chat" && (
           <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
-            <SystemPromptPicker />
+            <AgentPicker />
             <button
               type="button"
               onClick={() => setChatEnhanced(!chatEnhanced)}
