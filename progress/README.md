@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Agent 层 + 自动化任务已发 SDK 0.4.0 并上线本机 prod（真库迁移验过）。只剩 BOE 未部 —— 本机 ssh 不通。
+prod spawn 出的 claude 一律认证失败（旁证显示 07-28 起可能全站如此），先判定它是实例级故障还是任务路径独有。
 
 ## Goals
 
@@ -20,7 +20,7 @@ Agent 层 + 自动化任务已发 SDK 0.4.0 并上线本机 prod（真库迁移�
 ## 指针区
 
 - `facts.md` 已验证事实（改代码前读） · `failures.md` 待查 / 已结案（排查 bug 前读）
-- `sessions.md` 最近 5 条 log（S89–85） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
-- **待验收**：`console-ia-spec.md`（设置排布重组，S89 落地未 commit）
+- `sessions.md` 最近 5 条 log（S90–86） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- **待验收**：`console-ia-spec.md`（设置排布重组） · `skills/trellis-admin/`（S90 新增，读操作已实测，端到端待 prod 修好）
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
 - 其余 `*.md` 为 feature spec，被 Goals 指到时才读（`ls progress/` 即清单）
