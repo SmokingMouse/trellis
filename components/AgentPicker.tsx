@@ -2,6 +2,13 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "@/components/ui/Button";
+import {
+  AGENT_DEFAULT_HINT,
+  AGENT_DEFAULT_LABEL,
+  AGENT_UNSUPPORTED_HINT,
+  agentHint,
+  agentSupported,
+} from "@/lib/run-config";
 
 // S88: 选下一个新会话的 Agent（人设 + 模型 + 工具 + 技能 + 隔离度）。
 //
@@ -14,6 +21,9 @@ import { Button } from "@/components/ui/Button";
 //
 // 自定义 system prompt 的入口保留（textarea），但**只在没选 agent 时可用**：
 // --agent 与 --system-prompt 在 CLI 层就是互斥的，UI 上让它们同时亮着是骗人。
+//
+// S89：文案（「默认助手」这个名字、隔离提示的措辞）搬去 lib/run-config.ts —— 任务定义页
+// 引用同一份，此前两处各叫一个名字。
 
 type AgentSummary = {
   id: string;
@@ -55,17 +65,29 @@ export function AgentPicker() {
     };
   }, [open]);
 
-  // codex 不认 --agent/--agents/--plugin-dir（服务端也会钳成 null）。露着它
-  // 只会让人配了以为生效 —— 那是谎言级 UI，直接不显示。
-  const isCodex = provider.startsWith("codex");
-  if (isCodex) return null;
-
   const selected = agents.find((a) => a.id === draftAgentId) ?? null;
   const label = draftAgentId
     ? (selected?.name ?? "已选 Agent")
     : draftSystemPrompt
       ? "自定义角色"
-      : "默认助手";
+      : AGENT_DEFAULT_LABEL;
+
+  // 非 claude 家族（codex / mock）不认 --agent/--agents/--plugin-dir，服务端会钳成 null。
+  // 原来这里直接 return null 整个消失 —— 但如果用户**已经选了** agent 再换模型，
+  // 那个选择就无声无息地失效了。改成：选过就留一枚灰 chip 说明白，没选过才不出现
+  // （没选过时它没有任何可说的，出现只是噪音）。
+  if (!agentSupported(provider)) {
+    if (!draftAgentId) return null;
+    return (
+      <span
+        title={AGENT_UNSUPPORTED_HINT}
+        className="px-3 py-1.5 rounded-full border border-line bg-surface-muted text-ink-faint text-ui inline-flex items-center gap-1.5"
+      >
+        <span aria-hidden>🎭</span>
+        <span className="line-through">Agent：{label}</span>
+      </span>
+    );
+  }
 
   const pickAgent = (id: string | null) => {
     setDraftAgentId(id);
@@ -103,8 +125,8 @@ export function AgentPicker() {
             </div>
             <div className="flex flex-col gap-1 mb-3 max-h-[240px] overflow-y-auto">
               <AgentRow
-                name="默认助手"
-                hint="今天的行为，读 CLAUDE.md 和本机全部技能"
+                name={AGENT_DEFAULT_LABEL}
+                hint={AGENT_DEFAULT_HINT}
                 active={!draftAgentId}
                 onClick={() => pickAgent(null)}
               />
@@ -112,16 +134,7 @@ export function AgentPicker() {
                 <AgentRow
                   key={a.id}
                   name={a.name}
-                  hint={
-                    [
-                      a.description,
-                      // 隔离的代价要在选之前就说清楚，不能等它答不出话才发现。
-                      a.inheritEnv ? null : "隔离：无 CLAUDE.md / 本机技能 / MCP",
-                      a.tools ? `工具：${a.tools.join(" ")}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || undefined
-                  }
+                  hint={agentHint(a)}
                   active={draftAgentId === a.id}
                   onClick={() => pickAgent(a.id)}
                 />

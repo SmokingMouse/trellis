@@ -656,11 +656,29 @@ function migrate(db: Database) {
   `);
 
   // 任务会话不该挤在用户的会话侧栏里。'user' | 'task'。
+  // 注意：这个 `kind` 与 `nodes.kind`（'qa' | 'reference'）**同名不同义**，
+  // 两者没有任何关系，写查询时别把两张表的 kind 当同一个枚举（S89 记）。
   const hasSessionKind = db
     .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'kind'")
     .get();
   if (!hasSessionKind) {
     db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
+  }
+
+  // S89: `tasks.model` 这一列名不副实 —— 它存的一直是 **providerId**
+  // （`lib/server/tasks.ts` 里 `isProviderId(task.model) ? task.model : DEFAULT_PROVIDER`），
+  // 而 `agents.model` 存的是 CLI 模型名（如 'haiku'）。同名不同义，是真会写错的那种。
+  //
+  // 加列而不是改列：`migrate()` 至今全是加法 DDL（decisions.md 2026-07-28 把这条列为
+  // 部署方案可行的理由之一），这条纪律比一列干净更值钱。读时 `provider_id ?? model` 兜底，
+  // 写只写新列。旧列**留一个版本再删** —— 真库里 tasks 目前是 0 行（facts.md 第一条），
+  // 所以这次迁移零数据风险，但流程仍按有数据的情形走。
+  const hasTaskProviderId = db
+    .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'provider_id'")
+    .get();
+  if (!hasTaskProviderId) {
+    db.exec("ALTER TABLE tasks ADD COLUMN provider_id TEXT");
+    db.exec("UPDATE tasks SET provider_id = model WHERE provider_id IS NULL");
   }
 
   // Stage 16: FTS5 cross-session full-text search. Single virtual table

@@ -2,9 +2,14 @@
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
-import { providerFamily } from "@/lib/llm";
-import type { Mode, ProviderId } from "@/lib/llm";
-import { WorkspacePicker } from "./WorkspacePicker";
+import type { Mode } from "@/lib/llm";
+import {
+  approvalAvailable,
+  approvalCopy,
+  contextModeOptions,
+  workspaceRequired,
+} from "@/lib/run-config";
+import { WorkspaceField } from "./run-config/WorkspaceField";
 
 // Stage 14: the mode picker only appears in the new-session draft state
 // (the empty QuestionInput). It edits draftMode + draftWorkspacePath in
@@ -52,50 +57,11 @@ function LinkIcon() {
   );
 }
 
-type Option = {
-  id: Mode;
-  label: string;
-  Icon: () => React.ReactElement;
-  title: string;
+// 文案在 lib/run-config.ts（任务定义页共用同一份）；这里只负责把 id 映到图标。
+const ICONS: Record<Mode, () => React.ReactElement> = {
+  chat: ChatIcon,
+  project: LinkIcon,
 };
-
-function optionsFor(provider: ProviderId): Option[] {
-  if (providerFamily(provider) === "codex") {
-    return [
-      {
-        id: "chat",
-        label: "Chat",
-        Icon: ChatIcon,
-        title:
-          "Chat：纯文本回复，沙箱 read-only，禁用所有 tools / MCP。codex 暂无 WebSearch 等价，无联网。",
-      },
-      {
-        id: "project",
-        label: "Project",
-        Icon: LinkIcon,
-        title:
-          "Project：一条岔一个 codex session（分叉=前缀 rollout 新 lineage）。MCP/tools 全开。rollout 在 ~/.codex/sessions/，删除 trellis session 时清理。",
-      },
-    ];
-  }
-  // Claude (default).
-  return [
-    {
-      id: "chat",
-      label: "Chat",
-      Icon: ChatIcon,
-      title:
-        "Chat：纯文本 + WebSearch / WebFetch 联网。不加载 skills / CLAUDE.md。最便宜，对标 GPT 网页客户端。",
-    },
-    {
-      id: "project",
-      label: "Project",
-      Icon: LinkIcon,
-      title:
-        "Project：在所选仓库 cwd 中加载 skills + CLAUDE.md，一条岔一个 claude session（分叉=前缀 jsonl 新 lineage）。skills/tools 全开。删除 trellis session 时清理对应 jsonl。",
-    },
-  ];
-}
 
 export function ModePicker() {
   const mode = useSessionStore((s) => s.draftMode);
@@ -107,11 +73,10 @@ export function ModePicker() {
   const setRequireApproval = useSessionStore((s) => s.setDraftRequireApproval);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const OPTIONS = optionsFor(provider);
-  const needsWorkspace = mode === "project";
-  // 权限确认开关：仅 claude 系的 project 有意义（chat 无文件工具；
-  // codex 无 stdio 审批协议，显示了也是谎言）。服务端创建时还会再钳一道。
-  const approvalAvailable = needsWorkspace && providerFamily(provider) === "claude";
+  const OPTIONS = contextModeOptions(provider);
+  const needsWorkspace = workspaceRequired(mode);
+  const showApproval = approvalAvailable(mode, provider);
+  const approval = approvalCopy(requireApproval);
 
   const handleSelect = (next: Mode) => {
     if (next === mode) return;
@@ -136,7 +101,7 @@ export function ModePicker() {
       >
         {OPTIONS.map((opt) => {
           const active = mode === opt.id;
-          const { Icon } = opt;
+          const Icon = ICONS[opt.id];
           const style = modeStyle(opt.id);
           const activeColor =
             opt.id === "chat"
@@ -166,55 +131,30 @@ export function ModePicker() {
       </div>
 
       {needsWorkspace && (
-        <button
-          onClick={() => setPickerOpen(true)}
-          title={workspacePath ?? "请选择工作区目录"}
-          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
-            workspacePath
-              ? "border-line-strong bg-surface text-ink hover:bg-surface-muted"
-              : "border-danger-line bg-danger-muted text-danger-ink animate-pulse"
-          }`}
-        >
-          <span aria-hidden>📁</span>
-          <span className="truncate max-w-[10rem] font-mono">
-            {workspacePath ? basename(workspacePath) : "选择工作区"}
-          </span>
-        </button>
+        <WorkspaceField
+          value={workspacePath}
+          onChange={setWorkspacePath}
+          required
+          className="max-w-[10rem]"
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+        />
       )}
 
-      {approvalAvailable && (
+      {showApproval && (
         <button
           onClick={() => setRequireApproval(!requireApproval)}
-          title={
-            requireApproval
-              ? "需确认：Bash/Write/Edit 等可变更工具逐个弹卡，等你允许/拒绝后才执行（创建会话时锁定）"
-              : "YOLO：工具自动放行（现状默认）。点击切换为需确认——可变更工具执行前先问你"
-          }
+          title={approval.title}
           className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
             requireApproval
               ? "border-accent-line bg-accent-muted text-accent-ink"
               : "border-line-strong bg-surface text-ink-faint hover:bg-surface-muted"
           }`}
         >
-          <span aria-hidden>{requireApproval ? "🛡️" : "⚡"}</span>
-          <span>{requireApproval ? "需确认" : "YOLO"}</span>
+          <span aria-hidden>{approval.icon}</span>
+          <span>{approval.label}</span>
         </button>
-      )}
-
-      {pickerOpen && (
-        <WorkspacePicker
-          currentPath={workspacePath}
-          onPick={(p) => setWorkspacePath(p)}
-          onClose={() => setPickerOpen(false)}
-        />
       )}
     </div>
   );
-}
-
-function basename(p: string): string {
-  if (!p) return "";
-  const stripped = p.replace(/\/+$/, "");
-  const idx = stripped.lastIndexOf("/");
-  return idx === -1 ? stripped : stripped.slice(idx + 1);
 }

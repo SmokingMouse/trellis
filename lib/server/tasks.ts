@@ -39,7 +39,10 @@ export type Task = {
   prompt: string;
   workspacePath: string | null;
   contextMode: string;
-  model: string | null;
+  /** S89: 这一列存的是 **providerId**（如 'claude-sonnet-5' / 'codex'），不是 CLI 模型名。
+   *  `agents.model` 才是模型名 —— 两者同名不同义过，见 sqlite.ts 的 provider_id 迁移注释。
+   *  null = 用 DEFAULT_PROVIDER。 */
+  providerId: string | null;
   enabled: boolean;
   homeSessionId: string | null;
   timeoutMs: number;
@@ -81,13 +84,15 @@ export type TaskRun = {
   createdAt: number;
 };
 
-const TASK_COLS = `id, name, agent_id, prompt, workspace_path, context_mode, model,
+const TASK_COLS = `id, name, agent_id, prompt, workspace_path, context_mode, model, provider_id,
        enabled, home_session_id, timeout_ms, overlap_policy, notify_on,
        max_budget_usd, created_at, updated_at`;
 
 type TaskRow = {
   id: string; name: string; agent_id: string | null; prompt: string;
-  workspace_path: string | null; context_mode: string; model: string | null;
+  workspace_path: string | null; context_mode: string;
+  /** 旧列，留一个版本兜底后再删。真源是 provider_id。 */
+  model: string | null; provider_id: string | null;
   enabled: number; home_session_id: string | null; timeout_ms: number;
   overlap_policy: string; notify_on: string; max_budget_usd: number | null;
   created_at: number; updated_at: number;
@@ -96,7 +101,9 @@ type TaskRow = {
 function rowToTask(r: TaskRow): Task {
   return {
     id: r.id, name: r.name, agentId: r.agent_id, prompt: r.prompt,
-    workspacePath: r.workspace_path, contextMode: r.context_mode, model: r.model,
+    workspacePath: r.workspace_path, contextMode: r.context_mode,
+    // 读时兜底：迁移前建的行只有旧列。
+    providerId: r.provider_id ?? r.model,
     enabled: r.enabled === 1, homeSessionId: r.home_session_id,
     timeoutMs: r.timeout_ms, overlapPolicy: r.overlap_policy,
     notifyOn: (r.notify_on as Task["notifyOn"]) ?? "error",
@@ -130,9 +137,12 @@ export type TaskInput = {
   agentId?: string | null;
   workspacePath?: string | null;
   contextMode?: string;
-  model?: string | null;
+  providerId?: string | null;
   enabled?: boolean;
   timeoutMs?: number;
+  /** S89: 此前漏在 TaskInput 之外 —— 列在、调度器也读，但**建/改任务都写不进去**，
+   *  于是界面上加个开关就是谎言。'skip'（默认）| 'queue'。 */
+  overlapPolicy?: string;
   notifyOn?: Task["notifyOn"];
   maxBudgetUsd?: number | null;
 };
@@ -143,15 +153,15 @@ export function createTask(input: TaskInput): Task {
   getDB()
     .prepare(
       `INSERT INTO tasks (id, name, agent_id, prompt, workspace_path, context_mode,
-                          model, enabled, timeout_ms, notify_on, max_budget_usd,
-                          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                          provider_id, enabled, timeout_ms, overlap_policy, notify_on,
+                          max_budget_usd, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id, input.name, input.agentId ?? null, input.prompt,
       input.workspacePath ?? null, input.contextMode ?? "project",
-      input.model ?? null, input.enabled === false ? 0 : 1,
-      input.timeoutMs ?? 1_800_000, input.notifyOn ?? "error",
+      input.providerId ?? null, input.enabled === false ? 0 : 1,
+      input.timeoutMs ?? 1_800_000, input.overlapPolicy ?? "skip", input.notifyOn ?? "error",
       input.maxBudgetUsd ?? null, now, now,
     );
   return getTask(id)!;
@@ -167,9 +177,11 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Task | null {
   if (patch.agentId !== undefined) put("agent_id", patch.agentId);
   if (patch.workspacePath !== undefined) put("workspace_path", patch.workspacePath);
   if (patch.contextMode !== undefined) put("context_mode", patch.contextMode);
-  if (patch.model !== undefined) put("model", patch.model);
+  // 只写新列；旧 model 列不再更新（读时兜底仍在）。
+  if (patch.providerId !== undefined) put("provider_id", patch.providerId);
   if (patch.enabled !== undefined) put("enabled", patch.enabled ? 1 : 0);
   if (patch.timeoutMs !== undefined) put("timeout_ms", patch.timeoutMs);
+  if (patch.overlapPolicy !== undefined) put("overlap_policy", patch.overlapPolicy);
   if (patch.notifyOn !== undefined) put("notify_on", patch.notifyOn);
   if (patch.maxBudgetUsd !== undefined) put("max_budget_usd", patch.maxBudgetUsd);
   if (!sets.length) return getTask(id);
@@ -367,7 +379,7 @@ function ensureTaskSession(task: Task, question: string, now: number): {
     mode: task.contextMode,
     workspacePath: task.workspacePath,
     systemPrompt: null,
-    model: task.model,
+    model: task.providerId,
     agentId: task.agentId,
     attachments: [],
   });
@@ -476,7 +488,7 @@ export function launch(task: Task, runId: string): StartTaskRunResult {
 
   const { sessionId, nodeId } = ensureTaskSession(task, question, now);
 
-  const providerId = isProviderId(task.model) ? task.model : DEFAULT_PROVIDER;
+  const providerId = isProviderId(task.providerId) ? task.providerId : DEFAULT_PROVIDER;
   const family = providerFamily(providerId);
   const llm = getProvider(providerId, { mode: task.contextMode as never });
 

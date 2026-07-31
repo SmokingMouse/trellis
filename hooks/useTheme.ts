@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_PALETTE, isPaletteId, type ThemeMode } from "@/lib/themes";
+import { PREF_KEYS } from "@/lib/prefs";
 
 // Theme state = { mode, palette }:
 //   mode    — light / dark / system（跟随系统），storage key 'trellis-theme'。
@@ -13,9 +14,11 @@ import { DEFAULT_PALETTE, isPaletteId, type ThemeMode } from "@/lib/themes";
 // 纯 CSS 变量重绘（globals.css 的 token 层级联），不触发任何 React 重渲染
 // ——所以这里刻意不用 Context，消费方只有 ThemeMenu 与 /theme 命令。
 // layout.tsx 的预水合脚本镜像同样的解析逻辑，改动时保持同步。
+// S89: key 名两处共用 lib/prefs.ts 的常量（layout 的脚本从同一处插值生成），
+// 至少「名字」这一层不可能再漂。
 
-const MODE_KEY = "trellis-theme";
-const PALETTE_KEY = "trellis-palette";
+const MODE_KEY = PREF_KEYS.theme;
+const PALETTE_KEY = PREF_KEYS.palette;
 
 // Module-level pub/sub so the /theme command (runs outside React) and any
 // mounted ThemeMenu stay in sync without a Context.

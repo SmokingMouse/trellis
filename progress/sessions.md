@@ -1,6 +1,28 @@
 # Session Log
 
-最近 5 条，倒序（Session 88 / 87 / 86 / 85 / 84）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 89 / 88 / 87 / 86 / 85）。更早的见 `archive.md`。
+
+### Session 89（2026-07-31，设置与功能排布重组：出方案不动代码）
+- **触发**: 用户「现在 trellis 设置有点乱，各种功能排布也有点散乱，特别是在 Agent 和定时任务出现后，我想集中排一排」。三路并行勘察（设置落点 / 导航入口 / Agent 与任务表面）后出方案。
+- **诊断不是「没排整齐」，是一条原则被撑破**: `app/settings/page.tsx:5-8` 和 `decisions.md` 2026-07-29 写着「刻意不做偏好中心，一切配置都语境化」。这条对当下语境和 UI 偏好都成立，但 **Agent / Task 是持久对象（有 CRUD、跨 session、按 id 引用），结构上没有「当下」可挂**，于是各被甩成一张整页且不对等。
+- **勘察实测到的散乱（全部带 file:line，见 `console-ia-spec.md` 第 1 节）**: Agent 管理走两跳且三页互链缺一条边（`settings/agents` 不链 `/tasks`）· 同一套运行配置手写三遍，任务页 workspace 退化成**裸绝对路径 input**（`app/tasks/page.tsx:262`）不接 `workspaces` 表 · `agents.permission`/`require_approval` 与 tasks 的 `timeoutMs`/`overlapPolicy`/`maxBudgetUsd` 后端全实现了但**只能由 API 改** · `tasks.model` 实际存 providerId 而 `agents.model` 存模型名，**同名不同义** · `TaskToast` 只挂主页，在 `/tasks` 页反而收不到 · project 模式**根本没有 Agent 选择入口**（`QuestionInput.tsx:256`）· ~25 个 localStorage key 散在 8 个文件，`trellis-theme` 双份硬编码。
+- **用户拍板三个方向**（AskUserQuestion 三选）: ① 激进 —— 任务运行进侧栏、定义全收管理台；② 偏好做**镜像**不搬家；③ 本轮只出方案 + ADR 不动代码。
+- **最有价值的一条洞察**: 任务的执行落点**本来就是** session/node（`tasks.ts:374-376` 打 `kind='task'`，`repo.ts:342-352` 滤掉）。`/tasks` 页等于把「列表 + 运行历史 + 深链」在 SPA 外重实现了一遍。把 task session 在侧栏露一个折叠组，运行历史免费拿到工具卡片 / 就地分叉 / 搜索 / toast —— **这是在兑现 S88 已经付过的成本**。复核了 `repo.ts:347` 的隐藏理由（"一个月 30 个节点"）：**只对节点数成立，对侧栏行数不成立**（行数 = 任务数）。
+- **Done**: `console-ia-spec.md`（六批改动，每批带判据 + 4 条风险）· `decisions/2026-07-31-console-ia.md`（六条决策 + 修订 2026-07-29 旧条目的一半 + 后果）。**零代码改动**。
+- **实施时最容易搞错的一步（已写进 spec R3）**: 批 1 单独发布时**不能删 Header 的 ⏱** —— 删它的前提是任务日常入口已转移到侧栏（批 4）。先删就是纯粹退步。
+- **批 1 已实施（导航收拢）**: `lib/settings-tabs.ts`🆕 tab 唯一真源 + `components/SettingsNav.tsx`🆕（用 `useSelectedLayoutSegment` 判高亮，不做 pathname 前缀匹配）+ `app/settings/layout.tsx`🆕 接管滚动容器与页头 · `/settings/page.tsx` → `update/`、`/tasks` → `settings/tasks/`（**git mv，认成 R**）· redirect 放 next.config 且**用 307 不用 308**（308 被浏览器永久缓存，会把还在动的路由锁死）· Header ⏱ 改指 `/settings/tasks` 但**保留图标**。三张页各自的 `h-dvh` 容器与手写互链全删。
+- **批 3 已实施（抽共用运行配置）· 偏离了自己写的 spec**: 原计划「一个 `RunConfig.tsx` 带三种 variant」，读完代码判断是**假抽象** —— draft 是空状态首屏的图标分段器、task 是表单里的 select，控件形态本来就该不同，硬合只会得到巨大 variant 分支。真正在漂的是**文案与语义**。改为 `lib/run-config.ts`🆕（文案/语义唯一真源，无 JSX）+ `components/run-config/WorkspaceField.tsx`🆕（三处里唯一真正同一个的控件，受控 open 保住「切 project 自动弹 picker」的既有行为），消费方 ModePicker / AgentPicker / ModeBadge / tasks 页全部改引用。
+- **两条自我纠错（都记下来以免再犯）**: ① 批 1 里我给「← 返回」用了 `<a>` 并编了「与出去方向对称」的理由，被 lint 抓出 —— 查了才知道原来三张页用的都是 `<Link>`，`<a>` 那条规矩**只管出去**（丢 React Flow 状态），回来没东西要丢。② 批 3 里我一度顺手删掉「选 project 自动弹 WorkspacePicker」，那是 `ModePicker.tsx` 文件头写明的有意设计且不在批 3 范围内，已撤回并改成受控 open 保住。
+- **spec 里一条我写错的已修正**: 3.2 原写「agent chip 变灰至今未做」—— **ModeBadge 早就做了**。真实缺陷小得多：它手写 `model.startsWith("codex")` 判家族，**漏掉 mock**（服务端钳制是 `providerFamily(...)==="claude"`）。已统一走 `agentSupported()`。
+- **3.1 是真缺口且已补**: `QuestionInput` 把 Agent 入口整块关在 `draftMode === "chat"` 里，而服务端 `chat/route.ts:336` 对 agentId 的钳制**只看 claude 家族、不看 mode** —— project 会话一直支持 agent，只是没有入口。已实测截图确认 project 下入口出现。
+- **验证（隔离实例 :3399 + 真库 VACUUM 快照 + `TRELLIS_SCHEDULER=off`）**: tsc ✓ / lint 35 = baseline **零新增**（对照跑过 stash 前后）/ build ✓。批 1：307 落点、三 tab 全 200、SSR 阶段高亮就正确、桌面 rail 与手机横向条截图、Header 两入口点击落点正确。批 3：codex+chat 下 picker 正确隐身、切 claude+project 后 Agent 入口出现且下拉无 system-prompt textarea、自动弹 picker 行为保住、任务表单端到端建了一个任务且 WorkspacePicker 选出的绝对路径正确落 `tasks.workspace_path`。收尾：实例已停、快照已删、browser session 已 close（GPU 进程 0）、prod DB 修改时间仍 11:46、`:3088` 仍 401。
+- **批 2 已实施（tab 内容补齐）**: `ModelConfigModal` 拆成 Panel + Modal 两层，「🧠 模型与 Provider」tab 与下拉底部的 modal 共用同一组件 · 新增「📁 工作区 / CLI」tab（通览 + worktree 回收 + CLI attach，刻意**不做**新建 worktree / 开会话 —— 那两个有真正的语境化的家）· 新增 `GET /api/workspaces`（`recent` 不回 id/kind/createdBy，而删除判据恰好是 `createdBy==='trellis' && kind==='worktree'`；复用 `/api/sessions` 会把管理台耦到流式期间 ~1.6 次/秒的热路径）· agents 补 `permission`/`requireApproval` · tasks 补 `timeoutMs`/`overlapPolicy`/`maxBudgetUsd`/`enabled` · 运行历史加「中止」（行从整个 `<button>` 拆成 div + 两个子按钮）。
+- **批 2 挖出一个计划外缺陷**: `overlapPolicy` **根本不在 `TaskInput` 里** —— 列在、调度器读它、但 createTask/updateTask 都写不进去。只按原计划「表单加个 select」就完事的话，那个开关会静默失效，正是这一路一直在挑的「谎言级 UI」。已补全服务端。
+- **批 5 已实施（偏好镜像）· 判据被我主动调整并说明**: 原判据「所有 localStorage 调用点都走 prefs.ts」被否 —— 57 个调用点里 41 个在 `stores/sessionStore.ts`（3000+ 行核心，且**早已把 key 集中声明在文件顶部**并带注释）。为一条形式判据重写那 41 处读写，是拿主路径回归风险换一个好看的 grep 结果。真正在漂的只有主题那两个 key（`useTheme.ts` 与 `layout.tsx` 各硬编码一份，后者还留着「keep them in sync」的注释）—— 已物理消除：layout 的首屏防闪脚本改为从 `PREF_KEYS` **插值生成**。新增 `lib/prefs.ts`（key 真源 + 清单元数据）与「🎚 偏好」tab（每行标注**原本在哪改**，指路而非取代；新会话默认值只读，因为那三个 picker 要连带做一致性钳制）。
+- **批 6 已实施（语义冲突）**: `tasks.model` 名不副实（存的是 providerId，而 `agents.model` 是 CLI 模型名）→ **加列** `provider_id` + 读时 `provider_id ?? model` 兜底 + 只写新列，旧列留一版再删（保住 `migrate()` 全加法 DDL 那条纪律；真库 tasks 0 行，零数据风险）· `require_approval` 双源优先级**核实后写进 UI**：`applyAgent` 在会话基线之后跑，agent 非 null 即覆盖，所以是「以 agent 为准」· `sessions.kind` vs `nodes.kind` 同名不同义加注释 · agent 的技能改称「挂载技能」并说清与 `/` 补全那条路的区别。
+- **验证（隔离实例 :3399 + 真库 VACUUM 快照 + `TRELLIS_SCHEDULER=off`）**: tsc ✓ / lint 35 = baseline **零新增**（中途一度 37，两个 `set-state-in-effect` 已按 `app/settings/update/page.tsx:67` 的既定写法修回）/ build ✓，六个 tab 全 200。逐条实测：provider_id 迁移在真库快照上加列成功且旧列保留 · 偏好 tab 改皮肤 → localStorage 写入 → 刷新后 `html[data-theme]` 正确（证明 layout 与 useTheme 读的是同一个 key）· agent 的 permission/requireApproval 读写双向通（先 API 写→表单回显，再 UI 改→落库）· 任务四个新字段 + providerId 全部落库（`provider_id` 有值、旧 `model` 列为 null）。收尾：实例停、快照删、browser close（GPU 进程 0）、prod DB 仍 11:46、`:3088` 仍 401、`endpoints.yaml` 仍 7-28（models tab 全程只读）。
+- **一个测试工具的坑（不是产品 bug）**: `agent-browser click @ref` 在 agents 页那个「保存」按钮上**静默不生效**（长技能列表把它推出视口），连试两次都误判成「写入失败」。改用 `eval` 里 `button.click()` 后立刻通过。以后在长页面上验按钮，别只信 ref click 的成功返回。
+- **Next**: 用户验收（改动**未 commit**）。批 4 仍降级待观察 —— 判据是「入口从 2 跳变 1 跳 + 表单补全后，一周内 tasks 表是否还是 0 行」。若仍为 0，该考虑砍掉自动化任务而不是继续加功能。
 
 ### Session 88（2026-07-31，自定义 Agent 层 + 自动化任务：A1-A4 与 T1-T4 全量落地）
 - **触发**: 用户要「给 Trellis 加 Agent 管理（配提示词、技能等）+ 配置自动化任务」，追问后定死范围：一路做到 cron，但抽象要先立住 —— 后续的飞书群绑定、多 agent 讨论组都长在同一层上。中途下 `/goal` 要求一次全做完。
@@ -70,18 +92,3 @@
 - **两次自摆乌龙**: ① 第一版 guard 报「非 import 节点被误删」是虚惊 —— 我重写脚本时把 INSERT 删了，那两个节点压根没被放进去过。**测「东西还在吗」之前先确认它进去过。** ② lint 从 28 涨到 34 以为是回归，其实是我遗留在仓库根的临时验证脚本被 eslint 扫了。
 - **边界（诚实）**: 截图那条会话在 devbox 上，本机 DB 最新只到 7-28，**没拿到现场直接证据** —— 诊断靠本机语料复现同形态（136 例）建立。另：**源 jsonl 已失联的镜像会话走不到修复路径**（`parseLineages` 早返回 `empty`），本机两个 attached 会话的 jsonl 都已不在磁盘，那 2 个坏节点不会自愈，只是 UI 文案不再谎称「正在生成」。
 - **Next**: 两台实例（本机 prod + devbox）都要重新部署才生效；重启后首次 `getDB()` 跑 v1 迁移，watcher 自动全量重导一次。
-
-### Session 84（2026-07-30，动线渲染重做：三类 task 分家 + 工具渲染注册表）
-- **触发**: 用户贴截图「子 Agent 的动线展示还是很不友好，workflow 也没展示出来」，要求参考 riba / happyclaw 讨论一版方案。
-- **先证伪了截图的表象**：那两个「子 Agent」**根本不是子 Agent，是慢 Bash**。根因单一 —— `lib/subagents.ts:57` 拿 `c.agent !== undefined` 当「这是子 Agent」的判据，而 CLI 对**三种**东西发同一套 `system/task_*`：`local_agent` / `local_bash` / `local_workflow`。判别位 `task_type` 被丢两次（SDK `taskData()` 没抽 + adapter `void phase`）。
-- **实测拿的证据（不是读代码推的）**: 两次真跑 `claude -p … --output-format stream-json` 录流。① 后台 Bash 与**前台慢 `sleep 12`** 都发 `task_started{task_type:"local_bash"}`，且 `task_notification.summary` 就是描述回声 → 老代码 `report = summary ?? output` 短路掉真 stdout。② Workflow 发 `task_type:"local_workflow"` + `workflow_name`，**并且 `task_progress` 上挂着 `workflow_progress` 全量快照**（phase 列表 + 每个 agent 的 label/phaseTitle/state/model/tokens/durationMs/resultPreview）。二进制里 `strings` 也印证了三个字面量。
-- **这条实测直接推翻了原方案的一个前提**：Workflow 面板**不需要读磁盘**。用户已批准的「磁盘 adapter」因此本轮不建（L3 才用得上，现在建就是空转抽象）。
-- **Done L0（事件层）**: SDK 0.3.3 补抽 `task_type`/`workflow_name`/`workflow_progress`；adapter 停止丢 `phase`/`taskId`；`SubagentMeta` → `TaskMeta`（它描述的从来不只是子 agent）。
-- **Done L1（视图模型）**: `splitToolChain → {main, groups}` 两个平铺列表换成一棵 `buildToolTree → ToolNode{call, kind, meta, children, report}`。kind 四级降级链：`taskType` → 工具名/有子节点 → **taskId 首字母 a/b/w** → tool。前缀那级是关键 —— 它让修复**不等 SDK 发版**就在存量数据上生效。
-- **Done L2（渲染注册表）**: `lib/tool-registry.ts` 元数据表（30+ 工具各一行，不写 React）+ `components/tools/views/` 组件表（只有 Diff/Todo/Workflow/Subagent 四个）。抄了两条别人踩过的铁律：`canRender` 说不行就降级 RawView（注册表永远炸不了）、**错误永不隐藏**。
-- **Done L3（动线布局）**: 单一时间线取代「🔧 主链 + 🤖 子 Agent」两个抽屉 —— 分区把时间顺序切断了，正是「动线不友好」的另一半。删 `ToolCallsPanel.tsx` / `SubagentPanel.tsx` / `lib/subagents.ts`，不留双版本。
-- **实施中挖出两个计划外的**: ① SDK `stdout ?? content`，空 stdout 顶掉 content —— 和分组吞并叠加才是「命令结果彻底消失」的完整成因。② 失败的行必须默认展开，否则「错误永不隐藏」只是口号（渲染冒烟测试逼出来的）。
-- **验证**: `test-tool-tree.ts` 34 项 + `test-timeline-render.tsx` 45 项 ALL PASS（三个真 fixture 各覆盖一种 task_type，后两个是本次录的）；**生产库回放** 21 条误判 Bash 全部归位、20 条输出恢复可见、4 个真子 Agent 不回归；tsc ✓ lint ✓ build ✓。
-- **合并后在 main worktree（registry 版 0.3.2）实测，纠正一个我先前说轻了的判断**：分类确实全对（前缀链兜住）、report 不再吞 output，**但 `stdout ?? content` 那个修复也在 SDK 里** —— 0.3.2 上后台/无输出命令的输出仍是空串。所以「结果不可见」在 0.3.2 上只修好一半，发版不是锦上添花。`test-tool-tree.ts` 开头加了版本闸，装 0.3.2 时先打印提示再红。
-- **收尾**: `@smokingmouse/agent@0.3.3` 已发 npm，trellis 依赖收紧到 `^0.3.3` + 解链回注册表版本，全套验证在真 registry 包上复跑通过（tsc / 79 项断言 / build 全绿，版本闸不再告警）。main 已推 origin。
-- **Next**: **浏览器人工验收**（本 session 无浏览器工具，只能人跑）—— 尤其流式态：面板自动展开、运行中子 Agent 自动展开、LiveHeader 取最深运行节点。之后 `make deploy` 上 prod。

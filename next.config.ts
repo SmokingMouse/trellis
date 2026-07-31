@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import os from "node:os";
+import { DEFAULT_SETTINGS_TAB } from "./lib/settings-tabs";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -28,6 +29,25 @@ const nextConfig: NextConfig = {
   // @smokingmouse/agent 是 server-only Node 包(spawn child_process),external 它从 node_modules
   // 直接运行(dist 编译产物),不进 bundler。@smokingmouse/llm 同理(读 fs)。
   serverExternalPackages: ["@openai/codex-sdk", "@openai/codex", "@smokingmouse/agent", "@smokingmouse/llm"],
+  // S89: 管理台改成 tab 壳之后的两条路由兼容。放在 next.config 而不是留一张 redirect 页 ——
+  // 这里在文件系统路由之前生效，不用为了转发而渲染一个 React 树，也就不会有「先闪一下空页
+  // 再跳走」。
+  //
+  // permanent: false（307）是有意的：308 会被浏览器**永久**缓存，而这两条都还可能再动
+  // （/settings 将来若做成有内容的总览页，308 会让老浏览器再也进不去）。本机应用，
+  // 少一次 301 缓存的收益远小于把自己锁死的风险。
+  async redirects() {
+    return [
+      // /settings 落到第一个 tab。默认值取自 lib/settings-tabs.ts，改 tab 顺序即改这里。
+      {
+        source: "/settings",
+        destination: `/settings/${DEFAULT_SETTINGS_TAB}`,
+        permanent: false,
+      },
+      // S88 时任务是顶级页 /tasks。书签、Header 旧图标、以及任何贴出去的链接都还指着它。
+      { source: "/tasks", destination: "/settings/tasks", permanent: false },
+    ];
+  },
   // Tunneled dev (Cloudflare CDN, etc.): some CDNs rewrite Next dev's
   // `Cache-Control: no-cache` into `max-age=14400`, so edits to globals.css
   // don't reach the browser for hours. `no-store` is one of the few

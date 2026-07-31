@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Popover } from "@/components/ui/Popover";
-import { ModelConfigModal } from "@/components/ModelConfigModal";
+import { ModelConfigModal } from "@/components/ModelConfigPanel";
 import {
   PROVIDERS,
   FAMILY_LABELS,

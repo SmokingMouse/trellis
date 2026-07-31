@@ -1,11 +1,13 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 
-// 设置页。目前只有「版本与更新」一块 —— 刻意不把主题/发送键/宽度这些偏好搬进来，
-// 它们各自有语境化的入口（主题在 ThemeMenu、发送键在 composer 脚注、宽度在线性
-// 视图顶栏），搬进来只是多一跳。这一页存在的理由是**更新**：它没有语境化的家，
-// 又需要展示版本、落后的 commit、部署进度、失败日志，塞不进任何一个 popover。
+// 管理台的「版本与更新」tab。曾经这一页就是整个 /settings，文件头写着「刻意不做偏好中心」
+// —— S89 修订了那条取舍的一半：偏好仍不从原地控件搬走，但会在管理台多一份可穷举的镜像
+// 清单（批 5），因为偏好从当年的几个涨到了 ~25 个、散在 8 个文件里。见
+// decisions/2026-07-31-console-ia.md 决策 5。
+//
+// 更新本身进管理台的理由没变：它没有语境化的家，又要展示版本、落后的 commit、部署进度、
+// 失败日志，塞不进任何一个 popover。
 
 type Commit = { sha: string; subject: string };
 type DeployPhase =
@@ -136,25 +138,8 @@ export default function SettingsPage() {
   const canUpdate = repoOk && !st?.running && !busy;
 
   return (
-    <div className="min-h-screen bg-surface-canvas text-ink-strong">
-      <div className="mx-auto max-w-3xl px-6 py-8">
-        <div className="flex items-center gap-3 mb-6">
-          <Link
-            href="/"
-            className="h-7 px-2.5 inline-flex items-center rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
-          >
-            ← 返回
-          </Link>
-          <h1 className="text-lg font-semibold tracking-tight">设置</h1>
-          {/* S88：Agent 管理是独立整页（编辑器装不进 popover），从这里进。 */}
-          <Link
-            href="/settings/agents"
-            className="ml-auto h-7 px-2.5 inline-flex items-center rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
-          >
-            🎭 Agent 管理 →
-          </Link>
-        </div>
-
+    // S89: 滚动容器与页头由 app/settings/layout.tsx 接管，这里只剩内容。
+    <div className="max-w-3xl">
         <section className="rounded-card border border-line bg-surface shadow-raise p-5">
           <h2 className="text-ui font-medium mb-4">版本与更新</h2>
 
@@ -333,7 +318,6 @@ export default function SettingsPage() {
             验活不过自动回滚到上一版。整个过程只有切换那一下服务不可用。
           </p>
         </section>
-      </div>
     </div>
   );
 }
