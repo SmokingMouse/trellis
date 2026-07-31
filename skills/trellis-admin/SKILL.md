@@ -1,0 +1,118 @@
+---
+name: trellis-admin
+description: 配置 Trellis 平台的后台——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「让它盯着某个目录，一改就跑」「这个任务上次为什么失败」「看看有哪些定时任务」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「让这台机器上的某个 agent 定时地、或被事件触发地替我干活」就触发。触发词：trellis、trellisctl、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、任务失败、run 历史、看看任务。边界：只操作 Trellis 的 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
+---
+
+# Trellis 后台配置
+
+界面上能点的东西（管理台 `/settings/agents` 和 `/settings/tasks`），这里用一句话就能做完。价值不在"能做"，在于**建一个任务要填八个字段**，而对话里说清楚只要一句。
+
+所有操作都走 `scripts/trellisctl.ts`：
+
+```bash
+bun <skill目录>/scripts/trellisctl.ts health      # 先探这一下，确认连上的是哪个实例
+```
+
+裸 `trellisctl` 不带参数会打完整用法。下文只讲**字段语义和它们的坑**——那些是光看用法看不出来的。
+
+## 三个概念
+
+- **Agent** = 冻成一个 id 的「人设 + 能力面」：提示词、模型、工具白/黑名单、绑哪些本机技能、隔离还是继承本机环境。会话可以选它，任务可以引用它。
+- **Task** = 「agent + prompt + 工作目录」冻成一个按钮。任务的每次执行落在一个真实会话的平行根节点上，所以在界面上点进去看到的东西和你自己提问一模一样，还能就地分叉追问。
+- **Trigger** = 触发器，一个任务可以挂多个（一对多，独立成表）。**没有触发器的任务永远不会自己跑**——这一点是下面那条纪律的基础。
+
+## 纪律：先手动跑，确认了再挂触发器
+
+顺序永远是 **建任务 → `tasks run` 手动跑一次 → 看 `runs` 的结果 → 满意了才 `triggers add`**。
+
+理由不是谨慎，是**任务跑起来的时候没有人在场**：无人值守路径没有审批通道，工具调用一律放行（等价于 `--dangerously-skip-permissions`），它会真改文件、真发请求、真花钱。prompt 写歪一点，交互式会话里你当场就能 Esc，定时任务里你是第二天早上才知道。手动跑那一次的成本是几十秒，省下的是一整夜。
+
+同理，**写操作之前先把要建的东西用人话摘要给用户看一眼**再执行——不是走流程，是因为「每个工作日 09:00 在 ~/foo 跑一个会改文件的 agent」这句话，用户扫一眼就能发现目录写错了，而 JSON payload 他不会逐字读。
+
+## 建 Agent
+
+```bash
+bun .../trellisctl.ts agents create '{"slug":"pr-reviewer","name":"PR 审查","systemPrompt":"...","tools":["Read","Grep","Glob"],"inheritEnv":true}'
+```
+
+| 字段 | 语义与坑 |
+|---|---|
+| `slug` | `^[a-z0-9][a-z0-9-]{0,31}$`。它同时是 CLI 的 `--agent` 值、物化 pack 里的文件名、未来 @提及的名字，所以校验很严。 |
+| `systemPrompt` | 人设正文。选了 agent 的会话，会话级 systemPrompt 会被删掉——**agent 赢，两者不叠加**。 |
+| `model` | CLI 模型名，`null` = 跟随会话。**注意别和任务的 `providerId` 搞混**，那是两个东西。 |
+| `tools` | `null` = 不限制；`[]` = 一个工具都不给；给了数组就是白名单。名字要和 CLI 的工具名字面一致（`Read`/`Write`/`Edit`/`Bash`/`Grep`/`Glob`/`WebFetch`/`Skill`…），**拼错不会报错，只会静默少一个工具**。 |
+| `skills` | `[{"kind":"host","name":"<目录名>"}]`，只能引用本机 `~/.claude/skills/<name>`。名字取**目录名**不是 frontmatter 里的 `name`。用 `trellisctl skills [关键词]` 查。 |
+| `inheritEnv` | **新建的 agent 默认是 `false` = 隔离**，而隔离是三件套：没有 CLAUDE.md、没有本机 skill、**也没有 MCP**。想让它像平时的 claude 一样什么都看得见，显式写 `"inheritEnv":true`。 |
+| `permission` | `full` / `default` / `readonly` / `auto-edit`，`null` = 跟随会话。**这是无人值守场景下唯一真正起作用的闸**（见下面的失败模式）。 |
+| `requireApproval` | 三态（`true`/`false`/`null`）。只在交互式会话里有意义。 |
+
+内置的那几个 agent 改得动但删不掉（下次启动会被 seed 种回来），要让它消失用 `{"enabled":false}`。
+
+自定义 agent **只对 claude 系 provider 生效**；会话切到 codex 之后它静默失效。
+
+## 建 Task
+
+```bash
+bun .../trellisctl.ts tasks create - <<'JSON'
+{"name":"每日仓库巡检","prompt":"看一下昨天到今天的 git log，用三句话总结改了什么，有风险的地方单独指出来",
+ "workspacePath":"/Users/x/proj","contextMode":"project","notifyOn":"always"}
+JSON
+```
+
+prompt 里几乎一定会有引号和换行，**用 `- ` 从 stdin 读**（或 `@文件`），别去和 shell 转义搏斗。
+
+| 字段 | 语义与坑 |
+|---|---|
+| `name` `prompt` | 必填。 |
+| `agentSlug` | 用哪个 agent 跑，省略 = 默认人设。写 slug 就行（脚本会换成 id），别去复制 uuid。 |
+| `contextMode` | `project`（默认）跑在真实工作目录里、能改文件；`chat` 是不带目录的纯对话。**省略它等于选了 project**，所以 project 就必须给 `workspacePath`——脚本会替你挡住这个。 |
+| `workspacePath` | 必须是**当下真实存在**的目录。spawn 前会硬挡（目录被删/worktree 被回收是常事）。 |
+| `providerId` | provider 的 id（`trellisctl providers` 查），不是模型名。省略 = 默认。 |
+| `timeoutMs` | 默认 30 分钟，到点 abort。 |
+| `overlapPolicy` | `skip`（默认，上一次还在跑就跳过并留一条 skipped 记录）/ `queue`。 |
+| `notifyOn` | `error`（默认）/ `always` / `never`。默认只在失败时通知是刻意的——成功是常态，每次都推，一周内你就会把通知关掉。 |
+| `maxBudgetUsd` | 成本闸。时间闸永远在，这是第二道——一个陷进循环的 agent 能在 30 分钟里烧掉很多钱。 |
+| `enabled` | **停用的任务连手动跑都会被拒**，别拿它当"先建好放着"的开关（那个开关是"先不挂触发器"）。 |
+
+## 挂触发器
+
+```bash
+bun .../trellisctl.ts triggers add <taskId> '{"kind":"cron","config":{"expr":"0 9 * * 1-5"}}'
+```
+
+这一步之后任务才会自己跑。脚本会先回显人话描述和未来的触发时间，并拒绝触发间隔小于 5 分钟的表达式（要临时调试可以 `--force`）。
+
+**cron**：五字段 `分 时 日 月 周`，支持 `*` `*/n` `a,b,c` `a-b`。**不支持**秒级、`L`、`W`、`#`、英文月份/星期缩写。时区一律服务器本地。
+
+| 表达式 | 含义 |
+|---|---|
+| `0 9 * * *` | 每天 09:00 |
+| `0 9 * * 1-5` | 每个工作日 09:00 |
+| `30 8 * * 1` | 每周一 08:30 |
+| `0 */2 * * *` | 每两小时 |
+| `0 0 1 * *` | 每月 1 号 00:00 |
+
+拿不准就先 `trellisctl cron "0 9 * * 1-5"`，它会回人话和未来三次触发时间。裸 cron 串的问题从来不是难写，是**写错了不知道**。
+
+**其它触发器**：
+
+- `{"kind":"fs","config":{"dir":"/path","ext":".md","debounceMs":2000}}` — 只 watch 单层目录（递归 watch 在大目录上很贵）。
+- `{"kind":"git","config":{"repoPath":"/path","branch":"main","pollMs":60000}}` — 轮询 `git ls-remote`，远端有新 commit 就触发。想监听本地提交请改用 fs 触发器盯 `<repo>/.git/refs/heads`。
+- `{"kind":"session_done","config":{"sessionId":"..."}}` — 某个会话跑完就触发。不能填这个任务自己的会话（那是无限烧钱的闭环，服务端会拒）。
+- `lark` 这个 kind 建得出来但**全仓没有消费者**，建了就是永不触发的死配置。别建。
+
+## Known Failure Modes
+
+- **给 agent 勾了「需要审批」，但定时任务里它跑得毫无阻拦**：根因是审批闸要靠交互通道（`onCanUseTool`），而任务是无人值守的（`interactive:false`），那个条件永远不成立，于是整条降档逻辑被静默跳过，实际落到 `permission:"full"`。规避：**无人值守的限制只能靠 `permission:"readonly"` 或 `tools` 白名单**，别把 `requireApproval` 当保险；见 `lib/llm/sdk-adapter.ts:73` 与 `lib/server/tasks.ts:526`。
+
+- **某个任务从某天起就再也不跑了，界面上一点异常都没有**：根因是 `overlapPolicy:"skip"` 撞上一条永远停在 `running` 的僵尸 run（进程被 SIGKILL、目录被删等），此后每次触发都被判成「上一次还没结束」。判据：`trellisctl runs <taskId>` 看有没有一条 `running` 挂了很久，或一串 `skipped`。修法：中止它 `runs abort <runId>`。
+
+- **给 agent 配了技能，它却说没有 / 绕路自己硬写**：claude 的技能是靠 `Skill` 工具调起来的，工具白名单里没有 `Skill` 就等于技能静默失效。现在物化层会在有技能时自动补 `Skill`，但如果你在白名单里看到技能配了却调不动，先确认这一条。
+
+- **隔离 agent 用不了 MCP**：`inheritEnv:false` 会连本机 MCP 一起砍掉，这是产品事实不是 bug——隔离 = 无 CLAUDE.md + 无本机 skill + 无 MCP 三件套。要 MCP 就 `inheritEnv:true`。
+
+- **agent 配了但完全没生效，回答却一切正常**：先看会话/任务的 provider 是不是 codex 系——自定义 agent 只在 claude 系生效，切过去是静默失效。
+
+- **`trellisctl health` 探不到，但浏览器能打开 Trellis**：环境里有 `http_proxy` 时 bun 的 fetch 可能被劫走。先 `unset http_proxy https_proxy` 再试，或显式 `TRELLIS_URL=http://127.0.0.1:<port>`。
+
+- **在 A 机器上建的任务，B 机器上看不到**：两台实例不共享数据库，这是刻意的——`workspacePath` 本来就是机器本地路径，任务天然属于它该跑的那台机器。
