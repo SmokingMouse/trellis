@@ -1,13 +1,14 @@
 # Trellis Progress
 
 ## Current Focus
-自定义 Agent + 自动化任务全量落地并实测，卡在「SDK 只本机 link、没发 npm」所以上不了线。两台实例仍待重部。
+Agent 层 + 自动化任务已发 SDK 0.4.0 并上线本机 prod（真库迁移验过）。只剩 BOE 未部 —— 本机 ssh 不通。
 
 ## Goals
 
 - [ ] **自定义 Agent + 自动化任务** → [计划](custom-agents-plan.md) · [ADR](decisions/2026-07-31-custom-agents.md)
   A1-A4（人设 / 技能物化 / 管理界面 / @提及）· T1-T4（任务 / cron / 通知 / 事件触发）全部落地并逐条实测。
-  **卡点：SDK 未发 npm** —— `make deploy` 在新 release 里 `bun install` 会冲掉 link，本机 prod 与远端都用不了。
+  SDK 0.4.0 已发 npm，本机 prod 已上线（`ce3b5fba6`，真库迁移 + 5 个内置 agent + 44 会话无损）。
+  **待办：BOE 未部**（本机 ssh 不通，需在 devbox 上手跑，命令见 `sessions.md` 的 S88 Next）。
 - [ ] **S1: Project/Workspace 层级 + 工作区终端** → [spec](project-workspace-layer.md) · [ADR](decisions/2026-07-27-project-workspace-layer.md)
   P0/P1/P2 均已落地。判据是**行为指标**（一周内 worktree 里的 session 数 > 0），首轮实测为 0；
   S83、S87 各修掉一批可用性堵点后重新计时。S2/S3/S4 依赖它，见 ADR。
