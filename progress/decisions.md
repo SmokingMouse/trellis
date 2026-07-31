@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-07-31 · 「Trellis 管家」agent 先当普通自定义 agent，暂不写进内置种子
+
+**Decision**：S90 建的 `trellis-admin` agent（`2540bb02`，`inherit_env=1`）留在 DB 里当普通自定义
+agent，**不**加进 `lib/agent-presets.ts` 的 `BUILTIN_AGENT_SEEDS`。固化的触发条件是「这个
+人设被真实用例磨过一轮、纪律那几条不再改」。
+**Why**：它的 system prompt 是一次性写出来的、零使用，而内置 = 不可删（`agents.ts:245`
+拒删 builtin，只能停用）+ 跟着仓库上每台机器。**把未经检验的 prompt 焊成不可删的东西**
+是纯粹的负债；而暂缓的代价只是「BOE 上要再建一次」，一条命令。
+**顺带钉死一条常被搞错的**：`inherit_env=1` 的 agent **不需要绑 `skills_json`** —— 它不加
+`--setting-sources=`，本机 `~/.claude/skills/` 全部可见。绑技能只对隔离档（`inheritEnv:false`）
+有意义，给继承档绑只会白物化一个 pack。所以将来真要固化，`seedBuiltinAgents` 那条
+不写 `skills_json` 的 INSERT（`sqlite.ts:794`）**不用改**，只加一行种子即可。
+**Alternatives**：① 现在就加种子 —— 拒绝，理由如上；② 干脆不要这个 agent，靠默认助手
+＋技能 —— 差一点点，技能本来就人人可见，agent 唯一的增量是把操作纪律固化进人设、
+以及在 picker 里有个显眼入口，这两样值一行 DB 记录。
+
 ## 2026-07-29 · 设置页承载「点一下更新」：扳机从命令行挪到界面，但仍是显式动作
 
 **Decision**：新建 `/settings` 页（Header ⚙ 入口），首块「版本与更新」：显示当前 release
