@@ -1,9 +1,16 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { describeCron, nextFireAfter, parseCron } from "@/lib/cron";
+import { WorkspaceField } from "@/components/run-config/WorkspaceField";
+import { AGENT_DEFAULT_LABEL, contextModeOptions, workspaceRequired } from "@/lib/run-config";
+import { DEFAULT_PROVIDER } from "@/lib/llm";
+
+// 任务没有 provider 选择器（tasks.model 那一列存的其实是 providerId，且没有 UI ——
+// 见 console-ia-spec.md 批 6.1）。所以模式文案按默认 provider 取；等 tasks 真的能选
+// provider 时，这里改成跟着任务的那一个。
+const MODE_OPTIONS = contextModeOptions(DEFAULT_PROVIDER);
 
 // S88: 自动化任务页。双栏 —— 左任务列表、右选中任务的运行历史。
 //
@@ -41,6 +48,10 @@ type Task = {
   contextMode: string;
   enabled: boolean;
   notifyOn: string;
+  // S89 补齐：以下四项服务端一直支持（lib/server/tasks.ts:34-52），此前只能由 API 改。
+  timeoutMs: number;
+  overlapPolicy: string;
+  maxBudgetUsd: number | null;
   triggers: Trigger[];
   lastRun: Run | null;
 };
@@ -123,6 +134,15 @@ export default function TasksPage() {
     if (selectedId === id) void loadRuns(id);
   };
 
+  const abortRun = async (runId: string) => {
+    setMsg(null);
+    const r = await fetch(`/api/task-runs/${runId}/abort`, { method: "POST" });
+    const d = await r.json().catch(() => ({}));
+    setMsg(r.ok ? "已中止" : (d.error ?? "中止失败"));
+    void load();
+    if (selectedId) void loadRuns(selectedId);
+  };
+
   const save = async () => {
     if (!editing?.name || !editing?.prompt) return;
     const isNew = !editing.id;
@@ -160,27 +180,17 @@ export default function TasksPage() {
   };
 
   return (
-    // globals.css 把 html/body 焊成 overflow:hidden（SPA canvas 要的），
-    // 独立整页必须自带滚动容器。
-    <div className="h-dvh overflow-y-auto bg-canvas text-ink">
-      <header className="sticky top-0 z-10 border-b border-line bg-canvas px-4 py-3 flex items-center gap-3">
-        <Link href="/" className="text-ui text-ink-muted hover:text-ink">
-          ← 返回
-        </Link>
-        <h1 className="text-lg font-semibold">自动化任务</h1>
-        <Link
-          href="/settings/agents"
-          className="text-ui text-ink-faint hover:text-ink ml-auto"
-        >
-          🎭 Agent 管理 →
-        </Link>
-      </header>
-
+    // S89: 滚动容器与页头由 app/settings/layout.tsx 接管，这里只剩内容。
+    // msg 原来是贴在 header 下的通栏条，现在改成内容区里的一条卡片 —— 它是这一页的
+    // 反馈，不该假装是全站级横幅。
+    <>
       {msg && (
-        <div className="px-4 py-2 text-ui text-ink-muted border-b border-line">{msg}</div>
+        <div className="mb-3 px-3 py-2 rounded-md border border-line bg-surface-muted text-ui text-ink-muted">
+          {msg}
+        </div>
       )}
 
-      <div className="flex flex-col md:flex-row gap-4 p-4 max-w-[1200px] mx-auto">
+      <div className="flex flex-col md:flex-row gap-4">
         {/* 左：任务列表 */}
         <div className="md:w-[380px] shrink-0 flex flex-col gap-2">
           <Button
@@ -259,14 +269,19 @@ export default function TasksPage() {
                 value={editing.prompt ?? ""}
                 onChange={(e) => setEditing({ ...editing, prompt: e.target.value })}
               />
-              <input
-                className={`${INPUT} font-mono`}
-                placeholder="工作目录绝对路径（project 模式必填）"
-                value={editing.workspacePath ?? ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, workspacePath: e.target.value || null })
-                }
-              />
+              {/* S89: 原来这里是一个**裸的绝对路径 input** —— 不接 workspaces 表、
+                  不校验目录存不存在、不能建 worktree/scratch，用户得先去别处把路径复制
+                  出来。换成与新会话完全同一个的 WorkspaceField（内含 WorkspacePicker）。 */}
+              <div className="flex items-center gap-2">
+                <span className="text-ui text-ink-muted shrink-0">工作目录</span>
+                <WorkspaceField
+                  value={editing.workspacePath ?? null}
+                  onChange={(p) => setEditing({ ...editing, workspacePath: p })}
+                  required={workspaceRequired(editing.contextMode ?? "project")}
+                  placeholder="选择工作目录"
+                  className="max-w-[20rem]"
+                />
+              </div>
               <div className="flex flex-wrap gap-3">
                 <label className="text-ui flex items-center gap-2">
                   Agent
@@ -277,7 +292,9 @@ export default function TasksPage() {
                       setEditing({ ...editing, agentId: e.target.value || null })
                     }
                   >
-                    <option value="">默认 Agent</option>
+                    {/* 文案走 lib/run-config.ts —— 此前这里叫「默认 Agent」、
+                        新会话那边叫「默认助手」，同一个东西两个名字。 */}
+                    <option value="">{AGENT_DEFAULT_LABEL}</option>
                     {agents.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}
@@ -291,9 +308,18 @@ export default function TasksPage() {
                     className={SELECT}
                     value={editing.contextMode ?? "project"}
                     onChange={(e) => setEditing({ ...editing, contextMode: e.target.value })}
+                    title={
+                      MODE_OPTIONS.find((o) => o.id === (editing.contextMode ?? "project"))
+                        ?.title
+                    }
                   >
-                    <option value="project">project（有文件工具）</option>
-                    <option value="chat">chat（纯对话）</option>
+                    {/* 选项与说明同样来自 lib/run-config.ts。原来是另手写的
+                        「project（有文件工具）」，与 ModePicker 的长说明各说各话。 */}
+                    {MODE_OPTIONS.map((o) => (
+                      <option key={o.id} value={o.id} title={o.title}>
+                        {o.id}（{o.short}）
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="text-ui flex items-center gap-2">
@@ -307,6 +333,74 @@ export default function TasksPage() {
                     <option value="always">每次都通知</option>
                     <option value="never">从不</option>
                   </select>
+                </label>
+              </div>
+
+              {/* S89 补齐的四项。它们服务端一直生效、此前只能由 API 改 —— 而其中三项是
+                  **闸门**（超时 / 并发 / 成本），无人值守的任务恰恰最需要它们可见可调。 */}
+              <div className="flex flex-wrap gap-3">
+                <label
+                  className="text-ui flex items-center gap-2"
+                  title="超过这个时长强制中止。时间闸永远在，是兜底的那一道。"
+                >
+                  超时
+                  <select
+                    className={SELECT}
+                    value={String(editing.timeoutMs ?? 30 * 60_000)}
+                    onChange={(e) =>
+                      setEditing({ ...editing, timeoutMs: Number(e.target.value) })
+                    }
+                  >
+                    <option value={5 * 60_000}>5 分钟</option>
+                    <option value={15 * 60_000}>15 分钟</option>
+                    <option value={30 * 60_000}>30 分钟</option>
+                    <option value={60 * 60_000}>1 小时</option>
+                    <option value={3 * 60 * 60_000}>3 小时</option>
+                  </select>
+                </label>
+                <label
+                  className="text-ui flex items-center gap-2"
+                  title="上一次还在跑时又被触发怎么办。skip = 跳过这次（默认）；queue = 排队等它跑完。"
+                >
+                  重叠
+                  <select
+                    className={SELECT}
+                    value={editing.overlapPolicy ?? "skip"}
+                    onChange={(e) =>
+                      setEditing({ ...editing, overlapPolicy: e.target.value })
+                    }
+                  >
+                    <option value="skip">skip（跳过这次）</option>
+                    <option value="queue">queue（排队）</option>
+                  </select>
+                </label>
+                <label
+                  className="text-ui flex items-center gap-2"
+                  title="claude --max-budget-usd。时间闸之外的第二道 —— 一个陷入循环的 agent 可能在 30 分钟里烧掉很多钱。留空 = 不限。"
+                >
+                  成本上限 $
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    className={`${SELECT} w-24`}
+                    placeholder="不限"
+                    value={editing.maxBudgetUsd ?? ""}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        maxBudgetUsd: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <label className="text-ui flex items-center gap-2" title="停用后触发器不再触发，手动 ▶ 仍可用">
+                  <input
+                    type="checkbox"
+                    checked={editing.enabled ?? true}
+                    onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })}
+                  />
+                  启用
                 </label>
               </div>
               <div className="flex gap-2">
@@ -409,39 +503,60 @@ export default function TasksPage() {
                   {!runs.length && (
                     <div className="text-label text-ink-faint">还没有执行过</div>
                   )}
-                  {runs.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      disabled={!r.sessionId}
-                      onClick={() =>
-                        router.push(`/?session=${r.sessionId}&node=${r.nodeId}`)
-                      }
-                      className="text-left px-3 py-2 rounded-lg border border-line bg-surface hover:border-line-strong disabled:opacity-60"
-                    >
-                      <div className="text-ui flex items-center gap-2">
-                        <StatusDot status={r.status} />
-                        <span>{statusText(r)}</span>
-                        <span className="text-ink-faint text-label">{r.triggerKind}</span>
-                        <span className="ml-auto text-label text-ink-faint">
-                          {new Date(r.createdAt).toLocaleString()}
-                        </span>
+                  {/* S89: 行从一整个 <button> 拆成 div + 两个子按钮 —— 中止按钮嵌不进
+                      button 里。深链仍是主动作（点一条 run 回主 SPA 看完整渲染）。 */}
+                  {runs.map((r) => {
+                    const live = r.status === "running" || r.status === "pending";
+                    return (
+                      <div
+                        key={r.id}
+                        className="px-3 py-2 rounded-lg border border-line bg-surface flex items-start gap-2"
+                      >
+                        <button
+                          type="button"
+                          disabled={!r.sessionId}
+                          onClick={() =>
+                            router.push(`/?session=${r.sessionId}&node=${r.nodeId}`)
+                          }
+                          className="text-left flex-1 min-w-0 disabled:opacity-60 hover:opacity-80"
+                        >
+                          <div className="text-ui flex items-center gap-2">
+                            <StatusDot status={r.status} />
+                            <span>{statusText(r)}</span>
+                            <span className="text-ink-faint text-label">{r.triggerKind}</span>
+                            <span className="ml-auto text-label text-ink-faint">
+                              {new Date(r.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          {r.errorMessage && (
+                            <div className="text-label text-ink-faint truncate">
+                              {r.errorMessage}
+                            </div>
+                          )}
+                          {(r.tokenInput > 0 || r.tokenOutput > 0) && (
+                            <div className="text-label text-ink-faint">
+                              ↑{r.tokenInput} ↓{r.tokenOutput}
+                              {r.startedAt && r.endedAt
+                                ? ` · ${Math.round((r.endedAt - r.startedAt) / 1000)}s`
+                                : ""}
+                            </div>
+                          )}
+                        </button>
+                        {/* /api/task-runs/[id]/abort 从 S88 起就存在，但**页面上一直没有
+                            任何按钮调它** —— 一个跑飞的无人值守任务只能等超时。 */}
+                        {live && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void abortRun(r.id)}
+                          >
+                            中止
+                          </Button>
+                        )}
                       </div>
-                      {r.errorMessage && (
-                        <div className="text-label text-ink-faint truncate">
-                          {r.errorMessage}
-                        </div>
-                      )}
-                      {(r.tokenInput > 0 || r.tokenOutput > 0) && (
-                        <div className="text-label text-ink-faint">
-                          ↑{r.tokenInput} ↓{r.tokenOutput}
-                          {r.startedAt && r.endedAt
-                            ? ` · ${Math.round((r.endedAt - r.startedAt) / 1000)}s`
-                            : ""}
-                        </div>
-                      )}
-                    </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -450,7 +565,7 @@ export default function TasksPage() {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

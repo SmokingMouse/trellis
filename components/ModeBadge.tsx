@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { MODE_STYLES } from "@/lib/mode-style";
+import { AGENT_UNSUPPORTED_HINT, agentSupported } from "@/lib/run-config";
+import type { ProviderId } from "@/lib/llm";
 
 // Badge rendered in the Header for an active session. Shows
 // "Chat" / "Project · <shortName>" depending on the locked session mode.
@@ -85,12 +87,15 @@ export function ModeBadge() {
 }
 
 function AgentChip({ name, model }: { name: string; model: string | null }) {
-  const inactive = (model ?? "").startsWith("codex");
+  // S89: 原来手写 `model.startsWith("codex")`，漏掉 mock —— 服务端的钳制条件是
+  // `providerFamily(...) === "claude"`（chat/route.ts），mock 会话同样拿不到 agent，
+  // 却会在这里显示成生效。判据统一走 lib/run-config.ts 的 agentSupported。
+  const inactive = !model || !agentSupported(model as ProviderId);
   return (
     <span
       title={
         inactive
-          ? `${name}\ncodex 不支持自定义 Agent —— 本轮用默认人设`
+          ? `${name}\n${AGENT_UNSUPPORTED_HINT}`
           : `Agent：${name}（会话创建时锁定）`
       }
       className={`text-label truncate max-w-[7rem] ${inactive ? "text-ink-faint line-through" : ""}`}

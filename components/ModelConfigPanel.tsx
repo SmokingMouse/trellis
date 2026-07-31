@@ -7,6 +7,12 @@ import { useSessionStore } from "@/stores/sessionStore";
 
 // 模型配置编辑器 —— endpoints.yaml 的图形入口（服务端 lib/server/model-config.ts）。
 // key 只进 env_file + process.env，接口永不回显；保存即热生效（picker 立刻刷新）。
+//
+// S89：拆成 Panel（内容）+ Modal（外壳）两层。原来它只有一个入口 —— 埋在 ModelPicker
+// 下拉列表**底部**的一行「⚙ 管理模型…」。按「持久对象」的判据（有 CRUD、跨 session 存活、
+// 被引用），provider 目录是最典型的一个，何况它编辑的 endpoints.yaml 还是**跨应用共享**的
+// （其他 sm-toolkit 工具读同一份）。所以它同时进管理台 tab；下拉底部那个入口保留
+// —— 正在选模型时发现缺一个 provider，就地能改是对的。
 
 type CfgProvider = {
   name: string;
@@ -41,7 +47,11 @@ type FormState = {
 const FIELD =
   "w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line";
 
-export function ModelConfigModal({ onClose }: { onClose: () => void }) {
+/**
+ * 内容层。管理台 tab 直接用它；modal 外壳见下面的 ModelConfigModal。
+ * `onClose` 只影响页脚要不要多一个「关闭」按钮 —— tab 里没有可关的东西。
+ */
+export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
   const fetchProviderCatalog = useSessionStore((s) => s.fetchProviderCatalog);
   const [state, setState] = useState<CfgState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -132,11 +142,8 @@ export function ModelConfigModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // Portal to body: the picker lives inside the Header, whose backdrop-blur
-  // makes it the containing block for fixed descendants — an in-place Modal
-  // (fixed inset-0) would be trapped inside the 48px header strip.
-  return createPortal(
-    <Modal onClose={onClose} size="lg" panelClassName="max-h-[80vh] flex flex-col">
+  return (
+    <>
       <div className="px-5 pt-4 pb-3 border-b border-line shrink-0">
         <div className="text-sm font-medium text-ink-strong">模型配置</div>
         <div className="text-label text-ink-faint mt-0.5 truncate">
@@ -290,15 +297,32 @@ export function ModelConfigModal({ onClose }: { onClose: () => void }) {
             改动即时生效，其他 sm-toolkit 工具共用同一份配置
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              关闭
-            </Button>
+            {onClose && (
+              <Button variant="ghost" onClick={onClose}>
+                关闭
+              </Button>
+            )}
             <Button variant="primary" onClick={openAdd} disabled={!state && !loadError}>
               添加 provider
             </Button>
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+/**
+ * Modal 外壳。给 ModelPicker 下拉底部那个入口用。
+ *
+ * Portal to body: the picker lives inside the Header, whose backdrop-blur
+ * makes it the containing block for fixed descendants — an in-place Modal
+ * (fixed inset-0) would be trapped inside the 48px header strip.
+ */
+export function ModelConfigModal({ onClose }: { onClose: () => void }) {
+  return createPortal(
+    <Modal onClose={onClose} size="lg" panelClassName="max-h-[80vh] flex flex-col">
+      <ModelConfigPanel onClose={onClose} />
     </Modal>,
     document.body,
   );

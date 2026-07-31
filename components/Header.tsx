@@ -371,10 +371,13 @@ export function Header() {
         <ModeBadge />
         <ModelPicker />
         <ThemeMenu />
-        {/* S88 自动化任务。与设置并排 —— 同样是「没有语境化的家」的整页，
-            同样用 <a> 让浏览器真换一页。 */}
+        {/* 自动化任务。S89 起它是管理台的一个 tab，但 Header 上这个 ⏱ **保留**。
+            原计划是等任务日常入口转移到侧栏（spec 批 4）后删掉它、Header 收敛到一个 ⚙；
+            但 S89 查真库发现 tasks / task_runs 全是 0 行（facts.md 第一条），批 4 已降级，
+            而「入口太深」正是零使用的头号嫌疑 —— 这时候把入口改深是反着来的。
+            删它的条件改成：任务真的被用起来、且侧栏有了替代入口。 */}
         <a
-          href="/tasks"
+          href="/settings/tasks"
           title="自动化任务"
           aria-label="自动化任务"
           className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"

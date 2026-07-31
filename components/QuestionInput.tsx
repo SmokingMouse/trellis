@@ -253,9 +253,15 @@ export function QuestionInput() {
         <div className="mb-3 flex justify-center">
           <ModePicker />
         </div>
-        {draftMode === "chat" && (
-          <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
-            <AgentPicker />
+        {/* S89: Agent 选择两个 mode 都出现。原来整块被 `draftMode === "chat"` 关着，
+            但服务端 chat/route.ts 对 agentId 的钳制条件只有「claude 家族」、**不看 mode**
+            —— 即 project 会话完全支持 agent，只是界面上没有入口，只能靠 @提及。
+            AgentPicker 内部仍然只在 chat 时露出自定义 system prompt 的 textarea
+            （project 的人设来自 CLAUDE.md，服务端会把 systemPrompt 钳成 null）。
+            增强模式是 chat 专属，留在下面的条件块里。 */}
+        <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
+          <AgentPicker />
+          {draftMode === "chat" && (
             <button
               type="button"
               onClick={() => setChatEnhanced(!chatEnhanced)}
@@ -269,8 +275,8 @@ export function QuestionInput() {
               <span aria-hidden>⚡</span>
               <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
         <div
           className={`bg-surface border rounded-card shadow-raise overflow-hidden transition-colors ${
             dragOver

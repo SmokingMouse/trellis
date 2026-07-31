@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useAgentStore, type Agent, type AgentInput } from "@/stores/agentStore";
 import { Button } from "@/components/ui/Button";
 
@@ -23,6 +22,8 @@ const EMPTY: AgentInput = {
   skills: [],
   inheritEnv: false,
   enabled: true,
+  permission: null,
+  requireApproval: null,
 };
 
 export default function AgentsSettingsPage() {
@@ -58,6 +59,8 @@ export default function AgentsSettingsPage() {
       skills: a.skills,
       inheritEnv: a.inheritEnv,
       enabled: a.enabled,
+      permission: a.permission,
+      requireApproval: a.requireApproval,
     });
   };
 
@@ -100,21 +103,8 @@ export default function AgentsSettingsPage() {
   };
 
   return (
-    // globals.css 把 html/body 焊成 overflow:hidden（SPA canvas 要的），所以
-    // 独立整页必须自带滚动容器 —— 否则编辑器一超过视口高度，技能选择器和保存
-    // 按钮就永远够不着。sticky header 让「返回」在滚动时不跑掉。
-    <div className="h-dvh overflow-y-auto bg-canvas text-ink">
-      <header className="sticky top-0 z-10 border-b border-line bg-canvas px-4 py-3 flex items-center gap-3">
-        <Link href="/" className="text-ui text-ink-muted hover:text-ink">
-          ← 返回
-        </Link>
-        <h1 className="text-lg font-semibold">Agent</h1>
-        <Link href="/settings" className="text-ui text-ink-faint hover:text-ink ml-auto">
-          版本与更新 →
-        </Link>
-      </header>
-
-      <div className="flex flex-col md:flex-row gap-4 p-4 max-w-[1100px] mx-auto">
+    // S89: 滚动容器与页头由 app/settings/layout.tsx 接管，这里只剩内容。
+    <div className="flex flex-col md:flex-row gap-4">
         {/* 左：列表 */}
         <div className="md:w-[280px] shrink-0 flex flex-col gap-2">
           <Button type="button" variant="primary" size="sm" onClick={startNew}>
@@ -256,6 +246,58 @@ export default function AgentsSettingsPage() {
                 </span>
               </label>
 
+              {/* S89: permission / requireApproval 两列后端一直都在（lib/server/agents.ts:31-32、
+                  222-226 读写齐全，sdk-adapter.ts:69-77 真的进 spawn），**但此前没有任何编辑
+                  入口**，只能拿 API 直接写。这是「表单漏字段」里最贵的一类 —— 它是安全闸。 */}
+              <Field
+                label="工具权限档位"
+                hint="agent 级默认。留空 = 跟随会话（不覆盖）。"
+              >
+                <select
+                  value={draft.permission ?? ""}
+                  onChange={(e) =>
+                    setDraft({ ...draft, permission: e.target.value || null })
+                  }
+                  className={INPUT}
+                >
+                  <option value="">跟随会话</option>
+                  <option value="default">default（按 CLI 默认策略问）</option>
+                  <option value="readonly">readonly（只读，不许改动）</option>
+                  <option value="auto-edit">auto-edit（文件改动自动放行）</option>
+                  <option value="full">full（全部自动放行）</option>
+                </select>
+              </Field>
+
+              <Field
+                label="逐个确认"
+                hint={
+                  "覆盖会话的 YOLO / 需确认设置。会话侧同一个开关在新建会话时选，" +
+                  "两者都设时**以 agent 为准**（与 agent.model 覆盖会话模型同构）。"
+                }
+              >
+                <select
+                  value={
+                    draft.requireApproval === null || draft.requireApproval === undefined
+                      ? ""
+                      : draft.requireApproval
+                        ? "yes"
+                        : "no"
+                  }
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      requireApproval:
+                        e.target.value === "" ? null : e.target.value === "yes",
+                    })
+                  }
+                  className={INPUT}
+                >
+                  <option value="">跟随会话</option>
+                  <option value="yes">需确认（可变更工具逐个弹卡）</option>
+                  <option value="no">YOLO（自动放行）</option>
+                </select>
+              </Field>
+
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -265,9 +307,13 @@ export default function AgentsSettingsPage() {
                 <span className="text-ui">启用（停用后不在 picker 里出现，老会话静默退回默认人设）</span>
               </label>
 
+              {/* S89 命名消歧：这里的「技能」与输入框里 `/xxx` 补全出的「技能」是同一批
+                  ~/.claude/skills/ 目录，但走两条完全不同的路 —— 这边是 pack + symlink
+                  物化后由 `Skill` 工具调起（且隔离 agent 只有这里选中的这些），那边是
+                  纯文本补全交给 CLI。所以叫「挂载技能」而不是「技能」。 */}
               <Field
-                label={`技能（已选 ${draft.skills?.length ?? 0}）`}
-                hint="引用本机 ~/.claude/skills/。改技能正文自动跟随，不用重新保存"
+                label={`挂载技能（已选 ${draft.skills?.length ?? 0}）`}
+                hint="从本机 ~/.claude/skills/ 挂给这个 agent，由 Skill 工具调起（与输入框 / 补全的技能是同一批目录，但那条是把技能名补进提问里，不受这里影响）。改技能正文自动跟随，不用重新保存"
               >
                 <input
                   value={skillQuery}
@@ -336,7 +382,6 @@ export default function AgentsSettingsPage() {
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 }
