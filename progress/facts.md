@@ -1,6 +1,12 @@
 # Verified Facts
 
 
+- **S88 做完的自动化任务，上线至今真实使用量为零**（S89 实测，真库 `~/.trellis/data.db` 的 VACUUM 快照，2026-07-31 11:46 那份）：`SELECT * FROM tasks` → **0 行**；`task_runs` → **0 行**；`SELECT * FROM sessions WHERE kind='task'` → **0 行**；同库 `sessions` 有 44 行全是 `kind='user'`。即整套 T1-T4（四张表 + 调度器 + 三种触发器 + 通知出口）**一次都没被用过**。这与 S1 workspace 那次同构（`workspaces.created_by='trellis'` 实测 0 行）。**直接后果**：console-ia-spec 的批 4「任务运行进侧栏」是在优化一条零流量路径，其判据（一周内从侧栏进入任务会话 > 0）在有人先建出任务之前不可能达成 —— 该问的不是「运行历史怎么摆」，是「为什么没人建任务」。复现命令：
+  ```
+  bun -e 'const {Database}=require("bun:sqlite");const db=new Database(process.env.HOME+"/.trellis/data.db",{readonly:true});
+  console.log(db.prepare("SELECT COUNT(*) n FROM tasks").get(), db.prepare("SELECT COUNT(*) n FROM task_runs").get());db.close()'
+  ```
+  （**必须 `readonly:true` 裸开**，走 `getDB()` 会跑 `migrate()` 把正在跑的 run 收尸 —— 见本文件下方那条。）
 - **`npm whoami` 报 ENEEDAUTH 不代表没登录 —— 先看默认 registry 是不是镜像**（S88 实测）：本机 `~/.npmrc` 默认 registry 是 `https://registry.npmmirror.com`（无 auth），但 `@smokingmouse:registry` 与 `@anthropic-ai:registry` 单独指向 npmjs，且 `//registry.npmjs.org/:_authToken` 是有的。所以裸 `npm whoami` 查的是镜像 → ENEEDAUTH，而 `npm whoami --registry https://registry.npmjs.org/` 直接回 `smokingmouse`。**发布 scoped 包一律显式带 `--registry https://registry.npmjs.org/`**，别被那个报错骗去重新 `npm login`（那是交互式的，白折腾一轮）。
 - **验证「SDK 新字段真的上线了」唯一有效的做法是从 registry 重装后查 dist**（S88）：`make link-sdk` 会让本机怎么测都是对的，而 `make deploy` 在新 release 目录里 `bun install` 装的是 registry 版 —— 两者不一致时症状是**多传的字段被结构类型放过、被运行时静默丢弃，agent 不生效但 spawn 正常、回答正常、零报错**。发版后的检查清单：`make unlink-sdk` → `bun install` → `readlink node_modules/@smokingmouse/agent` 应为空（真实目录非软链）→ `grep -c customAgents node_modules/@smokingmouse/agent/dist/backends/claude.js`。配套：`instrumentation.ts` 启动时探 `capabilities().customAgents`，为假就 `console.error`，prod 日志里没这条告警才算数。
 - **cwd 不存在时 `spawn claude` 抛的 ENOENT 是异步 uncaughtException，逃得出 run-bus 的 try/catch**（S88 实测，日志 `⨯ uncaughtException: Error: ENOENT: no such file or directory, posix_spawn 'claude'`）：后果是节点**永远停在 streaming**、`task_runs` 永远停在 running —— 而 `overlap_policy='skip'` 会因此把那个任务**永久锁死**（后续每次触发都判为「上一次还没跑完」），界面上只是安静地没反应。交互式会话里用户当场能看见并重试，**无人值守的定时任务不行**，而目录被删 / worktree 被回收是完全正常的事。所以 `lib/server/tasks.ts:launch()` 在 spawn 前 `fs.existsSync(workspacePath)` 硬挡，并把 `startRun` 的同步抛出也兜进 `failRun`。**任何新增的「无人值守 spawn」路径都要照抄这两道**，别指望 run-bus 的 try/catch。
