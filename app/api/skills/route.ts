@@ -32,7 +32,7 @@ export async function GET() {
   const dir = path.join(os.homedir(), ".claude", "skills");
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    const skills: { name: string; description: string }[] = [];
+    const skills: { name: string; dir: string; description: string }[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       try {
@@ -40,7 +40,11 @@ export async function GET() {
           path.join(dir, e.name, "SKILL.md"),
           "utf8",
         );
-        skills.push(parseFrontmatter(raw, e.name));
+        // `dir` 是目录名，`name` 是 frontmatter 里的名字 —— 两者可以不同，且
+        // **agent 的技能引用必须存 dir**：claude 加载 plugin skill 时取的是目录名
+        // （2026-07-31 实测：symlink 名 linked-zebra 指向 xhs-cards，列出来是
+        // `trellis-pack:linked-zebra`）。`name` 只用于给人看的补全列表。
+        skills.push({ ...parseFrontmatter(raw, e.name), dir: e.name });
       } catch {
         /* no SKILL.md in this dir — skip */
       }

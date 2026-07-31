@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { MODE_STYLES } from "@/lib/mode-style";
 
@@ -14,6 +15,24 @@ import { MODE_STYLES } from "@/lib/mode-style";
 // undiscoverable.)
 export function ModeBadge() {
   const session = useSessionStore((s) => s.session);
+  const agentId = session?.agentId ?? null;
+  const [agentName, setAgentName] = useState<string | null>(null);
+  // 会话锁定的是 agent **id**，名字要查一次。agent 列表极少变，拉一次就够。
+  useEffect(() => {
+    if (!agentId) {
+      setAgentName(null);
+      return;
+    }
+    let alive = true;
+    fetch(`/api/agents/${agentId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && setAgentName(d?.agent?.name ?? null))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [agentId]);
+
   if (!session) return null;
 
   const mode = session.mode || "chat";
@@ -52,6 +71,9 @@ export function ModeBadge() {
           </span>
         </>
       )}
+      {/* S88 会话人设。codex 不认 --agent，切过去后 agent 静默失效 ——
+          灰掉并说明，否则就是「配了以为生效」的谎言级 UI。 */}
+      {agentName && <AgentChip name={agentName} model={session.model} />}
       {/* 权限确认会话：可变更工具逐个审批（创建时锁定）。 */}
       {session.requireApproval && (
         <span title="需确认：Bash/Write/Edit 等工具执行前弹卡等你允许" aria-label="需确认">
@@ -59,6 +81,22 @@ export function ModeBadge() {
         </span>
       )}
     </div>
+  );
+}
+
+function AgentChip({ name, model }: { name: string; model: string | null }) {
+  const inactive = (model ?? "").startsWith("codex");
+  return (
+    <span
+      title={
+        inactive
+          ? `${name}\ncodex 不支持自定义 Agent —— 本轮用默认人设`
+          : `Agent：${name}（会话创建时锁定）`
+      }
+      className={`text-label truncate max-w-[7rem] ${inactive ? "text-ink-faint line-through" : ""}`}
+    >
+      🎭 {name}
+    </span>
   );
 }
 

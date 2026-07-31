@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { QuestionInput } from "@/components/QuestionInput";
 import { Canvas } from "@/components/Canvas";
@@ -10,6 +10,7 @@ import { LinearThreadView } from "@/components/LinearThreadView";
 import { NewQuestionPicker } from "@/components/NewQuestionPicker";
 import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
+import { TaskToast } from "@/components/TaskToast";
 import { AbortToast } from "@/components/AbortToast";
 import { StreamAlertToast } from "@/components/StreamAlertToast";
 import { NotesDrawer } from "@/components/NotesDrawer";
@@ -51,6 +52,28 @@ export default function Home() {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // S88 深链：/?session=<sid>&node=<nid>。任务页的运行历史点进来就走这条 ——
+  // 任务层因此一行渲染代码都不用写，用户看到的和自己手动提问完全一样。
+  // hydrate 之后再切，否则 loadSession 会被 hydrate 的结果覆盖掉。
+  // 用 location 而不是 useSearchParams：后者会逼出 Suspense 边界要求（build 时
+  // 才炸），而深链本就是纯客户端行为，没有 SSR 语义可言。
+  const loadSession = useSessionStore((s) => s.loadSession);
+  const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const deepLinkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search);
+    const deepSession = q.get("session");
+    const deepNode = q.get("node");
+    if (!deepSession) return;
+    // 只跳一次 —— 用户在页面里点别的会话之后不该被 URL 拽回来。
+    if (deepLinkedRef.current === deepSession) return;
+    deepLinkedRef.current = deepSession;
+    void loadSession(deepSession).then(() => {
+      if (deepNode) setActiveNode(deepNode);
+    });
+  }, [hydrated, loadSession, setActiveNode]);
 
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
   // 这里再按常量发一份就会打架）。
@@ -106,6 +129,8 @@ export default function Home() {
         <NewQuestionPicker onClose={() => setComposeRootOpen(false)} />
       )}
       <DoneToast />
+      {/* S88：任务执行完成 / 失败的站内提醒（自带 SSE 订阅）。 */}
+      <TaskToast />
       <AbortToast />
       <StreamAlertToast />
       {/* S1 P1：工作区终端。自己判断有没有 workspace（chat 会话直接返回 null），

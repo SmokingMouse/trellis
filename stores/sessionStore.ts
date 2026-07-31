@@ -39,6 +39,9 @@ const WORKSPACE_KEY = "trellis-workspace";
 // D1: draft custom system prompt for new chat sessions (locked into the
 // session row on first POST, like draftMode/draftWorkspacePath).
 const SYSTEM_PROMPT_KEY = "trellis-system-prompt";
+// S88: 新会话选中的 Agent（agents.id）。与 SYSTEM_PROMPT_KEY 同纪律 —— 只是
+// 「下一个新会话用谁」的草稿，已建会话从 DB 行读回自己锁定的那个。
+const AGENT_KEY = "trellis-agent-id";
 // A4: global send-key preference (applies to all chat inputs immediately).
 const SEND_KEY_KEY = "trellis-send-key";
 // D2: how many ancestor turns chat folds into the prompt. Default 4
@@ -284,6 +287,12 @@ function loadDraftSystemPrompt(): string | null {
   return stored && stored.trim() ? stored : null;
 }
 
+function loadDraftAgentId(): string | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(AGENT_KEY);
+  return stored && stored.trim() ? stored : null;
+}
+
 function loadSendKey(): SendKey {
   if (typeof window === "undefined") return SEND_KEY_DEFAULT;
   const stored = window.localStorage.getItem(SEND_KEY_KEY);
@@ -366,6 +375,9 @@ type State = {
   // D1: draft system prompt for the next new chat session. null = use the
   // built-in default. Only consumed when creating a brand-new session.
   draftSystemPrompt: string | null;
+  // S88: 下一个新会话的人设（agents.id）。null = 默认 Agent。
+  draftAgentId: string | null;
+  setDraftAgentId: (id: string | null) => void;
   // A4: send-key preference, applied live to every chat input.
   sendKey: SendKey;
   // 线性视图内容列宽度偏好（窄/宽/超宽）。
@@ -577,7 +589,7 @@ type Actions = {
     parentId: string,
     question: string,
     anchor: ParentAnchor | null,
-    opts?: { attachments?: NodeAttachment[] },
+    opts?: { attachments?: NodeAttachment[]; mentionAgentSlug?: string | null },
   ) => Promise<void>;
   // Re-run an existing node in place: server keeps the same id, wipes the
   // response/usage/error, and re-streams against the original question +
@@ -743,6 +755,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   draftMode: "chat",
   draftWorkspacePath: null,
   draftSystemPrompt: null,
+  draftAgentId: null,
   sendKey: SEND_KEY_DEFAULT,
   threadWidth: THREAD_WIDTH_DEFAULT,
   treePanelView: "list",
@@ -807,6 +820,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftMode: loadDraftMode(),
       draftWorkspacePath: loadDraftWorkspace(),
       draftSystemPrompt: loadDraftSystemPrompt(),
+      draftAgentId: loadDraftAgentId(),
       sendKey: loadSendKey(),
       threadWidth: loadThreadWidth(),
       treePanelView: loadTreePanelView(),
@@ -1178,6 +1192,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  setDraftAgentId: (id) => {
+    const v = id && id.trim() ? id : null;
+    set({ draftAgentId: v });
+    if (typeof window !== "undefined") {
+      if (v) window.localStorage.setItem(AGENT_KEY, v);
+      else window.localStorage.removeItem(AGENT_KEY);
+    }
+  },
+
   setDraftSystemPrompt: (prompt) => {
     const v = prompt && prompt.trim() ? prompt : null;
     set({ draftSystemPrompt: v });
@@ -1248,8 +1271,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   streamRoot: async (question, opts) => {
-    const { provider, draftMode, draftWorkspacePath, draftSystemPrompt, session } =
-      get();
+    const {
+      provider,
+      draftMode,
+      draftWorkspacePath,
+      draftSystemPrompt,
+      draftAgentId,
+      session,
+    } = get();
     const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
     // Mode + workspace + systemPrompt are only sent when creating a new
     // session. When attaching to an existing session, the server reads them
@@ -1259,7 +1288,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       : {
           mode: draftMode,
           workspacePath: draftWorkspacePath,
-          ...(draftMode === "chat" && draftSystemPrompt
+          // S88: 选了 agent 就以 agent 为准，systemPrompt 不再发 —— 服务端
+          // applyAgent 也会删掉它，这里不发是为了让「发出去的东西」和「生效的
+          // 东西」一致，省得日后对着 network 面板怀疑人生。
+          ...(draftAgentId ? { agentId: draftAgentId } : {}),
+          ...(!draftAgentId && draftMode === "chat" && draftSystemPrompt
             ? { systemPrompt: draftSystemPrompt }
             : {}),
           // 权限确认：仅 project 有意义；服务端还会按 provider
@@ -1345,6 +1378,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           provider,
           historyDepth: get().historyDepth,
           chatEnhanced: get().chatEnhanced,
+          // S88 @提及：这一轮定向派给某个 agent（单轮，主线人格不变）。
+          ...(opts?.mentionAgentSlug ? { mentionAgentSlug: opts.mentionAgentSlug } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
         handleStreamEvent(set, get, { focusNew, controller, optimisticId }),

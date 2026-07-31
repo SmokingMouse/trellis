@@ -279,6 +279,19 @@ export function startRun(args: {
   // text; if it returns a non-empty string we write the label and emit
   // a topic_label event to subscribers. Errors are swallowed.
   topicLabel?: (aggregated: string) => Promise<string | null>;
+  // S88: run 终结钩子 —— 自动化任务的留档 / 通知 / 超时 timer 清理全挂在这。
+  //
+  // 调用点刻意钉在 finalizeNode **之后**（早了任务层回查 node 拿到旧状态）、
+  // 那串 best-effort 的 `await import(...)` 对账块**之前**（晚了通知要等好几秒，
+  // 且那些块任一 hang 住通知就永远不来）。
+  //
+  // ⚠️ 进程被 SIGKILL 时这个回调一次都不跑 —— 所以 sqlite.ts 的 migrate() 里有一条
+  // 对称的 boot reap 把残留的 running/pending task_run 收成 error。**两者必须成对**。
+  onSettled?: (r: {
+    status: "done" | "error";
+    errorMessage?: string | null;
+    usage: { input: number; output: number; cacheRead: number; cacheCreation: number };
+  }) => void;
 }): void {
   const existing = RUNS.get(args.nodeId);
   if (existing && existing.status === "streaming") {
@@ -600,6 +613,24 @@ async function runLoop(
       /* best-effort */
     }
 
+    // S88：见 startRun 的 onSettled 注释 —— 位置是刻意的，别往下挪。
+    if (args.onSettled) {
+      try {
+        args.onSettled({
+          status: stoppedWith,
+          errorMessage,
+          usage: {
+            input: usage.input,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheCreation: usage.cacheCreation,
+          },
+        });
+      } catch {
+        /* 任务层的问题绝不该拖垮一次正常的会话 run */
+      }
+    }
+
     state.status = stoppedWith;
     if (stoppedWith === "done") {
       state.finalEvent = { type: "done", usage };
@@ -676,6 +707,16 @@ async function runLoop(
           /* best-effort —— 同上，降级线性 */
         }
       }
+    }
+
+    // S88: session_done 触发器。动态 import 破掉 run-bus ↔ tasks 的循环依赖
+    // （tasks 静态 import run-bus），与上面几个对账块同一套 best-effort 纪律。
+    // 自触发防护在 onNodeSettled 里 —— 任务自己的节点不当事件源。
+    try {
+      const { onNodeSettled } = await import("./tasks");
+      onNodeSettled(args.nodeId);
+    } catch {
+      /* 任务层的问题不影响会话 run 收尾 */
     }
 
     // Close every still-attached subscriber and drop the state after a

@@ -371,6 +371,18 @@ export function Header() {
         <ModeBadge />
         <ModelPicker />
         <ThemeMenu />
+        {/* S88 自动化任务。与设置并排 —— 同样是「没有语境化的家」的整页，
+            同样用 <a> 让浏览器真换一页。 */}
+        <a
+          href="/tasks"
+          title="自动化任务"
+          aria-label="自动化任务"
+          className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"
+        >
+          <span aria-hidden className="text-[13px] leading-none">
+            ⏱
+          </span>
+        </a>
         {/* 设置是整页而不是 popover：版本、落后的 commit、部署进度、失败日志，
             没有一样塞得进一个下拉。用 <a> 而不是 <Link> —— 从画布跳走时让浏览器
             真的换一页，别把一整棵 React Flow 的状态背着走。 */}

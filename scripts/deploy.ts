@@ -418,6 +418,10 @@ async function smoke(dir: string): Promise<void> {
     TRELLIS_NEXT_PORT: String(gatePort + 100),
     TRELLIS_TTYD_PORT: String(7900 + (gatePort % 20)),
     NODE_ENV: "production",
+    // ★ S88：smoke 用的是**真数据快照**，里面有真任务表。不关掉调度器，这个
+    // 临时实例会看到到期任务并**真 spawn claude 去跑** —— 花真钱、动真 workspace。
+    // 「验证新版本能不能跑」绝不该顺带执行一遍用户的自动化任务。
+    TRELLIS_SCHEDULER: "off",
   };
   // 关掉认证闸，否则每个断言都要先登录。
   delete env.TRELLIS_AUTH_PASS;

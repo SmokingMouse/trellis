@@ -6,6 +6,8 @@ import {
   type Mode,
 } from "@/lib/llm";
 import { getProvider } from "@/lib/llm/server";
+import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
+import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { generateTopicLabel } from "@/lib/llm/topic";
 import {
   createSessionWithRoot,
@@ -20,6 +22,7 @@ import {
   getParentResumeId,
   isLineageIsolated,
   setNodeResumeId,
+  setNodeAgent,
 } from "@/lib/server/repo";
 import {
   attachedLineageForNode,
@@ -71,6 +74,9 @@ type ChatRequestRoot = {
   // 权限确认（new session 时锁定）：true = project 的可变更工具逐个弹权限卡。
   // 仅 claude 系 + project 模式生效，其余组合服务端钳成 false。
   requireApproval?: boolean;
+  // S88 会话人设（new session 时锁定）：agents.id。仅 claude 系生效，其余钳成 null。
+  // 与 systemPrompt 互斥 —— 选了 agent 就以 agent 的人设为准。
+  agentId?: string | null;
   // Stage 15: image attachments uploaded via /api/uploads. The client
   // sends NodeAttachment shapes; the server hash-resolves to on-disk
   // paths before handing to the provider.
@@ -84,6 +90,9 @@ type ChatRequestBranch = {
   parentAnchor?: { selectedText: string } | null;
   provider?: ProviderId;
   attachments?: NodeAttachment[];
+  // S88 @提及：把**这一轮**定向派给某个 agent（slug），主线人格不变。
+  // 只在 branch 上有意义 —— 「换个人答这一轮」天然是分支语义。
+  mentionAgentSlug?: string | null;
 };
 
 type ChatRequestRetry = {
@@ -241,6 +250,19 @@ export async function POST(req: Request) {
   let resolvedOrigin = "native";
   // 权限确认：new root 从 body 钳制后锁进 session 行；其余路径从 session 行读。
   let resolvedRequireApproval = false;
+  // S88 会话人设。与 requireApproval 完全同构：new root 从 body 钳制后锁进 session
+  // 行，并行 root / branch / retry 一律从 session 行读回。null = 默认 Agent。
+  let resolvedAgentId: string | null = null;
+  // S88 @提及：单轮定向。与会话人设是两套 —— 它不写 sessions 行，只作用于本轮，
+  // 且**不 resume 主线**（外援的人设写进主线 CLI session 会污染人格），
+  // 也**不 fork**（会在 jsonl 目录留孤儿 session 让 nativeLineageForNode 认错 tip）。
+  const mentionAgent =
+    body.kind === "branch" &&
+    typeof body.mentionAgentSlug === "string" &&
+    providerFamily(providerId) === "claude"
+      ? getAgentBySlug(body.mentionAgentSlug)
+      : null;
+  const mentionActive = !!(mentionAgent && mentionAgent.enabled);
   // Image attachments — supplied by client for root/branch, read from
   // DB for retry. Always normalized to NodeAttachment[] before going
   // into createNode args (so they land in attachments_json) and
@@ -262,6 +284,7 @@ export async function POST(req: Request) {
         resolvedWorkspacePath = existing.workspacePath;
         resolvedSystemPrompt = existing.systemPrompt;
         resolvedRequireApproval = existing.requireApproval;
+        resolvedAgentId = existing.agentId;
         nodeId = nid();
         const node = createRootInSession({
           sessionId: trellisSessionId,
@@ -308,6 +331,15 @@ export async function POST(req: Request) {
           body.requireApproval === true &&
           resolvedMode !== "chat" &&
           providerFamily(providerId) === "claude";
+        // S88 人设钳制：仅 claude 系。--agent/--agents/--plugin-dir 全是 claude CLI
+        // 专属，codex 连 /skill 语法都不认（见 Composer.tsx 的既有 family gate）——
+        // 放行只会得到「配了却静默不生效」的谎言级 UI。enabled 校验在 resolveEnabledAgent。
+        resolvedAgentId =
+          typeof body.agentId === "string" &&
+          providerFamily(providerId) === "claude" &&
+          resolveEnabledAgent(body.agentId)
+            ? body.agentId
+            : null;
         trellisSessionId = nid();
         nodeId = nid();
         const { session, node } = createSessionWithRoot({
@@ -321,6 +353,7 @@ export async function POST(req: Request) {
           systemPrompt: resolvedSystemPrompt,
           model: providerId,
           requireApproval: resolvedRequireApproval,
+          agentId: resolvedAgentId,
           attachments: resolvedAttachments,
         });
         createdEvent = { type: "created", session, node };
@@ -352,6 +385,7 @@ export async function POST(req: Request) {
       resolvedSystemPrompt = parentSession?.systemPrompt ?? null;
       resolvedOrigin = parentSession?.origin ?? "native";
       resolvedRequireApproval = parentSession?.requireApproval ?? false;
+      resolvedAgentId = parentSession?.agentId ?? null;
       createdEvent = { type: "created", node };
       questionForLLM = body.question;
     } else if (body.kind === "retry") {
@@ -379,6 +413,7 @@ export async function POST(req: Request) {
       resolvedWorkspacePath = retrySession?.workspacePath ?? null;
       resolvedSystemPrompt = retrySession?.systemPrompt ?? null;
       resolvedRequireApproval = retrySession?.requireApproval ?? false;
+      resolvedAgentId = retrySession?.agentId ?? null;
       createdEvent = { type: "created", node };
     } else {
       return Response.json({ error: "unknown kind" }, { status: 400 });
@@ -424,7 +459,7 @@ export async function POST(req: Request) {
     fileAttachments,
     mode !== "chat" || chatEnhanced,
   );
-  const chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
+  let chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
   // codex chat（B-fork 等价，depth 0）：codex 无 --fork-session，但 `codex exec
   // resume` 线性续聊 + 前缀 rollout 分叉可以拼出同一语义（分支互相隔离、历史住
   // 在 CLI session 里不折叠）。handled=false = 父节点没有可解析的 rollout
@@ -464,7 +499,7 @@ export async function POST(req: Request) {
   }
   // codex chat at depth>=1 / unresolvable — fold history at a sane default depth.
   const foldDepth = reqDepth === 0 ? 4 : reqDepth;
-  const history =
+  let history =
     chatBFork || codexChatHandled || mode === "project"
       ? []
       : buildHistoryForNode(nodeId, { maxDepth: foldDepth });
@@ -609,6 +644,20 @@ export async function POST(req: Request) {
             : null;
   }
 
+  // S88 @提及：外援是**一次性**的 —— 覆盖掉上面那整套身份解析。
+  //   · 不 resume 主线：外援的人设写进主线 CLI session 会永久污染主线人格；
+  //   · 不 fork：会在 cwd 的 jsonl 目录留一个孤儿 session，让 nativeLineageForNode
+  //     的簿记认错 tip（这是 cli-fork 那套最脆的地方）；
+  //   · 不落盘（ephemeral）：外援看一眼就走，不该在 resume 链上留痕。
+  // 上下文靠折叠历史 —— 复用已有的降级路径，零新代码。
+  if (mentionActive) {
+    claudeSessionId = null;
+    chatBFork = false;
+    if (history.length === 0) {
+      history = buildHistoryForNode(nodeId, { maxDepth: 4 });
+    }
+  }
+
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
   // We start the run with its own AbortController; HTTP disconnect only
   // unsubscribes us from the event broadcast — the LLM keeps running and
@@ -620,6 +669,19 @@ export async function POST(req: Request) {
   // never opens the protocol. Pure chat (no workspace) won't trigger the
   // interactive tools, but threading the callback is harmless there.
   const interactive = family === "claude";
+  // S88: 把 agent 定义变成「CLI 能吃的东西」。放在 route 而不是 sdk-adapter：
+  // 后者至今是纯函数无 IO，且被 codex 共用；route 本就是策略解析层
+  // （mode / workspace / resume / approval 都在这儿定）。
+  // agent 被停用 / 被删 → resolveEnabledAgent 返回 null → 静默退回默认人设，
+  // 绝不让「人设没了」变成「会话发不出消息」。
+  // @提及优先于会话人设：这一轮是外援答的。
+  const agentRecord = mentionActive ? mentionAgent : resolveEnabledAgent(resolvedAgentId);
+  const agentSpawn = agentRecord ? resolveAgentSpawn(agentRecord) : null;
+  // 每轮落一份「谁答的」。会话级也记 —— agent 定义是 live 引用（改了老会话跟着变），
+  // 这一列是事后唯一能追溯「当时哪个 agent 答的」的线索。
+  if (agentRecord) {
+    setNodeAgent(nodeId, agentRecord.id, mentionActive ? "mention" : "session");
+  }
   startRun({
     nodeId,
     // chat B-fork writes the forked id to THIS node (per-node); native isolated
@@ -652,6 +714,9 @@ export async function POST(req: Request) {
         claudeSessionId,
         cwd: spawnCwd,
         systemPrompt: resolvedSystemPrompt,
+        agent: agentSpawn,
+        // @提及：一次性 spawn，不落盘不 resume（见上方 mentionActive 那段）。
+        ephemeral: mentionActive,
         chatEnhanced,
         // claude B-fork 与 codex chat resume 共用这面旗：sdk-adapter 据此开
         // persistence+resume（--fork-session 本身 codex backend 会忽略）。

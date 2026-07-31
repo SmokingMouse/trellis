@@ -146,6 +146,13 @@ export default function SettingsPage() {
             ← 返回
           </Link>
           <h1 className="text-lg font-semibold tracking-tight">设置</h1>
+          {/* S88：Agent 管理是独立整页（编辑器装不进 popover），从这里进。 */}
+          <Link
+            href="/settings/agents"
+            className="ml-auto h-7 px-2.5 inline-flex items-center rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
+          >
+            🎭 Agent 管理 →
+          </Link>
         </div>
 
         <section className="rounded-card border border-line bg-surface shadow-raise p-5">

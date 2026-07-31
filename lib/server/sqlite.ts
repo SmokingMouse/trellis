@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { BUILTIN_AGENT_SEEDS } from "@/lib/agent-presets";
 
 const DB_DIR = path.join(os.homedir(), ".trellis");
 const DB_PATH = path.join(DB_DIR, "data.db");
@@ -509,6 +510,159 @@ function migrate(db: Database) {
     );
   }
 
+  // S88: 自定义 Agent。一行 = 一个可复用的人设（提示词 + 模型 + 技能 + 工具 + 隔离度），
+  // 有稳定 id/slug 供后续的定时任务 / @提及 / 讨论组按引用取用。
+  //
+  // 刻意不为「默认 Agent」建行 —— `sessions.agent_id IS NULL` 就是它。执行链因此能写成
+  // `if (agentId) { 新逻辑 } else { 今天的代码原封不动 }`，物理上杜绝默认路径回归。
+  //
+  // slug 同时是三样东西：claude `--agent` 的值、pack 里 agents/<slug>.md 的文件名、
+  // 未来 @提及的名字 —— 所以必须是安全的路径片段（校验在 lib/server/agents.ts）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      model TEXT,
+      tools_json TEXT,
+      disallowed_tools_json TEXT,
+      skills_json TEXT,
+      inherit_env INTEGER NOT NULL DEFAULT 0,
+      permission TEXT,
+      require_approval INTEGER,
+      builtin INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS agents_enabled ON agents(enabled, sort_order);
+  `);
+
+  seedBuiltinAgents(db);
+
+  // ON DELETE SET NULL 而非 CASCADE，理由同 workspace_id：删一个 agent 不该连坐删掉
+  // 用它聊过的全部历史，退回默认人设即可。
+  const hasSessionAgentId = db
+    .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'agent_id'")
+    .get();
+  if (!hasSessionAgentId) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL",
+    );
+  }
+
+  // 每轮实际由谁答。会话级人设也落一份，用于事后审计「这轮是哪个 agent 答的」——
+  // agent 定义是 live 引用（改了老会话就跟着改），这一列是仅有的历史线索。
+  // agent_scope: NULL | 'session' | 'mention'，@提及派活的那一轮才是 'mention'。
+  for (const col of ["agent_id", "agent_scope"] as const) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('nodes') WHERE name = ?")
+      .get(col);
+    if (!has) db.exec(`ALTER TABLE nodes ADD COLUMN ${col} TEXT`);
+  }
+
+  // S88: 自动化任务。三张表的切分理由见 progress/custom-agents-plan.md：
+  //
+  //   tasks          「agent + prompt + workspace」冻成一个按钮
+  //   task_triggers   触发器，**一对多独立成表**
+  //   task_runs       每次执行的留档
+  //
+  // 触发器为什么不是 tasks 上的一列：用户要的是「每天 9 点自动跑 **而且** 我想
+  // 随手点一下」—— 做成列就得建两行、复制一份 prompt。拆表后手动触发 = 零个
+  // trigger 行，cron = 一个 kind='cron' 行，未来飞书群 = 一个 kind='lark' 行。
+  // 更硬的理由：每个 trigger 有自己的运行时状态（cron 的 last_fired_at、git 的
+  // sha 游标），挂在 tasks 上会变成一堆互斥的 nullable 列。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      agent_id TEXT,
+      prompt TEXT NOT NULL,
+      workspace_path TEXT,
+      context_mode TEXT NOT NULL DEFAULT 'project',
+      model TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      home_session_id TEXT,
+      timeout_ms INTEGER NOT NULL DEFAULT 1800000,
+      overlap_policy TEXT NOT NULL DEFAULT 'skip',
+      notify_on TEXT NOT NULL DEFAULT 'error',
+      max_budget_usd REAL,
+      max_retries INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS tasks_enabled ON tasks(enabled);
+
+    CREATE TABLE IF NOT EXISTS task_triggers (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config_json TEXT NOT NULL,
+      last_fired_at INTEGER,
+      cursor TEXT,
+      last_checked_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS task_triggers_task ON task_triggers(task_id);
+    CREATE INDEX IF NOT EXISTS task_triggers_kind ON task_triggers(enabled, kind);
+
+    CREATE TABLE IF NOT EXISTS task_runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      trigger_id TEXT,
+      trigger_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      session_id TEXT,
+      node_id TEXT,
+      scheduled_for INTEGER NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      started_at INTEGER,
+      ended_at INTEGER,
+      error_message TEXT,
+      prompt_snapshot TEXT,
+      agent_id_snapshot TEXT,
+      token_input INTEGER NOT NULL DEFAULT 0,
+      token_output INTEGER NOT NULL DEFAULT 0,
+      notified_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS task_runs_task ON task_runs(task_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS task_runs_node ON task_runs(node_id);
+    CREATE INDEX IF NOT EXISTS task_runs_active ON task_runs(status);
+
+    CREATE TABLE IF NOT EXISTS scheduler_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_tick_at INTEGER NOT NULL
+    );
+  `);
+
+  // ★ 抢槽去重的核心。一个 trigger 的一个**计划槽位**（对齐到整分钟的
+  // scheduled_for），全库只能有一条 run。多进程同时 tick、重启后 catch-up
+  // 重复计算，都会撞在这条约束上而不是多跑一次、多烧一次钱。
+  // partial index 的 WHERE 让手动触发（trigger_id IS NULL）不受约束 ——
+  // 手动点两次就该跑两次。
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS task_runs_slot
+      ON task_runs(trigger_id, scheduled_for, attempt)
+      WHERE trigger_id IS NOT NULL;
+  `);
+
+  // 任务会话不该挤在用户的会话侧栏里。'user' | 'task'。
+  const hasSessionKind = db
+    .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'kind'")
+    .get();
+  if (!hasSessionKind) {
+    db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
+  }
+
   // Stage 16: FTS5 cross-session full-text search. Single virtual table
   // covers question / response / reference / note text. trigram tokenizer
   // is the FTS5-builtin pick for mixed CJK + ASCII: 3-char sliding window
@@ -550,6 +704,24 @@ function migrate(db: Database) {
      WHERE status = 'streaming'`,
   ).run();
 
+  // ★ S88：上面那条的**对称件**，必须成对存在 —— 只做一个比都不做更危险。
+  //
+  // task_run 的终结完全依赖进程内的 onSettled 回调，而 SIGKILL 时它一次都不跑。
+  // 结果是那行永远卡在 running，overlap_policy='skip' 会因此**永久跳过**该任务
+  // 后续所有执行 —— 一个静默瘫痪整个功能的死锁，界面上还看不出异常。
+  //
+  // pending 也要 reap：否则重启后 pending 队列复活一批过期任务，等价于绕过
+  // catch-up 窗口做无限补跑。补跑走 task-scheduler 的 catchUp，不靠 pending 复活。
+  //
+  // 放在 migrate() 里而不是调度器启动时：getDB() 触发 migrate 远早于
+  // instrumentation 注册调度器，分开会开出一个「节点已 error 但 run 仍 running」
+  // 的不一致窗口，而那个窗口里刚好可能有 API 请求读到。
+  db.prepare(
+    `UPDATE task_runs SET status = 'error', error_message = 'interrupted',
+            ended_at = ?
+     WHERE status IN ('running', 'pending')`,
+  ).run(Date.now());
+
   // First-boot backfill: if the search_index has zero rows but the DB
   // already holds data (upgrade from a pre-Stage-16 build), seed it
   // from the existing tables in a single transaction. Idempotent —
@@ -588,4 +760,37 @@ function migrate(db: Database) {
       tx();
     }
   }
+}
+
+// 把 lib/agent-presets.ts 的五个预设种进 agents 表。
+//
+// INSERT OR IGNORE 按 slug 幂等：每次 boot 都跑，已存在就不动 —— 所以用户改过的
+// 内置 agent 不会被下次启动覆盖回去，删掉的也不会复活（删除走 enabled=0，见 agents.ts）。
+//
+// inherit_env = 1：这五个是**纯人设**，用户选它们是想换语气，不是想进沙箱。
+// 隔离（inherit_env=0）会连 CLAUDE.md、本机 skill、MCP 一起砍掉（2026-07-31 实测，
+// 见 progress/facts.md），对「在 project 会话里换个说话风格」这个用法是纯伤害。
+// 新建的自定义 agent 默认相反（隔离），因为那才是「可复现、能搬机器」的用法。
+function seedBuiltinAgents(db: Database) {
+  const now = Date.now();
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO agents
+       (id, slug, name, description, system_prompt, inherit_env, builtin, enabled, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, ?, ?)`,
+  );
+  const tx = db.transaction(() => {
+    BUILTIN_AGENT_SEEDS.forEach((seed, i) => {
+      stmt.run(
+        `builtin-${seed.slug}`,
+        seed.slug,
+        seed.name,
+        seed.description,
+        seed.systemPrompt,
+        i,
+        now,
+        now,
+      );
+    });
+  });
+  tx();
 }

@@ -256,6 +256,7 @@ export function listProjectTree(): ApiProject[] {
     .prepare(
       `SELECT workspace_id AS w, COUNT(*) AS n, MAX(updated_at) AS u
        FROM sessions WHERE archived = 0 AND workspace_id IS NOT NULL
+         AND kind = 'user'
        GROUP BY workspace_id`,
     )
     .all() as { w: string; n: number; u: number }[]) {

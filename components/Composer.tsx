@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
+import { useAgentMentions, splitMention } from "@/hooks/useAgentMentions";
 import { providerFamily } from "@/lib/llm";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
@@ -63,6 +64,12 @@ export function Composer({
   // visible is usable. codex 系隐藏：列表来自 ~/.claude/skills，codex CLI 不认
   // /skill 语法，发出去只是字面 "/foo"。
   const matchedSkills = useSkillSuggestions(
+    text,
+    providerFamily(provider) === "claude",
+  );
+  // S88: `@slug` 单轮派活。与 `/` 那两个匹配器正则互斥（见 useAgentMentions），
+  // 同样 codex 系隐藏 —— --agent 是 claude CLI 专属，服务端也会钳成 null。
+  const matchedAgents = useAgentMentions(
     text,
     providerFamily(provider) === "claude",
   );
@@ -130,13 +137,21 @@ export function Composer({
     setText(`/${name} `);
     ref.current?.focus();
   };
+  const pickAgent = (slug: string) => {
+    setText(`@${slug} `);
+    ref.current?.focus();
+  };
+  // agents 与 commands/skills 互斥出现（`@` vs `/`），所以三者共用一个平坦的
+  // 索引空间不会串味：有 agent 时另两个必为空，反之亦然。
   const slashNav = useSlashNav(
-    matchedCommands.length + matchedSkills.length,
+    matchedCommands.length + matchedSkills.length + matchedAgents.length,
     text,
-    (i) =>
-      i < matchedCommands.length
+    (i) => {
+      if (matchedAgents.length) return pickAgent(matchedAgents[i].slug);
+      return i < matchedCommands.length
         ? pickCommand(matchedCommands[i])
-        : pickSkill(matchedSkills[i - matchedCommands.length].name),
+        : pickSkill(matchedSkills[i - matchedCommands.length].name);
+    },
   );
 
   useEffect(() => {
@@ -168,7 +183,9 @@ export function Composer({
     // This composer stays mounted after submit — clear so the next turn
     // starts fresh.
     att.clear();
-    streamBranch(targetNode.id, trimmed, null, { attachments });
+    // S88: 剥出开头的 `@slug` —— slug 走 body 字段，剩下的才是问题本身。
+    const [mentionAgentSlug, question] = splitMention(trimmed);
+    streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug });
     onSubmitted?.();
   };
 
@@ -189,12 +206,16 @@ export function Composer({
 
   return (
     <div className="relative py-3">
-      {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
+      {(matchedCommands.length > 0 ||
+        matchedSkills.length > 0 ||
+        matchedAgents.length > 0) && (
         <SkillPickerList
           skills={matchedSkills}
           onPick={pickSkill}
           commands={matchedCommands}
           onPickCommand={pickCommand}
+          agents={matchedAgents}
+          onPickAgent={pickAgent}
           activeIndex={slashNav.active}
         />
       )}

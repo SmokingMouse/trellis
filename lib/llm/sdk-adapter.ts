@@ -10,7 +10,7 @@ import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { EventType, type AgentEvent, type RunOptions } from "@smokingmouse/agent";
 import type { TaskMeta } from "@/lib/types";
-import type { Mode, StreamEvent, StreamRequest } from "./types";
+import type { AgentSpawn, Mode, StreamEvent, StreamRequest } from "./types";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 
 // chat enhanced-mode scratch workspace (shared by claude + codex). Giving chat
@@ -32,8 +32,68 @@ export function ensureChatScratch(): void {
 // （未 allowlist 的也会进 can_use_tool → 同样弹卡）。
 const APPROVAL_ASK_TOOLS = ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"];
 
+/** S88: 把自定义 Agent 叠加到已算好的 RunOptions 上。
+ *
+ * 刻意做成「三个 mode 分支之后的统一后处理」而不是新增分支 —— chat / enhanced chat /
+ * project 已经够难读，再乘一个「有没有 agent」维度就是 6 个分支。
+ *
+ * 铁律：**agent 只改「人设 + 能力面」，绝不碰「上下文与身份」**。
+ * workspace / cwd / resume / forkSession / persistence / attachments / env /
+ * onCanUseTool 一概不动 —— 那几个字段撑着 chat B-fork 和 project 的 per-lineage
+ * isolation 两套本来就很脆的机制，agent 掺一脚必炸。 */
+function applyAgent(base: RunOptions, a: AgentSpawn): RunOptions {
+  const out: RunOptions = { ...base };
+
+  // --agent 与 --system-prompt 互斥（后者是整体替换，前者是激活人设，同给的优先级
+  // CLI 无文档）。agent 的人设已完整躺在 --agents JSON 的 prompt / pack 的 md 正文里，
+  // 这里直接删掉 systemPrompt，不做 append —— 混合两个人设来源是日后
+  // 「为什么它不听我的」的温床。
+  delete out.systemPrompt;
+
+  out.agent = a.slug;
+  if (a.pluginDir) out.pluginDirs = [a.pluginDir];
+  if (a.agentsJson) out.agents = a.agentsJson;
+
+  if (!a.inheritEnv) {
+    // 隔离 = 不读本机 CLAUDE.md / settings / skill。**连 MCP 一起没了**
+    // （2026-07-31 实测，见 progress/facts.md）—— 这是产品事实不是 bug，
+    // UI 上必须讲明白。想给隔离 agent 配 MCP 只能显式走 --mcp-config（未做）。
+    out.settingSources = false;
+  }
+
+  // 下面这些「显式配了才覆盖」：没配就保持 mode 分支算出来的值。
+  // 例如 project 不配 tools 就仍是全工具，纯 chat 不配就仍是 WebSearch/WebFetch。
+  if (a.model) out.model = a.model;
+  if (a.tools) out.tools = a.tools;
+  if (a.disallowedTools?.length) out.disallowedTools = a.disallowedTools;
+  if (a.permission) out.permission = a.permission;
+
+  // agent 可以强制开审批（requireApproval=true）。关掉（false）也认，但只在
+  // 交互回调在场时有意义 —— 没有 onCanUseTool 时 askTools 本就是死字段。
+  if (a.requireApproval === true && base.onCanUseTool) {
+    out.permission = a.permission ?? "default";
+    out.askTools = APPROVAL_ASK_TOOLS;
+  } else if (a.requireApproval === false) {
+    delete out.askTools;
+  }
+
+  return out;
+}
+
 /** trellis mode + StreamRequest → SDK RunOptions(细粒度机制)。 */
 export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
+  let base = baseRunOptions(mode, model, req);
+  // @提及的一次性 spawn：把三个 mode 分支算出来的身份统统抹掉。放在 applyAgent
+  // **之前** —— agent 那层的铁律是不碰身份，抹身份这件事必须显式、独立、可搜。
+  if (req.ephemeral) {
+    base = { ...base, persistence: false, forkSession: false };
+    delete base.resume;
+  }
+  if (req.extraArgs?.length) base = { ...base, extraArgs: req.extraArgs };
+  return req.agent ? applyAgent(base, req.agent) : base;
+}
+
+function baseRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
   const common: RunOptions = { model, attachments: req.attachments };
   // 权限确认仅在交互回调在场时生效（run-bus 只给 claude 系建回调；codex/mock
   // 无 stdio 协议，保持各自现有 permission 策略不受影响）。
