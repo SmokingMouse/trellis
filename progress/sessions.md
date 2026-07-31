@@ -1,6 +1,17 @@
 # Session Log
 
-最近 5 条，倒序（Session 89 / 88 / 87 / 86 / 85）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 90 / 89 / 88 / 87 / 86）。更早的见 `archive.md`。
+
+### Session 90（2026-07-31，trellis-admin skill：让任意 claude 会话用一句话配后台）
+- **触发**: 用户「现在有了 Agent 配置的能力，能在平台预留一个 Agent，能通过这个 Agent 完成后台的一些 Agent 配置 or 定时任务配置吗」。
+- **我的第一版方案被用户一句话推翻，且推翻得对**: 我提「内置一个受限 admin agent（工具白名单 `["Bash","Skill"]`）」，用户问「不能做一个内置的 skill 吗，这样不用限制 agent」。**工具白名单在这里从来不是边界** —— admin agent 要调 CLI 就必须有 `Bash`，给了 Bash 就能 curl 任意端点、改任意文件，白名单只是看起来像闸。
+- **更关键的一条**: 这个能力**今天就已经存在**。默认 agent 不隔离，spawn 出的子进程继承 trellis 进程 env（`shared/.env.local` 经 bun 从 cwd 自动加载），任何能用 Bash 的会话早就能 curl `/api/agents`。做 skill **不是授予权限，是把已有权限变得可发现、有契约**。威胁模型因此从「越权」变成「手滑」—— 而对手滑，SKILL.md 里「先预览再写入」的纪律是**真管用的控制**（上一轮我说的「提示词不是闸」只对防绕过成立，已收窄）。
+- **Done**: `skills/trellis-admin/`（`SKILL.md` 字段语义 + cron 速查 + Known Failure Modes · `scripts/trellisctl.ts` ~380 行，agents/tasks/triggers/runs/providers/skills/cron 七组子命令）。软链 `~/.claude/skills/trellis-admin` → **仓库 checkout**，不是 `~/.trellis/current` —— 当前 release 部署于 skill 出现之前，链过去是断的；等这次上线后再定要不要改成跟 release 走。
+- **两道闸落在脚本里**（比改服务端轻，且不影响界面手动操作）: `triggers add` 拒绝触发间隔 < 5 分钟（`--force` 可越过）并在挂之前回显人话描述 + 下次触发时间；`tasks create` **建出来不挂触发器**，输出直接引导「先手动跑一次 → 看 runs → 满意再挂」。**原本想做的「建成停用再试跑」走不通** —— `lib/server/tasks.ts:409` 对 disabled 任务连手动 run 都拒。
+- **写的过程中修的三处**: 块注释里写 `*/2`，那个 `*/` 把注释提前关了（bun 直接 parse 失败）· builtin agent 的 id 是 `builtin-<slug>`，截 8 位后五行长得一模一样 → 索性不打 id、全用 slug 当句柄，并让 `tasks create` 收 `agentSlug` 自动换成 id · 中文列宽按码点 `padEnd` 会把表推歪，改按显示宽度算。另修一处照旧计划文档抄错的路径：任务页是 `/settings/tasks` 不是 `/tasks`（S89 已收进管理台）。
+- **实测通过**: `health`（3088，token 从 `shared/.env.local` 自动读到，`auth: on`）· `cron "0 9 * * 1-5"` →「每个工作日 09:00 · 08-03/04/05」（今天周五，跳周末正确）· `agents list --all` · `providers`（12 个）· `skills` · `tasks create/update/run/list` · `runs`。
+- **端到端卡住，但卡点不在本次改动**: 建了个真任务手动跑两次，**都在 1 秒内 0 token 失败**：`Failed to authenticate: OAuth session expired and could not be refreshed`。任务链路全通（建任务 / 抢槽 / 建 `kind='task'` 会话 / 建节点 / spawn / 捕获错误 / 留档），死在 spawn 出来的 claude 认证上。**五条已排除**（本机凭证 / proxy / launchd 的 PATH+HOME / env 污染 / `--model opus`），全部命令与判据见 `failures.md`。旁证：`nodes` 表最近一次 `done` 停在 **07-28 10:52** —— prod 的交互式会话很可能也早就坏了，只是三天没人开所以没人知道。
+- **Next**: 用户去 `trellis.smokingmouse.cc` 或 `127.0.0.1:3088` 发一句普通聊天。回得来 → 只有任务路径坏，对照 `tasks.ts:launch()` 与 `chat/route.ts` 构造的 StreamRequest 逐字段找差异；回不来 → prod 实例级故障，先 `launchctl kickstart -k` 看是否自愈。试跑任务 `bffbe8ed` 留在库里没删。**BOE 仍未部**（S88 遗留）。
 
 ### Session 89（2026-07-31，设置与功能排布重组：出方案不动代码）
 - **触发**: 用户「现在 trellis 设置有点乱，各种功能排布也有点散乱，特别是在 Agent 和定时任务出现后，我想集中排一排」。三路并行勘察（设置落点 / 导航入口 / Agent 与任务表面）后出方案。
@@ -70,25 +81,3 @@
 - **推完在 BOE 上又栽了同一个报错，但不是同一个 bug —— 新旧错位**：用户贴的第二条日志跑完了 smoke + backup 才死在 `launchctl`，而新代码的探针会在 preflight 就 abort，**到不了 smoke** —— 判据一眼断定「部署的是新 commit（`0fe873940`），执行的是旧脚本」。成因：`app/api/update/route.ts:55` 界面「更新到最新」默认部署 `origin/main`，而干活的 `scripts/deploy.ts` **来自工作树** —— fetch 到新 commit 就够建出新 release，可工作树没 `git pull`，于是新代码进了 release、旧流程照旧走 `switchTo()` 里的 launchctl。**「改部署脚本」这件事有天然的鸡生蛋：改动只有进工作树才生效。**
 - **补的闸**（`deploy.ts:checkMachinery`）：preflight 比对 `MACHINERY`（`scripts/deploy.ts` / `lib/deploy-supervisor.ts` / `lib/deploy-state.ts`）三者的 blob —— 目标 sha 里的、HEAD 里的、磁盘上的。**只拦真正会骗人的那种**：`HEAD` 是目标祖先（= 工作树落后，本次名不副实）→ 拒绝并指着 `git pull --ff-only`；本地未提交改动（`inHead === inTarget`）或目标非后代（按老 sha 回滚 / 别的分支）→ 只提醒。验证是**真造场景打的**：scratch clone 切到 `bffeda9` + 塞进带闸的新脚本 → 部署 `origin/main` 果然在 preflight 被拦 ✓；本仓库未提交状态 → 只提醒后落到无关的工作目录闸 ✓；`deploy.ts bffeda9`（回滚形态）→ 只提醒 ✓。tsc 零错、lint 回基线。
 - **Next**: BOE 上两步 `cd ~/trellis && git pull && bun scripts/deploy.ts install-service` → `make deploy`（跑前 export 代理，`bun install` 要出网）。注意 `install-service` 那一步就会让服务重启进 `~/.trellis/current` —— 也就是 11:18 那次建好却没跑上的 `20260730T111814-bffeda99b`，**S85 的修复到这一步即生效**，第二步才是发这次的 supervisor 修复。本机 prod 走 `make deploy`。
-
-### Session 85（2026-07-30，镜像会话的「永久正在生成…」— CLI 注入劫走回复）
-- **触发**: 用户截图一条 attach 的 CLI 镜像 turn：6 个工具全标「完成」，底下却一直转「正在生成…」。问「为啥显示完成了，但实际卡在这个界面」。
-- **两层病灶，都被实测坐实**：
-  - **根因（解析器切错 turn 边界）**: `cli-import.ts:isTurnStart` 把 CLI 注入的 user 文本消息当成了真用户提问 —— skill 触发的 `Base directory for this skill: …`、`<task-notification>`、Stop hook 反馈、`Continue from where you left off.`、Esc 打断的 `[Request interrupted by user]`、`/compact` 摘要。这些假 turn 会把**后续 assistant 的最终回复整段劫走**，真 turn 只剩工具调用 + 空 response。**本机 400 个真实 jsonl / 1142 个 turn 实测：136 条这种僵尸。**
-  - **UI 撒谎**: `TurnCard.tsx` / `ChatNode.tsx` 的兜底分支把「不在流式 + response 为空」一律画成脉冲点 +「正在生成…」，于是每一种「这轮本来就没文本」都伪装成永不结束的 loading，把上游问题全掩盖了。
-- **判据用结构字段、不用文本前缀**（前缀会随 CLI 版本漂）：`isMeta` / `promptSource === "system"` / `interruptedMessageId` / `isCompactSummary` / `isVisibleInTranscriptOnly`。真用户消息（typed/sdk/queued）零命中，剩余以 `<` 开头的全被既有 `isCommandNoise` 覆盖。
-- **Done**:
-  - `cli-import.ts`：五道结构闸；**孤儿链兜底认领**（严格判据下 `claude --continue`/fork 出的 jsonl 上溯不到 turn-start，会整段丢 —— 实测 117 条消息 / 16030 字符；先严格后宽松，次序反了就退回 bug 本身）；认领跑到**固定点**；空壳兜底 turn 剪枝 + 子节点提升；新导出 `entryUuids`。
-  - `cli-import-db.ts`：清理旧解析残留的假 turn 节点，四道闸（**id 出现在 jsonl entry uuid 集合里** / 非 streaming / 无子节点 / 无 lineage 失联）+ 循环到不动点（假 turn 串成链，一轮只剥一层）；`parseLineages` 区分「读不到」与「空」。
-  - `sqlite.ts`：`PRAGMA user_version` 一次性迁移 v1，作废 `cli_lineages.synced_uuid`（否则 `allUnchanged` 快路径跳过重写，存量永远修不好）。
-  - `EmptyResponseNotice.tsx`（新）：只有「镜像会话 + 正被实时写」才敢说「CLI 正在生成…」，否则据实说「暂无文本回复」。
-  - `sessionStore.ts`：`LIVE_TTL_MS` 12s → 60s（实测真实 transcript 相邻条目间隔 13.78% 超过 12s，最长 3576s，12s 会让在跑的会话反复诈死）。
-  - `cli-sync-watcher.ts`：`reimport` 的**空 catch 加日志** —— 它是镜像会话唯一的更新通道，静默失败 = 界面永久停更且零痕迹。
-- **外派 falsification-verifier 打了一轮，落库那一半被打穿（解析器一半全量对抗下不动摇）**，两条**可复现的数据丢失**路径，且「迁移作废游标」恰好保证它们升级后首次启动必然各跑一遍：
-  - **致命①**：清理判据 `claude_session_id IS NOT NULL` 不等于「import 建的」—— `app/api/chat/route.ts:512` 在 attached 会话**从非 tip 分叉**时会给 trellis 临时节点写 sid，而 `run-bus.ts:648` 的 `reconcileAttachedTurn` **只在 `stoppedWith==='done'` 时跑**；用户打断的那一轮（含他敲进去的问题）正好命中三道闸被删。
-  - **致命②**：`parseLineages` 把「文件读不到」和「文件是空的」静默当成一回事 → `turnIdSet` 缺整条 lineage → 清理从叶子逐层剥光整棵子树。**全失败有 early-return 护栏，唯独部分失败没有**，而这是最常见的情况（transcript 过期 / 用户清 jsonl）。
-  - 修法：判据换成**「节点 id 是否出现在 jsonl 的 entry uuid 集合里」** —— import 建的节点 id 恒等于某条 entry 的 uuid，trellis 自建节点是本地 v4 绝不在里面；比 `cli_turn_uuid` 强（那列这次才开始写，存量没有），比 `claude_session_id` 安全。另加 `anyUnreadable` 闸。
-- **验证**: 全量 400 个 jsonl —— **僵尸 136 → 0**、假 turn 236 → 14（兜底认领的孤儿链头）、文本 1021806 → **1023718（不减反增**，兜底把原本就丢的孤儿也捞回来了）、断链 0、多次解析 hash 一致。端到端：旧代码导入复现病症（4 个假 turn + 1 条空回复僵尸）→ 切修复版**一次 reimport** 即 0/0，总文本 37152 **与纯解析精确一致**（无重复）。两条致命路径**回归测试**：trellis 分叉被中止节点 ✅ 幸存、jsonl 失联时节点数 21 → 21 ✅ 未销毁。四象限安全闸（线性续聊 / 分叉被中止 / 分叉跑着 / 分叉 done）全部幸存。lint 32 problems/23 errors = 基线，tsc 零错。
-- **两次自摆乌龙**: ① 第一版 guard 报「非 import 节点被误删」是虚惊 —— 我重写脚本时把 INSERT 删了，那两个节点压根没被放进去过。**测「东西还在吗」之前先确认它进去过。** ② lint 从 28 涨到 34 以为是回归，其实是我遗留在仓库根的临时验证脚本被 eslint 扫了。
-- **边界（诚实）**: 截图那条会话在 devbox 上，本机 DB 最新只到 7-28，**没拿到现场直接证据** —— 诊断靠本机语料复现同形态（136 例）建立。另：**源 jsonl 已失联的镜像会话走不到修复路径**（`parseLineages` 早返回 `empty`），本机两个 attached 会话的 jsonl 都已不在磁盘，那 2 个坏节点不会自愈，只是 UI 文案不再谎称「正在生成」。
-- **Next**: 两台实例（本机 prod + devbox）都要重新部署才生效；重启后首次 `getDB()` 跑 v1 迁移，watcher 自动全量重导一次。
