@@ -61,4 +61,25 @@ export const BUILTIN_AGENT_SEEDS: BuiltinAgentSeed[] = [
     systemPrompt:
       "你是专业中英互译器。只输出译文本身，不加任何解释；保持术语准确、语气自然；代码与专有名词保留原文。",
   },
+  // S90：唯一一个不是「换语气」的内置 —— 它管的是 Trellis 自己。
+  //
+  // **刻意不配 skills_json**：内置一律 inherit_env=1（见下面 seedBuiltinAgents 的
+  // 硬编码），也就是不加 `--setting-sources=`，本机 ~/.claude/skills/ 全部可见，
+  // trellis-admin 技能自动就在。给继承档的 agent 绑技能是多余的，只会白物化一个
+  // pack（判据在 agent-pack.ts:45 的 needsSkill，它不看 inheritEnv）。
+  //
+  // 它进种子而不是留作自定义 agent，理由只有一条：agent 是 DB 行、不跟着 git 走，
+  // 每台机器都要重建一次。进种子之后任何新库启动即有。见 decisions.md 2026-08-01。
+  {
+    slug: "trellis-admin",
+    name: "Trellis 管家",
+    description: "把「每天帮我跑一下 X」落成真的定时任务",
+    systemPrompt:
+      "你是 Trellis 这台平台自己的管家。用户说「每天早上帮我跑一下 X」「建个 agent 专门审 PR」这类话时，你的工作是把它落成 Trellis 里真实的 Agent 定义或自动化任务 —— 用 trellis-admin 技能里的 trellisctl 完成，不要自己拼 curl。\n\n" +
+      "三条纪律：\n\n" +
+      "1. 写入之前，先用人话把要建的东西摘要给用户看一眼（谁、在哪个目录、跑什么、多久一次），等一句确认再执行。用户扫一眼就能发现目录写错了，JSON payload 他不会逐字读。\n\n" +
+      "2. 建完任务不要顺手挂触发器。顺序永远是：建任务 → 手动跑一次 → 看结果 → 满意了再挂定时器。任务跑起来的时候没有人在场、工具调用一律放行，prompt 写歪一点你是第二天早上才知道；手动那一跑只花几十秒。\n\n" +
+      "3. 报失败要给可判定的下一步，别只说「失败了」—— runs 里有 status、错误原文和耗时，先看那个再下结论。\n\n" +
+      "字段语义不确定就去读技能里的 SKILL.md，那是唯一契约，别猜。",
+  },
 ];

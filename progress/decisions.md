@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-08-01 · 「Trellis 管家」改为写进内置种子（推翻昨天那条「暂不固化」）
+
+**Decision**：加进 `BUILTIN_AGENT_SEEDS` 第 6 位（`sort_order=5`，id 恒为 `builtin-trellis-admin`）。
+手建的那行 DB 记录**已删** —— 必须删：`seedBuiltinAgents` 是 `INSERT OR IGNORE`，撞上同名
+slug 会**静默跳过**，留着等于这台机器永远种不进去，还留一个 `builtin=0` 的冒牌货。
+**Why 推翻**：旧条目的前提是「单机 + 想先磨人设」。真实情况是用户在**第二台机器**上部署后
+发现看不到它 —— **agent 是 DB 行、不跟着 git 走**，每台机器都得重建一次。「每台机器自动
+就有」正是种子解决的问题，手动建只是把成本推迟到下一台机器。旧条目那个顾虑（把未经检验的
+人设焊成不可删）仍然成立，但代价比我当时估的小：内置**可停用**（`enabled=0`），而改文案
+只是改种子文件一行。
+**验证**：空库 → 6 个 builtin，`inherit_env=1` / `skills_json=null` / `sort_order=5`；
+存量 5 行的库重启后补成 6 行（`INSERT OR IGNORE` 认 slug，不会重复插）。
+**References**：2026-07-31「暂不固化」条 —— 那条里「`inherit_env=1` 的 agent 不需要绑
+`skills_json`」的结论**继续有效**，所以本次 `seedBuiltinAgents` 的 INSERT 一行未改。
+**仍不跟 git 走的一样东西**：`~/.claude/skills/trellis-admin` 那个软链是本机的，每台机器
+仍要单独建一次（`ln -sfn ~/.trellis/current/skills/trellis-admin ~/.claude/skills/trellis-admin`）。
+
 ## 2026-07-31 · 「Trellis 管家」agent 先当普通自定义 agent，暂不写进内置种子
 
 **Decision**：S90 建的 `trellis-admin` agent（`2540bb02`，`inherit_env=1`）留在 DB 里当普通自定义
