@@ -34,7 +34,21 @@ export async function GET() {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const skills: { name: string; dir: string; description: string }[] = [];
     for (const e of entries) {
-      if (!e.isDirectory()) continue;
+      // symlink 也要收：指向别处仓库的 skill 是常态（本机 `trellis-admin` 就是
+      // 软链回本仓 `skills/trellis-admin`）。readdir 给的 Dirent **不穿透**，
+      // `isDirectory()` 对 symlink 恒 false —— 只认它就会把这类 skill 整个漏掉，
+      // 而 CLI 侧（init 事件的 slash_commands）和物化侧（agent-pack.ts:129/134
+      // 的 existsSync/symlinkSync 都穿透）都看得见，唯独这个发现层瞎。
+      if (!e.isDirectory()) {
+        if (!e.isSymbolicLink()) continue;
+        try {
+          // stat 穿透确认目标真是目录；悬空软链静默跳过。
+          const st = await fs.stat(path.join(dir, e.name));
+          if (!st.isDirectory()) continue;
+        } catch {
+          continue;
+        }
+      }
       try {
         const raw = await fs.readFile(
           path.join(dir, e.name, "SKILL.md"),

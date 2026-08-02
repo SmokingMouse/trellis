@@ -1,0 +1,282 @@
+// Regression harness for lib/server/cli-jsonl.ts —— CLI jsonl 的 turn 归属。
+//
+// 这个文件存在的理由是一次真实漂移：cli-import（jsonl → 节点树）和 cli-fork
+// （在某个 turn 上截前缀造分叉）各抄了一份 turn-start 判据，import 那份后来长出
+// 5 道结构闸，fork 那份没跟。两边对「turn 从哪开始」的答案分家后，fork 的入参
+// turnUuid 恰恰是 import 定的节点 id —— 等于在一条自己认不出的 turn 上截前缀。
+//
+// 2026-08-01 合并前实测（889 个 jsonl / 1897 个有回答的 turn）：
+//   36 个 turn（1.90%）fork 侧找不到 tail   → 分叉静默降级成线性
+//   315 个 turn（16.61%）选出的 tail 与 import 归属不符 → 前缀截在没说完的回答中间
+// 合并后两项均为 0。本 harness 就是防它再分家 —— 判据不能只靠注释约定。
+//
+// Run:  bun scripts/test-cli-jsonl.ts
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  type CliRawEntry,
+  indexByUuid,
+  isTurnStart,
+  looseTurnStart,
+  makeTurnOwnership,
+  readJsonlLines,
+  terminalAssistantLine,
+  userText,
+} from "@/lib/server/cli-jsonl";
+import { parseCliSessionJsonl } from "@/lib/server/cli-import";
+
+let failures = 0;
+function check(label: string, ok: boolean, got?: unknown) {
+  if (ok) console.log(`  ✓ ${label}`);
+  else {
+    failures++;
+    console.log(
+      `  ✗ ${label}${got === undefined ? "" : ` — got ${JSON.stringify(got)}`}`,
+    );
+  }
+}
+
+function section(name: string) {
+  console.log(`\n── ${name}`);
+}
+
+// ── 合成语料工具 ────────────────────────────────────────────────────────────
+
+let seq = 0;
+function uid(tag: string): string {
+  seq++;
+  return `${tag}-${String(seq).padStart(4, "0")}`;
+}
+
+function user(
+  uuid: string,
+  parentUuid: string | null,
+  text: string,
+  extra: Partial<CliRawEntry> = {},
+): CliRawEntry {
+  return {
+    type: "user",
+    uuid,
+    parentUuid,
+    timestamp: "2026-08-01T00:00:00.000Z",
+    message: { role: "user", content: [{ type: "text", text }] },
+    ...extra,
+  };
+}
+
+function assistant(
+  uuid: string,
+  parentUuid: string | null,
+  text: string,
+  extra: Partial<CliRawEntry> = {},
+): CliRawEntry {
+  return {
+    type: "assistant",
+    uuid,
+    parentUuid,
+    timestamp: "2026-08-01T00:00:01.000Z",
+    message: { role: "assistant", content: [{ type: "text", text }] },
+    ...extra,
+  };
+}
+
+function writeFixture(entries: CliRawEntry[]): string {
+  const dir = path.join(os.tmpdir(), "trellis-cli-jsonl-test");
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, `${uid("fx")}.jsonl`);
+  fs.writeFileSync(p, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  return p;
+}
+
+// ── 1. turn-start 的结构闸 ──────────────────────────────────────────────────
+// 每道闸各一条：CLI 注入的假提问必须被挡下。挡漏任何一道，后续 assistant 的最终
+// 回复就会被劫走挂到假 turn 上（真 turn 只剩工具调用、response 为空）。
+{
+  section("turn-start 的结构闸");
+  check("真用户提问认得出", isTurnStart(user(uid("u"), null, "帮我看下这个报错")));
+
+  const gates: [string, Partial<CliRawEntry>][] = [
+    ["isMeta", { isMeta: true }],
+    ["promptSource=system", { promptSource: "system" }],
+    ["interruptedMessageId", { interruptedMessageId: "abc" }],
+    ["isCompactSummary", { isCompactSummary: true }],
+    ["isVisibleInTranscriptOnly", { isVisibleInTranscriptOnly: true }],
+  ];
+  for (const [name, extra] of gates) {
+    check(
+      `${name} 挡下 CLI 注入`,
+      !isTurnStart(user(uid("u"), null, "Continue from where you left off.", extra)),
+    );
+  }
+
+  check(
+    "命令噪声挡下（老版本 jsonl 兜底）",
+    !isTurnStart(user(uid("u"), null, "<command-name>/clear</command-name>")),
+  );
+  check(
+    "tool_result 不是 turn-start",
+    !isTurnStart({
+      type: "user",
+      uuid: uid("u"),
+      parentUuid: null,
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }],
+      },
+    }),
+  );
+  check("空文本不是 turn-start", !isTurnStart(user(uid("u"), null, "   ")));
+
+  // 宽松判据必须恰好放行严格判据挡下的那些（兜底才有东西可认领）。
+  check(
+    "宽松判据放行 meta",
+    looseTurnStart(user(uid("u"), null, "Continue…", { isMeta: true })),
+  );
+  check(
+    "宽松判据同样不认 tool_result",
+    !looseTurnStart({
+      type: "user",
+      uuid: uid("u"),
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }],
+      },
+    }),
+  );
+}
+
+// ── 2. 历史 bug：假 turn-start 劫走真 turn 的回复 ───────────────────────────
+{
+  section("假 turn-start 不许劫走真 turn 的回复");
+
+  const q = uid("q");
+  const meta = uid("m");
+  const a1 = uid("a");
+  const a2 = uid("a");
+  // 真提问 → CLI 注入的 meta（长得像提问）→ 两条 assistant。
+  // 3 道闸的老判据会把 meta 当 turn-start，于是 a1/a2 全挂到 meta 上，
+  // 真 turn q 的 tail 变成 null（分叉直接降级）。
+  const entries = [
+    user(q, null, "帮我把这个函数重构一下"),
+    user(meta, q, "Base directory for this skill: /Users/x/.claude/skills/foo", {
+      isMeta: true,
+    }),
+    assistant(a1, meta, "好的，我先读一下文件"),
+    assistant(a2, a1, "重构完成，改了三处"),
+  ];
+  const p = writeFixture(entries);
+  const rawLines = readJsonlLines(p)!;
+
+  const tail = terminalAssistantLine(rawLines, q);
+  check("真 turn 找得到 tail", tail !== null);
+  check("tail 是最后一条 assistant", tail?.entry.uuid === a2, tail?.entry.uuid);
+
+  const { resolveOwner } = makeTurnOwnership(indexByUuid(entries));
+  check("两条 assistant 都归真 turn", resolveOwner(a1) === q && resolveOwner(a2) === q, {
+    a1: resolveOwner(a1),
+    a2: resolveOwner(a2),
+  });
+
+  // 同一份语料走 import：回复必须落在真 turn 上，不能出现空 response 的僵尸。
+  const parsed = parseCliSessionJsonl(p);
+  const turn = parsed?.turns.find((t) => t.id === q);
+  check("import 也把回复归给真 turn", Boolean(turn?.response.includes("重构完成")), turn?.response);
+  check("没有空 response 的僵尸 turn", (parsed?.turns ?? []).every((t) => t.response.trim() !== ""));
+}
+
+// ── 3. 宽松兜底：链头没有真提问时内容不许被丢 ───────────────────────────────
+{
+  section("宽松兜底承载 --continue / fork 出来的 jsonl");
+
+  const meta = uid("m");
+  const a1 = uid("a");
+  // `claude --continue` 出来的 jsonl：链头就是 meta，严格判据下上溯不到任何
+  // turn-start。没有兜底的话整段回复会被静默丢弃（实测 117 条消息 / 16030 字符）。
+  const entries = [
+    user(meta, null, "Continue from where you left off.", { isMeta: true }),
+    assistant(a1, meta, "接着上次的进度，我继续处理剩下两个文件"),
+  ];
+  const p = writeFixture(entries);
+
+  const { resolveOwner, fallbackStartIds } = makeTurnOwnership(indexByUuid(entries));
+  check("兜底把 meta 认领成起点", resolveOwner(a1) === meta, resolveOwner(a1));
+  check("认领记进 fallbackStartIds", fallbackStartIds.has(meta));
+
+  const parsed = parseCliSessionJsonl(p);
+  check("import 不丢这段回复", Boolean(parsed?.turns.some((t) => t.response.includes("继续处理"))));
+
+  const rawLines = readJsonlLines(p)!;
+  check("fork 也能在兜底 turn 上截前缀", terminalAssistantLine(rawLines, meta) !== null);
+}
+
+// ── 4. import ↔ fork 边界一致（真语料全扫）─────────────────────────────────
+// 这是本 harness 的主断言：import 造出来的每个 turn，fork 都必须能在**同一条**
+// turn 上找到 tail。两边判据一分家这里立刻红。
+{
+  section("import ↔ fork 边界一致（真语料）");
+
+  const root = path.join(os.homedir(), ".claude", "projects");
+  if (!fs.existsSync(root)) {
+    console.log("  ⊘ ~/.claude/projects 不存在，跳过真语料扫描（合成断言已覆盖判据本身）");
+  } else {
+    const files: string[] = [];
+    for (const d of fs.readdirSync(root)) {
+      const dir = path.join(root, d);
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(dir);
+      } catch {
+        continue;
+      }
+      if (!st.isDirectory()) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (f.endsWith(".jsonl")) files.push(path.join(dir, f));
+      }
+    }
+
+    let turns = 0;
+    let noTail = 0;
+    let wrongTurn = 0;
+    const badSamples: string[] = [];
+
+    for (const f of files) {
+      const parsed = parseCliSessionJsonl(f);
+      if (!parsed || parsed.turns.length === 0) continue;
+      const rawLines = readJsonlLines(f);
+      if (!rawLines) continue;
+
+      for (const t of parsed.turns) {
+        // 只看「有回答、UI 上看得见」的 turn —— 那些才是用户能点分叉的。
+        if (!t.response.trim()) continue;
+        turns++;
+        const tail = terminalAssistantLine(rawLines, t.id);
+        if (!tail) {
+          noTail++;
+          if (badSamples.length < 3) {
+            badSamples.push(`${path.basename(f)} turn=${t.id.slice(0, 8)} (no tail)`);
+          }
+          continue;
+        }
+        // tail 必须真属于这个 turn —— 它的文本应当出现在 import 组装的 response 里。
+        // 纯工具调用的收尾 assistant 行没有文本，跳过（无从比对，也无从出错）。
+        const text = userText(tail.entry)?.trim();
+        if (text && !t.response.includes(text)) {
+          wrongTurn++;
+          if (badSamples.length < 3) {
+            badSamples.push(`${path.basename(f)} turn=${t.id.slice(0, 8)} (tail 不属于该 turn)`);
+          }
+        }
+      }
+    }
+
+    console.log(`  · 扫了 ${files.length} 个 jsonl / ${turns} 个有回答的 turn（全量，无抽样）`);
+    check("每个可见 turn 都找得到 tail", noTail === 0, noTail);
+    check("每个 tail 都属于该 turn", wrongTurn === 0, wrongTurn);
+    for (const s of badSamples) console.log(`      ${s}`);
+  }
+}
+
+console.log(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILED\n`);
+process.exit(failures === 0 ? 0 : 1);

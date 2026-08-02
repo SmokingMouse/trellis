@@ -1,6 +1,23 @@
 # Session Log
 
-最近 5 条，倒序（Session 90 / 89 / 88 / 87 / 86）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 91 / 90 / 89 / 88 / 87）。更早的见 `archive.md`。
+
+### Session 91（2026-08-01，拿 happyclaw 做对照剖析 → 修掉它替我们踩过的三个坑）
+- **触发**: 用户「使用 workflow 深入剖析下 riba 的 happyclaw，看看对我们的 trellis 后续的演进和优化有啥指导意义吗」，看完结论后「按照你的建议把那些都改了吧」。
+- **对照组**: riba2534/happyclaw（自托管**多用户** Agent 系统，IM 六端 + 每用户 Docker + RBAC + 计费）。本机 fork 落后上游 271 个 commit，另开 worktree `/tmp/happyclaw-latest` 指到 `upstream/main`（`6ab7dad`，当天）。**三个月从 111k LOC 长到 292k**，且 `task-scheduler.ts` / `agent-builder.ts` / `memory-service.ts` / `plugin-*.ts` 与 trellis 三个 Goal 正面撞车 —— 它是我们 Goal 的未来态样本。
+- **Workflow**（106 agent / 11.4M token / 91 分钟 / 零失败）: trellis 三路摸底（含「已被拒绝方案清单」防止推荐已否掉的东西）→ happyclaw 九维深读（每维强制跑 git log 挖 fix commit）→ 逐维对照 → **每条建议派 3 个镜头对抗式证伪**（已经有了/已拒过 · 定位错配会带歪 · happyclaw 这么做本身就不对，2/3 票反对即毙）→ 排序 + persona-riba2534 判断 + 完备性批判。报告落 `happyclaw-contrast.md`（43KB）。
+- **最反常识的结论：27 条候选建议只活下来 4 条，且没有一条是「抄 happyclaw 的机制」**。真正可复用的是它的**尸检报告** —— 同一个 symlink 盲区三个月咬三次、「必须 byte-for-byte 一致」的注释半衰期 6 周且三个指针全指错、至少 7 处「造了闸忘接门」的死代码。riba 分身那句是对的：「拿别人问题的账单来报销自己的问题」—— 它的 292k 是**多用户 IM 商业模式**开的账单，不是 harness 成熟度标杆。**harness 不该继续加厚。**
+- **Done ①（`app/api/skills/route.ts:37`）**: `Dirent.isDirectory()` 对 symlink 恒 false，只认它会把软链形式的 skill 整个漏掉。本机 `~/.claude/skills/` 106 个条目里**恰好一个 symlink，就是 `trellis-admin`** —— **trellis 自己的管家 skill 在 trellis 的 UI 里隐形**（而 CLI 的 slash_commands、`trellisctl skills` 都看得见，因为它们用 `existsSync` 穿透）。改成允许 symlink + `fs.stat` 穿透确认 + 悬空链跳过。**明确不动** `workspaces/browse` 与 `sessions/[id]/files` 那两处 —— 它们跳 symlink 带着 "cycles / intentionally not listed" 注释，是有意决策。
+- **Done ②（`app/api/login/route.ts:34`）**: `sameSite: "lax"` → `"strict"`。lax 放行跨站顶层导航 → 任意外部页面能把浏览器导到 `/term/?arg=…`，而 ttyd 以 `-W`（可写）起、命令整个走 URL 的 `?arg=`（`ttyd.ts:236-240/295`）。happyclaw 的 `auth.ts:86` 就是 Strict，且 `web.ts:1390-1394` 白纸黑字写「**SameSite=Strict 是主防御**，origin 检查是纵深防御」—— 它为 WS Origin 白名单返工 4 次护的全是纵深那半条。UX 代价为零：入口是书签/PWA/直接输地址（strict 对这三种照发），`notify.ts` 不发回链；程序化调用（`server.ts:204`、`deploy.ts`、trellisctl）自己塞 header 不受约束。
+- **Done ③（新增 `lib/server/cli-jsonl.ts`，本轮的重头）**: `cli-fork.ts` 抄了 `cli-import.ts` 五份副本（`ms`/`userText`/`isToolResultEntry`/`isCommandNoise`/`isTurnStart`），**S85 给 import 加的 5 道结构闸 fork 一道没跟**，而且 `cli-fork.ts:6` 早就 `import { parseCliSessionJsonl } from "./cli-import"` —— 同一个 module graph，**根本不存在任何拦着复用的约束**，纯粹是抄完原件单方面演进。
+  - **实测严重性**（889 个 jsonl / 1897 个有回答的 turn）：老判据下 **36 个 turn（1.90%）fork 侧找不到 tail** → `buildPrefixJsonlCore` 返 null、分叉静默降级成线性；**另有 315 个（16.61%）选出的 tail 与 import 的归属不是同一条** → 前缀被截在一个**没说完的回答**中间。后者才是真严重性 —— 不是分叉失败，是**分叉点切错**。（报告里那个 12.8% 分母是错的，这两个数是重新量的。）
+  - 抽出纯模块（无 `server-only`、无 DB，可脱离服务端跑）：类型 + 五个谓词 + `makeTurnOwnership`（**strict → loose 两级**，只搬严格那级会让 null 率不降反升，因为 `--continue`/fork 出来的 jsonl 链头没有真提问）+ `readJsonlLines` / `terminalAssistantLine` / `keepUuidChain`。两边 import 同一份，**执行者是编译器不是注释**。
+- **`scripts/test-cli-jsonl.ts`（新）—— 这是 riba 那个追问的答案**：他问「这次打算给它留一条注释，还是留一个测试？happyclaw 那对互相点名的『byte-for-byte』注释半年后三个指针全指错」。24 条断言：7 道闸逐条钉死 + 复现 S85 的劫持 bug + 宽松兜底 + **真语料全扫**（889 jsonl / 1898 turn，无抽样）。
+- **做了变异测试证明它不是空断言**：把 5 道闸退回旧判据 → **11 条断言变红**。同时暴露一个诚实的边界：**真语料那两条断言在变异下依然是绿的**（turn 数还从 1898 涨到 2044）—— 因为两侧共用一份代码，一起错就一起「自洽」。**钉住闸本身的是合成断言，语料扫描只能防两边再次分家。**
+- **等价性验证**: 从 git 取出重构前的 `cli-import.ts`，对同一批 889 个文件逐字节比对 `parseCliSessionJsonl` 输出 —— **866 个完全一致 / 23 个两侧都 null / 0 处差异**。cli-import 的重构证明行为不变。
+- **其余验证**: tsc 零错 · lint 47 problems 全是既有的，我改的文件**零命中** · 既有 harness 全绿（cron 48 项 / project-cluster / tool-tree）· `/api/skills` 直接调真 handler：105 skills 且 `trellis-admin` 在内（旧逻辑 104）· login 直接调真 handler：`SameSite=strict` 正确序列化、错误口令仍 401 · `buildPrefixJsonlCore` 在临时目录拿一个**老逻辑返 null 的真会话**端到端跑通（1051 行 → 1007 行前缀，可反解成 6 个 turn，sessionId 已改写）。
+- **刻意没做**（报告里有但不在本轮范围）: 「新增 DB 列必须带真消费者」那条纪律没写进 `decisions.md`（trellis 已有 3 处空列：`notified_at` 零 SELECT、`task_runs.attempt`、`max_retries`）· claude/codex 的二进制解析（plist 里 `PATH` 硬编码了 `node/v24.14.1/bin`，nvm 一升级 `claude` 就从 PATH 消失，而 `update.ts:209` 和 `ttyd-dependency.ts:43` 两条路早就写对了）· run-bus 空输出闸 · BOE 的 per-user 身份/归属/审计（**27 条候选零覆盖，需单独立项**）。
+- **Next**: 改动**未 commit**、**未部署**。①③ 已本地实证；②需要在真浏览器上做一次登录回归（strict 生效后书签/PWA 入口应无感，但没在真浏览器验过）。prod 仍卡在「spawn 的 claude 一律认证失败」（S90 遗留，本轮未碰）。`/tmp/happyclaw-latest` worktree 留着，不用了跑 `git -C ~/python/ai/happyclaw worktree remove /tmp/happyclaw-latest`。
 
 ### Session 90（2026-07-31，trellis-admin skill：让任意 claude 会话用一句话配后台）
 - **触发**: 用户「现在有了 Agent 配置的能力，能在平台预留一个 Agent，能通过这个 Agent 完成后台的一些 Agent 配置 or 定时任务配置吗」。
@@ -65,20 +82,3 @@
 - **未做（有意）**: 平铺态（`isFlat`，单 workspace 与项目同名）的项目行没有「在这里开会话」—— 它的 ＋ 仍是「新建 worktree」，一行放两个按钮会挤。该场景由 picker 的「最近」覆盖。API 支持但 UI 仍未接线的 `ref`（从哪个 ref 起）也仍未接 —— 与本次抱怨无关。
 - **合并与推送**: `worktree-create-and-use` → `main`（`--no-ff` merge `3462480`，保住工作线形状），已推 `ccfca62..3462480`。上个 session 遗留在工作树的 `facts.md`（子 agent 内部调用不落主 jsonl，S84 探针）与本次无关，单独一条 `6208988` 留档、没并进功能 commit。
 - **Next**: 用户验收 —— 侧栏项目行 ＋ 建 worktree 应当**直接落到新会话**且工作区已选中；workspace 行悬停多出一个 ＋ 可直接开会话；选工作区的 modal 里多出「🌿 新建 worktree 并使用」。**两台实例仍待重部**（S85/S86/S87 三批修复都还没上线），BOE 上先跑 S86 记的两步。本机 prod 走 `make deploy`。
-
-### Session 86（2026-07-30，部署流水线跨平台：devbox 上 `make deploy` 死在 launchctl）
-- **触发**: 用户只贴了一张 BOE devbox 的部署日志截图 —— `switch: current → 20260730T111814-bffeda99b` 之后紧接着 `× Executable not found in $PATH: "launchctl"` → `failed`。没有一句文字。
-- **根因两层，第二层比第一层更坏**：
-  - `scripts/deploy.ts` 的 `kickstart()` 写死 `launchctl kickstart -k`，Linux 上 `Bun.spawn` 直接抛 ENOENT。**抛错点在 `switchTo()` 内部** —— 软链已经翻到新 release、服务却没重启，恰好落在整套设计唯一承诺「switch 之前失败 = prod 一根汗毛没动」的**缝**里。devbox 事后状态：跑着 `$HOME/trellis` 原地 build 的旧码，`.trellis/current` 指向一个建好但没人用的新 release（**S85 的修复因此压根没上线**）。
-  - 就算重启修好也白搭：BOE 的 systemd unit 的 `WorkingDirectory` 仍是 `$HOME/trellis`（`update-trellis.sh` 原地 build 那套留下的），而旧代码的 WorkingDirectory 检查只读 mac 的 plist，Linux 上返回 null → 那句「本次切换不会真正生效」的警告压根没机会打出来。**「看着成功、其实跑的是无关版本」比失败更坏**，所以这条从警告升级为**拒绝**（`--force` 可越过）。
-- **Done**:
-  - `lib/deploy-supervisor.ts`（新）：launchd / systemd user unit 两套实现，收口 `probe / restart / unitFile / workingDirectory / setWorkingDirectory / reload / restartShell / detachPrefix`；unit 名默认取 label 最后一段（`com.smokingmouse.trellis` → `trellis.service`，与 BOE 现存 unit 对齐），`TRELLIS_DEPLOY_UNIT` / `TRELLIS_DEPLOY_SUPERVISOR` 可覆盖。**deploy.ts 里不再有一个 platform 分支**。
-  - **preflight 加重启通路探针**（根因修法）：探不通就在碰任何东西之前 abort，失败重新落回「prod 没被碰过」那一侧。
-  - `install-launchd` → `install-service`（旧名留作别名）：改 plist 还是改 unit、reload 走 bootout+bootstrap 还是 daemon-reload+restart，都交给 supervisor；失败**真的还原备份**（S79 的纪律照搬）。`deploy-status` 现在把认到的 supervisor 与它当前的工作目录一起打出来。
-  - `lib/server/update.ts`：**systemd 下 `detached: true` 不够** —— 默认 KillMode=control-group 按 cgroup 杀，换会话不换 cgroup，`systemctl restart` 会把正在跑部署的进程一起带走，verify 与自动回滚双双失效（launchd 上 S82 修过一次，这是 Linux 上的新一份）。改经 `systemd-run --user --collect --quiet --scope` 换 cgroup，探针**真起一个空 scope**（systemd-run 在位但 dbus / XDG_RUNTIME_DIR 不对时照样跑不起来），不过就明说「改用命令行 make deploy」。顺带把 `startUpdate`/`startRollback` 两份 95% 重复的 spawn 合成 `spawnDeploy`。
-- **验证**（本机造 systemd 桩环境实跑：`TRELLIS_DEPLOY_SUPERVISOR=systemd` + PATH 里放桩 `systemctl` + `TRELLIS_DEPLOY_ROOT=/tmp/…` + 复刻 BOE 现状的桩 unit）：① mac 真 launchd 路径 `deploy-status` 照旧认出 job 与工作目录 ✓；② WD 指着 `/data00/…/trellis` 时 deploy **在 preflight 就拒绝**、`current` 未动 ✓；③ `install-service` 正确改写 `WorkingDirectory=` → `daemon-reload` → `restart` → 查 `ActiveState` ✓；④ rollback 走完探针→翻软链→重启→验活（验活打本机真网关 3088，✓）；⑤ 桩收到的 11 条调用序列与预期逐条对齐 ✓；⑥ **复刻事故现场**（PATH 里既无 launchctl 也无 systemctl）→ 报错落在 preflight、`current` 一根汗毛没动 ✓；⑦ 两套 `rollback.sh` 从**真源码模板**渲染 + `sh -n` 通过 ✓。tsc 零错。
-- **边界（诚实）**: **没在 BOE 上实跑过** —— 本机 ssh 不到公司 devbox（`~/.ssh/config` 里只有 bwg / vultr-tokyo）。systemd 分支的证据 = 桩环境 + `update-trellis.sh:74` 那串已被实践证明的命令，不是现场。`update-trellis.sh` 的 BOE 分支（原地 build）**先留着当退路**，等 deploy 在 BOE 上跑通一次再退役 —— 那才是「不留双版本」的时机。
-- **合并与推送**: `deploy-cross-platform` → `main`（`--no-ff` merge `41b4390`，保住工作线形状），已推 `bffeda9..41b4390`。**两台实例都还没重部**。
-- **推完在 BOE 上又栽了同一个报错，但不是同一个 bug —— 新旧错位**：用户贴的第二条日志跑完了 smoke + backup 才死在 `launchctl`，而新代码的探针会在 preflight 就 abort，**到不了 smoke** —— 判据一眼断定「部署的是新 commit（`0fe873940`），执行的是旧脚本」。成因：`app/api/update/route.ts:55` 界面「更新到最新」默认部署 `origin/main`，而干活的 `scripts/deploy.ts` **来自工作树** —— fetch 到新 commit 就够建出新 release，可工作树没 `git pull`，于是新代码进了 release、旧流程照旧走 `switchTo()` 里的 launchctl。**「改部署脚本」这件事有天然的鸡生蛋：改动只有进工作树才生效。**
-- **补的闸**（`deploy.ts:checkMachinery`）：preflight 比对 `MACHINERY`（`scripts/deploy.ts` / `lib/deploy-supervisor.ts` / `lib/deploy-state.ts`）三者的 blob —— 目标 sha 里的、HEAD 里的、磁盘上的。**只拦真正会骗人的那种**：`HEAD` 是目标祖先（= 工作树落后，本次名不副实）→ 拒绝并指着 `git pull --ff-only`；本地未提交改动（`inHead === inTarget`）或目标非后代（按老 sha 回滚 / 别的分支）→ 只提醒。验证是**真造场景打的**：scratch clone 切到 `bffeda9` + 塞进带闸的新脚本 → 部署 `origin/main` 果然在 preflight 被拦 ✓；本仓库未提交状态 → 只提醒后落到无关的工作目录闸 ✓；`deploy.ts bffeda9`（回滚形态）→ 只提醒 ✓。tsc 零错、lint 回基线。
-- **Next**: BOE 上两步 `cd ~/trellis && git pull && bun scripts/deploy.ts install-service` → `make deploy`（跑前 export 代理，`bun install` 要出网）。注意 `install-service` 那一步就会让服务重启进 `~/.trellis/current` —— 也就是 11:18 那次建好却没跑上的 `20260730T111814-bffeda99b`，**S85 的修复到这一步即生效**，第二步才是发这次的 supervisor 修复。本机 prod 走 `make deploy`。

@@ -9,52 +9,21 @@
 // 服务端独立验证（node --experimental-strip-types）。
 import fs from "node:fs";
 import type { ToolCall } from "@/lib/types";
+import {
+  type CliRawEntry,
+  type CliUsage,
+  indexByUuid,
+  isTurnStart,
+  makeTurnOwnership,
+  ms,
+  userText,
+} from "./cli-jsonl";
 
-// ── jsonl entry 形状（只声明用到的字段，其余忽略）────────────────────────────
-type ContentBlock = {
-  type: string;
-  text?: string;
-  thinking?: string;
-  // tool_use
-  id?: string;
-  name?: string;
-  input?: unknown;
-  // tool_result
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-};
-type Usage = {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-};
-type RawEntry = {
-  type: string;
-  uuid?: string;
-  parentUuid?: string | null;
-  isSidechain?: boolean;
-  // CLI 注入标记（skill 引导语 / Stop hook 通知 / "Continue from where you
-  // left off." 等）。真用户输入从不带它 —— 见 isTurnStart。
-  isMeta?: boolean;
-  // 这条 user 消息从哪来："typed"(键入) / "sdk" / "queued" 都是真用户；
-  // "system" 是 CLI 自己投递的（task-notification）。
-  promptSource?: string;
-  // 用户按 Esc 打断时 CLI 补的占位消息（"[Request interrupted by user]"）。
-  // 它指向被打断的那条 assistant 消息，不带 isMeta / promptSource。
-  interruptedMessageId?: string;
-  // /compact 之后 CLI 注入的历史摘要（"This session is being continued from…"）。
-  isCompactSummary?: boolean;
-  isVisibleInTranscriptOnly?: boolean;
-  timestamp?: string;
-  cwd?: string;
-  gitBranch?: string;
-  sessionId?: string;
-  aiTitle?: string;
-  toolUseResult?: { stderr?: string; stdout?: string } | unknown;
-  message?: { role?: string; content?: string | ContentBlock[]; usage?: Usage };
-};
+// entry 形状与 turn-start 判据都住在 ./cli-jsonl —— cli-fork 从同一份取，两边对
+// 「一个 turn 从哪开始」的答案不允许分家（那次漂移事故记在该文件头部）。
+// 下面两个别名只为本文件行文简洁。
+type RawEntry = CliRawEntry;
+type Usage = CliUsage;
 
 export type ParsedTurn = {
   // 节点 id = 该 turn 首条 user entry 的 uuid（确定性 → 重复导入幂等）。
@@ -92,70 +61,8 @@ export type ParsedCliSession = {
 };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-
-function ms(ts: string | undefined): number {
-  if (!ts) return 0;
-  const t = Date.parse(ts);
-  return Number.isNaN(t) ? 0 : t;
-}
-
-function userText(e: RawEntry): string | null {
-  const c = e.message?.content;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) {
-    const texts = c
-      .filter((b) => b.type === "text" && typeof b.text === "string")
-      .map((b) => b.text as string);
-    if (texts.length) return texts.join("\n");
-  }
-  return null;
-}
-
-function isToolResultEntry(e: RawEntry): boolean {
-  const c = e.message?.content;
-  return Array.isArray(c) && c.some((b) => b.type === "tool_result");
-}
-
-// CLI 注入的命令/系统行不是真用户提问 —— 过滤掉。
-function isCommandNoise(text: string): boolean {
-  const t = text.trimStart();
-  return (
-    t.startsWith("<command-name>") ||
-    t.startsWith("<command-message>") ||
-    t.startsWith("<local-command-") ||
-    t.startsWith("<bash-input>") ||
-    t.startsWith("<bash-stdout>") ||
-    t.startsWith("Caveat:")
-  );
-}
-
-// 一个 turn 由「真·用户提问」开启。判定的难点全在于：CLI 会往对话流里塞一堆
-// 长得和用户提问一模一样的 user 文本消息（skill 触发时的 "Base directory for
-// this skill: …"、后台 agent 完成的 <task-notification>、Stop hook 的反馈、
-// "Continue from where you left off."）。把它们误判成 turn-start 的后果不是多
-// 一个节点那么轻——它会把**后续 assistant 的最终回复整段劫走**挂到假 turn 上，
-// 真 turn 只剩工具调用、response 为空，UI 里就是一条永远「正在生成…」的僵尸。
-// 本机 337 个 turn 实测：修前 45 条空 response 带工具，其中 44 条是这么来的。
-//
-// 判据用结构字段、不用文本前缀白名单（前缀会随 CLI 版本漂）：
-//   isMeta === true          —— 83 条注入全中，257 条真用户零误杀
-//   promptSource === "system" —— task-notification 专属；真用户是 typed/sdk/queued
-//   interruptedMessageId      —— Esc 打断的占位消息（全库 522 条），这两个字段都没有
-//   isCompactSummary / isVisibleInTranscriptOnly —— /compact 注入的历史摘要
-// isCommandNoise 的文本闸留作老版本 jsonl 的兜底（那时还没有这些字段）。
-function isTurnStart(e: RawEntry): boolean {
-  if (e.type !== "user") return false;
-  if (isToolResultEntry(e)) return false;
-  if (e.isMeta === true) return false;
-  if (e.promptSource === "system") return false;
-  if (e.interruptedMessageId !== undefined) return false;
-  if (e.isCompactSummary === true) return false;
-  if (e.isVisibleInTranscriptOnly === true) return false;
-  const text = userText(e);
-  if (!text || !text.trim()) return false;
-  if (isCommandNoise(text)) return false;
-  return true;
-}
+// ms / userText / isToolResultEntry / isCommandNoise / isTurnStart 都已搬进
+// ./cli-jsonl（与 cli-fork 共用同一份）。这里只留本文件独有的 helper。
 
 // tool_result 的 content → 展平成字符串（string 直用；array 取 text 块拼接）。
 function toolResultString(content: unknown): string | null {
@@ -215,59 +122,11 @@ export function parseCliSessionJsonl(
   );
   if (entries.length === 0) return null;
 
-  // byUuid 收全部带 uuid 的 entry（含 type:"system" 的 compact/边界标记）——
-  // CLI 在每个 turn 之间插 system 节点承载父链，过滤掉会把链打断、让每个 turn
-  // 变成孤根。ownerTurn 上溯时需穿过这些非对话节点继续走。
-  const byUuid = new Map<string, RawEntry>();
-  for (const e of all) if (e.uuid) byUuid.set(e.uuid, e);
-
-  // 每条 entry 归属哪个 turn-start（沿 parentUuid 上溯到最近的 turn-start）。
-  // 同一套上溯跑两遍，判据不同 —— 见下面 resolveOwner 的取舍。
-  function makeOwnerResolver(isStart: (e: RawEntry) => boolean) {
-    const turnOf = new Map<string, string | null>();
-    return function ownerTurn(uuid: string): string | null {
-      const cached = turnOf.get(uuid);
-      if (cached !== undefined) return cached;
-      const e = byUuid.get(uuid);
-      if (!e) {
-        turnOf.set(uuid, null);
-        return null;
-      }
-      // 占位防环（坏 jsonl 自指）。
-      turnOf.set(uuid, null);
-      let owner: string | null;
-      if (isStart(e)) owner = e.uuid as string;
-      else owner = e.parentUuid ? ownerTurn(e.parentUuid) : null;
-      turnOf.set(uuid, owner);
-      return owner;
-    };
-  }
-
-  const strictOwner = makeOwnerResolver(isTurnStart);
-  // 宽松判据：任何带文本的非 tool_result user 消息都能当 turn-start（含被严格
-  // 判据挡掉的 meta / system / 命令噪声）。
-  const looseOwner = makeOwnerResolver(
-    (e) =>
-      e.type === "user" && !isToolResultEntry(e) && Boolean(userText(e)?.trim()),
-  );
-
-  // 兜底承载：`claude --continue` / fork 出来的 jsonl，开头可能压根没有真用户
-  // 提问（链头是 "Continue from where you left off." 这类 meta，甚至直接是
-  // assistant 片段）。严格判据下这些链上溯不到任何 turn-start，整段回复会被
-  // **静默丢弃** —— 本机实测 117 条消息 / 16030 字符。所以严格找不到主时退一步
-  // 用宽松判据认领，让内容有处可去；这类兜底 turn-start 会被记进
-  // fallbackStartIds 一并组装成节点。
-  //
-  // 次序不能反：先严格、后宽松。反过来 meta 消息就会重新抢走已经有主的 turn 的
-  // 文本 —— 那正是这次要修的 bug 本身。
-  const fallbackStartIds = new Set<string>();
-  function resolveOwner(uuid: string): string | null {
-    const strict = strictOwner(uuid);
-    if (strict) return strict;
-    const loose = looseOwner(uuid);
-    if (loose) fallbackStartIds.add(loose);
-    return loose;
-  }
+  // byUuid 要收全部带 uuid 的 entry（含 type:"system" 的 compact/边界标记）——
+  // 理由与两级归属（严格 → 宽松兜底）的取舍都记在 ./cli-jsonl；cli-fork 截前缀
+  // 时走的是同一份 makeTurnOwnership，两边的 turn 边界因此恒等。
+  const byUuid = indexByUuid(all);
+  const { resolveOwner, fallbackStartIds } = makeTurnOwnership(byUuid);
 
   // 全局 tool_result 索引：tool_use_id → { 输出文本, is_error, stderr }。
   const resultById = new Map<
