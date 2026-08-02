@@ -17,7 +17,8 @@
 - **等价性验证**: 从 git 取出重构前的 `cli-import.ts`，对同一批 889 个文件逐字节比对 `parseCliSessionJsonl` 输出 —— **866 个完全一致 / 23 个两侧都 null / 0 处差异**。cli-import 的重构证明行为不变。
 - **其余验证**: tsc 零错 · lint 47 problems 全是既有的，我改的文件**零命中** · 既有 harness 全绿（cron 48 项 / project-cluster / tool-tree）· `/api/skills` 直接调真 handler：105 skills 且 `trellis-admin` 在内（旧逻辑 104）· login 直接调真 handler：`SameSite=strict` 正确序列化、错误口令仍 401 · `buildPrefixJsonlCore` 在临时目录拿一个**老逻辑返 null 的真会话**端到端跑通（1051 行 → 1007 行前缀，可反解成 6 个 turn，sessionId 已改写）。
 - **刻意没做**（报告里有但不在本轮范围）: 「新增 DB 列必须带真消费者」那条纪律没写进 `decisions.md`（trellis 已有 3 处空列：`notified_at` 零 SELECT、`task_runs.attempt`、`max_retries`）· claude/codex 的二进制解析（plist 里 `PATH` 硬编码了 `node/v24.14.1/bin`，nvm 一升级 `claude` 就从 PATH 消失，而 `update.ts:209` 和 `ttyd-dependency.ts:43` 两条路早就写对了）· run-bus 空输出闸 · BOE 的 per-user 身份/归属/审计（**27 条候选零覆盖，需单独立项**）。
-- **Next**: 改动**未 commit**、**未部署**。①③ 已本地实证；②需要在真浏览器上做一次登录回归（strict 生效后书签/PWA 入口应无感，但没在真浏览器验过）。prod 仍卡在「spawn 的 claude 一律认证失败」（S90 遗留，本轮未碰）。`/tmp/happyclaw-latest` worktree 留着，不用了跑 `git -C ~/python/ai/happyclaw worktree remove /tmp/happyclaw-latest`。
+- **已合并推送**：四个 commit 走 `happyclaw-contrast-fixes` 分支 `--no-ff` 进 main（`f81df21`），已推 `18be950..f81df21`。**两台实例都未部署。**
+- **Next**: 部署后第一件事是 ②的**真浏览器登录回归** —— strict 生效后书签 / PWA / 直接输地址应当无感，但这条只验过 Set-Cookie 头的序列化，没在真浏览器点过；万一栽了，回退就是把那一个单词改回 `lax`。prod 仍卡在「spawn 的 claude 一律认证失败」（S90 遗留，本轮未碰）。`/tmp/happyclaw-latest` worktree 留着，不用了跑 `git -C ~/python/ai/happyclaw worktree remove /tmp/happyclaw-latest`。
 
 ### Session 90（2026-07-31，trellis-admin skill：让任意 claude 会话用一句话配后台）
 - **触发**: 用户「现在有了 Agent 配置的能力，能在平台预留一个 Agent，能通过这个 Agent 完成后台的一些 Agent 配置 or 定时任务配置吗」。
