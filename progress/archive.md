@@ -4,6 +4,23 @@
 
 ## Session Log
 
+### Session 86（2026-07-30，部署流水线跨平台：devbox 上 `make deploy` 死在 launchctl）
+- **触发**: 用户只贴了一张 BOE devbox 的部署日志截图 —— `switch: current → 20260730T111814-bffeda99b` 之后紧接着 `× Executable not found in $PATH: "launchctl"` → `failed`。没有一句文字。
+- **根因两层，第二层比第一层更坏**：
+  - `scripts/deploy.ts` 的 `kickstart()` 写死 `launchctl kickstart -k`，Linux 上 `Bun.spawn` 直接抛 ENOENT。**抛错点在 `switchTo()` 内部** —— 软链已经翻到新 release、服务却没重启，恰好落在整套设计唯一承诺「switch 之前失败 = prod 一根汗毛没动」的**缝**里。devbox 事后状态：跑着 `$HOME/trellis` 原地 build 的旧码，`.trellis/current` 指向一个建好但没人用的新 release（**S85 的修复因此压根没上线**）。
+  - 就算重启修好也白搭：BOE 的 systemd unit 的 `WorkingDirectory` 仍是 `$HOME/trellis`（`update-trellis.sh` 原地 build 那套留下的），而旧代码的 WorkingDirectory 检查只读 mac 的 plist，Linux 上返回 null → 那句「本次切换不会真正生效」的警告压根没机会打出来。**「看着成功、其实跑的是无关版本」比失败更坏**，所以这条从警告升级为**拒绝**（`--force` 可越过）。
+- **Done**:
+  - `lib/deploy-supervisor.ts`（新）：launchd / systemd user unit 两套实现，收口 `probe / restart / unitFile / workingDirectory / setWorkingDirectory / reload / restartShell / detachPrefix`；unit 名默认取 label 最后一段（`com.smokingmouse.trellis` → `trellis.service`，与 BOE 现存 unit 对齐），`TRELLIS_DEPLOY_UNIT` / `TRELLIS_DEPLOY_SUPERVISOR` 可覆盖。**deploy.ts 里不再有一个 platform 分支**。
+  - **preflight 加重启通路探针**（根因修法）：探不通就在碰任何东西之前 abort，失败重新落回「prod 没被碰过」那一侧。
+  - `install-launchd` → `install-service`（旧名留作别名）：改 plist 还是改 unit、reload 走 bootout+bootstrap 还是 daemon-reload+restart，都交给 supervisor；失败**真的还原备份**（S79 的纪律照搬）。`deploy-status` 现在把认到的 supervisor 与它当前的工作目录一起打出来。
+  - `lib/server/update.ts`：**systemd 下 `detached: true` 不够** —— 默认 KillMode=control-group 按 cgroup 杀，换会话不换 cgroup，`systemctl restart` 会把正在跑部署的进程一起带走，verify 与自动回滚双双失效（launchd 上 S82 修过一次，这是 Linux 上的新一份）。改经 `systemd-run --user --collect --quiet --scope` 换 cgroup，探针**真起一个空 scope**（systemd-run 在位但 dbus / XDG_RUNTIME_DIR 不对时照样跑不起来），不过就明说「改用命令行 make deploy」。顺带把 `startUpdate`/`startRollback` 两份 95% 重复的 spawn 合成 `spawnDeploy`。
+- **验证**（本机造 systemd 桩环境实跑：`TRELLIS_DEPLOY_SUPERVISOR=systemd` + PATH 里放桩 `systemctl` + `TRELLIS_DEPLOY_ROOT=/tmp/…` + 复刻 BOE 现状的桩 unit）：① mac 真 launchd 路径 `deploy-status` 照旧认出 job 与工作目录 ✓；② WD 指着 `/data00/…/trellis` 时 deploy **在 preflight 就拒绝**、`current` 未动 ✓；③ `install-service` 正确改写 `WorkingDirectory=` → `daemon-reload` → `restart` → 查 `ActiveState` ✓；④ rollback 走完探针→翻软链→重启→验活（验活打本机真网关 3088，✓）；⑤ 桩收到的 11 条调用序列与预期逐条对齐 ✓；⑥ **复刻事故现场**（PATH 里既无 launchctl 也无 systemctl）→ 报错落在 preflight、`current` 一根汗毛没动 ✓；⑦ 两套 `rollback.sh` 从**真源码模板**渲染 + `sh -n` 通过 ✓。tsc 零错。
+- **边界（诚实）**: **没在 BOE 上实跑过** —— 本机 ssh 不到公司 devbox（`~/.ssh/config` 里只有 bwg / vultr-tokyo）。systemd 分支的证据 = 桩环境 + `update-trellis.sh:74` 那串已被实践证明的命令，不是现场。`update-trellis.sh` 的 BOE 分支（原地 build）**先留着当退路**，等 deploy 在 BOE 上跑通一次再退役 —— 那才是「不留双版本」的时机。
+- **合并与推送**: `deploy-cross-platform` → `main`（`--no-ff` merge `41b4390`，保住工作线形状），已推 `bffeda9..41b4390`。**两台实例都还没重部**。
+- **推完在 BOE 上又栽了同一个报错，但不是同一个 bug —— 新旧错位**：用户贴的第二条日志跑完了 smoke + backup 才死在 `launchctl`，而新代码的探针会在 preflight 就 abort，**到不了 smoke** —— 判据一眼断定「部署的是新 commit（`0fe873940`），执行的是旧脚本」。成因：`app/api/update/route.ts:55` 界面「更新到最新」默认部署 `origin/main`，而干活的 `scripts/deploy.ts` **来自工作树** —— fetch 到新 commit 就够建出新 release，可工作树没 `git pull`，于是新代码进了 release、旧流程照旧走 `switchTo()` 里的 launchctl。**「改部署脚本」这件事有天然的鸡生蛋：改动只有进工作树才生效。**
+- **补的闸**（`deploy.ts:checkMachinery`）：preflight 比对 `MACHINERY`（`scripts/deploy.ts` / `lib/deploy-supervisor.ts` / `lib/deploy-state.ts`）三者的 blob —— 目标 sha 里的、HEAD 里的、磁盘上的。**只拦真正会骗人的那种**：`HEAD` 是目标祖先（= 工作树落后，本次名不副实）→ 拒绝并指着 `git pull --ff-only`；本地未提交改动（`inHead === inTarget`）或目标非后代（按老 sha 回滚 / 别的分支）→ 只提醒。验证是**真造场景打的**：scratch clone 切到 `bffeda9` + 塞进带闸的新脚本 → 部署 `origin/main` 果然在 preflight 被拦 ✓；本仓库未提交状态 → 只提醒后落到无关的工作目录闸 ✓；`deploy.ts bffeda9`（回滚形态）→ 只提醒 ✓。tsc 零错、lint 回基线。
+- **Next**: BOE 上两步 `cd ~/trellis && git pull && bun scripts/deploy.ts install-service` → `make deploy`（跑前 export 代理，`bun install` 要出网）。注意 `install-service` 那一步就会让服务重启进 `~/.trellis/current` —— 也就是 11:18 那次建好却没跑上的 `20260730T111814-bffeda99b`，**S85 的修复到这一步即生效**，第二步才是发这次的 supervisor 修复。本机 prod 走 `make deploy`。
+
 ### Session 85（2026-07-30，镜像会话的「永久正在生成…」— CLI 注入劫走回复）
 - **触发**: 用户截图一条 attach 的 CLI 镜像 turn：6 个工具全标「完成」，底下却一直转「正在生成…」。问「为啥显示完成了，但实际卡在这个界面」。
 - **两层病灶，都被实测坐实**：
