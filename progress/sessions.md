@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 93 / 92 / 91 / 90 / 89）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 94 / 93 / 92 / 91 / 90）。更早的见 `archive.md`。
+
+### Session 94（2026-08-04，卡片图改 happyclaw 式预览弹窗：复制 / 下载由用户选）
+- **触发**: 用户反馈卡片图「必须把图片下载下来」，要像 happyclaw 那样点开后自选「下载」或「进剪贴板」。
+- **根因**: 旧 `CardImageButton` 是自动写剪贴板、失败**静默降级**成下载 —— html-to-image 的异步渲染耗尽浏览器的用户手势时效，剪贴板写入总被拒，于是永远只会下载，且用户不知道为什么。
+- **Done**: `components/CardImageButton.tsx` 重写成 happyclaw `ShareImageDialog` 的形态：点击 → 渲染 PNG → 预览弹窗 + 底部「复制图片 / 下载图片」双按钮，复制发生在按钮点击瞬间（blob 已备好，手势新鲜），失败就地在按钮上提示改用下载。弹窗复用 `ui/Modal`，但经 `createPortal` 挂到 body —— TurnCard 在 React Flow 的 transform 节点内，直接渲染 fixed 弹窗会锚到节点而非视口。渲染链路（离屏卡片 + html-to-image）未动。
+- **流程教训（又一次）**: 在 main-2 worktree 里干活，一开始直接写了共享的 `sessions.md`/`archive.md`，收尾才发现主 worktree 有并行 session（S93 launchd 破案）动了同两个文件且撞了编号 —— `parallel-worktree.md` 的铁律（并行期只写 `blocks/<slug>.md`）第二次被违反（第一次是 S88）。按串行收尾处理：main-2 退回共享文件只提交源码 → 先提交对方 S93 记录 → `--no-ff` merge → 本条按 S94 叠上。
+- **验证**: main-2 里 `bun install` 后 tsc 零错、eslint 对该文件零告警。**真浏览器未点过。**
+- **Next**: 浏览器里点一轮（复制进剪贴板 / 下载 / Esc 与 scrim 关闭 / 暗色模式下预览底色）；跟 S93 的验收队列一起走（S91 三处 + 管理台批 1-6、BOE 部署）。
 
 ### Session 93（2026-08-04，S90 认证失败破案：launchd 上下文的 claude 读的是 keychain 里过期的凭证副本）
 - **触发**: 用户截图 prod 聊天发 "hello" 报 `Failed to authenticate: OAuth session expired and could not be refreshed` —— 正好回答 S90 留的判定题：**普通聊天同样死 → 实例级故障，与任务链路无关**。
@@ -47,25 +55,3 @@
 - **端到端卡住，但卡点不在本次改动**: 建了个真任务手动跑两次，**都在 1 秒内 0 token 失败**：`Failed to authenticate: OAuth session expired and could not be refreshed`。任务链路全通（建任务 / 抢槽 / 建 `kind='task'` 会话 / 建节点 / spawn / 捕获错误 / 留档），死在 spawn 出来的 claude 认证上。**五条已排除**（本机凭证 / proxy / launchd 的 PATH+HOME / env 污染 / `--model opus`），全部命令与判据见 `failures.md`。旁证：`nodes` 表最近一次 `done` 停在 **07-28 10:52** —— prod 的交互式会话很可能也早就坏了，只是三天没人开所以没人知道。
 - **续（8-01）：管家 agent 从「自定义」升成「内置种子」**。用户在**第二台机器**上部署后发现界面里没有它 —— 暴露了一件我一开始就写进 SKILL.md 失败模式、却没往 agent 身上想的事：**agent 是 DB 行、不跟着 git 走**。于是推翻前一天「先别固化」（见 `decisions.md` 2026-08-01），加进 `BUILTIN_AGENT_SEEDS` 第 6 位，并**删掉手建的那行** —— `seedBuiltinAgents` 是 `INSERT OR IGNORE`，撞同名 slug 会静默跳过，留着就永远种不进去。**种子刻意不配 `skills_json`**：内置一律 `inherit_env=1`，本机 `~/.claude/skills/` 全可见，绑了只会白物化一个 pack。空库（→ 6 个 builtin）与存量 5 行库（重启后补成 6 行）两条路都在 `TRELLIS_DB_PATH` 指的临时库上实测过，tsc 零错。**仍不跟 git 走的**：`~/.claude/skills/trellis-admin` 软链每台机器要单独建。
 - **Next**: 用户去 `trellis.smokingmouse.cc` 或 `127.0.0.1:3088` 发一句普通聊天。回得来 → 只有任务路径坏，对照 `tasks.ts:launch()` 与 `chat/route.ts` 构造的 StreamRequest 逐字段找差异；回不来 → prod 实例级故障，先 `launchctl kickstart -k` 看是否自愈。试跑任务 `bffbe8ed` 留在库里没删。**BOE 仍未部**（S88 遗留）。
-
-### Session 89（2026-07-31，设置与功能排布重组：出方案不动代码）
-- **触发**: 用户「现在 trellis 设置有点乱，各种功能排布也有点散乱，特别是在 Agent 和定时任务出现后，我想集中排一排」。三路并行勘察（设置落点 / 导航入口 / Agent 与任务表面）后出方案。
-- **诊断不是「没排整齐」，是一条原则被撑破**: `app/settings/page.tsx:5-8` 和 `decisions.md` 2026-07-29 写着「刻意不做偏好中心，一切配置都语境化」。这条对当下语境和 UI 偏好都成立，但 **Agent / Task 是持久对象（有 CRUD、跨 session、按 id 引用），结构上没有「当下」可挂**，于是各被甩成一张整页且不对等。
-- **勘察实测到的散乱（全部带 file:line，见 `console-ia-spec.md` 第 1 节）**: Agent 管理走两跳且三页互链缺一条边（`settings/agents` 不链 `/tasks`）· 同一套运行配置手写三遍，任务页 workspace 退化成**裸绝对路径 input**（`app/tasks/page.tsx:262`）不接 `workspaces` 表 · `agents.permission`/`require_approval` 与 tasks 的 `timeoutMs`/`overlapPolicy`/`maxBudgetUsd` 后端全实现了但**只能由 API 改** · `tasks.model` 实际存 providerId 而 `agents.model` 存模型名，**同名不同义** · `TaskToast` 只挂主页，在 `/tasks` 页反而收不到 · project 模式**根本没有 Agent 选择入口**（`QuestionInput.tsx:256`）· ~25 个 localStorage key 散在 8 个文件，`trellis-theme` 双份硬编码。
-- **用户拍板三个方向**（AskUserQuestion 三选）: ① 激进 —— 任务运行进侧栏、定义全收管理台；② 偏好做**镜像**不搬家；③ 本轮只出方案 + ADR 不动代码。
-- **最有价值的一条洞察**: 任务的执行落点**本来就是** session/node（`tasks.ts:374-376` 打 `kind='task'`，`repo.ts:342-352` 滤掉）。`/tasks` 页等于把「列表 + 运行历史 + 深链」在 SPA 外重实现了一遍。把 task session 在侧栏露一个折叠组，运行历史免费拿到工具卡片 / 就地分叉 / 搜索 / toast —— **这是在兑现 S88 已经付过的成本**。复核了 `repo.ts:347` 的隐藏理由（"一个月 30 个节点"）：**只对节点数成立，对侧栏行数不成立**（行数 = 任务数）。
-- **Done**: `console-ia-spec.md`（六批改动，每批带判据 + 4 条风险）· `decisions/2026-07-31-console-ia.md`（六条决策 + 修订 2026-07-29 旧条目的一半 + 后果）。**零代码改动**。
-- **实施时最容易搞错的一步（已写进 spec R3）**: 批 1 单独发布时**不能删 Header 的 ⏱** —— 删它的前提是任务日常入口已转移到侧栏（批 4）。先删就是纯粹退步。
-- **批 1 已实施（导航收拢）**: `lib/settings-tabs.ts`🆕 tab 唯一真源 + `components/SettingsNav.tsx`🆕（用 `useSelectedLayoutSegment` 判高亮，不做 pathname 前缀匹配）+ `app/settings/layout.tsx`🆕 接管滚动容器与页头 · `/settings/page.tsx` → `update/`、`/tasks` → `settings/tasks/`（**git mv，认成 R**）· redirect 放 next.config 且**用 307 不用 308**（308 被浏览器永久缓存，会把还在动的路由锁死）· Header ⏱ 改指 `/settings/tasks` 但**保留图标**。三张页各自的 `h-dvh` 容器与手写互链全删。
-- **批 3 已实施（抽共用运行配置）· 偏离了自己写的 spec**: 原计划「一个 `RunConfig.tsx` 带三种 variant」，读完代码判断是**假抽象** —— draft 是空状态首屏的图标分段器、task 是表单里的 select，控件形态本来就该不同，硬合只会得到巨大 variant 分支。真正在漂的是**文案与语义**。改为 `lib/run-config.ts`🆕（文案/语义唯一真源，无 JSX）+ `components/run-config/WorkspaceField.tsx`🆕（三处里唯一真正同一个的控件，受控 open 保住「切 project 自动弹 picker」的既有行为），消费方 ModePicker / AgentPicker / ModeBadge / tasks 页全部改引用。
-- **两条自我纠错（都记下来以免再犯）**: ① 批 1 里我给「← 返回」用了 `<a>` 并编了「与出去方向对称」的理由，被 lint 抓出 —— 查了才知道原来三张页用的都是 `<Link>`，`<a>` 那条规矩**只管出去**（丢 React Flow 状态），回来没东西要丢。② 批 3 里我一度顺手删掉「选 project 自动弹 WorkspacePicker」，那是 `ModePicker.tsx` 文件头写明的有意设计且不在批 3 范围内，已撤回并改成受控 open 保住。
-- **spec 里一条我写错的已修正**: 3.2 原写「agent chip 变灰至今未做」—— **ModeBadge 早就做了**。真实缺陷小得多：它手写 `model.startsWith("codex")` 判家族，**漏掉 mock**（服务端钳制是 `providerFamily(...)==="claude"`）。已统一走 `agentSupported()`。
-- **3.1 是真缺口且已补**: `QuestionInput` 把 Agent 入口整块关在 `draftMode === "chat"` 里，而服务端 `chat/route.ts:336` 对 agentId 的钳制**只看 claude 家族、不看 mode** —— project 会话一直支持 agent，只是没有入口。已实测截图确认 project 下入口出现。
-- **验证（隔离实例 :3399 + 真库 VACUUM 快照 + `TRELLIS_SCHEDULER=off`）**: tsc ✓ / lint 35 = baseline **零新增**（对照跑过 stash 前后）/ build ✓。批 1：307 落点、三 tab 全 200、SSR 阶段高亮就正确、桌面 rail 与手机横向条截图、Header 两入口点击落点正确。批 3：codex+chat 下 picker 正确隐身、切 claude+project 后 Agent 入口出现且下拉无 system-prompt textarea、自动弹 picker 行为保住、任务表单端到端建了一个任务且 WorkspacePicker 选出的绝对路径正确落 `tasks.workspace_path`。收尾：实例已停、快照已删、browser session 已 close（GPU 进程 0）、prod DB 修改时间仍 11:46、`:3088` 仍 401。
-- **批 2 已实施（tab 内容补齐）**: `ModelConfigModal` 拆成 Panel + Modal 两层，「🧠 模型与 Provider」tab 与下拉底部的 modal 共用同一组件 · 新增「📁 工作区 / CLI」tab（通览 + worktree 回收 + CLI attach，刻意**不做**新建 worktree / 开会话 —— 那两个有真正的语境化的家）· 新增 `GET /api/workspaces`（`recent` 不回 id/kind/createdBy，而删除判据恰好是 `createdBy==='trellis' && kind==='worktree'`；复用 `/api/sessions` 会把管理台耦到流式期间 ~1.6 次/秒的热路径）· agents 补 `permission`/`requireApproval` · tasks 补 `timeoutMs`/`overlapPolicy`/`maxBudgetUsd`/`enabled` · 运行历史加「中止」（行从整个 `<button>` 拆成 div + 两个子按钮）。
-- **批 2 挖出一个计划外缺陷**: `overlapPolicy` **根本不在 `TaskInput` 里** —— 列在、调度器读它、但 createTask/updateTask 都写不进去。只按原计划「表单加个 select」就完事的话，那个开关会静默失效，正是这一路一直在挑的「谎言级 UI」。已补全服务端。
-- **批 5 已实施（偏好镜像）· 判据被我主动调整并说明**: 原判据「所有 localStorage 调用点都走 prefs.ts」被否 —— 57 个调用点里 41 个在 `stores/sessionStore.ts`（3000+ 行核心，且**早已把 key 集中声明在文件顶部**并带注释）。为一条形式判据重写那 41 处读写，是拿主路径回归风险换一个好看的 grep 结果。真正在漂的只有主题那两个 key（`useTheme.ts` 与 `layout.tsx` 各硬编码一份，后者还留着「keep them in sync」的注释）—— 已物理消除：layout 的首屏防闪脚本改为从 `PREF_KEYS` **插值生成**。新增 `lib/prefs.ts`（key 真源 + 清单元数据）与「🎚 偏好」tab（每行标注**原本在哪改**，指路而非取代；新会话默认值只读，因为那三个 picker 要连带做一致性钳制）。
-- **批 6 已实施（语义冲突）**: `tasks.model` 名不副实（存的是 providerId，而 `agents.model` 是 CLI 模型名）→ **加列** `provider_id` + 读时 `provider_id ?? model` 兜底 + 只写新列，旧列留一版再删（保住 `migrate()` 全加法 DDL 那条纪律；真库 tasks 0 行，零数据风险）· `require_approval` 双源优先级**核实后写进 UI**：`applyAgent` 在会话基线之后跑，agent 非 null 即覆盖，所以是「以 agent 为准」· `sessions.kind` vs `nodes.kind` 同名不同义加注释 · agent 的技能改称「挂载技能」并说清与 `/` 补全那条路的区别。
-- **验证（隔离实例 :3399 + 真库 VACUUM 快照 + `TRELLIS_SCHEDULER=off`）**: tsc ✓ / lint 35 = baseline **零新增**（中途一度 37，两个 `set-state-in-effect` 已按 `app/settings/update/page.tsx:67` 的既定写法修回）/ build ✓，六个 tab 全 200。逐条实测：provider_id 迁移在真库快照上加列成功且旧列保留 · 偏好 tab 改皮肤 → localStorage 写入 → 刷新后 `html[data-theme]` 正确（证明 layout 与 useTheme 读的是同一个 key）· agent 的 permission/requireApproval 读写双向通（先 API 写→表单回显，再 UI 改→落库）· 任务四个新字段 + providerId 全部落库（`provider_id` 有值、旧 `model` 列为 null）。收尾：实例停、快照删、browser close（GPU 进程 0）、prod DB 仍 11:46、`:3088` 仍 401、`endpoints.yaml` 仍 7-28（models tab 全程只读）。
-- **一个测试工具的坑（不是产品 bug）**: `agent-browser click @ref` 在 agents 页那个「保存」按钮上**静默不生效**（长技能列表把它推出视口），连试两次都误判成「写入失败」。改用 `eval` 里 `button.click()` 后立刻通过。以后在长页面上验按钮，别只信 ref click 的成功返回。
-- **Next**: 用户验收（改动**未 commit**）。批 4 仍降级待观察 —— 判据是「入口从 2 跳变 1 跳 + 表单补全后，一周内 tasks 表是否还是 0 行」。若仍为 0，该考虑砍掉自动化任务而不是继续加功能。
