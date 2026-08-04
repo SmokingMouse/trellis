@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 91 / 90 / 89 / 88 / 87）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 93 / 92 / 91 / 90 / 89）。更早的见 `archive.md`。
+
+### Session 93（2026-08-04，S90 认证失败破案：launchd 上下文的 claude 读的是 keychain 里过期的凭证副本）
+- **触发**: 用户截图 prod 聊天发 "hello" 报 `Failed to authenticate: OAuth session expired and could not be refreshed` —— 正好回答 S90 留的判定题：**普通聊天同样死 → 实例级故障，与任务链路无关**。
+- **破案路径**: 错误串 `rg` 下来只存在于 claude.exe 二进制里（SDK / trellis 代码零嫌疑）→ 全机唯一 claude = nvm 的 2.1.207（7-13 装的，与故障时点无关），plist PATH 解析到同一个 → **一次性 launchd job（不经 trellis 任何代码）裸跑 `claude -p` 完整复现**：80ms 失败、`duration_api_ms: 0`（本地判死，网络请求都没发）；`env -i` 逐字同 env 在终端跑 → 成功（真调 API 4s 返回 "ok"）。唯一剩余变量 = launchd vs 终端的 macOS 安全上下文。
+- **根因（launchd 探针钉死）**: Claude 凭证存了两份且已分叉 —— `~/.claude/.credentials.json` 由终端 claude 持续刷新（当天 16:16 mtime，refresh token 有效到 8-20）；Keychain `Claude Code-credentials` 项 **7-26 起停更**（mdat），内容是旧格式短 JSON（281B vs 文件 509B），`refreshTokenExpiresAt = 7-26 02:48`。launchd 上下文里 keychain 与文件**都可读**（探针实测），claude 在该上下文选了 keychain → 读到死 token → 时间戳一比对直接报错。与「nodes 表 7-28 10:52 后再无 done」吻合。
+- **S90 五条排除为何全扑空**: 全部在终端做 —— `env -i` 能复制 env，复制不了「不是 launchd」这件事，而判别维度恰恰是上下文本身。
+- **修复（用户点头后执行）**: `security delete-generic-password -s "Claude Code-credentials"` 删掉已死副本 → 所有上下文回退到新鲜的文件。不选「文件→keychain 同步」：refresh token 单次轮换，两份活副本必再分家、复发。
+- **验证**: ① 同一 launchd 复现 job 转绿（修前 80ms 本地判死，修后真调 API 3.2s 返 "ok"）② 真 prod 进程端到端：trellisctl 建 chat 模式任务实跑 → run `45350b21` **done / 3s / 6 token**。顺带摸清 trellisctl 语法：`tasks run` 要完整 UUID（列表只显示 8 位短 id）、`tasks create` 收 JSON 体、无 workspace 必须 `"contextMode":"chat"`。③ /tmp 探针已清。**测试任务 `2c66ce0d`（authfix-verify）留在库里** —— trellisctl 没有 `tasks delete` 子命令，管理台 `/settings/tasks` 可删；S90 的 `bffbe8ed` 也还在。
+- **落档**: `failures.md` 结案（resolved）· workspace.md 凭证表 + 复发坑表各加一行 · auto-memory 记「launchd-claude 凭证分叉」。复发哨兵：keychain 条目重新出现且 mdat 冻结。
+- **Next**: prod 已复活；回到验收队列 —— S91 三处改动 + 管理台批 1-6 验收、BOE 部署（S88 遗留）。
 
 ### Session 92（2026-08-04，SDK 升 0.5.0：codex 走 endpoints.yaml 选模型 + 树形分支真 fork）
 - **Done**：`@smokingmouse/agent` ^0.4.0→^0.5.0、直接依赖 `@smokingmouse/llm` ^0.3.0→^0.4.0（扁平化消双份）；`npx tsc --noEmit` 干净；运行时验证 CodexBackend capabilities `forkSession: true` + `configDrivenModelSwitch: true`。
@@ -59,18 +69,3 @@
 - **验证（隔离实例 :3399 + 真库 VACUUM 快照 + `TRELLIS_SCHEDULER=off`）**: tsc ✓ / lint 35 = baseline **零新增**（中途一度 37，两个 `set-state-in-effect` 已按 `app/settings/update/page.tsx:67` 的既定写法修回）/ build ✓，六个 tab 全 200。逐条实测：provider_id 迁移在真库快照上加列成功且旧列保留 · 偏好 tab 改皮肤 → localStorage 写入 → 刷新后 `html[data-theme]` 正确（证明 layout 与 useTheme 读的是同一个 key）· agent 的 permission/requireApproval 读写双向通（先 API 写→表单回显，再 UI 改→落库）· 任务四个新字段 + providerId 全部落库（`provider_id` 有值、旧 `model` 列为 null）。收尾：实例停、快照删、browser close（GPU 进程 0）、prod DB 仍 11:46、`:3088` 仍 401、`endpoints.yaml` 仍 7-28（models tab 全程只读）。
 - **一个测试工具的坑（不是产品 bug）**: `agent-browser click @ref` 在 agents 页那个「保存」按钮上**静默不生效**（长技能列表把它推出视口），连试两次都误判成「写入失败」。改用 `eval` 里 `button.click()` 后立刻通过。以后在长页面上验按钮，别只信 ref click 的成功返回。
 - **Next**: 用户验收（改动**未 commit**）。批 4 仍降级待观察 —— 判据是「入口从 2 跳变 1 跳 + 表单补全后，一周内 tasks 表是否还是 0 行」。若仍为 0，该考虑砍掉自动化任务而不是继续加功能。
-
-### Session 88（2026-07-31，自定义 Agent 层 + 自动化任务：A1-A4 与 T1-T4 全量落地）
-- **触发**: 用户要「给 Trellis 加 Agent 管理（配提示词、技能等）+ 配置自动化任务」，追问后定死范围：一路做到 cron，但抽象要先立住 —— 后续的飞书群绑定、多 agent 讨论组都长在同一层上。中途下 `/goal` 要求一次全做完。
-- **用户的一问推翻了初始方案**：我原本按「读写 `~/.claude/agents/*.md`」提案，用户问「不能把这套抽出来吗？非得放系统 .claude 目录？不能给 SDK 一个路径让它自动绑定？」——**实测证明能**：`--agents '<json>'`（内联注入并激活为主 agent，零 fs 操作）与 `--plugin-dir <任意路径>`（agent + skill 整包）。我此前说的「技能没法按 agent 裁剪」是**错的**。
-- **六条架构决策**（详见 `decisions/2026-07-31-custom-agents.md`，完整设计在 `custom-agents-plan.md`）：DB 为真相源 spawn 时物化 · `agent_id IS NULL` 就是默认 Agent（不建行，物理上杜绝默认路径回归）· 隔离度按 agent 可选 · **agent 只改「人设 + 能力面」绝不碰「上下文与身份」** · 任务与 cron 同表同执行路径只换触发器 · 任务执行落在 session/nodes 上不另造渲染。
-- **Done**:
-  - **SDK**（跨仓 `~/sdk`）：`RunOptions` 加 `agent / agents / pluginDirs / disallowedTools / strictMcp / extraArgs`；argv 顺序焊死；`--disallowedTools` 逗号连接**不展开变参**（variadic 会吞后续 flag）；`environmentSkills:false` 与自定义 agent 互斥保护；`capabilities().customAgents` 供版本探测。`extraArgs` 把发布链从「每加一个 flag 发一次版」降成一次性成本。
-  - **A1-A4**：agents 表 + 三个新列 + 5 个 builtin 种子（文案抽到 `lib/agent-presets.ts` 当 schema 与 UI 的唯一真相源）· `applyAgent()` 统一后处理（三个 mode 分支一行不动）· 内容寻址 pack + symlink 技能 · `/settings/agents` 管理页 · `@提及` 单轮派活（`ephemeral`：不 resume 不 fork 不落盘）。
-  - **T1-T4**：`lib/cron.ts` 纯匹配器（**不写「推算下一次」只写「这一分钟匹不匹配」**，绕开月末/跨年/dom-dow OR 语义）+ 48 项单测 · 四张表 + `task_runs` 对称 boot reap · `run-bus` 的 `onSettled` 钩子 · 调度器对齐整分 tick + catch-up 只补最近一次 · 通知出口（`NotifyChannel` + 命令模板）· fs / git ls-remote / session_done 三种触发器 + 两道自触发防护 · `--max-budget-usd` 经 `extraArgs` 通电。
-- **验证**（dev server + **prod DB 的 VACUUM 只读快照**，prod 库 mtime 未变）：A1 四条端到端（人设在 project 生效 / 工具白名单只剩 Read·Grep·Glob / 本机 skill 不可见 / **不选 agent 的会话一字不变**）· A2 pack 里的 skill 可用且本机其余 80 个消失 · A4 `@translator` 只出译文而**主线下一轮仍是严谨工程师** · 僵尸 run 被 boot reap 收成 `error/interrupted` · **漏跑 5 个槽位只补 1 条** · 唯一索引挡住重复插入（`SQLITE_CONSTRAINT_UNIQUE`）· cron 槽位对齐整分而手动不对齐 · 通知失败推送/成功不推 · fs `.md` 触发而 `.txt` 被过滤 · 自触发被 400 挡 · 用假 `claude` 抓 argv 确认顺序与逗号连接全对。cron 48/48，tsc 零错。
-- **挖出三个真问题**（全写进 `facts.md`）：① cwd 不存在 → `spawn claude` 的 ENOENT 是**异步 uncaughtException**，逃得出 run-bus 的 try/catch → 节点永远 streaming、任务被 skip 策略永久锁死；② **Next 的 instrumentation 与 route handler 不共享模块实例** —— 「在 instrumentation 注册渠道、在 route 扇出」一条都发不出去且零报错；③ 技能靠 `Skill` 工具调起，配了工具白名单就静默失效，且修的时候要同时喂 `--tools` 与 pack frontmatter（第一版只补一处，行为纹丝不动）。
-- **教训（流程）**：本 session 全程在 `main-2` worktree 里跑，却**没先查有没有并行 session** —— 结果与另一个 session 撞了 S87 编号，且双方都改了 `sessions.md`/`README.md`/`facts.md`/`archive.md`（`parallel-worktree.md` 明令并行期只写 `progress/blocks/<slug>.md`）。收尾时按规则做了串行处理：共享文件退回基线 → 只提交源码 → merge 对方 → 再把自己的内容按 S88 叠上去。**代码层零重叠**（对方动 workspaces/worktree UI），否则代价会大得多。
-- **发布与上线**（用户点头后同 session 完成）：`@smokingmouse/agent@0.4.0` 已发 npm（`@smokingmouse` scope 在 `~/.npmrc` 里单独指向 npmjs 且带 token —— `npm whoami` 报 ENEEDAUTH 只是因为**默认 registry 是 npmmirror 镜像**，加 `--registry https://registry.npmjs.org/` 即通，别被那个报错骗去重新登录）。trellis bump 到 `^0.4.0` 后 **`make unlink-sdk` + 从 registry 重装**，确认装到的是真实目录而非软链、且 `dist` 里有 `customAgents`/`plugin-dir` —— 这一步是「静默失效」唯一的实检，不做就等于没验。`make deploy` 本机成功（`ce3b5fba6`），smoke 六项全过、prod ttyd 未受影响、验活闸 on；真 prod DB 迁移干净（5 张新表 + 4 个新列 + 唯一索引，5 个内置 agent 就位，**44 个存量会话无损**），启动日志有 `[scheduler] 已启动` 且**无 customAgents 告警**，闸后 `/api/agents` 返回 5 个 agent。
-- **未做 / 边界**: **BOE 没部** —— 本机 ssh 不通（`~/.ssh/config` 只有 github/bwg/vultr-tokyo，`boe` 解析到 clash 的 fake-ip 198.18.1.26，连接被关），与 S86 记的状况一致。需在 devbox 上手跑两步：`cd ~/trellis && git pull --ff-only && bun scripts/deploy.ts install-service` 然后 `make deploy`（跑前 export 代理，`bun install` 要出网）。lint 比基线多 3 处 `react-hooks/set-state-in-effect`（on-mount 取数，与既有 19 处同形状，未为规则扭曲代码）。
-- **Next**: BOE 上跑上面那两步；跑通后 `update-trellis.sh` 的 BOE 原地 build 分支就可以退役了（S86 留的退路）。

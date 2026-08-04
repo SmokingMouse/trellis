@@ -4,6 +4,21 @@
 
 ## Session Log
 
+### Session 88（2026-07-31，自定义 Agent 层 + 自动化任务：A1-A4 与 T1-T4 全量落地）
+- **触发**: 用户要「给 Trellis 加 Agent 管理（配提示词、技能等）+ 配置自动化任务」，追问后定死范围：一路做到 cron，但抽象要先立住 —— 后续的飞书群绑定、多 agent 讨论组都长在同一层上。中途下 `/goal` 要求一次全做完。
+- **用户的一问推翻了初始方案**：我原本按「读写 `~/.claude/agents/*.md`」提案，用户问「不能把这套抽出来吗？非得放系统 .claude 目录？不能给 SDK 一个路径让它自动绑定？」——**实测证明能**：`--agents '<json>'`（内联注入并激活为主 agent，零 fs 操作）与 `--plugin-dir <任意路径>`（agent + skill 整包）。我此前说的「技能没法按 agent 裁剪」是**错的**。
+- **六条架构决策**（详见 `decisions/2026-07-31-custom-agents.md`，完整设计在 `custom-agents-plan.md`）：DB 为真相源 spawn 时物化 · `agent_id IS NULL` 就是默认 Agent（不建行，物理上杜绝默认路径回归）· 隔离度按 agent 可选 · **agent 只改「人设 + 能力面」绝不碰「上下文与身份」** · 任务与 cron 同表同执行路径只换触发器 · 任务执行落在 session/nodes 上不另造渲染。
+- **Done**:
+  - **SDK**（跨仓 `~/sdk`）：`RunOptions` 加 `agent / agents / pluginDirs / disallowedTools / strictMcp / extraArgs`；argv 顺序焊死；`--disallowedTools` 逗号连接**不展开变参**（variadic 会吞后续 flag）；`environmentSkills:false` 与自定义 agent 互斥保护；`capabilities().customAgents` 供版本探测。`extraArgs` 把发布链从「每加一个 flag 发一次版」降成一次性成本。
+  - **A1-A4**：agents 表 + 三个新列 + 5 个 builtin 种子（文案抽到 `lib/agent-presets.ts` 当 schema 与 UI 的唯一真相源）· `applyAgent()` 统一后处理（三个 mode 分支一行不动）· 内容寻址 pack + symlink 技能 · `/settings/agents` 管理页 · `@提及` 单轮派活（`ephemeral`：不 resume 不 fork 不落盘）。
+  - **T1-T4**：`lib/cron.ts` 纯匹配器（**不写「推算下一次」只写「这一分钟匹不匹配」**，绕开月末/跨年/dom-dow OR 语义）+ 48 项单测 · 四张表 + `task_runs` 对称 boot reap · `run-bus` 的 `onSettled` 钩子 · 调度器对齐整分 tick + catch-up 只补最近一次 · 通知出口（`NotifyChannel` + 命令模板）· fs / git ls-remote / session_done 三种触发器 + 两道自触发防护 · `--max-budget-usd` 经 `extraArgs` 通电。
+- **验证**（dev server + **prod DB 的 VACUUM 只读快照**，prod 库 mtime 未变）：A1 四条端到端（人设在 project 生效 / 工具白名单只剩 Read·Grep·Glob / 本机 skill 不可见 / **不选 agent 的会话一字不变**）· A2 pack 里的 skill 可用且本机其余 80 个消失 · A4 `@translator` 只出译文而**主线下一轮仍是严谨工程师** · 僵尸 run 被 boot reap 收成 `error/interrupted` · **漏跑 5 个槽位只补 1 条** · 唯一索引挡住重复插入（`SQLITE_CONSTRAINT_UNIQUE`）· cron 槽位对齐整分而手动不对齐 · 通知失败推送/成功不推 · fs `.md` 触发而 `.txt` 被过滤 · 自触发被 400 挡 · 用假 `claude` 抓 argv 确认顺序与逗号连接全对。cron 48/48，tsc 零错。
+- **挖出三个真问题**（全写进 `facts.md`）：① cwd 不存在 → `spawn claude` 的 ENOENT 是**异步 uncaughtException**，逃得出 run-bus 的 try/catch → 节点永远 streaming、任务被 skip 策略永久锁死；② **Next 的 instrumentation 与 route handler 不共享模块实例** —— 「在 instrumentation 注册渠道、在 route 扇出」一条都发不出去且零报错；③ 技能靠 `Skill` 工具调起，配了工具白名单就静默失效，且修的时候要同时喂 `--tools` 与 pack frontmatter（第一版只补一处，行为纹丝不动）。
+- **教训（流程）**：本 session 全程在 `main-2` worktree 里跑，却**没先查有没有并行 session** —— 结果与另一个 session 撞了 S87 编号，且双方都改了 `sessions.md`/`README.md`/`facts.md`/`archive.md`（`parallel-worktree.md` 明令并行期只写 `progress/blocks/<slug>.md`）。收尾时按规则做了串行处理：共享文件退回基线 → 只提交源码 → merge 对方 → 再把自己的内容按 S88 叠上去。**代码层零重叠**（对方动 workspaces/worktree UI），否则代价会大得多。
+- **发布与上线**（用户点头后同 session 完成）：`@smokingmouse/agent@0.4.0` 已发 npm（`@smokingmouse` scope 在 `~/.npmrc` 里单独指向 npmjs 且带 token —— `npm whoami` 报 ENEEDAUTH 只是因为**默认 registry 是 npmmirror 镜像**，加 `--registry https://registry.npmjs.org/` 即通，别被那个报错骗去重新登录）。trellis bump 到 `^0.4.0` 后 **`make unlink-sdk` + 从 registry 重装**，确认装到的是真实目录而非软链、且 `dist` 里有 `customAgents`/`plugin-dir` —— 这一步是「静默失效」唯一的实检，不做就等于没验。`make deploy` 本机成功（`ce3b5fba6`），smoke 六项全过、prod ttyd 未受影响、验活闸 on；真 prod DB 迁移干净（5 张新表 + 4 个新列 + 唯一索引，5 个内置 agent 就位，**44 个存量会话无损**），启动日志有 `[scheduler] 已启动` 且**无 customAgents 告警**，闸后 `/api/agents` 返回 5 个 agent。
+- **未做 / 边界**: **BOE 没部** —— 本机 ssh 不通（`~/.ssh/config` 只有 github/bwg/vultr-tokyo，`boe` 解析到 clash 的 fake-ip 198.18.1.26，连接被关），与 S86 记的状况一致。需在 devbox 上手跑两步：`cd ~/trellis && git pull --ff-only && bun scripts/deploy.ts install-service` 然后 `make deploy`（跑前 export 代理，`bun install` 要出网）。lint 比基线多 3 处 `react-hooks/set-state-in-effect`（on-mount 取数，与既有 19 处同形状，未为规则扭曲代码）。
+- **Next**: BOE 上跑上面那两步；跑通后 `update-trellis.sh` 的 BOE 原地 build 分支就可以退役了（S86 留的退路）。
+
 ### Session 87（2026-07-31，worktree 建完即用：把「用眼睛搬路径」那一步删掉）
 - **触发**: 用户「感觉现在 Worktree 的启动还是不是很流畅。我得在对应目录下新建，然后在创建的时候又指定这个新的目录。」
 - **诊断（不是感觉问题，是数据被丢了）**: 建 worktree 与开 session 在代码里是**两条互不相连的链路**。服务端 `worktree/route.ts:133` 返回了 `{ok, workspaceId, path}`，`SessionSidebar.tsx:274` 收到，**下一行就丢**，只 `bumpSessionsRevision()`。于是用户必须把同一个路径用眼睛从侧栏搬到 `WorkspacePicker` 里再找一遍。更糟：它**不在「最近」列表里** —— `recent/route.ts` 两个数据源（`sessions` 表 / `~/.claude/projects` 目录）都以「已经有 session」为前提，刚 `git worktree add` 出来的目录**结构性**进不去，第一次只能走「浏览」一级级点或手打绝对路径。

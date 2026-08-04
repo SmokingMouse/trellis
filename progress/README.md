@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-prod spawn 出的 claude 一律认证失败（旁证显示 07-28 起可能全站如此），先判定它是实例级故障还是任务路径独有。
+spawn 认证失败已修复且 prod 实测复活；回到验收队列：S91 三处改动 + 管理台批 1-6，BOE 仍未部。
 
 ## Goals
 
