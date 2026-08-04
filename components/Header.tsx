@@ -10,6 +10,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Button } from "@/components/ui/Button";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
+import { ctxTokensOf, findLineageCtxTurn } from "@/lib/context-usage";
 import type { ChatNode } from "@/lib/types";
 
 // The 🧠 context-occupancy % uses a per-provider window (contextWindowFor),
@@ -27,44 +28,6 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
     cur = nodes[cur.parentId];
   }
   return null;
-}
-
-// A turn's true context-window occupancy. Prefer the backend-reported
-// contextTokens (last assistant message — excludes tool-loop / same-model
-// subagent accumulation); fall back to the input+cache sum for legacy rows /
-// backends that don't report it.
-function ctxTokensOf(n: ChatNode): number {
-  const ct = n.tokenCount.contextTokens;
-  if (typeof ct === "number" && ct > 0) return ct;
-  return (
-    n.tokenCount.input + n.tokenCount.cacheRead + n.tokenCount.cacheCreation
-  );
-}
-
-function findLatestCtxTurn(
-  rootId: string,
-  nodes: Record<string, ChatNode>,
-): ChatNode | null {
-  // Single pass: collect children-by-parent once, BFS from root, track max.
-  const childrenByParent = new Map<string, string[]>();
-  for (const n of Object.values(nodes)) {
-    if (!n.parentId) continue;
-    const list = childrenByParent.get(n.parentId);
-    if (list) list.push(n.id);
-    else childrenByParent.set(n.parentId, [n.id]);
-  }
-  let best: ChatNode | null = null;
-  const stack = [rootId];
-  while (stack.length) {
-    const id = stack.pop()!;
-    const n = nodes[id];
-    if (!n) continue;
-    const total = ctxTokensOf(n);
-    if (total > 0 && (!best || n.createdAt > best.createdAt)) best = n;
-    const kids = childrenByParent.get(id);
-    if (kids) stack.push(...kids);
-  }
-  return best;
 }
 
 export function Header() {
@@ -112,7 +75,7 @@ export function Header() {
     if (!activeNodeId) return null;
     const root = findRoot(activeNodeId, nodes);
     if (!root) return null;
-    const latest = findLatestCtxTurn(root.id, nodes);
+    const latest = findLineageCtxTurn(activeNodeId, nodes);
     if (!latest) return null;
     const tokens = ctxTokensOf(latest);
     return {
