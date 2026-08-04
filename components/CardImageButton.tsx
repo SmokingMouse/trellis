@@ -1,20 +1,22 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
+import { Modal } from "./ui/Modal";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 
-type Phase = "idle" | "rendering" | "copied" | "downloaded" | "error";
+type Phase = "idle" | "rendering" | "error";
 
-// Replaces the old "存到记忆" action: render this Q&A into a shareable card
-// PNG and drop it on the clipboard so the user can paste it straight into
-// chat / notes. Falls back to a file download where the browser blocks
-// programmatic image clipboard writes (older Safari / Firefox).
+// Renders this Q&A into a shareable card PNG, then opens a preview dialog
+// where the user picks the destination themselves — copy to clipboard or
+// download as a file (the old auto-copy-with-silent-download-fallback made
+// the outcome unpredictable across browsers).
 export function CardImageButton({
   title,
   content,
@@ -24,6 +26,7 @@ export function CardImageButton({
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [blob, setBlob] = useState<Blob | null>(null);
 
   const run = async () => {
     if (phase === "rendering" || !cardRef.current) return;
@@ -32,33 +35,14 @@ export function CardImageButton({
       // Lazy-load the rasterizer so it stays out of the main bundle.
       const { toBlob } = await import("html-to-image");
       const isDark = document.documentElement.classList.contains("dark");
-      const blob = await toBlob(cardRef.current, {
+      const rendered = await toBlob(cardRef.current, {
         pixelRatio: 2,
         backgroundColor: isDark ? "#1c1917" : "#ffffff",
         cacheBust: true,
       });
-      if (!blob) throw new Error("render produced no image");
-
-      // Prefer the clipboard; fall back to a download if it's unavailable
-      // or rejected (permissions / unsupported ClipboardItem image type).
-      const canClipImage =
-        typeof ClipboardItem !== "undefined" &&
-        !!navigator.clipboard?.write;
-      if (canClipImage) {
-        try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ "image/png": blob }),
-          ]);
-          setPhase("copied");
-        } catch {
-          downloadBlob(blob, title);
-          setPhase("downloaded");
-        }
-      } else {
-        downloadBlob(blob, title);
-        setPhase("downloaded");
-      }
-      window.setTimeout(() => setPhase("idle"), 2000);
+      if (!rendered) throw new Error("render produced no image");
+      setBlob(rendered);
+      setPhase("idle");
     } catch (err) {
       console.error("[trellis] card image failed:", err);
       setPhase("error");
@@ -69,13 +53,9 @@ export function CardImageButton({
   const label =
     phase === "rendering"
       ? "生成中…"
-      : phase === "copied"
-        ? "✓ 已复制图片"
-        : phase === "downloaded"
-          ? "✓ 已下载"
-          : phase === "error"
-            ? "✗ 失败"
-            : "🖼 卡片图";
+      : phase === "error"
+        ? "✗ 失败"
+        : "🖼 卡片图";
 
   return (
     <>
@@ -86,11 +66,19 @@ export function CardImageButton({
           void run();
         }}
         disabled={phase === "rendering"}
-        title="把这条问答渲染成一张卡片图片并复制到剪贴板"
+        title="把这条问答渲染成一张卡片图片"
         className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors disabled:opacity-50"
       >
         {label}
       </button>
+
+      {blob && (
+        <CardPreviewDialog
+          blob={blob}
+          title={title}
+          onClose={() => setBlob(null)}
+        />
+      )}
 
       {/* Off-screen card laid out (not display:none, which can't be
           rasterized) for html-to-image to capture. Mirrors the app's markdown
@@ -125,6 +113,87 @@ export function CardImageButton({
         </div>
       </div>
     </>
+  );
+}
+
+// Portalled to body: TurnCard lives inside a transformed React Flow node,
+// where a plain fixed-position Modal would anchor to the node, not the
+// viewport.
+function CardPreviewDialog({
+  blob,
+  title,
+  onClose,
+}: {
+  blob: Blob;
+  title: string;
+  onClose: () => void;
+}) {
+  const [url] = useState(() => URL.createObjectURL(blob));
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+
+  const copy = async () => {
+    try {
+      if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+        throw new Error("clipboard image write unsupported");
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob }),
+      ]);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch (err) {
+      console.error("[trellis] card image copy failed:", err);
+      setCopyState("failed");
+    }
+  };
+
+  return createPortal(
+    <div className="nodrag nowheel" onClick={(e) => e.stopPropagation()}>
+      <Modal onClose={onClose} size="lg">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-line">
+          <span className="text-ui font-medium text-ink-strong">卡片图</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2 py-0.5 rounded text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-auto p-4 bg-surface-muted/40">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={`卡片图预览：${title}`}
+            className="w-full rounded border border-line"
+          />
+        </div>
+        <div className="flex gap-2 px-5 py-3 border-t border-line">
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="flex-1 px-3 py-1.5 rounded border border-line text-ui text-ink hover:bg-surface-muted hover:text-ink-strong transition-colors"
+          >
+            {copyState === "copied"
+              ? "✓ 已复制"
+              : copyState === "failed"
+                ? "复制失败，请用下载"
+                : "复制图片"}
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadBlob(blob, title)}
+            className="flex-1 px-3 py-1.5 rounded bg-accent text-white text-ui hover:opacity-90 transition-opacity"
+          >
+            下载图片
+          </button>
+        </div>
+      </Modal>
+    </div>,
+    document.body,
   );
 }
 
