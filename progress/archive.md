@@ -4,6 +4,21 @@
 
 ## Session Log
 
+### Session 87（2026-07-31，worktree 建完即用：把「用眼睛搬路径」那一步删掉）
+- **触发**: 用户「感觉现在 Worktree 的启动还是不是很流畅。我得在对应目录下新建，然后在创建的时候又指定这个新的目录。」
+- **诊断（不是感觉问题，是数据被丢了）**: 建 worktree 与开 session 在代码里是**两条互不相连的链路**。服务端 `worktree/route.ts:133` 返回了 `{ok, workspaceId, path}`，`SessionSidebar.tsx:274` 收到，**下一行就丢**，只 `bumpSessionsRevision()`。于是用户必须把同一个路径用眼睛从侧栏搬到 `WorkspacePicker` 里再找一遍。更糟：它**不在「最近」列表里** —— `recent/route.ts` 两个数据源（`sessions` 表 / `~/.claude/projects` 目录）都以「已经有 session」为前提，刚 `git worktree add` 出来的目录**结构性**进不去，第一次只能走「浏览」一级级点或手打绝对路径。
+- **决定性对照**: 同一个 picker 里，「空白沙箱」(`WorkspacePicker.tsx:57`) 和「新建文件夹」(`:403`) 早就是 `创建 → pickPath(path)`，后者按钮字面写着**「创建并使用」**。**worktree 是唯一一个建完不选的创建动作** —— 疏漏而非设计。
+- **入口形态（用户选的）**: 两边都通，共用同一个底层动作。
+- **Done**:
+  - `worktree/route.ts`：抽出 `pickBase()`（GET/POST 共用，防「下拉里有、点了说没有 git 工作区」的漂移）+ 新增 `GET` 返回可作起点的 checkout 列表（含 `parent`，给前端做落点预览）。**刻意不复用 `listProjectTree()`** —— 那份的 `visible()` 会藏掉 discovered 且零会话的主 checkout，那是「该不该显示」，这里要的是「能不能建」。
+  - `SessionSidebar.tsx`：新 `startSessionIn(path)` = `setDraftMode("project")` + `setDraftWorkspacePath(path)` + `newConversation()` + 显式收移动端抽屉（不能靠 `activeId` 那个 effect，从 composer 态点过来 activeId 本来就是 null，不变不触发）。建完 worktree 接住 `r.path` 落进去；**workspace 行也挂上 ＋**（`GroupRow` 加 `addTitle`，两级语义不同），让「0 会话」那条以前点不动的灰行有了出口 —— 这也是**已有** worktree（CLI 里建的）唯一不用过 picker 的入口。
+  - `WorkspacePicker.tsx`：第三个「创建并使用」——「🌿 新建 worktree 并使用」，含 base repo 下拉（默认按**同父目录**命中当前工作区所属 repo，从一个 worktree 里再开平行 worktree 也选得对）、分支名、**落点路径实时回显**（分支名会原样变成磁盘目录名，建之前看得见比建完解释「它去哪了」有用）。
+  - `recent/route.ts`：补第三路数据源 `readWorktreesWithoutSessions()`（`created_by != 'discovered'` 且无 session），口径与侧栏 `visible()` 一致；顺带修 `deriveShortName` —— worktree 与主 checkout 共用 package.json，实测四个 worktree 在列表里**全叫 "trellis"**，只能靠灰色路径分辨；判据用「`.git` 是文件不是目录」（linked worktree 的特征，比 `git rev-parse` 便宜且不 spawn），命中就取目录名 = 分支名。
+- **验证（dev 实例 :3099，prod :3088 零触碰已复核）**: tsc ✓ / lint 32 = 基线 ✓ / `next build` ✓（顺带确认 route 文件里 `export type` 不违反 Next 的导出约束）。**浏览器实跑三条动线**：① workspace 行 ＋ → 直接落 composer，Project 模式 + 工作区 = 该 worktree（`localStorage.trellis-workspace` 核过是完整路径）✓；② picker 里建 → modal 关 + 工作区已是新 worktree ✓；③ 侧栏项目行 ＋ 输分支名回车 → 直接落 composer ✓。**实跑中发现并当场补的两个**：picker 建完没 bump 侧栏（新 worktree 要等下次刷新才现身，已补 `bumpSessionsRevision()` 并复验）；短名歧义（改后列表读 `wt-sidebar-test / wt-picker-test / wt-smoke-test / main-2`，与侧栏一致）。收尾：4 个测试 worktree 走 DELETE force=1 清掉（顺带验了删除路径没被新 ＋ 挤坏）、测试分支 `git branch -D`、DB 无残留、browser session 已关、dev 实例已停。
+- **未做（有意）**: 平铺态（`isFlat`，单 workspace 与项目同名）的项目行没有「在这里开会话」—— 它的 ＋ 仍是「新建 worktree」，一行放两个按钮会挤。该场景由 picker 的「最近」覆盖。API 支持但 UI 仍未接线的 `ref`（从哪个 ref 起）也仍未接 —— 与本次抱怨无关。
+- **合并与推送**: `worktree-create-and-use` → `main`（`--no-ff` merge `3462480`，保住工作线形状），已推 `ccfca62..3462480`。上个 session 遗留在工作树的 `facts.md`（子 agent 内部调用不落主 jsonl，S84 探针）与本次无关，单独一条 `6208988` 留档、没并进功能 commit。
+- **Next**: 用户验收 —— 侧栏项目行 ＋ 建 worktree 应当**直接落到新会话**且工作区已选中；workspace 行悬停多出一个 ＋ 可直接开会话；选工作区的 modal 里多出「🌿 新建 worktree 并使用」。**两台实例仍待重部**（S85/S86/S87 三批修复都还没上线），BOE 上先跑 S86 记的两步。本机 prod 走 `make deploy`。
+
 ### Session 86（2026-07-30，部署流水线跨平台：devbox 上 `make deploy` 死在 launchctl）
 - **触发**: 用户只贴了一张 BOE devbox 的部署日志截图 —— `switch: current → 20260730T111814-bffeda99b` 之后紧接着 `× Executable not found in $PATH: "launchctl"` → `failed`。没有一句文字。
 - **根因两层，第二层比第一层更坏**：

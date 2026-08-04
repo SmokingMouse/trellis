@@ -2,6 +2,12 @@
 
 最近 5 条，倒序（Session 91 / 90 / 89 / 88 / 87）。更早的见 `archive.md`。
 
+### Session 92（2026-08-04，SDK 升 0.5.0：codex 走 endpoints.yaml 选模型 + 树形分支真 fork）
+- **Done**：`@smokingmouse/agent` ^0.4.0→^0.5.0、直接依赖 `@smokingmouse/llm` ^0.3.0→^0.4.0（扁平化消双份）；`npx tsc --noEmit` 干净；运行时验证 CodexBackend capabilities `forkSession: true` + `configDrivenModelSwitch: true`。
+- **SDK 本轮新能力（sm-toolkit 同日发版，细节见其 progress/sessions.md）**：① codex model 可解析 endpoints.yaml 里显式标记 `codex: { wire_api: responses }` 的端点（目前 cpa），`-c model_providers` per-run 注入 + env_key 鉴权；② codex forkSession 由 rollout copy 模拟——此前 codex 分支节点 resume 同一 thread 会互相污染，现真 fork（新 id + 历史继承 + 双向隔离），失败 fail loud 不静默降级。
+- **对 trellis 的影响**：代码零改动即受益（run() 传的 forkSession 在 codex 下开始生效）；UI 可按 `capabilities().forkSession` 探测。codex 逐 token 流 / 双向审批（PendingInteraction）仍无——app-server 路线已评估暂缓，决策留档 sm-toolkit progress/decisions.md。
+- **Next**：prod 部署时带上 bun.lock；无代码改动待验收。
+
 ### Session 91（2026-08-01，拿 happyclaw 做对照剖析 → 修掉它替我们踩过的三个坑）
 - **触发**: 用户「使用 workflow 深入剖析下 riba 的 happyclaw，看看对我们的 trellis 后续的演进和优化有啥指导意义吗」，看完结论后「按照你的建议把那些都改了吧」。
 - **对照组**: riba2534/happyclaw（自托管**多用户** Agent 系统，IM 六端 + 每用户 Docker + RBAC + 计费）。本机 fork 落后上游 271 个 commit，另开 worktree `/tmp/happyclaw-latest` 指到 `upstream/main`（`6ab7dad`，当天）。**三个月从 111k LOC 长到 292k**，且 `task-scheduler.ts` / `agent-builder.ts` / `memory-service.ts` / `plugin-*.ts` 与 trellis 三个 Goal 正面撞车 —— 它是我们 Goal 的未来态样本。
@@ -68,18 +74,3 @@
 - **发布与上线**（用户点头后同 session 完成）：`@smokingmouse/agent@0.4.0` 已发 npm（`@smokingmouse` scope 在 `~/.npmrc` 里单独指向 npmjs 且带 token —— `npm whoami` 报 ENEEDAUTH 只是因为**默认 registry 是 npmmirror 镜像**，加 `--registry https://registry.npmjs.org/` 即通，别被那个报错骗去重新登录）。trellis bump 到 `^0.4.0` 后 **`make unlink-sdk` + 从 registry 重装**，确认装到的是真实目录而非软链、且 `dist` 里有 `customAgents`/`plugin-dir` —— 这一步是「静默失效」唯一的实检，不做就等于没验。`make deploy` 本机成功（`ce3b5fba6`），smoke 六项全过、prod ttyd 未受影响、验活闸 on；真 prod DB 迁移干净（5 张新表 + 4 个新列 + 唯一索引，5 个内置 agent 就位，**44 个存量会话无损**），启动日志有 `[scheduler] 已启动` 且**无 customAgents 告警**，闸后 `/api/agents` 返回 5 个 agent。
 - **未做 / 边界**: **BOE 没部** —— 本机 ssh 不通（`~/.ssh/config` 只有 github/bwg/vultr-tokyo，`boe` 解析到 clash 的 fake-ip 198.18.1.26，连接被关），与 S86 记的状况一致。需在 devbox 上手跑两步：`cd ~/trellis && git pull --ff-only && bun scripts/deploy.ts install-service` 然后 `make deploy`（跑前 export 代理，`bun install` 要出网）。lint 比基线多 3 处 `react-hooks/set-state-in-effect`（on-mount 取数，与既有 19 处同形状，未为规则扭曲代码）。
 - **Next**: BOE 上跑上面那两步；跑通后 `update-trellis.sh` 的 BOE 原地 build 分支就可以退役了（S86 留的退路）。
-
-### Session 87（2026-07-31，worktree 建完即用：把「用眼睛搬路径」那一步删掉）
-- **触发**: 用户「感觉现在 Worktree 的启动还是不是很流畅。我得在对应目录下新建，然后在创建的时候又指定这个新的目录。」
-- **诊断（不是感觉问题，是数据被丢了）**: 建 worktree 与开 session 在代码里是**两条互不相连的链路**。服务端 `worktree/route.ts:133` 返回了 `{ok, workspaceId, path}`，`SessionSidebar.tsx:274` 收到，**下一行就丢**，只 `bumpSessionsRevision()`。于是用户必须把同一个路径用眼睛从侧栏搬到 `WorkspacePicker` 里再找一遍。更糟：它**不在「最近」列表里** —— `recent/route.ts` 两个数据源（`sessions` 表 / `~/.claude/projects` 目录）都以「已经有 session」为前提，刚 `git worktree add` 出来的目录**结构性**进不去，第一次只能走「浏览」一级级点或手打绝对路径。
-- **决定性对照**: 同一个 picker 里，「空白沙箱」(`WorkspacePicker.tsx:57`) 和「新建文件夹」(`:403`) 早就是 `创建 → pickPath(path)`，后者按钮字面写着**「创建并使用」**。**worktree 是唯一一个建完不选的创建动作** —— 疏漏而非设计。
-- **入口形态（用户选的）**: 两边都通，共用同一个底层动作。
-- **Done**:
-  - `worktree/route.ts`：抽出 `pickBase()`（GET/POST 共用，防「下拉里有、点了说没有 git 工作区」的漂移）+ 新增 `GET` 返回可作起点的 checkout 列表（含 `parent`，给前端做落点预览）。**刻意不复用 `listProjectTree()`** —— 那份的 `visible()` 会藏掉 discovered 且零会话的主 checkout，那是「该不该显示」，这里要的是「能不能建」。
-  - `SessionSidebar.tsx`：新 `startSessionIn(path)` = `setDraftMode("project")` + `setDraftWorkspacePath(path)` + `newConversation()` + 显式收移动端抽屉（不能靠 `activeId` 那个 effect，从 composer 态点过来 activeId 本来就是 null，不变不触发）。建完 worktree 接住 `r.path` 落进去；**workspace 行也挂上 ＋**（`GroupRow` 加 `addTitle`，两级语义不同），让「0 会话」那条以前点不动的灰行有了出口 —— 这也是**已有** worktree（CLI 里建的）唯一不用过 picker 的入口。
-  - `WorkspacePicker.tsx`：第三个「创建并使用」——「🌿 新建 worktree 并使用」，含 base repo 下拉（默认按**同父目录**命中当前工作区所属 repo，从一个 worktree 里再开平行 worktree 也选得对）、分支名、**落点路径实时回显**（分支名会原样变成磁盘目录名，建之前看得见比建完解释「它去哪了」有用）。
-  - `recent/route.ts`：补第三路数据源 `readWorktreesWithoutSessions()`（`created_by != 'discovered'` 且无 session），口径与侧栏 `visible()` 一致；顺带修 `deriveShortName` —— worktree 与主 checkout 共用 package.json，实测四个 worktree 在列表里**全叫 "trellis"**，只能靠灰色路径分辨；判据用「`.git` 是文件不是目录」（linked worktree 的特征，比 `git rev-parse` 便宜且不 spawn），命中就取目录名 = 分支名。
-- **验证（dev 实例 :3099，prod :3088 零触碰已复核）**: tsc ✓ / lint 32 = 基线 ✓ / `next build` ✓（顺带确认 route 文件里 `export type` 不违反 Next 的导出约束）。**浏览器实跑三条动线**：① workspace 行 ＋ → 直接落 composer，Project 模式 + 工作区 = 该 worktree（`localStorage.trellis-workspace` 核过是完整路径）✓；② picker 里建 → modal 关 + 工作区已是新 worktree ✓；③ 侧栏项目行 ＋ 输分支名回车 → 直接落 composer ✓。**实跑中发现并当场补的两个**：picker 建完没 bump 侧栏（新 worktree 要等下次刷新才现身，已补 `bumpSessionsRevision()` 并复验）；短名歧义（改后列表读 `wt-sidebar-test / wt-picker-test / wt-smoke-test / main-2`，与侧栏一致）。收尾：4 个测试 worktree 走 DELETE force=1 清掉（顺带验了删除路径没被新 ＋ 挤坏）、测试分支 `git branch -D`、DB 无残留、browser session 已关、dev 实例已停。
-- **未做（有意）**: 平铺态（`isFlat`，单 workspace 与项目同名）的项目行没有「在这里开会话」—— 它的 ＋ 仍是「新建 worktree」，一行放两个按钮会挤。该场景由 picker 的「最近」覆盖。API 支持但 UI 仍未接线的 `ref`（从哪个 ref 起）也仍未接 —— 与本次抱怨无关。
-- **合并与推送**: `worktree-create-and-use` → `main`（`--no-ff` merge `3462480`，保住工作线形状），已推 `ccfca62..3462480`。上个 session 遗留在工作树的 `facts.md`（子 agent 内部调用不落主 jsonl，S84 探针）与本次无关，单独一条 `6208988` 留档、没并进功能 commit。
-- **Next**: 用户验收 —— 侧栏项目行 ＋ 建 worktree 应当**直接落到新会话**且工作区已选中；workspace 行悬停多出一个 ＋ 可直接开会话；选工作区的 modal 里多出「🌿 新建 worktree 并使用」。**两台实例仍待重部**（S85/S86/S87 三批修复都还没上线），BOE 上先跑 S86 记的两步。本机 prod 走 `make deploy`。

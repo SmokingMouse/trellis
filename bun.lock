@@ -7,8 +7,8 @@
       "dependencies": {
         "@dagrejs/dagre": "^3.0.0",
         "@excalidraw/excalidraw": "^0.18.1",
-        "@smokingmouse/agent": "^0.4.0",
-        "@smokingmouse/llm": "^0.3.0",
+        "@smokingmouse/agent": "^0.5.0",
+        "@smokingmouse/llm": "^0.4.0",
         "@xyflow/react": "^12.10.2",
         "highlight.js": "^11.11.1",
         "html-to-image": "^1.11.13",
@@ -291,9 +291,9 @@
 
     "@rtsao/scc": ["@rtsao/scc@1.1.0", "https://registry.npmmirror.com/@rtsao/scc/-/scc-1.1.0.tgz", {}, "sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g=="],
 
-    "@smokingmouse/agent": ["@smokingmouse/agent@0.4.0", "", { "dependencies": { "@smokingmouse/llm": "^0.3.0" } }, "sha512-2+JHAWSlhaU4Vck5COnUOTyLdGyswKG+1+e/rfoFazSJc71HowzeO9xojiaCRQEdBgmHU8UsTzUkQYR8cWjXXg=="],
+    "@smokingmouse/agent": ["@smokingmouse/agent@0.5.0", "", { "dependencies": { "@smokingmouse/llm": "^0.4.0" } }, "sha512-sMimFpoSu2UTR6aHXs7trklyLL2ekDw0X/HJGw/jyP9i9GcO/i6jALbZ9qlUpksb6EClitygLtZSBw9zoVAVxg=="],
 
-    "@smokingmouse/llm": ["@smokingmouse/llm@0.3.0", "", { "dependencies": { "yaml": "^2.7.1" } }, "sha512-IAQfK3emDx4fYpdmviav1T75dvgxoVI8zuYpJCXQImJe2d5RdSQYmC8O+AvIOFr227vWbJ08gM5wBUPXLqzodQ=="],
+    "@smokingmouse/llm": ["@smokingmouse/llm@0.4.0", "", { "dependencies": { "yaml": "^2.7.1" } }, "sha512-AeZIGhp0fsq5lZtYuoLkWUPoI6RknDtZrqES3+rF5FhUWQ3p2QEh9VSC3nSCPlOfKEsWA15eJgBOjVvVsKE99w=="],
 
     "@swc/helpers": ["@swc/helpers@0.5.15", "https://registry.npmmirror.com/@swc/helpers/-/helpers-0.5.15.tgz", { "dependencies": { "tslib": "^2.8.0" } }, "sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g=="],
 
