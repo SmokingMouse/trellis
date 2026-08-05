@@ -4,6 +4,18 @@
 
 ## Session Log
 
+### Session 90（2026-07-31，trellis-admin skill：让任意 claude 会话用一句话配后台）
+- **触发**: 用户「现在有了 Agent 配置的能力，能在平台预留一个 Agent，能通过这个 Agent 完成后台的一些 Agent 配置 or 定时任务配置吗」。
+- **我的第一版方案被用户一句话推翻，且推翻得对**: 我提「内置一个受限 admin agent（工具白名单 `["Bash","Skill"]`）」，用户问「不能做一个内置的 skill 吗，这样不用限制 agent」。**工具白名单在这里从来不是边界** —— admin agent 要调 CLI 就必须有 `Bash`，给了 Bash 就能 curl 任意端点、改任意文件，白名单只是看起来像闸。
+- **更关键的一条**: 这个能力**今天就已经存在**。默认 agent 不隔离，spawn 出的子进程继承 trellis 进程 env（`shared/.env.local` 经 bun 从 cwd 自动加载），任何能用 Bash 的会话早就能 curl `/api/agents`。做 skill **不是授予权限，是把已有权限变得可发现、有契约**。威胁模型因此从「越权」变成「手滑」—— 而对手滑，SKILL.md 里「先预览再写入」的纪律是**真管用的控制**（上一轮我说的「提示词不是闸」只对防绕过成立，已收窄）。
+- **Done**: `skills/trellis-admin/`（`SKILL.md` 字段语义 + cron 速查 + Known Failure Modes · `scripts/trellisctl.ts` ~380 行，agents/tasks/triggers/runs/providers/skills/cron 七组子命令）。软链 `~/.claude/skills/trellis-admin` → **仓库 checkout**，不是 `~/.trellis/current` —— 当前 release 部署于 skill 出现之前，链过去是断的；等这次上线后再定要不要改成跟 release 走。
+- **两道闸落在脚本里**（比改服务端轻，且不影响界面手动操作）: `triggers add` 拒绝触发间隔 < 5 分钟（`--force` 可越过）并在挂之前回显人话描述 + 下次触发时间；`tasks create` **建出来不挂触发器**，输出直接引导「先手动跑一次 → 看 runs → 满意再挂」。**原本想做的「建成停用再试跑」走不通** —— `lib/server/tasks.ts:409` 对 disabled 任务连手动 run 都拒。
+- **写的过程中修的三处**: 块注释里写 `*/2`，那个 `*/` 把注释提前关了（bun 直接 parse 失败）· builtin agent 的 id 是 `builtin-<slug>`，截 8 位后五行长得一模一样 → 索性不打 id、全用 slug 当句柄，并让 `tasks create` 收 `agentSlug` 自动换成 id · 中文列宽按码点 `padEnd` 会把表推歪，改按显示宽度算。另修一处照旧计划文档抄错的路径：任务页是 `/settings/tasks` 不是 `/tasks`（S89 已收进管理台）。
+- **实测通过**: `health`（3088，token 从 `shared/.env.local` 自动读到，`auth: on`）· `cron "0 9 * * 1-5"` →「每个工作日 09:00 · 08-03/04/05」（今天周五，跳周末正确）· `agents list --all` · `providers`（12 个）· `skills` · `tasks create/update/run/list` · `runs`。
+- **端到端卡住，但卡点不在本次改动**: 建了个真任务手动跑两次，**都在 1 秒内 0 token 失败**：`Failed to authenticate: OAuth session expired and could not be refreshed`。任务链路全通（建任务 / 抢槽 / 建 `kind='task'` 会话 / 建节点 / spawn / 捕获错误 / 留档），死在 spawn 出来的 claude 认证上。**五条已排除**（本机凭证 / proxy / launchd 的 PATH+HOME / env 污染 / `--model opus`），全部命令与判据见 `failures.md`。旁证：`nodes` 表最近一次 `done` 停在 **07-28 10:52** —— prod 的交互式会话很可能也早就坏了，只是三天没人开所以没人知道。
+- **续（8-01）：管家 agent 从「自定义」升成「内置种子」**。用户在**第二台机器**上部署后发现界面里没有它 —— 暴露了一件我一开始就写进 SKILL.md 失败模式、却没往 agent 身上想的事：**agent 是 DB 行、不跟着 git 走**。于是推翻前一天「先别固化」（见 `decisions.md` 2026-08-01），加进 `BUILTIN_AGENT_SEEDS` 第 6 位，并**删掉手建的那行** —— `seedBuiltinAgents` 是 `INSERT OR IGNORE`，撞同名 slug 会静默跳过，留着就永远种不进去。**种子刻意不配 `skills_json`**：内置一律 `inherit_env=1`，本机 `~/.claude/skills/` 全可见，绑了只会白物化一个 pack。空库（→ 6 个 builtin）与存量 5 行库（重启后补成 6 行）两条路都在 `TRELLIS_DB_PATH` 指的临时库上实测过，tsc 零错。**仍不跟 git 走的**：`~/.claude/skills/trellis-admin` 软链每台机器要单独建。
+- **Next**: 用户去 `trellis.smokingmouse.cc` 或 `127.0.0.1:3088` 发一句普通聊天。回得来 → 只有任务路径坏，对照 `tasks.ts:launch()` 与 `chat/route.ts` 构造的 StreamRequest 逐字段找差异；回不来 → prod 实例级故障，先 `launchctl kickstart -k` 看是否自愈。试跑任务 `bffbe8ed` 留在库里没删。**BOE 仍未部**（S88 遗留）。
+
 ### Session 89（2026-07-31，设置与功能排布重组：出方案不动代码）
 - **触发**: 用户「现在 trellis 设置有点乱，各种功能排布也有点散乱，特别是在 Agent 和定时任务出现后，我想集中排一排」。三路并行勘察（设置落点 / 导航入口 / Agent 与任务表面）后出方案。
 - **诊断不是「没排整齐」，是一条原则被撑破**: `app/settings/page.tsx:5-8` 和 `decisions.md` 2026-07-29 写着「刻意不做偏好中心，一切配置都语境化」。这条对当下语境和 UI 偏好都成立，但 **Agent / Task 是持久对象（有 CRUD、跨 session、按 id 引用），结构上没有「当下」可挂**，于是各被甩成一张整页且不对等。

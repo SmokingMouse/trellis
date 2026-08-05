@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-08-04 · CLI 授权管理：先 T0+T1（状态 + 预警），托管隔离暂缓
+
+**Decision**：落地 auth-health 探测 + 设置页状态卡（T0）与 scheduler 每小时预警（T1）；**托管隔离**
+（给 spawn 的 claude 独立 `CLAUDE_CONFIG_DIR`、平台持 `claude setup-token` 一年期年票经
+`CLAUDE_CODE_OAUTH_TOKEN` 注入）**暂缓**，触发条件 = BOE 多机部署真正提上日程。
+**Why**：要防的故障（S90-S93「认证挂 6 天没人知道」）T0+T1 就封死，一天工作量、纯读零风险；
+托管的最大红利是「多机不用各自维护登录态」，单机现在做只付代价（一年期 token 集中存平台侧
+sqlite/env 的泄露面）不收收益。
+**happyclaw 对照**（S91 的 `/tmp/happyclaw-latest` worktree 复用，`6ab7dad`）：它平台自持
+Claude Code 的公开 client_id 走 PKCE（`claude.ai/oauth/authorize` → 贴 code →
+`api.anthropic.com/v1/oauth/token` 交换），token 存 provider 配置，每 spawn 物化
+`.credentials.json`（0600，scopes 缺省补齐 —— CLI 对无 scopes 的凭证不认）到 per-agent
+`CLAUDE_CONFIG_DIR`，**绝不碰 `~/.claude`**；重新登录后推送到全部 session 目录。**短板**：
+平台侧没有 refresh 交换 → 每 ~15 天要在 UI 重新 OAuth；codex 零处理。可白嫖的实战细节：
+大陆 IP 直连 token 交换会 403（server-side fetch 要走代理）、宿主 `.claude.json` 的 feature
+flags 会让容器内 SDK 初始化挂起、官方 usage API（`api.anthropic.com/api/oauth/usage`）可显示
+5h/7d 订阅用量。
+**Alternatives**：① happyclaw 式 PKCE 托管 —— 拒：15 天保质期 + 代理工程，单用户不值；真到
+BOE 用 setup-token 年票更省（一年一续、官方背书的 headless 用途）。② 只隔离不托管（把本机
+凭证拷进隔离目录各自刷新）—— 拒：主动复刻 S93 的双副本分叉。
+**遗留可选甜点**：usage 用量上卡片（一个带 Bearer 的 GET）；T2 平台内重登录（ttyd 预跑
+`claude auth login` / codex 贴 key 表单）。
+
 ## 2026-08-01 · 「Trellis 管家」改为写进内置种子（推翻昨天那条「暂不固化」）
 
 **Decision**：加进 `BUILTIN_AGENT_SEEDS` 第 6 位（`sort_order=5`，id 恒为 `builtin-trellis-admin`）。
