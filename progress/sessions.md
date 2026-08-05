@@ -1,6 +1,15 @@
 # Session Log
 
-最近 5 条，倒序（Session 95 / 94 / 93 / 92 / 91）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 96 / 95 / 94 / 93 / 92）。更早的见 `archive.md`。
+
+### Session 96（2026-08-05，二号机双怪象破案：codex「未登录」是配置漂移伪装、claude「已登录」是环境变量 token）
+- **触发**: 用户在二号机截图两怪象——「指定了 provider 却报 codex 未登录」+「没登录过 claude 却显示已登录 · oauth_token」。两个都不是字面上的问题。
+- **诊断①（codex）**: 报错串只存在于 SDK 登录闸，0.5.0 起注入模式会跳过闸 → 触发只可能是 `configOverrides` 为空 = 解析降级。根因铁证：**cpa 的 `codex: wire_api: responses` 标记躺在本机 `~/.claude` 的未提交改动里**（`git -C ~/.claude diff` 实证），二号机靠 git 同步 → 它的 yaml 无标记 → 静默透传 → 撞闸。旧版 `resolveCodexModel` 一揽子 catch 把「yaml 没同步 / key 缺失」全吞成透传，配置漂移于是伪装成登录问题。**即使同步了 yaml 还差第二件**：`CPA_API_KEY` 在 `~/.agent-gateway.env`（机器本地、gitignored），二号机没有。
+- **诊断②（claude）**: 逐来源实测 `claude auth status --json` 映射——本机交互登录 = `claude.ai`+email+订阅；`ANTHROPIC_AUTH_TOKEN` **或** `CLAUDE_CODE_OAUTH_TOKEN` = `oauth_token`+email/订阅全空（与截图吻合）；**塞假 token 照样 loggedIn:true**（status 只看有没有、不验真）。即二号机 trellis 进程 env 里有这两个变量之一（devbox 内部网关的可能性最大），卡片如实转述了一个语义比字面宽的「已登录」。
+- **Done（SDK `@smokingmouse/agent@0.5.1`，已发 npm + push `31cb7d8`）**: `resolveCodexModel` 拆掉一揽子 catch——端点在 yaml 但无标记 → 仍透传（opt-in 语义不变）但带 `degraded` 原因；已标记但 key 缺失 → `fatal` 直接报错不 spawn（配置自相矛盾时静默换鉴权路线 = 把配置错误变成别的症状）；登录闸报错永远带诊断（degraded 原因或通用指引）。**四分支子进程实测**（SM_ENDPOINTS_PATH 指 yaml 变体 + 假 codex 二进制）：key 缺失点名 env var ✓ 无标记+未登录报「yaml 没同步」✓ 标记+key 齐全时假 codex login 恒 exit 1 仍 NO_ERROR（闸被跳过）且 argv 含注入、spawn env 含 key ✓ 原生名给通用指引 ✓。
+- **Done（trellis）**: `auth-health.ts` 把 `oauth_token` 翻译成「环境变量 token」+ 来源警告（含「status 不验真」）；codex 那句「第三方 provider 路径不受影响」改成有条件表述（要求标记+key，并提示 SDK ≥0.5.1 报具体原因）。dep bump `^0.5.1` 从 registry 装，facts 清单三连 ✓（真目录 / 0.5.1 / dist 里 grep 到新错误串）。tsc 零错、eslint 零新增、假 env token 下探针实测出新语义。
+- **二号机待办（都是用户手动，代码层已闭环）**: ① 本机 `~/.claude` 提交推送（**codex 标记还在未提交改动里**）→ 二号机 pull；② 二号机 `~/.agent-gateway.env` 补 `CPA_API_KEY`（值同本机）；③ 二号机重部 trellis 拿 0.5.1；④ 本机 prod 也要 `make deploy`（S95+S96 都没上线）。做完后二号机再选 cpa provider：若仍报错，错误信息这次会直说缺哪样。
+- **Next**: 用户跑二号机四步 + 本机 deploy；验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗 + S95 授权卡）。
 
 ### Session 95（2026-08-04，授权健康 T0+T1：状态卡 + 到期预警，把「挂 6 天没人知道」封死）
 - **触发**: 用户「有可能把 claude 和 codex 原生授权在平台上可以控制吗」。调研（claude-code-guide 权威查证 + 本地实测 + happyclaw 对照）后用户拍板：**T0+T1 先落地**，托管隔离（`CLAUDE_CONFIG_DIR` + setup-token 年票注入）等 BOE 多机坐实再上 —— 决策与 happyclaw 对照记 `decisions.md` 本日条。
@@ -33,21 +42,3 @@
 - **SDK 本轮新能力（sm-toolkit 同日发版，细节见其 progress/sessions.md）**：① codex model 可解析 endpoints.yaml 里显式标记 `codex: { wire_api: responses }` 的端点（目前 cpa），`-c model_providers` per-run 注入 + env_key 鉴权；② codex forkSession 由 rollout copy 模拟——此前 codex 分支节点 resume 同一 thread 会互相污染，现真 fork（新 id + 历史继承 + 双向隔离），失败 fail loud 不静默降级。
 - **对 trellis 的影响**：代码零改动即受益（run() 传的 forkSession 在 codex 下开始生效）；UI 可按 `capabilities().forkSession` 探测。codex 逐 token 流 / 双向审批（PendingInteraction）仍无——app-server 路线已评估暂缓，决策留档 sm-toolkit progress/decisions.md。
 - **Next**：prod 部署时带上 bun.lock；无代码改动待验收。
-
-### Session 91（2026-08-01，拿 happyclaw 做对照剖析 → 修掉它替我们踩过的三个坑）
-- **触发**: 用户「使用 workflow 深入剖析下 riba 的 happyclaw，看看对我们的 trellis 后续的演进和优化有啥指导意义吗」，看完结论后「按照你的建议把那些都改了吧」。
-- **对照组**: riba2534/happyclaw（自托管**多用户** Agent 系统，IM 六端 + 每用户 Docker + RBAC + 计费）。本机 fork 落后上游 271 个 commit，另开 worktree `/tmp/happyclaw-latest` 指到 `upstream/main`（`6ab7dad`，当天）。**三个月从 111k LOC 长到 292k**，且 `task-scheduler.ts` / `agent-builder.ts` / `memory-service.ts` / `plugin-*.ts` 与 trellis 三个 Goal 正面撞车 —— 它是我们 Goal 的未来态样本。
-- **Workflow**（106 agent / 11.4M token / 91 分钟 / 零失败）: trellis 三路摸底（含「已被拒绝方案清单」防止推荐已否掉的东西）→ happyclaw 九维深读（每维强制跑 git log 挖 fix commit）→ 逐维对照 → **每条建议派 3 个镜头对抗式证伪**（已经有了/已拒过 · 定位错配会带歪 · happyclaw 这么做本身就不对，2/3 票反对即毙）→ 排序 + persona-riba2534 判断 + 完备性批判。报告落 `happyclaw-contrast.md`（43KB）。
-- **最反常识的结论：27 条候选建议只活下来 4 条，且没有一条是「抄 happyclaw 的机制」**。真正可复用的是它的**尸检报告** —— 同一个 symlink 盲区三个月咬三次、「必须 byte-for-byte 一致」的注释半衰期 6 周且三个指针全指错、至少 7 处「造了闸忘接门」的死代码。riba 分身那句是对的：「拿别人问题的账单来报销自己的问题」—— 它的 292k 是**多用户 IM 商业模式**开的账单，不是 harness 成熟度标杆。**harness 不该继续加厚。**
-- **Done ①（`app/api/skills/route.ts:37`）**: `Dirent.isDirectory()` 对 symlink 恒 false，只认它会把软链形式的 skill 整个漏掉。本机 `~/.claude/skills/` 106 个条目里**恰好一个 symlink，就是 `trellis-admin`** —— **trellis 自己的管家 skill 在 trellis 的 UI 里隐形**（而 CLI 的 slash_commands、`trellisctl skills` 都看得见，因为它们用 `existsSync` 穿透）。改成允许 symlink + `fs.stat` 穿透确认 + 悬空链跳过。**明确不动** `workspaces/browse` 与 `sessions/[id]/files` 那两处 —— 它们跳 symlink 带着 "cycles / intentionally not listed" 注释，是有意决策。
-- **Done ②（`app/api/login/route.ts:34`）**: `sameSite: "lax"` → `"strict"`。lax 放行跨站顶层导航 → 任意外部页面能把浏览器导到 `/term/?arg=…`，而 ttyd 以 `-W`（可写）起、命令整个走 URL 的 `?arg=`（`ttyd.ts:236-240/295`）。happyclaw 的 `auth.ts:86` 就是 Strict，且 `web.ts:1390-1394` 白纸黑字写「**SameSite=Strict 是主防御**，origin 检查是纵深防御」—— 它为 WS Origin 白名单返工 4 次护的全是纵深那半条。UX 代价为零：入口是书签/PWA/直接输地址（strict 对这三种照发），`notify.ts` 不发回链；程序化调用（`server.ts:204`、`deploy.ts`、trellisctl）自己塞 header 不受约束。
-- **Done ③（新增 `lib/server/cli-jsonl.ts`，本轮的重头）**: `cli-fork.ts` 抄了 `cli-import.ts` 五份副本（`ms`/`userText`/`isToolResultEntry`/`isCommandNoise`/`isTurnStart`），**S85 给 import 加的 5 道结构闸 fork 一道没跟**，而且 `cli-fork.ts:6` 早就 `import { parseCliSessionJsonl } from "./cli-import"` —— 同一个 module graph，**根本不存在任何拦着复用的约束**，纯粹是抄完原件单方面演进。
-  - **实测严重性**（889 个 jsonl / 1897 个有回答的 turn）：老判据下 **36 个 turn（1.90%）fork 侧找不到 tail** → `buildPrefixJsonlCore` 返 null、分叉静默降级成线性；**另有 315 个（16.61%）选出的 tail 与 import 的归属不是同一条** → 前缀被截在一个**没说完的回答**中间。后者才是真严重性 —— 不是分叉失败，是**分叉点切错**。（报告里那个 12.8% 分母是错的，这两个数是重新量的。）
-  - 抽出纯模块（无 `server-only`、无 DB，可脱离服务端跑）：类型 + 五个谓词 + `makeTurnOwnership`（**strict → loose 两级**，只搬严格那级会让 null 率不降反升，因为 `--continue`/fork 出来的 jsonl 链头没有真提问）+ `readJsonlLines` / `terminalAssistantLine` / `keepUuidChain`。两边 import 同一份，**执行者是编译器不是注释**。
-- **`scripts/test-cli-jsonl.ts`（新）—— 这是 riba 那个追问的答案**：他问「这次打算给它留一条注释，还是留一个测试？happyclaw 那对互相点名的『byte-for-byte』注释半年后三个指针全指错」。24 条断言：7 道闸逐条钉死 + 复现 S85 的劫持 bug + 宽松兜底 + **真语料全扫**（889 jsonl / 1898 turn，无抽样）。
-- **做了变异测试证明它不是空断言**：把 5 道闸退回旧判据 → **11 条断言变红**。同时暴露一个诚实的边界：**真语料那两条断言在变异下依然是绿的**（turn 数还从 1898 涨到 2044）—— 因为两侧共用一份代码，一起错就一起「自洽」。**钉住闸本身的是合成断言，语料扫描只能防两边再次分家。**
-- **等价性验证**: 从 git 取出重构前的 `cli-import.ts`，对同一批 889 个文件逐字节比对 `parseCliSessionJsonl` 输出 —— **866 个完全一致 / 23 个两侧都 null / 0 处差异**。cli-import 的重构证明行为不变。
-- **其余验证**: tsc 零错 · lint 47 problems 全是既有的，我改的文件**零命中** · 既有 harness 全绿（cron 48 项 / project-cluster / tool-tree）· `/api/skills` 直接调真 handler：105 skills 且 `trellis-admin` 在内（旧逻辑 104）· login 直接调真 handler：`SameSite=strict` 正确序列化、错误口令仍 401 · `buildPrefixJsonlCore` 在临时目录拿一个**老逻辑返 null 的真会话**端到端跑通（1051 行 → 1007 行前缀，可反解成 6 个 turn，sessionId 已改写）。
-- **刻意没做**（报告里有但不在本轮范围）: 「新增 DB 列必须带真消费者」那条纪律没写进 `decisions.md`（trellis 已有 3 处空列：`notified_at` 零 SELECT、`task_runs.attempt`、`max_retries`）· claude/codex 的二进制解析（plist 里 `PATH` 硬编码了 `node/v24.14.1/bin`，nvm 一升级 `claude` 就从 PATH 消失，而 `update.ts:209` 和 `ttyd-dependency.ts:43` 两条路早就写对了）· run-bus 空输出闸 · BOE 的 per-user 身份/归属/审计（**27 条候选零覆盖，需单独立项**）。
-- **已合并推送**：四个 commit 走 `happyclaw-contrast-fixes` 分支 `--no-ff` 进 main（`f81df21`），已推 `18be950..f81df21`。**两台实例都未部署。**
-- **Next**: 部署后第一件事是 ②的**真浏览器登录回归** —— strict 生效后书签 / PWA / 直接输地址应当无感，但这条只验过 Set-Cookie 头的序列化，没在真浏览器点过；万一栽了，回退就是把那一个单词改回 `lax`。prod 仍卡在「spawn 的 claude 一律认证失败」（S90 遗留，本轮未碰）。`/tmp/happyclaw-latest` worktree 留着，不用了跑 `git -C ~/python/ai/happyclaw worktree remove /tmp/happyclaw-latest`。
