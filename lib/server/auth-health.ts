@@ -157,6 +157,16 @@ async function probeClaude(): Promise<CliAuthHealth> {
     h.loggedIn = r.code === 0 ? null : false;
     h.errors.push(`claude auth status 输出无法解析（exit ${r.code}）`);
   }
+  // authMethod 语义翻译（S96，2026-08-05 逐来源实测）：`oauth_token` = 登录态来自
+  // ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN 环境变量，不是本机交互登录；
+  // 且 status **不验证 token 有效性**——塞假值照样报 loggedIn:true。不译出来的话
+  // 「我没登录过，卡片却说已登录」（二号机实况）就是必然的困惑。
+  if (h.method === "oauth_token") {
+    h.method = "环境变量 token";
+    h.warnings.push(
+      "登录态来自环境变量（ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN），非本机 claude auth login；status 不验证 token 有效性，能不能用以真实请求为准",
+    );
+  }
   if (h.loggedIn === false) h.errors.push("claude 未登录 —— 需要重新走一次 claude auth login");
 
   const f = readClaudeCredentialFile();
@@ -219,9 +229,12 @@ async function probeCodex(): Promise<CliAuthHealth> {
   } else {
     h.loggedIn = r.code === 0 ? null : false;
     if (h.loggedIn === false) {
-      // 只展示不进 errors：本机 codex 运行走 config.toml 的第三方 provider
-      // （静态 key），ChatGPT 登录态挂了不影响 trellis 的 codex 会话。
-      h.warnings.push("codex 未登录 ChatGPT（第三方 provider 路径不受影响）");
+      // 只展示不进 errors：走第三方端点注入的 codex 会话不依赖 ChatGPT 登录。
+      // 但「不受影响」是有条件的（S96 二号机实锅）——注入生效要求 endpoints.yaml
+      // 对应端点带 codex 标记且本机有 key，缺一个就降级回原生模式撞上这里的未登录。
+      h.warnings.push(
+        "codex 未登录 ChatGPT —— 原生模式不可用；第三方端点注入不依赖它，但要求 endpoints.yaml 端点带 codex 标记 + 本机配好 key（缺失时会话报错里会带具体原因，SDK ≥0.5.1）",
+      );
     }
   }
 
