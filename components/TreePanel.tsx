@@ -54,6 +54,7 @@ function nodeRowLabel(n: ChatNode, max = 30): string {
 }
 
 export function TreePanel() {
+  const sessionId = useSessionStore((s) => s.session?.id);
   const nodesMap = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
@@ -69,6 +70,7 @@ export function TreePanel() {
 
   const view = useSessionStore((s) => s.treePanelView);
   const switchView = useSessionStore((s) => s.setTreePanelView);
+  const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
@@ -730,6 +732,16 @@ export function TreePanel() {
               {collapsed ? `${totalNodes} · ▴` : `${totalNodes} · ▾`}
             </span>
           </button>
+          {sessionId && (
+            <button
+              type="button"
+              onClick={() => setComposeRootOpen(true)}
+              className="shrink-0 px-2 py-2 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
+              title="新树：保留当前 session，只清空上下文（等价 /clear）"
+            >
+              ＋ 新树
+            </button>
+          )}
           {!collapsed && (
             <button
               type="button"
