@@ -8,13 +8,15 @@ import fs from "node:fs";
 // 而「飞书消息进来当触发器」是 task_triggers.kind='lark'，与本层完全正交。
 
 export type NotifyEvent = {
-  kind: "task_run_done" | "task_run_error" | "task_run_timeout";
+  // S95 加 auth_alert（CLI 授权预警，见 lib/server/auth-health.ts）——系统级事件
+  // 没有 task/run 语境，taskId/runId 因此放宽为可选。
+  kind: "task_run_done" | "task_run_error" | "task_run_timeout" | "auth_alert";
   title: string;
   body: string;
   /** 站内深链，形如 /?session=<sid>&node=<nid> */
   link?: string;
-  taskId: string;
-  runId: string;
+  taskId?: string;
+  runId?: string;
 };
 
 export interface NotifyChannel {
@@ -82,8 +84,8 @@ export const commandChannel: NotifyChannel = {
         .replaceAll("{body}", e.body)
         .replaceAll("{link}", e.link ?? "")
         .replaceAll("{kind}", e.kind)
-        .replaceAll("{taskId}", e.taskId)
-        .replaceAll("{runId}", e.runId),
+        .replaceAll("{taskId}", e.taskId ?? "")
+        .replaceAll("{runId}", e.runId ?? ""),
     );
     const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "pipe" });
     // 别让一个卡死的推送命令拖住任务收尾 —— 10s 够任何 HTTP 推送跑完。

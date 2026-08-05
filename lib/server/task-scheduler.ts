@@ -11,6 +11,7 @@ import {
   startTaskRun,
   type TaskTrigger,
 } from "./tasks";
+import { checkAuthAlerts } from "./auth-health";
 
 // S88: 定时调度器。挂在 instrumentation.ts（进程唯一的启动钩子）。
 //
@@ -49,6 +50,10 @@ export function startTaskScheduler(): void {
 
   void catchUp();
   refreshFsWatches();
+  // S95: 启动即查一次授权健康（部署/重启后马上发现认证挂了，别再等有人开会话）。
+  // 自兜异常 + 24h 去重都在 checkAuthAlerts 里。跟着 TRELLIS_SCHEDULER 闸走 ——
+  // smoke 实例不该发真预警。
+  void checkAuthAlerts();
 
   // 首次对齐到整分钟边界 +2s，之后每分钟一次。
   const now = new Date();
@@ -179,6 +184,8 @@ async function tick(): Promise<void> {
     }
 
     await pollGitTriggers(now.getTime());
+    // S95: 每小时（:07，避开整点的 cron 高峰）复查授权健康。
+    if (now.getMinutes() === 7) void checkAuthAlerts();
     writeLastTick(now.getTime());
   } catch (e) {
     console.error("[scheduler] tick 失败：", e);

@@ -11,6 +11,7 @@ import {
   thinkingChannel,
 } from "@/lib/stream-bus";
 import { refIcon } from "@/lib/ref-icon";
+import { isAuthErrorMessage } from "@/lib/auth-error";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
@@ -463,7 +464,17 @@ function ResponseBody({ node }: { node: ChatNode }) {
           </div>
         ) : (
           <div className="mt-3 p-2.5 bg-danger-muted border border-danger-line rounded text-danger-ink text-ui flex items-start gap-2">
-            <div className="flex-1">出错：{node.errorMessage}</div>
+            <div className="flex-1">
+              出错：{node.errorMessage}
+              {isAuthErrorMessage(node.errorMessage) && (
+                <a
+                  href="/settings/models"
+                  className="block mt-1 text-label underline underline-offset-2 opacity-80 hover:opacity-100"
+                >
+                  像是 CLI 授权问题 → 查看授权状态
+                </a>
+              )}
+            </div>
             <Button
               variant="danger"
               size="sm"
