@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-spawn 认证失败已修复且 prod 实测复活；回到验收队列：S91 三处改动 + 管理台批 1-6，BOE 仍未部。
+授权健康监控（T0 状态卡 + T1 预警）已落地待验收；验收队列见指针区，BOE 仍未部。
 
 ## Goals
 
@@ -22,6 +22,6 @@ spawn 认证失败已修复且 prod 实测复活；回到验收队列：S91 三�
 - `facts.md` 已验证事实（改代码前读） · `failures.md` 待查 / 已结案（排查 bug 前读）
 - `sessions.md` 最近 5 条 log（S94–90） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
-- **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91 三处 · S94 卡片图弹窗
+- **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91 三处 · S94 卡片图弹窗 · S95 授权卡+预警
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
 - 其余 `*.md` 为 feature spec，被 Goals 指到时才读（`ls progress/` 即清单）
