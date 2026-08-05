@@ -17,6 +17,7 @@ import {
   getStreamPending,
   thinkingChannel,
 } from "@/lib/stream-bus";
+import { isAuthErrorMessage } from "@/lib/auth-error";
 import { COMPACT_ZOOM_THRESHOLD, PEEK_CARD_HEIGHT } from "@/lib/layout";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -494,7 +495,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             </div>
           ) : (
             <div className="mt-3 p-2 bg-danger-muted border border-danger-line rounded text-danger-ink text-xs flex items-start gap-2">
-              <div className="flex-1">出错：{n.errorMessage}</div>
+              <div className="flex-1">
+                出错：{n.errorMessage}
+                {isAuthErrorMessage(n.errorMessage) && (
+                  <a
+                    href="/settings/models"
+                    onClick={(e) => e.stopPropagation()}
+                    className="block mt-1 underline underline-offset-2 opacity-80 hover:opacity-100"
+                  >
+                    像是 CLI 授权问题 → 查看授权状态
+                  </a>
+                )}
+              </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
