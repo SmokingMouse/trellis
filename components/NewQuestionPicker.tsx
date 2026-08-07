@@ -5,6 +5,8 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { Pill } from "@/components/ui/Pill";
+import { AttachmentPreview } from "./AttachmentPreview";
+import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 
 // Modal composer for "新话题（清空上下文）" — adds a parallel root
 // (parent_id=NULL) to the current session. This is Trellis's equivalent of the
@@ -15,7 +17,11 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const streamRoot = useSessionStore((s) => s.streamRoot);
   const sessionMode = useSessionStore((s) => s.session?.mode);
+  const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const att = useAttachmentUploads(
+    sessionMode !== "chat" || chatEnhanced ? "all" : "chat-safe",
+  );
   // In project mode a new root also forks a fresh claude session id — the
   // model loses its conversation memory of the existing tree AND starts a
   // brand-new Claude session. In chat there is no resumed claude
@@ -28,7 +34,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   }, []);
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || att.hasUploading) return;
     const trimmed = q.trim();
     if (!trimmed) {
       setError("问题不能为空");
@@ -39,7 +45,11 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
     // Fire and forget — close immediately so the user sees the new node
     // start streaming on canvas. The store handles the rest via SSE.
     onClose();
-    streamRoot(trimmed, { attachToCurrentSession: true });
+    streamRoot(trimmed, {
+      attachToCurrentSession: true,
+      attachments:
+        att.doneAttachments.length > 0 ? att.doneAttachments : undefined,
+    });
   };
 
   return (
@@ -65,17 +75,23 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="px-5 py-4">
+        {att.pending.length > 0 && (
+          <div className="mb-3">
+            <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+          </div>
+        )}
         <textarea
           ref={ref}
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onPaste={att.handlePaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               submit();
             }
           }}
-          placeholder="想问点什么？例如：这个 session 之外的另一个角度…"
+          placeholder="想问点什么？例如：这个 session 之外的另一个角度…（可粘贴图片）"
           rows={6}
           className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink text-sm outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
           disabled={busy}
@@ -88,14 +104,21 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
+        {att.notice && (
+          <div className="mt-2 text-ui text-warn-ink">{att.notice}</div>
+        )}
       </div>
 
       <div className="px-5 py-3 border-t border-line-faint flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>
           取消
         </Button>
-        <Button variant="primary" onClick={submit} disabled={!q.trim() || busy}>
-          {busy ? "提交中…" : "开始"}
+        <Button
+          variant="primary"
+          onClick={submit}
+          disabled={!q.trim() || busy || att.hasUploading}
+        >
+          {busy ? "提交中…" : att.hasUploading ? "上传中…" : "开始"}
         </Button>
       </div>
     </Modal>
