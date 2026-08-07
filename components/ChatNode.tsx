@@ -8,9 +8,6 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   subscribeStream,
@@ -20,6 +17,10 @@ import {
 import { isAuthErrorMessage } from "@/lib/auth-error";
 import { COMPACT_ZOOM_THRESHOLD, PEEK_CARD_HEIGHT } from "@/lib/layout";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
@@ -40,10 +41,6 @@ import { useSlashNav } from "@/hooks/useSlashNav";
 import { SkillPickerList } from "./SkillPickerList";
 import { ZoneEditor } from "./ZoneEditor";
 import { EmptyResponseNotice } from "./EmptyResponseNotice";
-
-// Plugin arrays at module scope so identity is stable across renders.
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 
 export type ChildAnchor = { text: string; childId: string };
 
@@ -465,8 +462,8 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           </>
         ) : n.response ? (
           <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_FULL}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
           >
@@ -805,4 +802,3 @@ function TokenMeta({
     </span>
   );
 }
-

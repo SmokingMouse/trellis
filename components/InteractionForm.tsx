@@ -1,16 +1,14 @@
 "use client";
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { Button } from "./ui/Button";
 import type { PendingInteraction } from "@/lib/types";
-
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 
 // A路③ (third / final knife, pure frontend): render a paused interactive-tool
 // prompt as a form so the user can answer inside Trellis and the model
@@ -523,8 +521,8 @@ function ExitPlanModeForm({
       {plan && (
         <div className="md-body text-body text-ink leading-relaxed max-h-[420px] overflow-y-auto rounded-card border border-line bg-surface px-4 py-3">
           <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_FULL}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
           >

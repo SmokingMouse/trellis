@@ -9,7 +9,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import {
+  MARKDOWN_PREVIEW_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   filePreviewUrl,
@@ -185,7 +188,12 @@ function TextBody({ url, markdown }: { url: string; markdown: boolean }) {
   if (markdown)
     return (
       <div className="md-body px-3 py-2 text-xs text-ink [&_pre]:!text-[11px]">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+          rehypePlugins={MARKDOWN_PREVIEW_REHYPE_PLUGINS}
+        >
+          {text}
+        </ReactMarkdown>
       </div>
     );
   return (

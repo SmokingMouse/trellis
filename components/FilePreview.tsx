@@ -2,15 +2,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { useSessionStore } from "@/stores/sessionStore";
 import { filePreviewUrl, previewKind } from "@/lib/generated-files";
-
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 
 // Global file-preview overlay, mounted once at the app root and driven by the
 // store's `filePreview` target. Every entry point (chips, clickable inline
@@ -150,8 +148,8 @@ function TextPreview({ url, markdown }: { url: string; markdown: boolean }) {
       <div className="h-full overflow-auto">
         <div className="md-body max-w-3xl mx-auto px-6 py-6 text-ink">
           <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_FULL}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
           >

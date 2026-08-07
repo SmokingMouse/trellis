@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { Button } from "@/components/ui/Button";
 
 // "Zone" — a full-screen, distraction-free Markdown writing surface for
@@ -17,9 +18,6 @@ import { Button } from "@/components/ui/Button";
 //
 // Send is always ⌘↩ in Zone regardless of the global Enter/⌘Enter setting:
 // in a long-form writing surface, a bare Enter must insert a newline.
-
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 
 type ZoneEditorProps = {
   value: string;
@@ -229,8 +227,8 @@ export function ZoneEditor({
           ) : value.trim() ? (
             <div className="md-body text-reading leading-[1.8]">
               <ReactMarkdown
-                remarkPlugins={REMARK_PLUGINS}
-                rehypePlugins={REHYPE_FULL}
+                remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                 components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
               >

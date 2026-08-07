@@ -2,14 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { Modal } from "./ui/Modal";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
-
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+} from "@/lib/markdown-plugins";
 
 type Phase = "idle" | "rendering" | "error";
 
@@ -99,8 +97,8 @@ export function CardImageButton({
           </div>
           <div className="md-body text-ink">
             <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
-              rehypePlugins={REHYPE_FULL}
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
               components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
             >

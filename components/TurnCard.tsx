@@ -1,9 +1,6 @@
 "use client";
 import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   subscribeStream,
@@ -13,6 +10,11 @@ import {
 import { refIcon } from "@/lib/ref-icon";
 import { isAuthErrorMessage } from "@/lib/auth-error";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  MARKDOWN_STREAMING_REHYPE_PLUGINS,
+} from "@/lib/markdown-plugins";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
@@ -29,13 +31,10 @@ import { Button } from "./ui/Button";
 import { Dots } from "./ui/Dots";
 import { StopButton } from "./ui/StopButton";
 
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_FULL = [rehypeRaw, rehypeHighlight];
 // 流式期间只做最小 rehype：rehypeRaw 跳过（半行 HTML 标签既浪费又可能抛错），
 // rehypeHighlight 也跳过——它会在每一帧对**整段** response 重跑语法高亮，
 // 几百 KB 的长回复能把主线程卡死，正是「tab 点不开」的主因。高亮只在 done
-// 态（REHYPE_FULL）跑一次，性价比远高于边流式边高亮。
-const REHYPE_STREAMING: typeof REHYPE_FULL = [];
+// 态跑一次；流式态只保留数学公式渲染。
 
 // #7: the single "turn" reading/interaction surface, shared by every place a
 // node is read in full (the linear thread is the only consumer today — the
@@ -46,7 +45,7 @@ const REHYPE_STREAMING: typeof REHYPE_FULL = [];
 // and the paused-interaction form.
 // React.memo：线性 thread 订阅整个 `nodes` 对象，流式期间每个 tool_call
 // 事件（合批后仍是每帧一次）都会让父组件重渲。未变的节点（同引用）直接跳
-// 过——避免 15 张已完成卡片每次都重跑 REHYPE_FULL 语法高亮。只有正在流式
+// 过——避免 15 张已完成卡片每次都重跑完整语法高亮。只有正在流式
 // 的节点引用每帧更新，正常重渲（且流式态已不跑高亮，成本低）。
 export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
@@ -397,8 +396,8 @@ function ResponseBody({ node }: { node: ChatNode }) {
         liveText ? (
           <>
             <ReactMarkdown
-              remarkPlugins={REMARK_PLUGINS}
-              rehypePlugins={REHYPE_STREAMING}
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_STREAMING_REHYPE_PLUGINS}
               components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
             >
@@ -417,8 +416,8 @@ function ResponseBody({ node }: { node: ChatNode }) {
       ) : node.response ? (
         <>
           <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_FULL}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
           >
@@ -597,8 +596,8 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
       >
         {ref.contentMd ? (
           <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_FULL}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
             components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
           >
