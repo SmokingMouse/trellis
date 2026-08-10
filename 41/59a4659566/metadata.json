@@ -1,0 +1,26 @@
+{
+  "id": "4159a4659566",
+  "timestamp": "2026-08-10T22:20:18+08:00",
+  "branch": "main",
+  "commitHash": "bb1d2ffdf23a408480a6d0a28e64e1f8af513a69",
+  "commitMessage": "fix: 修复卡片图和正文复制失败的问题",
+  "filesModified": [
+    "components/CardImageButton.tsx",
+    "components/CliResumeButton.tsx",
+    "components/CodeBlock.tsx",
+    "components/CopyButton.tsx",
+    "lib/clipboard.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 74,
+    "humanModified": 13,
+    "humanRemoved": 0,
+    "totalLinesChanged": 87,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
