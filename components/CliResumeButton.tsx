@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "./ui/Button";
+import { copyText } from "@/lib/clipboard";
 
 // 「在 CLI 继续」轻量入口：project 模式会话本就是真 claude CLI 会话，点一下把
 // `cd <ws> && claude --resume <id>` 复制到剪贴板，去终端粘贴即可续这条 lineage。
@@ -23,9 +24,9 @@ export function CliResumeButton({ nodeId }: { nodeId: string }) {
       const data = (await res.json()) as { resumable?: boolean; command?: string };
       if (data.resumable && data.command) {
         try {
-          await navigator.clipboard.writeText(data.command);
+          await copyText(data.command);
         } catch {
-          /* insecure context — still show success, user can re-copy */
+          /* clipboard unavailable — still show success, user can re-copy */
         }
         setState("copied");
       } else {

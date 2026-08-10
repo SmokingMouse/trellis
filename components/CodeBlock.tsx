@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState, isValidElement, type ReactNode } from "react";
+import { copyText } from "@/lib/clipboard";
 
 // Custom react-markdown `pre` renderer: wraps the highlighted <pre> in a
 // frame with a top bar showing the language label + a copy button (A3/B2).
@@ -17,6 +18,7 @@ function langOf(children: ReactNode): string {
 export function CodeBlock({ children }: { children?: ReactNode; node?: unknown }) {
   const preRef = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   const lang = langOf(children);
 
   const copy = async (e: React.MouseEvent) => {
@@ -24,11 +26,14 @@ export function CodeBlock({ children }: { children?: ReactNode; node?: unknown }
     const text = preRef.current?.textContent ?? "";
     if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
+      setFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (e.g. insecure context); fail silently
+    } catch (err) {
+      console.error("[trellis] code copy failed:", err);
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2000);
     }
   };
 
@@ -42,7 +47,7 @@ export function CodeBlock({ children }: { children?: ReactNode; node?: unknown }
           className="md-codeblock-copy nodrag"
           aria-label="复制代码"
         >
-          {copied ? "✓ 已复制" : "复制"}
+          {failed ? "✗ 失败" : copied ? "✓ 已复制" : "复制"}
         </button>
       </div>
       <pre ref={preRef}>{children}</pre>
