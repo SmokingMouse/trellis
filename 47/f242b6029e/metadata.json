@@ -1,0 +1,26 @@
+{
+  "id": "47f242b6029e",
+  "timestamp": "2026-08-10T22:26:04+08:00",
+  "branch": "fix/copy-card-and-text-v2",
+  "commitHash": "bf60b6d72be135d84d818213d389cf708aa1c380",
+  "commitMessage": "fix: 修复卡片图和正文复制失败的问题",
+  "filesModified": [
+    "components/CardImageButton.tsx",
+    "components/CliResumeButton.tsx",
+    "components/CodeBlock.tsx",
+    "components/CopyButton.tsx",
+    "lib/clipboard.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 67,
+    "humanModified": 46,
+    "humanRemoved": 0,
+    "totalLinesChanged": 113,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
