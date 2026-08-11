@@ -29,11 +29,28 @@ export function CardImageButton({
   const run = async () => {
     if (phase === "rendering" || !cardRef.current) return;
     setPhase("rendering");
+    const card = cardRef.current;
+    const wrapper = card.parentElement;
+    // Save the original wrapper style so we can restore it after rendering.
+    const prevStyle = wrapper?.getAttribute("style") ?? "";
     try {
+      // html-to-image rasterizes the element via an SVG <foreignObject>.
+      // Elements parked off-screen with `left: -99999px` can come out blank
+      // in some browsers (the foreignObject viewport clips to the element's
+      // bounding rect, which sits outside the rendered area). Move the card
+      // to a real on-screen position for the duration of the render, then
+      // restore. `z-index: -1` keeps it behind the page content so the user
+      // never sees it flash.
+      if (wrapper) {
+        wrapper.setAttribute(
+          "style",
+          "position:fixed;left:0;top:0;z-index:-1;pointer-events:none;",
+        );
+      }
       // Lazy-load the rasterizer so it stays out of the main bundle.
       const { toBlob } = await import("html-to-image");
       const isDark = document.documentElement.classList.contains("dark");
-      const rendered = await toBlob(cardRef.current, {
+      const rendered = await toBlob(card, {
         pixelRatio: 2,
         backgroundColor: isDark ? "#1c1917" : "#ffffff",
         cacheBust: true,
@@ -45,6 +62,8 @@ export function CardImageButton({
       console.error("[trellis] card image failed:", err);
       setPhase("error");
       window.setTimeout(() => setPhase("idle"), 2500);
+    } finally {
+      if (wrapper) wrapper.setAttribute("style", prevStyle);
     }
   };
 
@@ -80,7 +99,8 @@ export function CardImageButton({
 
       {/* Off-screen card laid out (not display:none, which can't be
           rasterized) for html-to-image to capture. Mirrors the app's markdown
-          styling so the image matches what the user reads. */}
+          styling so the image matches what the user reads. The wrapper is
+          temporarily repositioned on-screen during render — see run(). */}
       <div
         aria-hidden
         style={{ position: "fixed", left: -99999, top: 0, pointerEvents: "none" }}

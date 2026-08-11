@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { copyText } from "@/lib/clipboard";
 
 // Shared "copy to clipboard" button with a transient ✓ confirmation.
 // Used for "copy whole reply" in ChatNode/NodeFullView footers. Code-block
@@ -18,16 +19,20 @@ export function CopyButton({
   title?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const copy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
+      setFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (e.g. insecure context); fail silently
+    } catch (err) {
+      console.error("[trellis] copy failed:", err);
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2000);
     }
   };
 
@@ -42,7 +47,7 @@ export function CopyButton({
         "nodrag px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
       }
     >
-      {copied ? copiedLabel : label}
+      {failed ? "✗ 复制失败" : copied ? copiedLabel : label}
     </button>
   );
 }
