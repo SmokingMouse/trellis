@@ -412,6 +412,8 @@ Bun.serve<TermSocket>({
         headers: upstreamHeaders(req.headers, `127.0.0.1:${port}`),
         body: req.body,
         redirect: "manual",
+        // 同下面转发 Next 那段的理由：客户端断开要传导给上游，否则连接泄漏。
+        signal: req.signal,
         // @ts-expect-error bun 需要 duplex 才能流式转发请求体
         duplex: "half",
       });
@@ -429,6 +431,24 @@ Bun.serve<TermSocket>({
         headers: upstreamHeaders(req.headers, `127.0.0.1:${NEXT_PORT}`),
         body: req.body,
         redirect: "manual",
+        // 客户端断开必须传导给上游，否则这条上游连接**永不回收**。
+        //
+        // 症状（本机复发两次：8/6 挂了 4 天、8/10 一天两次）：大门这侧全线挂起
+        // 无响应，而 Next 直连 200、launchd 报 state=running、KeepAlive 也不救。
+        // 机制：浏览器每开一个页面就挂着 /api/tasks/events、/api/cli-sync/events
+        // 这些 SSE，关页面时若不把 abort 传下去，大门到 Next 的那条连接就一直留着
+        // —— launchd 域的 maxfiles 只有 256，攒满后 accept 拿不到 fd，TCP 握手仍
+        // 由内核 backlog 代答（所以端口看着是通的），应用层却一个字节都不回。
+        // 确诊靠 `lsof -p <大门 pid> | grep -c ESTABLISHED` 逼近 256。
+        //
+        // 传下去之后 Next 侧那些 SSE 路由才跑得到自己的 teardown（退订 +
+        // clearInterval 心跳）—— 清理逻辑本来就写好了，只是断开信号一直被大门
+        // 吞掉，在生产里从没触发过。
+        //
+        // 不会误伤在跑的 run：run 的生命周期归 run-bus 自己的 AbortController，
+        // req.signal 只是把这个订阅者摘掉（见 lib/server/run-bus.ts 的 Stage 17）。
+        // 显式中止走 POST /api/chat/[id]/abort，不走这条路。
+        signal: req.signal,
         // @ts-expect-error bun 需要 duplex 才能流式转发请求体
         duplex: "half",
       });
