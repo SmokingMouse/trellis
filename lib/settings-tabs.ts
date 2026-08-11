@@ -43,6 +43,12 @@ export const SETTINGS_TABS: SettingsTab[] = [
     title: "工作区通览与 worktree 回收、CLI 会话接入",
   },
   {
+    segment: "machine",
+    label: "机器资源",
+    icon: "🖥",
+    title: "Trellis 服务所在机器的 CPU、内存与工作目录磁盘状态",
+  },
+  {
     segment: "prefs",
     label: "偏好",
     icon: "🎚",
