@@ -19,7 +19,14 @@ const projectRoot = os.homedir();
 const devOrigin = process.env.TRELLIS_DEV_ORIGIN;
 
 const nextConfig: NextConfig = {
-  ...(devOrigin ? { allowedDevOrigins: [devOrigin] } : {}),
+  // 127.0.0.1 必须显式进白名单：Next 16 dev 的跨源防护只认启动 hostname（localhost）。
+  // 用 http://127.0.0.1:<port> 打开 dev 页时，HMR WebSocket 握手带 Origin: http://127.0.0.1
+  // 会被 dev server **静默掐断**（不回 HTTP 响应、不打日志），而 dev 的 RSC/hydration
+  // promise 与这条 WS 绑死（vercel/next.js#91770）—— 症状是整页 SSR 正常渲染但 React
+  // 永不 hydrate、交互全死、console 零报错（S75 悬案，S97 破案，全链见 failures.md）。
+  // 判法：curl 加 `-H "Origin: http://127.0.0.1:<port>"` 打 /_next/webpack-hmr 收到空响应，
+  // 换 localhost Origin 收到 101。
+  allowedDevOrigins: ["127.0.0.1", ...(devOrigin ? [devOrigin] : [])],
   turbopack: {
     root: projectRoot,
   },
