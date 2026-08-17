@@ -479,7 +479,12 @@ export function LinearThreadView() {
         </div>
       </div>
 
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        data-thread-scroll
+        className="flex-1 overflow-y-auto"
+      >
         <main className={`${widthClass} mx-auto px-4 py-5 pb-6 space-y-4`}>
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
