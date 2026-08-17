@@ -4,6 +4,16 @@
 
 ## Session Log
 
+### Session 93（2026-08-04，S90 认证失败破案：launchd 上下文的 claude 读的是 keychain 里过期的凭证副本）
+- **触发**: 用户截图 prod 聊天发 "hello" 报 `Failed to authenticate: OAuth session expired and could not be refreshed` —— 正好回答 S90 留的判定题：**普通聊天同样死 → 实例级故障，与任务链路无关**。
+- **破案路径**: 错误串 `rg` 下来只存在于 claude.exe 二进制里（SDK / trellis 代码零嫌疑）→ 全机唯一 claude = nvm 的 2.1.207（7-13 装的，与故障时点无关），plist PATH 解析到同一个 → **一次性 launchd job（不经 trellis 任何代码）裸跑 `claude -p` 完整复现**：80ms 失败、`duration_api_ms: 0`（本地判死，网络请求都没发）；`env -i` 逐字同 env 在终端跑 → 成功（真调 API 4s 返回 "ok"）。唯一剩余变量 = launchd vs 终端的 macOS 安全上下文。
+- **根因（launchd 探针钉死）**: Claude 凭证存了两份且已分叉 —— `~/.claude/.credentials.json` 由终端 claude 持续刷新（当天 16:16 mtime，refresh token 有效到 8-20）；Keychain `Claude Code-credentials` 项 **7-26 起停更**（mdat），内容是旧格式短 JSON（281B vs 文件 509B），`refreshTokenExpiresAt = 7-26 02:48`。launchd 上下文里 keychain 与文件**都可读**（探针实测），claude 在该上下文选了 keychain → 读到死 token → 时间戳一比对直接报错。与「nodes 表 7-28 10:52 后再无 done」吻合。
+- **S90 五条排除为何全扑空**: 全部在终端做 —— `env -i` 能复制 env，复制不了「不是 launchd」这件事，而判别维度恰恰是上下文本身。
+- **修复（用户点头后执行）**: `security delete-generic-password -s "Claude Code-credentials"` 删掉已死副本 → 所有上下文回退到新鲜的文件。不选「文件→keychain 同步」：refresh token 单次轮换，两份活副本必再分家、复发。
+- **验证**: ① 同一 launchd 复现 job 转绿（修前 80ms 本地判死，修后真调 API 3.2s 返 "ok"）② 真 prod 进程端到端：trellisctl 建 chat 模式任务实跑 → run `45350b21` **done / 3s / 6 token**。顺带摸清 trellisctl 语法：`tasks run` 要完整 UUID（列表只显示 8 位短 id）、`tasks create` 收 JSON 体、无 workspace 必须 `"contextMode":"chat"`。③ /tmp 探针已清。**测试任务 `2c66ce0d`（authfix-verify）留在库里** —— trellisctl 没有 `tasks delete` 子命令，管理台 `/settings/tasks` 可删；S90 的 `bffbe8ed` 也还在。
+- **落档**: `failures.md` 结案（resolved）· workspace.md 凭证表 + 复发坑表各加一行 · auto-memory 记「launchd-claude 凭证分叉」。复发哨兵：keychain 条目重新出现且 mdat 冻结。
+- **Next**: prod 已复活；回到验收队列 —— S91 三处改动 + 管理台批 1-6 验收、BOE 部署（S88 遗留）。
+
 ### Session 92（2026-08-04，SDK 升 0.5.0：codex 走 endpoints.yaml 选模型 + 树形分支真 fork）
 - **Done**：`@smokingmouse/agent` ^0.4.0→^0.5.0、直接依赖 `@smokingmouse/llm` ^0.3.0→^0.4.0（扁平化消双份）；`npx tsc --noEmit` 干净；运行时验证 CodexBackend capabilities `forkSession: true` + `configDrivenModelSwitch: true`。
 - **SDK 本轮新能力（sm-toolkit 同日发版，细节见其 progress/sessions.md）**：① codex model 可解析 endpoints.yaml 里显式标记 `codex: { wire_api: responses }` 的端点（目前 cpa），`-c model_providers` per-run 注入 + env_key 鉴权；② codex forkSession 由 rollout copy 模拟——此前 codex 分支节点 resume 同一 thread 会互相污染，现真 fork（新 id + 历史继承 + 双向隔离），失败 fail loud 不静默降级。

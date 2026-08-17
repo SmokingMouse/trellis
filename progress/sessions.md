@@ -1,6 +1,15 @@
 # Session Log
 
-最近 5 条，倒序（Session 97 / 96 / 95 / 94 / 93）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 98 / 97 / 96 / 95 / 94）。更早的见 `archive.md`。
+
+### Session 98（2026-08-18，Tab 切换大延迟治理：HAST 渲染缓存 + 视口懒渲染）
+- **触发**: 用户反馈会话节点多 / 内容大时，Tab 间切换延迟巨大。用户拍板范围 **P0+P1：连首次切换也治**。
+- **根因**: 每次切 session，`apiNodeToChatNode` 铸造全新 node 对象击穿 React.memo，所有 done 卡片重跑完整 unified 管线（parse + remark + rehype-highlight + rehype-katex）。实测 40 个最大 done 节点（共 399KB）基线 **1149ms**。
+- **Done（P0，新 `lib/markdown-cache.ts`）**: HAST 级缓存——按 `nodeId + content` 缓存管线产物树，重复挂载只跑 `toJsxRuntime`（近乎免费）。管线 + post-transform 忠实复刻 react-markdown v10 同步渲染路径（同插件、同 urlTransform、raw→text 兜底），文件头已标「升级 react-markdown 时需同步」。LRU 上限 200。
+- **Done（P1，新 `hooks/useNearViewport.ts` + 接线）**: 线性阅读视图里视口外 done 卡片先挂纯文本占位（成本≈一个 text node，`aria-hidden` 防屏幕阅读器念原始 markdown 符号），滚到视口 800px 内才升级完整 markdown——首次切换也不必等全部卡片。占位高度在 IO 触发瞬间捕获，`useLayoutEffect` 里对 `[data-thread-scroll]` 容器做滚动补偿（仅当卡片原本在视口上沿之上），消除升级高度跳动；锚点跳转目标 `force` 立即渲染（marks 滚动闪烁依赖 markdown DOM）。
+- **接线面**: TurnCard `ResponseBody` + `ReferenceFullBody`、ChatNode done 分支（画布不做懒渲染，canvas 会话 ≤20 节点）；流式分支保持原样（流式期间本就只跑最小 rehype）。其余 ReactMarkdown 消费者（CardImageButton / InteractionForm / FilePreview / ZoneEditor / HoverPreview）是小内容或按需渲染，不在热路径，未动。
+- **验证**: ①等价性——真库 40 个最大 done 节点双路渲染（react-markdown 同步组件 vs `renderCachedMarkdown`）`renderToStaticMarkup` 逐字节比对 **40/40 一致**；②性能——同批基线 1149ms → 缓存冷 828ms → **缓存热 193ms（6x）**，P1 懒渲染让首次切换只渲染近视口约 10-20 张；③tsc 零错；④eslint 改动文件零新增（git stash 基线对照）。
+- **Next**: 改动未提交（main 工作区）；用户真机点一轮长会话 Tab 切换确认体感后提交。可选：把缓存扩到其余预览 / 编辑面。
 
 ### Session 97（2026-08-16，处理 PR #14：大门反代接通客户端 abort，修 fd 泄漏静默卡死）
 - **触发**: 用户「处理一下 GitHub 上的 PR」。唯一 open PR = #14（Aaron7621 = 二号机）：`server.ts` 两处反代 fetch 各加 `signal: req.signal`，把客户端断开传导给上游——SSE 遗弃连接把 launchd maxfiles(256) 打满后 accept 拿不到 fd，TCP 握手仍由内核 backlog 代答，成「端口通、进程活、应用层一字节不回」的静默卡死（二号机 8/6 挂 4 天、8/10 一天两次，KeepAlive 不救，只能 kickstart）。
@@ -36,14 +45,4 @@
 - **流程教训（又一次）**: 在 main-2 worktree 里干活，一开始直接写了共享的 `sessions.md`/`archive.md`，收尾才发现主 worktree 有并行 session（S93 launchd 破案）动了同两个文件且撞了编号 —— `parallel-worktree.md` 的铁律（并行期只写 `blocks/<slug>.md`）第二次被违反（第一次是 S88）。按串行收尾处理：main-2 退回共享文件只提交源码 → 先提交对方 S93 记录 → `--no-ff` merge → 本条按 S94 叠上。
 - **验证**: main-2 里 `bun install` 后 tsc 零错、eslint 对该文件零告警。**真浏览器未点过。**
 - **Next**: 浏览器里点一轮（复制进剪贴板 / 下载 / Esc 与 scrim 关闭 / 暗色模式下预览底色）；跟 S93 的验收队列一起走（S91 三处 + 管理台批 1-6、BOE 部署）。
-
-### Session 93（2026-08-04，S90 认证失败破案：launchd 上下文的 claude 读的是 keychain 里过期的凭证副本）
-- **触发**: 用户截图 prod 聊天发 "hello" 报 `Failed to authenticate: OAuth session expired and could not be refreshed` —— 正好回答 S90 留的判定题：**普通聊天同样死 → 实例级故障，与任务链路无关**。
-- **破案路径**: 错误串 `rg` 下来只存在于 claude.exe 二进制里（SDK / trellis 代码零嫌疑）→ 全机唯一 claude = nvm 的 2.1.207（7-13 装的，与故障时点无关），plist PATH 解析到同一个 → **一次性 launchd job（不经 trellis 任何代码）裸跑 `claude -p` 完整复现**：80ms 失败、`duration_api_ms: 0`（本地判死，网络请求都没发）；`env -i` 逐字同 env 在终端跑 → 成功（真调 API 4s 返回 "ok"）。唯一剩余变量 = launchd vs 终端的 macOS 安全上下文。
-- **根因（launchd 探针钉死）**: Claude 凭证存了两份且已分叉 —— `~/.claude/.credentials.json` 由终端 claude 持续刷新（当天 16:16 mtime，refresh token 有效到 8-20）；Keychain `Claude Code-credentials` 项 **7-26 起停更**（mdat），内容是旧格式短 JSON（281B vs 文件 509B），`refreshTokenExpiresAt = 7-26 02:48`。launchd 上下文里 keychain 与文件**都可读**（探针实测），claude 在该上下文选了 keychain → 读到死 token → 时间戳一比对直接报错。与「nodes 表 7-28 10:52 后再无 done」吻合。
-- **S90 五条排除为何全扑空**: 全部在终端做 —— `env -i` 能复制 env，复制不了「不是 launchd」这件事，而判别维度恰恰是上下文本身。
-- **修复（用户点头后执行）**: `security delete-generic-password -s "Claude Code-credentials"` 删掉已死副本 → 所有上下文回退到新鲜的文件。不选「文件→keychain 同步」：refresh token 单次轮换，两份活副本必再分家、复发。
-- **验证**: ① 同一 launchd 复现 job 转绿（修前 80ms 本地判死，修后真调 API 3.2s 返 "ok"）② 真 prod 进程端到端：trellisctl 建 chat 模式任务实跑 → run `45350b21` **done / 3s / 6 token**。顺带摸清 trellisctl 语法：`tasks run` 要完整 UUID（列表只显示 8 位短 id）、`tasks create` 收 JSON 体、无 workspace 必须 `"contextMode":"chat"`。③ /tmp 探针已清。**测试任务 `2c66ce0d`（authfix-verify）留在库里** —— trellisctl 没有 `tasks delete` 子命令，管理台 `/settings/tasks` 可删；S90 的 `bffbe8ed` 也还在。
-- **落档**: `failures.md` 结案（resolved）· workspace.md 凭证表 + 复发坑表各加一行 · auto-memory 记「launchd-claude 凭证分叉」。复发哨兵：keychain 条目重新出现且 mdat 冻结。
-- **Next**: prod 已复活；回到验收队列 —— S91 三处改动 + 管理台批 1-6 验收、BOE 部署（S88 遗留）。
 
