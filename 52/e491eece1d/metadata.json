@@ -1,0 +1,31 @@
+{
+  "id": "52e491eece1d",
+  "timestamp": "2026-08-18T02:33:49+08:00",
+  "branch": "perf/markdown-render-cache",
+  "commitHash": "04250ddf16b6e63bfd04981ee509f564fe52c0d7",
+  "commitMessage": "perf: markdown HAST 缓存 + 视口懒渲染，治大会话 Tab 切换延迟（S98）",
+  "filesModified": [
+    "components/ChatNode.tsx",
+    "components/LinearThreadView.tsx",
+    "components/TurnCard.tsx",
+    "hooks/useNearViewport.ts",
+    "lib/markdown-cache.ts",
+    "progress/archive.md",
+    "progress/sessions.md"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 11,
+    "humanAdded": 206,
+    "humanModified": 48,
+    "humanRemoved": 0,
+    "totalLinesChanged": 265,
+    "agentPercentage": 0.0,
+    "agentFiles": [
+      "progress/archive.md",
+      "progress/sessions.md"
+    ]
+  },
+  "reason": "commit"
+}
