@@ -11,12 +11,13 @@ import { refIcon } from "@/lib/ref-icon";
 import { isAuthErrorMessage } from "@/lib/auth-error";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import {
-  MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
   MARKDOWN_STREAMING_REHYPE_PLUGINS,
 } from "@/lib/markdown-plugins";
+import { MarkdownBody } from "@/lib/markdown-cache";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
+import { useNearViewport } from "@/hooks/useNearViewport";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { CardImageButton } from "./CardImageButton";
@@ -298,12 +299,20 @@ function ResponseBody({ node }: { node: ChatNode }) {
     }
     return false;
   });
+  // P1: 视口外的 done 卡片先挂纯文本占位，滚到 800px 内再升级完整
+  // markdown（useNearViewport），长会话首次切换也不必等全部卡片跑完
+  // parse+highlight+katex。锚点跳转目标强制立即渲染——marks 的滚动闪烁
+  // 依赖 markdown DOM。
+  const isAnchorTarget = useSessionStore(
+    (s) => s.pendingScrollAnchor?.nodeId === node.id,
+  );
+  const near = useNearViewport(bodyRef, { force: isAnchorTarget });
 
   const { onMarkClick } = useMarkdownBodyMarks({
     bodyRef,
     nodeId: node.id,
     contentVersion: node.response,
-    suspended: isStreaming,
+    suspended: isStreaming || !near,
   });
 
   // A1: live markdown render while streaming. Accumulate deltas in a ref and
@@ -414,30 +423,31 @@ function ResponseBody({ node }: { node: ChatNode }) {
           </div>
         )
       ) : node.response ? (
-        <>
-          <ReactMarkdown
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-            components={MD_COMPONENTS}
-            urlTransform={MD_URL_TRANSFORM}
-          >
+        near ? (
+          <>
+            <MarkdownBody cacheKey={node.id} content={node.response} />
+            <div className="mt-3 flex justify-end gap-2">
+              <CliResumeButton nodeId={node.id} />
+              <RegenerateVariantButton nodeId={node.id} question={node.question} />
+              <CardImageButton
+                title={node.topicLabel ?? node.question}
+                content={node.response}
+              />
+              <CopyButton
+                text={node.response}
+                label="复制全文"
+                className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+              />
+            </div>
+            <GeneratedFilesBar node={node} />
+          </>
+        ) : (
+          // 占位：成本约等于一个 text node。aria-hidden 避免屏幕阅读器念
+          // 原始 markdown 符号；升级后真实内容自然可读。
+          <div className="whitespace-pre-wrap break-words" aria-hidden>
             {node.response}
-          </ReactMarkdown>
-          <div className="mt-3 flex justify-end gap-2">
-            <CliResumeButton nodeId={node.id} />
-            <RegenerateVariantButton nodeId={node.id} question={node.question} />
-            <CardImageButton
-              title={node.topicLabel ?? node.question}
-              content={node.response}
-            />
-            <CopyButton
-              text={node.response}
-              label="复制全文"
-              className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
-            />
           </div>
-          <GeneratedFilesBar node={node} />
-        </>
+        )
       ) : (
         <EmptyResponseNotice hasToolCalls={node.toolCalls.length > 0} />
       )}
@@ -496,11 +506,15 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
   const ref = node.reference;
   const isStreaming = node.status === "streaming";
   const bodyRef = useRef<HTMLDivElement>(null);
+  const isAnchorTarget = useSessionStore(
+    (s) => s.pendingScrollAnchor?.nodeId === node.id,
+  );
+  const near = useNearViewport(bodyRef, { force: isAnchorTarget });
   const { onMarkClick } = useMarkdownBodyMarks({
     bodyRef,
     nodeId: node.id,
     contentVersion: ref?.contentMd ?? "",
-    suspended: isStreaming,
+    suspended: isStreaming || !near,
   });
   if (!ref) {
     return (
@@ -595,14 +609,13 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
         className="md-body text-reading text-ink leading-relaxed"
       >
         {ref.contentMd ? (
-          <ReactMarkdown
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-            components={MD_COMPONENTS}
-            urlTransform={MD_URL_TRANSFORM}
-          >
-            {ref.contentMd}
-          </ReactMarkdown>
+          near ? (
+            <MarkdownBody cacheKey={`ref:${node.id}`} content={ref.contentMd} />
+          ) : (
+            <div className="whitespace-pre-wrap break-words" aria-hidden>
+              {ref.contentMd}
+            </div>
+          )
         ) : isStreaming ? null : (
           <div className="text-ink-faint italic text-sm">
             {ref.meta.fetchError

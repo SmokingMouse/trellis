@@ -7,7 +7,6 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import ReactMarkdown from "react-markdown";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   subscribeStream,
@@ -16,11 +15,7 @@ import {
 } from "@/lib/stream-bus";
 import { isAuthErrorMessage } from "@/lib/auth-error";
 import { COMPACT_ZOOM_THRESHOLD, PEEK_CARD_HEIGHT } from "@/lib/layout";
-import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
-import {
-  MARKDOWN_REHYPE_PLUGINS,
-  MARKDOWN_REMARK_PLUGINS,
-} from "@/lib/markdown-plugins";
+import { MarkdownBody } from "@/lib/markdown-cache";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
@@ -461,14 +456,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             <span className="streaming-cursor" />
           </>
         ) : n.response ? (
-          <ReactMarkdown
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-            components={MD_COMPONENTS}
-            urlTransform={MD_URL_TRANSFORM}
-          >
-            {n.response}
-          </ReactMarkdown>
+          <MarkdownBody cacheKey={n.id} content={n.response} />
         ) : (
           <EmptyResponseNotice hasToolCalls={(n.toolCalls?.length ?? 0) > 0} />
         )}
