@@ -1,0 +1,22 @@
+{
+  "id": "ed64afdb28c9",
+  "timestamp": "2026-08-18T02:41:05+08:00",
+  "branch": "main",
+  "commitHash": "a318f4f580551de2dd457f6d68c289c14684d7ff",
+  "commitMessage": "chore(progress): S98 续 —— 已部署 ebce0d176，记 devbox HOME 符号链接部署坑",
+  "filesModified": [
+    "progress/sessions.md"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 2,
+    "humanModified": 1,
+    "humanRemoved": 0,
+    "totalLinesChanged": 3,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
