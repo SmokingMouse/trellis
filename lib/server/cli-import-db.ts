@@ -255,8 +255,8 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
           status, error_message, sibling_index, token_input, token_output,
           token_cache_read, token_cache_creation, token_context, created_at,
           kind, tool_calls_json, claude_session_id, codex_session_id,
-          cli_turn_uuid, codex_turn_ordinal)
-       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?, ?, ?)
+          cli_turn_uuid, codex_turn_ordinal, final_start)
+       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          parent_id = excluded.parent_id,
@@ -272,7 +272,8 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          claude_session_id = excluded.claude_session_id,
          codex_session_id = excluded.codex_session_id,
          cli_turn_uuid = excluded.cli_turn_uuid,
-         codex_turn_ordinal = excluded.codex_turn_ordinal`,
+         codex_turn_ordinal = excluded.codex_turn_ordinal,
+         final_start = excluded.final_start`,
     );
 
     const ftsDel = db.prepare(
@@ -305,6 +306,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
           : null,
         provider === "claude" ? t.id : null,
         provider === "codex" ? (t.turnOrdinal ?? null) : null,
+        t.finalStart || null,
       );
       // 重建该节点的全文索引（先删后插，幂等）。
       ftsDel.run(t.id);

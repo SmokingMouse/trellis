@@ -466,6 +466,18 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN hidden_at INTEGER");
   }
 
+  // Agent 长任务 response 分层（见 lib/types.ts:ChatNode.finalStart）：最后一次
+  // 结构性中断（thinking/工具调用）之后的正文起始偏移。[0, final_start) 是过程
+  // 叙述，之后是最终答复。NULL/0 = 不分层（纯 chat、存量行 → 渲染不变）。
+  const hasFinalStart = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'final_start'",
+    )
+    .get();
+  if (!hasFinalStart) {
+    db.exec("ALTER TABLE nodes ADD COLUMN final_start INTEGER");
+  }
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

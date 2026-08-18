@@ -91,6 +91,8 @@ export type ApiNode = {
   toolCalls: ToolCall[];
   // A路②: non-null while a run paused on an interactive tool awaits the user.
   pendingInteraction: PendingInteraction | null;
+  // response 分层偏移（见 lib/types.ts:ChatNode.finalStart）。null/0 = 不分层。
+  finalStart: number | null;
   // 树面板雪藏标记。仅根节点携带语义（分支节点恒 null）；non-null = 这棵树被
   // 用户手动隐藏的时刻。树内新增节点时自动清空（写即复活）。
   hiddenAt: number | null;
@@ -127,6 +129,7 @@ type NodeRow = {
   attachments_json: string | null;
   tool_calls_json: string | null;
   pending_interaction_json: string | null;
+  final_start: number | null;
   hidden_at: number | null;
   agent_id: string | null;
   agent_scope: string | null;
@@ -137,7 +140,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
-       pending_interaction_json, hidden_at, agent_id, agent_scope`;
+       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
   id: string;
@@ -252,6 +255,7 @@ function rowToNode(r: NodeRow): ApiNode {
     attachments,
     toolCalls,
     pendingInteraction,
+    finalStart: r.final_start,
     hiddenAt: r.hidden_at,
     agentId: r.agent_id,
     agentScope: r.agent_scope === "mention" ? "mention" : r.agent_scope === "session" ? "session" : null,
@@ -992,6 +996,7 @@ export function resetNodeForRetry(
          token_context = NULL,
          tool_calls_json = NULL,
          pending_interaction_json = NULL,
+         final_start = NULL,
          codex_turn_ordinal = NULL
      WHERE id = ?`,
   ).run(nodeId);
@@ -1201,6 +1206,9 @@ export function finalizeNode(args: {
   // Main-agent context-window occupancy (last assistant message). null when the
   // backend can't report it; persisted as-is so the % gauge survives reload.
   tokenContext?: number | null;
+  // response 分层偏移（run-bus 流式期间维护的 finalStart）。0/undefined → NULL
+  // （不分层）。error 态也照写 —— 部分文本上分层依旧成立。
+  finalStart?: number;
   now: number;
 }): void {
   const db = getDB();
@@ -1214,7 +1222,7 @@ export function finalizeNode(args: {
        SET status = ?, error_message = ?,
            token_input = ?, token_output = ?,
            token_cache_read = ?, token_cache_creation = ?,
-           token_context = ?,
+           token_context = ?, final_start = ?,
            pending_interaction_json = NULL
        WHERE id = ?`,
     ).run(
@@ -1225,6 +1233,7 @@ export function finalizeNode(args: {
       args.tokenCacheRead,
       args.tokenCacheCreation,
       args.tokenContext ?? null,
+      args.finalStart || null,
       args.nodeId,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(

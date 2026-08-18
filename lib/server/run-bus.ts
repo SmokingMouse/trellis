@@ -71,6 +71,9 @@ export type RunEvent =
         cacheCreation: number;
         contextTokens?: number | null;
       };
+      // response 分层偏移（见 lib/types.ts:ChatNode.finalStart）。随终态下发，
+      // 客户端不必为它 refetch 节点。0 = 不分层。
+      finalStart?: number;
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
@@ -164,6 +167,16 @@ type RunState = {
   // Thinking accumulated this run. In-memory only (no DB column) — shipped
   // in catchup so late subscribers see the思考期; dropped with the RunState.
   committedThinking: string;
+  // Response 分层状态机（见 lib/types.ts:ChatNode.finalStart）。SDK 逐 token
+  // 透传正文、在 content block 边界不发任何事件，所以「text → 工具/思考 → text」
+  // 的段落在 committedText 里首尾相连成一坨。这里用结构性事件推断边界：
+  // thinking / tool_call_start 到来且中断后已有正文 → pendingBreak 置位；下一个
+  // delta 前先把段落分隔（"\n\n"）走完整 delta 路径（commit + DB + broadcast，
+  // 三方天然一致），并把 finalStart 推进到新段起点。turn 结束时 finalStart 即
+  // 「最终答复」的起始偏移 —— 最后一次中断之后模型说的话。
+  // 后端无关：claude/codex/mock 的事件都流经同一分支。
+  finalStart: number;
+  pendingBreak: boolean;
   // Final-state cache so late subscribers (joining after the runner
   // terminated but within the cleanup window) still get the right
   // terminal event sequence.
@@ -176,6 +189,7 @@ type RunState = {
           cacheRead: number;
           cacheCreation: number;
         };
+        finalStart?: number;
       }
     | { type: "error"; message: string };
   topicLabel?: string;
@@ -311,6 +325,8 @@ export function startRun(args: {
     committedToolCalls: [],
     pendingAgentPatches: new Map(),
     committedThinking: "",
+    finalStart: 0,
+    pendingBreak: false,
     pendingInteraction: null,
     approvedTools: new Set(),
     subscribers: new Set(),
@@ -415,6 +431,28 @@ async function runLoop(
       onCanUseTool,
     })) {
       if (event.type === "delta") {
+        // 段落边界消费：上一个结构性事件（thinking/工具）置了 pendingBreak，
+        // 新正文落地前先补段落分隔 —— 作为一条普通 delta 走完整路径（commit +
+        // DB append + broadcast），流式客户端 / DB 行 / catchup 快照三方自动
+        // 一致，无需客户端配合。刻意延迟到「确有新正文」才插：以工具收尾的
+        // turn 不会在 response 末尾留下分隔垃圾，finalStart 也恰好钉在最终
+        // 答复的第一个字符上。
+        if (state.pendingBreak) {
+          state.pendingBreak = false;
+          const t = state.committedText;
+          const sep = !t || t.endsWith("\n\n") ? "" : t.endsWith("\n") ? "\n" : "\n\n";
+          if (sep) {
+            state.committedText += sep;
+            aggregated += sep;
+            try {
+              appendNodeResponse(args.nodeId, sep);
+            } catch {
+              /* best-effort，同下 */
+            }
+            broadcast(state, { type: "delta", text: sep });
+          }
+          state.finalStart = state.committedText.length;
+        }
         // Order matters: grow committedText BEFORE broadcasting, so a
         // subscriber that races in concurrently can't snapshot pre-delta
         // and then also miss the broadcast (JS is single-threaded so
@@ -429,6 +467,12 @@ async function runLoop(
         }
         broadcast(state, { type: "delta", text: event.text });
       } else if (event.type === "thinking") {
+        // 结构性中断：这段思考之前说的话都是过程叙述（interleaved thinking
+        // 下最终答复前必有一段思考，所以「最后一次中断之后」恰是答复）。
+        // 只有中断后确有过正文才算数 —— 开场思考（committedText 空）不置位。
+        if (state.committedText.length > state.finalStart) {
+          state.pendingBreak = true;
+        }
         // Commit-before-broadcast, same as delta — but memory-only, no DB
         // write: thinking is ephemeral status, not part of the node row.
         state.committedThinking += event.text;
@@ -457,6 +501,12 @@ async function runLoop(
         }
         // Not forwarded to subscribers — server-internal.
       } else if (event.type === "tool_call_start") {
+        // 结构性中断，同 thinking 分支。不筛 parentToolUseId：子 agent 调工具
+        // 期间主 agent 没在写正文（在等 Task 返回），派生它的那条主链调用早已
+        // 置过位，重复置位幂等。
+        if (state.committedText.length > state.finalStart) {
+          state.pendingBreak = true;
+        }
         // Mirror to committedToolCalls + DB BEFORE broadcasting, same
         // discipline as the delta path so a concurrent subscribe() can't
         // catchup-snapshot pre-event then miss the broadcast.
@@ -607,6 +657,7 @@ async function runLoop(
         tokenCacheRead: usage.cacheRead,
         tokenCacheCreation: usage.cacheCreation,
         tokenContext: usage.contextTokens ?? null,
+        finalStart: state.finalStart,
         now: Date.now(),
       });
     } catch {
@@ -633,8 +684,8 @@ async function runLoop(
 
     state.status = stoppedWith;
     if (stoppedWith === "done") {
-      state.finalEvent = { type: "done", usage };
-      broadcast(state, { type: "done", usage });
+      state.finalEvent = { type: "done", usage, finalStart: state.finalStart };
+      broadcast(state, { type: "done", usage, finalStart: state.finalStart });
     } else {
       state.finalEvent = {
         type: "error",

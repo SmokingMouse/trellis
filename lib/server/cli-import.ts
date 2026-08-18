@@ -32,6 +32,10 @@ export type ParsedTurn = {
   siblingIndex: number;
   question: string;
   response: string;
+  // response 分层偏移（lib/types.ts:ChatNode.finalStart）。jsonl 里块结构完整，
+  // 按「最后一个 tool_use/thinking 块之后的首个 text 块」精确计算。0 = 不分层。
+  // 可选：codex rollout parser 不填（其 turn 组装粒度不同，缺省安全降级为不分层）。
+  finalStart?: number;
   toolCalls: ToolCall[];
   tokens: {
     input: number;
@@ -187,19 +191,31 @@ export function parseCliSessionJsonl(
     const textParts: string[] = [];
     const toolCalls: ToolCall[] = [];
     let lastUsage: Usage | undefined;
+    // finalStart 状态机，与 run-bus 的流式版同构：tool_use/thinking 块是结构性
+    // 中断，其后的首个 text part 即当前「最终答复」候选段的起点（part 索引）。
+    let finalPartIdx = 0;
+    let pendingBreak = false;
+    const pushText = (t: string) => {
+      if (pendingBreak) {
+        finalPartIdx = textParts.length;
+        pendingBreak = false;
+      }
+      textParts.push(t);
+    };
     for (const m of members) {
       const startedAt = ms(m.timestamp);
       const c = m.message?.content;
       if (m.message?.usage) lastUsage = m.message.usage;
       if (typeof c === "string") {
-        if (c.trim()) textParts.push(c);
+        if (c.trim()) pushText(c);
         continue;
       }
       if (!Array.isArray(c)) continue;
       for (const b of c) {
         if (b.type === "text" && b.text?.trim()) {
-          textParts.push(b.text);
+          pushText(b.text);
         } else if (b.type === "tool_use" && b.id) {
+          if (textParts.length) pendingBreak = true;
           const res = resultById.get(b.id);
           toolCalls.push({
             id: b.id,
@@ -212,8 +228,11 @@ export function parseCliSessionJsonl(
             startedAt,
             endedAt: startedAt,
           });
+        } else if (b.type === "thinking") {
+          // thinking 内容 v1 丢弃，但它仍是段落中断信号（interleaved thinking
+          // 下最终答复前必有一段思考）。
+          if (textParts.length) pendingBreak = true;
         }
-        // thinking 块 v1 丢弃。
       }
     }
 
@@ -224,6 +243,11 @@ export function parseCliSessionJsonl(
       siblingIndex: 0, // 下面按 parent 分组回填
       question: userText(start) ?? "",
       response: textParts.join("\n\n"),
+      // 偏移换算：前 finalPartIdx 个 part + 它们之后那个 "\n\n" 分隔。
+      finalStart:
+        finalPartIdx > 0
+          ? textParts.slice(0, finalPartIdx).join("\n\n").length + 2
+          : 0,
       toolCalls,
       tokens: {
         input: lastUsage?.input_tokens ?? 0,

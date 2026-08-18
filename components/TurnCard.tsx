@@ -428,13 +428,14 @@ function ResponseBody({ node }: { node: ChatNode }) {
       ) : node.response ? (
         near ? (
           <>
-            <MarkdownBody cacheKey={node.id} content={node.response} />
+            <SegmentedResponse node={node} />
             <div className="mt-3 flex justify-end gap-2">
               <CliResumeButton nodeId={node.id} />
               <RegenerateVariantButton nodeId={node.id} question={node.question} />
               <CardImageButton
                 title={node.topicLabel ?? node.question}
-                content={node.response}
+                // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
+                content={finalResponseText(node)}
               />
               <CopyButton
                 text={node.response}
@@ -502,6 +503,46 @@ function ResponseBody({ node }: { node: ChatNode }) {
           </div>
         ))}
     </div>
+  );
+}
+
+// Agent 长任务的 done 态正文分层（见 lib/types.ts:ChatNode.finalStart）：
+// 工具调用/思考之间的过程叙述折叠成一块弱化区，最终答复才是正文。没有
+// finalStart（纯 chat、旧数据、整段即答复）时与原来逐字节一致。
+// 过程段 trimEnd：段落分隔的 "\n\n" 尾巴不值得让 markdown 渲染个空段。
+function splitResponse(node: ChatNode): { preamble: string; final: string } {
+  const s = node.finalStart ?? 0;
+  if (s <= 0 || s >= node.response.length) {
+    return { preamble: "", final: node.response };
+  }
+  return {
+    preamble: node.response.slice(0, s).trimEnd(),
+    final: node.response.slice(s),
+  };
+}
+
+function finalResponseText(node: ChatNode): string {
+  return splitResponse(node).final;
+}
+
+function SegmentedResponse({ node }: { node: ChatNode }) {
+  const { preamble, final } = splitResponse(node);
+  return (
+    <>
+      {preamble && (
+        // <details> 不受控，与流式态的思考折叠同一心智模型。展开后弱化
+        // 字号/墨色 —— 过程叙述是「它当时在干嘛」，不该和答复争阅读权重。
+        <details className="mb-3">
+          <summary className="cursor-pointer select-none text-ui text-ink-faint hover:text-ink-muted">
+            🧭 过程叙述（{preamble.length} 字）
+          </summary>
+          <div className="mt-1.5 pl-3 border-l-2 border-line text-ui text-ink-muted [&_.md-body]:text-ui">
+            <MarkdownBody cacheKey={`${node.id}:pre`} content={preamble} />
+          </div>
+        </details>
+      )}
+      <MarkdownBody cacheKey={node.id} content={final} />
+    </>
   );
 }
 
