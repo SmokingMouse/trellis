@@ -59,19 +59,23 @@ export function Composer({
   // (staged to disk for the agent); pure chat only images + inlineable text.
   const toolCapable = sessionMode !== "chat" || chatEnhanced;
   const provider = useSessionStore((s) => s.provider);
-  // Skills show in every claude-family mode — pure chat can't run them as-is,
-  // but picking one auto-enables 增强模式 (per-turn spawn flag), so what's
-  // visible is usable. codex 系隐藏：列表来自 ~/.claude/skills，codex CLI 不认
-  // /skill 语法，发出去只是字面 "/foo"。
+  const family = providerFamily(provider);
+  const workspacePath = useSessionStore((s) => s.session?.workspacePath);
+  const skillProvider = family === "codex" ? "codex" : "claude";
+  const skillPrefix = family === "codex" ? "$" : "/";
+  // Picking a skill in pure chat auto-enables 增强模式 so the skill has the
+  // tools it may need. Invocation syntax stays native to each CLI family.
   const matchedSkills = useSkillSuggestions(
     text,
-    providerFamily(provider) === "claude",
+    family !== "mock",
+    skillProvider,
+    workspacePath,
   );
-  // S88: `@slug` 单轮派活。与 `/` 那两个匹配器正则互斥（见 useAgentMentions），
-  // 同样 codex 系隐藏 —— --agent 是 claude CLI 专属，服务端也会钳成 null。
+  // S88: `@slug` single-turn delegation. Both real provider families resolve
+  // the same Agent abstraction; mock stays hidden.
   const matchedAgents = useAgentMentions(
     text,
-    providerFamily(provider) === "claude",
+    family !== "mock",
   );
   const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
   // C1: Trellis commands in the docked composer — first-class in every mode
@@ -134,7 +138,7 @@ export function Composer({
       setChatEnhanced(true);
       setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO，本轮起生效）");
     }
-    setText(`/${name} `);
+    setText(`${skillPrefix}${name} `);
     ref.current?.focus();
   };
   const pickAgent = (slug: string) => {
@@ -217,6 +221,7 @@ export function Composer({
           agents={matchedAgents}
           onPickAgent={pickAgent}
           activeIndex={slashNav.active}
+          skillPrefix={skillPrefix}
         />
       )}
       {cmdNotice && (

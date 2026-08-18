@@ -41,6 +41,9 @@ export type ParsedTurn = {
     contextTokens: number | null;
   };
   createdAt: number;
+  // Codex rollout 没有 Claude 的 uuid 父链；分叉坐标是该 lineage 内第几条
+  // 可见 user turn（1-based）。Claude parser 不填。
+  turnOrdinal?: number;
 };
 
 export type ParsedCliSession = {

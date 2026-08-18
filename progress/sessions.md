@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 98 / 97 / 96 / 95 / 94）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 99 / 98 / 97 / 96 / 95）。更早的见 `archive.md`。
+
+### Session 99（2026-08-18，Codex 迁移体验对齐：历史 attach、skill、Agent、联网语义）
+- **触发**: 用户反馈 Trellis 只把 Claude provider 支持好，Codex 用户难迁入，要求迁来后体验至少对齐。根因不是单点 UI：Codex 原生会话完全无法 attach；现有 lineage 表/发现 API/watcher 都写死 Claude；skill API 只扫 `~/.claude/skills` 且输入框主动隐藏 Codex；Agent 在 UI/route/tasks 三层被钳成 Claude-only；Chat 文案还错误声称 Codex offline。
+- **Done ① CLI 迁移主链**: 新 `codex-import.ts` 解析 rollout（只认可见 `event_msg.user_message`、assistant 双通道去重、custom/function tools、四桶 token、残行容错）；发现层支持 `$CODEX_HOME/sessions` 跨日期递归、按 cwd 分组与现有 fork 跨日 union；`sessions.cli_provider` + provider-neutral `cli_lineages` 原位迁移旧表；attach/import/watcher/API/UI 全部 provider-aware。Attached Codex 可从 tip 线性 resume、从任意历史轮构造前缀 rollout 真分叉，CLI `codex fork` 写进新日期也会被根 watcher 自动归树；「在 CLI 继续」输出 `codex resume <id>`。同时修正旧 ordinal 把注入 role=user 当真提问的错误，并按 question 自愈存量。
+- **Done ② Skill / Agent / web**: provider-aware skill 索引按 Codex 官方 project/user/admin 作用域发现 `.agents/skills`，兼容当前 CLI 的 `$CODEX_HOME/skills/.system` 与 symlink；选择器原生填 `$skill`，纯 Chat 自动开增强。Codex Agent 支持人设、模型、静态 sandbox 权限、隔离和挂载 skill（`SKILL.md` + source dir 内联），会话 Agent、`@slug`、定时任务三条链均放行；工具白/黑名单与逐项审批明确标为不支持。纯 Codex Chat 现在显式隔离 AGENTS/环境 skills/plugins/MCP，但保留 CLI 默认 cached web search；Project/增强模式给 workspace-write network。
+- **验证**: `bun run test:codex-cli` 55 项全过（parser/DB attach/append/前缀分叉/跨日期 attach+watcher/skill/Agent）；真实 corpus 发现 4517 rollout，最近列表约 180ms、lineage attach 约 446ms；`bunx tsc --noEmit`、`git diff --check`、`make build` 全过。隔离 dev + agent-browser 真页面 smoke：Codex provider 可选、Agent picker 生效且边界提示可见、`$open` 补全成 `$openai-docs` 并自动开启增强、Attach 弹窗切 Codex 后列出真实历史。全仓 lint 仍是既有 34 errors/9 warnings；本次改动文件仅命中 `SessionSidebar.tsx:959` 的既有 setState-in-effect。
+- **边界 / Next**: 当前 `@smokingmouse/agent@0.5.1` 的 Codex exec backend 无 dynamic approval callback，且忽略 `extraArgs`，所以 CLI 0.147 虽有 `-a`/`--approve-for-me`，Trellis 仍不能像 Claude 一样弹逐项审批卡；真对齐需迁 `codex app-server` JSON-RPC。代码未部署，下一步先 review/commit，再走正常 deploy。
 
 ### Session 98（2026-08-18，Tab 切换大延迟治理：HAST 渲染缓存 + 视口懒渲染）
 - **触发**: 用户反馈会话节点多 / 内容大时，Tab 间切换延迟巨大。用户拍板范围 **P0+P1：连首次切换也治**。
@@ -12,7 +19,6 @@
 - **已提交合并推送**: `04250dd`（特性分支 `perf/markdown-render-cache`）→ `--no-ff` 合 main（`3e513c2`）→ push `origin/main`。
 - **已部署上线（`ebce0d176`）**: smoke 全绿、DB 备份、verify ready。**本机部署坑（重要）**：devbox 的 shell `HOME=/home/zhangpeng.pada` 是指向 `/data00/home/zhangpeng.pada` 的符号链接，直接 `make deploy` 会让 Turbopack build panic（`Invalid distDirRoot: ".next". distDirRoot should not navigate out of the projectPath`），且 deploy 预检会误报 systemd 单元工作目录不符（同一 inode 的字符串比较）。**正确姿势：`HOME=/data00/home/zhangpeng.pada make deploy`**（顺带让预检字符串对上，无需 `--force`；`TRELLIS_DEPLOY_ROOT` 单独给没用，build 仍 panic）。systemd 单元里 `HOME=/data00/...` 是刻意修过的（注释：Turbopack root 解析），别跑 `make install-service` 把它改回符号链接路径。
 - **Next**: 用户真机点一轮长会话 Tab 切换确认体感（重点：快速滚动时占位升级有没有可见跳动、锚点跳转是否还准）。可选：把缓存扩到其余预览 / 编辑面。
-
 ### Session 97（2026-08-16，处理 PR #14：大门反代接通客户端 abort，修 fd 泄漏静默卡死）
 - **触发**: 用户「处理一下 GitHub 上的 PR」。唯一 open PR = #14（Aaron7621 = 二号机）：`server.ts` 两处反代 fetch 各加 `signal: req.signal`，把客户端断开传导给上游——SSE 遗弃连接把 launchd maxfiles(256) 打满后 accept 拿不到 fd，TCP 握手仍由内核 backlog 代答，成「端口通、进程活、应用层一字节不回」的静默卡死（二号机 8/6 挂 4 天、8/10 一天两次，KeepAlive 不救，只能 kickstart）。
 - **Review 核实（逐条过下游代码，不是只读 PR 描述）**: ① 泄漏机制成立——两处 fetch 均未传 signal 且 `new Response(r.body)` 包装转发，断开不会自动传导到内层；② 「断开不杀 run」属实——chat 路由 onAbort 只 `unsubscribe(); close()`，run-bus Stage 17 注释明确 Run 自持 AbortController、落库走 appendNodeResponse 与订阅无关，`nodes/[id]/stream` 同模式；③ tasks/events、cli-sync/events 的 SSE teardown 本来就挂在 req.signal 上等着被接通；④ references 行为变化（关页面 → 抓取中止落 error）收尾路径核实：abort → catch → finalizeReferenceFetch 落库，无僵尸 streaming 卡；⑤ WS 路径 upgrade 在 fetch 之前，不受影响。
@@ -39,12 +45,3 @@
 - **Done（T1 预警）**: scheduler 启动即查 + 每小时 :07 复查（跟 `TRELLIS_SCHEDULER` 闸走，smoke 实例不发真预警）；硬条件（claude 缺失 / 未登录 / refresh 已过期 / 将过期 <72h / keychain 分叉）→ notify 推送，24h 去重落 `~/.trellis/auth-alerts.json`。notify.ts 扩 `auth_alert` kind（taskId/runId 放宽可选）；**`~/.trellis/notify.json` 从缺失配到有**（bark-push.py，--group trellis --level timeSensitive）—— 此前 notify 一直是 no-op。顺带：claude-缺失告警让 S91 点名的「nvm 升级后 plist PATH 失效」隐患第一次有了可见症状。
 - **验证**: tsc 零错 · eslint 4 条全既有（`git stash` 基线对照完全一致，我的文件零新增）· 模块直调（`bun --conditions=react-server`）：真机数据正确（claude max / refresh 至 8-20；codex ChatGPT）、健康态零误报零状态文件 · notify 链真推一条测试（执行无异常；**送达以手机收到为准**）· route handler 直调 200 · dev 编译零错（:3402 起停已清理；API 在 dev 里被既有 401 中间件拦，属预期）。**未验**: 卡片真浏览器渲染（dev 水合是 failures.md 开放故障，SSR 只出骨架）—— 部署后看一眼；每小时 tick 分支（与启动分支同一函数，只差触发时机）。
 - **Next**: 部署后 ① 开 `/settings/models` 看授权卡真渲染 ② 手机确认「trellis 预警通道测试」推送收到（没收到 = bark 链路问题）③ 验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗、BOE）。T2（平台内重登录）/ T3（托管隔离）等 BOE 提上日程再开。
-
-### Session 94（2026-08-04，卡片图改 happyclaw 式预览弹窗：复制 / 下载由用户选）
-- **触发**: 用户反馈卡片图「必须把图片下载下来」，要像 happyclaw 那样点开后自选「下载」或「进剪贴板」。
-- **根因**: 旧 `CardImageButton` 是自动写剪贴板、失败**静默降级**成下载 —— html-to-image 的异步渲染耗尽浏览器的用户手势时效，剪贴板写入总被拒，于是永远只会下载，且用户不知道为什么。
-- **Done**: `components/CardImageButton.tsx` 重写成 happyclaw `ShareImageDialog` 的形态：点击 → 渲染 PNG → 预览弹窗 + 底部「复制图片 / 下载图片」双按钮，复制发生在按钮点击瞬间（blob 已备好，手势新鲜），失败就地在按钮上提示改用下载。弹窗复用 `ui/Modal`，但经 `createPortal` 挂到 body —— TurnCard 在 React Flow 的 transform 节点内，直接渲染 fixed 弹窗会锚到节点而非视口。渲染链路（离屏卡片 + html-to-image）未动。
-- **流程教训（又一次）**: 在 main-2 worktree 里干活，一开始直接写了共享的 `sessions.md`/`archive.md`，收尾才发现主 worktree 有并行 session（S93 launchd 破案）动了同两个文件且撞了编号 —— `parallel-worktree.md` 的铁律（并行期只写 `blocks/<slug>.md`）第二次被违反（第一次是 S88）。按串行收尾处理：main-2 退回共享文件只提交源码 → 先提交对方 S93 记录 → `--no-ff` merge → 本条按 S94 叠上。
-- **验证**: main-2 里 `bun install` 后 tsc 零错、eslint 对该文件零告警。**真浏览器未点过。**
-- **Next**: 浏览器里点一轮（复制进剪贴板 / 下载 / Esc 与 scrim 关闭 / 暗色模式下预览底色）；跟 S93 的验收队列一起走（S91 三处 + 管理台批 1-6、BOE 部署）。
-

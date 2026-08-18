@@ -1,8 +1,9 @@
 import {
   listProjects,
-  listSessionsInDir,
+  listSessionsInProject,
   listRecentSessions,
   isWithinProjects,
+  type CliProvider,
 } from "@/lib/server/cli-discover";
 
 export const runtime = "nodejs";
@@ -13,18 +14,25 @@ export const dynamic = "force-dynamic";
 // GET /api/cli-sync/discover?recent=1   → 跨项目最近活跃 top N（扁平，按 mtime 排）
 export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
-  if (params.get("recent")) {
-    return Response.json({ sessions: listRecentSessions(40) });
+  const rawProvider = params.get("provider") ?? "claude";
+  if (rawProvider !== "claude" && rawProvider !== "codex") {
+    return Response.json({ error: "provider must be claude or codex" }, { status: 400 });
   }
-  const dir = params.get("dir");
-  if (dir) {
-    if (!isWithinProjects(dir)) {
+  const provider = rawProvider as CliProvider;
+  if (params.get("recent")) {
+    return Response.json({ sessions: listRecentSessions(40, provider) });
+  }
+  const project = params.get("project");
+  // Legacy query name remains accepted for bookmarked/dev URLs.
+  const key = project ?? params.get("dir");
+  if (key !== null) {
+    if (provider === "claude" && !isWithinProjects(key)) {
       return Response.json(
         { error: "dir must be under ~/.claude/projects" },
         { status: 400 },
       );
     }
-    return Response.json({ sessions: listSessionsInDir(dir) });
+    return Response.json({ sessions: listSessionsInProject(provider, key) });
   }
-  return Response.json({ projects: listProjects() });
+  return Response.json({ projects: listProjects(provider) });
 }

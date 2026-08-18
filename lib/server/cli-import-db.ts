@@ -6,6 +6,7 @@ import "server-only";
 import { existsSync } from "node:fs";
 import { getDB } from "./sqlite";
 import { parseCliSessionJsonl } from "./cli-import";
+import { parseCodexSessionJsonl } from "./codex-import";
 import { ensureWorkspaceForPath } from "./workspaces";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
 
@@ -39,7 +40,8 @@ export function trellisOwnedSessionIds(): Set<string> {
 
 type LineageRow = {
   trellis_session_id: string;
-  claude_session_id: string;
+  cli_session_id: string;
+  provider_family: "claude" | "codex";
   jsonl_path: string;
   fork_point_uuid: string | null;
   is_root: number;
@@ -55,8 +57,8 @@ function lineageRows(trellisSessionId: string): LineageRow[] {
   const db = getDB();
   return db
     .prepare(
-      `SELECT trellis_session_id, claude_session_id, jsonl_path, fork_point_uuid,
-              is_root, synced_uuid
+      `SELECT trellis_session_id, cli_session_id, provider_family, jsonl_path,
+              fork_point_uuid, is_root, synced_uuid
        FROM cli_lineages
        WHERE trellis_session_id = ?
        ORDER BY is_root DESC, jsonl_path`,
@@ -79,7 +81,10 @@ function parseLineagesChecked(rows: LineageRow[]): {
   const out: ParsedLineage[] = [];
   let anyUnreadable = false;
   for (const row of rows) {
-    const parsed = parseCliSessionJsonl(row.jsonl_path);
+    const parsed =
+      row.provider_family === "codex"
+        ? parseCodexSessionJsonl(row.jsonl_path)
+        : parseCliSessionJsonl(row.jsonl_path);
     if (!parsed || parsed.turns.length === 0) {
       if (!existsSync(row.jsonl_path)) anyUnreadable = true;
       continue;
@@ -112,7 +117,7 @@ function lineageSidByTurn(parsedRows: ParsedLineage[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const item of parsedRows) {
     for (const t of item.parsed.turns) {
-      if (!out.has(t.id)) out.set(t.id, item.row.claude_session_id);
+      if (!out.has(t.id)) out.set(t.id, item.row.cli_session_id);
     }
   }
   return out;
@@ -122,11 +127,13 @@ function nodesHaveLineageSids(
   db: ReturnType<typeof getDB>,
   trellisSessionId: string,
   expected: Map<string, string>,
+  provider: "claude" | "codex",
 ): boolean {
+  const column = provider === "codex" ? "codex_session_id" : "claude_session_id";
   const rows = db
-    .prepare("SELECT id, claude_session_id FROM nodes WHERE session_id = ?")
-    .all(trellisSessionId) as { id: string; claude_session_id: string | null }[];
-  const actual = new Map(rows.map((r) => [r.id, r.claude_session_id]));
+    .prepare(`SELECT id, ${column} AS sid FROM nodes WHERE session_id = ?`)
+    .all(trellisSessionId) as { id: string; sid: string | null }[];
+  const actual = new Map(rows.map((row) => [row.id, row.sid]));
   for (const [turnId, lineageSid] of expected) {
     if (actual.get(turnId) !== lineageSid) return false;
   }
@@ -164,13 +171,14 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
 
   const turnLineageSids = lineageSidByTurn(parsedRows);
   const turns = unionTurns(parsedRows);
+  const provider = parsedRows[0].row.provider_family;
   // 增量游标全命中 → 整组文件都没新增，跳过整个重写。
   const allUnchanged =
     parsedRows.length === rows.length &&
     parsedRows.every(
       ({ row, parsed }) => row.synced_uuid !== null && row.synced_uuid === parsed.lastUuid,
     ) &&
-    nodesHaveLineageSids(db, trellisSessionId, turnLineageSids);
+    nodesHaveLineageSids(db, trellisSessionId, turnLineageSids, provider);
   if (allUnchanged) {
     return {
       sessionId: trellisSessionId,
@@ -211,16 +219,19 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
     db.prepare(
       `INSERT INTO sessions
          (id, title, root_node_id, created_at, updated_at, context_mode,
-          workspace_path, workspace_id, origin, source_jsonl_path, synced_uuid)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?)
+          workspace_path, workspace_id, model, origin, source_jsonl_path,
+          synced_uuid, cli_provider)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          root_node_id = excluded.root_node_id,
          updated_at = excluded.updated_at,
          workspace_path = excluded.workspace_path,
          workspace_id = COALESCE(excluded.workspace_id, sessions.workspace_id),
+         model = COALESCE(sessions.model, excluded.model),
          source_jsonl_path = excluded.source_jsonl_path,
-         synced_uuid = excluded.synced_uuid`,
+         synced_uuid = excluded.synced_uuid,
+         cli_provider = excluded.cli_provider`,
     ).run(
       trellisSessionId,
       rootParsed.parsed.title,
@@ -230,8 +241,10 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
       mode,
       rootParsed.parsed.cwd,
       workspaceId,
+      provider === "codex" ? "codex" : null,
       rootPath,
       rootParsed.parsed.lastUuid,
+      provider,
     );
 
     // 每个节点记录所属 CLI lineage。共享祖先由 root lineage 首先占有，fork 独有
@@ -241,8 +254,9 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          (id, session_id, parent_id, parent_anchor_text, question, response,
           status, error_message, sibling_index, token_input, token_output,
           token_cache_read, token_cache_creation, token_context, created_at,
-          kind, tool_calls_json, claude_session_id, cli_turn_uuid)
-       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?)
+          kind, tool_calls_json, claude_session_id, codex_session_id,
+          cli_turn_uuid, codex_turn_ordinal)
+       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          parent_id = excluded.parent_id,
@@ -256,7 +270,9 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          token_context = excluded.token_context,
          tool_calls_json = excluded.tool_calls_json,
          claude_session_id = excluded.claude_session_id,
-         cli_turn_uuid = excluded.cli_turn_uuid`,
+         codex_session_id = excluded.codex_session_id,
+         cli_turn_uuid = excluded.cli_turn_uuid,
+         codex_turn_ordinal = excluded.codex_turn_ordinal`,
     );
 
     const ftsDel = db.prepare(
@@ -281,8 +297,14 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
         t.tokens.contextTokens,
         t.createdAt,
         t.toolCalls.length ? JSON.stringify(t.toolCalls) : null,
-        turnLineageSids.get(t.id) ?? trellisSessionId,
-        t.id,
+        provider === "claude"
+          ? (turnLineageSids.get(t.id) ?? trellisSessionId)
+          : null,
+        provider === "codex"
+          ? (turnLineageSids.get(t.id) ?? trellisSessionId)
+          : null,
+        provider === "claude" ? t.id : null,
+        provider === "codex" ? (t.turnOrdinal ?? null) : null,
       );
       // 重建该节点的全文索引（先删后插，幂等）。
       ftsDel.run(t.id);
@@ -339,13 +361,13 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
     const updateCursor = db.prepare(
       `UPDATE cli_lineages
        SET synced_uuid = ?
-       WHERE trellis_session_id = ? AND claude_session_id = ?`,
+       WHERE trellis_session_id = ? AND cli_session_id = ?`,
     );
     for (const item of parsedRows) {
       updateCursor.run(
         item.parsed.lastUuid,
         trellisSessionId,
-        item.row.claude_session_id,
+        item.row.cli_session_id,
       );
     }
   });

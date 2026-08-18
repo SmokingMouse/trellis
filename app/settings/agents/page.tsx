@@ -201,12 +201,12 @@ export default function AgentsSettingsPage() {
                       setDraft({ ...draft, model: e.target.value.trim() || null })
                     }
                     className={`${INPUT} font-mono`}
-                    placeholder="haiku / claude-opus / deepseek:xxx"
+                    placeholder="haiku / gpt-5.5 / deepseek:xxx"
                   />
                 </Field>
                 <Field
                   label="工具白名单"
-                  hint="逗号分隔。留空 = 不限制。配了技能会自动补上 Skill"
+                  hint="Claude 生效；Codex exec 无法强制工具名单。逗号分隔，留空 = 不限制；配了技能会自动补 Skill"
                 >
                   <input
                     value={draft.tools?.join(", ") ?? ""}
@@ -217,7 +217,7 @@ export default function AgentsSettingsPage() {
                 </Field>
               </div>
 
-              <Field label="工具黑名单" hint="逗号分隔。与白名单正交，可同时给">
+              <Field label="工具黑名单" hint="Claude 生效；Codex exec 无法强制。与白名单正交，可同时给">
                 <input
                   value={draft.disallowedTools?.join(", ") ?? ""}
                   onChange={(e) =>
@@ -239,8 +239,8 @@ export default function AgentsSettingsPage() {
                 <span className="text-ui">
                   继承本机环境
                   <span className="block text-label text-ink-faint">
-                    勾上 = 读 CLAUDE.md、本机全部技能、MCP（适合干活型 agent）。
-                    不勾 = 隔离：<b>无 CLAUDE.md、无本机技能、无 MCP</b>，只有下面选中的技能。
+                    勾上 = 读当前 provider 的项目说明、本机全部技能、MCP（适合干活型 agent）。
+                    不勾 = 隔离：<b>无项目说明、无环境技能、无 MCP</b>，只有下面选中的技能。
                     隔离的 agent 可复现、能整包搬到别的机器。
                   </span>
                 </span>
@@ -272,7 +272,7 @@ export default function AgentsSettingsPage() {
                 label="逐个确认"
                 hint={
                   "覆盖会话的 YOLO / 需确认设置。会话侧同一个开关在新建会话时选，" +
-                  "两者都设时**以 agent 为准**（与 agent.model 覆盖会话模型同构）。"
+                  "两者都设时以 agent 为准。仅 Claude 支持逐项审批；Codex 当前忽略该字段。"
                 }
               >
                 <select
@@ -313,7 +313,7 @@ export default function AgentsSettingsPage() {
                   纯文本补全交给 CLI。所以叫「挂载技能」而不是「技能」。 */}
               <Field
                 label={`挂载技能（已选 ${draft.skills?.length ?? 0}）`}
-                hint="从本机 ~/.claude/skills/ 挂给这个 agent，由 Skill 工具调起（与输入框 / 补全的技能是同一批目录，但那条是把技能名补进提问里，不受这里影响）。改技能正文自动跟随，不用重新保存"
+                hint="从本机 ~/.claude/skills/ 挂给这个 agent。Claude 通过 Skill 工具加载；Codex 会内联 SKILL.md 并保留源目录供脚本/引用解析。改正文自动跟随，不用重新保存"
               >
                 <input
                   value={skillQuery}

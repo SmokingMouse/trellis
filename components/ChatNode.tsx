@@ -36,6 +36,7 @@ import { useSlashNav } from "@/hooks/useSlashNav";
 import { SkillPickerList } from "./SkillPickerList";
 import { ZoneEditor } from "./ZoneEditor";
 import { EmptyResponseNotice } from "./EmptyResponseNotice";
+import { providerFamily } from "@/lib/llm";
 
 export type ChildAnchor = { text: string; childId: string };
 
@@ -608,12 +609,22 @@ function FollowupInput({
   const sessionMode = useSessionStore((s) => s.session?.mode);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
+  const provider = useSessionStore((s) => s.provider);
+  const workspacePath = useSessionStore((s) => s.session?.workspacePath);
+  const family = providerFamily(provider);
+  const skillProvider = family === "codex" ? "codex" : "claude";
+  const skillPrefix = family === "codex" ? "$" : "/";
   // Skills show in every mode; picking one in pure chat auto-enables 增强模式
   // (per-turn spawn flag — Header badge reflects it) so the skill can run.
-  const matchedSkills = useSkillSuggestions(q, true);
+  const matchedSkills = useSkillSuggestions(
+    q,
+    family !== "mock",
+    skillProvider,
+    workspacePath,
+  );
   const pickSkill = (name: string) => {
     if (sessionMode === "chat" && !chatEnhanced) setChatEnhanced(true);
-    setQ(`/${name} `);
+    setQ(`${skillPrefix}${name} `);
     ref.current?.focus();
   };
   const slashNav = useSlashNav(matchedSkills.length, q, (i) =>
@@ -637,6 +648,7 @@ function FollowupInput({
         skills={matchedSkills}
         onPick={pickSkill}
         activeIndex={slashNav.active}
+        skillPrefix={skillPrefix}
       />
       {/* px-1.5 insets the full-width textarea so its :focus-visible outline
           (globals.css — 2px solid + 2px offset, a non-layered rule utilities

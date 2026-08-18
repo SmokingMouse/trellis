@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import type { AgentRecord, SkillRef } from "./agents";
 import type { AgentSpawn } from "@/lib/llm/types";
+import { listSkills } from "./skills";
 
 // 把 DB 里的 Agent 定义变成「claude CLI 能吃的东西」。
 //
@@ -194,8 +195,56 @@ export function sweepAgentPacks(
   }
 }
 
-export function resolveAgentSpawn(a: AgentRecord): AgentSpawn {
+function codexAgentPrompt(a: AgentRecord): string {
+  const sections = [a.systemPrompt.trim()];
+  for (const ref of a.skills) {
+    let body = "";
+    let source = "inline";
+    if (ref.kind === "inline") {
+      body = ref.body;
+    } else if (isSafeDirName(ref.name)) {
+      const dir = path.join(HOST_SKILLS, ref.name);
+      try {
+        body = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
+        source = dir;
+      } catch {
+        continue;
+      }
+    }
+    if (!body.trim()) continue;
+    sections.push(
+      [
+        `Selected skill: ${ref.name}`,
+        `Source directory: ${source}`,
+        "Follow these instructions when relevant. Resolve relative files against the source directory.",
+        body.trim(),
+      ].join("\n"),
+    );
+  }
+  return sections.filter(Boolean).join("\n\n---\n\n");
+}
+
+export function resolveAgentSpawn(
+  a: AgentRecord,
+  family: "claude" | "codex" = "claude",
+  workspace?: string | null,
+): AgentSpawn {
+  if (family === "codex") {
+    return {
+      runtime: "codex",
+      slug: a.slug,
+      inheritEnv: a.inheritEnv,
+      model: a.model,
+      permission: a.permission,
+      systemPrompt: codexAgentPrompt(a),
+      environmentSkillNames: a.inheritEnv
+        ? undefined
+        : listSkills("codex", workspace).map((skill) => skill.name),
+    };
+  }
+
   const common: AgentSpawn = {
+    runtime: "claude",
     slug: a.slug,
     inheritEnv: a.inheritEnv,
     model: a.model,

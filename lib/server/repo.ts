@@ -52,6 +52,7 @@ export type ApiSession = {
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
   sourceJsonlPath: string | null;
+  cliProvider: "claude" | "codex" | null;
   // 权限确认：true = project 轮次的可变更工具需用户逐个允许/拒绝
   // （权限卡）。创建时锁定；false = YOLO（默认，含全部存量行）。
   requireApproval: boolean;
@@ -152,13 +153,14 @@ type SessionRow = {
   model: string | null;
   origin: string;
   source_jsonl_path: string | null;
+  cli_provider: "claude" | "codex" | null;
   require_approval: number;
   agent_id: string | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, require_approval, agent_id`;
+       origin, source_jsonl_path, cli_provider, require_approval, agent_id`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -285,6 +287,7 @@ function rowToSession(r: SessionRow): ApiSession {
     model: r.model,
     origin: r.origin ?? "native",
     sourceJsonlPath: r.source_jsonl_path,
+    cliProvider: r.cli_provider,
     requireApproval: r.require_approval === 1,
     agentId: r.agent_id,
   };

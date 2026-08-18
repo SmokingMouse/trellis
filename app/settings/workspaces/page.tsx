@@ -236,7 +236,7 @@ export default function WorkspacesSettingsPage() {
       <section className="rounded-card border border-line bg-surface shadow-raise p-4">
         <h2 className="text-ui font-medium mb-1">CLI 会话接入</h2>
         <p className="text-label text-ink-faint mb-3">
-          把本机 claude CLI 里已有的会话接进 Trellis（只读镜像，原始 jsonl 不动）。
+          把本机 Claude Code / Codex CLI 里已有的会话接进 Trellis（原始 jsonl 不动）。
           侧栏底部也有同一个入口。
         </p>
         <Button type="button" variant="ghost" size="sm" onClick={() => setAttachOpen(true)}>

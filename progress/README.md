@@ -13,15 +13,15 @@
   P0/P1/P2 均已落地。判据是**行为指标**（一周内 worktree 里的 session 数 > 0），首轮实测为 0；
   S83、S87 各修掉一批可用性堵点后重新计时。S2/S3/S4 依赖它，见 ADR。
 - [ ] **替代 CLI + GPT 客户端** → [roadmap](roadmap-2026q2.md) · [工作台](session-workbench.md) · [体验优化](optimization-roadmap.md)
-  未做 Stage 18/20/21、工作台 Wave 1、Level B store 重构；体验优化余项均已评估暂缓，理由在归档里。
+  Codex 主链已对齐（attach/同步/分叉/CLI 续聊/skill/Agent/cached web）；逐项审批待 app-server。余 Stage 20/21、工作台 Wave 1、Level B store 重构。
 
 > 逐条明细（含全部已完成与暂缓理由）在 `archive.md` 的「Goals 归档」。
 
 ## 指针区
 
 - `facts.md` 已验证事实（改代码前读） · `failures.md` 待查 / 已结案（排查 bug 前读）
-- `sessions.md` 最近 5 条 log（S96–92） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S99–95） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91 三处 · S94 卡片图弹窗 · S95 授权卡+预警
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
-- 其余 `*.md` 为 feature spec，被 Goals 指到时才读（`ls progress/` 即清单）
+- 其余 `*.md` 为按需读取的 feature spec

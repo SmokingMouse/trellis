@@ -2,7 +2,10 @@ import {
   attachSession,
   detachSession,
 } from "@/lib/server/cli-sync-watcher";
-import { isWithinProjects } from "@/lib/server/cli-discover";
+import {
+  isAllowedCliPath,
+  type CliProvider,
+} from "@/lib/server/cli-discover";
 import { listSessions } from "@/lib/server/repo";
 
 export const runtime = "nodejs";
@@ -20,6 +23,7 @@ export async function GET() {
       id: s.id,
       title: s.title,
       sourceJsonlPath: s.sourceJsonlPath,
+      provider: s.cliProvider ?? "claude",
       workspacePath: s.workspacePath,
       updatedAt: s.updatedAt,
     }));
@@ -27,7 +31,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { action?: unknown; jsonlPath?: unknown; sessionId?: unknown };
+  let body: {
+    action?: unknown;
+    jsonlPath?: unknown;
+    sessionId?: unknown;
+    provider?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -47,17 +56,23 @@ export async function POST(req: Request) {
     }
     // attach
     const jsonlPath = body.jsonlPath;
+    const provider: CliProvider = body.provider === "codex" ? "codex" : "claude";
     if (
       typeof jsonlPath !== "string" ||
       !jsonlPath.endsWith(".jsonl") ||
-      !isWithinProjects(jsonlPath)
+      !isAllowedCliPath(provider, jsonlPath)
     ) {
       return Response.json(
-        { error: "jsonlPath must be a .jsonl under ~/.claude/projects" },
+        {
+          error:
+            provider === "codex"
+              ? "jsonlPath must be a .jsonl under $CODEX_HOME/sessions"
+              : "jsonlPath must be a .jsonl under ~/.claude/projects",
+        },
         { status: 400 },
       );
     }
-    const stats = attachSession(jsonlPath);
+    const stats = attachSession(jsonlPath, provider);
     return Response.json({ ok: true, action: "attach", result: stats });
   } catch (e) {
     return Response.json(

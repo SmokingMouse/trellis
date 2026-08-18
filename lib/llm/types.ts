@@ -80,6 +80,8 @@ export type StreamEvent =
 // 「定义」（DB 里的 AgentRecord）与「怎么喂给 CLI」（这个类型）刻意分开：
 // route 负责查库 + 物化，sdk-adapter 只做纯翻译、不碰 IO。
 export type AgentSpawn = {
+  /** Provider-specific translation chosen before entering the pure SDK adapter. */
+  runtime: "claude" | "codex";
   /** claude --agent 的值，也是 pack 里 agents/<slug>.md 的文件名 */
   slug: string;
   /** 无技能的 agent 走内联 JSON（零 fs 操作）；有技能的走物化好的 pluginDir。二选一。 */
@@ -92,6 +94,10 @@ export type AgentSpawn = {
   disallowedTools?: string[] | null;
   permission?: "full" | "default" | "readonly" | "auto-edit" | null;
   requireApproval?: boolean | null;
+  /** Codex has no --agent; its persona and selected skill instructions are inlined. */
+  systemPrompt?: string;
+  /** Snapshot needed to make Codex's environmentSkills=false isolation explicit. */
+  environmentSkillNames?: string[];
 };
 
 // A路②: interaction_required / interaction_resolved are NOT provider stream
@@ -132,7 +138,7 @@ export type StreamRequest = {
   systemPrompt?: string | null;
   // S88: 本轮由哪个自定义 Agent 作答。由 route 从 sessions.agent_id（会话人设）
   // 或 @提及解析、物化后传入；null/undefined = 默认 Agent，执行链走今天的老路。
-  // 与 systemPrompt 互斥 —— applyAgent 会把 systemPrompt 删掉（见 sdk-adapter.ts）。
+  // Claude agent 与 systemPrompt 互斥；Codex agent is translated into systemPrompt.
   agent?: AgentSpawn | null;
   // S88 @提及：这次 spawn 是一次性的 —— 不落盘、不 resume、不 fork。
   // 与 agent 正交：agent 管「谁答」，这个管「这次身份是不是临时的」。
@@ -144,7 +150,8 @@ export type StreamRequest = {
   extraArgs?: string[];
   // chat "enhanced mode": when true, chat gets a scratch workspace + full
   // permission (no sandbox) so it can run skills + the web — YOLO. Default
-  // off = pure conversation (claude: WebSearch/WebFetch only; codex: readonly).
+  // off = pure conversation (Claude: WebSearch/WebFetch only; Codex:
+  // readonly + native cached web search, environment config isolated).
   chatEnhanced?: boolean;
   // Permission gate: when true (project, claude family), the spawn
   // uses --permission-mode default + injected ask rules so mutating tools

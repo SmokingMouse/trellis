@@ -9,6 +9,7 @@ import {
   agentHint,
   agentSupported,
 } from "@/lib/run-config";
+import { providerFamily } from "@/lib/llm";
 
 // S88: 选下一个新会话的 Agent（人设 + 模型 + 工具 + 技能 + 隔离度）。
 //
@@ -72,7 +73,7 @@ export function AgentPicker() {
       ? "自定义角色"
       : AGENT_DEFAULT_LABEL;
 
-  // 非 claude 家族（codex / mock）不认 --agent/--agents/--plugin-dir，服务端会钳成 null。
+  // Mock does not execute agents. Both real provider families do.
   // 原来这里直接 return null 整个消失 —— 但如果用户**已经选了** agent 再换模型，
   // 那个选择就无声无息地失效了。改成：选过就留一枚灰 chip 说明白，没选过才不出现
   // （没选过时它没有任何可说的，出现只是噪音）。
@@ -123,6 +124,11 @@ export function AgentPicker() {
             <div className="text-ui text-ink-muted mb-2">
               选一个 Agent（创建后锁定）
             </div>
+            {providerFamily(provider) === "codex" && (
+              <div className="text-label text-ink-faint mb-2">
+                Codex：人设、模型、静态权限、隔离与挂载技能生效；工具白/黑名单和逐项审批不支持。
+              </div>
+            )}
             <div className="flex flex-col gap-1 mb-3 max-h-[240px] overflow-y-auto">
               <AgentRow
                 name={AGENT_DEFAULT_LABEL}
@@ -134,7 +140,7 @@ export function AgentPicker() {
                 <AgentRow
                   key={a.id}
                   name={a.name}
-                  hint={agentHint(a)}
+                  hint={agentHint(a, provider)}
                   active={draftAgentId === a.id}
                   onClick={() => pickAgent(a.id)}
                 />

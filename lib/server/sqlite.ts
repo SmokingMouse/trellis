@@ -206,6 +206,10 @@ function migrate(db: Database) {
       name: "synced_uuid",
       sql: "ALTER TABLE sessions ADD COLUMN synced_uuid TEXT",
     },
+    {
+      name: "cli_provider",
+      sql: "ALTER TABLE sessions ADD COLUMN cli_provider TEXT",
+    },
   ];
   for (const c of cliSyncCols) {
     const has = db
@@ -215,26 +219,56 @@ function migrate(db: Database) {
   }
 
   // CLI branch alignment P1: one attached trellis session can bind a whole
-  // lineage of Claude CLI jsonl files (root + fork sessions). The old
+  // lineage of Claude or Codex jsonl files (root + fork sessions). The old
   // sessions.source_jsonl_path remains a denormalized root path; this table is
   // the authoritative member list and carries per-jsonl sync cursors.
   db.exec(`
     CREATE TABLE IF NOT EXISTS cli_lineages (
       trellis_session_id TEXT NOT NULL,
-      claude_session_id TEXT NOT NULL,
+      cli_session_id TEXT NOT NULL,
+      provider_family TEXT NOT NULL DEFAULT 'claude',
       jsonl_path TEXT NOT NULL,
       fork_point_uuid TEXT,
       is_root INTEGER NOT NULL DEFAULT 0,
       synced_uuid TEXT,
-      PRIMARY KEY (trellis_session_id, claude_session_id),
+      PRIMARY KEY (trellis_session_id, cli_session_id),
       FOREIGN KEY (trellis_session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS cli_lineages_session ON cli_lineages(trellis_session_id);
   `);
+  // Existing installs used a Claude-specific column name. SQLite preserves
+  // the PK/index/FK definitions when renaming, so this is a lossless in-place
+  // migration rather than a shadow-table copy.
+  const lineageColumns = db
+    .prepare("SELECT name FROM pragma_table_info('cli_lineages')")
+    .all() as { name: string }[];
+  const lineageColumnNames = new Set(lineageColumns.map((column) => column.name));
+  if (
+    lineageColumnNames.has("claude_session_id") &&
+    !lineageColumnNames.has("cli_session_id")
+  ) {
+    db.exec(
+      "ALTER TABLE cli_lineages RENAME COLUMN claude_session_id TO cli_session_id",
+    );
+    lineageColumnNames.delete("claude_session_id");
+    lineageColumnNames.add("cli_session_id");
+  }
+  if (!lineageColumnNames.has("provider_family")) {
+    db.exec(
+      "ALTER TABLE cli_lineages ADD COLUMN provider_family TEXT NOT NULL DEFAULT 'claude'",
+    );
+  }
+  db.exec(`
+    UPDATE sessions
+    SET cli_provider = 'claude'
+    WHERE origin = 'cli-import' AND cli_provider IS NULL
+  `);
   db.exec(`
     INSERT OR IGNORE INTO cli_lineages
-      (trellis_session_id, claude_session_id, jsonl_path, fork_point_uuid, is_root, synced_uuid)
-    SELECT id, id, source_jsonl_path, NULL, 1, synced_uuid
+      (trellis_session_id, cli_session_id, provider_family, jsonl_path,
+       fork_point_uuid, is_root, synced_uuid)
+    SELECT id, id, COALESCE(cli_provider, 'claude'), source_jsonl_path,
+           NULL, 1, synced_uuid
     FROM sessions
     WHERE origin = 'cli-import'
       AND source_jsonl_path IS NOT NULL

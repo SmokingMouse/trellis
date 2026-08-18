@@ -17,6 +17,7 @@ export function SkillPickerList({
   agents = [],
   onPickAgent,
   activeIndex = -1,
+  skillPrefix = "/",
 }: {
   skills: { name: string; description: string }[];
   onPick: (name: string) => void;
@@ -28,6 +29,7 @@ export function SkillPickerList({
   agents?: { slug: string; name: string; description: string }[];
   onPickAgent?: (slug: string) => void;
   activeIndex?: number;
+  skillPrefix?: "/" | "$";
 }) {
   if (!skills.length && !commands.length && !agents.length) return null;
   // Keep the keyboard highlight visible inside the scrollable list. Ref
@@ -104,7 +106,7 @@ export function SkillPickerList({
           className={rowClass(commands.length + i === activeIndex)}
         >
           <div className="text-ui font-mono text-ink">
-            /{s.name}
+            {skillPrefix}{s.name}
           </div>
           {s.description && (
             <div className="text-label text-ink-muted truncate">

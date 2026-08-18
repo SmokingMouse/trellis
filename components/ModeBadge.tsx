@@ -18,17 +18,19 @@ import type { ProviderId } from "@/lib/llm";
 export function ModeBadge() {
   const session = useSessionStore((s) => s.session);
   const agentId = session?.agentId ?? null;
-  const [agentName, setAgentName] = useState<string | null>(null);
+  const [agentLookup, setAgentLookup] = useState<{
+    id: string;
+    name: string | null;
+  } | null>(null);
   // 会话锁定的是 agent **id**，名字要查一次。agent 列表极少变，拉一次就够。
   useEffect(() => {
-    if (!agentId) {
-      setAgentName(null);
-      return;
-    }
+    if (!agentId) return;
     let alive = true;
     fetch(`/api/agents/${agentId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => alive && setAgentName(d?.agent?.name ?? null))
+      .then((d) => {
+        if (alive) setAgentLookup({ id: agentId, name: d?.agent?.name ?? null });
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -36,6 +38,7 @@ export function ModeBadge() {
   }, [agentId]);
 
   if (!session) return null;
+  const agentName = agentLookup?.id === agentId ? agentLookup.name : null;
 
   const mode = session.mode || "chat";
   const path = session.workspacePath;
@@ -73,8 +76,7 @@ export function ModeBadge() {
           </span>
         </>
       )}
-      {/* S88 会话人设。codex 不认 --agent，切过去后 agent 静默失效 ——
-          灰掉并说明，否则就是「配了以为生效」的谎言级 UI。 */}
+      {/* S88 会话人设。两个真实 provider 都生效；mock 灰掉说明。 */}
       {agentName && <AgentChip name={agentName} model={session.model} />}
       {/* 权限确认会话：可变更工具逐个审批（创建时锁定）。 */}
       {session.requireApproval && (

@@ -4,8 +4,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "./ui/Button";
 import { copyText } from "@/lib/clipboard";
 
-// 「在 CLI 继续」轻量入口：project 模式会话本就是真 claude CLI 会话，点一下把
-// `cd <ws> && claude --resume <id>` 复制到剪贴板，去终端粘贴即可续这条 lineage。
+// 「在 CLI 继续」轻量入口：project 模式本就是真 CLI thread，复制对应 family 的
+// resume 命令到剪贴板，去终端即可续这条 lineage。
 // 仅 project 模式渲染；不可续（源 jsonl 已不在盘等）→ 提示「盘上找不到」。
 // 树内分叉的「在 CLI 续任意分支」需 P2 前缀 jsonl，不在本入口范围（见 spec）。
 type State = "idle" | "loading" | "copied" | "none";

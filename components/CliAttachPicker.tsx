@@ -6,15 +6,17 @@ import { IconButton } from "@/components/ui/IconButton";
 // CLI 同步 Stage 3：attach picker。浏览本机 Claude Code CLI 会话，勾选 attach 进 trellis。
 // 两个视图：「最近活跃」（跨项目按最后活动时间扁平排，常用的浮顶）+「按项目」（目录分组懒加载）。
 // 顶部搜索框按标题/路径过滤。attach 后双向绑定；detach 只解绑、不删原始 jsonl。
-// 数据源：/api/cli-sync/discover（清单 / ?recent / ?dir）+ /api/cli-sync/attach（attach/detach）。
+// 数据源：/api/cli-sync/discover（provider + recent/project）+ /api/cli-sync/attach。
 
 type Project = {
-  dir: string;
+  provider: "claude" | "codex";
+  key: string;
   cwd: string | null;
   sessionCount: number;
   latestMtime: number;
 };
 type CliSession = {
+  provider: "claude" | "codex";
   jsonlPath: string;
   sessionId: string;
   title: string;
@@ -29,6 +31,7 @@ type Attached = {
   sourceJsonlPath: string | null;
   workspacePath: string | null;
   updatedAt: number;
+  provider: "claude" | "codex";
 };
 
 function fmtDate(ms: number): string {
@@ -49,6 +52,7 @@ export function CliAttachPicker({
   onChanged: () => void;
 }) {
   const [tab, setTab] = useState<"recent" | "projects">("recent");
+  const [provider, setProvider] = useState<"claude" | "codex">("claude");
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<CliSession[] | null>(null);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -70,94 +74,110 @@ export function CliAttachPicker({
   }, []);
 
   const loadRecent = useCallback(async () => {
-    setRecent(null);
     try {
-      const r = await fetch("/api/cli-sync/discover?recent=1").then((res) =>
-        res.json(),
-      );
+      const r = await fetch(
+        `/api/cli-sync/discover?provider=${provider}&recent=1`,
+      ).then((res) => res.json());
       setRecent(r.sessions ?? []);
     } catch {
       setError("加载失败");
       setRecent([]);
     }
-  }, []);
+  }, [provider]);
 
   const loadProjects = useCallback(async () => {
     if (projects) return;
     try {
-      const p = await fetch("/api/cli-sync/discover").then((r) => r.json());
+      const p = await fetch(
+        `/api/cli-sync/discover?provider=${provider}`,
+      ).then((r) => r.json());
       setProjects(p.projects ?? []);
     } catch {
       setError("加载失败");
       setProjects([]);
     }
-  }, [projects]);
+  }, [projects, provider]);
 
   // 初次：拉已 attach + 最近活跃（默认 tab）。
   useEffect(() => {
-    void loadAttached();
-    void loadRecent();
+    const timer = window.setTimeout(() => {
+      void loadAttached();
+      void loadRecent();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadAttached, loadRecent]);
+
+  const switchProvider = useCallback((next: "claude" | "codex") => {
+    if (next === provider) return;
+    setProvider(next);
+    setRecent(null);
+    setProjects(null);
+    setOpenDir(null);
+    setDirSessions({});
+    setError(null);
+  }, [provider]);
 
   // 切到「按项目」时懒加载项目清单。
   useEffect(() => {
-    if (tab === "projects") void loadProjects();
+    if (tab !== "projects") return;
+    const timer = window.setTimeout(() => void loadProjects(), 0);
+    return () => window.clearTimeout(timer);
   }, [tab, loadProjects]);
 
   // Esc 无条件关闭（含搜索框聚焦时）由 Modal 的 closeOnEsc="always" 提供。
 
   const expandDir = useCallback(
-    async (dir: string) => {
-      if (openDir === dir) {
+    async (projectKey: string) => {
+      if (openDir === projectKey) {
         setOpenDir(null);
         return;
       }
-      setOpenDir(dir);
-      if (!dirSessions[dir]) {
+      setOpenDir(projectKey);
+      if (!dirSessions[projectKey]) {
         try {
           const r = await fetch(
-            `/api/cli-sync/discover?dir=${encodeURIComponent(dir)}`,
+            `/api/cli-sync/discover?provider=${provider}&project=${encodeURIComponent(projectKey)}`,
           ).then((res) => res.json());
-          setDirSessions((s) => ({ ...s, [dir]: r.sessions ?? [] }));
+          setDirSessions((s) => ({ ...s, [projectKey]: r.sessions ?? [] }));
         } catch {
-          setDirSessions((s) => ({ ...s, [dir]: [] }));
+          setDirSessions((s) => ({ ...s, [projectKey]: [] }));
         }
       }
     },
-    [openDir, dirSessions],
+    [openDir, dirSessions, provider],
   );
 
   // attach/detach 后刷新所有受影响的视图。
   const refreshAll = useCallback(
-    async (dir: string | null) => {
+    async (projectKey: string | null) => {
       onChanged();
       await Promise.all([loadAttached(), loadRecent()]);
       setProjects(null); // 计数变了，下次切过去重拉
-      if (dir) {
+      if (projectKey) {
         const r = await fetch(
-          `/api/cli-sync/discover?dir=${encodeURIComponent(dir)}`,
+          `/api/cli-sync/discover?provider=${provider}&project=${encodeURIComponent(projectKey)}`,
         ).then((res) => res.json());
-        setDirSessions((s) => ({ ...s, [dir]: r.sessions ?? [] }));
+        setDirSessions((s) => ({ ...s, [projectKey]: r.sessions ?? [] }));
       }
     },
-    [loadAttached, loadRecent, onChanged],
+    [loadAttached, loadRecent, onChanged, provider],
   );
 
   const attach = useCallback(
-    async (jsonlPath: string, dir: string | null) => {
+    async (jsonlPath: string, projectKey: string | null) => {
       setBusy(jsonlPath);
       try {
         await fetch("/api/cli-sync/attach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "attach", jsonlPath }),
+          body: JSON.stringify({ action: "attach", jsonlPath, provider }),
         });
-        await refreshAll(dir);
+        await refreshAll(projectKey);
       } finally {
         setBusy(null);
       }
     },
-    [refreshAll],
+    [refreshAll, provider],
   );
 
   const detach = useCallback(
@@ -193,17 +213,17 @@ export function CliAttachPicker({
     return projects.filter(
       (p) =>
         (p.cwd ?? "").toLowerCase().includes(q) ||
-        p.dir.toLowerCase().includes(q),
+        p.key.toLowerCase().includes(q),
     );
   }, [projects, q]);
 
   const SessionRow = ({
     s,
-    dir,
+    projectKey,
     showCwd,
   }: {
     s: CliSession;
-    dir: string | null;
+    projectKey: string | null;
     showCwd: boolean;
   }) => (
     <div className="group flex items-center gap-2 pr-3 h-8 hover:bg-surface-muted">
@@ -229,7 +249,7 @@ export function CliAttachPicker({
         </span>
       ) : (
         <button
-          onClick={() => attach(s.jsonlPath, dir)}
+          onClick={() => attach(s.jsonlPath, projectKey)}
           disabled={busy === s.jsonlPath}
           className="shrink-0 text-label px-2 py-0.5 rounded bg-accent hover:bg-accent-strong text-ink-inverse disabled:opacity-50"
         >
@@ -254,8 +274,23 @@ export function CliAttachPicker({
           </IconButton>
         </div>
 
-        {/* tabs + search */}
-        <div className="shrink-0 px-3 py-2 border-b border-line-faint flex items-center gap-2">
+        {/* provider + view + search */}
+        <div className="shrink-0 px-3 py-2 border-b border-line-faint flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md bg-surface-muted p-0.5 text-label">
+            {(["claude", "codex"] as const).map((value) => (
+              <button
+                key={value}
+                onClick={() => switchProvider(value)}
+                className={`px-2.5 py-1 rounded ${
+                  provider === value
+                    ? "bg-surface text-ink-strong shadow-raise"
+                    : "text-ink-muted"
+                }`}
+              >
+                {value === "claude" ? "Claude" : "Codex"}
+              </button>
+            ))}
+          </div>
           <div className="flex rounded-md bg-surface-muted p-0.5 text-label">
             {(
               [
@@ -284,6 +319,12 @@ export function CliAttachPicker({
           />
         </div>
 
+        {error && (
+          <div className="shrink-0 px-4 py-2 border-b border-line-faint text-label text-danger">
+            {error}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto">
           {/* 已 attach */}
           {attached.length > 0 && (
@@ -297,6 +338,9 @@ export function CliAttachPicker({
                   className="group flex items-center gap-2 px-2 h-7 rounded-md hover:bg-surface-muted"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0" />
+                  <span className="shrink-0 text-nano uppercase text-ink-faint">
+                    {a.provider}
+                  </span>
                   <span
                     className="flex-1 min-w-0 truncate text-ui text-ink"
                     title={a.sourceJsonlPath ?? a.title}
@@ -331,7 +375,7 @@ export function CliAttachPicker({
                   <SessionRow
                     key={s.jsonlPath}
                     s={s}
-                    dir={null}
+                    projectKey={null}
                     showCwd
                   />
                 ))}
@@ -351,40 +395,40 @@ export function CliAttachPicker({
             ) : (
               <div className="py-1">
                 {projectsFiltered.map((p) => (
-                  <div key={p.dir}>
+                  <div key={p.key}>
                     <button
-                      onClick={() => expandDir(p.dir)}
+                      onClick={() => expandDir(p.key)}
                       className="w-full flex items-center gap-2 px-3 h-8 hover:bg-surface-muted text-left"
                     >
                       <span className="text-nano text-ink-faint w-2 shrink-0">
-                        {openDir === p.dir ? "▾" : "▸"}
+                        {openDir === p.key ? "▾" : "▸"}
                       </span>
                       <span
                         className="flex-1 min-w-0 truncate text-ui text-ink"
-                        title={p.cwd ?? p.dir}
+                        title={p.cwd ?? p.key}
                       >
-                        {shortCwd(p.cwd) || p.dir}
+                        {shortCwd(p.cwd) || "无工作目录"}
                       </span>
                       <span className="shrink-0 text-nano tabular-nums text-ink-faint">
                         {p.sessionCount}
                       </span>
                     </button>
-                    {openDir === p.dir && (
+                    {openDir === p.key && (
                       <div className="pb-1 pl-6">
-                        {!dirSessions[p.dir] ? (
+                        {!dirSessions[p.key] ? (
                           <div className="px-3 py-2 text-label text-ink-faint italic">
                             加载中…
                           </div>
-                        ) : dirSessions[p.dir].length === 0 ? (
+                        ) : dirSessions[p.key].length === 0 ? (
                           <div className="px-3 py-2 text-label text-ink-faint italic">
                             无
                           </div>
                         ) : (
-                          dirSessions[p.dir].map((s) => (
+                          dirSessions[p.key].map((s) => (
                             <SessionRow
                               key={s.jsonlPath}
                               s={s}
-                              dir={p.dir}
+                              projectKey={p.key}
                               showCwd={false}
                             />
                           ))

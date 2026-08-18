@@ -87,6 +87,9 @@ export function QuestionInput() {
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setProvider = useSessionStore((s) => s.setProvider);
   const provider = useSessionStore((s) => s.provider);
+  const family = providerFamily(provider);
+  const skillProvider = family === "codex" ? "codex" : "claude";
+  const skillPrefix = family === "codex" ? "$" : "/";
   const providerCatalog = useSessionStore((s) => s.providerCatalog);
   // Transient note when a command no-ops (e.g. /clear with no session) or
   // /model echoes its usage. Cleared on the next keystroke.
@@ -100,12 +103,20 @@ export function QuestionInput() {
   // in pure chat auto-enables 增强模式 (see pickSkill), so the dropdown never
   // reads as "skills missing".
   useEffect(() => {
-    if (skills.length) return;
-    fetch("/api/skills")
+    if (family === "mock") return;
+    let alive = true;
+    const params = new URLSearchParams({ provider: skillProvider });
+    if (draftWorkspacePath) params.set("workspace", draftWorkspacePath);
+    fetch(`/api/skills?${params}`)
       .then((r) => r.json())
-      .then((d) => setSkills(d.skills ?? []))
+      .then((d) => {
+        if (alive) setSkills(d.skills ?? []);
+      })
       .catch(() => {});
-  }, [skills.length]);
+    return () => {
+      alive = false;
+    };
+  }, [draftWorkspacePath, family, skillProvider]);
 
   // Stage 14: the Project draft mode needs a workspace path chosen
   // before submit.
@@ -126,12 +137,11 @@ export function QuestionInput() {
     providerCatalog,
   };
 
-  // C4: skill picker — active while the user types a leading "/name" token
-  // (no space yet). Selecting fills "/name " so claude (which handles skills
-  // natively) runs it when sent. claude 系专属：列表来自 ~/.claude/skills，
-  // codex CLI 不认 /skill 语法，展示了只会以字面 "/foo" 发给模型。
+  // Accept either marker for discovery; selection normalizes to the active
+  // CLI's native invocation (`/name` for Claude, `$name` for Codex).
+  const skillMarker = q.startsWith("$") ? "$" : q.startsWith("/") ? "/" : null;
   const skillQuery =
-    providerFamily(provider) === "claude" && q.startsWith("/") && !q.includes(" ")
+    family !== "mock" && skillMarker && !q.includes(" ")
       ? q.slice(1).toLowerCase()
       : null;
   const matchedSkills =
@@ -170,7 +180,7 @@ export function QuestionInput() {
       setChatEnhanced(true);
       setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO）");
     }
-    setQ(`/${name} `);
+    setQ(`${skillPrefix}${name} `);
     ref.current?.focus();
   };
   const slashNav = useSlashNav(
@@ -471,7 +481,7 @@ export function QuestionInput() {
                 )}
               >
                 <div className="text-ui font-mono text-ink">
-                  /{s.name}
+                  {skillPrefix}{s.name}
                 </div>
                 {s.description && (
                   <div className="text-label text-ink-muted truncate">
