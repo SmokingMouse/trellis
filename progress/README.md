@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-codex 权限卡 + Task 树（SDK 0.7.0）待部署与真机验收；cpa codex 上游故障在查（failures.md）。
+codex 权限卡 + Task 树（SDK 0.7.0）已部本机待真机验收；cpa codex 上游故障在查（failures.md）。
 
 ## Goals
 

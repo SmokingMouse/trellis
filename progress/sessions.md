@@ -8,6 +8,7 @@
 - **Done ② trellis**: 三闸放开 codex——`approvalAvailable`（mock 除外）、route 创建钳制、`interactive = claude || codex`；AgentPicker / settings 文案同步（Codex 支持逐项审批）；InteractionForm 零改动（Bash 命令块 / 通用 JSON 兜底本就按 toolName 渲染）。tsc 零错。
 - **Done ③ steer 推迟**: 树模型无消费位（一节点一问一答），决策记 `decisions.md` 2026-08-18 条。
 - **验证与插曲**: trellis 全链（makeCodexProvider→SDK→codex）实测**审批回调触发 + accept 后命令真执行 + shell 工具卡到达**；但完整轮次撞上 cpa 的 codex 上游 `503 auth_unavailable` 间歇故障（当日内从间歇恶化为挂起，判别实验证明与本次改动无关：默认 provider 同轮次全通、exec 同注入同 503）→ 记 `failures.md` 待查（修复大概率在 cpa 服务端补池凭证）。
+- **部署**: `make deploy` 上线 `66ebf0425`（smoke 全绿，prod node_modules 实核 0.7.0）。
 - **Next**: cpa 池恢复后按 failures.md 判定命令复验注入路径；用户真机 project+需确认开 codex 会话点权限卡、multi-agent 提问看 Task 树；审批「总是允许」按 toolName 已复用 claude 机制无需改。
 
 ### Session 104（2026-08-18，codex 逐 token 流上线：SDK 0.6.0 app-server transport + trellis bump）
