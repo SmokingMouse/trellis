@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-codex picker 补 yaml 第三方端点枚举（PR #16 待合并部署）；toolCalls 按需加载待真机验收。
+codex picker 补 yaml 第三方端点枚举（PR #16 已合并待部署）；toolCalls 按需加载待真机验收。
 
 ## Goals
 
