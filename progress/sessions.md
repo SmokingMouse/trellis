@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 105 / 104 / 103 / 102 / 101）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 106 / 105 / 104 / 103 / 102）。更早的见 `archive.md`。
+
+### Session 106（2026-08-18，agent 长任务正文一坨糊：分段 + 过程/结论分层，PR #17 已合并）
+- **触发**: 用户截图「正文+思考+正文……会导致正文的阅读体验特别差」——TurnCard 把几十段过程叙述连成一坨。
+- **根因**: SDK 逐 token 透传 `text_delta`、content block 边界零事件，run-bus `committedText += text` 无缝拼接；cli-import 路径早有 `join("\n\n")`，只有 live 流式路径中招。
+- **Done（一个状态机两层；worktree `calm-river-7881` → PR #17 → main `30df25a`）**: ①**分段**——run-bus 在结构性中断（thinking / 主链 tool_call_start）后的下一个 delta 前把 `"\n\n"` 当普通 delta 走完整路径（commit + DB append + broadcast），流式端/落库/catchup 快照三方天然一致，claude/codex/mock 通吃；延迟到「确有新正文」才插，工具收尾的 turn 不留尾部垃圾。②**分层**——同一状态机维护 `finalStart`（最后一次中断之后的正文起点）落新列 `nodes.final_start`（NULL/0 = 不分层 → 存量/纯 chat 渲染逐字节不变），TurnCard done 态把过程叙述折叠成弱化 details（「🧭 过程叙述（N 字）」，小号墨色+左竖线），最终答复才是正文；分享卡片图只带最终段，复制全文仍全文。cli-import 按块结构精确算同一偏移（thinking 块仍丢内容但当中断信号），retry 重置清零，done 事件/DB-fallback 重连都携带 finalStart。
+- **验证**: 新回归 `scripts/test-final-start.ts` 9/9（mock provider 驱动真实 startRun/subscribe + 手造 jsonl：分段串、落库偏移、done 携带、纯回答不分层、工具收尾指向末段）；真实数据最近 60 个 CLI jsonl / 369 turns → 243 分层、**0 越界/空最终段**，抽样最终段全是 TLDR/交付汇报类收尾；隔离 dev（`TRELLIS_DB_PATH` 临时库 + :3210）+ agent-browser 截图折叠/展开两态符合设计；tsc 零错、eslint 零新增（TurnCard 4 条既有基线）、`bun --bun run build` exit 0（裸 `bun run build` 无 `--bun` 会在 collect page data 阶段挂 `bun:sqlite`——Makefile:5-9 与 facts.md 早有记载，别绕过 make）。
+- **边界（刻意不做，记 PR body）**: 锚点/搜索命中过程段时 details 不自动展开（锚点几乎都在答案区）；流式态不分层（有 thinking 面板与动线顶着）。
+- **Next**: **未部署**（已进 main，下次 `make deploy` 自然带上）；部署后用户开一轮真 agent 长任务看 done 态「过程叙述折叠 + 结论正文」效果。
 
 ### Session 105（2026-08-18，codex 权限卡 + 子 agent Task 树：SDK 0.7.0 + trellis 三闸放开）
 - **触发**: S104 交付后用户「开始做吧」——下一批：审批回调、turn/steer、子 agent Task 树。
@@ -32,10 +40,3 @@
 - **插曲**: `~/.agent-gateway.env` 某行值含未闭合引号，zsh `source` 整体失败（它是 dotenv 格式非 shell 安全格式）——测试时改用 grep 单行提取 CPA_API_KEY 注入。
 - **Next**: PR #16 review 后合 main；部署走 devbox（本机不部）。合并部署后用户在 picker 选 `codex:gpt-5.6-sol` 之类真机验一轮（衔接 S101 Next 的 `codex:gpt-5.5` 真机确认）。
 
-### Session 101（2026-08-18，codex 第三方端点本机失效：canonical endpoints.yaml 缺 codex 标记）
-- **触发**: 用户截图会话 `cd2ca8d2`（model `codex:gpt-5.5[1m]`）报「codex 未登录(ChatGPT)…endpoints.yaml 端点需带 codex: { wire_api: responses } 标记」，问「现在好像不支持 codex 第三方登录」。
-- **根因链**: ① trellis 把 `codex:*` id 路由到 SDK CodexBackend，slug = `gpt-5.5[1m]`；② SDK `resolveCodexModel` 以 openai 协议解析 endpoints.yaml —— 该 slug 精确命中 yaml `codex` provider，但它只有 `anthropic_url`（→ 127.0.0.1:18765，**代理已死**：无监听、无 systemd/启动脚本），无 `openai_url` → throw 被 catch 吞成静默透传；③ 透传撞登录闸 `codex login status`（本机从未 ChatGPT 登录，只用静态 key provider）→ 报错。④ 修法（cpa 加标记）S96 已做过，但只落在 legacy `~/.claude/global/endpoints.yaml`（随 git 同步到本机）；**搜索顺序优先的 canonical `~/.config/sm/endpoints.yaml`（8-10 建，含 modelhub/traex 等机器专属 provider）从没移植该标记**——两份 yaml 已分叉，canonical 是生效的那份。
-- **Done**: canonical yaml 的 `cpa` provider 加 `codex: { wire_api: responses }`（带注释）；用户拍板后删掉死 `codex` provider 条目（18765 代理无监听无启动脚本，`CODEX_AUTH_TOKEN=unused` 一并从 env 清掉）；`HOME=/data00/home/zhangpeng.pada make deploy` 重部 prod（同 sha `a9d67a356`，smoke 全绿）让 SDK 重读 yaml。
-- **验证**: ① CPA `/v1/responses` 直连实测 `gpt-5.5` 可用；`gpt-5.5[1m]`/`gpt-5.5-fast[1m]` CPA 不认（unknown provider）；② 按 SDK 注入参数裸跑 `codex exec`（sm_endpoint + CPA_API_KEY）turn.completed 正常；③ `resolveEndpoint(..., "openai")` 实测 `gpt-5.5`/`gpt-5.6-sol` → cpa + 标记 + key present；删条目后 yaml 仍合法、`codex` provider 已不在列表；④ 重部后 prod smoke 全绿（含 /api/providers）。
-- **遗留**: ① 旧会话 `cd2ca8d2` 的 `[1m]` slug 无解（yaml 已无此模型，CPA 也不认），新会话选 `codex:gpt-5.5` 即可；② `modelhub` provider 随 LiteLLM :4000 今天删除已死，待清（modelhub-proxy:3456 是另一个东西，还活着）；③ SDK 登录闸对「config.toml 配了静态 key 默认 provider」的机器是假阴性（透传本可跑），根治要改 sm-toolkit；④ models_cache.json 若被 CLI 重建，`[1m]` 类 slug 仍会撞闸（不在 cpa 列表），plain slug 不受影响。
-- **Next**: 用户新开会话选 `codex:gpt-5.5` 真机确认一轮。

@@ -4,6 +4,14 @@
 
 ## Session Log
 
+### Session 101（2026-08-18，codex 第三方端点本机失效：canonical endpoints.yaml 缺 codex 标记）
+- **触发**: 用户截图会话 `cd2ca8d2`（model `codex:gpt-5.5[1m]`）报「codex 未登录(ChatGPT)…endpoints.yaml 端点需带 codex: { wire_api: responses } 标记」，问「现在好像不支持 codex 第三方登录」。
+- **根因链**: ① trellis 把 `codex:*` id 路由到 SDK CodexBackend，slug = `gpt-5.5[1m]`；② SDK `resolveCodexModel` 以 openai 协议解析 endpoints.yaml —— 该 slug 精确命中 yaml `codex` provider，但它只有 `anthropic_url`（→ 127.0.0.1:18765，**代理已死**：无监听、无 systemd/启动脚本），无 `openai_url` → throw 被 catch 吞成静默透传；③ 透传撞登录闸 `codex login status`（本机从未 ChatGPT 登录，只用静态 key provider）→ 报错。④ 修法（cpa 加标记）S96 已做过，但只落在 legacy `~/.claude/global/endpoints.yaml`（随 git 同步到本机）；**搜索顺序优先的 canonical `~/.config/sm/endpoints.yaml`（8-10 建，含 modelhub/traex 等机器专属 provider）从没移植该标记**——两份 yaml 已分叉，canonical 是生效的那份。
+- **Done**: canonical yaml 的 `cpa` provider 加 `codex: { wire_api: responses }`（带注释）；用户拍板后删掉死 `codex` provider 条目（18765 代理无监听无启动脚本，`CODEX_AUTH_TOKEN=unused` 一并从 env 清掉）；`HOME=/data00/home/zhangpeng.pada make deploy` 重部 prod（同 sha `a9d67a356`，smoke 全绿）让 SDK 重读 yaml。
+- **验证**: ① CPA `/v1/responses` 直连实测 `gpt-5.5` 可用；`gpt-5.5[1m]`/`gpt-5.5-fast[1m]` CPA 不认（unknown provider）；② 按 SDK 注入参数裸跑 `codex exec`（sm_endpoint + CPA_API_KEY）turn.completed 正常；③ `resolveEndpoint(..., "openai")` 实测 `gpt-5.5`/`gpt-5.6-sol` → cpa + 标记 + key present；删条目后 yaml 仍合法、`codex` provider 已不在列表；④ 重部后 prod smoke 全绿（含 /api/providers）。
+- **遗留**: ① 旧会话 `cd2ca8d2` 的 `[1m]` slug 无解（yaml 已无此模型，CPA 也不认），新会话选 `codex:gpt-5.5` 即可；② `modelhub` provider 随 LiteLLM :4000 今天删除已死，待清（modelhub-proxy:3456 是另一个东西，还活着）；③ SDK 登录闸对「config.toml 配了静态 key 默认 provider」的机器是假阴性（透传本可跑），根治要改 sm-toolkit；④ models_cache.json 若被 CLI 重建，`[1m]` 类 slug 仍会撞闸（不在 cpa 列表），plain slug 不受影响。
+- **Next**: 用户新开会话选 `codex:gpt-5.5` 真机确认一轮。
+
 ### Session 100（2026-08-18，大会话 Tab 切换仍慢：toolCalls 改按需加载，载荷 10.26MB→167KB）
 - **触发**: S98（HAST 缓存 + 视口懒渲染）落地后，用户反馈「怎么访问我的 boe 机器」tab 切换**还是慢**。
 - **根因**: GET /api/sessions/[id] 返回 **10.26MB**，其中 **98.6% 是 toolCalls JSON（10.12MB）**，response 文本仅 0.09MB；每次切 tab 都重拉整个会话（无缓存），gate（server.ts）又剥掉压缩。on-box 处理 ~190ms 很快，慢在用户远程 Mac 浏览器吃满 10.26MB 传输。S98 治的是渲染侧，传输侧这块大头没动。
