@@ -248,6 +248,12 @@ export type ChatNode = {
   // (AskUserQuestion / ExitPlanMode) waiting for the user to answer. The UI
   // renders the form from this; POST /api/nodes/[id]/respond clears it.
   pendingInteraction: PendingInteraction | null;
+  // Agent 长任务的 response 是「过程叙述段 + 最终答复」拼起来的（工具调用/思考
+  // 之间模型说的每句话都进了同一个字符串）。这里记录**最后一次结构性中断
+  // （thinking / 工具调用）之后的正文起始偏移** —— [0, finalStart) 是过程叙述，
+  // [finalStart, ∞) 是最终答复。0/null/缺省 = 整段都是答复（纯 chat、旧数据），
+  // UI 不分层。run-bus 流式时实时维护，finalize 落库；cli-import 按块结构精确计算。
+  finalStart?: number | null;
   // 树面板雪藏标记：仅树根携带语义（分支节点恒 null）。non-null = 用户手动
   // 隐藏这棵树的时刻；树内新增节点（分叉/重试）自动清空（写即复活）。
   hiddenAt: number | null;

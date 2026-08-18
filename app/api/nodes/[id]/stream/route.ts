@@ -94,7 +94,11 @@ export async function GET(
         pendingInteraction: null,
       });
       if (catchupStatus === "done") {
-        send({ type: "done", usage: node.tokenCount });
+        send({
+          type: "done",
+          usage: node.tokenCount,
+          finalStart: node.finalStart ?? 0,
+        });
       } else {
         send({
           type: "error",
