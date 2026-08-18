@@ -4,6 +4,16 @@
 
 ## Session Log
 
+### Session 96（2026-08-05，二号机双怪象破案：codex「未登录」是配置漂移伪装、claude「已登录」是环境变量 token）
+- **触发**: 用户在二号机截图两怪象——「指定了 provider 却报 codex 未登录」+「没登录过 claude 却显示已登录 · oauth_token」。两个都不是字面上的问题。
+- **诊断①（codex）**: 报错串只存在于 SDK 登录闸，0.5.0 起注入模式会跳过闸 → 触发只可能是 `configOverrides` 为空 = 解析降级。根因铁证：**cpa 的 `codex: wire_api: responses` 标记躺在本机 `~/.claude` 的未提交改动里**（`git -C ~/.claude diff` 实证），二号机靠 git 同步 → 它的 yaml 无标记 → 静默透传 → 撞闸。旧版 `resolveCodexModel` 一揽子 catch 把「yaml 没同步 / key 缺失」全吞成透传，配置漂移于是伪装成登录问题。**即使同步了 yaml 还差第二件**：`CPA_API_KEY` 在 `~/.agent-gateway.env`（机器本地、gitignored），二号机没有。
+- **诊断②（claude）**: 逐来源实测 `claude auth status --json` 映射——本机交互登录 = `claude.ai`+email+订阅；`ANTHROPIC_AUTH_TOKEN` **或** `CLAUDE_CODE_OAUTH_TOKEN` = `oauth_token`+email/订阅全空（与截图吻合）；**塞假 token 照样 loggedIn:true**（status 只看有没有、不验真）。即二号机 trellis 进程 env 里有这两个变量之一（devbox 内部网关的可能性最大），卡片如实转述了一个语义比字面宽的「已登录」。
+- **Done（SDK `@smokingmouse/agent@0.5.1`，已发 npm + push `31cb7d8`）**: `resolveCodexModel` 拆掉一揽子 catch——端点在 yaml 但无标记 → 仍透传（opt-in 语义不变）但带 `degraded` 原因；已标记但 key 缺失 → `fatal` 直接报错不 spawn（配置自相矛盾时静默换鉴权路线 = 把配置错误变成别的症状）；登录闸报错永远带诊断（degraded 原因或通用指引）。**四分支子进程实测**（SM_ENDPOINTS_PATH 指 yaml 变体 + 假 codex 二进制）：key 缺失点名 env var ✓ 无标记+未登录报「yaml 没同步」✓ 标记+key 齐全时假 codex login 恒 exit 1 仍 NO_ERROR（闸被跳过）且 argv 含注入、spawn env 含 key ✓ 原生名给通用指引 ✓。
+- **Done（trellis）**: `auth-health.ts` 把 `oauth_token` 翻译成「环境变量 token」+ 来源警告（含「status 不验真」）；codex 那句「第三方 provider 路径不受影响」改成有条件表述（要求标记+key，并提示 SDK ≥0.5.1 报具体原因）。dep bump `^0.5.1` 从 registry 装，facts 清单三连 ✓（真目录 / 0.5.1 / dist 里 grep 到新错误串）。tsc 零错、eslint 零新增、假 env token 下探针实测出新语义。
+- **二号机待办（都是用户手动，代码层已闭环）**: ① 本机 `~/.claude` 提交推送（**codex 标记还在未提交改动里**）→ 二号机 pull；② 二号机 `~/.agent-gateway.env` 补 `CPA_API_KEY`（值同本机）；③ 二号机重部 trellis 拿 0.5.1；④ 本机 prod 也要 `make deploy`（S95+S96 都没上线）。做完后二号机再选 cpa provider：若仍报错，错误信息这次会直说缺哪样。
+- **Next**: 用户跑二号机四步 + 本机 deploy；验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗 + S95 授权卡）。
+- **S101 回填（2026-08-18）**: ①的标记只落进 legacy `~/.claude/global/endpoints.yaml`；本机 canonical `~/.config/sm/endpoints.yaml`（搜索顺序优先）从没移植 → S101 同款故障在本机重演，已补。两份 yaml 已分叉，canonical 是生效的那份。
+
 ### Session 95（2026-08-04，授权健康 T0+T1：状态卡 + 到期预警，把「挂 6 天没人知道」封死）
 - **触发**: 用户「有可能把 claude 和 codex 原生授权在平台上可以控制吗」。调研（claude-code-guide 权威查证 + 本地实测 + happyclaw 对照）后用户拍板：**T0+T1 先落地**，托管隔离（`CLAUDE_CONFIG_DIR` + setup-token 年票注入）等 BOE 多机坐实再上 —— 决策与 happyclaw 对照记 `decisions.md` 本日条。
 - **调研拿到的抓手**（细节见 decisions 条）: `claude auth status --json` 是官方状态出口（2.1.207 实测）但**不含过期时间**，过期只能读 credentials.json（非公开 API，解析失败一律降级）；`CLAUDE_CODE_OAUTH_TOKEN` env 存在（认证优先级第 5，接 setup-token 一年期年票，设了就跳过本地凭证查找）；codex 有 `login --with-api-key` / `--with-access-token` 的 stdin 无头登录；**happyclaw 的做法 = 平台自持 Claude Code client_id 走 PKCE + 每 spawn 物化 .credentials.json 进独立 CLAUDE_CONFIG_DIR、绝不碰 ~/.claude —— 但平台侧从不 refresh（15 天保质期到了 UI 重新 OAuth），codex 零处理**。

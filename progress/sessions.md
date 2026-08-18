@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 100 / 99 / 98 / 97 / 96）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 101 / 100 / 99 / 98 / 97）。更早的见 `archive.md`。
+
+### Session 101（2026-08-18，codex 第三方端点本机失效：canonical endpoints.yaml 缺 codex 标记）
+- **触发**: 用户截图会话 `cd2ca8d2`（model `codex:gpt-5.5[1m]`）报「codex 未登录(ChatGPT)…endpoints.yaml 端点需带 codex: { wire_api: responses } 标记」，问「现在好像不支持 codex 第三方登录」。
+- **根因链**: ① trellis 把 `codex:*` id 路由到 SDK CodexBackend，slug = `gpt-5.5[1m]`；② SDK `resolveCodexModel` 以 openai 协议解析 endpoints.yaml —— 该 slug 精确命中 yaml `codex` provider，但它只有 `anthropic_url`（→ 127.0.0.1:18765，**代理已死**：无监听、无 systemd/启动脚本），无 `openai_url` → throw 被 catch 吞成静默透传；③ 透传撞登录闸 `codex login status`（本机从未 ChatGPT 登录，只用静态 key provider）→ 报错。④ 修法（cpa 加标记）S96 已做过，但只落在 legacy `~/.claude/global/endpoints.yaml`（随 git 同步到本机）；**搜索顺序优先的 canonical `~/.config/sm/endpoints.yaml`（8-10 建，含 modelhub/traex 等机器专属 provider）从没移植该标记**——两份 yaml 已分叉，canonical 是生效的那份。
+- **Done**: canonical yaml 的 `cpa` provider 加 `codex: { wire_api: responses }`（带注释）；用户拍板后删掉死 `codex` provider 条目（18765 代理无监听无启动脚本，`CODEX_AUTH_TOKEN=unused` 一并从 env 清掉）；`HOME=/data00/home/zhangpeng.pada make deploy` 重部 prod（同 sha `a9d67a356`，smoke 全绿）让 SDK 重读 yaml。
+- **验证**: ① CPA `/v1/responses` 直连实测 `gpt-5.5` 可用；`gpt-5.5[1m]`/`gpt-5.5-fast[1m]` CPA 不认（unknown provider）；② 按 SDK 注入参数裸跑 `codex exec`（sm_endpoint + CPA_API_KEY）turn.completed 正常；③ `resolveEndpoint(..., "openai")` 实测 `gpt-5.5`/`gpt-5.6-sol` → cpa + 标记 + key present；删条目后 yaml 仍合法、`codex` provider 已不在列表；④ 重部后 prod smoke 全绿（含 /api/providers）。
+- **遗留**: ① 旧会话 `cd2ca8d2` 的 `[1m]` slug 无解（yaml 已无此模型，CPA 也不认），新会话选 `codex:gpt-5.5` 即可；② `modelhub` provider 随 LiteLLM :4000 今天删除已死，待清（modelhub-proxy:3456 是另一个东西，还活着）；③ SDK 登录闸对「config.toml 配了静态 key 默认 provider」的机器是假阴性（透传本可跑），根治要改 sm-toolkit；④ models_cache.json 若被 CLI 重建，`[1m]` 类 slug 仍会撞闸（不在 cpa 列表），plain slug 不受影响。
+- **Next**: 用户新开会话选 `codex:gpt-5.5` 真机确认一轮。
 
 ### Session 100（2026-08-18，大会话 Tab 切换仍慢：toolCalls 改按需加载，载荷 10.26MB→167KB）
 - **触发**: S98（HAST 缓存 + 视口懒渲染）落地后，用户反馈「怎么访问我的 boe 机器」tab 切换**还是慢**。
@@ -36,13 +44,4 @@
 - **Done ②验收四项全过**（agent-browser 真浏览器，:3088 prod）: S91 sameSite=strict——直接输地址登录无感、刷新登录态持久；S95 授权卡——真渲染正确（claude 绿灯 max/refresh 至 9-2 剩 16 天，codex 绿灯 ChatGPT），「重新探测」正常，**手机推送送达仍留用户确认**；S94 卡片图弹窗——预览+双按钮+Esc/scrim 关闭+暗色全过，headless 下复制被拒时按钮就地提示「复制失败，请用下载」（S94 要的正是不再静默），真手势下的复制成功留真人一点。
 - **Done ③S75 hydration 悬案破案修复**（细节全链在 failures.md 已结案区）: 根因 = 用 127.0.0.1 访问 Next 16 dev 时 HMR WS 被 origin 校验静默掐死 + dev 的 hydration promise 与该 WS 绑死（上游 #91770）。修 = `next.config.ts` `allowedDevOrigins` 常驻 `"127.0.0.1"`。S75 的 CSS 假设证伪，`::highlight` 规则无辜还原。修后 127.0.0.1 访问 dev：fiber 0→26、交互复活。tsc 零错。**方法论教训**：七个环境假设（CSS/headers/runtime/bundler/版本/扩展/代理/headless）全灭后才转向框架内部等待链——对零报错的静默故障，应更早从"卡在哪一个 await"入手而不是枚举环境。
 - **Next**: 用户手动项——①手机确认 S95 推送送达 ②S96 二号机四步（~/.claude 推送、CPA_API_KEY、二号机重部）③ BOE 部署（devbox 手跑）。可选小加固：launchd maxfiles 调大（纵深防御）、`/term` fetch 包 try/catch。管理台批 1-6 验收未做。
-
-### Session 96（2026-08-05，二号机双怪象破案：codex「未登录」是配置漂移伪装、claude「已登录」是环境变量 token）
-- **触发**: 用户在二号机截图两怪象——「指定了 provider 却报 codex 未登录」+「没登录过 claude 却显示已登录 · oauth_token」。两个都不是字面上的问题。
-- **诊断①（codex）**: 报错串只存在于 SDK 登录闸，0.5.0 起注入模式会跳过闸 → 触发只可能是 `configOverrides` 为空 = 解析降级。根因铁证：**cpa 的 `codex: wire_api: responses` 标记躺在本机 `~/.claude` 的未提交改动里**（`git -C ~/.claude diff` 实证），二号机靠 git 同步 → 它的 yaml 无标记 → 静默透传 → 撞闸。旧版 `resolveCodexModel` 一揽子 catch 把「yaml 没同步 / key 缺失」全吞成透传，配置漂移于是伪装成登录问题。**即使同步了 yaml 还差第二件**：`CPA_API_KEY` 在 `~/.agent-gateway.env`（机器本地、gitignored），二号机没有。
-- **诊断②（claude）**: 逐来源实测 `claude auth status --json` 映射——本机交互登录 = `claude.ai`+email+订阅；`ANTHROPIC_AUTH_TOKEN` **或** `CLAUDE_CODE_OAUTH_TOKEN` = `oauth_token`+email/订阅全空（与截图吻合）；**塞假 token 照样 loggedIn:true**（status 只看有没有、不验真）。即二号机 trellis 进程 env 里有这两个变量之一（devbox 内部网关的可能性最大），卡片如实转述了一个语义比字面宽的「已登录」。
-- **Done（SDK `@smokingmouse/agent@0.5.1`，已发 npm + push `31cb7d8`）**: `resolveCodexModel` 拆掉一揽子 catch——端点在 yaml 但无标记 → 仍透传（opt-in 语义不变）但带 `degraded` 原因；已标记但 key 缺失 → `fatal` 直接报错不 spawn（配置自相矛盾时静默换鉴权路线 = 把配置错误变成别的症状）；登录闸报错永远带诊断（degraded 原因或通用指引）。**四分支子进程实测**（SM_ENDPOINTS_PATH 指 yaml 变体 + 假 codex 二进制）：key 缺失点名 env var ✓ 无标记+未登录报「yaml 没同步」✓ 标记+key 齐全时假 codex login 恒 exit 1 仍 NO_ERROR（闸被跳过）且 argv 含注入、spawn env 含 key ✓ 原生名给通用指引 ✓。
-- **Done（trellis）**: `auth-health.ts` 把 `oauth_token` 翻译成「环境变量 token」+ 来源警告（含「status 不验真」）；codex 那句「第三方 provider 路径不受影响」改成有条件表述（要求标记+key，并提示 SDK ≥0.5.1 报具体原因）。dep bump `^0.5.1` 从 registry 装，facts 清单三连 ✓（真目录 / 0.5.1 / dist 里 grep 到新错误串）。tsc 零错、eslint 零新增、假 env token 下探针实测出新语义。
-- **二号机待办（都是用户手动，代码层已闭环）**: ① 本机 `~/.claude` 提交推送（**codex 标记还在未提交改动里**）→ 二号机 pull；② 二号机 `~/.agent-gateway.env` 补 `CPA_API_KEY`（值同本机）；③ 二号机重部 trellis 拿 0.5.1；④ 本机 prod 也要 `make deploy`（S95+S96 都没上线）。做完后二号机再选 cpa provider：若仍报错，错误信息这次会直说缺哪样。
-- **Next**: 用户跑二号机四步 + 本机 deploy；验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗 + S95 授权卡）。
 
