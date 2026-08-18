@@ -1,0 +1,21 @@
+{
+  "sessionId": "ab12ddd8-fa11-4d9d-81d5-84b8b1e8dcc3",
+  "agent": "claude-code",
+  "model": "auto_model/alwaysday1_max",
+  "branch": "main",
+  "startedAt": "2026-08-17T23:57:21+08:00",
+  "condensedAt": "2026-08-18T13:20:53+08:00",
+  "reason": "compaction",
+  "turns": 7,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 69369,
+    "output": 34751,
+    "cached": 4427543
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read"
+  ]
+}
