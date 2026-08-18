@@ -259,7 +259,7 @@ export async function POST(req: Request) {
   const mentionAgent =
     body.kind === "branch" &&
     typeof body.mentionAgentSlug === "string" &&
-    providerFamily(providerId) === "claude"
+    providerFamily(providerId) !== "mock"
       ? getAgentBySlug(body.mentionAgentSlug)
       : null;
   const mentionActive = !!(mentionAgent && mentionAgent.enabled);
@@ -331,12 +331,12 @@ export async function POST(req: Request) {
           body.requireApproval === true &&
           resolvedMode !== "chat" &&
           providerFamily(providerId) === "claude";
-        // S88 人设钳制：仅 claude 系。--agent/--agents/--plugin-dir 全是 claude CLI
-        // 专属，codex 连 /skill 语法都不认（见 Composer.tsx 的既有 family gate）——
-        // 放行只会得到「配了却静默不生效」的谎言级 UI。enabled 校验在 resolveEnabledAgent。
+        // Both real providers support the product-level Agent abstraction.
+        // Claude uses --agent/plugin packs; Codex receives an equivalent
+        // persona + selected skill instructions through its system prompt.
         resolvedAgentId =
           typeof body.agentId === "string" &&
-          providerFamily(providerId) === "claude" &&
+          providerFamily(providerId) !== "mock" &&
           resolveEnabledAgent(body.agentId)
             ? body.agentId
             : null;
@@ -520,7 +520,7 @@ export async function POST(req: Request) {
   // progress/cli-branch-alignment-p2-spec.md）：从某 lineage 的 jsonl tip 且 X 在
   // trellis 无其他子 → 线性 resume 该 lineage（append 同 jsonl）；否则（非 tip 或已有
   // 子）→ buildPrefixJsonl 在 X 构造前缀 jsonl、resume 新 sid 成新 fork lineage。
-  // 仅 claude family（jsonl 是 claude 的）；codex/mock 在 attached 上不支持续聊。
+  // Claude 以 turn uuid 切前缀；Codex 以 rollout 内 user-turn ordinal 切前缀。
   let attachedHandled = false;
   let claudeSessionId: string | null = null;
   if (
@@ -549,6 +549,37 @@ export async function POST(req: Request) {
         } else {
           claudeSessionId = lin.lineageSid; // 构造失败兜底线性
         }
+      }
+    }
+  }
+  if (
+    resolvedOrigin === "cli-import" &&
+    body.kind === "branch" &&
+    family === "codex"
+  ) {
+    const branchFrom = body.parentNodeId;
+    const lin = codexLineageForNode(branchFrom);
+    if (lin) {
+      attachedHandled = true;
+      if (lin.isRolloutTip && !hasOtherChild(branchFrom, nodeId)) {
+        claudeSessionId = lin.lineageSid;
+      } else if (lin.nodeTurnOrdinal) {
+        const built = buildCodexPrefixRollout(lin.rolloutPath, lin.nodeTurnOrdinal);
+        if (built) {
+          registerForkLineage(
+            trellisSessionId,
+            built.newSid,
+            built.rolloutPath,
+            branchFrom,
+            "codex",
+          );
+          setNodeResumeId(nodeId, family, built.newSid);
+          claudeSessionId = built.newSid;
+        } else {
+          claudeSessionId = lin.lineageSid;
+        }
+      } else {
+        claudeSessionId = lin.lineageSid;
       }
     }
   }
@@ -676,7 +707,9 @@ export async function POST(req: Request) {
   // 绝不让「人设没了」变成「会话发不出消息」。
   // @提及优先于会话人设：这一轮是外援答的。
   const agentRecord = mentionActive ? mentionAgent : resolveEnabledAgent(resolvedAgentId);
-  const agentSpawn = agentRecord ? resolveAgentSpawn(agentRecord) : null;
+  const agentSpawn = agentRecord && family !== "mock"
+    ? resolveAgentSpawn(agentRecord, family, resolvedWorkspacePath)
+    : null;
   // 每轮落一份「谁答的」。会话级也记 —— agent 定义是 live 引用（改了老会话跟着变），
   // 这一列是事后唯一能追溯「当时哪个 agent 答的」的线索。
   if (agentRecord) {

@@ -1,9 +1,9 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import crypto from "node:crypto";
 import { getDB } from "./sqlite";
+import { CODEX_SESSIONS_DIR } from "./codex-paths";
 
 // ── codex rollout（~/.codex/sessions）的 lineage/分叉引擎 ─────────────────────
 //
@@ -20,7 +20,7 @@ import { getDB } from "./sqlite";
 //     前缀文件（新 UUID + 截断历史）被完整采信（暗号验证通过）；
 //   · reasoning 行的 encrypted_content 丢弃不影响 resume。
 
-const SESSIONS_ROOT = path.join(os.homedir(), ".codex", "sessions");
+const SESSIONS_ROOT = CODEX_SESSIONS_DIR;
 
 // sid → rollout 路径缓存。命中后仍 existsSync 验一次（文件可能被清）。
 const rolloutPathCache = new Map<string, string>();
@@ -90,24 +90,17 @@ type RolloutLine = {
   entry: { timestamp?: string; type?: string; payload?: Record<string, unknown> };
 };
 
-// rollout 里「user message」行的判定。Responses API 的 function_call_output /
-// reasoning 都是独立 item 类型不是 message，所以一轮之内 question 之后不会再出
-// user message —— 这是「ordinal == 总数 ⇔ tip」成立的前提。注意注入类 user
-// message（<user_instructions>/环境上下文）也计入序号：注入永远出现在该轮
-// question 之前，所以「截到第 k+1 条 user message 之前」天然把下一轮的注入一起
-// 截掉，序号语义不被注入破坏。
+// Only event_msg/user_message represents a user-visible turn. response_item
+// role=user also contains injected AGENTS/environment blocks (often more than
+// one per turn); counting those made native ordinals incompatible with import.
 function isUserMessage(entry: RolloutLine["entry"]): boolean {
-  if (entry.type !== "response_item") return false;
+  if (entry.type !== "event_msg") return false;
   const p = entry.payload;
-  return !!p && p.type === "message" && p.role === "user";
+  return !!p && p.type === "user_message" && typeof p.message === "string";
 }
 
 function userMessageText(entry: RolloutLine["entry"]): string {
-  const content = entry.payload?.content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : ""))
-    .join("");
+  return typeof entry.payload?.message === "string" ? entry.payload.message : "";
 }
 
 function readRollout(p: string): RolloutLine[] | null {
@@ -142,9 +135,8 @@ function countUserMessages(lines: RolloutLine[]): number {
 
 // 在 sourcePath 里以「第 turnOrdinal 条 user message 所在的那一轮」为分叉点，
 // 截出该轮结束为止的前缀，改写 session id 为新 UUID，写回同目录。
-// 截断规则：保留到第 turnOrdinal+1 条 user message 之前（含分叉轮的完整
-// assistant 响应/工具链）；随手剥掉尾部悬空的 turn_context / task 事件（属于
-// 下一轮的 preamble，留着是脏元数据）。
+// 截断规则：保留当前 visible user turn 的完整 assistant/tool output，停在下一条
+// turn_context 之前；随后剥掉下一轮已提前写入的 task_started preamble。
 export function buildCodexPrefixRollout(
   sourcePath: string,
   turnOrdinal: number,
@@ -153,16 +145,24 @@ export function buildCodexPrefixRollout(
   if (!lines || turnOrdinal < 1) return null;
 
   let seen = 0;
-  let cutAt = lines.length; // 默认截到 EOF（分叉点就是 tip 的情形）
+  let selectedUserIndex = -1;
   for (let i = 0; i < lines.length; i++) {
     if (!isUserMessage(lines[i].entry)) continue;
     seen++;
-    if (seen === turnOrdinal + 1) {
+    if (seen === turnOrdinal) {
+      selectedUserIndex = i;
+      break;
+    }
+  }
+  if (selectedUserIndex < 0) return null;
+
+  let cutAt = lines.length;
+  for (let i = selectedUserIndex + 1; i < lines.length; i++) {
+    if (lines[i].entry.type === "turn_context") {
       cutAt = i;
       break;
     }
   }
-  if (seen < turnOrdinal) return null; // ordinal 越界：映射失效，调用方降级线性
 
   let end = cutAt;
   while (end > 0) {
@@ -220,13 +220,14 @@ export function codexLineageForNode(nodeId: string): CodexLineage | null {
   const db = getDB();
   const node = db
     .prepare(
-      "SELECT parent_id, codex_session_id, codex_turn_ordinal FROM nodes WHERE id = ?",
+      "SELECT parent_id, codex_session_id, codex_turn_ordinal, question FROM nodes WHERE id = ?",
     )
     .get(nodeId) as
     | {
         parent_id: string | null;
         codex_session_id: string | null;
         codex_turn_ordinal: number | null;
+        question: string;
       }
     | undefined;
   if (!node) return null;
@@ -251,12 +252,30 @@ export function codexLineageForNode(nodeId: string): CodexLineage | null {
   const lines = readRollout(rolloutPath);
   if (!lines) return null;
   const total = countUserMessages(lines);
+  const userMessages = lines.filter((line) => isUserMessage(line.entry));
+  let nodeTurnOrdinal = node.codex_turn_ordinal;
+  const recordedText = nodeTurnOrdinal
+    ? userMessageText(userMessages[nodeTurnOrdinal - 1]?.entry ?? {})
+    : "";
+  // Ordinals written before Codex 0.147 support counted injected role=user
+  // response items. Validate against the node question and self-heal on read.
+  if (!recordedText.includes(node.question.trim())) {
+    let match: number | null = null;
+    userMessages.forEach((line, index) => {
+      if (userMessageText(line.entry).includes(node.question.trim())) match = index + 1;
+    });
+    nodeTurnOrdinal = match;
+    if (match !== null) {
+      getDB()
+        .prepare("UPDATE nodes SET codex_turn_ordinal = ? WHERE id = ?")
+        .run(match, nodeId);
+    }
+  }
   return {
     lineageSid,
     rolloutPath,
-    nodeTurnOrdinal: node.codex_turn_ordinal,
-    isRolloutTip:
-      node.codex_turn_ordinal !== null && node.codex_turn_ordinal === total,
+    nodeTurnOrdinal,
+    isRolloutTip: nodeTurnOrdinal !== null && nodeTurnOrdinal === total,
   };
 }
 

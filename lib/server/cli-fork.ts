@@ -76,7 +76,8 @@ export function attachedLineageForNode(nodeId: string): AttachedLineage | null {
     .prepare(
       `SELECT jsonl_path
        FROM cli_lineages
-       WHERE trellis_session_id = ? AND claude_session_id = ?`,
+       WHERE trellis_session_id = ? AND cli_session_id = ?
+         AND provider_family = 'claude'`,
     )
     .get(node.session_id, lineageSid) as { jsonl_path: string } | undefined;
   if (!row) return null;
@@ -112,7 +113,8 @@ export function cliResumeForNode(
   // attach（cli-import）是 claude 专属域，codex 不会有。
   const family = providerFamily(session.model ?? DEFAULT_PROVIDER);
   if (family === "codex") {
-    const resumeId = isLineageIsolated(session.id)
+    const resumeId =
+      session.origin === "cli-import" || isLineageIsolated(session.id)
       ? codexLineageForNode(nodeId)?.lineageSid ?? null
       : getRootResumeIdForNode(nodeId, "codex", session.workspacePath);
     if (!resumeId) return null;
@@ -154,16 +156,19 @@ export function registerForkLineage(
   newSid: string,
   jsonlPath: string,
   forkPointUuid: string,
+  provider: "claude" | "codex" = "claude",
 ): void {
   const db = getDB();
   db.prepare(
     `INSERT INTO cli_lineages
-       (trellis_session_id, claude_session_id, jsonl_path, fork_point_uuid, is_root, synced_uuid)
-     VALUES (?, ?, ?, ?, 0, NULL)
-     ON CONFLICT(trellis_session_id, claude_session_id) DO UPDATE SET
+       (trellis_session_id, cli_session_id, provider_family, jsonl_path,
+        fork_point_uuid, is_root, synced_uuid)
+     VALUES (?, ?, ?, ?, ?, 0, NULL)
+     ON CONFLICT(trellis_session_id, cli_session_id) DO UPDATE SET
+       provider_family = excluded.provider_family,
        jsonl_path = excluded.jsonl_path,
        fork_point_uuid = excluded.fork_point_uuid`,
-  ).run(trellisSessionId, newSid, jsonlPath, forkPointUuid);
+  ).run(trellisSessionId, newSid, provider, jsonlPath, forkPointUuid);
 }
 
 // 前缀构造核心：在 sourceJsonl 里以 turnUuid（turn-start user entry uuid）为分叉点，

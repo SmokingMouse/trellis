@@ -583,10 +583,10 @@ export function SessionSidebar() {
         </IconButton>
       </div>
 
-      {/* CLI 同步：attach 本机 Claude Code 会话（双向）。 */}
+      {/* CLI 同步：attach 本机 Claude Code / Codex 会话（双向）。 */}
       <button
         onClick={() => setAttachOpen(true)}
-        title="把本机 Claude Code CLI 会话 attach 进来（双向同步）"
+        title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
         className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         <span aria-hidden>⇄</span>
@@ -1035,13 +1035,13 @@ function SidebarRow({
         </span>
       )}
 
-      {/* CLI 同步：attach 的会话标个 CLI 角标（双向绑定）。正被 claude 实时驱动时
+      {/* CLI 同步：attach 的会话标来源角标（双向绑定）。正被 CLI 实时驱动时
           换成「● live」脉冲（remote-control 式感知）。 */}
       {session.origin === "cli-import" && !editing && (
         live ? (
           <span
             className="shrink-0 inline-flex items-center gap-1 text-nano font-semibold px-1 py-px rounded bg-positive text-ink-inverse group-hover:hidden"
-            title="正被一个活的 claude 进程实时驱动"
+            title={`正被一个活的 ${session.cliProvider === "codex" ? "Codex" : "Claude"} 进程实时驱动`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-ink-inverse animate-pulse" />
             live
@@ -1051,7 +1051,7 @@ function SidebarRow({
             className="shrink-0 text-nano font-semibold px-1 py-px rounded bg-positive-muted text-positive-ink group-hover:hidden"
             title="已 attach 的本机 CLI 会话（双向同步）"
           >
-            CLI
+            {session.cliProvider === "codex" ? "CX" : "CC"}
           </span>
         )
       )}

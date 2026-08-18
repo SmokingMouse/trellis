@@ -44,6 +44,20 @@ const APPROVAL_ASK_TOOLS = ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"
 function applyAgent(base: RunOptions, a: AgentSpawn): RunOptions {
   const out: RunOptions = { ...base };
 
+  if (a.runtime === "codex") {
+    // Codex has no --agent registry. Preserve the same product-level persona
+    // by replacing the mode prompt with the resolved agent prompt. Selected
+    // skills have already been inlined by agent-pack.ts.
+    out.systemPrompt = a.systemPrompt;
+    if (!a.inheritEnv) {
+      out.environmentSkills = false;
+      out.environmentSkillNames = a.environmentSkillNames;
+    }
+    if (a.model) out.model = a.model;
+    if (a.permission) out.permission = a.permission;
+    return out;
+  }
+
   // --agent 与 --system-prompt 互斥（后者是整体替换，前者是激活人设，同给的优先级
   // CLI 无文档）。agent 的人设已完整躺在 --agents JSON 的 prompt / pack 的 md 正文里，
   // 这里直接删掉 systemPrompt，不做 append —— 混合两个人设来源是日后
@@ -142,7 +156,9 @@ function baseRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptio
       // D1: user can override the chat persona per-session; fall back to the
       // built-in default when unset/blank.
       systemPrompt: sp,
-      tools: ["WebSearch", "WebFetch"], // claude 用;codex 无 web,backend 自行忽略
+      // Claude uses this allowlist. Codex ignores it and exposes its native
+      // cached web search; makeCodexProvider applies environment isolation.
+      tools: ["WebSearch", "WebFetch"],
       cwd: req.cwd ?? CHAT_SCRATCH,
       settingSources: false,
       // 纯对话 = GPT 式即答场景:effort 压到 low,否则默认 effort 下模型对

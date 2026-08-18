@@ -72,13 +72,13 @@
 - WebFetch / WebSearch 单独 icon 区分
 - Token 计量重新拆桶：tool 调用产生的 token 单独统计，在 footer 标 🔧
 
-**Stage 18: Skill 调用入口**
+**Stage 18: Skill 调用入口（已完成）**
 
 把用户 `~/.claude/skills/` 下 50+ skill 直接接入。
 
-- 输入框检测 `/<skill-name>` 前缀 → 触发 skill picker（fuzzy match）
-- skill 列表：扫 `~/.claude/skills/*/SKILL.md` 拿 name + description，缓存到 sessionStorage
-- 选中 skill → 走 SkillTool 路径（Workspace / Project 模式才支持，Chat 不支持因为无 cwd / 工具）
+- Claude 输入框检测 `/<skill-name>`，Codex 检测 `$<skill-name>` → 触发 provider-aware picker
+- Claude 扫 `~/.claude/skills`；Codex 扫 project/user/admin `.agents/skills` 并兼容 `$CODEX_HOME/skills`
+- 纯 Chat 点选自动开启增强模式；Project 直接走当前 CLI 原生 skill 机制
 - skill 调用作为特殊 `tool_call` 渲染（Stage 17 同款 UI）
 - 输入框右下角小角标显示当前命中的 skill 名 + ESC 取消
 

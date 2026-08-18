@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "bun server.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:codex-cli": "bun --conditions react-server scripts/test-codex-cli-import.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

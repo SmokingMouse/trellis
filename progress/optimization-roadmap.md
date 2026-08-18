@@ -76,7 +76,7 @@ Trellis 当前是一个**成熟度 ~75% 的「树状画布对话工具」**，�
 | 功能 | trellis | 缺口 |
 |---|---|---|
 | 基础对话 / 图片理解 / 全文搜索 / 模型切换 | ✅ | — |
-| 联网搜索 | 部分 | Chat 模式 WebSearch✅；**Codex chat 完全离线** |
+| 联网搜索 | ✅ | Claude Chat 用 WebSearch/WebFetch；Codex Chat 保留内置 cached web search（live search 尚未显式开启） |
 | 文件上传分析（PDF/Word/Excel） | ❌ | 仅图片，文件留 Stage 19 |
 | 长期记忆 / 自定义指令 | 部分 | 仅 project per-root 单线程；**system prompt 写死、无 UI** |
 | 图片生成 / 语音 | ❌ | 无（需付费 API，定位待定） |
@@ -87,7 +87,7 @@ Trellis 当前是一个**成熟度 ~75% 的「树状画布对话工具」**，�
 | C1 ↩Stage19 | 文件附件（PDF/Word/Excel/code） | 仅图片（Stage 15）；GPT 能传 PDF 直接分析 | 拖拽进 reference 节点：PDF→`pdf` skill 抽 md / Excel→表格 / code→直读 | **P0** | L |
 | C2 ↩Stage21 | 跨对话记忆 + 自定义指令 UI | 仅 project per-root 记忆；system prompt 硬编码（`prompt.ts:32-33`）无 UI；GPT 有 memory + custom instructions | ① custom instructions 编辑器注入 system prompt ② 节点↔`~/.claude/memory/` 桥接 | **P0** | M–L |
 | C3 | 语义检索补 FTS | FTS5 是 trigram 子串匹配（`sqlite.ts:120`），非语义；「找回那次聊过类似概念的对话」搜不到 | embedding 索引 + 语义/FTS 混合检索（需 embedding API，见 Q2） | P1 | L |
-| C4 ↩Stage18 | Skill 调用入口 | 无（roadmap 已规划）；50+ 本地 skill 接不进来 | 输入 `/<skill>` 触发 picker，走 SkillTool 路径 | P1 | M |
+| C4 ↩Stage18 | Skill 调用入口 | ✅ Claude `/skill` + Codex `$skill`，按 provider 发现作用域；纯 Chat 自动开增强 | 已完成 | — | — |
 | C5 | 模型选择 session 级 + 每轮可选 | 全局切换（`ModelPicker`，全局 state）；无成本/质量按需权衡 | session 级绑定 + 可选每轮升降级（haiku↔opus） | P2 | S–M |
 | C6 | 图片生成 / 语音 | 完全无；GPT 有 | 需第三方付费 API（见 Q3），与「单人单机 CLI」定位契合度待定 | P2 | L |
 

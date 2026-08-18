@@ -492,8 +492,10 @@ export function launch(task: Task, runId: string): StartTaskRunResult {
   const family = providerFamily(providerId);
   const llm = getProvider(providerId, { mode: task.contextMode as never });
 
-  const agentRecord = family === "claude" ? resolveEnabledAgent(task.agentId) : null;
-  const agentSpawn = agentRecord ? resolveAgentSpawn(agentRecord) : null;
+  const agentRecord = family !== "mock" ? resolveEnabledAgent(task.agentId) : null;
+  const agentSpawn = agentRecord && family !== "mock"
+    ? resolveAgentSpawn(agentRecord, family, task.workspacePath)
+    : null;
   if (agentRecord) setNodeAgent(nodeId, agentRecord.id, "session");
 
   const spawnCwd = sessionCwd(task.contextMode as never, task.workspacePath);

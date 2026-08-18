@@ -35,16 +35,16 @@ export function contextModeOptions(provider: ProviderId): ContextModeOption[] {
       {
         id: "chat",
         label: "Chat",
-        short: "纯对话，沙箱只读、无联网",
+        short: "纯对话 + cached web，沙箱只读",
         title:
-          "Chat：纯文本回复，沙箱 read-only，禁用所有 tools / MCP。codex 暂无 WebSearch 等价，无联网。",
+          "Chat：read-only sandbox，禁用 AGENTS.md / 环境 skills / plugins / MCP；保留 Codex 内置 web search（CLI 默认 cached）。",
       },
       {
         id: "project",
         label: "Project",
         short: "有文件工具 + MCP",
         title:
-          "Project：一条岔一个 codex session（分叉=前缀 rollout 新 lineage）。MCP/tools 全开。rollout 在 ~/.codex/sessions/，删除 trellis session 时清理。",
+          "Project：一条岔一个 Codex thread（分叉=前缀 rollout 新 lineage）。MCP/tools/web 全开。rollout 在 $CODEX_HOME/sessions/，删除 Trellis session 时清理。",
       },
     ];
   }
@@ -80,7 +80,7 @@ export function workspaceRequired(mode: Mode | string | null | undefined): boole
  * 曾经新会话叫「默认助手」、任务页叫「默认 Agent」—— 同一个东西两个名字，统一到这个。
  */
 export const AGENT_DEFAULT_LABEL = "默认助手";
-export const AGENT_DEFAULT_HINT = "今天的行为，读 CLAUDE.md 和本机全部技能";
+export const AGENT_DEFAULT_HINT = "跟随当前模式的项目说明、本机技能与 MCP";
 
 /** picker 需要的 agent 最小形状。agentStore 的 Agent 是它的超集。 */
 export type AgentLike = {
@@ -93,12 +93,21 @@ export type AgentLike = {
  * agent 选项下面那行小字。**隔离的代价必须在选之前说清楚**，不能等它答不出话才发现
  * ——「隔离」= 无 CLAUDE.md + 无本机技能 + 无 MCP 三件套（facts.md 有实测）。
  */
-export function agentHint(a: AgentLike): string | undefined {
+export function agentHint(a: AgentLike, provider?: ProviderId): string | undefined {
+  const codex = provider ? providerFamily(provider) === "codex" : false;
   return (
     [
       a.description,
-      a.inheritEnv ? null : "隔离：无 CLAUDE.md / 本机技能 / MCP",
-      a.tools ? `工具：${a.tools.join(" ")}` : null,
+      a.inheritEnv
+        ? null
+        : codex
+          ? "隔离：无 AGENTS.md / 环境技能 / MCP"
+          : "隔离：无 CLAUDE.md / 本机技能 / MCP",
+      a.tools
+        ? codex
+          ? "Codex 不强制工具白/黑名单"
+          : `工具：${a.tools.join(" ")}`
+        : null,
     ]
       .filter(Boolean)
       .join(" · ") || undefined
@@ -106,16 +115,15 @@ export function agentHint(a: AgentLike): string | undefined {
 }
 
 /**
- * agent 只对 claude 家族生效 —— `--agent/--agents/--plugin-dir` 全是 claude CLI 专属，
- * 服务端 chat/route.ts 与 tasks.ts 都会把非 claude 的 agentId 钳成 null。
- * UI 必须跟着说实话，否则就是「配了却静默不生效」。
+ * Claude uses native agent/plugin flags; Codex translates the same product
+ * abstraction into a system persona. Mock remains unsupported.
  */
 export function agentSupported(provider: ProviderId): boolean {
-  return providerFamily(provider) === "claude";
+  return providerFamily(provider) !== "mock";
 }
 
 export const AGENT_UNSUPPORTED_HINT =
-  "当前模型不是 claude 家族，Agent 不生效（--agent 是 claude CLI 专属，服务端会忽略）";
+  "Mock 调试 provider 不执行 Agent 配置";
 
 // ── 权限审批 ──────────────────────────────────────────────────────────────────
 

@@ -102,10 +102,10 @@ Trellis 的处理方式：每个回答都是一个**节点**，选中文字 → 
 
 > 详见 [下方专章](#与-cli-双向打通)。这是 Trellis 区别于一般 AI 客户端的核心。
 
-- **Attach 本机 CLI 会话**：浏览 `~/.claude/projects` 里已有的 Claude Code 会话清单，手选 attach 进 trellis（不按目录批量灌）
+- **Attach 本机 CLI 会话**：按 provider 浏览 `~/.claude/projects` 或 `$CODEX_HOME/sessions` 里的已有会话，手选 attach 进 Trellis（不按目录批量灌）
 - **真双向实时同步**：CLI 侧聊新一轮 → watcher ≤1s 自动导入 trellis；trellis 侧续聊 → resume 写回同一份 jsonl + 身份对账。两边落同一 transcript
 - **分支对齐**：CLI 的 rewind / `/branch` ↔ trellis 分叉双向对齐（一棵 trellis 树 = 一组 CLI session 按 message uuid 求并集）。trellis 从任意历史节点分叉 → 构造前缀 jsonl，在 CLI 侧也成为独立可 `--resume` 的会话
-- **「在 CLI 继续」**：Project 会话每个回答下一键复制 `cd <workspace> && claude --resume <id>`，回终端无缝接着聊
+- **「在 CLI 继续」**：Project 会话每个回答下一键复制 `claude --resume <id>` 或 `codex resume <id>` 命令，回终端无缝接着聊
 
 ### 参考材料
 
@@ -120,7 +120,7 @@ session 创建时锁定 mode + workspace + **model**（per-session 持久化，�
 
 | 模式 | 类比 | cwd | Tools / Skills / MCP | 跨节点记忆 | 适合 |
 |---|---|---|---|---|---|
-| **Chat** | GPT 网页客户端 | 无 | `WebSearch + WebFetch`；⚡ 增强模式 = scratch 目录 + 全工具 | 无 | 默认日常问答、补认知、查信息；临时跑个命令 / skill 开增强 |
+| **Chat** | GPT 网页客户端 | 无 | Claude：`WebSearch + WebFetch`；Codex：内置 cached web search + read-only；⚡ 增强模式 = scratch 目录 + 全工具 | 无 | 默认日常问答、补认知、查信息；临时跑个命令 / skill 开增强 |
 | **Project** | Claude Projects / 长期项目 | session 绑定 | 全开 | 有（沿祖先链，分支间隔离） | 在仓库里干活、跨节点延续记忆，cache 命中通常 70%+ |
 
 Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **Mock**（确定性假回复，看 UI 用），两档语义对齐。
@@ -128,15 +128,15 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 ### 工具调用与文件预览（Project / 增强 Chat）
 
 - **工具调用可视化**：解析 stream-json 的 `tool_use` / `tool_result`，在节点折叠区展示每次 Bash / Read / Write / WebFetch 的入参与输出
-- **交互式工具表单**：模型发起 `AskUserQuestion` / `ExitPlanMode` 时渲染成可填表单（单选/多选/批准计划），就地作答回灌
+- **交互式工具表单（Claude）**：模型发起 `AskUserQuestion` / `ExitPlanMode` 时渲染成可填表单（单选/多选/批准计划），就地作答回灌
 - **本地文件预览**：回答里生成或提到的文件 / HTML 直接在 trellis 内预览（HTML 走 opaque-origin sandbox iframe，图片/PDF/markdown 各自渲染）；行内像路径的代码也可点开。安全围栏 = session 实际碰过的目录范围，realpath 归一防逃逸
 
 ### 全文搜索 · 命令面板 · Skill
 
 - **⌘P 跨 session 全文搜**：FTS5 trigram 分词（中英混排都能子串匹配），覆盖问题 / 回答 / 参考 / 笔记，按 mode facet 过滤
 - **命令面板**：首屏输入框 `/` 前缀触发 —— `/new` `/clear`（🧹 开新话题/清空上下文）`/archive` `/switch` `/model` 等 session 元操作，纯 Trellis 命令本地执行不发 LLM
-- **Skill 入口**：输入 `/<skill-name>` 复用 `~/.claude/skills/` 下 50+ skill（由 claude CLI 原生执行；纯 Chat 点选自动开启增强模式）
-- **System Prompt 可配**（Chat）：5 个预设角色 + 自定义，per-session 锁定
+- **Skill 入口**：Claude 输入 `/<skill-name>`；Codex 输入 `$<skill-name>`，并按 `.agents/skills`、`~/.agents/skills`、`$CODEX_HOME/skills` 等作用域发现（纯 Chat 点选自动开启增强模式）
+- **Agent / System Prompt 可配**：5 个内置 Agent + 自定义人设，Claude 与 Codex 都可用；per-session 锁定，也支持 `@slug` 单轮调用
 
 ### 会话工作台
 
@@ -295,23 +295,23 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 
 ## 与 CLI 双向打通
 
-Trellis 把每个会话当成真 Claude Code CLI 会话来对待——Project 模式本就是 spawn 真 `claude` 把 transcript 写进 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`。在此之上做了三件事：
+Trellis 把每个 Project 会话当成真实 CLI thread：Claude transcript 位于 `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`，Codex rollout 位于 `$CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl`。在此之上做了三件事：
 
 ### Attach + 双向同步
 
 - **发现 + attach**：浏览本机 CLI 会话清单（排除 trellis 自己 spawn 的，防回环），手选哪些 attach。attach 的会话 origin 标 `cli-import`，跑在 Project 模式
 - **CLI → trellis**：watcher（`instrumentation.ts` 启动）监听 attached jsonl 所在目录，文件一变（CLI 侧聊了新轮 / rewind / `/branch`）→ debounce 后增量重导 → SSE 推前端无刷新 reload
-- **trellis → CLI**：在 attached 会话续聊 = `claude --resume` 写回同一 jsonl；done 后**身份对账**（删临时流式节点，让 canonical jsonl-uuid 节点接管），两个方向收敛到同一份 transcript
+- **Trellis → CLI**：在 attached 会话续聊 = 对应 provider 的 resume 写回同一 transcript；done 后**身份对账**（删临时流式节点，让 canonical CLI 节点接管），两个方向收敛到同一份 transcript
 - **物理约束**：同一会话别在 CLI 和 trellis 同时各聊一轮（抢 append）；串行无碍
 
 ### 分支对齐（一棵树 = 一组 CLI session）
 
-CLI 的会话是线性的，trellis 的是树。统一模型：**一棵 trellis 树 = 一组 CLI session（root + 各 fork）按 message uuid 求并集**。
+CLI 的单条会话是线性的，Trellis 的是树。统一模型：**一棵 Trellis 树 = 一组 CLI thread（root + 各 fork）的 lineage 并集**。
 
-- CLI 里 `/branch`（或 `--fork-session`）出来的分支 jsonl 共享祖先 uuid → trellis 自动 union 成同一棵树的子树
-- trellis 里从 tip 续 = 线性 append 同 jsonl；从**任意历史节点分叉** = trellis 构造一份「前缀 jsonl」（复制 root→X、复用 uuid、改 sessionId），`claude --resume` 当成在 X 分叉的合法会话——于是这条分支在 CLI 端也独立可 resume
+- CLI 里 Claude `/branch` / `--fork-session` 或 Codex `fork` 产生的新 transcript → Trellis 自动按共享前缀归并到同一棵树
+- Trellis 里从 tip 续 = 线性 append 同 transcript；从**任意历史节点分叉** = 构造 root→X 的前缀 transcript 并换新 session/thread id，再由对应 CLI resume，因此分支在终端也能独立继续
 
-### `/clear` 与 `/compact` 怎么对应
+### Claude `/clear` 与 `/compact` 怎么对应
 
 - **`/clear`**（CLI 抹掉上下文、开新 session id）→ 那是另一份不共享 uuid 的 jsonl，trellis **不会**自动并进当前树（它是「不相关的新对话」），而是作为一条独立可 attach 的会话出现。等价物 = trellis 的「🧹 新话题」（同树里加一个全新上下文的根）
 - **`/compact`**（同 session 摘要压缩、不换 jsonl）→ 在原 jsonl 追加一个 `type:"system"` 边界节点，对话继续。trellis 读全量 jsonl，**边界前后所有原始轮都完整显示**（compact 只压缩「模型那侧的窗口」，不动存储）——解析器专门桥接这个 system 边界节点，保证父链不在 compact 处断裂
@@ -334,16 +334,17 @@ session 创建时锁定 mode + workspace，整棵树共用。两档差别在 pro
 
 ### Project —— 长期协作 + per-lineage 真 CLI session
 
-- Prompt：**只发当前问题**给 claude，让它 resume 持久 session 自己找历史
-- 执行：**一条岔一个 claude session（lineage）**——顺着聊 = `--resume` 线性 append 同一份 jsonl；真分叉 = 在分叉点构造前缀 jsonl 成新 session（与 attached 会话的 P2 引擎同一套）；cwd 绑定 workspace_path
-- **沿祖先链共享 claude 全部历史**（分支间互相隔离），线性续聊 cache hit 通常占 input token 70%+
+- Prompt：**只发当前问题**给 CLI，让它 resume 持久 thread 自己找历史
+- 执行：**一条岔一个 CLI lineage**——顺着聊 = resume 线性 append 同一份 transcript；真分叉 = 在分叉点构造前缀 transcript 成新 session/thread；cwd 绑定 workspace_path
+- **沿祖先链共享 CLI 历史**（分支间互相隔离），线性续聊通常能复用大量 cache
 - 「🧹 新话题」= 同树里另起一个 root（全新 fresh context，不 resume 旧记忆，对应 CLI `/clear`）
 - 存量会话（per-lineage 上线前建的）保持旧的全树共享行为不迁移；新建 project session 自动 per-lineage
 
 ### Codex 那边
 
-- `Chat` → codex sandbox `read-only`、tools 关，cwd `~`（Codex 暂无 WebSearch 等价，offline）；增强模式 = scratch 目录 + 整体绕过沙箱
-- `Project` → `~/.codex/config.toml` + MCP 全开，共享 `~/.codex/sessions/<id>` 多轮 history，cwd = workspace_path
+- `Chat` → sandbox `read-only`，隔离 AGENTS.md / 环境 skills / plugins / MCP，保留 Codex 内置 web search（CLI 默认 cached）；增强模式 = scratch 目录 + 全工具
+- `Project` → `$CODEX_HOME/config.toml` + MCP/tools/web 全开，一条分支一个可独立 resume 的 rollout lineage，cwd = workspace_path
+- Agent 人设、模型、静态 sandbox 权限、隔离与挂载 skill 生效；Codex exec 当前没有接入 Trellis 的逐项审批回调，工具白/黑名单也无法强制
 
 ---
 
@@ -370,7 +371,7 @@ flowchart LR
     end
 
     DB[("~/.trellis/data.db<br/>SQLite WAL")]
-    JSONL[("~/.claude/projects<br/>CLI transcripts")]
+    JSONL[("~/.claude/projects · $CODEX_HOME/sessions<br/>CLI transcripts")]
 
     UI -- "POST /api/chat" --> Chat
     Chat -- "SSE delta" --> UI
@@ -393,7 +394,7 @@ flowchart LR
 
 - **前端**：Next.js 16 App Router，单页，所有"导航"都是 Zustand 状态。线性 thread + ReactFlow/Dagre 画布双视图；stream-bus 把 SSE delta 直喂 DOM，绕开 React 重渲染热路径
 - **服务端**：Route Handlers（`runtime: nodejs`），spawn `claude -p … --output-format stream-json` / `codex exec --json`，按行解析 JSONL 转 SSE
-- **CLI 同步**：`instrumentation.ts` 启动单例 watcher；解析器 `lib/server/cli-import.ts`（jsonl → Q/A 树，纯函数）+ `cli-import-db.ts`（union upsert）+ `cli-fork.ts`（前缀 jsonl 构造 / lineage 解析）
+- **CLI 同步**：`instrumentation.ts` 启动单例 watcher；Claude/Codex provider parser（jsonl → Q/A 树）+ `cli-import-db.ts`（union upsert）+ `cli-fork.ts`（前缀 transcript / lineage 解析）
 - **存储**：`~/.trellis/data.db`（better-sqlite3 WAL），schema 在 `lib/server/sqlite.ts` 启动自迁移
 - **mark 注入**：选区/笔记/锚点高亮是 React 渲染**之后**对 textNode wrap `<mark>`（`lib/dom-mark-injector.ts`），不改 markdown 源
 
