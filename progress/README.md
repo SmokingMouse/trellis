@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-codex 权限卡 + Task 树（SDK 0.7.0）已部待真机验收；response 过程/结论分层（PR #17）已合并待部署；cpa codex 上游故障在查（failures.md）。
+权限确认全拦（agent@0.8.0）+ 响应分层（PR #17）待部署；cpa codex 上游故障在查（failures.md）。
 
 ## Goals
 

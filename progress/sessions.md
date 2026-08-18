@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 106 / 105 / 104 / 103 / 102）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 107 / 106 / 105 / 104 / 103）。更早的见 `archive.md`。
+
+### Session 107（2026-08-18，权限确认升级全拦：agent@0.8.0 + READONLY_AUTO_ALLOW 免审名单）
+- **触发**: PR #15（并行会话的 askTools "all" + mcpServers 一等协议）review 合并、SDK 发 0.8.0 后，trellis 接力吃下全拦。
+- **Done**: ① bump `^0.8.0`；② `sdk-adapter` 的 `APPROVAL_ASK_TOOLS` 名单换 `"all"`（CLI `permissions.ask:["*"]`）——旧名单外的可变更工具（MCP 工具是最大的洞，`mcp__*` 名字穷举不完）此前被全局 allowlist 静默放行；③ 「哪些免审」的判断挪进 run-bus dispatcher：新增 `READONLY_AUTO_ALLOW`（Read/Glob/Grep/LS/WebFetch/WebSearch/TodoWrite/NotebookRead/BashOutput/Task/Skill/SlashCommand），权限确认下只读/编排类自动放行、其余一律弹卡；Task/Skill 外壳放行不漏审——内部可变更调用各自再进回调逐个弹卡。
+- **验证**: 真机 claude 走 trellis provider 层 + requireApproval：回调收到 `["Read","Bash"]`（Read 旧名单下直接绕过、现在进回调）、放行后回答 DONE；tsc 零错、eslint 改动文件零输出。agent@0.8.0 由干净 main 构建发布（PR #15 内容 58/58 复核）。
+- **版本归属澄清**: maxTurns/skills 两项实际已随 0.7.0 出包（并行会话在 0.7.0 发布前落的 main）；0.8.0 增量 = askTools 全拦 + McpServerConfig。
+- **Next**: 真机权限确认会话验弹卡范围（Bash/Edit/MCP 弹、Read 不弹、「总是允许」仍生效）；cpa codex 上游故障（failures.md）恢复后复验 codex 注入路径。
 
 ### Session 106（2026-08-18，agent 长任务正文一坨糊：分段 + 过程/结论分层，PR #17 已合并）
 - **触发**: 用户截图「正文+思考+正文……会导致正文的阅读体验特别差」——TurnCard 把几十段过程叙述连成一坨。
@@ -32,11 +39,3 @@
 - **Done（`components/TreePanel.tsx`）**: 纵横分开缩放——`scaleX` 仍贴合面板宽（272px，不出横向滚动条），`scaleY` 优先塞进 300px、塞不下时守住下限 `GRAPH_MIN_SCALE_Y = 12/126`（层距 ≥12px），高度溢出交给外层 body 的 `overflow-y-auto` 滚动。配套：锚点节点加 `data-graph-active`，切图/跳转后 `scrollIntoView({block:"nearest"})` 跟随，否则长树切过去看到的是树顶一屏灰点。
 - **验证**: tsc 零错、eslint 该文件零输出。真机视觉效果待用户看。已合并推送（`39ff175` → merge → push origin/main），**未部署**。
 - **Next**: 用户在真机开同一棵 82 节点树的图形视图确认：点间距可读、滚动顺、当前点在视口内。
-
-### Session 102（2026-08-18，codex picker 补 endpoints.yaml 第三方端点枚举，PR #16）
-- **触发**: S101 修通了本机 canonical yaml 的 codex 标记后，picker 仍选不到 yaml 里的第三方模型——`codexProviders()` 只读 `~/.codex/models_cache.json`，没登录过 ChatGPT 的机器只剩裸 `codex`（默认 gpt-5.5），带 `codex: { wire_api: responses }` 标记的端点模型（resolveCodexModel 可 `-c` 注入、无需登录）在 UI 上不存在。
-- **Done**（`app/api/providers/route.ts`，分支 `feat/codex-picker-yaml-endpoints`，PR #16 base main）: `codexProviders()` 改双源合并——新增 `codexYamlProviders()` 用 `loadEndpoints()` 原始 ConfigFile（不走 `listEndpoints`，EndpointInfo 不带 codex 块）枚举带标记 provider 的 models → `codex:<model>`（label `codex · <provider> · <model>`，hasKey = `process.env[api_key_env]` 有无）；models_cache.json 读取拆成 `codexCacheProviders()` 失败返回 `[]`（不再连带吞掉 yaml 来源）；按 id 去重 yaml 优先（与 resolveCodexModel 的 yaml 精确命中优先一致）；裸 `codex` 条目保留最前（DB 旧会话 model="codex" 按 exact id 查显示）。
-- **验证**: tsc 零错；临时 export + `SM_ENDPOINTS_PATH` 指临时 yaml 三场景实测（bun --conditions react-server）——带标记 provider 2 模型出现且 hasKey 随 CPA_API_KEY 有无翻转、不带标记 provider 不出现、`HOME` 指空目录（无 models_cache）时 yaml 枚举仍工作、合并后无重复 id；eslint 与 git stash 基线对照零新增；`bun run test:codex-cli` ALL PASS。
-- **插曲**: `~/.agent-gateway.env` 某行值含未闭合引号，zsh `source` 整体失败（它是 dotenv 格式非 shell 安全格式）——测试时改用 grep 单行提取 CPA_API_KEY 注入。
-- **Next**: PR #16 review 后合 main；部署走 devbox（本机不部）。合并部署后用户在 picker 选 `codex:gpt-5.6-sol` 之类真机验一轮（衔接 S101 Next 的 `codex:gpt-5.5` 真机确认）。
-

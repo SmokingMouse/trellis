@@ -22,6 +22,26 @@ import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 // project keeps its bypassPermissions YOLO behaviour (zero stall).
 const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
+// 权限确认模式的免审名单。agent@0.8.0 起 ask 规则是 "all"（全部工具进回调，
+// 否则 MCP 等名单外可变更工具会被用户全局 allowlist 静默放行），「哪些不用弹卡」
+// 的判断从 SDK 的 ask 名单挪到这里：只读/纯编排类自动放行，其余一律弹卡。
+// Task/Skill/SlashCommand 本体只是派生与读取——它们内部的可变更调用（Bash/Write/
+// MCP…）各自再进回调，逐个弹卡，不会因放行外壳而漏审。
+const READONLY_AUTO_ALLOW = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "WebFetch",
+  "WebSearch",
+  "TodoWrite",
+  "NotebookRead",
+  "BashOutput",
+  "Task",
+  "Skill",
+  "SlashCommand",
+]);
+
 // A路②: the onCanUseTool callback shape the SDK hands us. Redeclared narrowly
 // (same as ProviderEvent) to avoid widening server-only imports.
 export type OnCanUseTool = (req: {
@@ -367,10 +387,13 @@ async function runLoop(
         //   YOLO(默认) → instant allow。This is the★ invariant: workspace/
         //   project keep their bypass — no UI, no wait, zero stall.
         //   权限确认(requireApproval) → 不放行,落到下面的暂停路径弹权限卡;
-        //   本轮内点过「总是允许」的工具名除外。
+        //   例外:只读/编排类免审名单(READONLY_AUTO_ALLOW,ask="all" 后全部
+        //   工具都进回调,免审判断在这层做)与本轮内点过「总是允许」的工具名。
         if (
           !INTERACTIVE_TOOLS.has(req.toolName) &&
-          (!args.requireApproval || state.approvedTools.has(req.toolName))
+          (!args.requireApproval ||
+            READONLY_AUTO_ALLOW.has(req.toolName) ||
+            state.approvedTools.has(req.toolName))
         ) {
           return { behavior: "allow", updatedInput: req.input };
         }

@@ -25,12 +25,14 @@ export function ensureChatScratch(): void {
   }
 }
 
-// 权限确认模式下强制走审批的工具（claude permissions.ask 规则）。只列「可变更」
-// 类——Read/Glob/Grep 等只读工具 claude 本就免审，继续放行；这份名单的意义是
-// 压过用户全局 settings.json 的 allow 规则（本机裸 "Bash" 全放行，2026-07-15
-// 实测不注入 ask 则 can_use_tool 永不触发）。MCP 等未列工具走 claude 默认审批
-// （未 allowlist 的也会进 can_use_tool → 同样弹卡）。
-const APPROVAL_ASK_TOOLS = ["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"];
+// 权限确认模式的 ask 规则：agent@0.8.0 起用 "all"（CLI `permissions.ask:["*"]`），
+// **全部**工具进 can_useTool 回调，压过用户全局 settings.json 的 allow 规则
+// （本机裸 "Bash" 全放行，2026-07-15 实测不注入 ask 则回调永不触发）。
+// 换 "all" 的动机：旧名单（Bash/Write/Edit/MultiEdit/NotebookEdit）之外的可变更
+// 工具会被全局 allowlist 静默放行——MCP 工具是最大的洞（mcp__* 名字排列组合，
+// 名单穷举不完）。「哪些免审」的判断随之挪进 run-bus 的 dispatcher（只读工具
+// 自动放行名单 READONLY_AUTO_ALLOW），SDK 层只负责「全都送进来」。
+const APPROVAL_ASK_TOOLS = "all" as const;
 
 /** S88: 把自定义 Agent 叠加到已算好的 RunOptions 上。
  *
