@@ -1,0 +1,22 @@
+{
+  "sessionId": "84ca08b8-d55a-4e85-a5ea-0b30c7056874",
+  "agent": "claude-code",
+  "model": "auto_model/alwaysday1_max",
+  "branch": "main",
+  "startedAt": "2026-08-18T14:06:31+08:00",
+  "condensedAt": "2026-08-18T14:35:26+08:00",
+  "reason": "compaction",
+  "turns": 1,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 346351,
+    "output": 92649,
+    "cached": 8055051
+  },
+  "tools": [
+    "AskUserQuestion",
+    "Bash",
+    "Edit",
+    "Read"
+  ]
+}
