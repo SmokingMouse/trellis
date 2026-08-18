@@ -281,7 +281,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               ⚠
             </span>
           )}
-          <ToolCallBadge toolCalls={n.toolCalls} />
+          <ToolCallBadge toolCalls={n.toolCalls} stats={n.toolCallStats} />
           <TokenMeta tokenCount={n.tokenCount} variant="compact" />
         </div>
         <Handle type="source" position={Position.Bottom} />
@@ -458,7 +458,11 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         ) : n.response ? (
           <MarkdownBody cacheKey={n.id} content={n.response} />
         ) : (
-          <EmptyResponseNotice hasToolCalls={(n.toolCalls?.length ?? 0) > 0} />
+          <EmptyResponseNotice
+            hasToolCalls={
+              (n.toolCalls?.length ?? 0) > 0 || (n.toolCallStats?.total ?? 0) > 0
+            }
+          />
         )}
         {errorSuperseded && (
           <SupersededErrorNotice nodeId={n.id} errorMessage={n.errorMessage} />
@@ -570,7 +574,10 @@ function NodeFooter({
         </>
       ) : (
         <>
-          <ToolCallBadge toolCalls={node.toolCalls} />
+          <ToolCallBadge
+            toolCalls={node.toolCalls}
+            stats={node.toolCallStats}
+          />
           <TokenMeta tokenCount={node.tokenCount} variant="full" />
           {node.response && (
             <CopyButton
@@ -719,25 +726,46 @@ function truncate(s: string, n: number) {
 // 🔧 is every call in the turn; delegation gets its own 🤖 / ⚙ count so a turn
 // that fanned out reads as such at a glance instead of just showing an
 // inflated tool number.
-function ToolCallBadge({ toolCalls }: { toolCalls: ToolCall[] }) {
-  const tree = buildToolTree(toolCalls);
-  const counts = countToolTree(tree);
-  if (counts.total === 0) return null;
-  const labels = walkToolTree(tree)
-    .filter((n) => n.kind === "subagent")
-    .map((n) => subagentLabel(n.meta));
+//
+// 大会话的 toolCalls 不随会话载荷下发（改发预计算 stats），所以 badge 优先
+// 用 stats——省掉每个卡片一次 buildToolTree（91 节点实测 10ms，能省则省）。
+function ToolCallBadge({
+  toolCalls,
+  stats,
+}: {
+  toolCalls: ToolCall[];
+  stats?: ChatNodeData["toolCallStats"];
+}) {
+  let total = 0;
+  let subagents = 0;
+  let workflows = 0;
+  let labels: string[] = [];
+  if (toolCalls.length > 0) {
+    const tree = buildToolTree(toolCalls);
+    const counts = countToolTree(tree);
+    total = counts.total;
+    subagents = counts.subagents;
+    workflows = counts.workflows;
+    labels = walkToolTree(tree)
+      .filter((n) => n.kind === "subagent")
+      .map((n) => subagentLabel(n.meta));
+  } else if (stats) {
+    total = stats.total;
+    subagents = stats.subagents;
+    workflows = stats.workflows;
+    labels = stats.labels;
+  }
+  if (total === 0) return null;
   return (
     <span className="shrink-0 inline-flex items-center gap-1 text-nano tabular-nums text-ink-muted">
-      <span title={`本轮共 ${counts.total} 次工具调用`}>🔧{counts.total}</span>
-      {counts.subagents > 0 && (
-        <span title={`派了 ${counts.subagents} 个子 Agent：${labels.join("、")}`}>
-          🤖{counts.subagents}
+      <span title={`本轮共 ${total} 次工具调用`}>🔧{total}</span>
+      {subagents > 0 && (
+        <span title={`派了 ${subagents} 个子 Agent：${labels.join("、")}`}>
+          🤖{subagents}
         </span>
       )}
-      {counts.workflows > 0 && (
-        <span title={`跑了 ${counts.workflows} 个 Workflow`}>
-          ⚙{counts.workflows}
-        </span>
+      {workflows > 0 && (
+        <span title={`跑了 ${workflows} 个 Workflow`}>⚙{workflows}</span>
       )}
     </span>
   );

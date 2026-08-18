@@ -8,6 +8,14 @@ import {
   listNotesBySession,
 } from "@/lib/server/repo";
 import { isProviderId } from "@/lib/llm";
+import {
+  buildToolTree,
+  countToolTree,
+  subagentLabel,
+  walkToolTree,
+} from "@/lib/tool-tree";
+import { toolTitle } from "@/lib/tool-registry";
+import { generatedFilesFromToolCalls } from "@/lib/generated-files";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +29,37 @@ export async function GET(
   if (!session) return Response.json({ error: "not found" }, { status: 404 });
   const nodes = getSessionNodes(id);
   const notes = listNotesBySession(id);
-  return Response.json({ session, nodes, notes });
+  // 大会话里 toolCalls 能占载荷 98%（实测 10.26MB 里 10.12MB），而首屏只有
+  // 卡片角标和动线折叠态需要几个数字。这里剥离完整数组，改发预计算的
+  // toolCallStats + generatedFiles；完整数组按需走 GET /api/nodes/[id]/tool-calls。
+  // 流式节点不受影响（toolCalls 随流事件进客户端 store）。
+  const slimNodes = nodes.map((n) => {
+    const tree = buildToolTree(n.toolCalls);
+    const counts = countToolTree(tree);
+    const labels = walkToolTree(tree)
+      .filter((t) => t.kind === "subagent")
+      .map((t) => subagentLabel(t.meta));
+    // 顶层工具名去重，喂给折叠摘要行（无委派时点名 "Bash、Read、Edit"）。
+    // 截 5 个：客户端只显示前 4 个 + "…"，多给一个是为了让它判断有 "更多"。
+    const tools = [...new Set(tree.map((t) => toolTitle(t.call)))].slice(0, 5);
+    return {
+      ...n,
+      // toolCalls 占载荷 98%（实测 10.12MB / 10.26MB），不下发——
+      // JSON.stringify 会丢弃 undefined 字段。客户端按需走
+      // GET /api/nodes/[id]/tool-calls。
+      toolCalls: undefined,
+      toolCallStats: {
+        total: counts.total,
+        subagents: counts.subagents,
+        workflows: counts.workflows,
+        errors: counts.errors,
+        labels,
+        tools,
+      },
+      generatedFiles: generatedFilesFromToolCalls(n.toolCalls),
+    };
+  });
+  return Response.json({ session, nodes: slimNodes, notes });
 }
 
 export async function PATCH(

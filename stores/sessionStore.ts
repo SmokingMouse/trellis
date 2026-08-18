@@ -7,6 +7,7 @@ import type {
   Note,
   ParentAnchor,
   Session,
+  ToolCall,
 } from "@/lib/types";
 import {
   clearStreamPending,
@@ -345,12 +346,20 @@ function loadTreePanelView(): TreePanelView {
 }
 
 // API node → client node (add position field, drop nullable distinction)
-type ApiNode = Omit<ChatNode, "position" | "topicLabel"> & {
+// toolCalls 可选：GET /api/sessions/[id] 已剥离完整数组（改发 toolCallStats +
+// generatedFiles），按需走 GET /api/nodes/[id]/tool-calls；单节点端点仍带全量。
+type ApiNode = Omit<ChatNode, "position" | "topicLabel" | "toolCalls"> & {
   topicLabel?: string | null;
+  toolCalls?: ToolCall[];
 };
 
 function apiNodeToChatNode(n: ApiNode): ChatNode {
-  return { ...n, position: { x: 0, y: 0 }, topicLabel: n.topicLabel ?? null };
+  return {
+    ...n,
+    toolCalls: n.toolCalls ?? [],
+    position: { x: 0, y: 0 },
+    topicLabel: n.topicLabel ?? null,
+  };
 }
 
 type State = {
@@ -415,6 +424,10 @@ type State = {
   // claude fetcher emits SSE `progress` events; cleared when the node
   // transitions to status=done. Transient — never persisted.
   fetchProgress: Record<string, string>;
+  // 按需拉取 toolCalls 的在途标记（nodeId → loading）。GET /api/sessions/[id]
+  // 不再下发完整数组，展开动线时由 loadNodeToolCalls 拉取；这个 map 让 UI
+  // 能显示「加载中…」并给 action 去重（同节点不并发拉两次）。
+  toolCallsLoading: Record<string, boolean>;
   // When user wants to land inside a node *and* highlight a specific
   // span: clicking "↳ 从「xxx」分叉" on a child (kind="child", anchored
   // by data-child-id), or jumping back from a note in NotesDrawer
@@ -595,6 +608,9 @@ type Actions = {
   // response/usage/error, and re-streams against the original question +
   // parent context. Avoids polluting the tree with retry siblings.
   retryNode: (nodeId: string) => Promise<void>;
+  // 按需拉取单个节点的完整 toolCalls（GET /api/nodes/[id]/tool-calls）。
+  // 会话载荷已剥离这部分，展开动线面板时调用。幂等：已有数据 / 在途中直接返回。
+  loadNodeToolCalls: (nodeId: string) => Promise<void>;
   // Cancel an in-flight stream. Triggers fetch abort → server marks the row
   // status="error" / errorMessage="aborted" with whatever partial response
   // was already persisted. No-op if the node has no controller registered
@@ -791,6 +807,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   viewMode: "canvas",
   streamAlert: null,
   fetchProgress: {},
+  toolCallsLoading: {},
   pendingScrollAnchor: null,
   doneToasts: [],
   abortArm: null,
@@ -1451,6 +1468,39 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+  },
+
+  loadNodeToolCalls: async (nodeId) => {
+    const n = get().nodes[nodeId];
+    // 已有全量数据（流式节点 / 单节点端点带回来的）就不必再拉。
+    if (!n || n.toolCalls.length > 0) return;
+    if (get().toolCallsLoading[nodeId]) return;
+    set((s) => ({
+      toolCallsLoading: { ...s.toolCallsLoading, [nodeId]: true },
+    }));
+    try {
+      const res = await fetchWithTimeout(
+        `/api/nodes/${nodeId}/tool-calls`,
+        5000,
+      );
+      if (!res.ok) return;
+      const { toolCalls } = (await res.json()) as { toolCalls?: ToolCall[] };
+      if (!Array.isArray(toolCalls)) return;
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        // 拉取期间节点被换过（重跑 / 切会话）就别往旧节点上盖。
+        if (!cur || cur.toolCalls.length > 0) return s;
+        return {
+          nodes: { ...s.nodes, [nodeId]: { ...cur, toolCalls } },
+        };
+      });
+    } catch {
+      // 拉取失败静默降级：角标统计还在，只是展开动线没内容。下次展开重试。
+    } finally {
+      set((s) => ({
+        toolCallsLoading: { ...s.toolCallsLoading, [nodeId]: false },
+      }));
+    }
   },
 
   abortStream: (nodeId) => {

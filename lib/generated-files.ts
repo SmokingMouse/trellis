@@ -1,18 +1,23 @@
-import type { ChatNode } from "./types";
+import type { ChatNode, GeneratedFile, ToolCall } from "./types";
+
+export type { GeneratedFile };
 
 // Tools whose calls mean "a file was written/changed" — the ones worth
 // offering a preview for. Read/Bash/Grep are excluded (no deterministic
 // output path). NotebookEdit uses notebook_path instead of file_path.
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
-export type GeneratedFile = { absPath: string; name: string };
-
 // Pull the distinct files this node's turn wrote/edited, in first-seen order.
 // Absolute paths only (tool calls report absolute) — the server fences these to
 // the session whitelist, so we don't pre-filter by workspace here.
-export function generatedFilesFromNode(node: ChatNode): GeneratedFile[] {
+//
+// 接受裸 toolCalls 数组而非整个 node：服务端预计算（随会话载荷下发的
+// generatedFiles）和客户端 GeneratedFilesBar 共用同一份逻辑。
+export function generatedFilesFromToolCalls(
+  toolCalls: ToolCall[],
+): GeneratedFile[] {
   const seen = new Map<string, GeneratedFile>();
-  for (const tc of node.toolCalls) {
+  for (const tc of toolCalls) {
     if (!WRITE_TOOLS.has(tc.name)) continue;
     const input = tc.input as Record<string, unknown> | null;
     if (!input || typeof input !== "object") continue;
@@ -23,6 +28,10 @@ export function generatedFilesFromNode(node: ChatNode): GeneratedFile[] {
     }
   }
   return [...seen.values()];
+}
+
+export function generatedFilesFromNode(node: ChatNode): GeneratedFile[] {
+  return generatedFilesFromToolCalls(node.toolCalls);
 }
 
 // Build the preview URL from an ABSOLUTE on-disk path: the path (minus leading

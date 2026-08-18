@@ -88,9 +88,12 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
       />
       {/* One chronological timeline of everything the turn did — delegated
           work nests under the call that spawned it rather than being pulled
-          out into a parallel panel. */}
+          out into a parallel panel. 大会话的 toolCalls 不随载荷下发，展开时
+          由 ToolTimeline 自己按需拉取（折叠态用 stats 渲染）。 */}
       <ToolTimeline
+        nodeId={node.id}
         toolCalls={node.toolCalls}
+        stats={node.toolCallStats ?? null}
         live={node.status === "streaming"}
       />
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
@@ -449,7 +452,11 @@ function ResponseBody({ node }: { node: ChatNode }) {
           </div>
         )
       ) : (
-        <EmptyResponseNotice hasToolCalls={node.toolCalls.length > 0} />
+        <EmptyResponseNotice
+          hasToolCalls={
+            node.toolCalls.length > 0 || (node.toolCallStats?.total ?? 0) > 0
+          }
+        />
       )}
       {isError && hasChildren && (
         <SupersededErrorNotice

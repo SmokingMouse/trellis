@@ -218,6 +218,28 @@ function migrate(db: Database) {
   // lineage of Claude CLI jsonl files (root + fork sessions). The old
   // sessions.source_jsonl_path remains a denormalized root path; this table is
   // the authoritative member list and carries per-jsonl sync cursors.
+  //
+  // 旧版表用 cli_session_id（+ provider_family），后改名 claude_session_id。
+  // CREATE TABLE IF NOT EXISTS 对已存在的旧表是空操作，下面的 INSERT 会因
+  // claude_session_id 列不存在而炸（实测 prod 旧表 0 行）。空表直接 DROP
+  // 重建；非空则 RENAME COLUMN 兜底（SQLite 会连带更新主键约束）。
+  const oldCliCol = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('cli_lineages') WHERE name = 'cli_session_id'",
+    )
+    .get();
+  if (oldCliCol) {
+    const { n } = db
+      .prepare("SELECT COUNT(*) AS n FROM cli_lineages")
+      .get() as { n: number };
+    if (n === 0) {
+      db.exec("DROP TABLE cli_lineages");
+    } else {
+      db.exec(
+        "ALTER TABLE cli_lineages RENAME COLUMN cli_session_id TO claude_session_id",
+      );
+    }
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS cli_lineages (
       trellis_session_id TEXT NOT NULL,

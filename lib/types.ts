@@ -162,6 +162,23 @@ export type ToolCall = {
   agent?: TaskMeta;
 };
 
+// 预计算的工具调用统计——GET /api/sessions/[id] 用它替代完整 toolCalls 数组
+// （后者体积能占会话载荷的 98%，改为按需拉取，见 ChatNode.toolCalls 注释）。
+// 字段与 countToolTree 的产物对齐；labels 是子 Agent 名（角标 tooltip 用），
+// tools 是顶层工具名去重（折叠摘要行在无委派时点名工具，≤5 个，客户端截 4）。
+export type ToolCallStats = {
+  total: number;
+  subagents: number;
+  workflows: number;
+  errors: number;
+  labels: string[];
+  tools: string[];
+};
+
+// 一轮里被写/改过的文件（GeneratedFilesBar 用）。从 toolCalls 里抽
+// Write/Edit/MultiEdit/NotebookEdit 的 file_path 去重而得。
+export type GeneratedFile = { absPath: string; name: string };
+
 // A路②: a paused interactive-tool prompt awaiting a user answer. Set while
 // an AskUserQuestion / ExitPlanMode call is in flight; cleared on response or
 // abort. input carries the tool's raw arguments (e.g. AskUserQuestion's
@@ -215,7 +232,18 @@ export type ChatNode = {
   // from the provider's stream. Ordered by start time. Empty when the
   // model didn't call any tools (chat mode often, project
   // when the prompt didn't need them).
+  //
+  // 大会话里这一项能占 /api/sessions/[id] 载荷的 98%（实测 10MB 里 9.9MB），
+  // 所以 GET /api/sessions/[id] 不再下发它，改发预计算的 toolCallStats +
+  // generatedFiles；完整数组按需走 GET /api/nodes/[id]/tool-calls（展开动线
+  // 时才拉）。流式节点不受影响——toolCalls 随流事件进 store。
   toolCalls: ToolCall[];
+  // 预计算的工具调用统计（服务端随会话载荷下发）。toolCalls 被懒加载后，
+  // 卡片角标 / 动线折叠态靠它渲染，不必等按需拉取。
+  toolCallStats?: ToolCallStats | null;
+  // 预计算的「本轮生成文件」清单（服务端随会话载荷下发），供
+  // GeneratedFilesBar 在 toolCalls 未加载时渲染。
+  generatedFiles?: GeneratedFile[];
   // A路②: non-null while this node's run is paused on an interactive tool
   // (AskUserQuestion / ExitPlanMode) waiting for the user to answer. The UI
   // renders the form from this; POST /api/nodes/[id]/respond clears it.
