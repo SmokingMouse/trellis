@@ -1,0 +1,35 @@
+{
+  "id": "5290944bd945",
+  "timestamp": "2026-08-18T13:30:55+08:00",
+  "branch": "main",
+  "commitHash": "a9d67a356eefbd0b2d666be05dfe8a856e986053",
+  "commitMessage": "Merge branch 'perf/lazy-tool-calls': toolCalls 按需加载，载荷 10.26MB→167KB（S100）",
+  "filesModified": [
+    "app/api/nodes/[id]/tool-calls/route.ts",
+    "app/api/sessions/[id]/route.ts",
+    "components/ChatNode.tsx",
+    "components/GeneratedFilesBar.tsx",
+    "components/TurnCard.tsx",
+    "components/tools/ToolTimeline.tsx",
+    "lib/generated-files.ts",
+    "lib/types.ts",
+    "progress/README.md",
+    "progress/archive.md",
+    "progress/sessions.md",
+    "scripts/test-timeline-render.tsx",
+    "scripts/verify-slim-session.ts",
+    "stores/sessionStore.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 329,
+    "humanModified": 54,
+    "humanRemoved": 0,
+    "totalLinesChanged": 383,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
