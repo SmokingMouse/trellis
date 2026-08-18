@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-codex 逐 token 流（SDK 0.6.0）+ picker 枚举 + toolCalls 懒加载已合并，待本机部署与真机验收。
+codex 逐 token 流（SDK 0.6.0）+ picker 枚举 + toolCalls 懒加载已部本机（85fd082e4），待真机验收。
 
 ## Goals
 
