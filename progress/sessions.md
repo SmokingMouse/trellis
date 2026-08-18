@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 104 / 103 / 102 / 101 / 100）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 105 / 104 / 103 / 102 / 101）。更早的见 `archive.md`。
+
+### Session 105（2026-08-18，codex 权限卡 + 子 agent Task 树：SDK 0.7.0 + trellis 三闸放开）
+- **触发**: S104 交付后用户「开始做吧」——下一批：审批回调、turn/steer、子 agent Task 树。
+- **Done ① SDK 0.7.0**（已发 npm，干净 worktree 构建发布防并行 WIP 混入）: 审批——`permission "default"` + onCanUseTool → codex `approvalPolicy untrusted`，`requestApproval` RPC 映射成 claude 形状回调（commandExecution→`Bash` 带裸命令 / fileChange→`Edit` 带 diff），allow→accept / deny→decline / abort→cancel；权限确认模式 preflight 失败 fail loud 不再静默回退 exec（安全语义降级）。multi-agent——**修 0.6.0 潜伏 bug**（子线事件同连接到达，不过滤则子线 turn/completed 提前终结 run、子文本混主答）；`subAgentActivity`→spawn_agent 工具卡 + Task started/completed（taskType local_agent，summary=子线终答），子线工具挂 parentToolUseId。SDK 单测 48/48、审批 e2e 3/3、回归 e2e 11/11。
+- **Done ② trellis**: 三闸放开 codex——`approvalAvailable`（mock 除外）、route 创建钳制、`interactive = claude || codex`；AgentPicker / settings 文案同步（Codex 支持逐项审批）；InteractionForm 零改动（Bash 命令块 / 通用 JSON 兜底本就按 toolName 渲染）。tsc 零错。
+- **Done ③ steer 推迟**: 树模型无消费位（一节点一问一答），决策记 `decisions.md` 2026-08-18 条。
+- **验证与插曲**: trellis 全链（makeCodexProvider→SDK→codex）实测**审批回调触发 + accept 后命令真执行 + shell 工具卡到达**；但完整轮次撞上 cpa 的 codex 上游 `503 auth_unavailable` 间歇故障（当日内从间歇恶化为挂起，判别实验证明与本次改动无关：默认 provider 同轮次全通、exec 同注入同 503）→ 记 `failures.md` 待查（修复大概率在 cpa 服务端补池凭证）。
+- **Next**: cpa 池恢复后按 failures.md 判定命令复验注入路径；用户真机 project+需确认开 codex 会话点权限卡、multi-agent 提问看 Task 树；审批「总是允许」按 toolName 已复用 claude 机制无需改。
 
 ### Session 104（2026-08-18，codex 逐 token 流上线：SDK 0.6.0 app-server transport + trellis bump）
 - **触发**: 用户问「codex provider 不支持 stream？工具和子 agent 也没有？」。调研（两 research agent 挖 openai/codex 0.147 源码 + 本机协议探针）：exec --json 的 delta 是输出层**有意丢弃**且无 flag 可开；0.147 起 v1 协议移除、v2 唯一默认，官方全生态（TUI/exec/VS Code 扩展/Python SDK）已收敛到 app-server；实测 app-server `thread/resume` 直接续 exec 录的 rollout（同一存储、id 互通）。SDK 侧 08-04 推迟决策的重启条件「v2 收敛」已满足 → 解除。
@@ -30,11 +38,3 @@
 - **验证**: ① CPA `/v1/responses` 直连实测 `gpt-5.5` 可用；`gpt-5.5[1m]`/`gpt-5.5-fast[1m]` CPA 不认（unknown provider）；② 按 SDK 注入参数裸跑 `codex exec`（sm_endpoint + CPA_API_KEY）turn.completed 正常；③ `resolveEndpoint(..., "openai")` 实测 `gpt-5.5`/`gpt-5.6-sol` → cpa + 标记 + key present；删条目后 yaml 仍合法、`codex` provider 已不在列表；④ 重部后 prod smoke 全绿（含 /api/providers）。
 - **遗留**: ① 旧会话 `cd2ca8d2` 的 `[1m]` slug 无解（yaml 已无此模型，CPA 也不认），新会话选 `codex:gpt-5.5` 即可；② `modelhub` provider 随 LiteLLM :4000 今天删除已死，待清（modelhub-proxy:3456 是另一个东西，还活着）；③ SDK 登录闸对「config.toml 配了静态 key 默认 provider」的机器是假阴性（透传本可跑），根治要改 sm-toolkit；④ models_cache.json 若被 CLI 重建，`[1m]` 类 slug 仍会撞闸（不在 cpa 列表），plain slug 不受影响。
 - **Next**: 用户新开会话选 `codex:gpt-5.5` 真机确认一轮。
-
-### Session 100（2026-08-18，大会话 Tab 切换仍慢：toolCalls 改按需加载，载荷 10.26MB→167KB）
-- **触发**: S98（HAST 缓存 + 视口懒渲染）落地后，用户反馈「怎么访问我的 boe 机器」tab 切换**还是慢**。
-- **根因**: GET /api/sessions/[id] 返回 **10.26MB**，其中 **98.6% 是 toolCalls JSON（10.12MB）**，response 文本仅 0.09MB；每次切 tab 都重拉整个会话（无缓存），gate（server.ts）又剥掉压缩。on-box 处理 ~190ms 很快，慢在用户远程 Mac 浏览器吃满 10.26MB 传输。S98 治的是渲染侧，传输侧这块大头没动。
-- **Done（懒加载 toolCalls）**: 会话载荷剥离完整 toolCalls 数组，改发预计算 `toolCallStats`（total/subagents/workflows/errors + `labels` 子 Agent 名 + `tools` 顶层工具名去重 ≤5）+ `generatedFiles`；新增 `GET /api/nodes/[id]/tool-calls` 按需端点。`ToolTimeline` 展开时 `loadNodeToolCalls` 拉取（拉取期间折叠态用 stats 渲染角标数字，占位行「正在加载工具调用…」）；`ToolCallBadge` 优先用 stats 省掉每卡片一次 buildToolTree；`GeneratedFilesBar` 优先用预计算 generatedFiles。**流式路径不变**（toolCalls 随流事件进 store）。
-- **验证**: ①直调路由（`TRELLIS_DB_PATH` 指 prod 副本，`bun --conditions=react-server`）——91 节点、载荷 **10.26MB→166.6KB（~62x）**、无任何节点下发 toolCalls、stats/generatedFiles 在位、无委派节点 `tools` 有值（BOE 75 个有工具调用的节点全是无委派，折叠摘要行靠它点名 "Bash、Read、Edit"）；②tool-calls 端点返回完整数组、长度与 stats.total 一致、未知节点 404；③`test-timeline-render` 全绿（toolCalls 在场路径）；④stats-only 渲染测试全绿（折叠行点名工具 / 委派计数 / 超 4 截 4+… / total=0 不渲染）；⑤tsc 零错、eslint 零新增（TurnCard 4 条既有，git stash 基线对照）。
-- **合并插曲**: 与 origin/main 的 Codex 迁移（S99）撞了 session 编号和 `cli_lineages` 迁移——本 session 初基于旧 main 写的 cli_lineages 修复（DROP 重建为 claude_session_id）方向反了：origin/main 已用 RENAME COLUMN 原位迁移到 provider-neutral 的 `cli_session_id`（多 provider lineage），prod 旧表正好是目标 schema。合并时丢弃我的 sqlite.ts 改动，采用 origin/main 版本。
-- **Next**: 部署后用户真机点一轮长会话 Tab 切换确认体感（重点：展开动线时的按需拉取有没有可见延迟、角标数字对不对）。**未部署**——等用户点头。

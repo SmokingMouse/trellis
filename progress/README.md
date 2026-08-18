@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-codex 逐 token 流（SDK 0.6.0）+ picker 枚举 + toolCalls 懒加载已部本机（85fd082e4），待真机验收。
+codex 权限卡 + Task 树（SDK 0.7.0）待部署与真机验收；cpa codex 上游故障在查（failures.md）。
 
 ## Goals
 

@@ -147,14 +147,15 @@ export function approvalCopy(requireApproval: boolean): ApprovalCopy {
 }
 
 /**
- * 审批开关什么时候该露面：只有 claude 系的 project。
- * chat 没有可变更工具；codex 没有 stdio 审批协议，显示了也是谎言。服务端会再钳一道。
+ * 审批开关什么时候该露面：claude / codex 的 project（chat 没有可变更工具）。
+ * codex 自 agent@0.7.0 走 app-server 审批协议（requestApproval → 权限卡），与
+ * claude 的 stdio can_use_tool 同构；mock 无审批概念。服务端会再钳一道。
  */
 export function approvalAvailable(
   mode: Mode | string | null | undefined,
   provider: ProviderId,
 ): boolean {
-  return workspaceRequired(mode) && providerFamily(provider) === "claude";
+  return workspaceRequired(mode) && providerFamily(provider) !== "mock";
 }
 
 // ── 路径显示 ──────────────────────────────────────────────────────────────────

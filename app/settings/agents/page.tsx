@@ -272,7 +272,7 @@ export default function AgentsSettingsPage() {
                 label="逐个确认"
                 hint={
                   "覆盖会话的 YOLO / 需确认设置。会话侧同一个开关在新建会话时选，" +
-                  "两者都设时以 agent 为准。仅 Claude 支持逐项审批；Codex 当前忽略该字段。"
+                  "两者都设时以 agent 为准。Claude / Codex 均支持逐项审批（Codex 的可信白名单命令会自动放行）。"
                 }
               >
                 <select

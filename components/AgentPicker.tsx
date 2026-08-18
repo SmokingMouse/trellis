@@ -126,7 +126,7 @@ export function AgentPicker() {
             </div>
             {providerFamily(provider) === "codex" && (
               <div className="text-label text-ink-faint mb-2">
-                Codex：人设、模型、静态权限、隔离与挂载技能生效；工具白/黑名单和逐项审批不支持。
+                Codex：人设、模型、静态权限、隔离、挂载技能与逐项审批生效；工具白/黑名单不支持。
               </div>
             )}
             <div className="flex flex-col gap-1 mb-3 max-h-[240px] overflow-y-auto">

@@ -4,6 +4,13 @@
 
 ---
 
+## 2026-08-18 · 推迟 turn/steer（codex 在飞轮次追加输入），不造死 API
+
+**Decision**：codex app-server 的 `turn/steer`（向进行中的轮次追加用户输入）SDK 与 trellis 均暂不接入。
+**Why**：①树模型无消费位——trellis 一节点 = 一问一答，steer 的追加输入没有归宿（改写原问题？一节点两问？都破坏分叉/重发/CLI 对齐的既有语义），产品形态必须先行；②provider 割裂——claude 无等价能力（stream-json 中途 user message 是排队下一轮，不是转向），单 codex 功能会造出两套发送语义；③现有 abort + 重发/分叉已覆盖「改主意」场景，代价只是重跑半轮。
+**Alternatives**：SDK 先做机制、trellis 后接 —— 拒绝，无消费者的 API 面是维护负债（S104 决策链同款理由：审批回调就是等 trellis dispatcher 有消费位才接的）。
+**重启条件**：出现明确 UX（如「生成中输入框切 steer 模式」的设计稿）且接受 codex-only；或 claude 侧出现等价协议。
+
 ## 2026-08-04 · CLI 授权管理：先 T0+T1（状态 + 预警），托管隔离暂缓
 
 **Decision**：落地 auth-health 探测 + 设置页状态卡（T0）与 scheduler 每小时预警（T1）；**托管隔离**

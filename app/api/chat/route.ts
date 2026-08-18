@@ -325,12 +325,13 @@ export async function POST(req: Request) {
           }
           resolvedWorkspacePath = wp;
         }
-        // 权限确认钳制：只有 claude 系的 project 才可开（chat 无文件工具；
-        // codex/mock 无 stdio 协议，开了也是谎言级 UI）。
+        // 权限确认钳制：claude / codex 的 project 可开（chat 无文件工具；mock
+        // 无审批概念）。codex 走 app-server 审批协议（agent@0.7.0 起），与 claude
+        // 的 stdio can_use_tool 同构。
         resolvedRequireApproval =
           body.requireApproval === true &&
           resolvedMode !== "chat" &&
-          providerFamily(providerId) === "claude";
+          providerFamily(providerId) !== "mock";
         // Both real providers support the product-level Agent abstraction.
         // Claude uses --agent/plugin packs; Codex receives an equivalent
         // persona + selected skill instructions through its system prompt.
@@ -694,12 +695,14 @@ export async function POST(req: Request) {
   // unsubscribes us from the event broadcast — the LLM keeps running and
   // keeps writing to the DB. Late tabs / a returning mobile client pick
   // up via GET /api/nodes/[id]/stream.
-  // A路②: only the claude family speaks the stdio permission protocol that
-  // backs interactive tools (AskUserQuestion / ExitPlanMode). codex/mock get
-  // no callback, so run-bus passes ctx.onCanUseTool=undefined and the provider
-  // never opens the protocol. Pure chat (no workspace) won't trigger the
-  // interactive tools, but threading the callback is harmless there.
-  const interactive = family === "claude";
+  // A路②: claude speaks the stdio permission protocol (interactive tools
+  // AskUserQuestion / ExitPlanMode + approve-mode cards). codex (agent@0.7.0)
+  // rides the app-server approval RPCs mapped to the same onCanUseTool shape —
+  // approve 模式下 commandExecution/fileChange 弹权限卡；非 approve 模式回调闲置
+  // (approvalPolicy=never，codex 无 AskUserQuestion 等价物)。mock has neither.
+  // Pure chat (no workspace) won't trigger cards; threading the callback is
+  // harmless there.
+  const interactive = family === "claude" || family === "codex";
   // S88: 把 agent 定义变成「CLI 能吃的东西」。放在 route 而不是 sdk-adapter：
   // 后者至今是纯函数无 IO，且被 codex 共用；route 本就是策略解析层
   // （mode / workspace / resume / approval 都在这儿定）。

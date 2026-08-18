@@ -109,8 +109,9 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
 
 function baseRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
   const common: RunOptions = { model, attachments: req.attachments };
-  // 权限确认仅在交互回调在场时生效（run-bus 只给 claude 系建回调；codex/mock
-  // 无 stdio 协议，保持各自现有 permission 策略不受影响）。
+  // 权限确认仅在交互回调在场时生效。run-bus 给 claude / codex 建回调（claude 走
+  // stdio can_use_tool；codex 自 agent@0.7.0 走 app-server requestApproval，SDK
+  // 映射成同一 onCanUseTool 形状，toolName 也对齐 Bash/Edit）；mock 无审批概念。
   const approve = req.requireApproval === true && !!req.onCanUseTool;
   if (mode === "chat") {
     const sp = req.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;

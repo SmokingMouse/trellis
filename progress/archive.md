@@ -4,6 +4,14 @@
 
 ## Session Log
 
+### Session 100（2026-08-18，大会话 Tab 切换仍慢：toolCalls 改按需加载，载荷 10.26MB→167KB）
+- **触发**: S98（HAST 缓存 + 视口懒渲染）落地后，用户反馈「怎么访问我的 boe 机器」tab 切换**还是慢**。
+- **根因**: GET /api/sessions/[id] 返回 **10.26MB**，其中 **98.6% 是 toolCalls JSON（10.12MB）**，response 文本仅 0.09MB；每次切 tab 都重拉整个会话（无缓存），gate（server.ts）又剥掉压缩。on-box 处理 ~190ms 很快，慢在用户远程 Mac 浏览器吃满 10.26MB 传输。S98 治的是渲染侧，传输侧这块大头没动。
+- **Done（懒加载 toolCalls）**: 会话载荷剥离完整 toolCalls 数组，改发预计算 `toolCallStats`（total/subagents/workflows/errors + `labels` 子 Agent 名 + `tools` 顶层工具名去重 ≤5）+ `generatedFiles`；新增 `GET /api/nodes/[id]/tool-calls` 按需端点。`ToolTimeline` 展开时 `loadNodeToolCalls` 拉取（拉取期间折叠态用 stats 渲染角标数字，占位行「正在加载工具调用…」）；`ToolCallBadge` 优先用 stats 省掉每卡片一次 buildToolTree；`GeneratedFilesBar` 优先用预计算 generatedFiles。**流式路径不变**（toolCalls 随流事件进 store）。
+- **验证**: ①直调路由（`TRELLIS_DB_PATH` 指 prod 副本，`bun --conditions=react-server`）——91 节点、载荷 **10.26MB→166.6KB（~62x）**、无任何节点下发 toolCalls、stats/generatedFiles 在位、无委派节点 `tools` 有值（BOE 75 个有工具调用的节点全是无委派，折叠摘要行靠它点名 "Bash、Read、Edit"）；②tool-calls 端点返回完整数组、长度与 stats.total 一致、未知节点 404；③`test-timeline-render` 全绿（toolCalls 在场路径）；④stats-only 渲染测试全绿（折叠行点名工具 / 委派计数 / 超 4 截 4+… / total=0 不渲染）；⑤tsc 零错、eslint 零新增（TurnCard 4 条既有，git stash 基线对照）。
+- **合并插曲**: 与 origin/main 的 Codex 迁移（S99）撞了 session 编号和 `cli_lineages` 迁移——本 session 初基于旧 main 写的 cli_lineages 修复（DROP 重建为 claude_session_id）方向反了：origin/main 已用 RENAME COLUMN 原位迁移到 provider-neutral 的 `cli_session_id`（多 provider lineage），prod 旧表正好是目标 schema。合并时丢弃我的 sqlite.ts 改动，采用 origin/main 版本。
+- **Next**: 部署后用户真机点一轮长会话 Tab 切换确认体感（重点：展开动线时的按需拉取有没有可见延迟、角标数字对不对）。**未部署**——等用户点头。
+
 ### Session 99（2026-08-18，Codex 迁移体验对齐：历史 attach、skill、Agent、联网语义）
 - **触发**: 用户反馈 Trellis 只把 Claude provider 支持好，Codex 用户难迁入，要求迁来后体验至少对齐。根因不是单点 UI：Codex 原生会话完全无法 attach；现有 lineage 表/发现 API/watcher 都写死 Claude；skill API 只扫 `~/.claude/skills` 且输入框主动隐藏 Codex；Agent 在 UI/route/tasks 三层被钳成 Claude-only；Chat 文案还错误声称 Codex offline。
 - **Done ① CLI 迁移主链**: 新 `codex-import.ts` 解析 rollout（只认可见 `event_msg.user_message`、assistant 双通道去重、custom/function tools、四桶 token、残行容错）；发现层支持 `$CODEX_HOME/sessions` 跨日期递归、按 cwd 分组与现有 fork 跨日 union；`sessions.cli_provider` + provider-neutral `cli_lineages` 原位迁移旧表；attach/import/watcher/API/UI 全部 provider-aware。Attached Codex 可从 tip 线性 resume、从任意历史轮构造前缀 rollout 真分叉，CLI `codex fork` 写进新日期也会被根 watcher 自动归树；「在 CLI 继续」输出 `codex resume <id>`。同时修正旧 ordinal 把注入 role=user 当真提问的错误，并按 question 自愈存量。
