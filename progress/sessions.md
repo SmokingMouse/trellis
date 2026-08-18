@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 101 / 100 / 99 / 98 / 97）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 102 / 101 / 100 / 99 / 98）。更早的见 `archive.md`。
+
+### Session 102（2026-08-18，codex picker 补 endpoints.yaml 第三方端点枚举，PR #16）
+- **触发**: S101 修通了本机 canonical yaml 的 codex 标记后，picker 仍选不到 yaml 里的第三方模型——`codexProviders()` 只读 `~/.codex/models_cache.json`，没登录过 ChatGPT 的机器只剩裸 `codex`（默认 gpt-5.5），带 `codex: { wire_api: responses }` 标记的端点模型（resolveCodexModel 可 `-c` 注入、无需登录）在 UI 上不存在。
+- **Done**（`app/api/providers/route.ts`，分支 `feat/codex-picker-yaml-endpoints`，PR #16 base main）: `codexProviders()` 改双源合并——新增 `codexYamlProviders()` 用 `loadEndpoints()` 原始 ConfigFile（不走 `listEndpoints`，EndpointInfo 不带 codex 块）枚举带标记 provider 的 models → `codex:<model>`（label `codex · <provider> · <model>`，hasKey = `process.env[api_key_env]` 有无）；models_cache.json 读取拆成 `codexCacheProviders()` 失败返回 `[]`（不再连带吞掉 yaml 来源）；按 id 去重 yaml 优先（与 resolveCodexModel 的 yaml 精确命中优先一致）；裸 `codex` 条目保留最前（DB 旧会话 model="codex" 按 exact id 查显示）。
+- **验证**: tsc 零错；临时 export + `SM_ENDPOINTS_PATH` 指临时 yaml 三场景实测（bun --conditions react-server）——带标记 provider 2 模型出现且 hasKey 随 CPA_API_KEY 有无翻转、不带标记 provider 不出现、`HOME` 指空目录（无 models_cache）时 yaml 枚举仍工作、合并后无重复 id；eslint 与 git stash 基线对照零新增；`bun run test:codex-cli` ALL PASS。
+- **插曲**: `~/.agent-gateway.env` 某行值含未闭合引号，zsh `source` 整体失败（它是 dotenv 格式非 shell 安全格式）——测试时改用 grep 单行提取 CPA_API_KEY 注入。
+- **Next**: PR #16 review 后合 main；部署走 devbox（本机不部）。合并部署后用户在 picker 选 `codex:gpt-5.6-sol` 之类真机验一轮（衔接 S101 Next 的 `codex:gpt-5.5` 真机确认）。
 
 ### Session 101（2026-08-18，codex 第三方端点本机失效：canonical endpoints.yaml 缺 codex 标记）
 - **触发**: 用户截图会话 `cd2ca8d2`（model `codex:gpt-5.5[1m]`）报「codex 未登录(ChatGPT)…endpoints.yaml 端点需带 codex: { wire_api: responses } 标记」，问「现在好像不支持 codex 第三方登录」。
@@ -35,13 +42,3 @@
 - **已提交合并推送**: `04250dd`（特性分支 `perf/markdown-render-cache`）→ `--no-ff` 合 main（`3e513c2`）→ push `origin/main`。
 - **已部署上线（`ebce0d176`）**: smoke 全绿、DB 备份、verify ready。**本机部署坑（重要）**：devbox 的 shell `HOME=/home/zhangpeng.pada` 是指向 `/data00/home/zhangpeng.pada` 的符号链接，直接 `make deploy` 会让 Turbopack build panic（`Invalid distDirRoot: ".next". distDirRoot should not navigate out of the projectPath`），且 deploy 预检会误报 systemd 单元工作目录不符（同一 inode 的字符串比较）。**正确姿势：`HOME=/data00/home/zhangpeng.pada make deploy`**（顺带让预检字符串对上，无需 `--force`；`TRELLIS_DEPLOY_ROOT` 单独给没用，build 仍 panic）。systemd 单元里 `HOME=/data00/...` 是刻意修过的（注释：Turbopack root 解析），别跑 `make install-service` 把它改回符号链接路径。
 - **Next**: 用户真机点一轮长会话 Tab 切换确认体感（重点：快速滚动时占位升级有没有可见跳动、锚点跳转是否还准）。可选：把缓存扩到其余预览 / 编辑面。
-### Session 97（2026-08-16，处理 PR #14：大门反代接通客户端 abort，修 fd 泄漏静默卡死）
-- **触发**: 用户「处理一下 GitHub 上的 PR」。唯一 open PR = #14（Aaron7621 = 二号机）：`server.ts` 两处反代 fetch 各加 `signal: req.signal`，把客户端断开传导给上游——SSE 遗弃连接把 launchd maxfiles(256) 打满后 accept 拿不到 fd，TCP 握手仍由内核 backlog 代答，成「端口通、进程活、应用层一字节不回」的静默卡死（二号机 8/6 挂 4 天、8/10 一天两次，KeepAlive 不救，只能 kickstart）。
-- **Review 核实（逐条过下游代码，不是只读 PR 描述）**: ① 泄漏机制成立——两处 fetch 均未传 signal 且 `new Response(r.body)` 包装转发，断开不会自动传导到内层；② 「断开不杀 run」属实——chat 路由 onAbort 只 `unsubscribe(); close()`，run-bus Stage 17 注释明确 Run 自持 AbortController、落库走 appendNodeResponse 与订阅无关，`nodes/[id]/stream` 同模式；③ tasks/events、cli-sync/events 的 SSE teardown 本来就挂在 req.signal 上等着被接通；④ references 行为变化（关页面 → 抓取中止落 error）收尾路径核实：abort → catch → finalizeReferenceFetch 落库，无僵尸 streaming 卡；⑤ WS 路径 upgrade 在 fetch 之前，不受影响。
-- **本地复核插曲**: PR 分支 tsc 先报 `lib/markdown-plugins.ts` 缺 rehype-katex/remark-math——不是 PR 的锅，是本地 main 落后 origin（katex、机器资源状态等已在远端），`git pull` + `bun install` 后 PR 分支 tsc 干净。本机 Bun 1.3.14 与 PR 靶场版本一致（repo 未锁 Bun 版本，修复依赖 Bun 的 req.signal 断开语义）。
-- **处置**: approve 留两条非阻塞备忘（`/term` 路径 fetch 无 try/catch，客户端在响应头前断开抛的 AbortError 目前靠 Bun 静默吞掉——实测行为、非文档保证，升 Bun 时留意；转发 Next 的既有 catch 现在也会捕获客户端 abort，将来若要在 catch 里统计「Next 挂了」需先甄别 AbortError）→ merge commit `2967653` 进 main（沿仓库 merge-commit 惯例）。故障尸检已长存于 server.ts 内联注释 + PR #14 正文，不另开 failures.md 条目。
-- **Done（同 session 续，用户「开始吧」授权清账）①部署**: `make deploy` 上线 `f106885`（S95 授权监控 + S96 SDK 0.5.1 + katex + 机器资源 + PR #14 一次到位），smoke 全绿、闸 on→on、旧 release gc。**PR #14 生产实证**：8 条 SSE 挂着时大门上游连接 8 条、客户端断开 3s 后归零（修复前断 8 泄 8）。build 期有条既存 Turbopack NFT 警告（workspaces/mkdir 路由 trace 到整个项目），非本次引入，未拦部署，留观。
-- **Done ②验收四项全过**（agent-browser 真浏览器，:3088 prod）: S91 sameSite=strict——直接输地址登录无感、刷新登录态持久；S95 授权卡——真渲染正确（claude 绿灯 max/refresh 至 9-2 剩 16 天，codex 绿灯 ChatGPT），「重新探测」正常，**手机推送送达仍留用户确认**；S94 卡片图弹窗——预览+双按钮+Esc/scrim 关闭+暗色全过，headless 下复制被拒时按钮就地提示「复制失败，请用下载」（S94 要的正是不再静默），真手势下的复制成功留真人一点。
-- **Done ③S75 hydration 悬案破案修复**（细节全链在 failures.md 已结案区）: 根因 = 用 127.0.0.1 访问 Next 16 dev 时 HMR WS 被 origin 校验静默掐死 + dev 的 hydration promise 与该 WS 绑死（上游 #91770）。修 = `next.config.ts` `allowedDevOrigins` 常驻 `"127.0.0.1"`。S75 的 CSS 假设证伪，`::highlight` 规则无辜还原。修后 127.0.0.1 访问 dev：fiber 0→26、交互复活。tsc 零错。**方法论教训**：七个环境假设（CSS/headers/runtime/bundler/版本/扩展/代理/headless）全灭后才转向框架内部等待链——对零报错的静默故障，应更早从"卡在哪一个 await"入手而不是枚举环境。
-- **Next**: 用户手动项——①手机确认 S95 推送送达 ②S96 二号机四步（~/.claude 推送、CPA_API_KEY、二号机重部）③ BOE 部署（devbox 手跑）。可选小加固：launchd maxfiles 调大（纵深防御）、`/term` fetch 包 try/catch。管理台批 1-6 验收未做。
-

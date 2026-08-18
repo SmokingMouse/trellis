@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-大会话 Tab 切换延迟治理：toolCalls 改按需加载（载荷 10.26MB→167KB），已落地待真机验收。
+codex picker 补 yaml 第三方端点枚举（PR #16 待合并部署）；toolCalls 按需加载待真机验收。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 ## 指针区
 
 - `facts.md` 已验证事实（改代码前读） · `failures.md` 待查 / 已结案（排查 bug 前读）
-- `sessions.md` 最近 5 条 log（S99–95） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S102–98） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91 三处 · S94 卡片图弹窗 · S95 授权卡+预警
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

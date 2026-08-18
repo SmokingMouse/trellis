@@ -78,16 +78,74 @@ function yamlProviders(): ProviderInfo[] {
   return hasNative ? fromYaml : [...NATIVE_TIERS, ...fromYaml];
 }
 
-// Codex-family entries, enumerated from the codex CLI's own model cache
-// (~/.codex/models_cache.json, refreshed by the CLI itself on login/use) —
-// each becomes a "codex:<slug>" composite id that getProvider() turns into
-// `codex -m <slug>`. The bare "codex" id stays first for back-compat:
-// existing sessions have model="codex" locked in the DB, and the picker's
+// Codex-family entries, merged from two independent sources — each becomes a
+// "codex:<model>" composite id that getProvider() turns into `codex -m
+// <model>`:
+//   1. endpoints.yaml providers explicitly marked `codex: { wire_api:
+//      responses }` — third-party Responses endpoints that CodexBackend's
+//      resolveCodexModel injects via `-c model_providers.sm_endpoint.*`,
+//      usable without any ChatGPT login.
+//   2. ~/.codex/models_cache.json (refreshed by the codex CLI itself on
+//      login/use) — the native catalog, absent on machines that never logged
+//      into ChatGPT.
+// On id collision the yaml entry wins, mirroring resolveCodexModel, which
+// checks the yaml for an exact model hit before falling back to native
+// passthrough. The bare "codex" id stays first for back-compat: existing
+// sessions have model="codex" locked in the DB, and the picker's
 // current-model display looks itself up by exact id.
 function codexProviders(): ProviderInfo[] {
-  const fallback: ProviderInfo[] = [
-    { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex", hasKey: true },
+  const merged = codexYamlProviders();
+  const seen = new Set(merged.map((p) => p.id));
+  for (const p of codexCacheProviders()) {
+    if (!seen.has(p.id)) merged.push(p);
+  }
+  if (merged.length === 0) {
+    return [
+      { id: "codex", label: "Codex (GPT-5)", shortLabel: "Codex", hasKey: true },
+    ];
+  }
+  return [
+    {
+      id: "codex",
+      label: "Codex（默认 gpt-5.5）",
+      shortLabel: "Codex",
+      hasKey: true,
+    },
+    ...merged,
   ];
+}
+
+// hasKey here is a plain env check on api_key_env — unlike native claude
+// entries, injected codex endpoints authenticate solely via that env var
+// (resolveCodexModel treats a missing key on a marked provider as fatal).
+function codexYamlProviders(): ProviderInfo[] {
+  let config: ReturnType<typeof loadEndpoints>;
+  try {
+    config = loadEndpoints();
+  } catch {
+    return [];
+  }
+  const out: ProviderInfo[] = [];
+  const seen = new Set<string>();
+  for (const [name, prov] of Object.entries(config.providers)) {
+    if (prov.codex?.wire_api !== "responses") continue;
+    const hasKey = Boolean(process.env[prov.api_key_env]);
+    for (const model of prov.models) {
+      const id = `codex:${model}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        label: `codex · ${name} · ${model}`,
+        shortLabel: model,
+        hasKey,
+      });
+    }
+  }
+  return out;
+}
+
+function codexCacheProviders(): ProviderInfo[] {
   try {
     const raw = fs.readFileSync(
       path.join(os.homedir(), ".codex", "models_cache.json"),
@@ -100,28 +158,18 @@ function codexProviders(): ProviderInfo[] {
         visibility?: string;
       }>;
     };
-    const models = (cache.models ?? []).filter(
-      (m) => m.slug && m.visibility === "list",
-    );
-    if (models.length === 0) return fallback;
-    return [
-      {
-        id: "codex",
-        label: "Codex（默认 gpt-5.5）",
-        shortLabel: "Codex",
-        hasKey: true,
-      },
-      ...models.map((m) => ({
+    return (cache.models ?? [])
+      .filter((m) => m.slug && m.visibility === "list")
+      .map((m) => ({
         id: `codex:${m.slug}`,
         label: `codex · ${m.display_name ?? m.slug}`,
         shortLabel: m.slug!,
         hasKey: true,
-      })),
-    ];
+      }));
   } catch {
-    // No codex CLI on this machine / unreadable cache — keep the single
-    // legacy entry so existing sessions still render, spawn fails with the
-    // CLI's own error if actually used.
-    return fallback;
+    // No codex CLI on this machine / unreadable cache — the yaml source (and
+    // the bare legacy entry) still work; spawn fails with the CLI's own error
+    // if a native model is actually used.
+    return [];
   }
 }
