@@ -43,6 +43,10 @@ const GRAPH_NODE_H = 90;
 // 0.4 ≈ 50px 行距，与密树自然落到的 ~34px 同一量级；密树 scale 本就低于
 // 此值，不受影响。
 const GRAPH_MAX_SCALE = 0.4;
+// 纵向缩放下限：层距不许小于 12px（点直径 7px + 呼吸空间）。长树因此会
+// 超出 GRAPH_MAX_H —— 有意的：面板体本就 overflow-y-auto，超高就滚动，
+// 比把 80 个点压成一串珠子强。12 / 126（dagre compact 层距）≈ 0.095。
+const GRAPH_MIN_SCALE_Y = 12 / 126;
 
 type Hover = { nodeId: string; top: number } | null;
 
@@ -150,21 +154,30 @@ export function TreePanel() {
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
-    const scale = Math.min(
+    // 纵横分开缩放：横向永远贴合面板宽（不出横向滚动条），纵向优先整树
+    // 塞进 GRAPH_MAX_H，塞不下（长链树）就守住最小层距、让高度溢出去滚动。
+    // 点图不怕纵横比失真 —— 拓扑形状靠连线，不靠等比。
+    const scaleX = Math.min(
       (GRAPH_W - GRAPH_PAD * 2) / Math.max(1, maxX - minX),
-      (GRAPH_MAX_H - GRAPH_PAD * 2) / Math.max(1, maxY - minY),
       GRAPH_MAX_SCALE,
     );
-    const spanX = (maxX - minX) * scale;
-    const spanY = (maxY - minY) * scale;
+    const scaleY = Math.max(
+      Math.min(
+        scaleX,
+        (GRAPH_MAX_H - GRAPH_PAD * 2) / Math.max(1, maxY - minY),
+      ),
+      GRAPH_MIN_SCALE_Y,
+    );
+    const spanX = (maxX - minX) * scaleX;
+    const spanY = (maxY - minY) * scaleY;
     const height = Math.max(56, Math.round(spanY + GRAPH_PAD * 2));
     const offX = (GRAPH_W - spanX) / 2;
     const offY = (height - spanY) / 2;
     const points = new Map<string, { x: number; y: number }>();
     for (const [id, p] of centers) {
       points.set(id, {
-        x: offX + (p.x - minX) * scale,
-        y: offY + (p.y - minY) * scale,
+        x: offX + (p.x - minX) * scaleX,
+        y: offY + (p.y - minY) * scaleY,
       });
     }
     return { points, height, visible };
@@ -205,6 +218,15 @@ export function TreePanel() {
   useEffect(() => {
     if (filter !== null) filterInputRef.current?.focus();
   }, [filter !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 长树的图形高度会超出滚动体（GRAPH_MIN_SCALE_Y 保层距），锚点常在树底
+  // —— 切图/跳转后把当前点滚进视口，否则看到的是树顶一屏灰点。
+  useEffect(() => {
+    if (view !== "graph") return;
+    bodyRef.current
+      ?.querySelector("[data-graph-active]")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [view, activeNodeId, graphGeometry]);
 
   // Guard against the hovered node being deleted out from under the card.
   const hoverNode = hover ? (nodesMap[hover.nodeId] ?? null) : null;
@@ -402,6 +424,7 @@ export function TreePanel() {
             <g
               key={n.id}
               className="group"
+              data-graph-active={isActive ? "" : undefined}
               onMouseEnter={hoverRow(n.id)}
               onMouseLeave={leaveRow(n.id)}
             >
