@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 102 / 101 / 100 / 99 / 98）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 103 / 102 / 101 / 100 / 99）。更早的见 `archive.md`。
+
+### Session 103（2026-08-18，树面板图形视图长树密到糊：缩放下限 + 滚动 + 锚点跟随）
+- **触发**: 用户截图「BOE GPU部署sub2a」82 节点树的图形视图——点全挤成一串珠子，「这个节点也太密集了」。
+- **根因**: `TreePanel` graphGeometry 把整树等比压进 `GRAPH_MAX_H=300px`。dagre compact 层距 126px（90+36），长链树布局总高数千 px → scale 被压到 ~0.03，层距 3-4px < 点直径 7px，必然重叠。
+- **Done（`components/TreePanel.tsx`）**: 纵横分开缩放——`scaleX` 仍贴合面板宽（272px，不出横向滚动条），`scaleY` 优先塞进 300px、塞不下时守住下限 `GRAPH_MIN_SCALE_Y = 12/126`（层距 ≥12px），高度溢出交给外层 body 的 `overflow-y-auto` 滚动。配套：锚点节点加 `data-graph-active`，切图/跳转后 `scrollIntoView({block:"nearest"})` 跟随，否则长树切过去看到的是树顶一屏灰点。
+- **验证**: tsc 零错、eslint 该文件零输出。真机视觉效果待用户看。**未提交未部署**。
+- **Next**: 用户在真机开同一棵 82 节点树的图形视图确认：点间距可读、滚动顺、当前点在视口内。
 
 ### Session 102（2026-08-18，codex picker 补 endpoints.yaml 第三方端点枚举，PR #16）
 - **触发**: S101 修通了本机 canonical yaml 的 codex 标记后，picker 仍选不到 yaml 里的第三方模型——`codexProviders()` 只读 `~/.codex/models_cache.json`，没登录过 ChatGPT 的机器只剩裸 `codex`（默认 gpt-5.5），带 `codex: { wire_api: responses }` 标记的端点模型（resolveCodexModel 可 `-c` 注入、无需登录）在 UI 上不存在。
@@ -31,14 +38,3 @@
 - **Done ② Skill / Agent / web**: provider-aware skill 索引按 Codex 官方 project/user/admin 作用域发现 `.agents/skills`，兼容当前 CLI 的 `$CODEX_HOME/skills/.system` 与 symlink；选择器原生填 `$skill`，纯 Chat 自动开增强。Codex Agent 支持人设、模型、静态 sandbox 权限、隔离和挂载 skill（`SKILL.md` + source dir 内联），会话 Agent、`@slug`、定时任务三条链均放行；工具白/黑名单与逐项审批明确标为不支持。纯 Codex Chat 现在显式隔离 AGENTS/环境 skills/plugins/MCP，但保留 CLI 默认 cached web search；Project/增强模式给 workspace-write network。
 - **验证**: `bun run test:codex-cli` 55 项全过（parser/DB attach/append/前缀分叉/跨日期 attach+watcher/skill/Agent）；真实 corpus 发现 4517 rollout，最近列表约 180ms、lineage attach 约 446ms；`bunx tsc --noEmit`、`git diff --check`、`make build` 全过。隔离 dev + agent-browser 真页面 smoke：Codex provider 可选、Agent picker 生效且边界提示可见、`$open` 补全成 `$openai-docs` 并自动开启增强、Attach 弹窗切 Codex 后列出真实历史。全仓 lint 仍是既有 34 errors/9 warnings；本次改动文件仅命中 `SessionSidebar.tsx:959` 的既有 setState-in-effect。
 - **边界 / Next**: 当前 `@smokingmouse/agent@0.5.1` 的 Codex exec backend 无 dynamic approval callback，且忽略 `extraArgs`，所以 CLI 0.147 虽有 `-a`/`--approve-for-me`，Trellis 仍不能像 Claude 一样弹逐项审批卡；真对齐需迁 `codex app-server` JSON-RPC。代码未部署，下一步先 review/commit，再走正常 deploy。
-
-### Session 98（2026-08-18，Tab 切换大延迟治理：HAST 渲染缓存 + 视口懒渲染）
-- **触发**: 用户反馈会话节点多 / 内容大时，Tab 间切换延迟巨大。用户拍板范围 **P0+P1：连首次切换也治**。
-- **根因**: 每次切 session，`apiNodeToChatNode` 铸造全新 node 对象击穿 React.memo，所有 done 卡片重跑完整 unified 管线（parse + remark + rehype-highlight + rehype-katex）。实测 40 个最大 done 节点（共 399KB）基线 **1149ms**。
-- **Done（P0，新 `lib/markdown-cache.ts`）**: HAST 级缓存——按 `nodeId + content` 缓存管线产物树，重复挂载只跑 `toJsxRuntime`（近乎免费）。管线 + post-transform 忠实复刻 react-markdown v10 同步渲染路径（同插件、同 urlTransform、raw→text 兜底），文件头已标「升级 react-markdown 时需同步」。LRU 上限 200。
-- **Done（P1，新 `hooks/useNearViewport.ts` + 接线）**: 线性阅读视图里视口外 done 卡片先挂纯文本占位（成本≈一个 text node，`aria-hidden` 防屏幕阅读器念原始 markdown 符号），滚到视口 800px 内才升级完整 markdown——首次切换也不必等全部卡片。占位高度在 IO 触发瞬间捕获，`useLayoutEffect` 里对 `[data-thread-scroll]` 容器做滚动补偿（仅当卡片原本在视口上沿之上），消除升级高度跳动；锚点跳转目标 `force` 立即渲染（marks 滚动闪烁依赖 markdown DOM）。
-- **接线面**: TurnCard `ResponseBody` + `ReferenceFullBody`、ChatNode done 分支（画布不做懒渲染，canvas 会话 ≤20 节点）；流式分支保持原样（流式期间本就只跑最小 rehype）。其余 ReactMarkdown 消费者（CardImageButton / InteractionForm / FilePreview / ZoneEditor / HoverPreview）是小内容或按需渲染，不在热路径，未动。
-- **验证**: ①等价性——真库 40 个最大 done 节点双路渲染（react-markdown 同步组件 vs `renderCachedMarkdown`）`renderToStaticMarkup` 逐字节比对 **40/40 一致**；②性能——同批基线 1149ms → 缓存冷 828ms → **缓存热 193ms（6x）**，P1 懒渲染让首次切换只渲染近视口约 10-20 张；③tsc 零错；④eslint 改动文件零新增（git stash 基线对照）。
-- **已提交合并推送**: `04250dd`（特性分支 `perf/markdown-render-cache`）→ `--no-ff` 合 main（`3e513c2`）→ push `origin/main`。
-- **已部署上线（`ebce0d176`）**: smoke 全绿、DB 备份、verify ready。**本机部署坑（重要）**：devbox 的 shell `HOME=/home/zhangpeng.pada` 是指向 `/data00/home/zhangpeng.pada` 的符号链接，直接 `make deploy` 会让 Turbopack build panic（`Invalid distDirRoot: ".next". distDirRoot should not navigate out of the projectPath`），且 deploy 预检会误报 systemd 单元工作目录不符（同一 inode 的字符串比较）。**正确姿势：`HOME=/data00/home/zhangpeng.pada make deploy`**（顺带让预检字符串对上，无需 `--force`；`TRELLIS_DEPLOY_ROOT` 单独给没用，build 仍 panic）。systemd 单元里 `HOME=/data00/...` 是刻意修过的（注释：Turbopack root 解析），别跑 `make install-service` 把它改回符号链接路径。
-- **Next**: 用户真机点一轮长会话 Tab 切换确认体感（重点：快速滚动时占位升级有没有可见跳动、锚点跳转是否还准）。可选：把缓存扩到其余预览 / 编辑面。

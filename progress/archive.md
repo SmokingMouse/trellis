@@ -4,6 +4,17 @@
 
 ## Session Log
 
+### Session 98（2026-08-18，Tab 切换大延迟治理：HAST 渲染缓存 + 视口懒渲染）
+- **触发**: 用户反馈会话节点多 / 内容大时，Tab 间切换延迟巨大。用户拍板范围 **P0+P1：连首次切换也治**。
+- **根因**: 每次切 session，`apiNodeToChatNode` 铸造全新 node 对象击穿 React.memo，所有 done 卡片重跑完整 unified 管线（parse + remark + rehype-highlight + rehype-katex）。实测 40 个最大 done 节点（共 399KB）基线 **1149ms**。
+- **Done（P0，新 `lib/markdown-cache.ts`）**: HAST 级缓存——按 `nodeId + content` 缓存管线产物树，重复挂载只跑 `toJsxRuntime`（近乎免费）。管线 + post-transform 忠实复刻 react-markdown v10 同步渲染路径（同插件、同 urlTransform、raw→text 兜底），文件头已标「升级 react-markdown 时需同步」。LRU 上限 200。
+- **Done（P1，新 `hooks/useNearViewport.ts` + 接线）**: 线性阅读视图里视口外 done 卡片先挂纯文本占位（成本≈一个 text node，`aria-hidden` 防屏幕阅读器念原始 markdown 符号），滚到视口 800px 内才升级完整 markdown——首次切换也不必等全部卡片。占位高度在 IO 触发瞬间捕获，`useLayoutEffect` 里对 `[data-thread-scroll]` 容器做滚动补偿（仅当卡片原本在视口上沿之上），消除升级高度跳动；锚点跳转目标 `force` 立即渲染（marks 滚动闪烁依赖 markdown DOM）。
+- **接线面**: TurnCard `ResponseBody` + `ReferenceFullBody`、ChatNode done 分支（画布不做懒渲染，canvas 会话 ≤20 节点）；流式分支保持原样（流式期间本就只跑最小 rehype）。其余 ReactMarkdown 消费者（CardImageButton / InteractionForm / FilePreview / ZoneEditor / HoverPreview）是小内容或按需渲染，不在热路径，未动。
+- **验证**: ①等价性——真库 40 个最大 done 节点双路渲染（react-markdown 同步组件 vs `renderCachedMarkdown`）`renderToStaticMarkup` 逐字节比对 **40/40 一致**；②性能——同批基线 1149ms → 缓存冷 828ms → **缓存热 193ms（6x）**，P1 懒渲染让首次切换只渲染近视口约 10-20 张；③tsc 零错；④eslint 改动文件零新增（git stash 基线对照）。
+- **已提交合并推送**: `04250dd`（特性分支 `perf/markdown-render-cache`）→ `--no-ff` 合 main（`3e513c2`）→ push `origin/main`。
+- **已部署上线（`ebce0d176`）**: smoke 全绿、DB 备份、verify ready。**本机部署坑（重要）**：devbox 的 shell `HOME=/home/zhangpeng.pada` 是指向 `/data00/home/zhangpeng.pada` 的符号链接，直接 `make deploy` 会让 Turbopack build panic（`Invalid distDirRoot: ".next". distDirRoot should not navigate out of the projectPath`），且 deploy 预检会误报 systemd 单元工作目录不符（同一 inode 的字符串比较）。**正确姿势：`HOME=/data00/home/zhangpeng.pada make deploy`**（顺带让预检字符串对上，无需 `--force`；`TRELLIS_DEPLOY_ROOT` 单独给没用，build 仍 panic）。systemd 单元里 `HOME=/data00/...` 是刻意修过的（注释：Turbopack root 解析），别跑 `make install-service` 把它改回符号链接路径。
+- **Next**: 用户真机点一轮长会话 Tab 切换确认体感（重点：快速滚动时占位升级有没有可见跳动、锚点跳转是否还准）。可选：把缓存扩到其余预览 / 编辑面。
+
 ### Session 97（2026-08-16，处理 PR #14：大门反代接通客户端 abort，修 fd 泄漏静默卡死）
 - **触发**: 用户「处理一下 GitHub 上的 PR」。唯一 open PR = #14（Aaron7621 = 二号机）：`server.ts` 两处反代 fetch 各加 `signal: req.signal`，把客户端断开传导给上游——SSE 遗弃连接把 launchd maxfiles(256) 打满后 accept 拿不到 fd，TCP 握手仍由内核 backlog 代答，成「端口通、进程活、应用层一字节不回」的静默卡死（二号机 8/6 挂 4 天、8/10 一天两次，KeepAlive 不救，只能 kickstart）。
 - **Review 核实（逐条过下游代码，不是只读 PR 描述）**: ① 泄漏机制成立——两处 fetch 均未传 signal 且 `new Response(r.body)` 包装转发，断开不会自动传导到内层；② 「断开不杀 run」属实——chat 路由 onAbort 只 `unsubscribe(); close()`，run-bus Stage 17 注释明确 Run 自持 AbortController、落库走 appendNodeResponse 与订阅无关，`nodes/[id]/stream` 同模式；③ tasks/events、cli-sync/events 的 SSE teardown 本来就挂在 req.signal 上等着被接通；④ references 行为变化（关页面 → 抓取中止落 error）收尾路径核实：abort → catch → finalizeReferenceFetch 落库，无僵尸 streaming 卡；⑤ WS 路径 upgrade 在 fetch 之前，不受影响。
