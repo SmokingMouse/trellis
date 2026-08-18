@@ -4,6 +4,13 @@
 
 ## Session Log
 
+### Session 99（2026-08-18，Codex 迁移体验对齐：历史 attach、skill、Agent、联网语义）
+- **触发**: 用户反馈 Trellis 只把 Claude provider 支持好，Codex 用户难迁入，要求迁来后体验至少对齐。根因不是单点 UI：Codex 原生会话完全无法 attach；现有 lineage 表/发现 API/watcher 都写死 Claude；skill API 只扫 `~/.claude/skills` 且输入框主动隐藏 Codex；Agent 在 UI/route/tasks 三层被钳成 Claude-only；Chat 文案还错误声称 Codex offline。
+- **Done ① CLI 迁移主链**: 新 `codex-import.ts` 解析 rollout（只认可见 `event_msg.user_message`、assistant 双通道去重、custom/function tools、四桶 token、残行容错）；发现层支持 `$CODEX_HOME/sessions` 跨日期递归、按 cwd 分组与现有 fork 跨日 union；`sessions.cli_provider` + provider-neutral `cli_lineages` 原位迁移旧表；attach/import/watcher/API/UI 全部 provider-aware。Attached Codex 可从 tip 线性 resume、从任意历史轮构造前缀 rollout 真分叉，CLI `codex fork` 写进新日期也会被根 watcher 自动归树；「在 CLI 继续」输出 `codex resume <id>`。同时修正旧 ordinal 把注入 role=user 当真提问的错误，并按 question 自愈存量。
+- **Done ② Skill / Agent / web**: provider-aware skill 索引按 Codex 官方 project/user/admin 作用域发现 `.agents/skills`，兼容当前 CLI 的 `$CODEX_HOME/skills/.system` 与 symlink；选择器原生填 `$skill`，纯 Chat 自动开增强。Codex Agent 支持人设、模型、静态 sandbox 权限、隔离和挂载 skill（`SKILL.md` + source dir 内联），会话 Agent、`@slug`、定时任务三条链均放行；工具白/黑名单与逐项审批明确标为不支持。纯 Codex Chat 现在显式隔离 AGENTS/环境 skills/plugins/MCP，但保留 CLI 默认 cached web search；Project/增强模式给 workspace-write network。
+- **验证**: `bun run test:codex-cli` 55 项全过（parser/DB attach/append/前缀分叉/跨日期 attach+watcher/skill/Agent）；真实 corpus 发现 4517 rollout，最近列表约 180ms、lineage attach 约 446ms；`bunx tsc --noEmit`、`git diff --check`、`make build` 全过。隔离 dev + agent-browser 真页面 smoke：Codex provider 可选、Agent picker 生效且边界提示可见、`$open` 补全成 `$openai-docs` 并自动开启增强、Attach 弹窗切 Codex 后列出真实历史。全仓 lint 仍是既有 34 errors/9 warnings；本次改动文件仅命中 `SessionSidebar.tsx:959` 的既有 setState-in-effect。
+- **边界 / Next**: 当前 `@smokingmouse/agent@0.5.1` 的 Codex exec backend 无 dynamic approval callback，且忽略 `extraArgs`，所以 CLI 0.147 虽有 `-a`/`--approve-for-me`，Trellis 仍不能像 Claude 一样弹逐项审批卡；真对齐需迁 `codex app-server` JSON-RPC。代码未部署，下一步先 review/commit，再走正常 deploy。（后续：S104 已在 SDK 0.6.0 落地 app-server transport，approval 回调仍待独立 phase。）
+
 ### Session 98（2026-08-18，Tab 切换大延迟治理：HAST 渲染缓存 + 视口懒渲染）
 - **触发**: 用户反馈会话节点多 / 内容大时，Tab 间切换延迟巨大。用户拍板范围 **P0+P1：连首次切换也治**。
 - **根因**: 每次切 session，`apiNodeToChatNode` 铸造全新 node 对象击穿 React.memo，所有 done 卡片重跑完整 unified 管线（parse + remark + rehype-highlight + rehype-katex）。实测 40 个最大 done 节点（共 399KB）基线 **1149ms**。

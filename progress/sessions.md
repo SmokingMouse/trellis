@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 103 / 102 / 101 / 100 / 99）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 104 / 103 / 102 / 101 / 100）。更早的见 `archive.md`。
+
+### Session 104（2026-08-18，codex 逐 token 流上线：SDK 0.6.0 app-server transport + trellis bump）
+- **触发**: 用户问「codex provider 不支持 stream？工具和子 agent 也没有？」。调研（两 research agent 挖 openai/codex 0.147 源码 + 本机协议探针）：exec --json 的 delta 是输出层**有意丢弃**且无 flag 可开；0.147 起 v1 协议移除、v2 唯一默认，官方全生态（TUI/exec/VS Code 扩展/Python SDK）已收敛到 app-server；实测 app-server `thread/resume` 直接续 exec 录的 rollout（同一存储、id 互通）。SDK 侧 08-04 推迟决策的重启条件「v2 收敛」已满足 → 解除。
+- **Done（全在 ~/sdk，trellis 零代码改动）**: `@smokingmouse/agent@0.6.0` 发 npm——CodexBackend 默认 app-server transport（per-run spawn stdio JSON-RPC v2）：`item/agentMessage/delta`→TextChunk 逐 token、reasoning→Thinking、item 生命周期→ToolCall/Done（**含 collabAgentToolCall 多 agent**，S99 时代「codex 子 agent 不可见」随之闭环）、原生 `thread/fork` 替代 rollout copy、abort→`turn/interrupt`；preflight 失败零事件回退 exec（prompt 绝不跑两遍），`environmentSkills=false`/`extraArgs`/ephemeral resume 预分流 exec。trellis 仅 bump `^0.6.0`（package.json + bun.lock）。
+- **验证**: SDK 单测 40/40 + 真机 e2e 10 项（流式 100 chunks vs 强制 exec 1、fork 隔离、readonly 拒写/workspace-write 圈内/full 圈外逐档=exec 语义、abort 5.5s 收尾）；trellis node_modules 冒烟：capabilities `streaming:"token"`、真跑 app-server 23 chunks。sm-toolkit 三 commit 合并推送 + release commit（`9eff060`、`25b5cc0`）。
+- **边界**: 审批回调（dynamicPermissionCallback）仍未接——S99 边界里「Codex 不能弹逐项审批卡」只解了 transport 层，approval RPC 映射是下一个独立 phase；`turn/steer`、`subAgentActivity`→Task 树渲染同理。S101 遗留 ③（登录闸假阴性）未动。
+- **Next**: 本机 `make deploy` 部署（含 S102/103 已合并未部改动）；用户真机开 codex 会话看打字机效果；devbox 侧下次 `make deploy` 自动带上 0.6.0（bun.lock 已锁）。
 
 ### Session 103（2026-08-18，树面板图形视图长树密到糊：缩放下限 + 滚动 + 锚点跟随）
 - **触发**: 用户截图「BOE GPU部署sub2a」82 节点树的图形视图——点全挤成一串珠子，「这个节点也太密集了」。
@@ -31,10 +38,3 @@
 - **验证**: ①直调路由（`TRELLIS_DB_PATH` 指 prod 副本，`bun --conditions=react-server`）——91 节点、载荷 **10.26MB→166.6KB（~62x）**、无任何节点下发 toolCalls、stats/generatedFiles 在位、无委派节点 `tools` 有值（BOE 75 个有工具调用的节点全是无委派，折叠摘要行靠它点名 "Bash、Read、Edit"）；②tool-calls 端点返回完整数组、长度与 stats.total 一致、未知节点 404；③`test-timeline-render` 全绿（toolCalls 在场路径）；④stats-only 渲染测试全绿（折叠行点名工具 / 委派计数 / 超 4 截 4+… / total=0 不渲染）；⑤tsc 零错、eslint 零新增（TurnCard 4 条既有，git stash 基线对照）。
 - **合并插曲**: 与 origin/main 的 Codex 迁移（S99）撞了 session 编号和 `cli_lineages` 迁移——本 session 初基于旧 main 写的 cli_lineages 修复（DROP 重建为 claude_session_id）方向反了：origin/main 已用 RENAME COLUMN 原位迁移到 provider-neutral 的 `cli_session_id`（多 provider lineage），prod 旧表正好是目标 schema。合并时丢弃我的 sqlite.ts 改动，采用 origin/main 版本。
 - **Next**: 部署后用户真机点一轮长会话 Tab 切换确认体感（重点：展开动线时的按需拉取有没有可见延迟、角标数字对不对）。**未部署**——等用户点头。
-
-### Session 99（2026-08-18，Codex 迁移体验对齐：历史 attach、skill、Agent、联网语义）
-- **触发**: 用户反馈 Trellis 只把 Claude provider 支持好，Codex 用户难迁入，要求迁来后体验至少对齐。根因不是单点 UI：Codex 原生会话完全无法 attach；现有 lineage 表/发现 API/watcher 都写死 Claude；skill API 只扫 `~/.claude/skills` 且输入框主动隐藏 Codex；Agent 在 UI/route/tasks 三层被钳成 Claude-only；Chat 文案还错误声称 Codex offline。
-- **Done ① CLI 迁移主链**: 新 `codex-import.ts` 解析 rollout（只认可见 `event_msg.user_message`、assistant 双通道去重、custom/function tools、四桶 token、残行容错）；发现层支持 `$CODEX_HOME/sessions` 跨日期递归、按 cwd 分组与现有 fork 跨日 union；`sessions.cli_provider` + provider-neutral `cli_lineages` 原位迁移旧表；attach/import/watcher/API/UI 全部 provider-aware。Attached Codex 可从 tip 线性 resume、从任意历史轮构造前缀 rollout 真分叉，CLI `codex fork` 写进新日期也会被根 watcher 自动归树；「在 CLI 继续」输出 `codex resume <id>`。同时修正旧 ordinal 把注入 role=user 当真提问的错误，并按 question 自愈存量。
-- **Done ② Skill / Agent / web**: provider-aware skill 索引按 Codex 官方 project/user/admin 作用域发现 `.agents/skills`，兼容当前 CLI 的 `$CODEX_HOME/skills/.system` 与 symlink；选择器原生填 `$skill`，纯 Chat 自动开增强。Codex Agent 支持人设、模型、静态 sandbox 权限、隔离和挂载 skill（`SKILL.md` + source dir 内联），会话 Agent、`@slug`、定时任务三条链均放行；工具白/黑名单与逐项审批明确标为不支持。纯 Codex Chat 现在显式隔离 AGENTS/环境 skills/plugins/MCP，但保留 CLI 默认 cached web search；Project/增强模式给 workspace-write network。
-- **验证**: `bun run test:codex-cli` 55 项全过（parser/DB attach/append/前缀分叉/跨日期 attach+watcher/skill/Agent）；真实 corpus 发现 4517 rollout，最近列表约 180ms、lineage attach 约 446ms；`bunx tsc --noEmit`、`git diff --check`、`make build` 全过。隔离 dev + agent-browser 真页面 smoke：Codex provider 可选、Agent picker 生效且边界提示可见、`$open` 补全成 `$openai-docs` 并自动开启增强、Attach 弹窗切 Codex 后列出真实历史。全仓 lint 仍是既有 34 errors/9 warnings；本次改动文件仅命中 `SessionSidebar.tsx:959` 的既有 setState-in-effect。
-- **边界 / Next**: 当前 `@smokingmouse/agent@0.5.1` 的 Codex exec backend 无 dynamic approval callback，且忽略 `extraArgs`，所以 CLI 0.147 虽有 `-a`/`--approve-for-me`，Trellis 仍不能像 Claude 一样弹逐项审批卡；真对齐需迁 `codex app-server` JSON-RPC。代码未部署，下一步先 review/commit，再走正常 deploy。
