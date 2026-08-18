@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatTokens } from "@/lib/format-tokens";
 import { toolTitle } from "@/lib/tool-registry";
 import {
@@ -9,7 +9,8 @@ import {
   walkToolTree,
   type ToolNode,
 } from "@/lib/tool-tree";
-import type { ToolCall } from "@/lib/types";
+import type { ToolCall, ToolCallStats } from "@/lib/types";
+import { useSessionStore } from "@/stores/sessionStore";
 import { ToolRow, useElapsed } from "./ToolRow";
 
 // The turn's whole tool timeline, in chronological order, one row per call.
@@ -19,12 +20,20 @@ import { ToolRow, useElapsed } from "./ToolRow";
 // from the main list to appear in its own box, so the two panels each told
 // half the story and neither preserved the order things actually happened in.
 // One tree, nested where nesting is real, is both simpler and more honest.
+//
+// 大会话的 toolCalls 不随会话载荷下发（占比能到 98%，改发预计算 stats），
+// 所以 done 节点首次展开时按需拉取（loadNodeToolCalls）；拉取期间折叠态
+// 用 stats 渲染角标数字。流式节点不受影响——toolCalls 随流事件进 store。
 
 export function ToolTimeline({
+  nodeId,
   toolCalls,
+  stats,
   live,
 }: {
+  nodeId: string;
   toolCalls: ToolCall[];
+  stats?: ToolCallStats | null;
   live: boolean;
 }) {
   const tree = useMemo(() => buildToolTree(toolCalls), [toolCalls]);
@@ -34,7 +43,17 @@ export function ToolTimeline({
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? live;
 
-  if (tree.length === 0) return null;
+  // 折叠态在 toolCalls 未加载时用 stats 顶上（tree 为空但 stats 有数字）。
+  const display = tree.length > 0 ? counts : stats ?? null;
+  // toolCalls 被剥离、且这轮确实有工具调用 → 展开时按需拉取。
+  const needsLoad = toolCalls.length === 0 && (stats?.total ?? 0) > 0;
+  const loadNodeToolCalls = useSessionStore((s) => s.loadNodeToolCalls);
+  const loading = useSessionStore((s) => Boolean(s.toolCallsLoading[nodeId]));
+  useEffect(() => {
+    if (open && needsLoad) void loadNodeToolCalls(nodeId);
+  }, [open, needsLoad, nodeId, loadNodeToolCalls]);
+
+  if (!display || display.total === 0) return null;
   const running = live ? walkToolTree(tree).filter((n) => n.running) : [];
 
   return (
@@ -58,14 +77,14 @@ export function ToolTimeline({
           <>
             <span className="font-medium text-ink shrink-0">🧰 动线</span>
             <span className="text-ink-muted tabular-nums shrink-0">
-              {counts.total} 步
+              {display.total} 步
             </span>
             <span className="text-ink-faint truncate min-w-0">
-              {summaryLine(tree, counts.subagents, counts.workflows)}
+              {summaryLine(tree, display.subagents, display.workflows, stats?.tools)}
             </span>
-            {counts.errors > 0 && (
+            {display.errors > 0 && (
               <span className="text-danger-ink shrink-0">
-                · {counts.errors} 失败
+                · {display.errors} 失败
               </span>
             )}
           </>
@@ -76,13 +95,27 @@ export function ToolTimeline({
         </span>
       </button>
 
-      {open && (
-        <div className="border-t border-line divide-y divide-line/70">
-          {tree.map((n) => (
-            <ToolRow key={n.call.id} node={n} live={live} />
-          ))}
-        </div>
-      )}
+      {open &&
+        (tree.length > 0 ? (
+          <div className="border-t border-line divide-y divide-line/70">
+            {tree.map((n) => (
+              <ToolRow key={n.call.id} node={n} live={live} />
+            ))}
+          </div>
+        ) : (
+          // toolCalls 还在按需拉取（或拉取失败静默降级）——给一行占位，
+          // 别让展开的面板空着。
+          <div className="border-t border-line px-3 py-2 text-ui text-ink-faint flex items-center gap-2">
+            {loading ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                正在加载工具调用…
+              </>
+            ) : (
+              <span>工具调用暂无数据</span>
+            )}
+          </div>
+        ))}
     </div>
   );
 }
@@ -130,6 +163,9 @@ function summaryLine(
   tree: ToolNode[],
   subagents: number,
   workflows: number,
+  // toolCalls 被剥离时（大会话 done 节点）tree 为空，用服务端预计算的
+  // 顶层工具名顶上，保住 "Bash、Read、Edit" 这行点名。
+  statsTools?: string[],
 ): string {
   const parts: string[] = [];
   if (subagents > 0) parts.push(`${subagents} 子 Agent`);
@@ -137,7 +173,11 @@ function summaryLine(
   if (parts.length === 0) {
     // No delegation — name the tools instead, so the collapsed line still
     // says something ("Bash、Read、Edit").
-    const names = [...new Set(tree.map((n) => toolTitle(n.call)))];
+    const names =
+      tree.length > 0
+        ? [...new Set(tree.map((n) => toolTitle(n.call)))]
+        : (statsTools ?? []);
+    if (names.length === 0) return "";
     return names.slice(0, 4).join("、") + (names.length > 4 ? "…" : "");
   }
   return `· ${parts.join(" · ")}`;

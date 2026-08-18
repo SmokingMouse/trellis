@@ -38,7 +38,9 @@ const base = (
 });
 
 function render(calls: ToolCall[], live = false): string {
-  return renderToStaticMarkup(<ToolTimeline toolCalls={calls} live={live} />);
+  return renderToStaticMarkup(
+    <ToolTimeline nodeId="test-node" toolCalls={calls} live={live} />,
+  );
 }
 
 function nodeOf(calls: ToolCall[]): ToolNode {

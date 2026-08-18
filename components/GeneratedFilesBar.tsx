@@ -15,9 +15,15 @@ const KIND_ICON: Record<string, string> = {
 // global preview overlay as clickable inline paths. Lists every written file —
 // the server fences each to the session whitelist on open (out-of-cwd files
 // Claude generated are previewable too), so we don't pre-filter here.
+//
+// 大会话的 toolCalls 不随会话载荷下发，所以优先用服务端预计算的
+// generatedFiles；toolCalls 在手里时（流式 / 按需拉过后）就地算。
 export function GeneratedFilesBar({ node }: { node: ChatNode }) {
   const openFilePreview = useSessionStore((s) => s.openFilePreview);
-  const files = generatedFilesFromNode(node);
+  const files =
+    node.toolCalls.length > 0
+      ? generatedFilesFromNode(node)
+      : (node.generatedFiles ?? []);
   if (files.length === 0) return null;
 
   return (

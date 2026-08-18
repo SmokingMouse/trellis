@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 99 / 98 / 97 / 96 / 95）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 100 / 99 / 98 / 97 / 96）。更早的见 `archive.md`。
+
+### Session 100（2026-08-18，大会话 Tab 切换仍慢：toolCalls 改按需加载，载荷 10.26MB→167KB）
+- **触发**: S98（HAST 缓存 + 视口懒渲染）落地后，用户反馈「怎么访问我的 boe 机器」tab 切换**还是慢**。
+- **根因**: GET /api/sessions/[id] 返回 **10.26MB**，其中 **98.6% 是 toolCalls JSON（10.12MB）**，response 文本仅 0.09MB；每次切 tab 都重拉整个会话（无缓存），gate（server.ts）又剥掉压缩。on-box 处理 ~190ms 很快，慢在用户远程 Mac 浏览器吃满 10.26MB 传输。S98 治的是渲染侧，传输侧这块大头没动。
+- **Done（懒加载 toolCalls）**: 会话载荷剥离完整 toolCalls 数组，改发预计算 `toolCallStats`（total/subagents/workflows/errors + `labels` 子 Agent 名 + `tools` 顶层工具名去重 ≤5）+ `generatedFiles`；新增 `GET /api/nodes/[id]/tool-calls` 按需端点。`ToolTimeline` 展开时 `loadNodeToolCalls` 拉取（拉取期间折叠态用 stats 渲染角标数字，占位行「正在加载工具调用…」）；`ToolCallBadge` 优先用 stats 省掉每卡片一次 buildToolTree；`GeneratedFilesBar` 优先用预计算 generatedFiles。**流式路径不变**（toolCalls 随流事件进 store）。
+- **验证**: ①直调路由（`TRELLIS_DB_PATH` 指 prod 副本，`bun --conditions=react-server`）——91 节点、载荷 **10.26MB→166.6KB（~62x）**、无任何节点下发 toolCalls、stats/generatedFiles 在位、无委派节点 `tools` 有值（BOE 75 个有工具调用的节点全是无委派，折叠摘要行靠它点名 "Bash、Read、Edit"）；②tool-calls 端点返回完整数组、长度与 stats.total 一致、未知节点 404；③`test-timeline-render` 全绿（toolCalls 在场路径）；④stats-only 渲染测试全绿（折叠行点名工具 / 委派计数 / 超 4 截 4+… / total=0 不渲染）；⑤tsc 零错、eslint 零新增（TurnCard 4 条既有，git stash 基线对照）。
+- **合并插曲**: 与 origin/main 的 Codex 迁移（S99）撞了 session 编号和 `cli_lineages` 迁移——本 session 初基于旧 main 写的 cli_lineages 修复（DROP 重建为 claude_session_id）方向反了：origin/main 已用 RENAME COLUMN 原位迁移到 provider-neutral 的 `cli_session_id`（多 provider lineage），prod 旧表正好是目标 schema。合并时丢弃我的 sqlite.ts 改动，采用 origin/main 版本。
+- **Next**: 部署后用户真机点一轮长会话 Tab 切换确认体感（重点：展开动线时的按需拉取有没有可见延迟、角标数字对不对）。**未部署**——等用户点头。
 
 ### Session 99（2026-08-18，Codex 迁移体验对齐：历史 attach、skill、Agent、联网语义）
 - **触发**: 用户反馈 Trellis 只把 Claude provider 支持好，Codex 用户难迁入，要求迁来后体验至少对齐。根因不是单点 UI：Codex 原生会话完全无法 attach；现有 lineage 表/发现 API/watcher 都写死 Claude；skill API 只扫 `~/.claude/skills` 且输入框主动隐藏 Codex；Agent 在 UI/route/tasks 三层被钳成 Claude-only；Chat 文案还错误声称 Codex offline。
@@ -38,10 +46,3 @@
 - **二号机待办（都是用户手动，代码层已闭环）**: ① 本机 `~/.claude` 提交推送（**codex 标记还在未提交改动里**）→ 二号机 pull；② 二号机 `~/.agent-gateway.env` 补 `CPA_API_KEY`（值同本机）；③ 二号机重部 trellis 拿 0.5.1；④ 本机 prod 也要 `make deploy`（S95+S96 都没上线）。做完后二号机再选 cpa provider：若仍报错，错误信息这次会直说缺哪样。
 - **Next**: 用户跑二号机四步 + 本机 deploy；验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗 + S95 授权卡）。
 
-### Session 95（2026-08-04，授权健康 T0+T1：状态卡 + 到期预警，把「挂 6 天没人知道」封死）
-- **触发**: 用户「有可能把 claude 和 codex 原生授权在平台上可以控制吗」。调研（claude-code-guide 权威查证 + 本地实测 + happyclaw 对照）后用户拍板：**T0+T1 先落地**，托管隔离（`CLAUDE_CONFIG_DIR` + setup-token 年票注入）等 BOE 多机坐实再上 —— 决策与 happyclaw 对照记 `decisions.md` 本日条。
-- **调研拿到的抓手**（细节见 decisions 条）: `claude auth status --json` 是官方状态出口（2.1.207 实测）但**不含过期时间**，过期只能读 credentials.json（非公开 API，解析失败一律降级）；`CLAUDE_CODE_OAUTH_TOKEN` env 存在（认证优先级第 5，接 setup-token 一年期年票，设了就跳过本地凭证查找）；codex 有 `login --with-api-key` / `--with-access-token` 的 stdin 无头登录；**happyclaw 的做法 = 平台自持 Claude Code client_id 走 PKCE + 每 spawn 物化 .credentials.json 进独立 CLAUDE_CONFIG_DIR、绝不碰 ~/.claude —— 但平台侧从不 refresh（15 天保质期到了 UI 重新 OAuth），codex 零处理**。
-- **Done（T0 状态可见）**: `lib/server/auth-health.ts`（探测 = auth status + credentials.json 时效 + **keychain 分叉哨兵**（S93 复发检测：副本落后文件 48h+ 即警）+ codex login status；30s 缓存）· `app/api/auth-health/route.ts` · `components/AuthHealthCard.tsx` 挂 `/settings/models` 顶部 —— 判断全在服务端，卡片只渲染，**预警与卡片共用同一份判断**，不会「卡片绿着、手机在报警」· TurnCard / ChatNode 错误卡对认证类错误多一行「→ 查看授权状态」出口（`lib/auth-error.ts` 判据，误报代价为零所以判宽）。
-- **Done（T1 预警）**: scheduler 启动即查 + 每小时 :07 复查（跟 `TRELLIS_SCHEDULER` 闸走，smoke 实例不发真预警）；硬条件（claude 缺失 / 未登录 / refresh 已过期 / 将过期 <72h / keychain 分叉）→ notify 推送，24h 去重落 `~/.trellis/auth-alerts.json`。notify.ts 扩 `auth_alert` kind（taskId/runId 放宽可选）；**`~/.trellis/notify.json` 从缺失配到有**（bark-push.py，--group trellis --level timeSensitive）—— 此前 notify 一直是 no-op。顺带：claude-缺失告警让 S91 点名的「nvm 升级后 plist PATH 失效」隐患第一次有了可见症状。
-- **验证**: tsc 零错 · eslint 4 条全既有（`git stash` 基线对照完全一致，我的文件零新增）· 模块直调（`bun --conditions=react-server`）：真机数据正确（claude max / refresh 至 8-20；codex ChatGPT）、健康态零误报零状态文件 · notify 链真推一条测试（执行无异常；**送达以手机收到为准**）· route handler 直调 200 · dev 编译零错（:3402 起停已清理；API 在 dev 里被既有 401 中间件拦，属预期）。**未验**: 卡片真浏览器渲染（dev 水合是 failures.md 开放故障，SSR 只出骨架）—— 部署后看一眼；每小时 tick 分支（与启动分支同一函数，只差触发时机）。
-- **Next**: 部署后 ① 开 `/settings/models` 看授权卡真渲染 ② 手机确认「trellis 预警通道测试」推送收到（没收到 = bark 链路问题）③ 验收队列照旧（S91 三处 + 管理台批 1-6 + S94 弹窗、BOE）。T2（平台内重登录）/ T3（托管隔离）等 BOE 提上日程再开。

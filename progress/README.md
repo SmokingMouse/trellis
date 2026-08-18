@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-授权健康监控（T0 状态卡 + T1 预警）已落地待验收；验收队列见指针区，BOE 仍未部。
+大会话 Tab 切换延迟治理：toolCalls 改按需加载（载荷 10.26MB→167KB），已落地待真机验收。
 
 ## Goals
 
