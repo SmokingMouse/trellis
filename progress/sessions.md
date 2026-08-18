@@ -7,6 +7,7 @@
 - **Done**: ① bump `^0.8.0`；② `sdk-adapter` 的 `APPROVAL_ASK_TOOLS` 名单换 `"all"`（CLI `permissions.ask:["*"]`）——旧名单外的可变更工具（MCP 工具是最大的洞，`mcp__*` 名字穷举不完）此前被全局 allowlist 静默放行；③ 「哪些免审」的判断挪进 run-bus dispatcher：新增 `READONLY_AUTO_ALLOW`（Read/Glob/Grep/LS/WebFetch/WebSearch/TodoWrite/NotebookRead/BashOutput/Task/Skill/SlashCommand），权限确认下只读/编排类自动放行、其余一律弹卡；Task/Skill 外壳放行不漏审——内部可变更调用各自再进回调逐个弹卡。
 - **验证**: 真机 claude 走 trellis provider 层 + requireApproval：回调收到 `["Read","Bash"]`（Read 旧名单下直接绕过、现在进回调）、放行后回答 DONE；tsc 零错、eslint 改动文件零输出。agent@0.8.0 由干净 main 构建发布（PR #15 内容 58/58 复核）。
 - **版本归属澄清**: maxTurns/skills 两项实际已随 0.7.0 出包（并行会话在 0.7.0 发布前落的 main）；0.8.0 增量 = askTools 全拦 + McpServerConfig。
+- **部署**: `make deploy` 上线 `4a6bbb4cf`（连带 PR #17 响应分层，prod node_modules 实核 0.8.0）。
 - **Next**: 真机权限确认会话验弹卡范围（Bash/Edit/MCP 弹、Read 不弹、「总是允许」仍生效）；cpa codex 上游故障（failures.md）恢复后复验 codex 注入路径。
 
 ### Session 106（2026-08-18，agent 长任务正文一坨糊：分段 + 过程/结论分层，PR #17 已合并）
