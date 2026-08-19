@@ -105,13 +105,31 @@ function projectSkillRoots(workspace?: string | null): string[] {
   return roots;
 }
 
+/** trellis 自带技能根（`<app>/skills`，随部署走）。
+ *
+ * prod 的 cwd 是具体 release 目录（`~/.trellis/releases/<ts>-<sha>`，会被清理），
+ * 必须经 `current` 软链取 —— agent-pack 里指向这里的 symlink 才不会随 release
+ * 清理悬空，且升级后自动跟到新版。dev checkout 直接用 cwd 下的 skills/。 */
+export function builtinSkillsRoot(): string {
+  const releases = path.join(os.homedir(), ".trellis", "releases");
+  return process.cwd().startsWith(releases + path.sep)
+    ? path.join(os.homedir(), ".trellis", "current", "skills")
+    : path.join(process.cwd(), "skills");
+}
+
+/** claude 侧技能搜索根。顺序即优先级：用户目录赢，内置兜底 —— 同名时用户
+ * 自己的版本覆盖 trellis 自带的（listSkills 的 byName 去重是先到先得）。 */
+export function claudeSkillRoots(): string[] {
+  return [path.join(os.homedir(), ".claude", "skills"), builtinSkillsRoot()];
+}
+
 export function listSkills(
   provider: SkillProvider,
   workspace?: string | null,
 ): DiscoveredSkill[] {
   const roots =
     provider === "claude"
-      ? [path.join(os.homedir(), ".claude", "skills")]
+      ? claudeSkillRoots()
       : [
           ...projectSkillRoots(workspace),
           path.join(os.homedir(), ".agents", "skills"),

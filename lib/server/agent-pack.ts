@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import type { AgentRecord, SkillRef } from "./agents";
 import type { AgentSpawn } from "@/lib/llm/types";
-import { listSkills } from "./skills";
+import { claudeSkillRoots, listSkills } from "./skills";
 
 // 把 DB 里的 Agent 定义变成「claude CLI 能吃的东西」。
 //
@@ -16,9 +16,18 @@ import { listSkills } from "./skills";
 // 内置的 5 个纯人设全在第一档，所以最常见的路径完全不碰文件系统。
 
 const PACK_ROOT = path.join(os.homedir(), ".trellis", "agent-packs");
-const HOST_SKILLS = path.join(os.homedir(), ".claude", "skills");
 /** 旧 pack 的保留期。够长到不会删掉某个长跑 run 正在用的目录。 */
 const SWEEP_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** 技能目录逐根解析：用户 `~/.claude/skills` 优先，其次 trellis 自带 `skills/`
+ * （内置技能随部署走，`trellis-admin` 靠它在没有任何手工 symlink 的机器上可用）。 */
+function resolveSkillDir(name: string): string | null {
+  for (const root of claudeSkillRoots()) {
+    const p = path.join(root, name);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 /** claude --agents 的 JSON value 形状（实测字段，2026-07-31 / CLI 2.1.207）。 */
 type InlineAgentDef = {
@@ -30,8 +39,10 @@ type InlineAgentDef = {
 
 /** pack 目录结构 / 生成逻辑的版本号。**改了 writePack 的产出就要 +1** ——
  * 否则老 hash 命中缓存目录，新逻辑对存量 agent 永远不生效（本文件的 Skill
- * 自动补全就踩过一次：改了代码、pack 没重建、行为纹丝不动）。 */
-const PACK_FORMAT = 2;
+ * 自动补全就踩过一次：改了代码、pack 没重建、行为纹丝不动）。
+ * v3：技能源从单根 ~/.claude/skills 改为多根（+ trellis 自带 skills/）——
+ * 存量 pack 可能缺内置技能的 symlink，必须重物化。 */
+const PACK_FORMAT = 3;
 
 /** agent 实际拿到的工具白名单。
  *
@@ -124,11 +135,13 @@ function writePack(dir: string, a: AgentRecord): void {
       console.warn(`[agent-pack] 跳过非法技能名 ${JSON.stringify(name)}`);
       continue;
     }
-    const src = path.join(HOST_SKILLS, name);
+    const src = resolveSkillDir(name);
     // 技能被用户删了就跳过，不让整个会话失败 —— agent 少个技能能跑，
     // 起不来就什么都做不了。
-    if (!fs.existsSync(src)) {
-      console.warn(`[agent-pack] 技能 ${name} 在 ${HOST_SKILLS} 下不存在，跳过`);
+    if (!src) {
+      console.warn(
+        `[agent-pack] 技能 ${name} 在 ${claudeSkillRoots().join(" / ")} 下都不存在，跳过`,
+      );
       continue;
     }
     if (linked === 0) fs.mkdirSync(skillsDir, { recursive: true });
@@ -203,7 +216,8 @@ function codexAgentPrompt(a: AgentRecord): string {
     if (ref.kind === "inline") {
       body = ref.body;
     } else if (isSafeDirName(ref.name)) {
-      const dir = path.join(HOST_SKILLS, ref.name);
+      const dir = resolveSkillDir(ref.name);
+      if (!dir) continue;
       try {
         body = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8");
         source = dir;

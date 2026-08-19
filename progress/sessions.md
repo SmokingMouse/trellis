@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 107 / 106 / 105 / 104 / 103）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 108 / 107 / 106 / 105 / 104）。更早的见 `archive.md`。
+
+### Session 108（2026-08-19，「后台运行」空头支票破案 + trellis-admin 补接续姿势）
+- **触发**: 用户截图 macbook-pro 上 trellis 会话——agent 声称「全量同步后台跑、完成后我会触发周报任务(bc5b37ff)」，问这种后台运行是不是真的。
+- **破案（三层实测）**: ① `claude -p`（trellis 的 spawn 形态）退出时 **run_in_background 后台任务被杀**（sleep 90 实测无存活）；裸 `nohup &` 孤儿能活（实测存活）但无人看管。② 「完成后我会触发」必假——说话的进程 turn 结束即退，scheduler 只认 cron/fs/git/session_done 触发。③ 本机（=macmini）prod 库实核：无周报任务、零 trigger、日报 prompt 无 rsync 步骤——截图会话在 **macbook-pro 实例**（tailnet 档案确认本机是 macmini），任务数据在那台库里，agent 的「✅已建好」在够得着的库里查无实据。
+- **社区对照（happyclaw 源码实读）**: 模式 A=常驻 warm runner + SDK task-notification 唤醒（`background-task-drain.ts` 331 行「完成债」状态机是 IM 单次送达语义的账单，trellis 不该抄）；模式 B=调度器 + prompt 逐字重放 + agent 自助 `schedule_task` 工具（工具描述强制「调度词不进 prompt」「超时先 list_tasks 核实防重复建」——值得抄的是这套防呆合同）；模式 C=OpenClaw 式 heartbeat 轮询（trellis 用一个 cron trigger 即可模拟，零代码）。
+- **Done（`skills/trellis-admin/SKILL.md`）**: ① description 补接续场景触发词（跑完之后/完成后接着/后台跑完再触发/同步完成后），明确「接续编排归本 skill，正解是触发器不是口头承诺」；② 新增「长任务与『完成后接续』」一节：两条真路（收进同一 run 分批跑 / nohup+标志文件+fs 触发器）+ 三条防呆（调度词不进 prompt、id 必须来自命令回显+超时先 list 核实、没有 once 触发器用 tasks run 或 cron+rm 顶）。
+- **Done ②（内置化，用户拍板「symlink 方案不行——新用户没东西可链」后落地）**: 技能源改多根解析，**零 schema 变更**（绑定仍 `kind:"host"`+目录名）——`skills.ts` 新增 `builtinSkillsRoot()`（cwd 在 `~/.trellis/releases/` 下 → 经 `current` 软链取 `current/skills`，pack symlink 不随 release 清理悬空、升级自动跟随；dev checkout → `cwd/skills`）+ `claudeSkillRoots()`（用户 `~/.claude/skills` 优先、内置兜底，byName 去重先到先得）；`agent-pack.ts` 的 writePack / codexAgentPrompt 改 `resolveSkillDir()` 逐根找，**PACK_FORMAT 2→3**（facts 纪律：writePack 产出变了必须 bump，否则存量 pack 命中老 hash 永不重建）。顺带发现 L1（symlink 发现层）**早已修**（`93c7c6c`，`skills.ts:38` statSync 穿透），contrast 坑 1 的发现层部分不用再做。
+- **验证**: tsc 零错、eslint 两文件零输出；冒烟三场景（`bun --conditions react-server`）——A 假 HOME 模拟无 symlink 新机器：内置根发现 + 物化成功 + pack symlink 经内置目录可读 SKILL.md；B 本机双源：去重后 1 条且用户目录赢；C 在 `~/.trellis/current` 下跑：内置根正确解析为 `current/skills`（release 目录 `20260818T094242` 实核带 skills/trellis-admin）。**未部署**。
+- **未做（候选，待用户定）**: ① `--append-system-prompt` 生命周期契约注入（`tasks.ts:472 launch()` 经 extraArgs，交互路径同理）——治「agent 不知道自己会死」的根因；② once 触发器 kind（产品 gap）。
+- **Next**: `make deploy` 上线多根解析（存量 agent 首次 spawn 自动重物化）；macbook-pro 拉取部署后 trellis-admin 零配置可用，顺带在那台核实周报任务真伪并手动跑；决定候选 ①② 做哪个。
 
 ### Session 107（2026-08-18，权限确认升级全拦：agent@0.8.0 + READONLY_AUTO_ALLOW 免审名单）
 - **触发**: PR #15（并行会话的 askTools "all" + mcpServers 一等协议）review 合并、SDK 发 0.8.0 后，trellis 接力吃下全拦。
@@ -34,9 +44,3 @@
 - **边界**: 审批回调（dynamicPermissionCallback）仍未接——S99 边界里「Codex 不能弹逐项审批卡」只解了 transport 层，approval RPC 映射是下一个独立 phase；`turn/steer`、`subAgentActivity`→Task 树渲染同理。S101 遗留 ③（登录闸假阴性）未动。
 - **Next**: 用户真机开 codex 会话看打字机效果（顺带 S100 Tab 切换体感 / S103 长树图形视图两项待验收）；devbox 侧下次 `make deploy` 自动带上 0.6.0（bun.lock 已锁）。
 
-### Session 103（2026-08-18，树面板图形视图长树密到糊：缩放下限 + 滚动 + 锚点跟随）
-- **触发**: 用户截图「BOE GPU部署sub2a」82 节点树的图形视图——点全挤成一串珠子，「这个节点也太密集了」。
-- **根因**: `TreePanel` graphGeometry 把整树等比压进 `GRAPH_MAX_H=300px`。dagre compact 层距 126px（90+36），长链树布局总高数千 px → scale 被压到 ~0.03，层距 3-4px < 点直径 7px，必然重叠。
-- **Done（`components/TreePanel.tsx`）**: 纵横分开缩放——`scaleX` 仍贴合面板宽（272px，不出横向滚动条），`scaleY` 优先塞进 300px、塞不下时守住下限 `GRAPH_MIN_SCALE_Y = 12/126`（层距 ≥12px），高度溢出交给外层 body 的 `overflow-y-auto` 滚动。配套：锚点节点加 `data-graph-active`，切图/跳转后 `scrollIntoView({block:"nearest"})` 跟随，否则长树切过去看到的是树顶一屏灰点。
-- **验证**: tsc 零错、eslint 该文件零输出。真机视觉效果待用户看。已合并推送（`39ff175` → merge → push origin/main），**未部署**。
-- **Next**: 用户在真机开同一棵 82 节点树的图形视图确认：点间距可读、滚动顺、当前点在视口内。

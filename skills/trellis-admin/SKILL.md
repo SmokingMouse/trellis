@@ -1,6 +1,6 @@
 ---
 name: trellis-admin
-description: 配置 Trellis 平台的后台——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「让它盯着某个目录，一改就跑」「这个任务上次为什么失败」「看看有哪些定时任务」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「让这台机器上的某个 agent 定时地、或被事件触发地替我干活」就触发。触发词：trellis、trellisctl、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、任务失败、run 历史、看看任务。边界：只操作 Trellis 的 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
+description: 配置 Trellis 平台的后台——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「让它盯着某个目录，一改就跑」「这个跑完之后自动做 Y」「这个任务上次为什么失败」「看看有哪些定时任务」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「让这台机器上的某个 agent 定时地、或被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、后台跑完再触发、同步完成后、任务失败、run 历史、看看任务。边界：只操作 Trellis 的 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
 ---
 
 # Trellis 后台配置
@@ -41,7 +41,7 @@ bun .../trellisctl.ts agents create '{"slug":"pr-reviewer","name":"PR 审查","s
 | `systemPrompt` | 人设正文。选了 agent 的会话，会话级 systemPrompt 会被删掉——**agent 赢，两者不叠加**。 |
 | `model` | CLI 模型名，`null` = 跟随会话。**注意别和任务的 `providerId` 搞混**，那是两个东西。 |
 | `tools` | `null` = 不限制；`[]` = 一个工具都不给；给了数组就是白名单。名字要和 CLI 的工具名字面一致（`Read`/`Write`/`Edit`/`Bash`/`Grep`/`Glob`/`WebFetch`/`Skill`…），**拼错不会报错，只会静默少一个工具**。 |
-| `skills` | `[{"kind":"host","name":"<目录名>"}]`，只能引用本机 `~/.claude/skills/<name>`。名字取**目录名**不是 frontmatter 里的 `name`。用 `trellisctl skills [关键词]` 查。 |
+| `skills` | `[{"kind":"host","name":"<目录名>"}]`。目录逐根解析：本机 `~/.claude/skills/<name>` 优先，找不到再取 trellis 自带 `skills/<name>`（内置技能随部署走，`trellis-admin` 属于后者，不需要任何手工 symlink）。名字取**目录名**不是 frontmatter 里的 `name`。用 `trellisctl skills [关键词]` 查。 |
 | `inheritEnv` | **新建的 agent 默认是 `false` = 隔离**，而隔离是三件套：没有 CLAUDE.md、没有本机 skill、**也没有 MCP**。想让它像平时的 claude 一样什么都看得见，显式写 `"inheritEnv":true`。 |
 | `permission` | `full` / `default` / `readonly` / `auto-edit`，`null` = 跟随会话。**这是无人值守场景下唯一真正起作用的闸**（见下面的失败模式）。 |
 | `requireApproval` | 三态（`true`/`false`/`null`）。只在交互式会话里有意义。 |
@@ -100,6 +100,19 @@ bun .../trellisctl.ts triggers add <taskId> '{"kind":"cron","config":{"expr":"0 
 - `{"kind":"git","config":{"repoPath":"/path","branch":"main","pollMs":60000}}` — 轮询 `git ls-remote`，远端有新 commit 就触发。想监听本地提交请改用 fs 触发器盯 `<repo>/.git/refs/heads`。
 - `{"kind":"session_done","config":{"sessionId":"..."}}` — 某个会话跑完就触发。不能填这个任务自己的会话（那是无限烧钱的闭环，服务端会拒）。
 - `lark` 这个 kind 建得出来但**全仓没有消费者**，建了就是永不触发的死配置。别建。
+
+## 长任务与「完成后接续」：承诺必须物化成触发器
+
+会话里的你是单 turn 进程——turn 结束进程就退出，`run_in_background` 的后台任务会被一起杀掉（实测：`claude -p` 退出即清理），裸 `nohup ... &` 的孤儿进程能活、但没有任何东西看着它。所以**「X 跑完之后我会触发 Y」这句话没有任何机制兜底**——说这话的进程在用户读到它时已经不在了。接续需求只有两条真路：
+
+- **首选：收进同一个 run。** 依赖步骤直接写进任务 prompt 第一步（「先分批 rsync 同步 X，失败不阻塞、在报告里注明；然后…」）。无人值守 run 工具全放行，长命令唯一的约束是 Bash 单命令 10 分钟上限——在 prompt 里写明**按目录/批次拆开跑**，别教它放后台。
+- **真要异步：标志文件 + fs 触发器。** 启动侧 `nohup bash -c '<长命令>; touch /path/flags/done' &`（孤儿进程活得过 CLI 退出），下游任务挂 `{"kind":"fs","config":{"dir":"/path/flags"}}`。这是触发器体系内唯一真正成立的「完成后触发」。
+
+三条防呆，每条对应一种已发生的事故：
+
+- **prompt 里一个调度词都不许有。** 任务 prompt 是每次触发时逐字重放的动作指令，「每天早上」「同步完成后」这类语义全部落在 trigger 上；把调度词写进 prompt，第一次触发时 agent 会试图再调度一遍而不是干活。
+- **报给用户的 id 必须来自命令回显。** `tasks create` / `triggers add` 的输出才是事实；创建类命令超时或失败时先 `tasks list` 核实有没有建成，**不要直接重试**（可能重复建），更不要凭感觉报「已建好 ✅」——建没建成以库里查得到为准。
+- **没有 once 触发器。** kind 只有 cron / fs / git / session_done；「就这一次，X 点跑一下」用手动 `tasks run`、或「cron + 跑完 `triggers rm`」顶上，别造不存在的 kind。
 
 ## Known Failure Modes
 

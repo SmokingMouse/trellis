@@ -4,6 +4,13 @@
 
 ## Session Log
 
+### Session 103（2026-08-18，树面板图形视图长树密到糊：缩放下限 + 滚动 + 锚点跟随）
+- **触发**: 用户截图「BOE GPU部署sub2a」82 节点树的图形视图——点全挤成一串珠子，「这个节点也太密集了」。
+- **根因**: `TreePanel` graphGeometry 把整树等比压进 `GRAPH_MAX_H=300px`。dagre compact 层距 126px（90+36），长链树布局总高数千 px → scale 被压到 ~0.03，层距 3-4px < 点直径 7px，必然重叠。
+- **Done（`components/TreePanel.tsx`）**: 纵横分开缩放——`scaleX` 仍贴合面板宽（272px，不出横向滚动条），`scaleY` 优先塞进 300px、塞不下时守住下限 `GRAPH_MIN_SCALE_Y = 12/126`（层距 ≥12px），高度溢出交给外层 body 的 `overflow-y-auto` 滚动。配套：锚点节点加 `data-graph-active`，切图/跳转后 `scrollIntoView({block:"nearest"})` 跟随，否则长树切过去看到的是树顶一屏灰点。
+- **验证**: tsc 零错、eslint 该文件零输出。真机视觉效果待用户看。已合并推送（`39ff175` → merge → push origin/main），**未部署**。
+- **Next**: 用户在真机开同一棵 82 节点树的图形视图确认：点间距可读、滚动顺、当前点在视口内。
+
 ### Session 102（2026-08-18，codex picker 补 endpoints.yaml 第三方端点枚举，PR #16）
 - **触发**: S101 修通了本机 canonical yaml 的 codex 标记后，picker 仍选不到 yaml 里的第三方模型——`codexProviders()` 只读 `~/.codex/models_cache.json`，没登录过 ChatGPT 的机器只剩裸 `codex`（默认 gpt-5.5），带 `codex: { wire_api: responses }` 标记的端点模型（resolveCodexModel 可 `-c` 注入、无需登录）在 UI 上不存在。
 - **Done**（`app/api/providers/route.ts`，分支 `feat/codex-picker-yaml-endpoints`，PR #16 base main）: `codexProviders()` 改双源合并——新增 `codexYamlProviders()` 用 `loadEndpoints()` 原始 ConfigFile（不走 `listEndpoints`，EndpointInfo 不带 codex 块）枚举带标记 provider 的 models → `codex:<model>`（label `codex · <provider> · <model>`，hasKey = `process.env[api_key_env]` 有无）；models_cache.json 读取拆成 `codexCacheProviders()` 失败返回 `[]`（不再连带吞掉 yaml 来源）；按 id 去重 yaml 优先（与 resolveCodexModel 的 yaml 精确命中优先一致）；裸 `codex` 条目保留最前（DB 旧会话 model="codex" 按 exact id 查显示）。
