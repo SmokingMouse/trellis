@@ -182,7 +182,7 @@ function launchd(label: string): Supervisor {
 
 /**
  * unit 名默认取 label 的最后一段：`com.smokingmouse.trellis` → `trellis.service`
- * —— 与 BOE 上现存的那个 unit 对齐（scripts/update-trellis.sh 用的就是它）。
+ * —— 与 BOE 上现存的那个 unit 对齐。
  */
 function unitName(label: string): string {
   const raw = process.env.TRELLIS_DEPLOY_UNIT || label.split(".").pop() || label;

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  installHint,
   probeExecutable,
   probeSummary,
   type ProbeResult,
@@ -268,7 +269,7 @@ export function startTtyd(): Promise<number | null> {
       return null;
     }
     if (!tmux) {
-      state.error = "未找到 tmux（安装：brew install tmux）";
+      state.error = `未找到 tmux（安装：${installHint("tmux")}）`;
       state.errorDetail = null;
       return null;
     }

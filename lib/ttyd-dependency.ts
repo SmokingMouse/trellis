@@ -10,10 +10,15 @@ import path from "node:path";
 // 真没装 / 装了但没执行位 / 探测那一下超时或 fork 失败。前两种要人去装，
 // 第三种重试一下就好。分不清就只能瞎猜，所以 ProbeResult 逐个候选记原因。
 
-export const TTYD_INSTALL_COMMAND = "brew install ttyd";
+/** 按平台给安装提示 —— 这行字也会出现在 Linux（systemd 实例）的日志里，别只会说 brew。 */
+export function installHint(pkg: string): string {
+  return process.platform === "darwin" ? `brew install ${pkg}` : `apt install ${pkg}`;
+}
+
+export const TTYD_INSTALL_COMMAND = installHint("ttyd");
 export const TTYD_MISSING_MESSAGE = `未找到 ttyd（安装：${TTYD_INSTALL_COMMAND}）`;
 export const TTYD_HOST_DEPENDENCY_NOTE =
-  `Web 终端依赖宿主机安装 ttyd；macOS 安装：${TTYD_INSTALL_COMMAND}`;
+  `Web 终端依赖宿主机安装 ttyd（安装：${TTYD_INSTALL_COMMAND}）`;
 
 export const TTYD_CANDIDATES = [
   "/opt/homebrew/bin/ttyd",

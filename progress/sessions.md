@@ -1,6 +1,14 @@
 # Session Log
 
-最近 5 条，倒序（Session 108 / 107 / 106 / 105 / 104）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 109 / 108 / 107 / 106 / 105）。更早的见 `archive.md`。
+
+### Session 109（2026-08-19，部署独立性审查 + 四项修复）
+- **触发**: 用户「检查部署的独立性，是否存在对环境的依赖和耦合」→ 审查报告 → 「全部修复」。
+- **审查结论**: 部署主链（release/原子切换/回滚/双 supervisor/端口可配/优雅降级）解耦做得扎实；问题集中在一个腐烂运维脚本、新机器 bootstrap 三处人肉缺口（服务定义无模板、shared/.env.local 不随 clone、宿主机 CLI 登录态）、两处小不一致。tmux「无 PATH 兜底」为误报（probeExecutable 内部本就扫 PATH），实际只有提示文案写死 brew。
+- **Done**: ① 删 `scripts/update-trellis.sh`——已腐烂（引用 Makefile 已删的 SDK_REPO）、只在原主人两台机器可用、走的是 deploy.ts 明确取代的「原地 build + kickstart」老路，且把字节内网代理/BOE 路径含真实用户名推上了公开仓库（**git 历史里仍在，删除只是止血，代理地址与用户名按已公开对待**）；连带修 `deploy-supervisor.ts` 注释悬空引用。② `skills.ts` 的 `builtinSkillsRoot()` 改走 `deployPaths()`——原来硬拼 `os.homedir()/.trellis` 旁路了 `TRELLIS_DEPLOY_ROOT`。③ `ttyd-dependency.ts` 新增 `installHint()` 按平台给安装命令，ttyd/tmux 提示不再对 Linux 说 brew。④ README：Quickstart 补 tmux 依赖与 Linux 安装命令；新增「新机器从零部署」章节——7 步 checklist（含首次 `make deploy FORCE=1` 的鸡生蛋说明：服务工作目录还没切 current 时 preflight 必拦）+ launchd plist / systemd user unit 模板（以本机实测 plist 泛化；PATH 注释点名要含 claude CLI 的 bin）+ macOS keychain 凭证雷（launchd 会话读 keychain 死凭证，回退文件存储修复）。
+- **刻意不动**: `next.config.ts` turbopack root = homedir——作者注释已决策 unconditional（link-sdk 场景依赖），当前部署布局（release 全在 `~/.trellis/`）下无实际问题，仅是将来容器化的已知阻断点。
+- **验证**: tsc 零错；eslint 四个改动文件零输出；`bun --bun run build` 过；skills root 冒烟——默认根行为不变（回归安全）、`TRELLIS_DEPLOY_ROOT=/tmp/drill` 时正确解析 `/tmp/drill/current/skills`。**未部署、未提交**。
+- **Next**: 用户过目 diff 后提交；下次 `make deploy` 自然带上（skills root 改动影响 prod 的内置技能解析，与 S108 多根解析同批上线正好）。泄露历史**不重写**已拍板（decisions.md 2026-08-19 条），无后续动作。
 
 ### Session 108（2026-08-19，「后台运行」空头支票破案 + trellis-admin 补接续姿势）
 - **触发**: 用户截图 macbook-pro 上 trellis 会话——agent 声称「全量同步后台跑、完成后我会触发周报任务(bc5b37ff)」，问这种后台运行是不是真的。
@@ -36,11 +44,4 @@
 - **验证与插曲**: trellis 全链（makeCodexProvider→SDK→codex）实测**审批回调触发 + accept 后命令真执行 + shell 工具卡到达**；但完整轮次撞上 cpa 的 codex 上游 `503 auth_unavailable` 间歇故障（当日内从间歇恶化为挂起，判别实验证明与本次改动无关：默认 provider 同轮次全通、exec 同注入同 503）→ 记 `failures.md` 待查（修复大概率在 cpa 服务端补池凭证）。
 - **部署**: `make deploy` 上线 `66ebf0425`（smoke 全绿，prod node_modules 实核 0.7.0）。
 - **Next**: cpa 池恢复后按 failures.md 判定命令复验注入路径；用户真机 project+需确认开 codex 会话点权限卡、multi-agent 提问看 Task 树；审批「总是允许」按 toolName 已复用 claude 机制无需改。
-
-### Session 104（2026-08-18，codex 逐 token 流上线：SDK 0.6.0 app-server transport + trellis bump）
-- **触发**: 用户问「codex provider 不支持 stream？工具和子 agent 也没有？」。调研（两 research agent 挖 openai/codex 0.147 源码 + 本机协议探针）：exec --json 的 delta 是输出层**有意丢弃**且无 flag 可开；0.147 起 v1 协议移除、v2 唯一默认，官方全生态（TUI/exec/VS Code 扩展/Python SDK）已收敛到 app-server；实测 app-server `thread/resume` 直接续 exec 录的 rollout（同一存储、id 互通）。SDK 侧 08-04 推迟决策的重启条件「v2 收敛」已满足 → 解除。
-- **Done（全在 ~/sdk，trellis 零代码改动）**: `@smokingmouse/agent@0.6.0` 发 npm——CodexBackend 默认 app-server transport（per-run spawn stdio JSON-RPC v2）：`item/agentMessage/delta`→TextChunk 逐 token、reasoning→Thinking、item 生命周期→ToolCall/Done（**含 collabAgentToolCall 多 agent**，S99 时代「codex 子 agent 不可见」随之闭环）、原生 `thread/fork` 替代 rollout copy、abort→`turn/interrupt`；preflight 失败零事件回退 exec（prompt 绝不跑两遍），`environmentSkills=false`/`extraArgs`/ephemeral resume 预分流 exec。trellis 仅 bump `^0.6.0`（package.json + bun.lock）。
-- **验证**: SDK 单测 40/40 + 真机 e2e 10 项（流式 100 chunks vs 强制 exec 1、fork 隔离、readonly 拒写/workspace-write 圈内/full 圈外逐档=exec 语义、abort 5.5s 收尾）；trellis node_modules 冒烟：capabilities `streaming:"token"`、真跑 app-server 23 chunks。sm-toolkit 三 commit 合并推送 + release commit（`9eff060`、`25b5cc0`）。**本机已部**：`make deploy` 上线 `85fd082e4`（smoke 全绿，f106885→85fd082 连带 S99–103 改动一起上线），prod node_modules 实核 0.6.0。
-- **边界**: 审批回调（dynamicPermissionCallback）仍未接——S99 边界里「Codex 不能弹逐项审批卡」只解了 transport 层，approval RPC 映射是下一个独立 phase；`turn/steer`、`subAgentActivity`→Task 树渲染同理。S101 遗留 ③（登录闸假阴性）未动。
-- **Next**: 用户真机开 codex 会话看打字机效果（顺带 S100 Tab 切换体感 / S103 长树图形视图两项待验收）；devbox 侧下次 `make deploy` 自动带上 0.6.0（bun.lock 已锁）。
 

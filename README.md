@@ -213,7 +213,7 @@ Provider 可切 **Claude**（Sonnet / Opus / Haiku）/ **Codex**（OpenAI）/ **
 - 至少装一个 LLM CLI（Trellis 不直接打 API，是 spawn 本机 CLI）：
   - [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/quickstart)：`npm i -g @anthropic-ai/claude-code` → `claude` 可用并已登录
   - [Codex CLI](https://github.com/openai/codex)（可选）：`codex login` 完成登录
-- Web 终端功能依赖宿主机安装 [ttyd](https://github.com/tsl0922/ttyd)。macOS 安装：`brew install ttyd`
+- Web 终端功能依赖宿主机安装 [ttyd](https://github.com/tsl0922/ttyd) 与 tmux。macOS：`brew install ttyd tmux`；Debian/Ubuntu：`apt install ttyd tmux`
 - 完全不装 CLI 也能启动——provider picker 选 `Mock`，返回固定假回复，仅用于看 UI
 
 Trellis 的 LLM/CLI 运行时层是普通 npm 依赖（[`@smokingmouse/agent`](https://www.npmjs.com/package/@smokingmouse/agent) + [`@smokingmouse/llm`](https://www.npmjs.com/package/@smokingmouse/llm)，源码在 [`sm-toolkit`](https://github.com/SmokingMouse/sm-toolkit)），`bun install` 一步装完，无需额外 clone/build 任何仓库。
@@ -229,7 +229,7 @@ make dev
 
 只想看当前环境缺什么、不装任何东西：`make check`。
 
-若未安装 `ttyd`，Trellis 仍可启动，但 Web 终端不可用；启动/部署日志与终端面板会提示 `ttyd` 缺失和 `brew install ttyd` 安装命令。Trellis 不会自动执行安装命令。
+若未安装 `ttyd`，Trellis 仍可启动，但 Web 终端不可用；启动/部署日志与终端面板会提示 `ttyd` 缺失和对应平台的安装命令。Trellis 不会自动执行安装命令。
 
 唯一的运行时注意点：必须用 `bun --bun run dev`（`make dev`/`make build`/`make start` 已经这么做了）——`bun run` 不会把 Next/Turbopack 内部起的 worker 进程纳入 bun 运行时，导致 `bun:sqlite`（`lib/server/sqlite.ts` 用）解析不到。
 
@@ -290,6 +290,91 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 **macOS / Linux 都支持**：重启走 launchd（`launchctl kickstart -k`）还是 systemd user unit（`systemctl --user restart`）按平台自动判定，unit 名默认取 label 的最后一段（`com.smokingmouse.trellis` → `trellis.service`，用 `TRELLIS_DEPLOY_UNIT` 覆盖）。`make deploy-status` 会把认到的那套连同它当前的工作目录一起打出来。
 
 > 两种情况 `make deploy` 会**拒绝执行**，都可以 `FORCE=1` 强行继续：① 有会话正在生成（切换会中断它们，会列出是哪些）；② 常驻服务的工作目录不是 `~/.trellis/current`（这种状态下重启只是让服务在原目录里重来一遍，跟部署的那个 sha 没关系）。
+
+### 新机器从零部署
+
+部署产物（release / 数据库 / 配置）全部落在 `~/.trellis/`，代码里没有写死的机器路径；真正跟机器走的是**宿主机状态**：bun、已登录的 CLI、常驻服务定义、以及不进 git 的 `.env.local`。按顺序补齐：
+
+1. **装依赖**：bun（必须，运行时用了 `bun:sqlite`/`Bun.serve`，Node 跑不了）→ claude CLI 并 `claude login` → 可选 codex / ttyd / tmux。`make check` 随时报缺什么。
+2. **clone + `make setup`**。
+3. **建运行期配置** `~/.trellis/shared/.env.local`（`shared/` 下的文件会被软链进每个 release，不随 release 清理丢失）：
+
+   ```bash
+   TRELLIS_AUTH_PASS=<登录密码>
+   TRELLIS_AUTH_TOKEN=<随机长串，cookie 会话令牌>
+   TRELLIS_REPO_DIR=<trellis 仓库 checkout 的绝对路径>
+   ```
+
+   前两个任一缺失 = 认证闸**静默关闭**。机器只在内网/Tailscale 里可以不配；挂公网隧道必须配——Trellis 能 spawn CLI 在宿主机执行任意代码，这道闸是唯一的门。`TRELLIS_REPO_DIR` 给应用内「检查更新/更新到最新」用（release 目录不是 git 仓库，部署脚本要回到 checkout 里跑）。
+4. **装常驻服务定义**（模板见下），`WorkingDirectory` 先指向仓库 checkout，并在 checkout 里 `make build` 一次让它有东西可跑，然后加载服务。
+5. **首次部署**：`make deploy FORCE=1`——此时服务工作目录还不是 `~/.trellis/current`（正是下一步要改的），preflight 会拦，首次明知故犯一次。
+6. **`make install-service`**：把服务定义的工作目录改到 `~/.trellis/current`（自动备份原文件并重载）。之后 `make deploy` 不再需要 FORCE，仓库目录退化为纯开发 checkout。
+7. **验证**：`make deploy-status`；`curl http://127.0.0.1:3088/__gate/health` 应给出 `next=ready` 且 `auth=on`。
+
+**launchd（macOS）**：存为 `~/Library/LaunchAgents/com.smokingmouse.trellis.plist`（label 可用 `TRELLIS_DEPLOY_LABEL` 换），`launchctl bootstrap gui/$(id -u) <plist路径>` 加载。把 `/Users/YOU` 全部换成真实家目录——plist 不展开 `~`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.smokingmouse.trellis</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOU/.bun/bin/bun</string>
+        <string>--bun</string><string>run</string><string>start</string>
+        <string>--</string><string>-p</string><string>3088</string>
+    </array>
+    <!-- install-service 只改这一行；首次先指向仓库 checkout -->
+    <key>WorkingDirectory</key>
+    <string>/Users/YOU/path/to/trellis</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/YOU</string>
+        <!-- launchd 不继承 shell 环境。spawn claude/git/ttyd 全靠这条 PATH：
+             必须含 claude CLI 所在 bin（npm -g 的目录，nvm 下形如
+             ~/.nvm/versions/node/vXX/bin）和 Homebrew bin。 -->
+        <key>PATH</key>
+        <string>/Users/YOU/.bun/bin:/Users/YOU/.nvm/versions/node/vXX.X.X/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/Library/Logs/trellis.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/Library/Logs/trellis.log</string>
+</dict>
+</plist>
+```
+
+> **macOS 已知雷**：claude CLI 的凭证默认存 keychain，launchd 会话读 keychain 可能读到失效凭证——症状是终端里 `claude` 一切正常、Trellis spawn 出的却报未登录。修法：删掉 keychain 里的 Claude Code 凭证条目让 CLI 回退到 `~/.claude/.credentials.json` 文件存储，重新 `claude login`。
+
+**systemd user unit（Linux）**：存为 `~/.config/systemd/user/trellis.service`，`systemctl --user daemon-reload && systemctl --user enable --now trellis`。ssh 登出后要继续跑：`loginctl enable-linger $USER`（缺它连 `systemctl --user` 都不可用，部署 preflight 会报 XDG_RUNTIME_DIR 相关错误）：
+
+```ini
+[Unit]
+Description=trellis
+After=network.target
+
+[Service]
+# install-service 只改这一行；首次先指向仓库 checkout
+WorkingDirectory=%h/path/to/trellis
+ExecStart=%h/.bun/bin/bun --bun run start -- -p 3088
+# systemd 不继承 shell 环境。PATH 必须含 claude CLI 所在 bin。
+Environment=PATH=%h/.bun/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
 
 ---
 

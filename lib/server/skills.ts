@@ -2,6 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { deployPaths } from "@/lib/deploy-state";
 import { CODEX_HOME_DIR } from "./codex-paths";
 
 export type SkillProvider = "claude" | "codex";
@@ -107,13 +108,14 @@ function projectSkillRoots(workspace?: string | null): string[] {
 
 /** trellis 自带技能根（`<app>/skills`，随部署走）。
  *
- * prod 的 cwd 是具体 release 目录（`~/.trellis/releases/<ts>-<sha>`，会被清理），
+ * prod 的 cwd 是具体 release 目录（`<root>/releases/<ts>-<sha>`，会被清理），
  * 必须经 `current` 软链取 —— agent-pack 里指向这里的 symlink 才不会随 release
- * 清理悬空，且升级后自动跟到新版。dev checkout 直接用 cwd 下的 skills/。 */
+ * 清理悬空，且升级后自动跟到新版。dev checkout 直接用 cwd 下的 skills/。
+ * 部署根统一走 deployPaths()，TRELLIS_DEPLOY_ROOT 挪走时这里要跟着挪。 */
 export function builtinSkillsRoot(): string {
-  const releases = path.join(os.homedir(), ".trellis", "releases");
-  return process.cwd().startsWith(releases + path.sep)
-    ? path.join(os.homedir(), ".trellis", "current", "skills")
+  const p = deployPaths();
+  return process.cwd().startsWith(p.releases + path.sep)
+    ? path.join(p.current, "skills")
     : path.join(process.cwd(), "skills");
 }
 

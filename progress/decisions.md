@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-08-19 · update-trellis.sh 泄露的内网信息：删文件即止，不重写 git 历史
+
+**Decision**：`scripts/update-trellis.sh` 已从工作树删除（S109），但它在公开仓库 git 历史里残留的字节内网代理地址（`sys-proxy-rd-relay.byted.org:8118`）与 BOE 路径（`/data00/home/zhangpeng.pada`）**不重写历史清除**，按已公开信息对待。
+**Why**：这些是网络位置与路径，不是凭证——无泄密后果可缓解，重写收益趋零；而 force push 公开仓库会打断所有 clone/fork 的历史连续性，代价确定。
+**Alternatives**：filter-repo 重写 + force push —— 拒绝，见上；若将来历史里混进真凭证，另案处理（rotate 凭证优先于重写历史）。
+
 ## 2026-08-18 · 推迟 turn/steer（codex 在飞轮次追加输入），不造死 API
 
 **Decision**：codex app-server 的 `turn/steer`（向进行中的轮次追加用户输入）SDK 与 trellis 均暂不接入。
