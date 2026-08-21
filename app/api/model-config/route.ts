@@ -3,6 +3,7 @@ import {
   readModelConfigState,
   upsertProvider,
   deleteProvider,
+  setDefaultModel,
   type UpsertProviderInput,
 } from "@/lib/server/model-config";
 
@@ -14,6 +15,26 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   return Response.json(readModelConfigState());
+}
+
+export async function PATCH(req: Request) {
+  let body: { defaultModel?: string };
+  try {
+    body = (await req.json()) as { defaultModel?: string };
+  } catch {
+    return Response.json({ error: "invalid JSON" }, { status: 400 });
+  }
+  if (typeof body?.defaultModel !== "string" || !body.defaultModel.trim()) {
+    return Response.json({ error: "缺 defaultModel" }, { status: 400 });
+  }
+  try {
+    return Response.json(setDefaultModel(body.defaultModel.trim()));
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : "update default failed" },
+      { status: 400 },
+    );
+  }
 }
 
 export async function POST(req: Request) {
