@@ -172,6 +172,22 @@ export function upsertProvider(input: UpsertProviderInput): ModelConfigState {
   return readModelConfigState();
 }
 
+export function setDefaultModel(defaultModel: string): ModelConfigState {
+  const model = defaultModel.trim();
+  if (!model) throw new Error("默认模型名不能为空");
+  const p = configPath();
+  let doc = readDoc(p);
+  if (!doc) {
+    doc = new Document({});
+    doc.commentBefore =
+      " endpoints.yaml — created by trellis 模型配置 UI\n" +
+      " search order: $SM_ENDPOINTS_PATH → ~/.config/sm/endpoints.yaml → ~/.claude/global/endpoints.yaml";
+  }
+  doc.set("default", model);
+  writeConfig(p, doc);
+  return readModelConfigState();
+}
+
 export function deleteProvider(name: string): ModelConfigState {
   const p = configPath();
   const doc = readDoc(p);

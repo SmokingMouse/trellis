@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAgentStore, type Agent, type AgentInput } from "@/stores/agentStore";
 import { Button } from "@/components/ui/Button";
+import type { ProviderInfo } from "@/lib/llm";
 
 // S88: Agent 管理页。整页而非 modal —— 编辑器要装一个大 system prompt textarea +
 // 技能多选（本机上百个 skill，要能搜）+ 工具白/黑名单 + 三个开关 + 模型，
@@ -34,6 +35,7 @@ export default function AgentsSettingsPage() {
   const [skillQuery, setSkillQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<ProviderInfo[]>([]);
 
   useEffect(() => {
     void refresh();
@@ -41,6 +43,10 @@ export default function AgentsSettingsPage() {
       .then((r) => r.json())
       .then((d) => setHostSkills(d.skills ?? []))
       .catch(() => setHostSkills([]));
+    fetch("/api/providers")
+      .then((r) => (r.ok ? r.json() : { providers: [] }))
+      .then((d) => setCatalog(d.providers ?? []))
+      .catch(() => setCatalog([]));
   }, [refresh]);
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
@@ -195,14 +201,59 @@ export default function AgentsSettingsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="模型" hint="留空 = 跟随会话当前模型">
-                  <input
-                    value={draft.model ?? ""}
-                    onChange={(e) =>
-                      setDraft({ ...draft, model: e.target.value.trim() || null })
-                    }
-                    className={`${INPUT} font-mono`}
-                    placeholder="haiku / gpt-5.5 / deepseek:xxx"
-                  />
+                  <div className="space-y-1.5">
+                    <input
+                      value={draft.model ?? ""}
+                      onChange={(e) =>
+                        setDraft({ ...draft, model: e.target.value.trim() || null })
+                      }
+                      className={`${INPUT} font-mono`}
+                      placeholder="haiku / gpt-5.5 / deepseek:xxx"
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { label: "跟随会话", value: null },
+                        { label: "haiku", value: "haiku" },
+                        { label: "sonnet", value: "sonnet" },
+                        { label: "opus", value: "opus" },
+                        { label: "codex", value: "codex" },
+                        { label: "gpt-5.5", value: "gpt-5.5" },
+                      ].map((chip) => {
+                        const active =
+                          chip.value === null ? !draft.model : draft.model === chip.value;
+                        return (
+                          <button
+                            key={chip.label}
+                            type="button"
+                            onClick={() => setDraft({ ...draft, model: chip.value })}
+                            className={`px-1.5 py-0.5 text-nano rounded-md border transition-colors ${
+                              active
+                                ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
+                                : "bg-surface-muted text-ink-muted hover:text-ink border-line"
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {catalog.length > 0 && (
+                      <select
+                        className="w-full px-2 py-1 text-label rounded-field border border-line bg-surface text-ink outline-none"
+                        value={draft.model ?? ""}
+                        onChange={(e) =>
+                          setDraft({ ...draft, model: e.target.value || null })
+                        }
+                      >
+                        <option value="">-- 从可用模型列表中选择 --</option>
+                        {catalog.map((p) => (
+                          <option key={p.id} value={p.shortLabel}>
+                            {p.label} ({p.shortLabel})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 </Field>
                 <Field
                   label="工具白名单"
