@@ -644,6 +644,8 @@ type Actions = {
   // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
   // 失败回滚。幂等。
   setTreeHidden: (nodeId: string, hidden: boolean) => Promise<void>;
+  // 树命名 / 重命名：修改 nodeId 所在树根的 topicLabel。乐观更新，失败回滚。
+  renameTree: (nodeId: string, title: string) => Promise<void>;
   // A路③: answer a paused interactive tool (AskUserQuestion / ExitPlanMode).
   // Optimistically clears node.pendingInteraction (the interaction_resolved
   // SSE event also clears it — idempotent). On 404/409 (stale: run no longer
@@ -2086,6 +2088,40 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       patch(hiddenAt);
     } catch {
       patch(prev); // 回滚，静默失败
+    }
+  },
+
+  renameTree: async (nodeId, title) => {
+    // 客户端走到根 —— 支持传根 id 或子树任意节点 id。
+    const nodes = get().nodes;
+    let rootId = nodeId;
+    for (let i = 0; i < 1000; i++) {
+      const cur: ChatNode | undefined = nodes[rootId];
+      if (!cur) return;
+      if (!cur.parentId) break;
+      rootId = cur.parentId;
+    }
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const prev = nodes[rootId]?.topicLabel ?? null;
+    const patch = (label: string | null) =>
+      set((s) => {
+        const cur = s.nodes[rootId];
+        if (!cur) return s;
+        return { nodes: { ...s.nodes, [rootId]: { ...cur, topicLabel: label } } };
+      });
+    patch(trimmed);
+    try {
+      const res = await fetch(`/api/nodes/${rootId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topicLabel: trimmed }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { topicLabel } = (await res.json()) as { topicLabel: string };
+      patch(topicLabel);
+    } catch {
+      patch(prev); // 回滚
     }
   },
 
