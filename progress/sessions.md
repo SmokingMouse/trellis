@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 111 / 110 / 109 / 108 / 107）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 112 / 111 / 110 / 109 / 108）。更早的见 `archive.md`。
+
+### Session 112（2026-08-21，树隐藏修复：彻底移出非隐藏区 + 焦点自动切换 + 已隐藏组展开自适应）
+- **触发**: 用户反馈树隐藏问题——当前树或只剩一棵树时点击隐藏，该树仍旧出现在非隐藏区，或者说只要停留在当前树该树就不在隐藏区里，且存在双重渲染。
+- **根因**: `TreePanel.tsx` 存在 `{activeEntry?.hidden && renderActiveTree(activeEntry)}` 强制把被隐藏的当前树再次渲染在热区下方；同时点击隐藏时未自动把活跃焦点切换到下一棵可见树；activeRootId 回退时未优先选择首棵可见树。
+- **Done**: ① `TreePanel.tsx` 删去 `activeEntry?.hidden` 在非隐藏区的强制渲染；② 隐藏当前树时（无论是在展开树头还是折叠树行点击），若存在其他可见树则自动将焦点切至下一棵可见树（`nextVisible.latestNodeId`）；若恢复隐藏树且当前无可见活跃树，自动恢复其活跃状态；③ `activeRootId` 缺省 fallback 优先选择第一棵未隐藏树（`entries.find(e => !e.hidden)`）；④ `renderTreeRow` 补全 `entry.hidden` 下当前被选树的 active 样式；⑤ `hiddenOpen` 支持全树被隐藏时默认展开 `已隐藏` 组，便于用户快速恢复；⑥ 新增 `lib/tree-panel.test.ts` 覆盖分组、雪藏过滤、热度排序及单树雪藏等场景。
+- **验证**: `bun test` 9 pass ✔；`node_modules/.bin/tsc --noEmit` 0 错 ✔；`eslint` 0 错 ✔；`bun --bun run build` 成功通过 ✔。
+- **Next**: 提交分支、提交 PR 并合并至 master/main。
 
 ### Session 111（2026-08-21，打标/起题模型可配：app_settings kv + 设置页卡片）
 - **触发**: S110 交付后用户追问「别人用但没有这些模型呢」→「能不能在设置里配」。此前 claude 路写死 `--model haiku`（官方 alias，正常安装都认，但只路由部分模型的网关/自建 cpa 类环境会静默失败）。

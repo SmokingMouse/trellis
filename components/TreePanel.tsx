@@ -78,7 +78,7 @@ export function TreePanel() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
-  const [hiddenOpen, setHiddenOpen] = useState(false);
+  const [hiddenOpen, setHiddenOpen] = useState<boolean | null>(null);
   // null = 过滤模式关闭；字符串（含空串）= 开启且为当前查询。
   const [filter, setFilter] = useState<string | null>(null);
   const [filterSel, setFilterSel] = useState(0);
@@ -95,12 +95,16 @@ export function TreePanel() {
   const byParent = useMemo(() => childrenIndex(nodesMap), [nodesMap]);
   const activeRootId = useMemo(() => {
     const anchor = activeNodeId && nodesMap[activeNodeId] ? activeNodeId : null;
-    return anchor ? rootIdOf(anchor, nodesMap) : entries[0]?.root.id ?? null;
+    if (anchor) return rootIdOf(anchor, nodesMap);
+    const firstVisible = entries.find((e) => !e.hidden);
+    return firstVisible?.root.id ?? entries[0]?.root.id ?? null;
   }, [activeNodeId, nodesMap, entries]);
   const groups = useMemo(
     () => groupTrees(entries, activeRootId),
     [entries, activeRootId],
   );
+  const isHiddenExpanded =
+    hiddenOpen ?? (groups.hot.length === 0 && groups.cold.length === 0);
   const activeRows = useMemo(
     () =>
       activeRootId ? flattenTree(activeRootId, nodesMap, collapsedNodeIds) : [],
@@ -283,67 +287,98 @@ export function TreePanel() {
   // 死循环风险。
 
   // 折叠态树行（热区非当前树 / 冷组 / 已隐藏组通用）。
-  const renderTreeRow = (entry: TreeEntry) => (
-    <div
-      key={entry.root.id}
-      className="group flex items-center rounded hover:bg-surface-muted"
-    >
-      <button
-        type="button"
-        onClick={() => jumpToNode(entry.latestNodeId)}
-        onMouseEnter={hoverRow(entry.root.id)}
-        onMouseLeave={leaveRow(entry.root.id)}
-        className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 text-left ${
-          entry.hidden ? "text-ink-faint" : "text-ink-muted"
+  const renderTreeRow = (entry: TreeEntry) => {
+    const isActive = entry.root.id === activeRootId;
+    return (
+      <div
+        key={entry.root.id}
+        className={`group flex items-center rounded ${
+          isActive ? "bg-surface-muted/60" : "hover:bg-surface-muted"
         }`}
-        title={treeLabel(entry.root, 200)}
       >
-        {entry.root.kind === "reference" && (
-          <span className="shrink-0" aria-hidden>
-            {refIcon(entry.root.reference)}
+        <button
+          type="button"
+          onClick={() => jumpToNode(entry.latestNodeId)}
+          onMouseEnter={hoverRow(entry.root.id)}
+          onMouseLeave={leaveRow(entry.root.id)}
+          className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 text-left ${
+            entry.hidden
+              ? isActive
+                ? "text-ink-muted"
+                : "text-ink-faint"
+              : isActive
+                ? "text-ink font-medium"
+                : "text-ink-muted"
+          }`}
+          title={treeLabel(entry.root, 200)}
+        >
+          {entry.root.kind === "reference" && (
+            <span className="shrink-0" aria-hidden>
+              {refIcon(entry.root.reference)}
+            </span>
+          )}
+          <span className="truncate">{treeLabel(entry.root)}</span>
+          {/* 树级运行状态 rollup：等待输入 > 生成中（等输入更紧急）。折叠行
+              看不见节点级的点，这里补一眼可扫的树级信号。 */}
+          {entry.hasWaiting ? (
+            <span className="shrink-0 text-[10px] animate-pulse" title="有节点在等你回答" aria-label="等待输入">
+              🙋
+            </span>
+          ) : entry.hasStreaming ? (
+            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="生成中" aria-label="生成中" />
+          ) : null}
+          <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
+            {entry.count}
           </span>
-        )}
-        <span className="truncate">{treeLabel(entry.root)}</span>
-        {/* 树级运行状态 rollup：等待输入 > 生成中（等输入更紧急）。折叠行
-            看不见节点级的点，这里补一眼可扫的树级信号。 */}
-        {entry.hasWaiting ? (
-          <span className="shrink-0 text-[10px] animate-pulse" title="有节点在等你回答" aria-label="等待输入">
-            🙋
-          </span>
-        ) : entry.hasStreaming ? (
-          <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="生成中" aria-label="生成中" />
-        ) : null}
-        <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
-          {entry.count}
-        </span>
-        {entry.unreadCount > 0 && !entry.hidden && (
-          <span className="shrink-0 inline-flex items-center gap-0.5 text-nano font-medium text-unread-ink tabular-nums">
-            <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
-            {entry.unreadCount}
-          </span>
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={() => void setTreeHidden(entry.root.id, !entry.hidden)}
-        className={`shrink-0 px-1.5 py-1 text-nano rounded transition-opacity ${
-          entry.hidden
-            ? "text-ink-muted hover:text-ink hover:bg-surface-muted"
-            : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
-        }`}
-        title={entry.hidden ? "恢复显示" : "隐藏这棵树（数据保留，可随时恢复）"}
-        aria-label={entry.hidden ? "恢复显示" : "隐藏这棵树"}
-      >
-        {entry.hidden ? "恢复" : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-            <line x1="1" y1="1" x2="23" y2="23" />
-          </svg>
-        )}
-      </button>
-    </div>
-  );
+          {entry.unreadCount > 0 && !entry.hidden && (
+            <span className="shrink-0 inline-flex items-center gap-0.5 text-nano font-medium text-unread-ink tabular-nums">
+              <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
+              {entry.unreadCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const willHide = !entry.hidden;
+            if (willHide) {
+              if (entry.root.id === activeRootId) {
+                const nextVisible = entries.find(
+                  (e) => !e.hidden && e.root.id !== entry.root.id,
+                );
+                if (nextVisible) {
+                  jumpToNode(nextVisible.latestNodeId);
+                }
+              }
+            } else {
+              const curActiveIsVisible = entries.some(
+                (e) => !e.hidden && e.root.id === activeRootId,
+              );
+              if (!curActiveIsVisible) {
+                jumpToNode(entry.latestNodeId);
+              }
+            }
+            void setTreeHidden(entry.root.id, willHide);
+          }}
+          className={`shrink-0 px-1.5 py-1 text-nano rounded transition-opacity ${
+            entry.hidden
+              ? "text-ink-muted hover:text-ink hover:bg-surface-muted"
+              : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+          }`}
+          title={entry.hidden ? "恢复显示" : "隐藏这棵树（数据保留，可随时恢复）"}
+          aria-label={entry.hidden ? "恢复显示" : "隐藏这棵树"}
+        >
+          {entry.hidden ? "恢复" : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+          )}
+        </button>
+      </div>
+    );
+  };
 
   // 折叠角标（+N）的配色：藏起来的东西里等输入 > 生成中 > 未读 > 纯计数，
   // 与列表折叠行同一优先级 —— 折叠不该把状态一起藏掉。
@@ -543,11 +578,6 @@ export function TreePanel() {
   };
 
   // 当前树：树头行 + 节点行（线性段平铺，真分叉缩进）。
-  const activeEntry =
-    groups.hot.find((e) => e.root.id === activeRootId) ??
-    groups.hidden.find((e) => e.root.id === activeRootId) ??
-    null;
-
   const renderActiveTree = (entry: TreeEntry) => (
     <div key={entry.root.id}>
       <div className="group flex items-center rounded bg-surface-muted/60">
@@ -566,7 +596,15 @@ export function TreePanel() {
         </div>
         <button
           type="button"
-          onClick={() => void setTreeHidden(entry.root.id, true)}
+          onClick={() => {
+            const nextVisible = entries.find(
+              (e) => !e.hidden && e.root.id !== entry.root.id,
+            );
+            if (nextVisible) {
+              jumpToNode(nextVisible.latestNodeId);
+            }
+            void setTreeHidden(entry.root.id, true);
+          }}
           className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
           title="隐藏这棵树（数据保留，可随时恢复）"
           aria-label="隐藏这棵树"
@@ -887,8 +925,6 @@ export function TreePanel() {
                       ? renderActiveTree(e)
                       : renderTreeRow(e),
                   )}
-                  {/* 当前树被雪藏时不在热区 —— 仍要展开显示，钉在热区下方 */}
-                  {activeEntry?.hidden && renderActiveTree(activeEntry)}
 
                   {groups.cold.length > 0 && (
                     <div className="mt-1 pt-1 border-t border-line-faint">
@@ -910,14 +946,20 @@ export function TreePanel() {
                   )}
 
                   {groups.hidden.length > 0 && (
-                    <div className="mt-1 pt-1 border-t border-line-faint">
+                    <div
+                      className={
+                        groups.hot.length > 0 || groups.cold.length > 0
+                          ? "mt-1 pt-1 border-t border-line-faint"
+                          : ""
+                      }
+                    >
                       <button
                         type="button"
-                        onClick={() => setHiddenOpen((v) => !v)}
+                        onClick={() => setHiddenOpen(!isHiddenExpanded)}
                         className="w-full px-2 py-1 flex items-center gap-1 rounded text-ink-faint hover:bg-surface-muted"
                       >
                         <span
-                          className={`inline-block transition-transform ${hiddenOpen ? "rotate-90" : ""}`}
+                          className={`inline-block transition-transform ${isHiddenExpanded ? "rotate-90" : ""}`}
                           aria-hidden
                         >
                           ▸
@@ -930,7 +972,7 @@ export function TreePanel() {
                           </span>
                         )}
                       </button>
-                      {hiddenOpen && groups.hidden.map(renderTreeRow)}
+                      {isHiddenExpanded && groups.hidden.map(renderTreeRow)}
                     </div>
                   )}
                 </>
