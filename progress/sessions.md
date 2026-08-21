@@ -1,6 +1,21 @@
 # Session Log
 
-最近 5 条，倒序（Session 109 / 108 / 107 / 106 / 105）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 111 / 110 / 109 / 108 / 107）。更早的见 `archive.md`。
+
+### Session 111（2026-08-21，打标/起题模型可配：app_settings kv + 设置页卡片）
+- **触发**: S110 交付后用户追问「别人用但没有这些模型呢」→「能不能在设置里配」。此前 claude 路写死 `--model haiku`（官方 alias，正常安装都认，但只路由部分模型的网关/自建 cpa 类环境会静默失败）。
+- **Done**: ① `app_settings` kv 表（服务端 app 级偏好的通用归宿——localStorage prefs 服务端读不到，spawn 路径要读的偏好从此有家）+ repo `getAppSetting/setAppSetting`（空值=删行回默认）；② `/api/settings` 白名单路由（GET 全量 / PATCH 单键，key 白名单制防长尾垃圾键）；③ topic.ts 读 `label_model_claude`（默认 haiku）/ `label_model_codex`（默认不传 `-c model=` 走本机默认），topic+title 两用途共用；④ `LabelModelCard` 挂 settings/models 页（与 AuthHealthCard 同级，不进 ModelConfigPanel——那组件被 modal 复用且管的是 endpoints.yaml 跨应用共享配置，起题模型是 trellis 私有偏好不该混入）。
+- **验证**: tsc/eslint/`bun --bun run build` 零错；隔离 dev（副本库 :3891）**双向对照**——kv round-trip ✔；配 `no-such-model-xyz` 发一轮 chat → SSE 无 topic_label/session_title（证明配置真进 spawn、失败静默不伤对话）；清除后再发 → 两事件恢复（「并发编程活锁」/「活锁现象解析」）✔；agent-browser 实测设置页卡片渲染 + UI 保存 → API 回读 `sonnet` 落库 ✔。
+- **Next**: 与 S110 同批**未提交未部署**，用户过目后一起提交；后续想给别的服务端偏好用 kv 直接进 `/api/settings` 白名单。
+
+### Session 110（2026-08-21，体验 A/D 落地：发问相似检测 + 会话自动命名，顺带修 topic_label 超时暗伤）
+- **触发**: 用户「树多了不知道在哪棵续聊还是新开」→ 痛点拆三层（①没想起来聊过——决策时机层，⌘P pull 式救不了 ②记得但搜不到——trigram 换措辞 miss，即 C3 ③找到树不知在哪节点续），方案 A（push 式相似检测）+ D（自动命名地基）拍板先做。
+- **Done A（发问时相似检测，roadmap 记 C7）**: `repo.findRelated`——与 searchAll 整句 phrase 不同，草稿拆多 term（ASCII 整词 + CJK 3 字窗步 2 + 尾窗，会话腔停用表双向 includes 过滤）各查一次 FTS，按 session 聚合 term 覆盖度，门槛 ≥2 term（单 term 查询放宽 1）+ 排除 archived，宁漏报不误报；新路由 `/api/search/related`；`RelatedHints.tsx` 挂 QuestionInput 输入卡下——debounce 600ms、≥6 字才查、`/` `$` 前缀跳过、✕ 压制当前草稿（清空复位，react-hooks 新规不让 effect 内同步 setState → 渲染门控 + prev-render 对比实现）、点行走 jumpToSearchHit 直落原树线性视图命中节点。
+- **Done D（会话自动命名，roadmap 记 C8）**: sessions 加 `title_source`（default/auto/user）迁移 + 存量回填（title ≠ 根节点首问前 60 字 → user；导入系派生规则不同天然 mismatch 也标 user = 保守正确）；renameSession 置 user 永久锁；run-bus 新增 `sessionTitle` post-done 钩子（**与 topicLabel 并发跑**——两钩子各一次 CLI spawn，串行最坏顶穿 30s grace window）+ `session_title` 事件广播/迟到订阅补发；chat route 闭包判定全走 DB（origin=native only——retry 路径不回填 resolvedOrigin 故不信 route 变量；doneCount==1 首答起题、%8==0 按最近 3 轮刷新「当前主题」）；`generateSessionTitle` 与 topic 共用 spawn 管道（haiku）；store 收事件就地改当前 session 标题 + bump sessionsRevision 让 sidebar/tabs 重拉；`applyAutoTitle` 的 `WHERE title_source != 'user'` 原子守卫防与手动改名竞态。
+- **顺带破案（存量暗伤）**: topic.ts 的 claude 8s 超时一直在静默掐死打标——`claude -p --model haiku` 冷启动实测 10.6s（热 4.2s），历史 topic_label 命中率仅 49/493≈10%。超时提 15s（并发取 max，30s grace 内），topic_label 与 session_title 同受益。
+- **验证**: tsc/eslint 零错、`bun --bun run build` 过（裸 `bunx next build` 挂 `bun:sqlite` 属已知，Makefile:5-9 有载）；真库副本冒烟（`TRELLIS_DB_PATH=/tmp` 隔离）——迁移回填 33 default/16 user/2 import ✔、findRelated 该中的中（trellis 权限、jsonl 分叉）该静默的静默（React 没聊过 → 0 hit）、user 锁行拦截 ✔；隔离 dev（:3891）E2E——POST /api/chat 真跑 opus 一轮，SSE 依次 done → topic_label → **session_title**（「B树与B+树的核心差异」），DB 落盘 `title_source=auto` ✔；agent-browser 实测——sidebar 显示生成标题（旁边就是超时年代的失败对照「用一句话解释什么是虚拟内存」）、首屏敲草稿 1.8s 后提示条浮现（3 命中带 mark 高亮 + 相对时间）、点行直落原树命中节点 + 底部续聊框。
+- **未做/边界**: 树内 DockedComposer 不挂相似检测（新开树时刻才是决策点）；attach/import 会话不自动命名（标题归 importer/watcher）；B4 首屏最近入口、「续聊前沿可见化」（方案 C）未动。
+- **Next**: **未部署未提交**——用户过目后提交，下次 `make deploy` 自然带上；上线后观察召回精度（误报烦就提门槛/扩停用表）与自动标题质量；C3 语义检索（Q2 倾向本地 bge-small）排期不变，落地后 findRelated 换召回底座。
 
 ### Session 109（2026-08-19，部署独立性审查 + 四项修复）
 - **触发**: 用户「检查部署的独立性，是否存在对环境的依赖和耦合」→ 审查报告 → 「全部修复」。
@@ -28,20 +43,5 @@
 - **部署**: `make deploy` 上线 `4a6bbb4cf`（连带 PR #17 响应分层，prod node_modules 实核 0.8.0）。
 - **Next**: 真机权限确认会话验弹卡范围（Bash/Edit/MCP 弹、Read 不弹、「总是允许」仍生效）；cpa codex 上游故障（failures.md）恢复后复验 codex 注入路径。
 
-### Session 106（2026-08-18，agent 长任务正文一坨糊：分段 + 过程/结论分层，PR #17 已合并）
-- **触发**: 用户截图「正文+思考+正文……会导致正文的阅读体验特别差」——TurnCard 把几十段过程叙述连成一坨。
-- **根因**: SDK 逐 token 透传 `text_delta`、content block 边界零事件，run-bus `committedText += text` 无缝拼接；cli-import 路径早有 `join("\n\n")`，只有 live 流式路径中招。
-- **Done（一个状态机两层；worktree `calm-river-7881` → PR #17 → main `30df25a`）**: ①**分段**——run-bus 在结构性中断（thinking / 主链 tool_call_start）后的下一个 delta 前把 `"\n\n"` 当普通 delta 走完整路径（commit + DB append + broadcast），流式端/落库/catchup 快照三方天然一致，claude/codex/mock 通吃；延迟到「确有新正文」才插，工具收尾的 turn 不留尾部垃圾。②**分层**——同一状态机维护 `finalStart`（最后一次中断之后的正文起点）落新列 `nodes.final_start`（NULL/0 = 不分层 → 存量/纯 chat 渲染逐字节不变），TurnCard done 态把过程叙述折叠成弱化 details（「🧭 过程叙述（N 字）」，小号墨色+左竖线），最终答复才是正文；分享卡片图只带最终段，复制全文仍全文。cli-import 按块结构精确算同一偏移（thinking 块仍丢内容但当中断信号），retry 重置清零，done 事件/DB-fallback 重连都携带 finalStart。
-- **验证**: 新回归 `scripts/test-final-start.ts` 9/9（mock provider 驱动真实 startRun/subscribe + 手造 jsonl：分段串、落库偏移、done 携带、纯回答不分层、工具收尾指向末段）；真实数据最近 60 个 CLI jsonl / 369 turns → 243 分层、**0 越界/空最终段**，抽样最终段全是 TLDR/交付汇报类收尾；隔离 dev（`TRELLIS_DB_PATH` 临时库 + :3210）+ agent-browser 截图折叠/展开两态符合设计；tsc 零错、eslint 零新增（TurnCard 4 条既有基线）、`bun --bun run build` exit 0（裸 `bun run build` 无 `--bun` 会在 collect page data 阶段挂 `bun:sqlite`——Makefile:5-9 与 facts.md 早有记载，别绕过 make）。
-- **边界（刻意不做，记 PR body）**: 锚点/搜索命中过程段时 details 不自动展开（锚点几乎都在答案区）；流式态不分层（有 thinking 面板与动线顶着）。
-- **Next**: **未部署**（已进 main，下次 `make deploy` 自然带上）；部署后用户开一轮真 agent 长任务看 done 态「过程叙述折叠 + 结论正文」效果。
 
-### Session 105（2026-08-18，codex 权限卡 + 子 agent Task 树：SDK 0.7.0 + trellis 三闸放开）
-- **触发**: S104 交付后用户「开始做吧」——下一批：审批回调、turn/steer、子 agent Task 树。
-- **Done ① SDK 0.7.0**（已发 npm，干净 worktree 构建发布防并行 WIP 混入）: 审批——`permission "default"` + onCanUseTool → codex `approvalPolicy untrusted`，`requestApproval` RPC 映射成 claude 形状回调（commandExecution→`Bash` 带裸命令 / fileChange→`Edit` 带 diff），allow→accept / deny→decline / abort→cancel；权限确认模式 preflight 失败 fail loud 不再静默回退 exec（安全语义降级）。multi-agent——**修 0.6.0 潜伏 bug**（子线事件同连接到达，不过滤则子线 turn/completed 提前终结 run、子文本混主答）；`subAgentActivity`→spawn_agent 工具卡 + Task started/completed（taskType local_agent，summary=子线终答），子线工具挂 parentToolUseId。SDK 单测 48/48、审批 e2e 3/3、回归 e2e 11/11。
-- **Done ② trellis**: 三闸放开 codex——`approvalAvailable`（mock 除外）、route 创建钳制、`interactive = claude || codex`；AgentPicker / settings 文案同步（Codex 支持逐项审批）；InteractionForm 零改动（Bash 命令块 / 通用 JSON 兜底本就按 toolName 渲染）。tsc 零错。
-- **Done ③ steer 推迟**: 树模型无消费位（一节点一问一答），决策记 `decisions.md` 2026-08-18 条。
-- **验证与插曲**: trellis 全链（makeCodexProvider→SDK→codex）实测**审批回调触发 + accept 后命令真执行 + shell 工具卡到达**；但完整轮次撞上 cpa 的 codex 上游 `503 auth_unavailable` 间歇故障（当日内从间歇恶化为挂起，判别实验证明与本次改动无关：默认 provider 同轮次全通、exec 同注入同 503）→ 记 `failures.md` 待查（修复大概率在 cpa 服务端补池凭证）。
-- **部署**: `make deploy` 上线 `66ebf0425`（smoke 全绿，prod node_modules 实核 0.7.0）。
-- **Next**: cpa 池恢复后按 failures.md 判定命令复验注入路径；用户真机 project+需确认开 codex 会话点权限卡、multi-agent 提问看 Task 树；审批「总是允许」按 toolName 已复用 claude 机制无需改。
 

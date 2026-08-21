@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-权限确认全拦（agent@0.8.0）+ 响应分层（PR #17）已部本机；cpa codex 上游故障在查（failures.md）。
+发问相似检测 + 会话自动命名已落地实测待提交部署；cpa codex 上游故障在查（failures.md）。
 
 ## Goals
 

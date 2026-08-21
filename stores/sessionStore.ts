@@ -2554,6 +2554,8 @@ type StreamEvent =
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
+  // 自动命名（体验 D）：post-done 会话标题生成完成（首答起题 / 每 8 节点刷新）。
+  | { type: "session_title"; sessionId: string; title: string }
   // CLI 同步 Stage 2：attach 会话续聊后服务端做了身份对账（临时节点 → canonical
   // jsonl-uuid 节点），通知客户端重载该 session 拿正确的节点 id。
   | { type: "reload_session"; sessionId: string }
@@ -2844,6 +2846,15 @@ function handleStreamEvent(
           nodes: { ...s.nodes, [id]: { ...n, topicLabel: event.label } },
         };
       });
+    } else if (event.type === "session_title") {
+      // 自动命名（体验 D）：标题在 post-done 异步到达。当前打开的正是这个
+      // session 就地改标题；sidebar/tabs 走 sessionsRevision 重拉各自列表。
+      set((s) =>
+        s.session?.id === event.sessionId
+          ? { session: { ...s.session, title: event.title } }
+          : s,
+      );
+      get().bumpSessionsRevision();
     } else if (event.type === "reload_session") {
       // CLI 同步 Stage 2：服务端把临时续聊节点换成了 canonical jsonl-uuid 节点。
       // 只在它就是当前 active session 时重载（否则下次切过去 loadSession 自然拿新的）。

@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-08-21 · 发问相似检测 v1 用 FTS 多词 OR，不等 embedding
+
+**Decision**：相似检测（防重复开树，roadmap C7）v1 召回 = 现有 FTS5 索引上的多 term OR 查询（`repo.findRelated`：ASCII 整词 + CJK 3 字窗步 2、会话腔停用表、按 session 聚合覆盖度、≥2 term 门槛），不引 embedding。
+**Why**：零新基建当天上线；痛点大头在「没想起来去搜」的**时机层**，push 式提示本身就是增量，召回精度够用即可；误报由覆盖度门槛 + 旁路提示条可 ✕ 兜住（宁漏报不误报）。
+**Alternatives**：① 整句 phrase（searchAll 同款）——拒绝，子串匹配对换措辞零召回；② 直接上 embedding——拒绝，Q2 未拍板且 C3 是 L 号工作量，不该挡 S 号的时机层缺口。C3 落地后 `findRelated` 换召回底座即可（召回逻辑已隔离在 repo 层，UI/route 不动）。
+
 ## 2026-08-19 · update-trellis.sh 泄露的内网信息：删文件即止，不重写 git 历史
 
 **Decision**：`scripts/update-trellis.sh` 已从工作树删除（S109），但它在公开仓库 git 历史里残留的字节内网代理地址（`sys-proxy-rd-relay.byted.org:8118`）与 BOE 路径（`/data00/home/zhangpeng.pada`）**不重写历史清除**，按已公开信息对待。

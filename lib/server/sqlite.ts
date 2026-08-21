@@ -478,6 +478,40 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN final_start INTEGER");
   }
 
+  // 自动命名（体验 D）：title 的来源标记。default = 建会话时的首问截断；
+  // auto = 首答后小模型生成 / 每 8 节点刷新；user = 手动重命名（此后自动命名
+  // 永不覆盖）。存量回填：title ≠ 根节点首问前 60 字 → 视为手动改过名 → 标
+  // user。导入系（attach/import）title 派生规则不同必然 mismatch 也被标 user
+  // —— 保守正确：非 native 会话本就不在自动命名范围内。
+  const hasTitleSource = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'title_source'",
+    )
+    .get();
+  if (!hasTitleSource) {
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'default'",
+    );
+    db.exec(`
+      UPDATE sessions SET title_source = 'user'
+      WHERE EXISTS (
+        SELECT 1 FROM nodes n
+        WHERE n.id = sessions.root_node_id
+          AND substr(n.question, 1, 60) <> sessions.title
+      )
+    `);
+  }
+
+  // 服务端 app 级偏好 kv（settings 页可改、spawn 路径要读的那类——localStorage
+  // prefs 服务端读不到）。首个用户：打标/起题模型（label_model_claude/codex）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

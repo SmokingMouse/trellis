@@ -11,6 +11,7 @@ import { matchCommands, parseCommand, type Command, type CommandStore } from "@/
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { providerFamily } from "@/lib/llm";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { RelatedHints } from "./RelatedHints";
 import { SketchModal } from "./SketchModal";
 import { Button } from "@/components/ui/Button";
 import {
@@ -428,6 +429,9 @@ export function QuestionInput() {
             {att.notice}
           </div>
         )}
+        {/* 体验 A：草稿相似检测。放在通知条之下、"/"下拉之上不冲突 ——
+            "/"开头的输入 RelatedHints 自身会跳过。 */}
+        <RelatedHints query={q} />
         {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
           <div className="mt-2 border border-line rounded-lg bg-surface shadow-raise overflow-hidden max-h-64 overflow-y-auto">
             {/* C1: Trellis commands first (first-class, all modes). Selecting

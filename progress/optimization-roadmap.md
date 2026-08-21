@@ -86,10 +86,12 @@ Trellis 当前是一个**成熟度 ~75% 的「树状画布对话工具」**，�
 |---|---|---|---|---|---|
 | C1 ↩Stage19 | 文件附件（PDF/Word/Excel/code） | 仅图片（Stage 15）；GPT 能传 PDF 直接分析 | 拖拽进 reference 节点：PDF→`pdf` skill 抽 md / Excel→表格 / code→直读 | **P0** | L |
 | C2 ↩Stage21 | 跨对话记忆 + 自定义指令 UI | 仅 project per-root 记忆；system prompt 硬编码（`prompt.ts:32-33`）无 UI；GPT 有 memory + custom instructions | ① custom instructions 编辑器注入 system prompt ② 节点↔`~/.claude/memory/` 桥接 | **P0** | M–L |
-| C3 | 语义检索补 FTS | FTS5 是 trigram 子串匹配（`sqlite.ts:120`），非语义；「找回那次聊过类似概念的对话」搜不到 | embedding 索引 + 语义/FTS 混合检索（需 embedding API，见 Q2） | P1 | L |
+| C3 | 语义检索补 FTS | FTS5 是 trigram 子串匹配（`sqlite.ts:120`），非语义；「找回那次聊过类似概念的对话」搜不到 | embedding 索引 + 语义/FTS 混合检索（需 embedding API，见 Q2）；落地后 C7 相似检测共用该索引升级召回 | P1 | L |
 | C4 ↩Stage18 | Skill 调用入口 | ✅ Claude `/skill` + Codex `$skill`，按 provider 发现作用域；纯 Chat 自动开增强 | 已完成 | — | — |
 | C5 | 模型选择 session 级 + 每轮可选 | 全局切换（`ModelPicker`，全局 state）；无成本/质量按需权衡 | session 级绑定 + 可选每轮升降级（haiku↔opus） | P2 | S–M |
 | C6 | 图片生成 / 语音 | 完全无；GPT 有 | 需第三方付费 API（见 Q3），与「单人单机 CLI」定位契合度待定 | P2 | L |
+| C7 | 发问时相似检测（防重复开树） | ✅ 已落地（S110）。痛点：⌘P 是 pull 式，「没想起来聊过」时救不了 | 首屏草稿 debounce 旁路查 `/api/search/related`（FTS 多词 OR + term 覆盖度门槛，`repo.findRelated`），提示条「去原树续聊 / 新开」；v2 等 C3 embedding 换召回底座 | — | — |
+| C8 | 会话自动命名（title 地基） | ✅ 已落地（S110）。原 title = 首问截 60 字，树聊深后失真 | 首答后小模型起题 + 每 8 完成节点按最近 3 轮刷新「当前主题」；`title_source` 三态，手动改名永不覆盖；仅 native 会话。模型可在 settings/models 配（S111，默认 claude=haiku / codex=本机默认） | — | — |
 
 **C2 展开**：这是「替代 GPT」的第二大高频缺口。GPT 的 memory + 自定义指令让它「记住你是谁、怎么跟你说话」。trellis 的 `~/.claude/CLAUDE.md` 在 workspace/project 自动加载，但 chat 模式 system prompt 写死成「简洁有耐心的助教…不调用任何工具」（`prompt.ts:32-33`），用户改不了、是黑盒。最小可用版：先做 custom instructions 编辑器（P0 子项，S–M），Memory 桥接（Stage 21，M）随后。
 

@@ -680,7 +680,8 @@ export function getParentResumeId(
 // User-driven session rename. Bumps updated_at so the picker re-sorts the
 // row to the top (intentional: just-renamed sessions are most relevant).
 // Returns the updated row, or null if the session id doesn't exist —
-// caller surfaces 404.
+// caller surfaces 404. title_source = 'user' 是永久锁：自动命名（下方
+// applyAutoTitle）此后对这行不再生效。
 export function renameSession(
   sessionId: string,
   title: string,
@@ -691,11 +692,89 @@ export function renameSession(
   if (!trimmed) return null;
   const result = db
     .prepare(
-      "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+      "UPDATE sessions SET title = ?, title_source = 'user', updated_at = ? WHERE id = ?",
     )
     .run(trimmed.slice(0, 200), now, sessionId);
   if (result.changes === 0) return null;
   return getSession(sessionId);
+}
+
+// 自动命名写入。WHERE 里的 title_source 守卫做成原子的 —— 与并发的手动
+// rename 竞态时（用户点了重命名、同一刻标题生成也回来了）用户永远赢。
+// 刻意不 bump updated_at：自动命名不该影响 sidebar 的时间排序。
+export function applyAutoTitle(sessionId: string, title: string): boolean {
+  const db = getDB();
+  const trimmed = title.trim();
+  if (!trimmed) return false;
+  const result = db
+    .prepare(
+      `UPDATE sessions SET title = ?, title_source = 'auto'
+       WHERE id = ? AND title_source != 'user'`,
+    )
+    .run(trimmed.slice(0, 200), sessionId);
+  return result.changes > 0;
+}
+
+// 自动命名的判定素材：已完成 QA 节点数（触发时机）+ 最近几轮问答（生成
+// 输入）。turns 按时间正序返回，喂给标题生成器时「最近的在最后」。origin
+// 从 DB 直取而不是信 route 层变量 —— retry 路径不回填 resolvedOrigin。
+export function getSessionTitleContext(
+  sessionId: string,
+  recentTurns = 3,
+): {
+  doneCount: number;
+  titleSource: string;
+  origin: string;
+  turns: { question: string; response: string }[];
+} | null {
+  const db = getDB();
+  const meta = db
+    .prepare("SELECT title_source, origin FROM sessions WHERE id = ?")
+    .get(sessionId) as
+    | { title_source: string; origin: string }
+    | undefined;
+  if (!meta) return null;
+  const { c } = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM nodes
+       WHERE session_id = ? AND status = 'done' AND kind = 'qa'`,
+    )
+    .get(sessionId) as { c: number };
+  const rows = db
+    .prepare(
+      `SELECT question, response FROM nodes
+       WHERE session_id = ? AND status = 'done' AND kind = 'qa'
+       ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(sessionId, recentTurns) as { question: string; response: string }[];
+  return {
+    doneCount: c,
+    titleSource: meta.title_source,
+    origin: meta.origin,
+    turns: rows.reverse(),
+  };
+}
+
+// 服务端 app 级偏好 kv（app_settings 表）。value 传 null/空串 = 删行回默认。
+export function getAppSetting(key: string): string | null {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT value FROM app_settings WHERE key = ?")
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setAppSetting(key: string, value: string | null): void {
+  const db = getDB();
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(key, trimmed, Date.now());
 }
 
 export function setNodeTopicLabel(nodeId: string, label: string): void {
@@ -1941,6 +2020,218 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
     });
   }
   return [...groups.values()];
+}
+
+// ---------------------------------------------------------------------------
+// 体验 A：发问时相似检测（duplicate-detection 式召回）。与 searchAll 的差别：
+// searchAll 把整句包成单一 phrase（子串匹配，适合「记得原词」的 pull 式搜索）；
+// 这里把草稿问题拆成多个 term 各查一次，按 session 聚合 term 覆盖度 —— 措辞
+// 不同也能靠共享的实词/字序命中。宁漏报不误报：覆盖 < 2 个 term 的 session
+// 不出（单 term 查询除外），archived 会话不出，调用方 UI 只做旁路提示。
+// ---------------------------------------------------------------------------
+
+export type RelatedSession = {
+  sessionId: string;
+  sessionTitle: string;
+  sessionMode: string;
+  sessionWorkspacePath: string | null;
+  sessionUpdatedAt: number;
+  // 代表性命中：该 session 里 bm25 最好的一条，作为「去续聊」的跳转落点。
+  sourceKind: SearchHit["sourceKind"];
+  sourceId: string;
+  snippet: string;
+  matchText: string;
+  coveredTerms: number;
+  totalTerms: number;
+};
+
+// 会话腔停用片段：任何两段对话都共享的问句用语。term 窗与它们互为子串即丢，
+// 否则「覆盖 ≥2 term」的精度门槛会被「是什么 + 怎么用」这类组合击穿。抓大
+// 放小 —— 长尾的低区分度窗交给 bm25 的 IDF 压权。
+const RELATED_STOP_CJK = [
+  "什么",
+  "怎么",
+  "怎样",
+  "为啥",
+  "如何",
+  "可以",
+  "能不能",
+  "有没有",
+  "是不是",
+  "为什么",
+  "帮我",
+  "请问",
+  "谢谢",
+  "一下",
+  "这个",
+  "那个",
+  "哪个",
+  "哪些",
+  "还是",
+  "或者",
+  "以及",
+  "因为",
+  "所以",
+  "如果",
+  "然后",
+  "应该",
+  "觉得",
+  "知道",
+  "理解",
+  "解释",
+  "讲讲",
+  "看看",
+  "问题",
+  "时候",
+  "东西",
+  "地方",
+  "方法",
+  "方式",
+  "情况",
+  "意思",
+  "区别",
+];
+const RELATED_STOP_ASCII = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "this",
+  "that",
+  "what",
+  "how",
+  "why",
+  "can",
+  "are",
+  "was",
+  "not",
+  "you",
+  "have",
+  "from",
+  "about",
+]);
+
+function isStopCjkWindow(w: string): boolean {
+  return RELATED_STOP_CJK.some((s) => s.includes(w) || w.includes(s));
+}
+
+// 草稿问题 → 检索 term 集。ASCII/数字整词直取（trigram 子串语义下等价
+// 「包含该词」，专名/技术词区分度最高，先推优先保留）；CJK 连续段 ≤4 字
+// 整段、>4 字切 3 字窗步 2 + 尾窗对齐（覆盖段尾）。cap 8 控查询成本。
+function extractRelatedTerms(raw: string, max = 8): string[] {
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    if (t.length < MIN_QUERY_CHARS || seen.has(t)) return;
+    seen.add(t);
+    terms.push(t);
+  };
+  for (const m of raw.toLowerCase().matchAll(/[a-z0-9_#+./-]{3,}/g)) {
+    const tok = m[0].replace(/^[./-]+|[./-]+$/g, "");
+    if (tok.length < 3 || RELATED_STOP_ASCII.has(tok)) continue;
+    push(tok);
+  }
+  for (const m of raw.matchAll(/[\u3400-\u4dbf\u4e00-\u9fff]+/g)) {
+    const run = m[0];
+    if (run.length <= 4) {
+      if (run.length >= MIN_QUERY_CHARS && !isStopCjkWindow(run)) push(run);
+      continue;
+    }
+    for (let i = 0; i + 3 <= run.length; i += 2) {
+      const w = run.slice(i, i + 3);
+      if (!isStopCjkWindow(w)) push(w);
+    }
+    const tail = run.slice(-3);
+    if (!isStopCjkWindow(tail)) push(tail);
+  }
+  return terms.slice(0, max);
+}
+
+export function findRelated(
+  rawText: string,
+  maxSessions = 3,
+): { related: RelatedSession[]; totalTerms: number } {
+  const terms = extractRelatedTerms(rawText);
+  if (terms.length === 0) return { related: [], totalTerms: 0 };
+
+  const db = getDB();
+  type Row = {
+    source_kind: string;
+    source_id: string;
+    session_id: string;
+    snippet: string;
+    match_text: string;
+    title: string;
+    context_mode: string;
+    workspace_path: string | null;
+    updated_at: number;
+    rank: number;
+  };
+  const stmt = db.prepare(
+    `SELECT si.source_kind, si.source_id, si.session_id,
+            snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
+            snippet(search_index, 0, '', '', '', 12) AS match_text,
+            s.title, s.context_mode, s.workspace_path, s.updated_at,
+            bm25(search_index) AS rank
+     FROM search_index si
+     JOIN sessions s ON s.id = si.session_id
+     WHERE search_index MATCH ? AND s.archived = 0
+     ORDER BY rank
+     LIMIT 20`,
+  );
+
+  type Agg = { covered: Set<string>; best: Row; updatedAt: number };
+  const bySession = new Map<string, Agg>();
+  for (const term of terms) {
+    let rows: Row[];
+    try {
+      rows = stmt.all(`"${term.replace(/"/g, '""')}"`) as Row[];
+    } catch {
+      continue; // FTS5 语法边角 → 该 term 作废，不让整个请求 500
+    }
+    for (const r of rows) {
+      const agg = bySession.get(r.session_id);
+      if (!agg) {
+        bySession.set(r.session_id, {
+          covered: new Set([term]),
+          best: r,
+          updatedAt: r.updated_at,
+        });
+      } else {
+        agg.covered.add(term);
+        // bm25 越小越好（FTS5 返回负值，ORDER BY rank ASC = best first）
+        if (r.rank < agg.best.rank) agg.best = r;
+      }
+    }
+  }
+
+  const minCovered = terms.length >= 2 ? 2 : 1;
+  const ranked = [...bySession.values()]
+    .filter((a) => a.covered.size >= minCovered)
+    .sort(
+      (x, y) =>
+        y.covered.size - x.covered.size ||
+        x.best.rank - y.best.rank ||
+        y.updatedAt - x.updatedAt,
+    )
+    .slice(0, maxSessions);
+
+  return {
+    totalTerms: terms.length,
+    related: ranked.map((a) => ({
+      sessionId: a.best.session_id,
+      sessionTitle: a.best.title,
+      sessionMode: a.best.context_mode,
+      sessionWorkspacePath: a.best.workspace_path,
+      sessionUpdatedAt: a.updatedAt,
+      sourceKind: a.best.source_kind as SearchHit["sourceKind"],
+      sourceId: a.best.source_id,
+      snippet: a.best.snippet,
+      matchText: a.best.match_text,
+      coveredTerms: a.covered.size,
+      totalTerms: terms.length,
+    })),
+  };
 }
 
 // Cleanup leftover streaming nodes — call on server start. If the process

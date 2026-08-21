@@ -97,6 +97,9 @@ export type RunEvent =
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
+  // 自动命名（体验 D）：post-done 会话标题生成完成。客户端更新当前 session
+  // 标题 + bump sessionsRevision 让 sidebar/tabs 重拉。
+  | { type: "session_title"; sessionId: string; title: string }
   // CLI 同步 Stage 2：attach 会话续聊完，身份对账把临时节点换成 canonical jsonl-uuid
   // 节点后，让客户端重载该 session 拿到正确 id（详见 progress/cli-sync.md）。
   | { type: "reload_session"; sessionId: string }
@@ -213,6 +216,9 @@ type RunState = {
       }
     | { type: "error"; message: string };
   topicLabel?: string;
+  // 自动命名（体验 D）：post-done 生成的会话标题，供 grace window 内迟到的
+  // 订阅者补发（镜像 topicLabel 的语义）。
+  sessionTitle?: { sessionId: string; title: string };
   // A路②: the interactive-tool prompt currently awaiting a user answer, plus
   // the resolver that the onCanUseTool promise is parked on. Both null/unset
   // when no interaction is in flight. resolveInteraction() (POST respond) and
@@ -313,6 +319,13 @@ export function startRun(args: {
   // text; if it returns a non-empty string we write the label and emit
   // a topic_label event to subscribers. Errors are swallowed.
   topicLabel?: (aggregated: string) => Promise<string | null>;
+  // 自动命名（体验 D）：post-done 会话标题钩子。闭包自己做全部会话级判定
+  // （origin/title_source/触发节奏）与 DB 写入，返回非空即广播 session_title
+  // —— run-bus 保持对 session 实体无知。与 topicLabel 并发跑：两个都是最长
+  // 8s（codex 20s）的 CLI spawn，串行会顶到 30s grace window。
+  sessionTitle?: (
+    aggregated: string,
+  ) => Promise<{ sessionId: string; title: string } | null>;
   // S88: run 终结钩子 —— 自动化任务的留档 / 通知 / 超时 timer 清理全挂在这。
   //
   // 调用点刻意钉在 finalizeNode **之后**（早了任务层回查 node 拿到旧状态）、
@@ -723,6 +736,15 @@ async function runLoop(
     // with non-empty aggregated text. Late subscribers joining within
     // the grace window will see topic_label as a live event; ones
     // joining after won't get it (it's in the DB anyway).
+    //
+    // 自动命名（体验 D）在这之前先启动、之后再 await —— 两个钩子各是一次
+    // CLI spawn，串行最坏 16s/40s 会顶穿 30s grace window，并发则 ≤ 单次上限。
+    const sessionTitlePromise =
+      stoppedWith === "done" &&
+      args.sessionTitle &&
+      aggregated.trim().length > 0
+        ? args.sessionTitle(aggregated).catch(() => null)
+        : null;
     if (
       stoppedWith === "done" &&
       args.topicLabel &&
@@ -745,6 +767,13 @@ async function runLoop(
         }
       } catch {
         /* best-effort */
+      }
+    }
+    if (sessionTitlePromise) {
+      const titled = await sessionTitlePromise;
+      if (titled) {
+        state.sessionTitle = titled;
+        broadcast(state, { type: "session_title", ...titled });
       }
     }
 
@@ -894,6 +923,13 @@ export function subscribe(
           nodeId,
           label: state.topicLabel,
         });
+      } catch {
+        /* ignore */
+      }
+    }
+    if (state.sessionTitle) {
+      try {
+        sub.onEvent({ type: "session_title", ...state.sessionTitle });
       } catch {
         /* ignore */
       }

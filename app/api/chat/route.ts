@@ -8,8 +8,9 @@ import {
 import { getProvider } from "@/lib/llm/server";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
-import { generateTopicLabel } from "@/lib/llm/topic";
+import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
 import {
+  applyAutoTitle,
   createSessionWithRoot,
   createRootInSession,
   createBranchNode,
@@ -18,6 +19,7 @@ import {
   getNode,
   getNodeAttachments,
   getSession,
+  getSessionTitleContext,
   getRootResumeIdForNode,
   getParentResumeId,
   isLineageIsolated,
@@ -764,6 +766,26 @@ export async function POST(req: Request) {
     topicLabel:
       providerId !== "mock"
         ? (aggregated) => generateTopicLabel(questionForTopic, aggregated, family)
+        : undefined,
+    // 自动命名（体验 D）：首答完成起一次题，此后每 8 个完成节点按最近几轮
+    // 刷新「当前主题」。判定全走 DB（origin 只认 native —— attach/import 的
+    // 标题归 importer/watcher 管；title_source='user' 永不覆盖）。mock 跳过，
+    // 与 topicLabel 同因：测试路径不该 spawn CLI。
+    sessionTitle:
+      providerId !== "mock"
+        ? async () => {
+            const ctx = getSessionTitleContext(trellisSessionId);
+            if (!ctx || ctx.origin !== "native" || ctx.titleSource === "user") {
+              return null;
+            }
+            const due =
+              ctx.doneCount === 1 ||
+              (ctx.doneCount > 1 && ctx.doneCount % 8 === 0);
+            if (!due || ctx.turns.length === 0) return null;
+            const title = await generateSessionTitle(ctx.turns, family);
+            if (!title || !applyAutoTitle(trellisSessionId, title)) return null;
+            return { sessionId: trellisSessionId, title };
+          }
         : undefined,
   });
 

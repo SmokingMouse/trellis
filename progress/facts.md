@@ -1,6 +1,7 @@
 # Verified Facts
 
 
+- **spawn `claude -p --model haiku` 冷启动 ~10.6s、热 ~4.2s；topic.ts 老的 8s 超时线曾把历史 topic_label 命中率压到 49/493≈10%**（S110 实测：`time claude -p "输出两个字" --output-format text --no-session-persistence --tools "" --system-prompt "…" --model haiku` 两跑 10.661s / 4.176s；命中率 = 真库副本 `SELECT COUNT(*) FROM nodes WHERE topic_label IS NOT NULL AND topic_label != ''` vs `status='done' AND kind='qa'` 总数）。任何「post-done 顺手 spawn claude 打标/起题」的超时别拍 8s——现 `lib/llm/topic.ts` 统一 15s(claude)/20s(codex)；且多个 post-done 钩子必须**并发**：run-bus 的 subscriber grace window 只有 30s（`run-bus.ts` `CLEANUP_GRACE_MS`），串行叠加会让事件广播赶不上流关闭。
 - **S88 做完的自动化任务，上线至今真实使用量为零**（S89 实测，真库 `~/.trellis/data.db` 的 VACUUM 快照，2026-07-31 11:46 那份）：`SELECT * FROM tasks` → **0 行**；`task_runs` → **0 行**；`SELECT * FROM sessions WHERE kind='task'` → **0 行**；同库 `sessions` 有 44 行全是 `kind='user'`。即整套 T1-T4（四张表 + 调度器 + 三种触发器 + 通知出口）**一次都没被用过**。这与 S1 workspace 那次同构（`workspaces.created_by='trellis'` 实测 0 行）。**直接后果**：console-ia-spec 的批 4「任务运行进侧栏」是在优化一条零流量路径，其判据（一周内从侧栏进入任务会话 > 0）在有人先建出任务之前不可能达成 —— 该问的不是「运行历史怎么摆」，是「为什么没人建任务」。复现命令：
   ```
   bun -e 'const {Database}=require("bun:sqlite");const db=new Database(process.env.HOME+"/.trellis/data.db",{readonly:true});
