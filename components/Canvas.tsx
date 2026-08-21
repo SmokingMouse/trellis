@@ -24,7 +24,7 @@ import {
 } from "@/hooks/useSelectionWithin";
 import { layoutNodes, COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { buildNodeIndex } from "@/lib/node-index";
-import { hiddenByCollapse } from "@/lib/collapsed";
+import { hiddenCanvasNodeIds } from "@/lib/collapsed";
 
 const nodeTypes = { chat: ChatNode, reference: ReferenceCard };
 const NODE_WIDTH = 600;
@@ -52,11 +52,12 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   const sessionId = useSessionStore((s) => s.session?.id);
   const { setCenter, getViewport, fitView } = useReactFlow();
 
-  // Folded subtrees disappear from the canvas — collapsed roots stay
-  // visible (their "+N" badge invites re-expansion), but every
-  // descendant is excluded from layout, flowNodes, and flowEdges.
+  // Folded subtrees and hidden trees disappear from the canvas:
+  // - Collapsed roots stay visible (their "+N" badge invites re-expansion),
+  //   while their descendants are excluded from layout, flowNodes, and flowEdges.
+  // - Hidden trees (root.hiddenAt !== null) are completely excluded.
   const hiddenIds = useMemo(
-    () => hiddenByCollapse(collapsedNodeIds, nodeMap),
+    () => hiddenCanvasNodeIds(collapsedNodeIds, nodeMap),
     [collapsedNodeIds, nodeMap],
   );
 
@@ -158,7 +159,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   // form the other half of the LoD oscillation loop.
   const activeNode = activeNodeId ? nodeMap[activeNodeId] : null;
   useEffect(() => {
-    if (!activeNode) return;
+    if (!activeNode || hiddenIds.has(activeNode.id)) return;
     const id = requestAnimationFrame(() => {
       const { zoom: cur } = getViewport();
       setCenter(
@@ -169,7 +170,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
     });
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeNodeId]);
+  }, [activeNodeId, hiddenIds]);
 
   // Re-fit view when switching sessions — fitView prop only fires on mount.
   // Also drop the layout-ready flag so the new session's first dagre
@@ -196,7 +197,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       const state = useSessionStore.getState();
       const fresh =
         state.lastEditedNodeId && state.nodes[state.lastEditedNodeId];
-      if (fresh && fresh.position) {
+      if (fresh && fresh.position && !hiddenIds.has(fresh.id)) {
         const { zoom: cur } = getViewport();
         setCenter(
           fresh.position.x + NODE_WIDTH / 2,
@@ -323,7 +324,9 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   const flowEdges: Edge[] = useMemo(
     () =>
       Object.values(nodeMap)
-        .filter((n) => n.parentId && !hiddenIds.has(n.id))
+        .filter(
+          (n) => n.parentId && !hiddenIds.has(n.id) && !hiddenIds.has(n.parentId),
+        )
         .map((n) => ({
           id: `e-${n.id}`,
           source: n.parentId!,

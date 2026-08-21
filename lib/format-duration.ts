@@ -5,3 +5,4 @@ export function formatDuration(ms: number): string {
   const m = Math.floor(s / 60);
   return `${m}m ${Math.round(s - m * 60)}s`;
 }
+

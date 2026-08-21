@@ -1143,10 +1143,27 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // have no edit record yet (e.g. straight after a page reload with
       // no nodes touched since).
       const { lastEditedNodeId, nodes, activeNodeId } = get();
-      const focus =
+      let focus =
         lastEditedNodeId && nodes[lastEditedNodeId]
           ? lastEditedNodeId
           : activeNodeId;
+
+      // If focus is in a hidden tree, prefer focusing on a visible tree node
+      if (focus && nodes[focus]) {
+        let root = nodes[focus];
+        while (root.parentId && nodes[root.parentId]) {
+          root = nodes[root.parentId];
+        }
+        if (root.hiddenAt !== null) {
+          const visibleRoots = Object.values(nodes).filter(
+            (n) => !n.parentId && n.hiddenAt === null,
+          );
+          if (visibleRoots.length > 0) {
+            focus = visibleRoots[0].id;
+          }
+        }
+      }
+
       if (focus) get().expandAncestors(focus);
       set({ viewMode: "canvas", activeNodeId: focus });
       return;

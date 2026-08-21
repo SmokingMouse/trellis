@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-树命名/重命名（PATCH API + Store 乐观更新 + 树面板行内双击/悬停编辑）已落地实测通过；cpa codex 故障在查（failures.md）。
+画布完全剔除隐藏树并支持思维树大纲分组恢复已落地（S116）；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -17,7 +17,7 @@
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S114–110） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S116–112） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { refIcon } from "@/lib/ref-icon";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, isUnreadNode } from "@/lib/tree-panel";
+import { ancestorsOf } from "@/lib/collapsed";
 import type { ChatNode } from "@/lib/types";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 
@@ -62,6 +63,18 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
     [nodes],
   );
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [hiddenOpen, setHiddenOpen] = useState<boolean | null>(null);
+
+  const visibleForest = useMemo(
+    () => forest.filter((t) => t.hiddenAt === null),
+    [forest],
+  );
+  const hiddenForest = useMemo(
+    () => forest.filter((t) => t.hiddenAt !== null),
+    [forest],
+  );
+  const isHiddenExpanded =
+    hiddenOpen ?? (visibleForest.length === 0);
 
   if (forest.length === 0) return null;
 
@@ -99,7 +112,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
           )}
         </div>
       </div>
-      {forest.map((t, i) => (
+      {visibleForest.map((t, i) => (
         <div
           key={t.id}
           className={
@@ -109,6 +122,43 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
           <TreeRow node={t} branchDepth={0} isBranch={false} indices={indices} unreadOnly={unreadOnly} />
         </div>
       ))}
+      {hiddenForest.length > 0 && (
+        <div
+          className={
+            visibleForest.length > 0
+              ? "mt-1.5 pt-1.5 border-t border-line-faint"
+              : ""
+          }
+        >
+          <button
+            type="button"
+            onClick={() => setHiddenOpen(!isHiddenExpanded)}
+            className="w-full px-2 py-1 flex items-center gap-1 rounded text-ink-faint hover:bg-surface-muted transition-colors"
+          >
+            <span
+              className={`inline-block transition-transform ${
+                isHiddenExpanded ? "rotate-90" : ""
+              }`}
+              aria-hidden
+            >
+              ▸
+            </span>
+            已隐藏 · {hiddenForest.length} 棵
+          </button>
+          {isHiddenExpanded &&
+            hiddenForest.map((t) => (
+              <div key={t.id} className="mt-1">
+                <TreeRow
+                  node={t}
+                  branchDepth={0}
+                  isBranch={false}
+                  indices={indices}
+                  unreadOnly={unreadOnly}
+                />
+              </div>
+            ))}
+        </div>
+      )}
     </>
   );
 
@@ -169,6 +219,7 @@ function TreeRow({
   const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
   const collapsed = useSessionStore((s) => s.collapsedNodeIds.has(node.id));
   const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
+  const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
   const sessionRootId = useSessionStore((s) => s.session?.rootNodeId);
   const confirmDelete = useConfirmDelete();
   const isActive = activeNodeId === node.id;
@@ -177,9 +228,8 @@ function TreeRow({
   const unread = isUnreadNode(node);
   const hasChildren = node.children.length > 0;
   const canDelete = sessionRootId !== node.id;
-  // 树面板雪藏的根：画布 Outline 不过滤（画布本就是「看全部」的面），只做
-  // 淡显 + 标注，让两个面的状态语义对得上。
-  const isHiddenRoot = !node.parentId && node.hiddenAt !== null;
+  const isRoot = !node.parentId;
+  const isHiddenRoot = isRoot && node.hiddenAt !== null;
   // In "unread only" mode, hide read leaves entirely. A read row with at
   // least one unread descendant stays visible (rendered dim) so the
   // hierarchy doesn't lose context.
@@ -275,6 +325,48 @@ function TreeRow({
             </span>
           )}
         </button>
+        {isRoot && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const willHide = !isHiddenRoot;
+              if (willHide) {
+                const curActive = activeNodeId;
+                if (
+                  curActive === node.id ||
+                  (curActive &&
+                    ancestorsOf(curActive, useSessionStore.getState().nodes).includes(node.id))
+                ) {
+                  const allNodes = useSessionStore.getState().nodes;
+                  const allRoots = Object.values(allNodes).filter((n) => !n.parentId);
+                  const nextVisibleRoot = allRoots.find(
+                    (r) => r.id !== node.id && r.hiddenAt === null,
+                  );
+                  if (nextVisibleRoot) {
+                    setActiveNode(nextVisibleRoot.id);
+                  }
+                }
+              }
+              void setTreeHidden(node.id, willHide);
+            }}
+            className={`shrink-0 px-1.5 py-1 text-nano rounded transition-opacity ${
+              isHiddenRoot
+                ? "text-ink-muted hover:text-ink hover:bg-surface-muted"
+                : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+            }`}
+            title={isHiddenRoot ? "恢复显示" : "隐藏这棵树（数据保留，可随时恢复）"}
+            aria-label={isHiddenRoot ? "恢复显示" : "隐藏这棵树"}
+          >
+            {isHiddenRoot ? "恢复" : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            )}
+          </button>
+        )}
         {canDelete && (
           <button
             onClick={(e) => {
