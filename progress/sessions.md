@@ -1,6 +1,17 @@
 # Session Log
 
-最近 5 条，倒序（Session 114 / 113 / 112 / 111 / 110）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 115 / 114 / 113 / 112 / 111）。更早的见 `archive.md`。
+
+### Session 115（2026-08-21，树命名/重命名支持：PATCH API + Store 乐观更新 + 树面板行内编辑）
+- **触发**: 用户提问「能支持对 树 命名吗」→ 评估可行性后立即落地。
+- **Done ① API & Store**:
+  1. `app/api/nodes/[id]/route.ts`: 新增 `PATCH` 处理器支持更新 `topicLabel`，调用已有 `repo.setNodeTopicLabel` 落库 `nodes.topic_label`。
+  2. `stores/sessionStore.ts`: 新增 `renameTree(nodeId, title)` action，自动向上回溯根节点，乐观更新 `node.topicLabel` 并发送 API 请求，失败自动回滚。
+- **Done ② UI 交互（TreePanel）**:
+  1. `components/TreePanel.tsx`: 当前活跃树头行（`renderActiveTree`）与折叠态树行（`renderTreeRow`）全面支持树重命名——双击树名或悬停点击重命名按钮（铅笔图标）进入行内编辑 `<input>`，支持 Enter / onBlur 提交与 Escape 取消。
+  2. 命名联动：所有视图（TreePanel、Outline、Header、Canvas）统一消费 `treeLabel(root)`，修改后全站即时同步。
+- **验证**: `bun test` 22/22 pass（扩展 `lib/tree-panel.test.ts` 覆盖 topicLabel 覆盖 reference 标题等单测）；`tsc --noEmit` 0 错；`bun --bun run build` 成功完成全量生产构建。
+- **Next**: 合并至 main，下次 `make deploy` 部署上线。
 
 ### Session 114（2026-08-21，Token 统计精准化 + 单卡耗时 & Token 使用 & 纯模型 TPS 仪表）
 - **触发**: 用户反馈两个问题：① 当前 token 统计不精确；② 最好能在每个卡片展示耗时 & token 使用 & TPS。
@@ -37,8 +48,3 @@
 - **验证**: tsc/eslint/`bun --bun run build` 零错；隔离 dev（副本库 :3891）**双向对照**——kv round-trip ✔；配 `no-such-model-xyz` 发一轮 chat → SSE 无 topic_label/session_title（证明配置真进 spawn、失败静默不伤对话）；清除后再发 → 两事件恢复（「并发编程活锁」/「活锁现象解析」）✔；agent-browser 实测设置页卡片渲染 + UI 保存 → API 回读 `sonnet` 落库 ✔。
 - **Next**: 与 S110 同批**未提交未部署**，用户过目后一起提交；后续想给别的服务端偏好用 kv 直接进 `/api/settings` 白名单。
 
-### Session 110（2026-08-21，体验 A/D 落地：发问相似检测 + 会话自动命名，顺带修 topic_label 超时暗伤）
-- **触发**: 用户「树多了不知道在哪棵续聊还是新开」→ 痛点拆三层（①没想起来聊过——决策时机层，⌘P pull 式救不了 ②记得但搜不到——trigram 换措辞 miss，即 C3 ③找到树不知在哪节点续），方案 A（push 式相似检测）+ D（自动命名地基）拍板先做。
-- **Done A（发问时相似检测，roadmap 记 C7）**: `repo.findRelated`——与 searchAll 整句 phrase 不同，草稿拆多 term（ASCII 整词 + CJK 3 字窗步 2 + 尾窗，会话腔停用表双向 includes 过滤）各查一次 FTS，按 session 聚合 term 覆盖度，门槛 ≥2 term（单 term 查询放宽 1）+ 排除 archived，宁漏报不误报；新路由 `/api/search/related`；`RelatedHints.tsx` 挂 QuestionInput 输入卡下——debounce 600ms、≥6 字才查、`/` `$` 前缀跳过、✕ 压制当前草稿（清空复位，react-hooks 新规不让 effect 内同步 setState → 渲染门控 + prev-render 对比实现）、点行走 jumpToSearchHit 直落原树线性视图命中节点。
-- **Done D（会话自动命名，roadmap 记 C8）**: sessions 加 `title_source`（default/auto/user）迁移 + 存量回填（title ≠ 根节点首问前 60 字 → user；导入系派生规则不同天然 mismatch 也标 user = 保守正确）；renameSession 置 user 永久锁；run-bus 新增 `sessionTitle` post-done 钩子（**与 topicLabel 并发跑**——两钩子各一次 CLI spawn，串行最坏顶穿 30s grace window）+ `session_title` 事件广播/迟到订阅补发；chat route 闭包判定全走 DB（origin=native only——retry 路径不回填 resolvedOrigin 故不信 route 变量；doneCount==1 首答起题、%8==0 按最近 3 轮刷新「当前主题」）；`generateSessionTitle` 与 topic 共用 spawn 管道（haiku）；store 收事件就地改当前 session 标题 + bump sessionsRevision 让 sidebar/tabs 重拉；`applyAutoTitle` 的 `WHERE title_source != 'user'` 原子守卫防与手动改名竞态。
-- **顺带破案（存量暗伤）**: topic.ts 的 claude 8s 超时一直在静默掐死打标——`claude -p --model haiku` 冷启动实测 10.6s（热 4.2s），历史 topic_label 命中率仅 49/493≈10%。超时提 15s（并发取 max，30s grace 内），topic_label 与 session_title 同受益。

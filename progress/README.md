@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Token 统计精准化 + 单卡耗时/Token/TPS 仪表已落地实测待提交部署；cpa codex 故障在查（failures.md）。
+树命名/重命名（PATCH API + Store 乐观更新 + 树面板行内双击/悬停编辑）已落地实测通过；cpa codex 故障在查（failures.md）。
 
 ## Goals
 

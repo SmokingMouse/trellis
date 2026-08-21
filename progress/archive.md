@@ -4,6 +4,12 @@
 
 ## Session Log
 
+### Session 110（2026-08-21，体验 A/D 落地：发问相似检测 + 会话自动命名，顺带修 topic_label 超时暗伤）
+- **触发**: 用户「树多了不知道在哪棵续聊还是新开」→ 痛点拆三层（①没想起来聊过——决策时机层，⌘P pull 式救不了 ②记得但搜不到——trigram 换措辞 miss，即 C3 ③找到树不知在哪节点续），方案 A（push 式相似检测）+ D（自动命名地基）拍板先做。
+- **Done A（发问时相似检测，roadmap 记 C7）**: `repo.findRelated`——与 searchAll 整句 phrase 不同，草稿拆多 term（ASCII 整词 + CJK 3 字窗步 2 + 尾窗，会话腔停用表双向 includes 过滤）各查一次 FTS，按 session 聚合 term 覆盖度，门槛 ≥2 term（单 term 查询放宽 1）+ 排除 archived，宁漏报不误报；新路由 `/api/search/related`；`RelatedHints.tsx` 挂 QuestionInput 输入卡下——debounce 600ms、≥6 字才查、`/` `$` 前缀跳过、✕ 压制当前草稿（清空复位，react-hooks 新规不让 effect 内同步 setState → 渲染门控 + prev-render 对比实现）、点行走 jumpToSearchHit 直落原树线性视图命中节点。
+- **Done D（会话自动命名，roadmap 记 C8）**: sessions 加 `title_source`（default/auto/user）迁移 + 存量回填（title ≠ 根节点首问前 60 字 → user；导入系派生规则不同天然 mismatch 也标 user = 保守正确）；renameSession 置 user 永久锁；run-bus 新增 `sessionTitle` post-done 钩子（**与 topicLabel 并发跑**——两钩子各一次 CLI spawn，串行最坏顶穿 30s grace window）+ `session_title` 事件广播/迟到订阅补发；chat route 闭包判定全走 DB（origin=native only——retry 路径不回填 resolvedOrigin 故不信 route 变量；doneCount==1 首答起题、%8==0 按最近 3 轮刷新「当前主题」）；`generateSessionTitle` 与 topic 共用 spawn 管道（haiku）；store 收事件就地改当前 session 标题 + bump sessionsRevision 让 sidebar/tabs 重拉；`applyAutoTitle` 的 `WHERE title_source != 'user'` 原子守卫防与手动改名竞态。
+- **顺带破案（存量暗伤）**: topic.ts 的 claude 8s 超时一直在静默掐死打标——`claude -p --model haiku` 冷启动实测 10.6s（热 4.2s），历史 topic_label 命中率仅 49/493≈10%。超时提 15s（并发取 max，30s grace 内），topic_label 与 session_title 同受益。
+
 ### Session 109（2026-08-19，部署独立性审查 + 四项修复）
 - **触发**: 用户「检查部署的独立性，是否存在对环境的依赖和耦合」→ 审查报告 → 「全部修复」。
 - **审查结论**: 部署主链（release/原子切换/回滚/双 supervisor/端口可配/优雅降级）解耦做得扎实；问题集中在一个腐烂运维脚本、新机器 bootstrap 三处人肉缺口（服务定义无模板、shared/.env.local 不随 clone、宿主机 CLI 登录态）、两处小不一致。tmux「无 PATH 兜底」为误报（probeExecutable 内部本就扫 PATH），实际只有提示文案写死 brew。

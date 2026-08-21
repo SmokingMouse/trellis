@@ -63,6 +63,7 @@ export function TreePanel() {
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
+  const renameTree = useSessionStore((s) => s.renameTree);
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
   const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
   const treeVisits = useSessionStore((s) => s.treeVisits);
@@ -79,6 +80,9 @@ export function TreePanel() {
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState<boolean | null>(null);
+  // 树重命名编辑态
+  const [editingRootId, setEditingRootId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   // null = 过滤模式关闭；字符串（含空串）= 开启且为当前查询。
   const [filter, setFilter] = useState<string | null>(null);
   const [filterSel, setFilterSel] = useState(0);
@@ -261,6 +265,26 @@ export function TreePanel() {
     setFilterSel(0);
   };
 
+  const startEdit = (root: ChatNode) => {
+    setEditingRootId(root.id);
+    setEditingTitle(root.topicLabel ?? treeLabel(root));
+    setHover(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingRootId(null);
+    setEditingTitle("");
+  };
+
+  const commitEdit = (rootId: string) => {
+    const next = editingTitle.trim();
+    setEditingRootId(null);
+    setEditingTitle("");
+    if (next && next !== (nodesMap[rootId]?.topicLabel ?? "")) {
+      void renameTree(rootId, next);
+    }
+  };
+
   const onFilterKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -289,6 +313,36 @@ export function TreePanel() {
   // 折叠态树行（热区非当前树 / 冷组 / 已隐藏组通用）。
   const renderTreeRow = (entry: TreeEntry) => {
     const isActive = entry.root.id === activeRootId;
+    const isEditing = editingRootId === entry.root.id;
+
+    if (isEditing) {
+      return (
+        <div
+          key={entry.root.id}
+          className="flex items-center rounded bg-surface-muted/60 px-1.5 py-1"
+        >
+          <input
+            autoFocus
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitEdit(entry.root.id);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancelEdit();
+              }
+            }}
+            onBlur={() => commitEdit(entry.root.id)}
+            className="w-full px-1.5 py-0.5 rounded text-ui bg-surface border border-line-strong outline-none focus:border-accent text-ink-strong"
+            placeholder="命名这棵树（回车保存 · Esc 取消）"
+          />
+        </div>
+      );
+    }
+
     return (
       <div
         key={entry.root.id}
@@ -299,6 +353,10 @@ export function TreePanel() {
         <button
           type="button"
           onClick={() => jumpToNode(entry.latestNodeId)}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            startEdit(entry.root);
+          }}
           onMouseEnter={hoverRow(entry.root.id)}
           onMouseLeave={leaveRow(entry.root.id)}
           className={`flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 text-left ${
@@ -310,7 +368,7 @@ export function TreePanel() {
                 ? "text-ink font-medium"
                 : "text-ink-muted"
           }`}
-          title={treeLabel(entry.root, 200)}
+          title={`${treeLabel(entry.root, 200)}\n双击重命名`}
         >
           {entry.root.kind === "reference" && (
             <span className="shrink-0" aria-hidden>
@@ -336,6 +394,21 @@ export function TreePanel() {
               {entry.unreadCount}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            startEdit(entry.root);
+          }}
+          className="shrink-0 px-1.5 py-1 text-nano rounded transition-opacity opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+          title="重命名这棵树"
+          aria-label="重命名这棵树"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          </svg>
         </button>
         <button
           type="button"
@@ -578,47 +651,89 @@ export function TreePanel() {
   };
 
   // 当前树：树头行 + 节点行（线性段平铺，真分叉缩进）。
-  const renderActiveTree = (entry: TreeEntry) => (
-    <div key={entry.root.id}>
-      <div className="group flex items-center rounded bg-surface-muted/60">
-        <div className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1">
-          {entry.root.kind === "reference" && (
-            <span className="shrink-0" aria-hidden>
-              {refIcon(entry.root.reference)}
-            </span>
-          )}
-          <span className="truncate font-medium text-ink-strong">
-            {treeLabel(entry.root)}
-          </span>
-          <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
-            {entry.count}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            const nextVisible = entries.find(
-              (e) => !e.hidden && e.root.id !== entry.root.id,
-            );
-            if (nextVisible) {
-              jumpToNode(nextVisible.latestNodeId);
-            }
-            void setTreeHidden(entry.root.id, true);
-          }}
-          className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
-          title="隐藏这棵树（数据保留，可随时恢复）"
-          aria-label="隐藏这棵树"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-            <line x1="1" y1="1" x2="23" y2="23" />
-          </svg>
-        </button>
-      </div>
-      {view === "graph" && graphGeometry ? (
-        renderTreeGraph()
-      ) : (
+  const renderActiveTree = (entry: TreeEntry) => {
+    const isEditing = editingRootId === entry.root.id;
+
+    return (
+      <div key={entry.root.id}>
+        {isEditing ? (
+          <div className="flex items-center rounded bg-surface-muted/60 px-1.5 py-1">
+            <input
+              autoFocus
+              value={editingTitle}
+              onChange={(e) => setEditingTitle(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitEdit(entry.root.id);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+              }}
+              onBlur={() => commitEdit(entry.root.id)}
+              className="w-full px-1.5 py-0.5 rounded text-ui bg-surface border border-line-strong outline-none focus:border-accent text-ink-strong"
+              placeholder="命名这棵树（回车保存 · Esc 取消）"
+            />
+          </div>
+        ) : (
+          <div className="group flex items-center rounded bg-surface-muted/60">
+            <div
+              className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 cursor-pointer"
+              onDoubleClick={() => startEdit(entry.root)}
+              title={`${treeLabel(entry.root, 200)}\n双击重命名`}
+            >
+              {entry.root.kind === "reference" && (
+                <span className="shrink-0" aria-hidden>
+                  {refIcon(entry.root.reference)}
+                </span>
+              )}
+              <span className="truncate font-medium text-ink-strong">
+                {treeLabel(entry.root)}
+              </span>
+              <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
+                {entry.count}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => startEdit(entry.root)}
+              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
+              title="重命名这棵树"
+              aria-label="重命名这棵树"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const nextVisible = entries.find(
+                  (e) => !e.hidden && e.root.id !== entry.root.id,
+                );
+                if (nextVisible) {
+                  jumpToNode(nextVisible.latestNodeId);
+                }
+                void setTreeHidden(entry.root.id, true);
+              }}
+              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
+              title="隐藏这棵树（数据保留，可随时恢复）"
+              aria-label="隐藏这棵树"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            </button>
+          </div>
+        )}
+        {view === "graph" && graphGeometry ? (
+          renderTreeGraph()
+        ) : (
       <div className="mt-0.5">
         {activeRows.map(({ node, depth, isBranch, hasChildren, collapsed, hiddenRollup }) => {
           const isActive = node.id === activeNodeId;
@@ -764,6 +879,7 @@ export function TreePanel() {
       )}
     </div>
   );
+};
 
   return (
     // 右下角是一条堆栈，终端在最底层（把手 / 浮层 / 底部分栏三态高度都由
