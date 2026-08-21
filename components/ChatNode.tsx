@@ -18,6 +18,7 @@ import { COMPACT_ZOOM_THRESHOLD, PEEK_CARD_HEIGHT } from "@/lib/layout";
 import { MarkdownBody } from "@/lib/markdown-cache";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { formatTokens } from "@/lib/format-tokens";
+import { TurnStatsMeta } from "./TurnStatsMeta";
 import { injectMarks, clearMarks, type MarkSpec } from "@/lib/dom-mark-injector";
 import type { ChatNode as ChatNodeData, ToolCall } from "@/lib/types";
 import {
@@ -283,7 +284,14 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             </span>
           )}
           <ToolCallBadge toolCalls={n.toolCalls} stats={n.toolCallStats} />
-          <TokenMeta tokenCount={n.tokenCount} variant="compact" />
+          <TurnStatsMeta
+            tokenCount={n.tokenCount}
+            durationMs={n.durationMs}
+            createdAt={n.createdAt}
+            toolCalls={n.toolCalls}
+            isStreaming={false}
+            variant="compact"
+          />
         </div>
         <Handle type="source" position={Position.Bottom} />
       </div>
@@ -579,7 +587,14 @@ function NodeFooter({
             toolCalls={node.toolCalls}
             stats={node.toolCallStats}
           />
-          <TokenMeta tokenCount={node.tokenCount} variant="full" />
+          <TurnStatsMeta
+            tokenCount={node.tokenCount}
+            durationMs={node.durationMs}
+            createdAt={node.createdAt}
+            toolCalls={node.toolCalls}
+            isStreaming={isStreaming}
+            variant="full"
+          />
           {node.response && (
             <CopyButton
               text={node.response}
@@ -778,54 +793,6 @@ function ToolCallBadge({
       )}
       {workflows > 0 && (
         <span title={`跑了 ${workflows} 个 Workflow`}>⚙{workflows}</span>
-      )}
-    </span>
-  );
-}
-
-// fullscreen footer. Three buckets (↑ in, ↓ out, ⚡ cache hit). cache
-// creation is collapsed into the cache slot only when non-zero (rare —
-// happens on first cli-multi turn) by appending +N. We deliberately
-// omit fields that are zero to keep idle nodes uncluttered.
-function TokenMeta({
-  tokenCount,
-  variant,
-}: {
-  tokenCount: ChatNodeData["tokenCount"];
-  variant: "compact" | "full";
-}) {
-  const { input, output, cacheRead, cacheCreation } = tokenCount;
-  const hasAny =
-    input > 0 || output > 0 || cacheRead > 0 || cacheCreation > 0;
-  if (!hasAny) {
-    return (
-      <span
-        className={
-          variant === "compact"
-            ? "shrink-0 text-nano text-ink-faint tabular-nums"
-            : "text-ink-faint tabular-nums"
-        }
-      >
-        —
-      </span>
-    );
-  }
-  const baseCls = "tabular-nums whitespace-nowrap";
-  const sizeCls = variant === "compact" ? "text-nano" : "text-label";
-  return (
-    <span
-      className={`shrink-0 inline-flex items-center gap-1.5 ${sizeCls} ${baseCls} text-ink-muted`}
-      title={`输入 ${input} · 输出 ${output} · 缓存命中 ${cacheRead}${
-        cacheCreation > 0 ? ` · 缓存写入 ${cacheCreation}` : ""
-      }`}
-    >
-      <span>↑{formatTokens(input)}</span>
-      <span>↓{formatTokens(output)}</span>
-      {(cacheRead > 0 || cacheCreation > 0) && (
-        <span className="text-positive">
-          ⚡{formatTokens(cacheRead)}
-          {cacheCreation > 0 ? `+${formatTokens(cacheCreation)}` : ""}
-        </span>
       )}
     </span>
   );

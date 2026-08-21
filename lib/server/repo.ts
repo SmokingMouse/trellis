@@ -83,6 +83,7 @@ export type ApiNode = {
     contextTokens?: number | null;
   };
   createdAt: number;
+  durationMs: number | null;
   topicLabel: string | null;
   kind: NodeKind;
   reference: ReferencePayload | null;
@@ -118,6 +119,7 @@ type NodeRow = {
   token_cache_creation: number;
   token_context: number | null;
   created_at: number;
+  duration_ms: number | null;
   topic_label: string | null;
   kind: string | null;
   ref_source_type: string | null;
@@ -137,7 +139,7 @@ type NodeRow = {
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
        status, error_message, sibling_index, token_input, token_output,
-       token_cache_read, token_cache_creation, token_context, created_at,
+       token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
        pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
@@ -248,6 +250,7 @@ function rowToNode(r: NodeRow): ApiNode {
       contextTokens: r.token_context,
     },
     createdAt: r.created_at,
+    durationMs: r.duration_ms ?? null,
     topicLabel: r.topic_label,
     kind,
     reference,
@@ -1073,6 +1076,7 @@ export function resetNodeForRetry(
          token_input = 0, token_output = 0,
          token_cache_read = 0, token_cache_creation = 0,
          token_context = NULL,
+         duration_ms = NULL,
          tool_calls_json = NULL,
          pending_interaction_json = NULL,
          final_start = NULL,
@@ -1288,6 +1292,7 @@ export function finalizeNode(args: {
   // response 分层偏移（run-bus 流式期间维护的 finalStart）。0/undefined → NULL
   // （不分层）。error 态也照写 —— 部分文本上分层依旧成立。
   finalStart?: number;
+  durationMs?: number | null;
   now: number;
 }): void {
   const db = getDB();
@@ -1302,6 +1307,7 @@ export function finalizeNode(args: {
            token_input = ?, token_output = ?,
            token_cache_read = ?, token_cache_creation = ?,
            token_context = ?, final_start = ?,
+           duration_ms = ?,
            pending_interaction_json = NULL
        WHERE id = ?`,
     ).run(
@@ -1313,6 +1319,7 @@ export function finalizeNode(args: {
       args.tokenCacheCreation,
       args.tokenContext ?? null,
       args.finalStart || null,
+      args.durationMs ?? null,
       args.nodeId,
     );
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(

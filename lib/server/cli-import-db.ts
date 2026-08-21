@@ -253,10 +253,10 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
       `INSERT INTO nodes
          (id, session_id, parent_id, parent_anchor_text, question, response,
           status, error_message, sibling_index, token_input, token_output,
-          token_cache_read, token_cache_creation, token_context, created_at,
+          token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
           kind, tool_calls_json, claude_session_id, codex_session_id,
           cli_turn_uuid, codex_turn_ordinal, final_start)
-       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, NULL, ?, ?, 'done', NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'qa', ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          parent_id = excluded.parent_id,
@@ -268,6 +268,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
          token_cache_read = excluded.token_cache_read,
          token_cache_creation = excluded.token_cache_creation,
          token_context = excluded.token_context,
+         duration_ms = excluded.duration_ms,
          tool_calls_json = excluded.tool_calls_json,
          claude_session_id = excluded.claude_session_id,
          codex_session_id = excluded.codex_session_id,
@@ -297,6 +298,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
         t.tokens.cacheCreation,
         t.tokens.contextTokens,
         t.createdAt,
+        t.durationMs ?? null,
         t.toolCalls.length ? JSON.stringify(t.toolCalls) : null,
         provider === "claude"
           ? (turnLineageSids.get(t.id) ?? trellisSessionId)

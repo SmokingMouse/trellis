@@ -24,6 +24,7 @@ type TurnDraft = ParsedTurn & {
   responseText: string[];
   seenResponseIds: Set<string>;
   toolByCallId: Map<string, ToolCall>;
+  latestTimestamp: number;
 };
 
 function ms(value: unknown): number {
@@ -105,11 +106,13 @@ function createTurn(
       contextTokens: null,
     },
     createdAt,
+    durationMs: 0,
     turnOrdinal: ordinal,
     eventText: [],
     responseText: [],
     seenResponseIds: new Set(),
     toolByCallId: new Map(),
+    latestTimestamp: createdAt,
   };
 }
 
@@ -192,25 +195,27 @@ export function parseCodexSessionJsonl(
 
       const active = activeTurnId ? byTurnId.get(activeTurnId) : undefined;
       if (!active) continue;
+      if (at > active.latestTimestamp) active.latestTimestamp = at;
       if (eventType === "agent_message") {
         const text = stringValue(payload?.message);
         if (text) active.eventText.push(text);
       } else if (eventType === "token_count") {
         const info = payload?.info;
-        const last =
-          info && typeof info === "object"
-            ? ((info as JsonObject).last_token_usage as Usage | undefined)
-            : undefined;
-        if (last) {
-          const totalInput = last.input_tokens ?? 0;
-          const cached = last.cached_input_tokens ?? 0;
-          active.tokens = {
-            input: Math.max(0, totalInput - cached),
-            output: last.output_tokens ?? 0,
-            cacheRead: cached,
-            cacheCreation: last.cache_write_input_tokens ?? 0,
-            contextTokens: totalInput,
-          };
+        if (info && typeof info === "object") {
+          const infoObj = info as JsonObject;
+          const total = (infoObj.total_token_usage ?? infoObj.last_token_usage) as Usage | undefined;
+          const last = (infoObj.last_token_usage ?? infoObj.total_token_usage) as Usage | undefined;
+          if (total || last) {
+            const totalInput = total?.input_tokens ?? last?.input_tokens ?? 0;
+            const cached = total?.cached_input_tokens ?? last?.cached_input_tokens ?? 0;
+            active.tokens = {
+              input: Math.max(0, totalInput - cached),
+              output: total?.output_tokens ?? last?.output_tokens ?? 0,
+              cacheRead: cached,
+              cacheCreation: total?.cache_write_input_tokens ?? last?.cache_write_input_tokens ?? 0,
+              contextTokens: last?.input_tokens ?? totalInput,
+            };
+          }
         }
       }
       continue;
@@ -221,6 +226,7 @@ export function parseCodexSessionJsonl(
     const itemTurnId = turnIdFromPayload(payload) ?? activeTurnId;
     const turn = itemTurnId ? byTurnId.get(itemTurnId) : undefined;
     if (!turn || !itemType) continue;
+    if (at > turn.latestTimestamp) turn.latestTimestamp = at;
 
     if (itemType === "message" && payload.role === "assistant") {
       const text = contentText(payload.content).trim();
@@ -277,6 +283,7 @@ export function parseCodexSessionJsonl(
       response: draft.response,
       toolCalls: draft.toolCalls,
       tokens: draft.tokens,
+      durationMs: Math.max(0, draft.latestTimestamp - draft.createdAt),
       createdAt: draft.createdAt,
       turnOrdinal: draft.turnOrdinal,
     };

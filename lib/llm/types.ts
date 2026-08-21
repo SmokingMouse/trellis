@@ -41,7 +41,7 @@ export type StreamEvent =
   // the UI is blind — nothing renders — for the entire思考期. Ephemeral:
   // never persisted, dropped when the turn finalizes (与 CLI 行为一致).
   | { type: "thinking"; text: string }
-  | { type: "done"; usage?: TokenUsage }
+  | { type: "done"; usage?: TokenUsage; finalStart?: number; durationMs?: number }
   | { type: "error"; message: string }
   // project mode only: emitted once per spawn after parsing system/init.
   // The route handler writes this back to sessions.claude_session_id.

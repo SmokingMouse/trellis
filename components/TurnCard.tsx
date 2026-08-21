@@ -28,6 +28,7 @@ import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { ToolTimeline } from "./tools/ToolTimeline";
+import { TurnStatsMeta } from "./TurnStatsMeta";
 import { Button } from "./ui/Button";
 import { Dots } from "./ui/Dots";
 import { StopButton } from "./ui/StopButton";
@@ -416,6 +417,12 @@ function ResponseBody({ node }: { node: ChatNode }) {
               {liveText}
             </ReactMarkdown>
             <span className="streaming-cursor" />
+            <div className="mt-2 flex items-center">
+              <TurnStatsMeta
+                createdAt={node.createdAt}
+                isStreaming={true}
+              />
+            </div>
           </>
         ) : liveThinking ? null : (
           // First token hasn't arrived yet — show an animated indicator
@@ -423,25 +430,39 @@ function ResponseBody({ node }: { node: ChatNode }) {
           <div className="flex items-center gap-1.5 py-2 text-ink-faint">
             <Dots />
             <span className="ml-1.5 text-ui">正在生成…</span>
+            <TurnStatsMeta
+              createdAt={node.createdAt}
+              isStreaming={true}
+              className="ml-2"
+            />
           </div>
         )
       ) : node.response ? (
         near ? (
           <>
             <SegmentedResponse node={node} />
-            <div className="mt-3 flex justify-end gap-2">
-              <CliResumeButton nodeId={node.id} />
-              <RegenerateVariantButton nodeId={node.id} question={node.question} />
-              <CardImageButton
-                title={node.topicLabel ?? node.question}
-                // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
-                content={finalResponseText(node)}
+            <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+              <TurnStatsMeta
+                tokenCount={node.tokenCount}
+                durationMs={node.durationMs}
+                createdAt={node.createdAt}
+                toolCalls={node.toolCalls}
+                isStreaming={false}
               />
-              <CopyButton
-                text={node.response}
-                label="复制全文"
-                className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
-              />
+              <div className="flex items-center gap-2 ml-auto">
+                <CliResumeButton nodeId={node.id} />
+                <RegenerateVariantButton nodeId={node.id} question={node.question} />
+                <CardImageButton
+                  title={node.topicLabel ?? node.question}
+                  // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
+                  content={finalResponseText(node)}
+                />
+                <CopyButton
+                  text={node.response}
+                  label="复制全文"
+                  className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+                />
+              </div>
             </div>
             <GeneratedFilesBar node={node} />
           </>

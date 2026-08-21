@@ -478,6 +478,16 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN final_start INTEGER");
   }
 
+  // 单轮耗时（毫秒）。记录从提问发送到整轮流式结束 / 导入解析的总耗时。
+  const hasDurationMs = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'duration_ms'",
+    )
+    .get();
+  if (!hasDurationMs) {
+    db.exec("ALTER TABLE nodes ADD COLUMN duration_ms INTEGER");
+  }
+
   // 自动命名（体验 D）：title 的来源标记。default = 建会话时的首问截断；
   // auto = 首答后小模型生成 / 每 8 节点刷新；user = 手动重命名（此后自动命名
   // 永不覆盖）。存量回填：title ≠ 根节点首问前 60 字 → 视为手动改过名 → 标

@@ -94,6 +94,7 @@ export type RunEvent =
       // response 分层偏移（见 lib/types.ts:ChatNode.finalStart）。随终态下发，
       // 客户端不必为它 refetch 节点。0 = 不分层。
       finalStart?: number;
+      durationMs?: number;
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
@@ -213,6 +214,7 @@ type RunState = {
           cacheCreation: number;
         };
         finalStart?: number;
+        durationMs?: number;
       }
     | { type: "error"; message: string };
   topicLabel?: string;
@@ -380,6 +382,7 @@ async function runLoop(
   state: RunState,
   args: Parameters<typeof startRun>[0],
 ): Promise<void> {
+  const startedAt = Date.now();
   let aggregated = "";
   let usage: {
     input: number;
@@ -683,6 +686,8 @@ async function runLoop(
       broadcast(state, { type: "error", message: errorMessage });
     }
 
+    const durationMs = Math.max(0, Date.now() - startedAt);
+
     try {
       finalizeNode({
         nodeId: args.nodeId,
@@ -694,6 +699,7 @@ async function runLoop(
         tokenCacheCreation: usage.cacheCreation,
         tokenContext: usage.contextTokens ?? null,
         finalStart: state.finalStart,
+        durationMs,
         now: Date.now(),
       });
     } catch {
@@ -720,8 +726,8 @@ async function runLoop(
 
     state.status = stoppedWith;
     if (stoppedWith === "done") {
-      state.finalEvent = { type: "done", usage, finalStart: state.finalStart };
-      broadcast(state, { type: "done", usage, finalStart: state.finalStart });
+      state.finalEvent = { type: "done", usage, finalStart: state.finalStart, durationMs };
+      broadcast(state, { type: "done", usage, finalStart: state.finalStart, durationMs });
     } else {
       state.finalEvent = {
         type: "error",

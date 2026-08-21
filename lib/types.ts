@@ -213,6 +213,9 @@ export type ChatNode = {
     contextTokens?: number | null;
   };
   createdAt: number;
+  // Total turn duration in milliseconds (measured from question submission to stream done).
+  // null while running or for legacy rows without recorded duration.
+  durationMs?: number | null;
   siblingIndex: number;
   // Short LLM-generated topic for overview rendering. Null until done; falls
   // back to question prefix in the UI when not yet available.

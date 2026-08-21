@@ -44,6 +44,7 @@ export type ParsedTurn = {
     cacheCreation: number;
     contextTokens: number | null;
   };
+  durationMs?: number | null;
   createdAt: number;
   // Codex rollout 没有 Claude 的 uuid 父链；分叉坐标是该 lineage 内第几条
   // 可见 user turn（1-based）。Claude parser 不填。
@@ -190,6 +191,10 @@ export function parseCliSessionJsonl(
 
     const textParts: string[] = [];
     const toolCalls: ToolCall[] = [];
+    let sumInput = 0;
+    let sumOutput = 0;
+    let sumCacheRead = 0;
+    let sumCacheCreation = 0;
     let lastUsage: Usage | undefined;
     // finalStart 状态机，与 run-bus 的流式版同构：tool_use/thinking 块是结构性
     // 中断，其后的首个 text part 即当前「最终答复」候选段的起点（part 索引）。
@@ -205,7 +210,14 @@ export function parseCliSessionJsonl(
     for (const m of members) {
       const startedAt = ms(m.timestamp);
       const c = m.message?.content;
-      if (m.message?.usage) lastUsage = m.message.usage;
+      if (m.message?.usage) {
+        const u = m.message.usage;
+        lastUsage = u;
+        sumInput += u.input_tokens ?? 0;
+        sumOutput += u.output_tokens ?? 0;
+        sumCacheRead += u.cache_read_input_tokens ?? 0;
+        sumCacheCreation += u.cache_creation_input_tokens ?? 0;
+      }
       if (typeof c === "string") {
         if (c.trim()) pushText(c);
         continue;
@@ -236,6 +248,10 @@ export function parseCliSessionJsonl(
       }
     }
 
+    const startMs = ms(start.timestamp);
+    const endMs = members.length > 0 ? ms(members[members.length - 1].timestamp) : startMs;
+    const durationMs = endMs > startMs ? endMs - startMs : 0;
+
     const parentTurn = start.parentUuid ? resolveOwner(start.parentUuid) : null;
     turns.push({
       id,
@@ -250,17 +266,18 @@ export function parseCliSessionJsonl(
           : 0,
       toolCalls,
       tokens: {
-        input: lastUsage?.input_tokens ?? 0,
-        output: lastUsage?.output_tokens ?? 0,
-        cacheRead: lastUsage?.cache_read_input_tokens ?? 0,
-        cacheCreation: lastUsage?.cache_creation_input_tokens ?? 0,
+        input: sumInput,
+        output: sumOutput,
+        cacheRead: sumCacheRead,
+        cacheCreation: sumCacheCreation,
         contextTokens: lastUsage
           ? (lastUsage.input_tokens ?? 0) +
             (lastUsage.cache_read_input_tokens ?? 0) +
             (lastUsage.cache_creation_input_tokens ?? 0)
           : null,
       },
-      createdAt: ms(start.timestamp),
+      durationMs,
+      createdAt: startMs,
     });
   }
 

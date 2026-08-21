@@ -1,12 +1,12 @@
 # Trellis Progress
 
 ## Current Focus
-模型选择与管理体验重构落地（即搜即选+预设模版+可视标签），连同S110/S111待提交部署。
+Token 统计精准化 + 单卡耗时/Token/TPS 仪表已落地实测待提交部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
 - [ ] **自定义 Agent + 自动化任务** → [计划](custom-agents-plan.md) · [ADR](decisions/2026-07-31-custom-agents.md)
-  A1-A4 · T1-T4 全部落地实测。SDK 0.4.0 本机 prod 已上线。待办：BOE 未部。
+  A1-A4 · T1-T4 全部落地实测。本机 prod 已上线。待办：BOE 未部（需 devbox 手跑，见 sessions.md S88 Next）。
 - [ ] **S1: Project/Workspace 层级 + 工作区终端** → [spec](project-workspace-layer.md) · [ADR](decisions/2026-07-27-project-workspace-layer.md)
   P0/P1/P2 均已落地，S83/S87 修掉可用性堵点后计时观测。S2/S3/S4 依赖它。
 - [ ] **替代 CLI + GPT 客户端** → [roadmap](roadmap-2026q2.md) · [工作台](session-workbench.md) · [体验优化](optimization-roadmap.md)
@@ -17,8 +17,8 @@
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S113–109） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S114–110） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
-- **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91 三处 · S94 卡片图弹窗 · S95 授权卡+预警
+- **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
 - 其余 `*.md` 为按需读取的 feature spec

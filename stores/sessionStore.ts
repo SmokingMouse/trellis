@@ -2551,6 +2551,7 @@ type StreamEvent =
       // response 分层偏移（lib/types.ts:ChatNode.finalStart）。随终态下发，
       // done 提交时写进节点，重载前 TurnCard 就能分层渲染。
       finalStart?: number;
+      durationMs?: number;
     }
   | { type: "error"; message: string }
   | { type: "topic_label"; nodeId: string; label: string }
@@ -2791,6 +2792,9 @@ function handleStreamEvent(
               response: n.response + fullText,
               status: "done",
               tokenCount: usage,
+              durationMs:
+                event.durationMs ??
+                (n.createdAt ? Math.max(0, Date.now() - n.createdAt) : null),
               finalStart: event.finalStart ?? n.finalStart ?? null,
             },
           },
@@ -2816,6 +2820,9 @@ function handleStreamEvent(
                 response: n.response + fullText,
                 status: "error",
                 errorMessage: event.message,
+                durationMs:
+                  n.durationMs ??
+                  (n.createdAt ? Math.max(0, Date.now() - n.createdAt) : null),
               },
             },
             // Run 死了，"等你回答"的 waiting toast 一并过时。
