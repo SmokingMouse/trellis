@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-定时任务侧栏固定分组 + 深链跳转修复已落地待部署（S117）；cpa codex 故障在查（failures.md）。
+trellisctl 平台操作面（S118）与定时任务侧栏分组（S117）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -17,7 +17,7 @@
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S117–113） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S118–114） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
