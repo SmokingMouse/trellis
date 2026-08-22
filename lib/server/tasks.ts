@@ -188,13 +188,44 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Task | null {
   put("updated_at", Date.now());
   vals.push(id);
   getDB().prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...(vals as never[]));
-  return getTask(id);
+  const next = getTask(id);
+  // S117: 常驻会话在侧栏「定时任务」分组里露脸了，标题/工作目录得跟着任务走 ——
+  // 否则改名后列表里还挂着旧名，终端面板开的还是旧目录。
+  if (next?.homeSessionId && (patch.name !== undefined || patch.workspacePath !== undefined)) {
+    if (patch.name !== undefined) {
+      getDB()
+        .prepare("UPDATE sessions SET title = ? WHERE id = ?")
+        .run(`⏱ ${next.name}`, next.homeSessionId);
+    }
+    if (patch.workspacePath !== undefined) {
+      getDB()
+        .prepare("UPDATE sessions SET workspace_path = ? WHERE id = ?")
+        .run(next.workspacePath, next.homeSessionId);
+    }
+  }
+  return next;
+}
+
+/** 会话被用户删除/归档时解绑任务指针 —— 下次触发时 ensureTaskSession 会重建。
+ * 不解绑的话，归档的会话会被后续执行悄悄写回新节点（archived 却一直在长）。 */
+export function detachHomeSession(sessionId: string): void {
+  getDB()
+    .prepare("UPDATE tasks SET home_session_id = NULL WHERE home_session_id = ?")
+    .run(sessionId);
 }
 
 export function deleteTask(id: string): boolean {
   // triggers / runs 走 ON DELETE CASCADE。任务会话**故意留着** —— 那是执行历史，
   // 删任务不该连坐删掉「它这几个月产出过什么」。
+  // S117: 但 kind='task' 的会话只在「定时任务」分组可见，任务行一删它就成了
+  // 幽灵（哪个列表都不进）。翻回 'user' 让历史落进常规列表，标题上的 ⏱ 说明身世。
+  const task = getTask(id);
   const r = getDB().prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  if (r.changes > 0 && task?.homeSessionId) {
+    getDB()
+      .prepare("UPDATE sessions SET kind = 'user' WHERE id = ?")
+      .run(task.homeSessionId);
+  }
   return r.changes > 0;
 }
 
@@ -359,7 +390,12 @@ function ensureTaskSession(task: Task, question: string, now: number): {
   nodeId: string;
 } {
   const nodeId = crypto.randomUUID();
-  if (task.homeSessionId) {
+  // S117: home 会话在侧栏可见可删可归档了，指针可能悬挂 —— 会话行没了就当
+  // 从没建过，走下面的新建分支（新 id 会覆盖旧指针）。
+  const homeAlive =
+    task.homeSessionId &&
+    getDB().query("SELECT 1 FROM sessions WHERE id = ?").get(task.homeSessionId);
+  if (task.homeSessionId && homeAlive) {
     createRootInSession({
       sessionId: task.homeSessionId,
       nodeId,

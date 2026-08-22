@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSessionStore } from "@/stores/sessionStore";
 import { ToastShell } from "@/components/ui/Toast";
 
 // S88: 任务执行完成 / 失败的站内提醒。
 //
 // 自带 SSE 订阅 + 自己那点本地状态，**不进 sessionStore** —— 它和会话树、流式
 // 状态零交集，塞进那个 3000 行的 store 只会让它更难读。
+// （S117 起有两处最小交集：run 事件 bump 一下侧栏、点击 toast 直接切会话 ——
+// 都是对既有 store action 的调用，本地状态仍然自持。）
 //
 // 与 DoneToast 共用右下角堆叠位（后者 z-40，这里 z-40 且更靠上一点），
 // 视觉走同一套 ToastShell，用户不会觉得是两个系统。
@@ -20,7 +23,8 @@ type Item = {
   runId: string;
   status: string;
   taskName: string;
-  link: string | null;
+  sessionId: string | null;
+  nodeId: string | null;
 };
 
 const AUTO_DISMISS_MS = 8000;
@@ -55,6 +59,11 @@ export function TaskToast() {
             const line = frame.split("\n").find((l) => l.startsWith("data: "));
             if (!line) continue;
             const ev = JSON.parse(line.slice(6)) as TaskEvent;
+            // S117: 任务会话在侧栏有分组了 —— 首次执行懒建的会话行、执行结束的
+            // 角标都靠重拉 /api/sessions 长出来。getState() 取免得进依赖数组。
+            if (ev.type === "run_started" || ev.type === "run_finished") {
+              useSessionStore.getState().bumpSessionsRevision();
+            }
             if (ev.type !== "run_finished") continue;
             // 成功且没人在看任务页时不打扰？—— 不做这个判断：notify_on 已经在
             // 服务端决定了要不要**外部**推送，站内 toast 是廉价的、看一眼就走。
@@ -93,13 +102,22 @@ export function TaskToast() {
           tone={it.status === "done" ? "positive" : "danger"}
           className="px-3 py-2 cursor-pointer"
           onClick={() => {
-            if (it.link) window.location.href = it.link;
+            // S117: 原来是 window.location.href 整页刷新（store 全丢重启）。
+            // toast 只挂在主 SPA 里，直接驱动 store 切过去即可 —— 与侧栏点行
+            // 同一条路径，tab / 高亮自然跟上。
+            if (!it.sessionId) return;
+            const st = useSessionStore.getState();
+            const nodeId = it.nodeId;
+            void st.previewSession(it.sessionId).then(() => {
+              if (nodeId) st.setActiveNode(nodeId);
+            });
+            setItems((prev) => prev.filter((x) => x.runId !== it.runId));
           }}
         >
           <div className="text-ui">
             ⏱ 任务「{it.taskName}」{statusText(it.status)}
           </div>
-          {it.link && (
+          {it.sessionId && (
             <div className="text-label text-ink-faint">点击查看这次执行</div>
           )}
         </ToastShell>
@@ -132,7 +150,8 @@ async function hydrateItem(
       runId,
       status,
       taskName: task.name as string,
-      link: run?.sessionId ? `/?session=${run.sessionId}&node=${run.nodeId}` : null,
+      sessionId: (run?.sessionId as string | undefined) ?? null,
+      nodeId: (run?.nodeId as string | undefined) ?? null,
     };
   } catch {
     return null;

@@ -59,7 +59,13 @@ export function SessionTabs() {
       .then((data) => {
         if (cancelled) return;
         const map: Record<string, Session> = {};
-        for (const s of (data.sessions ?? []) as Session[]) map[s.id] = s;
+        // S117: taskSessions 也要能 resolve —— 从任务页/侧栏分组深链进来的
+        // 任务会话（kind='task'）不在 sessions 里，漏掉它 tab 就渲染不出来。
+        for (const s of [
+          ...(data.sessions ?? []),
+          ...(data.taskSessions ?? []),
+        ] as Session[])
+          map[s.id] = s;
         setById(map);
       })
       .catch(() => {

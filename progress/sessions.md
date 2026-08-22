@@ -1,6 +1,17 @@
 # Session Log
 
-最近 5 条，倒序（Session 116 / 115 / 114 / 113 / 112）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 117 / 116 / 115 / 114 / 113）。更早的见 `archive.md`。
+
+### Session 117（2026-08-22，定时任务固定入口：侧栏「⏱ 定时任务」分组 + 深链跳转修复）
+- **触发**: 用户「希望给定时任务单独分配一个固定的工作区，通过左边的列表点进去看执行情况；现在点历史运行记录，跳转目标特别奇怪」。
+- **根因（跳转奇怪）**: 任务会话 `kind='task'` 被 `/api/sessions` 全量排除 → 深链落地后侧栏无行可高亮、tab 条 `byId` resolve 不出该会话；且主页深链只 `loadSession` 不占 tab 位，`hydrate` 又把 preview tab 设回 `sessions[0]`——dev StrictMode 双跑下第二个 hydrate 实例在深链之后完成、覆盖 preview，**画面与 tab/侧栏指向两个不同会话**。
+- **Done ① 侧栏固定分组（SessionSidebar）**: 新增「⏱ 定时任务」分组，行骨架来自 **tasks 表**（任务是常驻实体——没跑过的任务渲染灰行占位，不因会话未懒建而隐身）；有 home 会话的行走 SidebarRow（preview/pin/改名/归档/删除、running 脉冲与未读角标全部免费复用，`/api/runs` 本就不分 kind）；分组 ＋ 号跳 `/settings/tasks`；任务已删的存量孤儿 task 会话也列出不吞。
+- **Done ② API**: `/api/sessions` 响应加 `tasks`（id/name/homeSessionId/enabled）+ `taskSessions`；repo 新增 `listTaskSessions()`；归档视图放宽 kind（`archived=1` 时 user+task 都列，`countArchivedSessions` 同口径）——否则归档的任务会话从每个列表里消失。
+- **Done ③ 生命周期闭环（lib/server/tasks.ts）**: `updateTask` 改名/改目录同步 home 会话（title `⏱ name` / workspace_path）；`deleteTask` 把 home 会话翻回 `kind='user'`（历史落进常规列表）；新增 `detachHomeSession()` 挂在会话 DELETE / 归档 PATCH 上解绑指针（归档语义 = 历史收起、下次执行重开新会话）；`ensureTaskSession` 校验 home 会话行仍存活，悬挂即重建。
+- **Done ④ 深链修复**: `page.tsx` 深链改走 `previewSession`（占 tab 位，与侧栏点行同路径）；`sessionStore.hydrate` 加 hydrated guard + `hydrateInFlight` 防重入（双跑并发），尾部 preview **只在空位落座**（深链先到就不挤）；`SessionTabs.byId` 并入 taskSessions。
+- **Done ⑤ TaskToast**: run_started/run_finished 事件 `bumpSessionsRevision()`（首跑懒建的会话行即时长出）；点击 toast 从 `window.location.href` 整页刷新改为 store 内 `previewSession + setActiveNode`（同路由改 URL 本就不触发深链 effect，老写法靠整页重启 store 才凑效）。
+- **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
+- **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
 
 ### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
 - **触发**: 用户反馈隐藏的树在画布上仍然会出现。
@@ -46,17 +57,3 @@
 - **Done ④ Agent 管理模型字段提升**: 自定义 Agent 模型配置支持快捷预设 Tag 与全量 Provider 模型分类下拉选择器。
 - **验证**: `bun --bun run build` 与 Next.js turbopack 编译 100% 通过（零类型/语法错误）；无多余依赖与无侵入式回退保护。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
-
-### Session 112（2026-08-21，树隐藏修复：彻底移出非隐藏区 + 焦点自动切换 + 已隐藏组展开自适应）
-- **触发**: 用户反馈树隐藏问题——当前树或只剩一棵树时点击隐藏，该树仍旧出现在非隐藏区，或者说只要停留在当前树该树就不在隐藏区里，且存在双重渲染。
-- **根因**: `TreePanel.tsx` 存在 `{activeEntry?.hidden && renderActiveTree(activeEntry)}` 强制把被隐藏的当前树再次渲染在热区下方；同时点击隐藏时未自动把活跃焦点切换到下一棵可见树；activeRootId 回退时未优先选择首棵可见树。
-- **Done**: ① `TreePanel.tsx` 删去 `activeEntry?.hidden` 在非隐藏区的强制渲染；② 隐藏当前树时（无论是在展开树头还是折叠树行点击），若存在其他可见树则自动将焦点切至下一棵可见树（`nextVisible.latestNodeId`）；若恢复隐藏树且当前无可见活跃树，自动恢复其活跃状态；③ `activeRootId` 缺省 fallback 优先选择第一棵未隐藏树（`entries.find(e => !e.hidden)`）；④ `renderTreeRow` 补全 `entry.hidden` 下当前被选树的 active 样式；⑤ `hiddenOpen` 支持全树被隐藏时默认展开 `已隐藏` 组，便于用户快速恢复；⑥ 新增 `lib/tree-panel.test.ts` 覆盖分组、雪藏过滤、热度排序及单树雪藏等场景。
-- **验证**: `bun test` 9 pass ✔；`node_modules/.bin/tsc --noEmit` 0 错 ✔；`eslint` 0 错 ✔；`bun --bun run build` 成功通过 ✔。
-- **Next**: 提交分支、提交 PR 并合并至 master/main。
-
-### Session 111（2026-08-21，打标/起题模型可配：app_settings kv + 设置页卡片）
-- **触发**: S110 交付后用户追问「别人用但没有这些模型呢」→「能不能在设置里配」。此前 claude 路写死 `--model haiku`（官方 alias，正常安装都认，但只路由部分模型的网关/自建 cpa 类环境会静默失败）。
-- **Done**: ① `app_settings` kv 表（服务端 app 级偏好的通用归宿——localStorage prefs 服务端读不到，spawn 路径要读的偏好从此有家）+ repo `getAppSetting/setAppSetting`（空值=删行回默认）；② `/api/settings` 白名单路由（GET 全量 / PATCH 单键，key 白名单制防长尾垃圾键）；③ topic.ts 读 `label_model_claude`（默认 haiku）/ `label_model_codex`（默认不传 `-c model=` 走本机默认），topic+title 两用途共用；④ `LabelModelCard` 挂 settings/models 页（与 AuthHealthCard 同级，不进 ModelConfigPanel——那组件被 modal 复用且管的是 endpoints.yaml 跨应用共享配置，起题模型是 trellis 私有偏好不该混入）。
-- **验证**: tsc/eslint/`bun --bun run build` 零错；隔离 dev（副本库 :3891）**双向对照**——kv round-trip ✔；配 `no-such-model-xyz` 发一轮 chat → SSE 无 topic_label/session_title（证明配置真进 spawn、失败静默不伤对话）；清除后再发 → 两事件恢复（「并发编程活锁」/「活锁现象解析」）✔；agent-browser 实测设置页卡片渲染 + UI 保存 → API 回读 `sonnet` 落库 ✔。
-- **Next**: 与 S110 同批**未提交未部署**，用户过目后一起提交；后续想给别的服务端偏好用 kv 直接进 `/api/settings` 白名单。
-
