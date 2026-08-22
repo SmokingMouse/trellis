@@ -4,6 +4,15 @@
 
 ## Session Log
 
+### Session 113（2026-08-21，模型选择与管理体验重构：可搜/分类/最近 + 预设模版一键填入 + 可视标签）
+- **触发**: 用户反馈「模型的选择和管理太不友好了，选择上需要下拉逐个找，设置页设置模型时也需要手动输入」。
+- **Done ① ModelPicker 模型选择下拉重构**: 顶部增加即时搜索栏（拼音/厂商/模型名模糊过滤，带清空与全键盘快捷键上下导航 Enter 选择）；新增「全部 / 常用 / Claude 系 / Codex 系 / 第三方」快速分类 Filter Pills；集成 `localStorage` 最近使用模型记录（快捷置顶，1 键切换）；卡片增加厂商 Badge 标识、上下文窗口容量（1M/200K 等）与状态提醒（跨系需新建会话、缺 Key）；空结果智能引导添加。
+- **Done ② ModelConfigPanel Provider 管理与预设模版**: 新增主流大模型（DeepSeek、Kimi、通义千问、智谱 GLM、MiniMax、火山引擎 Ark、SiliconFlow、OpenRouter、Ollama、OpenAI）预设模版一键填入端点、环境变量与模型列表；模型管理支持可视 Tag 增删、候选推荐一键添加以及多行文本双模式；新增可视化一键设置 `endpoints.yaml` 全局默认模型（`setDefaultModel` + PATCH 接口）。
+- **Done ③ LabelModelCard 打标/起题模型配置提升**: 提供 Claude 系与 Codex 系推荐快捷 Tag（默认 haiku / mini 等）与可用模型下拉选择器，告别手动输入。
+- **Done ④ Agent 管理模型字段提升**: 自定义 Agent 模型配置支持快捷预设 Tag 与全量 Provider 模型分类下拉选择器。
+- **验证**: `bun --bun run build` 与 Next.js turbopack 编译 100% 通过（零类型/语法错误）；无多余依赖与无侵入式回退保护。
+- **Next**: 合并至 main，下次 `make deploy` 部署上线。
+
 ### Session 112（2026-08-21，树隐藏修复：彻底移出非隐藏区 + 焦点自动切换 + 已隐藏组展开自适应）
 - **触发**: 用户反馈树隐藏问题——当前树或只剩一棵树时点击隐藏，该树仍旧出现在非隐藏区，或者说只要停留在当前树该树就不在隐藏区里，且存在双重渲染。
 - **根因**: `TreePanel.tsx` 存在 `{activeEntry?.hidden && renderActiveTree(activeEntry)}` 强制把被隐藏的当前树再次渲染在热区下方；同时点击隐藏时未自动把活跃焦点切换到下一棵可见树；activeRootId 回退时未优先选择首棵可见树。

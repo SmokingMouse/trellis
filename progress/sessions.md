@@ -12,6 +12,17 @@
 - **验证**: `bun --bun run build` 全过（裸 `bun run build` 会在 page-data 阶段死于 Node worker 找不到 bun:sqlite，必须 `--bun`）；worktree 起 `PORT=3299 bun server.ts` 测试实例全链路实测——sessions / ps / get 树形（2 树 + 分支缩进）✔、ask 三形态（mock provider 零成本）✔、wait 接力与终态回放 ✔、abort 404 容错 ✔、rename / label / rm 防呆与清理 ✔、respond 判空 ✔。respond 的 allow/deny 真实交互路径未实测（需 claude 系 run 停卡；逻辑比照 `InteractionForm.tsx:509`）。
 - **Next**: 合并 main 后 `make deploy` 部署——`node get/read` 与 `respond` 依赖新 GET route，打旧实例是 404（已写进 Known Failure Modes）。
 
+### Session 117（2026-08-22，定时任务固定入口：侧栏「⏱ 定时任务」分组 + 深链跳转修复）
+- **触发**: 用户「希望给定时任务单独分配一个固定的工作区，通过左边的列表点进去看执行情况；现在点历史运行记录，跳转目标特别奇怪」。
+- **根因（跳转奇怪）**: 任务会话 `kind='task'` 被 `/api/sessions` 全量排除 → 深链落地后侧栏无行可高亮、tab 条 `byId` resolve 不出该会话；且主页深链只 `loadSession` 不占 tab 位，`hydrate` 又把 preview tab 设回 `sessions[0]`——dev StrictMode 双跑下第二个 hydrate 实例在深链之后完成、覆盖 preview，**画面与 tab/侧栏指向两个不同会话**。
+- **Done ① 侧栏固定分组（SessionSidebar）**: 新增「⏱ 定时任务」分组，行骨架来自 **tasks 表**（任务是常驻实体——没跑过的任务渲染灰行占位，不因会话未懒建而隐身）；有 home 会话的行走 SidebarRow（preview/pin/改名/归档/删除、running 脉冲与未读角标全部免费复用，`/api/runs` 本就不分 kind）；分组 ＋ 号跳 `/settings/tasks`；任务已删的存量孤儿 task 会话也列出不吞。
+- **Done ② API**: `/api/sessions` 响应加 `tasks`（id/name/homeSessionId/enabled）+ `taskSessions`；repo 新增 `listTaskSessions()`；归档视图放宽 kind（`archived=1` 时 user+task 都列，`countArchivedSessions` 同口径）——否则归档的任务会话从每个列表里消失。
+- **Done ③ 生命周期闭环（lib/server/tasks.ts）**: `updateTask` 改名/改目录同步 home 会话（title `⏱ name` / workspace_path）；`deleteTask` 把 home 会话翻回 `kind='user'`（历史落进常规列表）；新增 `detachHomeSession()` 挂在会话 DELETE / 归档 PATCH 上解绑指针（归档语义 = 历史收起、下次执行重开新会话）；`ensureTaskSession` 校验 home 会话行仍存活，悬挂即重建。
+- **Done ④ 深链修复**: `page.tsx` 深链改走 `previewSession`（占 tab 位，与侧栏点行同路径）；`sessionStore.hydrate` 加 hydrated guard + `hydrateInFlight` 防重入（双跑并发），尾部 preview **只在空位落座**（深链先到就不挤）；`SessionTabs.byId` 并入 taskSessions。
+- **Done ⑤ TaskToast**: run_started/run_finished 事件 `bumpSessionsRevision()`（首跑懒建的会话行即时长出）；点击 toast 从 `window.location.href` 整页刷新改为 store 内 `previewSession + setActiveNode`（同路由改 URL 本就不触发深链 effect，老写法靠整页重启 store 才凑效）。
+- **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
+- **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
+
 ### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
 - **触发**: 用户反馈隐藏的树在画布上仍然会出现。
 - **根因**: `Canvas.tsx` 中 `hiddenIds` 仅通过 `hiddenByCollapse` 处理折叠节点的后代，未将 `hiddenAt !== null` 的雪藏树（根及全部后代）加入排除集合；`Outline.tsx` 未区分可见树与雪藏树，且缺少对雪藏树的恢复/隐藏控制。
@@ -34,7 +45,6 @@
 - **验证**: `bun test` 22/22 pass（扩展 `lib/tree-panel.test.ts` 覆盖 topicLabel 覆盖 reference 标题等单测）；`tsc --noEmit` 0 错；`bun --bun run build` 成功完成全量生产构建。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
 
-
 ### Session 114（2026-08-21，Token 统计精准化 + 单卡耗时 & Token 使用 & 纯模型 TPS 仪表）
 - **触发**: 用户反馈两个问题：① 当前 token 统计不精确；② 最好能在每个卡片展示耗时 & token 使用 & TPS。
 - **根因 & Done ① Token 统计精准化**:
@@ -47,13 +57,3 @@
   3. 视图接入：`TurnCard`（线性视图/工作台）底部操作栏左侧嵌入 `TurnStatsMeta`，流式期间与完成态自适应；`ChatNode`（画布视图完整卡片与紧凑卡片）接入 `TurnStatsMeta`，全端体验对齐。
 - **验证**: `bun test` 17/17 全过（涵盖精度、耗时格式化、工具时间区间合并与扣除、TPS 纯模型速率计算）；`tsc --noEmit` 零错；`scripts/test-cli-jsonl.ts` 与 `scripts/test-tool-tree.ts` 全绿。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
-
-### Session 113（2026-08-21，模型选择与管理体验重构：可搜/分类/最近 + 预设模版一键填入 + 可视标签）
-- **触发**: 用户反馈「模型的选择和管理太不友好了，选择上需要下拉逐个找，设置页设置模型时也需要手动输入」。
-- **Done ① ModelPicker 模型选择下拉重构**: 顶部增加即时搜索栏（拼音/厂商/模型名模糊过滤，带清空与全键盘快捷键上下导航 Enter 选择）；新增「全部 / 常用 / Claude 系 / Codex 系 / 第三方」快速分类 Filter Pills；集成 `localStorage` 最近使用模型记录（快捷置顶，1 键切换）；卡片增加厂商 Badge 标识、上下文窗口容量（1M/200K 等）与状态提醒（跨系需新建会话、缺 Key）；空结果智能引导添加。
-- **Done ② ModelConfigPanel Provider 管理与预设模版**: 新增主流大模型（DeepSeek、Kimi、通义千问、智谱 GLM、MiniMax、火山引擎 Ark、SiliconFlow、OpenRouter、Ollama、OpenAI）预设模版一键填入端点、环境变量与模型列表；模型管理支持可视 Tag 增删、候选推荐一键添加以及多行文本双模式；新增可视化一键设置 `endpoints.yaml` 全局默认模型（`setDefaultModel` + PATCH 接口）。
-- **Done ③ LabelModelCard 打标/起题模型配置提升**: 提供 Claude 系与 Codex 系推荐快捷 Tag（默认 haiku / mini 等）与可用模型下拉选择器，告别手动输入。
-- **Done ④ Agent 管理模型字段提升**: 自定义 Agent 模型配置支持快捷预设 Tag 与全量 Provider 模型分类下拉选择器。
-- **验证**: `bun --bun run build` 与 Next.js turbopack 编译 100% 通过（零类型/语法错误）；无多余依赖与无侵入式回退保护。
-- **Next**: 合并至 main，下次 `make deploy` 部署上线。
-

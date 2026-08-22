@@ -58,7 +58,10 @@ export default function Home() {
   // hydrate 之后再切，否则 loadSession 会被 hydrate 的结果覆盖掉。
   // 用 location 而不是 useSearchParams：后者会逼出 Suspense 边界要求（build 时
   // 才炸），而深链本就是纯客户端行为，没有 SSR 语义可言。
-  const loadSession = useSessionStore((s) => s.loadSession);
+  // S117: 走 previewSession 而不是裸 loadSession —— 后者只换画面不占 tab 位，
+  // 深链到任务会话时 tab 条/侧栏还高亮着 hydrate 选的上一个会话，画面与
+  // 导航指向两个地方（「跳转目标特别奇怪」的主因之一）。
+  const previewDeepSession = useSessionStore((s) => s.previewSession);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const deepLinkedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -70,10 +73,10 @@ export default function Home() {
     // 只跳一次 —— 用户在页面里点别的会话之后不该被 URL 拽回来。
     if (deepLinkedRef.current === deepSession) return;
     deepLinkedRef.current = deepSession;
-    void loadSession(deepSession).then(() => {
+    void previewDeepSession(deepSession).then(() => {
       if (deepNode) setActiveNode(deepNode);
     });
-  }, [hydrated, loadSession, setActiveNode]);
+  }, [hydrated, previewDeepSession, setActiveNode]);
 
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
   // 这里再按常量发一份就会打架）。

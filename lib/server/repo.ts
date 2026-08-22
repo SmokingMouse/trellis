@@ -354,21 +354,38 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const want = opts?.archived ? 1 : 0;
   const rows = db
     .prepare(
-      // S88: kind='task' 是自动化任务的常驻会话，不该挤进用户的侧栏
-      // （一个每日任务一个月能产 30 个节点，但它只有 1 个会话）。任务页从
-      // task_runs 那侧进，点进去仍是同一个 session 的正常渲染。
-      `SELECT ${SESSION_COLS} FROM sessions WHERE archived = ? AND kind = 'user'
+      // S88: kind='task' 是自动化任务的常驻会话，不挤进用户的**活跃**列表
+      // —— 它们在侧栏有自己的「定时任务」分组（S117，listTaskSessions）。
+      // 归档视图放宽 kind：归档的任务会话若也被排除，就从每个列表里都消失了。
+      `SELECT ${SESSION_COLS} FROM sessions
+       WHERE archived = ? AND (kind = 'user' OR (? = 1 AND kind = 'task'))
        ORDER BY updated_at DESC`,
     )
-    .all(want) as SessionRow[];
+    .all(want, want) as SessionRow[];
+  return rows.map(rowToSession);
+}
+
+// S117: 任务的常驻会话（kind='task'）。不混进 listSessions —— 它们在侧栏有
+// 自己的「定时任务」分组，且 tab 条要能把深链进来的任务会话 resolve 出标题。
+export function listTaskSessions(): ApiSession[] {
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `SELECT ${SESSION_COLS} FROM sessions WHERE archived = 0 AND kind = 'task'
+       ORDER BY updated_at DESC`,
+    )
+    .all() as SessionRow[];
   return rows.map(rowToSession);
 }
 
 // B2: count archived sessions — drives the "显示已归档 (N)" toggle label.
 export function countArchivedSessions(): number {
   const db = getDB();
+  // 与 listSessions 的归档视图同一口径：任务会话也计入（能找回才敢归档）。
   const row = db
-    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind = 'user'")
+    .prepare(
+      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task')",
+    )
     .get() as { n: number };
   return row.n;
 }
