@@ -834,6 +834,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   mobileNavOpen: false,
 
   hydrate: async (sessionId) => {
+    // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
+    // 一次 hydrate —— 不挡住的话它会把画面拽回 sessions[0]、把 preview tab
+    // 覆盖成别的会话（与深链 loadSession 赛跑，谁后完成谁赢）。已经活着的
+    // store 不需要二次自举。in-flight 标记防的是并发双跑（dev StrictMode
+    // effect 双调时 hydrated 还没来得及变 true，实测第二个实例会在深链
+    // previewSession 之后完成、把 preview tab 覆盖回 sessions[0]）。
+    if (get().hydrated || hydrateInFlight) return;
+    hydrateInFlight = true;
     set({
       provider: loadProvider(),
       draftMode: loadDraftMode(),
@@ -865,11 +873,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // it pinned across reloads, it's already an open tab; otherwise show
       // it as the (transient) preview tab so the strip isn't empty while a
       // session is active.
+      // S117: 只在 preview 位还空着时落座 —— 深链的 previewSession 可能已经
+      // 抢先占了位，hydrate 是兜底不是主张，不该把人挤下去。
       set((s) => ({
         hydrated: true,
-        previewSessionId: s.pinnedSessionIds.includes(targetId!)
-          ? s.previewSessionId
-          : targetId!,
+        previewSessionId:
+          s.previewSessionId ??
+          (s.pinnedSessionIds.includes(targetId!) ? null : targetId!),
       }));
       // Stage 17: any rows still status='streaming' after hydrate must
       // be a stream that was alive when we last saw the page. Attach
@@ -879,6 +889,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       const message = err instanceof Error ? err.message : String(err);
       console.error("[trellis] hydrate failed:", err);
       set({ hydrated: true, hydrateError: message });
+    } finally {
+      hydrateInFlight = false;
     }
   },
 
@@ -2409,6 +2421,9 @@ function evictSessionFromTabs(
 // two rapid switches) can resolve LAST and flip the view back to the wrong
 // session — the "switched to B but A's running content shows" 串台.
 let loadSeq = 0;
+
+// S117: hydrate 防重入（hydrated 变 true 之前的并发双跑，见 hydrate 注释）。
+let hydrateInFlight = false;
 
 async function loadSessionInternal(sessionId: string, set: Setter) {
   const seq = ++loadSeq;

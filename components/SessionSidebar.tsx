@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { Dots } from "@/components/ui/Dots";
@@ -18,6 +19,7 @@ import {
   SCRATCH_CLUSTER_KEY,
   type ProjectSummary,
   type Session,
+  type SidebarTask,
   type WorkspaceGitStatus,
 } from "@/lib/types";
 
@@ -54,6 +56,7 @@ function loadCollapsed(): Set<string> {
 //  the SessionPicker's management powers aren't lost.
 
 export function SessionSidebar() {
+  const router = useRouter();
   const activeId = useSessionStore((s) => s.session?.id ?? null);
   const previewId = useSessionStore((s) => s.previewSessionId);
   const previewSession = useSessionStore((s) => s.previewSession);
@@ -91,6 +94,10 @@ export function SessionSidebar() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  // S117：「定时任务」分组。骨架行来自 tasks（任务是常驻实体），taskSessions
+  // 是 kind='task' 的会话对象（喂 SidebarRow；也含任务已删的存量孤儿会话）。
+  const [tasks, setTasks] = useState<SidebarTask[]>([]);
+  const [taskSessions, setTaskSessions] = useState<Session[]>([]);
   // 惰性初值直接读 localStorage（store 里 loadSidebarOpen 同款），不走 effect。
   // 不会 hydration 不匹配：projects 初值是 []、靠 fetch 填，首屏一个分组行都不
   // 渲染，折叠状态在 fetch 回来之前根本不可见。
@@ -157,6 +164,8 @@ export function SessionSidebar() {
           setSessions(data.sessions ?? []);
           setArchivedCount(data.archivedCount ?? 0);
           setProjects(data.projects ?? []);
+          setTasks(data.tasks ?? []);
+          setTaskSessions(data.taskSessions ?? []);
         }
       })
       .catch(() => {
@@ -413,6 +422,65 @@ export function SessionSidebar() {
     );
   };
 
+  // S117：「定时任务」固定分组。行的实体是**任务**而非会话 —— 会话是第一次
+  // 执行时才懒建的，没跑过的任务也该有固定入口（建了任务它就在这里，不因
+  // 没跑过而隐身）。有 home 会话的行走 SidebarRow：点击预览 = 直接进执行历史，
+  // running 脉冲 / 完成未读角标全部免费复用（/api/runs 不区分任务节点）。
+  const renderTasksGroup = () => {
+    const sessionById = new Map(taskSessions.map((s) => [s.id, s]));
+    const claimed = new Set(tasks.map((t) => t.homeSessionId).filter(Boolean));
+    // 任务已删但 kind 仍是 'task' 的存量孤儿会话（改版前删的任务）—— 不吞，
+    // 否则那几个月的执行历史从每个列表里都消失了。
+    const orphanTaskSessions = taskSessions.filter((s) => !claimed.has(s.id));
+    const count = tasks.length + orphanTaskSessions.length;
+    if (count === 0) return null;
+    const isCollapsed = collapsed.has("__tasks");
+    return (
+      <div className="mb-3">
+        <GroupRow
+          level={0}
+          collapsed={isCollapsed}
+          label="⏱ 定时任务"
+          title={`定时任务 · ${tasks.length} 个\n点行进入执行历史；新建 / 触发器 / 运行明细在 设置 → 任务`}
+          badge={isCollapsed ? String(count) : null}
+          onToggle={() => toggleCollapsed("__tasks")}
+          onAdd={() => router.push("/settings/tasks")}
+          addTitle="管理定时任务（新建 / 触发器 / 运行历史）"
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>
+            {tasks.map((t) => {
+              const s = t.homeSessionId
+                ? sessionById.get(t.homeSessionId)
+                : undefined;
+              if (s) return renderRow(s, 1);
+              // 还没执行过（或会话被归档/删除）：占位行，说明去哪把它跑起来。
+              return (
+                <div
+                  key={t.id}
+                  style={{ paddingLeft: PAD(1), height: ROW_H }}
+                  className={`mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
+                    t.enabled ? "" : "opacity-50"
+                  }`}
+                  title={`${t.name}\n还没有执行记录 —— 第一次执行时会在这里长出会话（设置 → 任务 里可手动 ▶）`}
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0 opacity-40 bg-line"
+                    aria-hidden
+                  />
+                  <span className="flex-1 min-w-0 truncate text-ui italic">
+                    ⏱ {t.name}
+                  </span>
+                </div>
+              );
+            })}
+            {orphanTaskSessions.map((s) => renderRow(s, 1))}
+          </IndentGuide>
+        )}
+      </div>
+    );
+  };
+
   // S1 三级：Project → Workspace → Session。折叠子树时把「藏了几个会话」
   // 回显出来（与树面板折叠行同语义 —— 折叠不该把状态一起藏掉）。
   //
@@ -594,7 +662,7 @@ export function SessionSidebar() {
       </button>
 
       <div className="flex-1 overflow-y-auto py-1.5">
-        {sessions.length === 0 ? (
+        {sessions.length === 0 && tasks.length === 0 && taskSessions.length === 0 ? (
           <div className="px-3 py-3 text-label text-ink-faint italic">
             还没有会话，点上面「新会话」开始
           </div>
@@ -602,6 +670,9 @@ export function SessionSidebar() {
           <>
             {renderProjects()}
             {renderGroup("__chat", "Chat", chat)}
+            {/* S117：定时任务的固定分组 —— 每个任务的常驻会话在这里可点可看，
+                不再只有 设置 → 任务 深链一条路。 */}
+            {renderTasksGroup()}
             {/* 归不了组的 project 会话：目录已被删，或存量行压根没记 cwd。
                 单列一组而不是悄悄隐藏，否则用户会以为会话丢了。 */}
             {renderGroup("__orphans", "未归组", orphans)}
