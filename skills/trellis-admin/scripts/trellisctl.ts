@@ -86,15 +86,29 @@ function authToken(): string | null {
 
 type ApiResult = { status: number; body: any };
 
-async function api(method: string, p: string, body?: unknown): Promise<ApiResult> {
-  const base = await resolveBase();
+function authHeaders(hasBody: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   const tok = authToken();
   if (tok) headers.cookie = `${AUTH_COOKIE}=${tok}`;
-  if (body !== undefined) headers["content-type"] = "application/json";
+  if (hasBody) headers["content-type"] = "application/json";
+  return headers;
+}
+
+const AUTH_HINT =
+  `401 —— 认证闸开着，但没拿到 token。\n` +
+  `  真源：~/.trellis/shared/.env.local 里的 TRELLIS_AUTH_TOKEN\n` +
+  `  或显式给：TRELLIS_AUTH_TOKEN=xxx trellisctl ...`;
+
+async function api(
+  method: string,
+  p: string,
+  body?: unknown,
+  opts?: { tolerate?: number[] },
+): Promise<ApiResult> {
+  const base = await resolveBase();
   const r = await fetch(base + p, {
     method,
-    headers,
+    headers: authHeaders(body !== undefined),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await r.text();
@@ -104,18 +118,68 @@ async function api(method: string, p: string, body?: unknown): Promise<ApiResult
   } catch {
     /* 非 JSON 响应，保留原文用于报错 */
   }
-  if (r.status === 401) {
-    die(
-      `401 —— 认证闸开着，但没拿到 token。\n` +
-        `  真源：~/.trellis/shared/.env.local 里的 TRELLIS_AUTH_TOKEN\n` +
-        `  或显式给：TRELLIS_AUTH_TOKEN=xxx trellisctl ...`,
-    );
-  }
+  if (r.status === 401) die(AUTH_HINT);
   // 202 是「排队中 / 上一次还在跑」，那是状态不是错误（见 tasks/[id]/run/route.ts）。
-  if (!r.ok && r.status !== 202) {
+  // tolerate：个别语义化状态码不算错（如 abort 的 404 = 本来就没在跑）。
+  if (!r.ok && r.status !== 202 && !opts?.tolerate?.includes(r.status)) {
     die(`${method} ${p} → ${r.status}: ${j?.error ?? text.slice(0, 400)}`);
   }
   return { status: r.status, body: j };
+}
+
+/** SSE 请求：返回原始 Response，交给 sseEvents() 逐事件消费。timeoutMs 是
+ *  整条流的总时限 —— LLM 轮次动辄几分钟，超时不代表 run 死了（服务端
+ *  run-bus 与 HTTP 解耦，断开只是不看了，run 继续跑、继续落库）。 */
+async function apiSse(
+  method: string,
+  p: string,
+  body?: unknown,
+  timeoutMs?: number,
+): Promise<Response> {
+  const base = await resolveBase();
+  const r = await fetch(base + p, {
+    method,
+    headers: authHeaders(body !== undefined),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  });
+  if (r.status === 401) die(AUTH_HINT);
+  if (!r.ok) {
+    const text = await r.text();
+    let j: any = null;
+    try {
+      j = text ? JSON.parse(text) : null;
+    } catch {
+      /* keep raw */
+    }
+    die(`${method} ${p} → ${r.status}: ${j?.error ?? text.slice(0, 400)}`);
+  }
+  return r;
+}
+
+/** 逐事件读 SSE（`data: {...}\n\n` 分帧）。 */
+async function* sseEvents(r: Response): AsyncGenerator<any> {
+  const reader = r.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          yield JSON.parse(line.slice(5).trim());
+        } catch {
+          /* 非 JSON data 行（心跳等）直接丢 */
+        }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +253,51 @@ function minGapMinutes(fields: { minute: Set<number> }): number {
   let gap = 60 - ms[ms.length - 1] + ms[0];
   for (let i = 1; i < ms.length; i++) gap = Math.min(gap, ms[i] - ms[i - 1]);
   return gap;
+}
+
+/** 纯文本参数三形态：字面 / `@文件` / `-`（stdin）。问题正文常带引号换行。 */
+function readTextArg(raw: string | undefined, what: string): string {
+  if (!raw) die(`缺少${what}（可内联，或 '-' 从 stdin 读、@路径 从文件读）`);
+  let txt = raw;
+  if (raw === "-") txt = fs.readFileSync(0, "utf8");
+  else if (raw.startsWith("@")) txt = fs.readFileSync(raw.slice(1), "utf8");
+  const t = txt.trim();
+  if (!t) die(`${what}是空的`);
+  return t;
+}
+
+function ktok(n: number | null | undefined): string {
+  if (!n) return "0";
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** 距今多久（在跑的节点用它显示「跑了多久」）。 */
+function ago(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m${s % 60}s`;
+  return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`;
+}
+
+/** 长文默认打尾部 —— 消费方多半只要结论段，全文有 --full。 */
+function tailLines(s: string, n: number): string {
+  const lines = (s ?? "").split("\n");
+  if (lines.length <= n) return s ?? "";
+  return `…（前面还有 ${lines.length - n} 行，--full 看全文）\n${lines.slice(-n).join("\n")}`;
+}
+
+/** 节点状态一眼化：⏸ 在等人回答（比 streaming 更要紧，先判）。 */
+function nodeIcon(n: { status: string; pendingInteraction?: unknown }): string {
+  if (n.pendingInteraction) return "⏸";
+  return n.status === "streaming" ? "▶" : n.status === "done" ? "✓" : n.status === "error" ? "✗" : "?";
+}
+
+/** 节点一行标签：主题 > 问题 > 引用来源。reference 节点没有问答语义。 */
+function nodeLabel(n: any): string {
+  if (n.kind === "reference") {
+    return `◈ ${n.topicLabel || n.reference?.sourceUri || n.question || "引用材料"}`;
+  }
+  return n.topicLabel || n.question || "（空）";
 }
 
 // ---------------------------------------------------------------------------
@@ -465,8 +574,446 @@ async function cmdCron() {
   }
 }
 
-const USAGE = `trellisctl —— Trellis 后台配置
+// ---------------------------------------------------------------------------
+// 平台操作面：会话 / 树 / 节点 / 发消息
+// 「树」= 会话画布里的一个根节点（parent_id IS NULL）；一个会话可以有多棵平行树。
+// 会话是稳定枚举单位（有 id 有 title），树没有独立 id —— 树 = 它的根节点。
+// ---------------------------------------------------------------------------
 
+async function cmdSessions(sub: string) {
+  if (!sub || sub === "list") {
+    const archived = has("--archived");
+    const [{ body }, { body: rb }] = await Promise.all([
+      api("GET", `/api/sessions${archived ? "?archived=1" : ""}`),
+      api("GET", "/api/runs"),
+    ]);
+    if (has("--json")) return out(body.sessions);
+    const running = new Set<string>(rb?.runningSessionIds ?? []);
+    if (!body.sessions.length) {
+      return console.log(archived ? "（归档区是空的）" : "（一个会话都没有）");
+    }
+    for (const s of body.sessions) {
+      const ws = s.workspacePath ? path.basename(s.workspacePath) : "纯对话";
+      console.log(
+        `${running.has(s.id) ? "▶" : " "} ${s.id}  ${pad(clip(s.title, 26), 28)}` +
+          `${pad(ws, 20)}${ts(s.updatedAt)}`,
+      );
+    }
+    if (!archived && body.archivedCount) {
+      console.log(`\n（另有 ${body.archivedCount} 个已归档，--archived 查看）`);
+    }
+    if (running.size) console.log(`▶ = 有节点在跑；看具体哪个节点：trellisctl ps`);
+    return;
+  }
+  if (sub === "get") {
+    const id = pos[2] ?? die("要会话 id");
+    const { body } = await api("GET", `/api/sessions/${id}`);
+    if (has("--json")) return out(body);
+    const s = body.session;
+    const nodes: any[] = body.nodes ?? [];
+    console.log(`${s.title}`);
+    console.log(
+      `  id=${s.id}  ${s.mode === "chat" ? "纯对话" : s.workspacePath ?? s.mode}` +
+        `${s.model ? `  model=${s.model}` : ""}${s.archived ? "  [已归档]" : ""}`,
+    );
+    // 组树：roots（parentId=null）按创建序，子节点按 siblingIndex。
+    const children = new Map<string | null, any[]>();
+    for (const n of nodes) {
+      const k = n.parentId ?? null;
+      if (!children.has(k)) children.set(k, []);
+      children.get(k)!.push(n);
+    }
+    for (const list of children.values()) {
+      list.sort((a, b) => a.siblingIndex - b.siblingIndex || a.createdAt - b.createdAt);
+    }
+    const roots = children.get(null) ?? [];
+    const walk = (n: any, depth: number) => {
+      const tok = n.tokenCount ? ktok(n.tokenCount.input + n.tokenCount.output) : "0";
+      const time =
+        n.status === "streaming"
+          ? `跑了${ago(n.createdAt)}`
+          : n.durationMs
+            ? `${Math.round(n.durationMs / 1000)}s`
+            : "";
+      console.log(
+        `  ${"  ".repeat(depth)}${nodeIcon(n)} ${n.id}  ${pad(clip(nodeLabel(n), 40), 42)}` +
+          `${pad(tok, 7)}${time}`,
+      );
+      for (const c of children.get(n.id) ?? []) walk(c, depth + 1);
+    };
+    roots.forEach((root, i) => {
+      console.log(`\n树 ${i + 1}/${roots.length}${root.hiddenAt ? "（已雪藏）" : ""}：`);
+      walk(root, 0);
+    });
+    console.log(`\n⏸=等回答 ▶=在跑 ✓=完成 ✗=失败 ◈=引用。看某节点：node get <id>`);
+    return;
+  }
+  if (sub === "rename") {
+    const id = pos[2] ?? die("要会话 id");
+    const title = pos[3] ?? die("要新标题");
+    const { body } = await api("PATCH", `/api/sessions/${id}`, { title });
+    console.log(`✓ 改名为「${body.session.title}」（此后自动命名不再覆盖）`);
+    return;
+  }
+  if (sub === "archive") {
+    const id = pos[2] ?? die("要会话 id");
+    const undo = has("--undo");
+    await api("PATCH", `/api/sessions/${id}`, { archived: !undo });
+    console.log(undo ? `✓ 已从归档区恢复` : `✓ 已归档（可逆，--undo 恢复）`);
+    return;
+  }
+  if (sub === "rm") {
+    const id = pos[2] ?? die("要会话 id");
+    const { body } = await api("GET", `/api/sessions/${id}`);
+    const n = body.nodes?.length ?? 0;
+    if (!has("--yes")) {
+      die(
+        `将删除会话「${body.session.title}」及其全部 ${n} 个节点，不可恢复。\n` +
+          `  只是想让它从列表消失用 sessions archive ${id}（可逆）。确认真删加 --yes`,
+      );
+    }
+    await api("DELETE", `/api/sessions/${id}`);
+    console.log(`✓ 删了「${body.session.title}」（${n} 个节点）`);
+    return;
+  }
+  die(`sessions 没有子命令 ${sub}`);
+}
+
+/** 谁在跑。/api/runs 只给 session 粒度（run-bus 内存态），具体到节点要再拉
+ *  会话找 status=streaming 的行 —— 在跑的会话通常只有一两个，两跳无妨。 */
+async function cmdPs() {
+  const { body } = await api("GET", "/api/runs");
+  const ids: string[] = body?.runningSessionIds ?? [];
+  if (!ids.length) return console.log("（现在没有任何节点在跑）");
+  for (const sid of ids) {
+    const { body: sb } = await api("GET", `/api/sessions/${sid}`, undefined, { tolerate: [404] });
+    if (!sb?.session) continue;
+    const live = (sb.nodes as any[]).filter((n) => n.status === "streaming");
+    for (const n of live) {
+      const state = n.pendingInteraction
+        ? `⏸ 等回答（${n.pendingInteraction.toolName}）`
+        : `▶ 跑了${ago(n.createdAt)}`;
+      console.log(`${state}  「${clip(sb.session.title, 24)}」`);
+      console.log(`   node=${n.id}`);
+      console.log(`   ${clip(n.question, 90)}`);
+    }
+  }
+  console.log(`\n盯到跑完：wait <nodeId>；看输出：node read <nodeId>；停掉：abort <nodeId>`);
+}
+
+async function cmdNode(sub: string) {
+  const id = pos[2] ?? die("要节点 id");
+  if (sub === "get") {
+    const { body } = await api("GET", `/api/nodes/${id}`);
+    if (has("--json")) return out(body.node);
+    const n = body.node;
+    const t = n.tokenCount ?? {};
+    console.log(`${nodeIcon(n)} ${n.status}${n.pendingInteraction ? "（暂停等回答）" : ""}  node=${n.id}`);
+    console.log(`  会话=${n.sessionId}  ${n.parentId ? `父=${n.parentId}` : "树根"}`);
+    if (n.question) console.log(`  问：${clip(n.question, 120)}`);
+    if (n.topicLabel) console.log(`  主题：${n.topicLabel}`);
+    console.log(
+      `  tok in=${ktok(t.input)} out=${ktok(t.output)} cache=${ktok((t.cacheRead ?? 0) + (t.cacheCreation ?? 0))}` +
+        `${n.durationMs ? `  耗时 ${Math.round(n.durationMs / 1000)}s` : ""}`,
+    );
+    const st = n.toolCallStats;
+    if (st?.total) {
+      console.log(
+        `  工具 ${st.total} 次（${(st.tools ?? []).join("/")}）` +
+          `${st.errors ? ` ${st.errors} 次失败` : ""}${st.subagents ? ` 委派 ${st.subagents}` : ""}`,
+      );
+    }
+    if (n.errorMessage) console.log(`  ✗ ${clip(n.errorMessage, 200)}`);
+    if (n.pendingInteraction) {
+      console.log(`  ⏸ ${n.pendingInteraction.toolName}  toolUseId=${n.pendingInteraction.toolUseId}`);
+      console.log(`     ${clip(JSON.stringify(n.pendingInteraction.input), 500)}`);
+      console.log(`     回它：respond ${n.id} --allow / --deny；AskUserQuestion 用 --answers '{"<问题>":"<选项label>"}'`);
+    }
+    console.log(`  回答 ${(n.response ?? "").length} 字符 —— node read ${n.id} 看正文`);
+    return;
+  }
+  if (sub === "read") {
+    const { body } = await api("GET", `/api/nodes/${id}`);
+    const resp = body.node.response ?? "";
+    if (!resp) {
+      return console.log(
+        body.node.status === "streaming" ? "（还没吐出内容 —— wait 一下再来）" : "（空回答）",
+      );
+    }
+    console.log(has("--full") ? resp : tailLines(resp, Number(flagVal("--tail") ?? 120)));
+    return;
+  }
+  if (sub === "label") {
+    const label = pos[3] ?? die("要标签文本");
+    await api("PATCH", `/api/nodes/${id}`, { topicLabel: label });
+    console.log(`✓ 标好「${label}」`);
+    return;
+  }
+  if (sub === "rm") {
+    if (!has("--yes")) {
+      die(`将删除该节点及其下整棵子树，不可恢复。确认加 --yes（会话主根删不掉，那是删会话的事）`);
+    }
+    const { body } = await api("DELETE", `/api/nodes/${id}`);
+    console.log(`✓ 删了 ${body.deletedNodeIds?.length ?? 0} 个节点`);
+    return;
+  }
+  die(`node 没有子命令 ${sub}`);
+}
+
+/** ask / retry 共用的 run 生命周期：POST /api/chat 是 SSE，首事件 created 带
+ *  session/node id。**服务端 run 与这条 HTTP 解耦** —— 不 --wait 时拿到 id 就
+ *  断开，run 继续跑、继续落库；--wait 才守到终态。 */
+async function runChat(payload: any, o: { wait: boolean; timeoutS: number }) {
+  const base = await resolveBase();
+  const r = await apiSse("POST", "/api/chat", payload, (o.wait ? o.timeoutS : 30) * 1000);
+  let nodeId = "";
+  let sessionId = "";
+  let text = "";
+  let tools = 0;
+  let settled = false;
+  try {
+    for await (const ev of sseEvents(r)) {
+      if (ev.type === "created") {
+        sessionId = ev.session?.id ?? ev.node?.sessionId ?? "";
+        nodeId = ev.node?.id ?? "";
+        console.log(`▶ 跑起来了  session=${sessionId}  node=${nodeId}`);
+        console.log(`  界面：${base}/?session=${sessionId}&node=${nodeId}`);
+        if (!o.wait) {
+          console.log(`  未带 --wait，先撤了（run 在服务端继续）。跟进：`);
+          console.log(`    trellisctl wait ${nodeId}`);
+          console.log(`    trellisctl node read ${nodeId}`);
+          settled = true;
+          try {
+            await r.body?.cancel();
+          } catch {
+            /* 断开失败无妨，进程退出连接就没了 */
+          }
+          return;
+        }
+        continue;
+      }
+      if (ev.type === "delta") {
+        text += ev.text;
+        continue;
+      }
+      if (ev.type === "tool_call_start") {
+        tools += 1;
+        continue;
+      }
+      if (ev.type === "interaction_required") {
+        settled = true;
+        console.log(`⏸ 它停下来等回答：${ev.toolName}（toolUseId=${ev.toolUseId}）`);
+        console.log(`  ${clip(JSON.stringify(ev.input), 500)}`);
+        console.log(`  回它：trellisctl respond ${nodeId} --allow / --deny（详见 node get ${nodeId}）`);
+        return;
+      }
+      if (ev.type === "done") {
+        settled = true;
+        console.log(
+          `\n✓ 完成  out ${ktok(ev.usage?.output)} tok` +
+            `${tools ? ` · ${tools} 次工具调用` : ""}` +
+            `${ev.durationMs ? ` · ${Math.round(ev.durationMs / 1000)}s` : ""}\n`,
+        );
+        console.log(text || "（空回答）");
+        return;
+      }
+      if (ev.type === "error") {
+        settled = true;
+        die(`run 失败：${ev.message}`);
+      }
+    }
+  } catch (e) {
+    const name = (e as Error).name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      if (!nodeId) die(`连接超时，还没拿到节点 id —— 用 trellisctl ps / sessions 查有没有建出来`);
+      console.log(`⏱ 等了 ${o.timeoutS}s 还没到终态 —— run 还在服务端跑（断开不杀 run）。`);
+      console.log(`  接着守：trellisctl wait ${nodeId} --timeout ${o.timeoutS}`);
+      return;
+    }
+    throw e;
+  }
+  if (!settled) {
+    console.log(`流断了但没收到终态 —— 查一下：trellisctl node get ${nodeId || "<nodeId>"}`);
+  }
+}
+
+async function cmdAsk() {
+  const question = readTextArg(pos[1], "问题");
+  const nodeT = flagVal("--node");
+  const sessT = flagVal("--session");
+  const isNew = has("--new");
+  if ([nodeT, sessT, isNew ? "y" : null].filter(Boolean).length !== 1) {
+    die(
+      `要恰好一个目标：\n` +
+        `  --node <id>     在该节点下追问（同一棵树上长分支，继承上文）\n` +
+        `  --session <id>  在该会话里开一棵平行新树（同画布，全新上文）\n` +
+        `  --new           开全新会话（--workspace <dir> 进 project 模式，缺省纯对话）`,
+    );
+  }
+  let payload: any;
+  if (nodeT) {
+    payload = { kind: "branch", parentNodeId: nodeT, question };
+    const mention = flagVal("--mention");
+    if (mention) payload.mentionAgentSlug = mention;
+  } else if (sessT) {
+    payload = { kind: "root", sessionId: sessT, question };
+  } else {
+    payload = { kind: "root", question };
+    const ws = flagVal("--workspace");
+    if (ws) {
+      const abs = path.resolve(ws);
+      if (!fs.existsSync(abs)) die(`工作目录不存在：${abs}`);
+      payload.mode = "project";
+      payload.workspacePath = abs;
+      // 缺省 YOLO（工具全放行、真改文件）。--approval 让可变更工具逐个弹卡，
+      // 卡会变成 pendingInteraction —— wait 看得到，respond 回得了，闭环成立。
+      if (has("--approval")) payload.requireApproval = true;
+    }
+    const agent = flagVal("--agent");
+    if (agent) {
+      const a = await findAgent(agent);
+      if (!a) die(`没有这个 agent：${agent}（trellisctl agents list --all 看有哪些）`);
+      payload.agentId = a.id;
+    }
+    const sp = flagVal("--system-prompt");
+    if (sp) payload.systemPrompt = readTextArg(sp, "systemPrompt");
+  }
+  const provider = flagVal("--provider");
+  if (provider) payload.provider = provider;
+  await runChat(payload, {
+    wait: has("--wait"),
+    timeoutS: Number(flagVal("--timeout") ?? 600),
+  });
+}
+
+async function cmdRetry() {
+  const nodeId = pos[1] ?? die("要节点 id");
+  const payload: any = { kind: "retry", nodeId };
+  const provider = flagVal("--provider");
+  if (provider) payload.provider = provider;
+  await runChat(payload, {
+    wait: has("--wait"),
+    timeoutS: Number(flagVal("--timeout") ?? 600),
+  });
+}
+
+async function cmdAbort() {
+  const nodeId = pos[1] ?? die("要节点 id");
+  const { status } = await api("POST", `/api/chat/${nodeId}/abort`, undefined, { tolerate: [404] });
+  console.log(status === 404 ? "（本来就没在跑 —— 已结束或从没跑过）" : `✓ 已叫停 ${nodeId}`);
+}
+
+/** 守一个节点到终态。挂 GET /api/nodes/[id]/stream：catchup 先到（当前快照），
+ *  live 时续推增量，无 live run 时直接回放 DB 终态并关流 —— 两种情况一套逻辑。 */
+async function cmdWait() {
+  const nodeId = pos[1] ?? die("要节点 id");
+  const timeoutS = Number(flagVal("--timeout") ?? 600);
+  const r = await apiSse("GET", `/api/nodes/${nodeId}/stream`, undefined, timeoutS * 1000);
+  let text = "";
+  const blocked = (toolName: string, toolUseId: string, input: unknown) => {
+    console.log(`⏸ 它在等回答：${toolName}（toolUseId=${toolUseId}）`);
+    console.log(`  ${clip(JSON.stringify(input), 500)}`);
+    console.log(`  回它：trellisctl respond ${nodeId} --allow / --deny（详见 node get ${nodeId}）`);
+  };
+  try {
+    for await (const ev of sseEvents(r)) {
+      if (ev.type === "catchup") {
+        text = ev.response ?? "";
+        if (ev.pendingInteraction) {
+          const p = ev.pendingInteraction;
+          blocked(p.toolName, p.toolUseId, p.input);
+          return;
+        }
+        continue;
+      }
+      if (ev.type === "delta") {
+        text += ev.text;
+        continue;
+      }
+      if (ev.type === "interaction_required") {
+        blocked(ev.toolName, ev.toolUseId, ev.input);
+        return;
+      }
+      if (ev.type === "done") {
+        console.log(`✓ 跑完了  out ${ktok(ev.usage?.output)} tok\n`);
+        console.log(tailLines(text, 40));
+        if (text.split("\n").length > 40) console.log(`\n（全文：trellisctl node read ${nodeId} --full）`);
+        return;
+      }
+      if (ev.type === "error") {
+        die(`✗ 以 error 收场：${ev.message}\n  重跑：trellisctl retry ${nodeId}`);
+      }
+    }
+  } catch (e) {
+    const name = (e as Error).name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      console.log(`⏱ 等了 ${timeoutS}s 还没到终态 —— run 还在跑。再守：trellisctl wait ${nodeId}`);
+      return;
+    }
+    throw e;
+  }
+  console.log(`流结束但没见到终态 —— 查：trellisctl node get ${nodeId}`);
+}
+
+/** 回答暂停中的交互卡。服务端只认 { toolUseId, behavior, updatedInput? }；
+ *  toolUseId 从节点的 pendingInteraction 现取，不让调用方抄 —— 抄错的表现是
+ *  409 mismatch，而现取永远是对的那一个。 */
+async function cmdRespond() {
+  const nodeId = pos[1] ?? die("要节点 id");
+  const allow = has("--allow");
+  const deny = has("--deny");
+  if (allow === deny) die("要 --allow 或 --deny 之一");
+  const { body } = await api("GET", `/api/nodes/${nodeId}`);
+  const p = body.node.pendingInteraction;
+  if (!p) {
+    die(`这个节点现在没有等待中的交互（可能已被回答，或 run 已结束）。看状态：node get ${nodeId}`);
+  }
+  const payload: any = { toolUseId: p.toolUseId, behavior: allow ? "allow" : "deny" };
+  if (allow) {
+    // allow 必须回传 record（SDK schema 拒 undefined；见 InteractionForm.tsx:509）。
+    // 默认原样 echo input；AskUserQuestion 用 --answers 合成 { ...input, answers }；
+    // --input 全量自定义（ExitPlanMode 改计划这类）。
+    const answers = flagVal("--answers");
+    const inputArg = flagVal("--input");
+    payload.updatedInput = inputArg
+      ? readJsonArg(inputArg)
+      : answers
+        ? { ...(p.input ?? {}), answers: readJsonArg(answers) }
+        : p.input;
+    if (has("--always")) payload.alwaysAllowTool = true;
+  }
+  const message = flagVal("--message");
+  if (message) payload.message = message;
+  await api("POST", `/api/nodes/${nodeId}/respond`, payload);
+  console.log(`✓ 已回（${allow ? "allow" : "deny"}）—— run 继续。守它：trellisctl wait ${nodeId}`);
+}
+
+const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
+
+平台操作（会话 / 树 / 节点）：
+  sessions [--archived] [--json]           列会话（▶ = 有节点在跑）
+  sessions get <id> [--json]               会话详情 + 树形大纲（一段一棵树）
+  sessions rename <id> <标题>
+  sessions archive <id> [--undo]           归档 / 恢复（可逆）
+  sessions rm <id> --yes                   连节点一起删（不可逆）
+  ps                                       现在谁在跑 / 谁停着等回答
+  node get <id> [--json]                   单节点：状态、token、工具、暂停详情
+  node read <id> [--tail N|--full]         读回答正文（默认尾 120 行）
+  node label <id> <标签>                    改节点主题标签
+  node rm <id> --yes                       删节点及其子树
+
+  ask <问题|@file|-> <目标> [选项]          发消息（真 spawn 一次 LLM run）
+    目标三选一：--node <id>（节点下追问） --session <id>（开平行新树） --new（全新会话）
+    --new 可配：--workspace <dir>（project 模式） --agent <slug> --system-prompt <文本|@file>
+    通用：--provider <id>  --wait [--timeout 秒=600]（不带 --wait = 发完即走）
+    --node 可配 --mention <slug>（本轮 @外援 agent）
+  retry <nodeId> [--wait]                  重跑一个节点
+  wait <nodeId> [--timeout 秒=600]         守到终态（或它停下来等回答）
+  abort <nodeId>                           叫停在跑的节点
+  respond <nodeId> --allow|--deny          回答暂停中的审批卡 / 提问卡
+    [--answers '{"问":"选项"}'] [--input <json>] [--message <文本>] [--always]
+
+后台配置（agents / tasks / triggers）：
   health                                   探活：连的是哪个实例、认证拿到没
   agents list [--all] [--json]             列 Agent（--all 含停用的）
   agents get <slug|id>
@@ -485,14 +1032,14 @@ const USAGE = `trellisctl —— Trellis 后台配置
   triggers add <taskId> <json|@file|-> [--force]   { kind, config } —— 这一步之后才会自动跑
   triggers rm <taskId> <triggerId>
 
-  runs <taskId> [--limit N] [--json]       运行历史
+  runs <taskId> [--limit N] [--json]       任务运行历史
   runs abort <runId>
 
   providers                                可用的 providerId
   skills [关键词]                           本机可给 agent 绑的技能名
   cron "<expr>"                            校验 + 人话回显 + 未来三次触发时间
 
-JSON 参数可以是内联串、@文件路径、或 '-'（从 stdin 读，prompt 带引号换行时用这个）。`;
+JSON / 长文本参数可以是内联串、@文件路径、或 '-'（从 stdin 读，带引号换行时用这个）。`;
 
 async function main() {
   const cmd = pos[0];
@@ -505,6 +1052,14 @@ async function main() {
     case "providers": return cmdProviders();
     case "skills": return cmdSkills();
     case "cron": return cmdCron();
+    case "sessions": return cmdSessions(pos[1]);
+    case "ps": return cmdPs();
+    case "node": return cmdNode(pos[1]);
+    case "ask": return cmdAsk();
+    case "retry": return cmdRetry();
+    case "abort": return cmdAbort();
+    case "wait": return cmdWait();
+    case "respond": return cmdRespond();
     default:
       console.log(USAGE);
       process.exit(cmd ? 1 : 0);

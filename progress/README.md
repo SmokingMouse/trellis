@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-画布完全剔除隐藏树并支持思维树大纲分组恢复已落地（S116）；cpa codex 故障在查（failures.md）。
+trellisctl 平台操作面（S118）与定时任务侧栏分组（S117）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 

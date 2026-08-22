@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 116 / 115 / 114 / 113 / 112）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 118 / 117 / 116 / 115 / 114）。更早的见 `archive.md`。
+
+### Session 118（2026-08-22，trellisctl 平台操作面：会话/树/节点读写 + GET /api/nodes/[id]）
+- **触发**: 用户要求给 trellis-admin 扩展 herdr 式的平台读写能力（看隔壁树运行情况、往树上开新节点、开新树）。
+- **设计**: 纯 CLI 扩展为主——盘点确认服务端能力基本齐备（`POST /api/chat` 三形态、`nodes/[id]/stream` catchup、`/api/runs`、sessions CRUD），且 run 与 HTTP 解耦使 CLI 可发完即走。唯一真缺口是「裸 nodeId → 元数据」直达路径。
+- **Done**:
+  1. `app/api/nodes/[id]/route.ts`: 新增 `GET`（复用 `getNode`，剥 toolCalls 发 toolCallStats，载荷纪律同 sessions/[id]）。
+  2. `skills/trellis-admin/scripts/trellisctl.ts`: 新增平台操作面——`sessions`（list / get 树形大纲 / rename / archive / rm）、`ps`（在跑 + ⏸ 等回答）、`node`（get / read / label / rm）、`ask`（`--node` 分支 / `--session` 平行根 / `--new` 新会话，`--wait` 守终态，`--approval` 权限卡）、`wait` / `abort` / `retry` / `respond`（--allow / --deny / --answers）。基建：`apiSse` + `sseEvents`（SSE 消费）、`api()` 加 tolerate 参数。
+  3. `skills/trellis-admin/SKILL.md`: description 扩操作面触发词；新增「平台操作面」章节（概念对齐 / ask 三形态语义表 / 等与接管 / 与任务分工）；Known Failure Modes 追加 3 条（--wait 超时重发、旧实例 404、respond 409）。
+- **验证**: `bun --bun run build` 全过（裸 `bun run build` 会在 page-data 阶段死于 Node worker 找不到 bun:sqlite，必须 `--bun`）；worktree 起 `PORT=3299 bun server.ts` 测试实例全链路实测——sessions / ps / get 树形（2 树 + 分支缩进）✔、ask 三形态（mock provider 零成本）✔、wait 接力与终态回放 ✔、abort 404 容错 ✔、rename / label / rm 防呆与清理 ✔、respond 判空 ✔。respond 的 allow/deny 真实交互路径未实测（需 claude 系 run 停卡；逻辑比照 `InteractionForm.tsx:509`）。
+- **Next**: 合并 main 后 `make deploy` 部署——`node get/read` 与 `respond` 依赖新 GET route，打旧实例是 404（已写进 Known Failure Modes）。
 
 ### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
 - **触发**: 用户反馈隐藏的树在画布上仍然会出现。
@@ -46,17 +56,4 @@
 - **Done ④ Agent 管理模型字段提升**: 自定义 Agent 模型配置支持快捷预设 Tag 与全量 Provider 模型分类下拉选择器。
 - **验证**: `bun --bun run build` 与 Next.js turbopack 编译 100% 通过（零类型/语法错误）；无多余依赖与无侵入式回退保护。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
-
-### Session 112（2026-08-21，树隐藏修复：彻底移出非隐藏区 + 焦点自动切换 + 已隐藏组展开自适应）
-- **触发**: 用户反馈树隐藏问题——当前树或只剩一棵树时点击隐藏，该树仍旧出现在非隐藏区，或者说只要停留在当前树该树就不在隐藏区里，且存在双重渲染。
-- **根因**: `TreePanel.tsx` 存在 `{activeEntry?.hidden && renderActiveTree(activeEntry)}` 强制把被隐藏的当前树再次渲染在热区下方；同时点击隐藏时未自动把活跃焦点切换到下一棵可见树；activeRootId 回退时未优先选择首棵可见树。
-- **Done**: ① `TreePanel.tsx` 删去 `activeEntry?.hidden` 在非隐藏区的强制渲染；② 隐藏当前树时（无论是在展开树头还是折叠树行点击），若存在其他可见树则自动将焦点切至下一棵可见树（`nextVisible.latestNodeId`）；若恢复隐藏树且当前无可见活跃树，自动恢复其活跃状态；③ `activeRootId` 缺省 fallback 优先选择第一棵未隐藏树（`entries.find(e => !e.hidden)`）；④ `renderTreeRow` 补全 `entry.hidden` 下当前被选树的 active 样式；⑤ `hiddenOpen` 支持全树被隐藏时默认展开 `已隐藏` 组，便于用户快速恢复；⑥ 新增 `lib/tree-panel.test.ts` 覆盖分组、雪藏过滤、热度排序及单树雪藏等场景。
-- **验证**: `bun test` 9 pass ✔；`node_modules/.bin/tsc --noEmit` 0 错 ✔；`eslint` 0 错 ✔；`bun --bun run build` 成功通过 ✔。
-- **Next**: 提交分支、提交 PR 并合并至 master/main。
-
-### Session 111（2026-08-21，打标/起题模型可配：app_settings kv + 设置页卡片）
-- **触发**: S110 交付后用户追问「别人用但没有这些模型呢」→「能不能在设置里配」。此前 claude 路写死 `--model haiku`（官方 alias，正常安装都认，但只路由部分模型的网关/自建 cpa 类环境会静默失败）。
-- **Done**: ① `app_settings` kv 表（服务端 app 级偏好的通用归宿——localStorage prefs 服务端读不到，spawn 路径要读的偏好从此有家）+ repo `getAppSetting/setAppSetting`（空值=删行回默认）；② `/api/settings` 白名单路由（GET 全量 / PATCH 单键，key 白名单制防长尾垃圾键）；③ topic.ts 读 `label_model_claude`（默认 haiku）/ `label_model_codex`（默认不传 `-c model=` 走本机默认），topic+title 两用途共用；④ `LabelModelCard` 挂 settings/models 页（与 AuthHealthCard 同级，不进 ModelConfigPanel——那组件被 modal 复用且管的是 endpoints.yaml 跨应用共享配置，起题模型是 trellis 私有偏好不该混入）。
-- **验证**: tsc/eslint/`bun --bun run build` 零错；隔离 dev（副本库 :3891）**双向对照**——kv round-trip ✔；配 `no-such-model-xyz` 发一轮 chat → SSE 无 topic_label/session_title（证明配置真进 spawn、失败静默不伤对话）；清除后再发 → 两事件恢复（「并发编程活锁」/「活锁现象解析」）✔；agent-browser 实测设置页卡片渲染 + UI 保存 → API 回读 `sonnet` 落库 ✔。
-- **Next**: 与 S110 同批**未提交未部署**，用户过目后一起提交；后续想给别的服务端偏好用 kv 直接进 `/api/settings` 白名单。
 
