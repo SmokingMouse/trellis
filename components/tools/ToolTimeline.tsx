@@ -1,25 +1,27 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatTokens } from "@/lib/format-tokens";
-import { toolTitle } from "@/lib/tool-registry";
+import { toolSummary, toolTitle } from "@/lib/tool-registry";
 import {
   buildToolTree,
   countToolTree,
+  runningChain,
   subagentLabel,
-  walkToolTree,
   type ToolNode,
 } from "@/lib/tool-tree";
-import type { ToolCall, ToolCallStats } from "@/lib/types";
+import type { ToolCall, ToolCallStats, WorkflowAgentEntry } from "@/lib/types";
 import { useSessionStore } from "@/stores/sessionStore";
-import { ToolRow, useElapsed } from "./ToolRow";
+import { TimelineList, useElapsed } from "./ToolRow";
 
-// The turn's whole tool timeline, in chronological order, one row per call.
+// The turn's whole tool timeline, in chronological order.
 //
-// Replaces the old pair of panels (🔧 工具调用 for the main agent + a separate
-// 🤖 子 Agent box). Splitting them meant delegated work had to be *removed*
-// from the main list to appear in its own box, so the two panels each told
-// half the story and neither preserved the order things actually happened in.
-// One tree, nested where nesting is real, is both simpler and more honest.
+// 结构三层，对应注意力的冷热（见 ToolRow.tsx 的 TimelineList）：
+//   热  header 面包屑 —— 此刻正在跑的最深链路（⚙ wf › 🤖 agent › 工具），
+//       面板收着也一直可见；失败行、运行中的行。
+//   温  骨架 —— 委派实体（子 Agent / Workflow / 长跑命令）+ 计划检查点，
+//       一行一个，带聚合统计；这是展开面板后看到的"关系图"。
+//   冷  连续已完成的普通工具压成段落 chip，点击才逐行铺开；行的 body 再
+//       点击才展开。追溯 = 沿着 摘要行 → 骨架 → 段落 → 行 一层层下钻。
 //
 // 大会话的 toolCalls 不随会话载荷下发（占比能到 98%，改发预计算 stats），
 // 所以 done 节点首次展开时按需拉取（loadNodeToolCalls）；拉取期间折叠态
@@ -54,7 +56,7 @@ export function ToolTimeline({
   }, [open, needsLoad, nodeId, loadNodeToolCalls]);
 
   if (!display || display.total === 0) return null;
-  const running = live ? walkToolTree(tree).filter((n) => n.running) : [];
+  const chain = live ? runningChain(tree) : [];
 
   return (
     <div className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
@@ -71,8 +73,11 @@ export function ToolTimeline({
         >
           ▸
         </span>
-        {running.length > 0 ? (
-          <LiveHeader running={running} />
+        {chain.length > 0 ? (
+          <LiveHeader
+            chain={chain}
+            parallel={counts.running - chain.length}
+          />
         ) : (
           <>
             <span className="font-medium text-ink shrink-0">🧰 动线</span>
@@ -98,9 +103,7 @@ export function ToolTimeline({
       {open &&
         (tree.length > 0 ? (
           <div className="border-t border-line divide-y divide-line/70">
-            {tree.map((n) => (
-              <ToolRow key={n.call.id} node={n} live={live} />
-            ))}
+            <TimelineList nodes={tree} live={live} />
           </div>
         ) : (
           // toolCalls 还在按需拉取（或拉取失败静默降级）——给一行占位，
@@ -120,36 +123,65 @@ export function ToolTimeline({
   );
 }
 
-// The folded-state live line — the reason a collapsed panel is acceptable at
-// all. Without it a folded timeline meant the user had no idea anything was
-// happening. Deepest running node wins: while a sub-agent runs, what you want
-// to see is the tool *it* is running, not the word "Agent".
-function LiveHeader({ running }: { running: ToolNode[] }) {
-  const node = running[running.length - 1];
-  const elapsed = useElapsed(node.call.startedAt);
-  const label =
-    node.kind === "subagent"
-      ? subagentLabel(node.meta)
-      : node.kind === "workflow"
-        ? (node.meta.workflowName ?? "Workflow")
-        : toolTitle(node.call);
-  const doing = node.meta.lastToolName ?? node.meta.description;
+// The live line — a breadcrumb of the deepest running chain, root → leaf.
+// Always in the header, open or collapsed: this is the one thing the user
+// wants while it streams, and it's also the "who spawned whom" answer without
+// opening anything. The leaf reaches one step deeper than tool_call events
+// can see — a sub-agent's current tool / a workflow's running agent — via
+// live task metadata.
+function LiveHeader({
+  chain,
+  parallel,
+}: {
+  chain: ToolNode[];
+  parallel: number;
+}) {
+  const leaf = chain[chain.length - 1];
+  const elapsed = useElapsed(leaf.call.startedAt);
+  const crumbs = chain.map(crumbLabel);
+  const step = leafStep(leaf);
+  if (step) crumbs.push(step);
+  const doing = leafDoing(leaf);
+  const stat = [
+    leaf.meta.totalTokens ? formatTokens(leaf.meta.totalTokens) : null,
+    elapsed !== null ? `${Math.round(elapsed / 1000)}s` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <>
-      <span className="font-medium text-ink shrink-0">🧰 {label}</span>
-      {doing && (
-        <span className="text-warn-ink truncate min-w-0">正在 {doing}</span>
-      )}
-      <span className="text-ink-faint tabular-nums shrink-0 hidden sm:inline">
-        {[
-          node.meta.totalTokens ? formatTokens(node.meta.totalTokens) : null,
-          elapsed !== null ? `${Math.round(elapsed / 1000)}s` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
+      <span className="font-medium text-ink shrink-0" aria-hidden>
+        🧰
       </span>
-      {running.length > 1 && (
-        <span className="text-ink-faint shrink-0">+{running.length - 1}</span>
+      <span className="flex items-center gap-1 min-w-0 font-medium text-ink">
+        {crumbs.map((c, i) => (
+          <Fragment key={i}>
+            {i > 0 && (
+              <span className="text-ink-faint shrink-0" aria-hidden>
+                ›
+              </span>
+            )}
+            {/* 挤不下时先牺牲上游环节 —— 叶子（正在跑的那个）永远完整。 */}
+            <span
+              className={
+                i === crumbs.length - 1 ? "shrink-0" : "truncate min-w-0"
+              }
+            >
+              {c}
+            </span>
+          </Fragment>
+        ))}
+      </span>
+      {doing && (
+        <span className="text-warn-ink truncate min-w-0">{doing}</span>
+      )}
+      {stat && (
+        <span className="text-ink-faint tabular-nums shrink-0 hidden sm:inline">
+          {stat}
+        </span>
+      )}
+      {parallel > 0 && (
+        <span className="text-ink-faint shrink-0">+{parallel} 并行</span>
       )}
       <span
         className="w-1.5 h-1.5 rounded-full bg-warn animate-pulse shrink-0"
@@ -157,6 +189,35 @@ function LiveHeader({ running }: { running: ToolNode[] }) {
       />
     </>
   );
+}
+
+function crumbLabel(n: ToolNode): string {
+  if (n.kind === "subagent") return `🤖 ${subagentLabel(n.meta)}`;
+  if (n.kind === "workflow") return `⚙ ${n.meta.workflowName ?? "Workflow"}`;
+  if (n.kind === "longRunning") return `⏱ ${toolTitle(n.call)}`;
+  return toolTitle(n.call);
+}
+
+// 面包屑的最后一格：委派叶子此刻抓着的东西。tool_call 事件到不了这一层
+// （子 Agent 的内部调用有事件，但 workflow 的 agent 没有），task 元数据有。
+function leafStep(leaf: ToolNode): string | null {
+  if (leaf.kind === "subagent") return leaf.meta.lastToolName ?? null;
+  if (leaf.kind === "workflow") {
+    const agents = (leaf.meta.workflowProgress ?? []).filter(
+      (e): e is WorkflowAgentEntry => e.type === "workflow_agent",
+    );
+    const running = agents.filter((a) => a.state !== "done");
+    return running.length > 0 ? running[running.length - 1].label : null;
+  }
+  return null;
+}
+
+function leafDoing(leaf: ToolNode): string | null {
+  if (leaf.kind === "subagent" || leaf.kind === "workflow") {
+    // description is live-updated by task_progress to the current step.
+    return leaf.meta.description ?? null;
+  }
+  return toolSummary(leaf.call);
 }
 
 function summaryLine(

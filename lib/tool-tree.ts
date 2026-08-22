@@ -22,6 +22,17 @@ import type { TaskKind, TaskMeta, ToolCall } from "@/lib/types";
 // taskType is the real judgement.
 const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
 
+// Tools whose call marks a *narrative beat* of the turn (a plan update, a plan
+// submission, a question to the human) rather than a unit of mechanical work.
+// They never fold into a cold segment: a TodoWrite between two runs of file
+// edits — or the AskUserQuestion whose answer redirected the turn — is the
+// chapter heading that makes the compressed skeleton readable.
+const CHECKPOINT_TOOL_NAMES = new Set([
+  "TodoWrite",
+  "ExitPlanMode",
+  "AskUserQuestion",
+]);
+
 // Guard against a malformed parent chain (a cycle, or absurd nesting) turning
 // the recursive walk into a hang.
 const MAX_NEST_DEPTH = 6;
@@ -222,4 +233,83 @@ export function countToolTree(nodes: ToolNode[]): ToolTreeCounts {
     running: all.filter((n) => n.running).length,
     errors: all.filter((n) => n.call.status === "error").length,
   };
+}
+
+// ── 冷热分段 ──────────────────────────────────────────────────────────────
+//
+// The timeline's attention problem: a 40-step turn rendered one row per call
+// puts 40 rows of *history* (cold) in the same visual register as the one
+// thing that's actually happening (hot). The fix is structural, not styling:
+// runs of completed plain tool calls compress into one "segment" entry the UI
+// renders as a single dimmed chip, while everything a reader navigates by —
+// delegations, checkpoints, failures, whatever is running right now — stays a
+// standalone entry.
+//
+// What is *never* swallowed into a segment:
+//   - delegations (subagent / workflow / longRunning): they're the skeleton
+//   - running calls: the hot tail — history folds up, the live row stays out
+//   - errors: a chip that hides a failure makes "errors are never hidden" a lie
+//   - checkpoint tools (TodoWrite / ExitPlanMode): the chapter headings
+
+/** Fewer consecutive foldable calls than this render as plain rows — a chip
+ * that replaces one or two one-line rows costs a click and saves nothing. */
+export const MIN_SEGMENT = 3;
+
+export type TimelineEntry =
+  | { type: "node"; node: ToolNode }
+  | { type: "segment"; nodes: ToolNode[] };
+
+function segmentable(node: ToolNode): boolean {
+  return (
+    node.kind === "tool" &&
+    !node.running &&
+    node.call.status !== "error" &&
+    !CHECKPOINT_TOOL_NAMES.has(node.call.name)
+  );
+}
+
+/** One sibling list → the entries the UI renders, chronological order kept. */
+export function segmentTimeline(nodes: ToolNode[]): TimelineEntry[] {
+  const out: TimelineEntry[] = [];
+  let run: ToolNode[] = [];
+  const flush = () => {
+    if (run.length >= MIN_SEGMENT) out.push({ type: "segment", nodes: run });
+    else for (const n of run) out.push({ type: "node", node: n });
+    run = [];
+  };
+  for (const n of nodes) {
+    if (segmentable(n)) run.push(n);
+    else {
+      flush();
+      out.push({ type: "node", node: n });
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * The deepest currently-running chain, root first — the breadcrumb the header
+ * shows while streaming. Among parallel running siblings the most recently
+ * started wins (siblings are already sorted by startedAt): what the user wants
+ * to see is the newest thing the run reached for.
+ */
+export function runningChain(tree: ToolNode[]): ToolNode[] {
+  const chain: ToolNode[] = [];
+  let level = tree;
+  for (let depth = 0; depth <= MAX_NEST_DEPTH; depth++) {
+    const running = level.filter((n) => n.running);
+    if (running.length === 0) break;
+    const pick = running[running.length - 1];
+    chain.push(pick);
+    level = pick.children;
+  }
+  return chain;
+}
+
+/** Failures anywhere under this node (children and deeper, self excluded) —
+ * so a collapsed delegation row can still confess its nested failures. */
+export function nestedErrorCount(node: ToolNode): number {
+  return walkToolTree(node.children).filter((n) => n.call.status === "error")
+    .length;
 }

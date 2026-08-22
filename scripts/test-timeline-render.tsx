@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { buildToolTree, type ToolNode } from "@/lib/tool-tree";
 import type { ToolCall } from "@/lib/types";
 import { ToolTimeline } from "@/components/tools/ToolTimeline";
-import { rowAutoOpen, ToolRow } from "@/components/tools/ToolRow";
+import { rowAutoOpen, TimelineList, ToolRow } from "@/components/tools/ToolRow";
 
 let failures = 0;
 function check(label: string, ok: boolean, got?: unknown) {
@@ -162,14 +162,54 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
             durationMs: 8855,
             resultPreview: "ALPHA_OK",
           },
+          // 还没跑完的 agent 让 Alpha 保持活跃 —— 活跃 phase 才铺开 agent 行。
+          {
+            type: "workflow_agent",
+            index: 2,
+            label: "alpha-2",
+            phaseIndex: 1,
+            phaseTitle: "Alpha",
+            state: "start",
+          },
         ],
       },
     }),
   ]);
   check("Workflow 渲染出 phase 树", wf.includes("Alpha") && wf.includes("Beta") && wf.includes("2 阶段"));
-  check("Workflow agent 挂在自己的 phase 下", wf.includes("alpha-1"));
+  check("活跃 phase 铺开 agent 行", wf.includes("alpha-1") && wf.includes("alpha-2"));
   check("Workflow agent 的结果预览可见", wf.includes("ALPHA_OK"));
+  check("phase 头部带完成计数", wf.includes("1/2"));
+  check("统计行报出运行中数量", wf.includes("1 运行中"));
   check("Workflow 脚本收进折叠区而不是摘要行", wf.includes("工作流脚本"));
+
+  // 全部跑完的 phase 收成一行标题 + 计数 —— agent 行是冷数据，点击才回来。
+  const wfDone = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      input: { script: "export const meta = {}" },
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "probe-wf",
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          {
+            type: "workflow_agent",
+            index: 1,
+            label: "alpha-1",
+            phaseIndex: 1,
+            phaseTitle: "Alpha",
+            state: "done",
+            resultPreview: "ALPHA_OK",
+          },
+        ],
+      },
+    }),
+  ]);
+  check(
+    "跑完的 phase 收成一行（agent 行不进 DOM）",
+    wfDone.includes("Alpha") && wfDone.includes("1/1") && !wfDone.includes("alpha-1"),
+  );
 
   const todo = renderRow([
     base({
@@ -246,6 +286,107 @@ console.log("\n── 降级与铁律");
   check("stderr 不被 resultPolicy 吞掉", withStderr.includes("command not found"));
 }
 
+// ── 冷热分段 ─────────────────────────────────────────────────────────────
+// 本次重排的核心：已完成的普通工具连跑折成一枚段落 chip（冷），委派骨架、
+// 失败、正在跑的行、当前计划常驻（热）。
+console.log("\n── 冷热分段：历史折叠，热区常驻");
+{
+  const doneRun = (n: number, offset = 0): ToolCall[] =>
+    Array.from({ length: n }, (_, i) =>
+      base(
+        i % 2
+          ? { id: String(offset + i + 1), name: "Read", input: { file_path: `/repo/f${offset + i}.ts` } }
+          : { id: String(offset + i + 1), name: "Bash", input: { command: `cmd-${offset + i}` } },
+      ),
+    );
+  const renderList = (calls: ToolCall[], live: boolean) =>
+    renderToStaticMarkup(
+      <TimelineList nodes={buildToolTree(calls)} live={live} />,
+    );
+
+  const liveHtml = renderList(
+    [
+      ...doneRun(3),
+      base({ id: "9", name: "Bash", status: "running", input: { command: "npm test" } }),
+    ],
+    true,
+  );
+  check("已完成连跑折成段落 chip", liveHtml.includes("3 步"));
+  check("chip 点名工具与次数", liveHtml.includes("Bash ×2") && liveHtml.includes("Read"));
+  check("段内明细不进 DOM（冷数据点击才展开）", !liveHtml.includes("cmd-0"));
+  check("正在跑的调用不被吞进段里", liveHtml.includes("npm test"));
+
+  check(
+    "非流式的唯一段落直接铺行（chip 只会复读计数）",
+    renderList(doneRun(3), false).includes("cmd-0"),
+  );
+
+  const mixed = renderList(
+    [
+      ...doneRun(3),
+      base({
+        id: "20",
+        name: "Agent",
+        input: { subagent_type: "Explore", description: "查一下" },
+        agent: { taskType: "local_agent" },
+      }),
+      ...doneRun(3, 30),
+    ],
+    false,
+  );
+  check("混合骨架保留委派行", mixed.includes("Explore"));
+  check("混合骨架里的段落仍是 chip", (mixed.match(/3 步/g) ?? []).length === 2);
+
+  const withErr = renderList(
+    [
+      ...doneRun(2),
+      base({ id: "40", name: "Bash", status: "error", input: { command: "boom" }, output: "exit 1" }),
+      ...doneRun(2, 50),
+    ],
+    false,
+  );
+  check("失败的行不被段落吞掉", withErr.includes("boom"));
+  check("失败的行自动展开 body", withErr.includes("exit 1"));
+
+  const todos = renderList(
+    [
+      base({
+        id: "t1",
+        name: "TodoWrite",
+        input: { todos: [{ content: "旧的第一版计划条目", status: "pending" }] },
+      }),
+      base({
+        id: "t2",
+        name: "TodoWrite",
+        input: {
+          todos: [
+            { content: "当前计划条目", status: "in_progress", activeForm: "正在推进当前计划" },
+          ],
+        },
+      }),
+    ],
+    true,
+  );
+  check("最后一个 TodoWrite 是当前计划，live 也展开", todos.includes("正在推进当前计划"));
+  check("旧 TodoWrite 收起成一行", !todos.includes("旧的第一版计划条目"));
+
+  // header 面包屑：收着的面板也能看到最深运行链（agent › 它正在跑的工具）。
+  const crumb = render(
+    [
+      base({
+        id: "1",
+        name: "Agent",
+        status: "running",
+        input: { subagent_type: "Explore", description: "查渲染链路" },
+        agent: { taskType: "local_agent", lastToolName: "Grep" },
+      }),
+    ],
+    true,
+  );
+  check("header 面包屑露出运行链", crumb.includes("Explore") && crumb.includes("Grep"));
+  check("面包屑用 › 连接", crumb.includes("›"));
+}
+
 // ── 展开规则 ─────────────────────────────────────────────────────────────
 console.log("\n── 展开规则");
 {
@@ -253,6 +394,9 @@ console.log("\n── 展开规则");
   const failed = nodeOf([base({ id: "1", name: "Bash", status: "error", input: { command: "ls" } })]);
   const edit = nodeOf([
     base({ id: "1", name: "Edit", input: { file_path: "/x", old_string: "a", new_string: "b" } }),
+  ]);
+  const todo = nodeOf([
+    base({ id: "1", name: "TodoWrite", input: { todos: [] } }),
   ]);
   const runningSub = nodeOf([
     base({ id: "1", name: "Agent", status: "running", agent: { taskType: "local_agent" } }),
@@ -263,6 +407,9 @@ console.log("\n── 展开规则");
   check("失败的行默认展开", rowAutoOpen(failed, false));
   check("失败的行即使不在流式里也展开", rowAutoOpen(failed, false) && rowAutoOpen(failed, true));
   check("Edit 默认展开（body 就是内容）", rowAutoOpen(edit, false));
+  check("live 期间已完成的 Edit 不再摊开（冷数据让位）", !rowAutoOpen(edit, true));
+  check("当前 TodoWrite live 期间保持展开", rowAutoOpen(todo, true, true));
+  check("非当前 TodoWrite live 期间收起", !rowAutoOpen(todo, true, false));
   check("流式中正在跑的子 Agent 默认展开", rowAutoOpen(runningSub, true));
   check("非流式（已中断）的子 Agent 不展开", !rowAutoOpen(runningSub, false));
   check("流式中的普通工具不展开（否则每一步都炸开）", !rowAutoOpen(runningBash, true));
