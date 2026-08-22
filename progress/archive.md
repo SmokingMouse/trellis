@@ -4,6 +4,19 @@
 
 ## Session Log
 
+### Session 114（2026-08-21，Token 统计精准化 + 单卡耗时 & Token 使用 & 纯模型 TPS 仪表）
+- **触发**: 用户反馈两个问题：① 当前 token 统计不精确；② 最好能在每个卡片展示耗时 & token 使用 & TPS。
+- **根因 & Done ① Token 统计精准化**:
+  1. `lib/format-tokens.ts`: 原先 ≥10k 粗暴 `Math.round(n/1000) + 'k'`（如 12.4k 变成 12k、85.6k 变成 86k，抹杀数百 token 精度）。改为 1k~1M 均保留 1 位小数（整千自动去尾 `.0`，如 `12.4k`、`15k`、`125.4k`），≥1M 保留 2 位小数（如 `1.25M`）。
+  2. `lib/server/cli-import.ts`: 多步工具调用 turn 中原先只取最后一条 assistant 消息的 `lastUsage`（丢失该轮前期全部工具调用的 token）。修复为全轮所有 assistant message 的 token 累加（input / output / cacheRead / cacheCreation 逐项求和），`contextTokens` 精确取末条占用。
+  3. `lib/server/codex-import.ts`: 优先消费 `info.total_token_usage`，多步工具与 token 累积一致。
+- **Done ② 单卡耗时 & Token 使用 & 纯模型 TPS 展示**:
+  1. 数据流与落库：`nodes` 加 `duration_ms INTEGER` 列，`run-bus` 记录提问到 done 的总耗时并在 done 事件及 `finalizeNode` 中落库；`cli-import` 与 `codex-import` 计算每轮时间差回填 `durationMs`。
+  2. 组件 `TurnStatsMeta`: 统一计算并渲染 ⏱️ 耗时（流式态秒级跳动、done 态精确显示）、Token 细分（↑输入 ↓输出 ⚡缓存，带高精度 hover 详情）、⚡ TPS（`outputTokens / llmDurationSeconds`，**自动合并并扣除工具执行时间**，准确反映 Model API 生成速率）。
+  3. 视图接入：`TurnCard`（线性视图/工作台）底部操作栏左侧嵌入 `TurnStatsMeta`，流式期间与完成态自适应；`ChatNode`（画布视图完整卡片与紧凑卡片）接入 `TurnStatsMeta`，全端体验对齐。
+- **验证**: `bun test` 17/17 全过（涵盖精度、耗时格式化、工具时间区间合并与扣除、TPS 纯模型速率计算）；`tsc --noEmit` 零错；`scripts/test-cli-jsonl.ts` 与 `scripts/test-tool-tree.ts` 全绿。
+- **Next**: 合并至 main，下次 `make deploy` 部署上线。
+
 ### Session 113（2026-08-21，模型选择与管理体验重构：可搜/分类/最近 + 预设模版一键填入 + 可视标签）
 - **触发**: 用户反馈「模型的选择和管理太不友好了，选择上需要下拉逐个找，设置页设置模型时也需要手动输入」。
 - **Done ① ModelPicker 模型选择下拉重构**: 顶部增加即时搜索栏（拼音/厂商/模型名模糊过滤，带清空与全键盘快捷键上下导航 Enter 选择）；新增「全部 / 常用 / Claude 系 / Codex 系 / 第三方」快速分类 Filter Pills；集成 `localStorage` 最近使用模型记录（快捷置顶，1 键切换）；卡片增加厂商 Badge 标识、上下文窗口容量（1M/200K 等）与状态提醒（跨系需新建会话、缺 Key）；空结果智能引导添加。

@@ -3,34 +3,178 @@ import { useEffect, useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import { defaultOpen, toolIcon, toolSummary, toolTitle } from "@/lib/tool-registry";
-import { subagentLabel, type ToolNode } from "@/lib/tool-tree";
+import {
+  nestedErrorCount,
+  segmentTimeline,
+  subagentLabel,
+  type TimelineEntry,
+  type ToolNode,
+} from "@/lib/tool-tree";
 import { Pill } from "../ui/Pill";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
 
-// One row of the timeline. Recursive: a sub-agent's own calls render as the
-// same component one level in, so nesting depth costs nothing to support.
+// The timeline's rendering layer, three pieces in one file (they're mutually
+// recursive — a sub-agent's body renders a TimelineList of its own):
+//
+//   TimelineList  one sibling list → segments + standalone rows (the skeleton)
+//   SegmentRow    a run of completed plain calls, folded to one dim chip
+//   ToolRow       one standalone call, recursive through delegations
+//
+// 冷热纪律（本次重排的核心）：屏幕上的常驻位置只留给「热」的东西 —— 正在跑的
+// 行、失败、委派骨架、当前计划（最后一个 TodoWrite）。已完成的普通工具连跑
+// 压成一枚段落 chip（冷数据点击才展开），live 期间已完成行的 registry
+// defaultOpen（diff / 清单）也一律压制 —— 那是「刚才发生过的事」，不该把正在
+// 发生的事推出屏幕。
+
+export function TimelineList({
+  nodes,
+  live,
+  depth = 0,
+}: {
+  nodes: ToolNode[];
+  live: boolean;
+  depth?: number;
+}) {
+  const entries = segmentTimeline(nodes);
+  // 整个列表就是一枚段落、且不在流式中 —— chip 只会复读上一级已经说过的
+  // 计数，纯属白点一下。直接铺行（live 期间不豁免：chip 的高度上限正是流式
+  // 期间要的）。
+  const itemize =
+    !live && entries.length === 1 && entries[0].type === "segment";
+  // 最后一个 TodoWrite 是「当前计划」，live 期间也保持展开 —— 它是热数据，
+  // 之前的 TodoWrite 都只是它的历史版本。
+  const currentTodoId = [...nodes]
+    .reverse()
+    .find((n) => n.call.name === "TodoWrite")?.call.id;
+
+  const row = (n: ToolNode) => (
+    <ToolRow
+      key={n.call.id}
+      node={n}
+      live={live}
+      depth={depth}
+      currentTodo={n.call.id === currentTodoId}
+    />
+  );
+
+  if (itemize) return <>{nodes.map(row)}</>;
+  return (
+    <>
+      {entries.map((e) =>
+        e.type === "node" ? (
+          row(e.node)
+        ) : (
+          <SegmentRow
+            // 段首 call 的 id 在后续调用并入时保持不变 —— 用户展开过的段
+            // 不会因为新调用滚入而弹回收起。
+            key={`seg-${e.nodes[0].call.id}`}
+            entry={e}
+            live={live}
+            depth={depth}
+          />
+        ),
+      )}
+    </>
+  );
+}
+
+// A run of completed plain calls, folded into one line. Deliberately colder
+// than a ToolRow: no status pills, no per-call titles, faint ink — it should
+// read as "9 steps happened here", not compete with the skeleton.
+function SegmentRow({
+  entry,
+  live,
+  depth,
+}: {
+  entry: Extract<TimelineEntry, { type: "segment" }>;
+  live: boolean;
+  depth: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const { nodes } = entry;
+  return (
+    <div className="bg-surface/60">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:bg-surface-muted/60 hover:text-ink-muted transition-colors"
+      >
+        <span
+          className="transition-transform shrink-0"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
+          aria-hidden
+        >
+          ▸
+        </span>
+        <span className="shrink-0 select-none" aria-hidden>
+          ⋯
+        </span>
+        <span className="tabular-nums shrink-0">{nodes.length} 步</span>
+        <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
+        <span className="flex-1" />
+        <span className="text-nano tabular-nums shrink-0">
+          {segmentDuration(nodes)}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-line/70 divide-y divide-line/70">
+          {nodes.map((n) => (
+            <ToolRow key={n.call.id} node={n} live={live} depth={depth} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Read ×5 · Edit ×3 · Bash" — tool names in first-appearance order.
+function segmentSummary(nodes: ToolNode[]): string {
+  const counts = new Map<string, number>();
+  for (const n of nodes) {
+    const t = toolTitle(n.call);
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const names = [...counts.entries()].map(([t, c]) =>
+    c > 1 ? `${t} ×${c}` : t,
+  );
+  return names.slice(0, 4).join(" · ") + (names.length > 4 ? " …" : "");
+}
+
+// Only worth a number when the run actually took time — a pile of instant
+// reads summing to 80ms is noise.
+function segmentDuration(nodes: ToolNode[]): string {
+  const ms = nodes.reduce((s, n) => s + (n.call.durationMs ?? 0), 0);
+  return ms >= 1000 ? formatDuration(ms) : "";
+}
+
+// One standalone row. Recursive: a sub-agent's own calls render as a nested
+// TimelineList one level in, so nesting depth costs nothing to support.
 
 export function ToolRow({
   node,
   live,
   depth = 0,
+  currentTodo = false,
 }: {
   node: ToolNode;
   live: boolean;
   depth?: number;
+  currentTodo?: boolean;
 }) {
   // null = "follow the automatic rule"; once the user clicks, their choice
   // sticks even when the automatic rule would flip (e.g. the sub-agent they
   // just collapsed starts another tool).
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? rowAutoOpen(node, live);
+  const open = userOpen ?? rowAutoOpen(node, live, currentTodo);
 
   const view = resolveToolView(node);
   const useCustom = view?.canRender(node) ?? false;
   const Body = useCustom ? view!.Component : RawView;
 
   const elapsed = useElapsed(live && node.running ? node.call.startedAt : null);
+  const nestedErrors = node.kind === "tool" ? 0 : nestedErrorCount(node);
 
   return (
     <div className="bg-surface/60">
@@ -56,6 +200,12 @@ export function ToolRow({
           {rowSummary(node) ?? ""}
         </span>
         <span className="flex-1" />
+        {nestedErrors > 0 && (
+          // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
+          <span className="text-nano text-danger-ink shrink-0">
+            {nestedErrors} 失败
+          </span>
+        )}
         <span className="text-nano tabular-nums text-ink-faint shrink-0">
           {statLine(node, elapsed)}
         </span>
@@ -64,9 +214,7 @@ export function ToolRow({
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-2">
           <Body node={node}>
-            {node.children.map((c) => (
-              <ToolRow key={c.call.id} node={c} live={live} depth={depth + 1} />
-            ))}
+            <TimelineList nodes={node.children} live={live} depth={depth + 1} />
           </Body>
           {/* A custom view owns its own body, but children still have to land
               somewhere — only SubagentView slots them in, so any other kind
@@ -74,9 +222,11 @@ export function ToolRow({
           {!useCustom && node.children.length > 0 && (
             <div className="border-l-2 border-line ml-1 pl-2">
               <div className="border border-line rounded divide-y divide-line/70 overflow-hidden">
-                {node.children.map((c) => (
-                  <ToolRow key={c.call.id} node={c} live={live} depth={depth + 1} />
-                ))}
+                <TimelineList
+                  nodes={node.children}
+                  live={live}
+                  depth={depth + 1}
+                />
               </div>
             </div>
           )}
@@ -89,17 +239,28 @@ export function ToolRow({
 /**
  * Whether a row starts expanded, absent a user click.
  *
- * Three reasons to open on arrival, in the order they were learned:
- *   - the registry says the body *is* the content (a diff, a checklist)
- *   - it's running right now and it's a delegation — watching it work is the
- *     whole point of a live timeline (happy's dynamic Task.minimal, same idea)
+ * Reasons to open on arrival:
  *   - it failed. Anything else buries the one row that explains why the turn
  *     went sideways behind a click, which makes "errors are never hidden" a
  *     slogan rather than a behaviour.
+ *   - it's running right now and it's a delegation — watching it work is the
+ *     whole point of a live timeline (its history is folded by TimelineList,
+ *     so opening it shows a skeleton, not a wall).
+ *   - it's the *current* todo list — the turn's live plan state is hot data.
+ *   - the run is over and the registry says the body *is* the content (a
+ *     diff, a checklist). While the run is live these stay collapsed: a diff
+ *     that already happened is cold, and auto-opening it pushes the row
+ *     that's actually running off screen.
  */
-export function rowAutoOpen(node: ToolNode, live: boolean): boolean {
+export function rowAutoOpen(
+  node: ToolNode,
+  live: boolean,
+  currentTodo = false,
+): boolean {
   if (node.call.status === "error") return true;
   if (live && node.running && node.kind !== "tool") return true;
+  if (currentTodo) return true;
+  if (live) return false;
   return defaultOpen(node);
 }
 

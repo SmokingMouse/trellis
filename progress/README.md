@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-trellisctl 平台操作面（S118）与定时任务侧栏分组（S117）已落地待部署；cpa codex 故障在查（failures.md）。
+工具动线冷热重排（S119）、trellisctl 操作面（S118）、定时任务侧栏（S117）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
