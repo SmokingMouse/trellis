@@ -550,7 +550,12 @@ export async function POST(req: Request) {
           setNodeResumeId(nodeId, family, built.newSid);
           claudeSessionId = built.newSid;
         } else {
-          claudeSessionId = lin.lineageSid; // 构造失败兜底线性
+          // 前缀截取失败，绝不能回退 resume lin.lineageSid（会接续平行分支最新 tip 导致上下文串线）。
+          // 安全降级为起 fresh 独立 session，由 trellis DB 历史折叠（buildHistoryForNode）供给上下文。
+          claudeSessionId = null;
+          if (history.length === 0) {
+            history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+          }
         }
       }
     }
@@ -579,20 +584,26 @@ export async function POST(req: Request) {
           setNodeResumeId(nodeId, family, built.newSid);
           claudeSessionId = built.newSid;
         } else {
-          claudeSessionId = lin.lineageSid;
+          claudeSessionId = null;
+          if (history.length === 0) {
+            history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+          }
         }
       } else {
-        claudeSessionId = lin.lineageSid;
+        claudeSessionId = null;
+        if (history.length === 0) {
+          history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+        }
       }
     }
   }
   // 原生 per-lineage 隔离（progress/project-lineage-isolation-spec.md）：新建的
   // project session（lineage_isolation=1）走 lineage 解析，路由与 attached P2 同构：
   // 父是 lineage jsonl tip 且无其他子 → 线性 resume 该 lineage（append 同 jsonl）；
-  // 真分叉 → 前缀 jsonl 在父 turn 分叉成新 lineage；uuid 缺失/构造失败 → 降级线性
-  // （= 旧共享行为，上下文只多不错）。root/新话题 → fresh，sid 由 session_init 落
-  // 本节点（lineage 头自持）。仅 claude family；存量 session（flag=0）与 codex 走
-  // 下方旧路径。
+  // 真分叉 → 前缀 jsonl 在父 turn 分叉成新 lineage；uuid 缺失/构造失败 → 安全降级
+  // 为 fresh 独立 session 并由 DB 历史折叠供给上下文（绝不接续平行分支 tip）。
+  // root/新话题 → fresh，sid 由 session_init 落本节点（lineage 头自持）。仅 claude family；
+  // 存量 session（flag=0）走下方旧路径。
   let nativeIsolated = false;
   if (
     !attachedHandled &&
@@ -607,6 +618,9 @@ export async function POST(req: Request) {
       if (!lin) {
         // 祖先链无可用 lineage（首轮失败 / jsonl 被清）→ fresh，本节点成新 lineage 头。
         claudeSessionId = null;
+        if (history.length === 0) {
+          history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+        }
       } else if (lin.isJsonlTip && !hasOtherChild(body.parentNodeId, nodeId)) {
         claudeSessionId = lin.lineageSid;
       } else if (lin.nodeTurnUuid) {
@@ -616,16 +630,29 @@ export async function POST(req: Request) {
           setNodeResumeId(nodeId, family, built.newSid);
           claudeSessionId = built.newSid;
         } else {
-          claudeSessionId = lin.lineageSid;
+          // 前缀截取失败，绝不能回退 resume lin.lineageSid（会接续平行分支最新 tip 导致上下文串线）。
+          // 安全降级为起 fresh 独立 session，由 trellis DB 历史折叠（buildHistoryForNode）供给上下文。
+          claudeSessionId = null;
+          if (history.length === 0) {
+            history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+          }
         }
       } else {
-        claudeSessionId = lin.lineageSid;
+        // nodeTurnUuid 缺失（例如 backfill 失败或非 tip 分叉），同理绝不能 resume lin.lineageSid。
+        // 安全降级为 fresh session + DB 历史折叠。
+        claudeSessionId = null;
+        if (history.length === 0) {
+          history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+        }
       }
     } else if (body.kind === "retry") {
       // self-or-ancestor：fork 头重试续自己的 lineage，线性节点续父 lineage；
       // jsonl 缺失 → null → fresh + sid 落本节点（自愈，同 claudeJsonlExists 纪律）。
       const lin = nativeLineageForNode(nodeId, spawnCwd);
       claudeSessionId = lin?.lineageSid ?? null;
+      if (!claudeSessionId && history.length === 0) {
+        history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+      }
     } else {
       claudeSessionId = null; // root / 新话题：fresh lineage
     }
@@ -647,6 +674,9 @@ export async function POST(req: Request) {
       const lin = codexLineageForNode(body.parentNodeId);
       if (!lin) {
         claudeSessionId = null; // 祖先链无可用 lineage → fresh，本节点成新头
+        if (history.length === 0) {
+          history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+        }
       } else if (lin.isRolloutTip && !hasOtherChild(body.parentNodeId, nodeId)) {
         claudeSessionId = lin.lineageSid;
       } else if (lin.nodeTurnOrdinal) {
@@ -655,14 +685,23 @@ export async function POST(req: Request) {
           setNodeResumeId(nodeId, family, built.newSid);
           claudeSessionId = built.newSid;
         } else {
-          claudeSessionId = lin.lineageSid;
+          claudeSessionId = null;
+          if (history.length === 0) {
+            history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+          }
         }
       } else {
-        claudeSessionId = lin.lineageSid;
+        claudeSessionId = null;
+        if (history.length === 0) {
+          history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+        }
       }
     } else if (body.kind === "retry") {
       const lin = codexLineageForNode(nodeId);
       claudeSessionId = lin?.lineageSid ?? null;
+      if (!claudeSessionId && history.length === 0) {
+        history = buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+      }
     } else {
       claudeSessionId = null; // root / 新话题：fresh lineage
     }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { formatTokens } from "./format-tokens";
 import { formatDuration } from "./format-duration";
-import { computeToolActiveDuration } from "@/components/TurnStatsMeta";
+import { computeToolActiveDuration } from "./tool-duration";
 import type { ToolCall } from "@/lib/types";
 
 describe("formatTokens precision", () => {

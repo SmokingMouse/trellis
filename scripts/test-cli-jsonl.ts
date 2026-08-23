@@ -129,10 +129,26 @@ function writeFixture(entries: CliRawEntry[]): string {
   );
   check("空文本不是 turn-start", !isTurnStart(user(uid("u"), null, "   ")));
 
-  // 宽松判据必须恰好放行严格判据挡下的那些（兜底才有东西可认领）。
+  // 宽松判据必须恰好放行严格判据挡下的那些（兜底才有东西可认领），但不认 compact 摘要。
   check(
     "宽松判据放行 meta",
     looseTurnStart(user(uid("u"), null, "Continue…", { isMeta: true })),
+  );
+  check(
+    "宽松判据不认 compact summary",
+    !looseTurnStart(
+      user(uid("u"), null, "Continue from where you left off.", {
+        isCompactSummary: true,
+      }),
+    ),
+  );
+  check(
+    "宽松判据不认 isVisibleInTranscriptOnly",
+    !looseTurnStart(
+      user(uid("u"), null, "Continue from where you left off.", {
+        isVisibleInTranscriptOnly: true,
+      }),
+    ),
   );
   check(
     "宽松判据同样不认 tool_result",

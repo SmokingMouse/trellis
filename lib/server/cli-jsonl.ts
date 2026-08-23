@@ -142,10 +142,13 @@ export function isTurnStart(e: CliRawEntry): boolean {
 
 // 宽松判据：任何带文本的非 tool_result user 消息都能当 turn-start（含被严格
 // 判据挡掉的 meta / system / 命令噪声）。只用于严格判据找不到主时的兜底。
+// 绝不能放行 compact summary（那不是对话起点，否则会导致 turn-start 错配）。
 export function looseTurnStart(e: CliRawEntry): boolean {
-  return (
-    e.type === "user" && !isToolResultEntry(e) && Boolean(userText(e)?.trim())
-  );
+  if (e.type !== "user") return false;
+  if (isToolResultEntry(e)) return false;
+  if (e.isCompactSummary === true) return false;
+  if (e.isVisibleInTranscriptOnly === true) return false;
+  return Boolean(userText(e)?.trim());
 }
 
 // ── turn 归属 ───────────────────────────────────────────────────────────────
