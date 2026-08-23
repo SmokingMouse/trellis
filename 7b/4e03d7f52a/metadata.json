@@ -1,0 +1,31 @@
+{
+  "id": "7b4e03d7f52a",
+  "timestamp": "2026-08-23T15:30:45+08:00",
+  "branch": "worktree/silver-river-7607",
+  "commitHash": "b6e3063af3582bd097fda34e7ee74e3dc467bbbd",
+  "commitMessage": "fix(cli-fork): 修复分叉串线与伪 turn 干扰，安全降级 fresh session，记 S115",
+  "filesModified": [
+    "app/api/chat/route.ts",
+    "components/TurnStatsMeta.tsx",
+    "lib/format-tokens.test.ts",
+    "lib/server/cli-fork.ts",
+    "lib/server/cli-jsonl.ts",
+    "lib/tool-duration.ts",
+    "progress/README.md",
+    "progress/archive.md",
+    "progress/sessions.md",
+    "scripts/test-cli-jsonl.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 82,
+    "humanModified": 67,
+    "humanRemoved": 0,
+    "totalLinesChanged": 149,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
