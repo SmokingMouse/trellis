@@ -1,0 +1,196 @@
+对 herdr 进行深度探查，使用 write craft 写一篇技术文章，帮…
+
+看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   - **User Request**: Analyze a specific conversation tree anomaly in Trellis: *"看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑"* (Look at this tree, it seems to reflect a bug in Trellis: why is a branch continuing the logic/context of another parallel branch?).
+   - **Intent**: Uncover the architectural and implementation bugs in Trellis's session branching, CLI resume, lineage isolation, and JSONL prefix construction logic that cause forked branches to inherit the context and output of parallel branches.
+
+2. Key Technical Concepts:
+   - **Trellis Tree & Node Lineage Model**: In Project mode with `lineage_isolation=1`, Trellis maintains parent-child node relationships in SQLite (`nodes` table) while backing the execution via Claude Code CLI session transcripts (`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`).
+   - **Prefix JSONL Construction (`buildPrefixJsonlCore`)**: When branching from a historical node $X$, Trellis is designed to slice the transcript from root up to node $Xs terminal assistant message, rewrite `sessionId` to a new UUID, write `<newSid>.jsonl`, and execute `claude --resume <newSid>` to create a totally isolated branch.
+   - **Turn Identification & Backfill (`backfillNativeTurnUuid`)**: When a turn completes, Trellis parses the JSONL to find the turn's start entry UUID (`cli_turn_uuid`), which serves as the anchor/cut point for future branch slicing.
+   - **Degradation Fallback Flaw**: In `app/api/chat/route.ts`, if `cli_turn_uuid` is missing or prefix construction fails, Trellis falls back to `claudeSessionId = lin.lineageSid` under the faulty assumption that "上下文只多不错" (more context is harmless). In reality, this causes `claude --resume` to resume the active tip of the existing session, pulling in the entire history of whatever parallel branch was executed last.
+   - **Compaction Summary Noise**: When Claude Code executes `/compact` or runs low on context, it injects a summary entry with `isCompactSummary: true` (`"This session is being continued from a previous conversation..."`).
+
+3. Files and Code Sections:
+   - `app/api/chat/route.ts`:
+     - *Significance*: Handles chat turn routing, lineage resolution, session resumption, and branch instantiation.
+     - *Faulty Code (lines 604-624)*:
+       ```typescript
+       if (body.kind === "branch") {
+         const lin = nativeLineageForNode(body.parentNodeId, spawnCwd);
+         if (!lin) {
+           claudeSessionId = null;
+         } else if (lin.isJsonlTip && !hasOtherChild(body.parentNodeId, nodeId)) {
+           claudeSessionId = lin.lineageSid;
+         } else if (lin.nodeTurnUuid) {
+           const built = buildPrefixJsonlCore(lin.jsonlPath, lin.nodeTurnUuid);
+           if (built) {
+             setNodeResumeId(nodeId, family, built.newSid);
+             claudeSessionId = built.newSid;
+           } else {
+             claudeSessionId = lin.lineageSid; // Bug: falls back to resuming tip of parallel branch!
+           }
+         } else {
+           claudeSessionId = lin.lineageSid; // Bug: missing UUID causes cross-branch context bleed!
+         }
+       }
+       ```
+   - `lib/server/cli-fork.ts`:
+     - *Significance*: Computes lineage metadata (`nativeLineageForNode`), slices JSONL transcripts (`buildPrefixJsonlCore`), and backfills turn UUIDs (`backfillNativeTurnUuid`).
+     - *Relevant Code*:
+       ```typescript
+       export async function backfillNativeTurnUuid(nodeId: string): Promise<void> {
+         // ...
+         const newest = [...parsed.turns].sort(
+           (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+         )[0];
+         if (!q || newest.question.includes(q)) {
+           db.prepare(
+             "UPDATE nodes SET cli_turn_uuid = ? WHERE id = ? AND cli_turn_uuid IS NULL",
+           ).run(newest.id, nodeId);
+           return;
+         }
+       }
+       ```
+   - `lib/server/cli-jsonl.ts`:
+     - *Significance*: Core parser for CLI JSONL transcripts, turn ownership resolution (`makeTurnOwnership`), and entry predicates (`isTurnStart`, `looseTurnStart`).
+     - *Compaction Issue*: `looseTurnStart` allows entries with `isCompactSummary: true` to be recognized as turns during fallback resolution, making the compaction summary appear as `newest.question`.
+
+4. Errors and fixes:
+   - **Bug 1: Fallback to `lin.lineageSid` on missing `cli_turn_uuid` / slicing failure**:
+     - *Root Cause*: When forking from a parent node that lacks `cli_turn_uuid` (or if `buildPrefixJsonlCore` fails), `route.ts` defaults to `claudeSessionId = lin.lineageSid`. Because `lin.lineageSid` is the shared session ID whose JSONL already contains subsequent turns from Branch 1, `claude --resume` executes against the tip of Branch 1.
+     - *Fix Mechanism*: When branching from a non-tip node or when `hasOtherChild` is true, if `nodeTurnUuid` cannot be resolved or prefix slicing fails, it MUST NOT resume `lin.lineageSid`. It should either fall back to folded history (`history = buildHistoryForNode(...)` with a fresh session `claudeSessionId = null`) or fail loudly rather than silently corrupting transcripts and leaking parallel branch contexts.
+   - **Bug 2: `backfillNativeTurnUuid` failure due to Compaction Summary & matching logic**:
+     - *Root Cause*: When Claude Code injects `/compact` summaries (`"This session is being continued from a previous conversation..."`), `looseTurnStart` in `cli-jsonl.ts` turns the summary into a synthetic turn. `backfillNativeTurnUuid` then checks `newest.question.includes(q)` against the summary text, fails the check, times out, and leaves `nodes.cli_turn_uuid` as `NULL`.
+     - *Fix Mechanism*: `backfillNativeTurnUuid` must filter out synthetic/compaction turns when looking for the matching turn, or match by scanning backward across recent turns rather than solely inspecting `turns[0]`.
+
+5. Problem Solving:
+   - Located the exact database records in `/home/zhangpeng.pada/.trellis/data.db` (session `90061380-bb0e-423e-a49b-208b45d7d352`) where the user investigated `herdr`.
+   - Demonstrated how Node `8bcb2658` (root) spawned Branch 1 (`96658104` $\to$ `b3bb0b2a` $\to$ `a7d83071` $\to$ `7cdad4f8` $\to$ `3793a575` $\to$ `c8bc12bb`), which discussed SVG diagrams and Feishu whiteboards.
+   - Traced how Node `4e4e5582` was spawned from Node `8bcb2658`, but because `8bcb2658` had `cli_turn_uuid = NULL`, Trellis passed `claudeSessionId = '8e60b806-f860-4c3d-a8b1-903ed7440a07'`.
+   - Verified in `8e60b806-f860-4c3d-a8b1-903ed7440a07.jsonl` that Node `4e4e5582` became Turn 9 directly appended after Turn 8 ("画 svg 有用技能吗"), explaining why Claude answered `4e4e5582` using context from Branch 1.
+
+6. All user messages:
+   - *"对 herdr 进行深度探查，使用 write craft 写一篇技术文章，帮…\n\n看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑"*
+
+7. Pending Tasks:
+   - Provide a clear, detailed architectural explanation to the user explaining the exact mechanics of why this cross-branch context bleed occurred.
+   - Propose and implement fixes for:
+     1. `app/api/chat/route.ts`: Prevent branching from degrading into resuming the tip of `lin.lineageSid`.
+     2. `lib/server/cli-fork.ts` & `lib/server/cli-jsonl.ts`: Robustly handle `cli_turn_uuid` resolution in the presence of compaction summaries and root nodes.
+
+8. Current Work:
+   - Dissected the root cause of the branching bug in Trellis across `app/api/chat/route.ts`, `lib/server/cli-fork.ts`, and `lib/server/cli-jsonl.ts`.
+   - Inspected the live SQLite database (`~/.trellis/data.db`) and verified the raw JSONL transcript (`8e60b806-f860-4c3d-a8b1-903ed7440a07.jsonl`).
+
+9. Optional Next Step:
+   - Explain the diagnosis directly to the user with the exact turn sequence and code analysis, and outline the fix for `app/api/chat/route.ts` (safe fallback for branching) and `lib/server/cli-fork.ts` (compaction-resilient UUID backfill).
+   - Quote from user leading to this step: *"看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑"*.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/zhangpeng.pada/.claude/projects/-data00-home-zhangpeng-pada--herdr-worktrees-trellis-worktree-silver-river-7607/28ff2aa8-30cd-40cd-a5f9-7989fd76adb8.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+没问题,按照这个思路来改吧
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   - **User Request**: *"看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑"* and subsequently *"没问题,按照这个思路来改吧"*.
+   - **Intent**: Fix the cross-branch context bleed bug in Trellis where creating a branch from a root/historical node causes the new branch to inherit the full transcript and context of existing parallel branches instead of being isolated.
+
+2. Key Technical Concepts:
+   - **Lineage Isolation Model (`lineage_isolation=1`)**: In Project mode, each conversation branch should map to an isolated Claude CLI session transcript (`<sessionId>.jsonl`), with fork nodes maintaining their own `claude_session_id`.
+   - **Prefix JSONL Slicing (`buildPrefixJsonlCore`)**: When branching from node $X$, Trellis reconstructs a trimmed transcript from root up to $Xs terminal assistant response, writes `<newSid>.jsonl`, and resumes with `claude --resume <newSid>`.
+   - **Turn Identification (`cli_turn_uuid`)**: Slicing requires knowing the exact turn-start user message UUID in the transcript.
+   - **Degradation Vulnerability**: `claude --resume <sid>` has no turn-slicing parameter and resumes from the absolute tip of `<sid>.jsonl`. Falling back to `claudeSessionId = lin.lineageSid` on branch failure resumes the tip of whatever parallel branch was executed last.
+   - **Compaction Summaries (`isCompactSummary: true`)**: Injected by Claude Code during `/compact`. They must not be parsed as user turn starts or interfere with `cli_turn_uuid` backfilling.
+
+3. Files and Code Sections:
+   - `app/api/chat/route.ts`:
+     - *Significance*: Resolves lineage, builds conversation history, selects session IDs, and launches runs.
+     - *Vulnerable Fallback (lines 605-623)*:
+       ```typescript
+       if (body.kind === "branch") {
+         const lin = nativeLineageForNode(body.parentNodeId, spawnCwd);
+         if (!lin) {
+           claudeSessionId = null;
+         } else if (lin.isJsonlTip && !hasOtherChild(body.parentNodeId, nodeId)) {
+           claudeSessionId = lin.lineageSid;
+         } else if (lin.nodeTurnUuid) {
+           const built = buildPrefixJsonlCore(lin.jsonlPath, lin.nodeTurnUuid);
+           if (built) {
+             setNodeResumeId(nodeId, family, built.newSid);
+             claudeSessionId = built.newSid;
+           } else {
+             claudeSessionId = lin.lineageSid; // Bug: Bleeds parallel branch context!
+           }
+         } else {
+           claudeSessionId = lin.lineageSid; // Bug: Bleeds parallel branch context!
+         }
+       }
+       ```
+     - *Fix*: In non-tip / multi-child branching, if `built` is null or `nodeTurnUuid` is missing, fallback to `claudeSessionId = null` (creating a fresh session with `sessionIdTarget = "node"`) and supply `history = buildHistoryForNode(nodeId, { maxDepth: foldDepth })`.
+   - `lib/server/cli-jsonl.ts`:
+     - *Significance*: Defines JSONL turn predicates (`isTurnStart`, `looseTurnStart`) and turn ownership resolution.
+     - *Vulnerable Code (lines 145-149)*:
+       ```typescript
+       export function looseTurnStart(e: CliRawEntry): boolean {
+         return (
+           e.type === "user" && !isToolResultEntry(e) && Boolean(userText(e)?.trim())
+         );
+       }
+       ```
+     - *Fix*: Exclude `e.isCompactSummary === true` and `e.isVisibleInTranscriptOnly === true` from `looseTurnStart`.
+   - `lib/server/cli-fork.ts`:
+     - *Significance*: Backfills `cli_turn_uuid` on turn completion (`backfillNativeTurnUuid`).
+     - *Vulnerable Code (lines 321-329)*:
+       ```typescript
+       const newest = [...parsed.turns].sort(
+         (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+       )[0];
+       if (!q || newest.question.includes(q)) {
+         db.prepare(
+           "UPDATE nodes SET cli_turn_uuid = ? WHERE id = ? AND cli_turn_uuid IS NULL",
+         ).run(newest.id, nodeId);
+         return;
+       }
+       ```
+     - *Fix*: Traverse `parsed.turns` (from newest to oldest) filtering out compaction summaries to locate the turn matching `q`.
+
+4. Errors and fixes:
+   - **Bug 1: Silent Fallback to Shared `lineageSid` on Branching**:
+     - *Cause*: `app/api/chat/route.ts` fell back to `claudeSessionId = lin.lineageSid` when `nodeTurnUuid` was missing or slicing failed.
+     - *Fix*: Fallback to `claudeSessionId = null` with `history = buildHistoryForNode(nodeId)` so branching never resumes parallel branch tips.
+   - **Bug 2: Missing `cli_turn_uuid` from Compaction Summary Interference**:
+     - *Cause*: `looseTurnStart` recognized compaction summaries as turns, and `backfillNativeTurnUuid` checked only `parsed.turns[0]`.
+     - *Fix*: Prevent compaction summaries in `looseTurnStart` and match against historical turns in `backfillNativeTurnUuid`.
+
+5. Problem Solving:
+   - Diagnosed live SQLite database entries (`session 90061380-...`) and confirmed how Node `8bcb2658` had `cli_turn_uuid = NULL`, leading Node `4e4e5582` to be appended to `8e60b806-....jsonl` as Turn 9 immediately after Turn 8 of Branch 1.
+   - Validated JSONL structures and confirmed that compaction summaries (`f2442fe8...`) triggered the UUID backfill failure.
+
+6. All user messages:
+   - *"对 herdr 进行深度探查，使用 write craft 写一篇技术文章，帮…\n\n看看这棵树,好像反应了 trellis 的某些 bug, 为啥分支会接续另一条分支的逻辑"*
+   - *"没问题,按照这个思路来改吧"*
+
+7. Pending Tasks:
+   - Modify `lib/server/cli-jsonl.ts` to guard `looseTurnStart` against `isCompactSummary` and `isVisibleInTranscriptOnly`.
+   - Update `lib/server/cli-fork.ts` (`backfillNativeTurnUuid`) to scan turns robustly.
+   - Update `app/api/chat/route.ts` to implement safe fresh-session fallback for branches when prefix slicing cannot be performed (for both Claude and Codex).
+   - Run tests (`bun scripts/test-cli-jsonl.ts`, `bun test`) and verify regression safety.
+
+8. Current Work:
+   - Preparing code edits across `lib/server/cli-jsonl.ts`, `lib/server/cli-fork.ts`, and `app/api/chat/route.ts` following user confirmation.
+
+9. Optional Next Step:
+   - Execute the code modifications in `lib/server/cli-jsonl.ts`, `lib/server/cli-fork.ts`, and `app/api/chat/route.ts`, followed by running the regression test suite.
+   - User quote leading to this step: *"没问题,按照这个思路来改吧"*.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/zhangpeng.pada/.claude/projects/-data00-home-zhangpeng-pada--herdr-worktrees-trellis-worktree-silver-river-7607/28ff2aa8-30cd-40cd-a5f9-7989fd76adb8.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
