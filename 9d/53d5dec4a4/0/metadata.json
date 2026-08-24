@@ -1,0 +1,22 @@
+{
+  "sessionId": "8e14def9-a325-43c4-a6f7-41d6a00b093e",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "main",
+  "startedAt": "2026-08-19T16:09:46+08:00",
+  "condensedAt": "2026-08-24T11:59:25+08:00",
+  "reason": "commit",
+  "turns": 2,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 472640,
+    "output": 92538,
+    "cached": 6917037
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read",
+    "Write"
+  ]
+}
