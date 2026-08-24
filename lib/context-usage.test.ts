@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ctxTokensOf, findLineageCtxTurn } from "./context-usage";
+import { ctxTokensOf, findLineageCtxTurn, isContextCompacted } from "./context-usage";
 
 type ContextNode = Parameters<typeof ctxTokensOf>[0];
 
@@ -71,5 +71,40 @@ describe("Header context usage", () => {
         }),
       ),
     ).toBe(90);
+  });
+
+  describe("isContextCompacted", () => {
+    test("detects continuation summary marker in question", () => {
+      const summaryNode = {
+        question:
+          "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
+        tokenCount: { input: 1000, output: 200, cacheRead: 0, cacheCreation: 0 },
+      };
+      expect(isContextCompacted(summaryNode)).toBe(true);
+    });
+
+    test("detects context occupancy plunge", () => {
+      const prev = {
+        question: "Previous long turn",
+        tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 120_000 },
+      };
+      const curr = {
+        question: "Next turn after compact",
+        tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 25_000 },
+      };
+      expect(isContextCompacted(curr, prev)).toBe(true);
+    });
+
+    test("returns false for normal consecutive turns", () => {
+      const prev = {
+        question: "Step 1",
+        tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 30_000 },
+      };
+      const curr = {
+        question: "Step 2",
+        tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 35_000 },
+      };
+      expect(isContextCompacted(curr, prev)).toBe(false);
+    });
   });
 });

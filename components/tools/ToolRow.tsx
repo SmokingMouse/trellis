@@ -93,13 +93,21 @@ function SegmentRow({
 }) {
   const [open, setOpen] = useState(false);
   const { nodes } = entry;
+
   return (
-    <div className="bg-surface/60">
+    <div
+      className={`transition-colors ${
+        live
+          ? "bg-surface/80 border-l-2 border-l-line-strong/60 hover:bg-surface-muted/60"
+          : "bg-surface/60 hover:bg-surface-muted/60"
+      }`}
+    >
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:bg-surface-muted/60 hover:text-ink-muted transition-colors"
+        title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
+        className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:text-ink-muted transition-colors group"
       >
         <span
           className="transition-transform shrink-0"
@@ -111,8 +119,13 @@ function SegmentRow({
         <span className="shrink-0 select-none" aria-hidden>
           ⋯
         </span>
-        <span className="tabular-nums shrink-0">{nodes.length} 步</span>
+        <span className="tabular-nums shrink-0 font-mono text-ink-muted">
+          {nodes.length} 步
+        </span>
         <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
+        <span className="shrink-0 text-nano px-1.5 py-0.5 rounded bg-surface-muted border border-line/60 text-ink-faint group-hover:text-ink-muted transition-colors">
+          {open ? "已展开" : "已自动收起"}
+        </span>
         <span className="flex-1" />
         <span className="text-nano tabular-nums shrink-0">
           {segmentDuration(nodes)}
