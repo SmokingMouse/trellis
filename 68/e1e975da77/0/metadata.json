@@ -1,0 +1,22 @@
+{
+  "sessionId": "18415e4b-83b2-4618-8649-b8e55132097b",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "worktree/quiet-stone-94f5",
+  "startedAt": "2026-08-24T12:03:00+08:00",
+  "condensedAt": "2026-08-24T15:19:55+08:00",
+  "reason": "compaction",
+  "turns": 4,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 2004284,
+    "output": 26306,
+    "cached": 6836402
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read",
+    "ToolSearch"
+  ]
+}

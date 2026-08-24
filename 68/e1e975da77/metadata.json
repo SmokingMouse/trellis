@@ -1,0 +1,17 @@
+{
+  "id": "68e1e975da77",
+  "timestamp": "2026-08-24T15:19:55+08:00",
+  "branch": "worktree/quiet-stone-94f5",
+  "commitHash": null,
+  "commitMessage": "",
+  "filesModified": [
+    "components/LinearThreadView.tsx",
+    "components/tools/ToolRow.tsx",
+    "lib/context-usage.test.ts",
+    "lib/context-usage.ts",
+    "scripts/test-timeline-render.tsx"
+  ],
+  "sessions": 1,
+  "attribution": {},
+  "reason": "compaction"
+}
