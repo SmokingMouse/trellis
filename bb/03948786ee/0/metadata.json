@@ -1,0 +1,22 @@
+{
+  "sessionId": "2a38ec5e-a262-4bcd-a7d6-7343fbfe1aa6",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "worktree/calm-cloud-7849",
+  "startedAt": "2026-08-24T19:52:37+08:00",
+  "condensedAt": "2026-08-24T20:14:46+08:00",
+  "reason": "compaction",
+  "turns": 2,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 2338930,
+    "output": 64446,
+    "cached": 3575074
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read",
+    "Skill"
+  ]
+}

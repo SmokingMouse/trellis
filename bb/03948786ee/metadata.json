@@ -1,0 +1,14 @@
+{
+  "id": "bb03948786ee",
+  "timestamp": "2026-08-24T20:14:46+08:00",
+  "branch": "worktree/calm-cloud-7849",
+  "commitHash": null,
+  "commitMessage": "",
+  "filesModified": [
+    "lib/server/cli-jsonl.ts",
+    "scripts/test-cli-jsonl.ts"
+  ],
+  "sessions": 1,
+  "attribution": {},
+  "reason": "compaction"
+}
