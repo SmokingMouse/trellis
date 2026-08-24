@@ -36,3 +36,38 @@ export function findLineageCtxTurn(
   }
   return null;
 }
+
+/**
+ * Detects whether conversation context was automatically compacted before/at this turn.
+ * Sourced either from CLI-injected continuation summary markers in question text,
+ * or a noticeable context occupancy drop (e.g. >=40k tokens dropped by >=40%).
+ */
+export function isContextCompacted(
+  currNode: { question?: string; tokenCount: ChatNode["tokenCount"] },
+  prevNode?: { question?: string; tokenCount: ChatNode["tokenCount"] },
+): boolean {
+  if (!currNode) return false;
+
+  const q = currNode.question ?? "";
+  if (
+    q.includes("This session is being continued from a previous conversation that ran out of context") ||
+    q.includes("The summary below covers the earlier portion of the conversation")
+  ) {
+    return true;
+  }
+
+  if (prevNode) {
+    const prevCtx = ctxTokensOf(prevNode as any);
+    const currCtx = ctxTokensOf(currNode as any);
+    if (
+      prevCtx >= 40_000 &&
+      currCtx > 0 &&
+      currCtx <= prevCtx * 0.6 &&
+      prevCtx - currCtx >= 30_000
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}

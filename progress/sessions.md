@@ -1,6 +1,19 @@
 # Session Log
 
-最近 5 条，倒序（Session 120 / 119 / 118 / 117 / 116）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 121 / 120 / 119 / 118 / 117）。更早的见 `archive.md`。
+
+### Session 121（2026-08-24，自动压缩感知增强：工具连跑折叠状态标识 + 轮次上下文自动压缩分隔条）
+- **触发**: 用户反馈触发自动压缩时希望能明确感知到，避免静默压缩导致用户误以为步骤消失或未理解上下文转入紧凑摘要。
+- **设计（两层压缩感知）**:
+  1. **工具链级冷热折叠感知 (`SegmentRow`)**: 连续 ≥3 个已完成普通工具折叠成 chip 时，增加明确状态徽章（`[已自动收起]` / `[已展开]`）、操作提示浮层（`title="点击展开已自动收起的明细"`）及 live 活跃边框高亮，明确告知用户此处发生自动折叠与可点击展开。
+  2. **会话轮次级上下文自动压缩感知 (`LinearThreadView`)**: 新增 `isContextCompacted` 判据（捕获 CLI 紧凑延续摘要标记与 ≥40k token 降幅 ≥40% 门限），在长会话触发自动 compact 时渲染虚线分隔条与徽章（`🗜️ 上下文已自动压缩（早期历史已转入模型紧凑摘要）`）。
+- **Done**:
+  1. `components/tools/ToolRow.tsx`: `SegmentRow` 增加 `已自动收起` / `已展开` 状态徽章、展开提示 tooltip、live 态视觉区隔，保持冷数据不进 DOM 的同时提供直观感知。
+  2. `lib/context-usage.ts`: 新增 `isContextCompacted` 判定函数；补充 `lib/context-usage.test.ts` 单元测试。
+  3. `components/LinearThreadView.tsx`: 接入 `isContextCompacted`，在紧凑压缩轮次交界处渲染分隔条与说明。
+  4. `scripts/test-timeline-render.tsx`: 补全段落 chip 带有「已自动收起」提示的断言。
+- **验证**: `bun test` 44/44 全部通过；`bun scripts/test-timeline-render.tsx`、`bun scripts/test-cli-jsonl.ts`、`bun scripts/test-tool-tree.ts` 全通过；`tsc --noEmit` 0 错。
+- **Next**: 合并至 main 后部署上线。
 
 ### Session 120（2026-08-23，Lineage 隔离分叉串线修复：切片失败安全降级 + 紧凑摘要/turn 判据收紧）
 - **触发**: 用户反馈从历史节点分叉发问时，分支接续了另一条并行分支的上下文和执行历史。
@@ -45,14 +58,4 @@
 - **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
 - **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
 
-### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
-- **触发**: 用户反馈隐藏的树在画布上仍然会出现。
-- **根因**: `Canvas.tsx` 中 `hiddenIds` 仅通过 `hiddenByCollapse` 处理折叠节点的后代，未将 `hiddenAt !== null` 的雪藏树（根及全部后代）加入排除集合；`Outline.tsx` 未区分可见树与雪藏树，且缺少对雪藏树的恢复/隐藏控制。
-- **Done**:
-  1. `lib/collapsed.ts`: 新增 `hiddenCanvasNodeIds`，统一将「折叠节点的后代」以及「雪藏树（`root.hiddenAt !== null`）根与全部后代」纳入隐藏 ID 集合；补充 `lib/collapsed.test.ts` 单元测试。
-  2. `components/Canvas.tsx`: `hiddenIds` 改用 `hiddenCanvasNodeIds`，在 Dagre 自动布局、`flowNodes`、`flowEdges`、焦点平移、页面挂载落地候选（`fresh`）中全面排除雪藏树。
-  3. `components/Outline.tsx`: 区分 `visibleForest` 与 `hiddenForest`；增加 `已隐藏 · N 棵` 折叠分组（默认收起，全隐藏时自适应展开）；根节点行新增悬停隐藏/恢复按钮，支持在思维树大纲直接隐藏或恢复树，并自动切换焦点。
-  4. `stores/sessionStore.ts`: `setViewMode("canvas")` 切换至画布时，若焦点所在树为隐藏树，自动回退到首棵可见树根。
-- **验证**: `bun test` 26/26 全部通过（覆盖 collapsed、tree-panel、format-tokens、context-usage）；相关逻辑零报错。
-- **Next**: 合并至 main，下次 `make deploy` 部署上线。
 
