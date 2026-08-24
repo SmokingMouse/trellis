@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已落地待部署；cpa codex 故障在查（failures.md）。
+Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已上线；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
