@@ -1,0 +1,21 @@
+{
+  "sessionId": "28ff2aa8-30cd-40cd-a5f9-7989fd76adb8",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "worktree/silver-river-7607",
+  "startedAt": "2026-08-23T01:45:57+08:00",
+  "condensedAt": "2026-08-24T11:36:21+08:00",
+  "reason": "commit",
+  "turns": 3,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 565854,
+    "output": 17990,
+    "cached": 4804256
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read"
+  ]
+}
