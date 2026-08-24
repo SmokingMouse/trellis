@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已上线；cpa codex 故障在查（failures.md）。
+全平台 SVG 渲染与交互体系优化（S121）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -17,7 +17,7 @@ Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已上线�
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S120–116） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S121–117） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

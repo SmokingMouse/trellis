@@ -1,6 +1,17 @@
 # Session Log
 
-最近 5 条，倒序（Session 120 / 119 / 118 / 117 / 116）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 121 / 120 / 119 / 118 / 117）。更早的见 `archive.md`。
+
+### Session 121（2026-08-24，全平台 SVG 渲染与交互体系优化：代码块双模式 + 文件预览与源码 + 样式增强）
+- **触发**: 用户「现在在平台上,好像不支持 svg 的渲染,做一些优化」。
+- **根因**: ① CodeBlock 仅将 `svg/xml/html` 作为文本代码高亮渲染，用户生成图表/流程图/矢量图只能看到长串代码，无法直观看到渲染效果；② 缺少「预览/源码」切换、背景色切换（网格/亮色/暗色防深浅冲突）、缩放与放大模态框、下载 SVG 等操作；③ FilePreview 对 `.svg` 文件仅作为静态 `<img>` 展示，无法查看与复制源码；④ Markdown 内直接嵌入的 `<svg>` 缺少响应式防溢出样式。
+- **Done**:
+  1. `lib/svg.ts`: 新增纯工具库——`isSvgCode`（语言与内容特征识别）、`extractSvg`、`normalizeSvg`（自动补全缺失的 `xmlns`、视口 `viewBox` 兜底、去除危险脚本）、`validateSvgSyntax`（DOMParser XML 解析校验）、`createSvgBlobUrl`（沙箱安全 Blob URL）、`downloadSvgFile`（一键下载）。
+  2. `components/CodeBlock.tsx`: 全面升级支持 SVG 渲染——检测到 SVG 代码块时默认开启「👁 预览」视图；提供「👁 预览 / 📄 源码」一键切换；支持背景切换（网格底 / 亮底 / 暗底）、点击放大 / ⛶ 全屏弹窗大图预览（支持 20%~400% 缩放调节与 1:1 重置）、一键下载 `.svg` 文件、复制源码，遇到畸形/未闭合标签优雅降级提示并引导查看源码。
+  3. `components/FilePreview.tsx`: 增加 `SvgFilePreview` 专属文件预览组件，支持视觉预览与源码查看双模式、缩放比例控制器、背景色切换与复制/下载。
+  4. `components/HoverPreview.tsx` & `app/globals.css`: 悬浮卡片增加高对比网格背景；全局为 `.md-body svg` 增加自适应 `max-width: 100%`、`height: auto` 与居中展示，彻底杜绝内容溢出卡片。
+- **验证**: `scripts/test-svg-rendering.tsx` 全流程断言通过（包含提取、规范化、安全清洗、识别与 Unified AST/JSX 转换）；`bun --bun run build` 成功完成 Turbopack 生产编译。
+- **Next**: 合并至 main，下次 `make deploy` 部署上线。
 
 ### Session 120（2026-08-23，Lineage 隔离分叉串线修复：切片失败安全降级 + 紧凑摘要/turn 判据收紧）
 - **触发**: 用户反馈从历史节点分叉发问时，分支接续了另一条并行分支的上下文和执行历史。
@@ -44,15 +55,3 @@
 - **Done ⑤ TaskToast**: run_started/run_finished 事件 `bumpSessionsRevision()`（首跑懒建的会话行即时长出）；点击 toast 从 `window.location.href` 整页刷新改为 store 内 `previewSession + setActiveNode`（同路由改 URL 本就不触发深链 effect，老写法靠整页重启 store 才凑效）。
 - **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
 - **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
-
-### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
-- **触发**: 用户反馈隐藏的树在画布上仍然会出现。
-- **根因**: `Canvas.tsx` 中 `hiddenIds` 仅通过 `hiddenByCollapse` 处理折叠节点的后代，未将 `hiddenAt !== null` 的雪藏树（根及全部后代）加入排除集合；`Outline.tsx` 未区分可见树与雪藏树，且缺少对雪藏树的恢复/隐藏控制。
-- **Done**:
-  1. `lib/collapsed.ts`: 新增 `hiddenCanvasNodeIds`，统一将「折叠节点的后代」以及「雪藏树（`root.hiddenAt !== null`）根与全部后代」纳入隐藏 ID 集合；补充 `lib/collapsed.test.ts` 单元测试。
-  2. `components/Canvas.tsx`: `hiddenIds` 改用 `hiddenCanvasNodeIds`，在 Dagre 自动布局、`flowNodes`、`flowEdges`、焦点平移、页面挂载落地候选（`fresh`）中全面排除雪藏树。
-  3. `components/Outline.tsx`: 区分 `visibleForest` 与 `hiddenForest`；增加 `已隐藏 · N 棵` 折叠分组（默认收起，全隐藏时自适应展开）；根节点行新增悬停隐藏/恢复按钮，支持在思维树大纲直接隐藏或恢复树，并自动切换焦点。
-  4. `stores/sessionStore.ts`: `setViewMode("canvas")` 切换至画布时，若焦点所在树为隐藏树，自动回退到首棵可见树根。
-- **验证**: `bun test` 26/26 全部通过（覆盖 collapsed、tree-panel、format-tokens、context-usage）；相关逻辑零报错。
-- **Next**: 合并至 main，下次 `make deploy` 部署上线。
-

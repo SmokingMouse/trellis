@@ -137,7 +137,7 @@ function ImageBody({ url, name }: { url: string; name: string }) {
   if (failed)
     return <div className="px-3 py-2.5 text-xs text-ink-faint">图片加载失败</div>;
   return (
-    <div className="p-2 flex items-center justify-center">
+    <div className="p-2 flex items-center justify-center min-h-[100px] [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/12px_12px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.2)_0%_50%)_50%/12px_12px]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
