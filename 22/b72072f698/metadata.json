@@ -1,0 +1,30 @@
+{
+  "id": "22b72072f698",
+  "timestamp": "2026-08-24T20:22:52+08:00",
+  "branch": "worktree/calm-cloud-7849",
+  "commitHash": "618283c800e6cd3ed05b690739439cd587c695e6",
+  "commitMessage": "fix(cli-jsonl): 修复 Compact Continuation 断链与最终回复丢失问题，记 S122",
+  "filesModified": [
+    "lib/server/cli-jsonl.ts",
+    "progress/README.md",
+    "progress/archive.md",
+    "progress/sessions.md",
+    "scripts/test-cli-jsonl.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 22,
+    "agentRemoved": 2,
+    "humanAdded": 108,
+    "humanModified": 2,
+    "humanRemoved": 0,
+    "totalLinesChanged": 134,
+    "agentPercentage": 16.4,
+    "agentFiles": [
+      "progress/README.md",
+      "progress/archive.md",
+      "progress/sessions.md"
+    ]
+  },
+  "reason": "commit"
+}
