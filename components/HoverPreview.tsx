@@ -21,6 +21,8 @@ import {
   remoteImageHref,
   type PreviewKind,
 } from "@/lib/generated-files";
+import { createSvgBlobUrl } from "@/lib/svg";
+import { renderMermaidToSvg } from "@/lib/mermaid";
 
 // Hover preview for file links / inline file paths inside rendered markdown:
 // linger ~250ms on a previewable target → a floating card shows the content
@@ -122,12 +124,68 @@ function HoverCard({
 
 function HoverBody({ target }: { target: HoverTarget }) {
   if (target.kind === "image") return <ImageBody url={target.url} name={target.name} />;
+  if (target.kind === "mermaid") return <MermaidHoverBody url={target.url} name={target.name} />;
   if (target.kind === "markdown" || target.kind === "text")
     return <TextBody url={target.url} markdown={target.kind === "markdown"} />;
   // html/pdf: content needs an iframe — too heavy for a peek card.
   return (
     <div className="px-3 py-2.5 text-xs text-ink-faint">
       {target.kind.toUpperCase()} 文件 · 点击打开完整预览
+    </div>
+  );
+}
+
+function MermaidHoverBody({ url, name }: { url: string; name: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((t) => {
+        if (!alive) return;
+        const isDark =
+          typeof document !== "undefined" &&
+          document.documentElement.classList.contains("dark");
+        return renderMermaidToSvg(t, isDark);
+      })
+      .then((res) => {
+        if (!alive || !res) return;
+        if (res.error || !res.svg) {
+          setFailed(true);
+        } else {
+          const bUrl = createSvgBlobUrl(res.svg);
+          setBlobUrl(bUrl);
+        }
+      })
+      .catch(() => alive && setFailed(true));
+
+    return () => {
+      alive = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [url]);
+
+  if (failed) {
+    return <TextBody url={url} markdown={false} />;
+  }
+
+  if (!blobUrl) {
+    return <div className="px-3 py-2.5 text-xs text-ink-faint">渲染图表中…</div>;
+  }
+
+  return (
+    <div className="p-2 flex items-center justify-center min-h-[100px] [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/12px_12px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.2)_0%_50%)_50%/12px_12px]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={blobUrl}
+        alt={name}
+        className="max-w-full max-h-[252px] object-contain"
+      />
     </div>
   );
 }

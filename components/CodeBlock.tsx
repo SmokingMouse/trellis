@@ -15,6 +15,7 @@ import {
   downloadSvgFile,
   validateSvgSyntax,
 } from "@/lib/svg";
+import { isMermaidCode, renderMermaidToSvg } from "@/lib/mermaid";
 
 function langOf(children: ReactNode): string {
   if (isValidElement(children)) {
@@ -48,36 +49,66 @@ export function CodeBlock({
   const [failed, setFailed] = useState(false);
   const lang = langOf(children);
 
-  // Extract raw text to detect if this block is an SVG
+  // Extract raw text to detect if this block is an SVG or Mermaid diagram
   const codeText = extractText(children);
   const isSvg = isSvgCode(codeText, lang);
+  const isMermaid = !isSvg && isMermaidCode(codeText, lang);
+  const isDiagram = isSvg || isMermaid;
 
   const [mode, setMode] = useState<"preview" | "code">("preview");
   const [bg, setBg] = useState<BgMode>("checkered");
   const [isZoomed, setIsZoomed] = useState(false);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [svgError, setSvgError] = useState<string | null>(null);
+  const [diagramError, setDiagramError] = useState<string | null>(null);
 
-  // Generate safe SVG Blob URL when in SVG mode
+  // Generate safe SVG Blob URL for SVG or Mermaid diagrams
   useEffect(() => {
-    if (!isSvg || !codeText) return;
-    const validation = validateSvgSyntax(codeText);
-    if (!validation.valid) {
-      setSvgError(validation.error || "SVG 语法格式有误");
-      return;
+    if (!isDiagram || !codeText) return;
+    let active = true;
+    let createdUrl: string | null = null;
+
+    if (isSvg) {
+      const validation = validateSvgSyntax(codeText);
+      if (!validation.valid) {
+        setDiagramError(validation.error || "SVG 语法格式有误");
+        return;
+      }
+      try {
+        createdUrl = createSvgBlobUrl(codeText);
+        setBlobUrl(createdUrl);
+        setDiagramError(null);
+      } catch {
+        setDiagramError("SVG 解析生成失败");
+      }
+    } else if (isMermaid) {
+      const isDark =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("dark");
+
+      void renderMermaidToSvg(codeText, isDark).then(({ svg, error }) => {
+        if (!active) return;
+        if (error || !svg) {
+          setDiagramError(error || "Mermaid 语法格式错误");
+          setBlobUrl(null);
+        } else {
+          try {
+            createdUrl = createSvgBlobUrl(svg);
+            setBlobUrl(createdUrl);
+            setDiagramError(null);
+          } catch {
+            setDiagramError("Mermaid SVG 生成失败");
+          }
+        }
+      });
     }
 
-    try {
-      const url = createSvgBlobUrl(codeText);
-      setBlobUrl(url);
-      setSvgError(null);
-      return () => {
-        URL.revokeObjectURL(url);
-      };
-    } catch {
-      setSvgError("SVG 解析生成失败");
-    }
-  }, [isSvg, codeText]);
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [isDiagram, isSvg, isMermaid, codeText]);
 
   const copy = async (e: MouseEvent) => {
     e.stopPropagation();
@@ -104,11 +135,21 @@ export function CodeBlock({
 
   const handleDownload = (e: MouseEvent) => {
     e.stopPropagation();
-    downloadSvgFile(codeText, "diagram.svg");
+    if (isSvg) {
+      downloadSvgFile(codeText, "diagram.svg");
+    } else if (isMermaid) {
+      // If we have rendered the diagram, fetch the blob and download
+      if (blobUrl) {
+        fetch(blobUrl)
+          .then((r) => r.text())
+          .then((svgStr) => downloadSvgFile(svgStr, "mermaid-diagram.svg"))
+          .catch(() => downloadSvgFile(codeText, "diagram.txt"));
+      }
+    }
   };
 
-  // If this is not an SVG codeblock, render the standard code block
-  if (!isSvg) {
+  // If this is not a diagram codeblock, render the standard code block
+  if (!isDiagram) {
     return (
       <div className="md-codeblock">
         <div className="md-codeblock-bar" contentEditable={false}>
@@ -140,6 +181,8 @@ export function CodeBlock({
     dark: "背景: 暗色",
   };
 
+  const badgeText = isSvg ? "SVG" : "Mermaid";
+
   return (
     <div className="md-codeblock my-3 rounded-card border border-line overflow-hidden shadow-raise">
       {/* Top action bar */}
@@ -147,10 +190,10 @@ export function CodeBlock({
         className="md-codeblock-bar flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-muted/90 border-b border-line text-ui text-ink select-none"
         contentEditable={false}
       >
-        {/* Left: SVG badge + Mode switcher */}
+        {/* Left: Diagram badge + Mode switcher */}
         <div className="flex items-center gap-1.5">
           <span className="px-1.5 py-0.5 rounded text-nano font-mono font-semibold bg-accent-muted text-accent-ink border border-accent-line">
-            SVG
+            {badgeText}
           </span>
           <div className="inline-flex rounded-md p-0.5 bg-surface border border-line text-label">
             <button
@@ -210,7 +253,7 @@ export function CodeBlock({
               <button
                 type="button"
                 onClick={handleDownload}
-                title="下载为 .svg 文件"
+                title="下载为 .svg 矢量图"
                 className="px-2 py-0.5 rounded text-label text-ink-muted bg-surface hover:bg-surface-raised border border-line transition-colors"
               >
                 ⤓ 下载
@@ -233,11 +276,11 @@ export function CodeBlock({
         <div
           className={`relative min-h-[160px] max-h-[520px] overflow-auto flex items-center justify-center p-6 transition-colors ${bgClasses[bg]}`}
         >
-          {svgError ? (
+          {diagramError ? (
             <div className="text-center p-4 bg-warn-muted/80 border border-warn-line rounded-lg text-warn-ink text-ui max-w-md">
-              <div className="font-semibold mb-1">⚠️ {svgError}</div>
+              <div className="font-semibold mb-1">⚠️ {diagramError}</div>
               <p className="text-label opacity-90 mb-2">
-                当前 SVG 语法有误或模型尚未完全输出闭合标签。
+                当前图表语法有误或模型尚未完全输出闭合标签。
               </p>
               <button
                 type="button"
@@ -251,13 +294,13 @@ export function CodeBlock({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={blobUrl}
-              alt="SVG Preview"
+              alt={`${badgeText} Diagram Preview`}
               onClick={() => setIsZoomed(true)}
               className="max-w-full max-h-[460px] object-contain cursor-zoom-in transition-transform duration-150 hover:scale-[1.01]"
               title="点击放大查看"
             />
           ) : (
-            <div className="text-ink-faint text-label">渲染中…</div>
+            <div className="text-ink-faint text-label">图表渲染中…</div>
           )}
         </div>
       ) : (
@@ -268,9 +311,11 @@ export function CodeBlock({
 
       {/* Zoom Modal */}
       {isZoomed && blobUrl && (
-        <SvgZoomModal
+        <DiagramZoomModal
+          title={`${badgeText} 图表预览`}
           blobUrl={blobUrl}
-          svgCode={codeText}
+          code={codeText}
+          isSvg={isSvg}
           bg={bg}
           onBgChange={setBg}
           onClose={() => setIsZoomed(false)}
@@ -280,15 +325,19 @@ export function CodeBlock({
   );
 }
 
-function SvgZoomModal({
+function DiagramZoomModal({
+  title,
   blobUrl,
-  svgCode,
+  code,
+  isSvg,
   bg,
   onBgChange,
   onClose,
 }: {
+  title: string;
   blobUrl: string;
-  svgCode: string;
+  code: string;
+  isSvg: boolean;
   bg: BgMode;
   onBgChange: (bg: BgMode) => void;
   onClose: () => void;
@@ -305,11 +354,22 @@ function SvgZoomModal({
 
   const handleCopy = async () => {
     try {
-      await copyText(svgCode);
+      await copyText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignore
+    }
+  };
+
+  const handleDownload = () => {
+    if (isSvg) {
+      downloadSvgFile(code, "diagram.svg");
+    } else {
+      fetch(blobUrl)
+        .then((r) => r.text())
+        .then((svgStr) => downloadSvgFile(svgStr, "mermaid-diagram.svg"))
+        .catch(() => downloadSvgFile(code, "diagram.txt"));
     }
   };
 
@@ -328,7 +388,7 @@ function SvgZoomModal({
         <div className="shrink-0 flex items-center justify-between px-5 h-13 border-b border-line bg-surface-muted/60">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-ui text-ink-strong">
-              SVG 矢量图预览
+              {title}
             </span>
             <span className="text-label text-ink-faint">
               ({Math.round(scale * 100)}%)
@@ -391,13 +451,13 @@ function SvgZoomModal({
               onClick={handleCopy}
               className="px-2.5 py-1 rounded border border-line bg-surface text-ui text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
             >
-              {copied ? "✓ 已复制源码" : "复制 SVG"}
+              {copied ? "✓ 已复制源码" : "复制代码"}
             </button>
 
             {/* Download button */}
             <button
               type="button"
-              onClick={() => downloadSvgFile(svgCode, "diagram.svg")}
+              onClick={handleDownload}
               className="px-2.5 py-1 rounded bg-accent text-white text-ui hover:opacity-90 transition-opacity"
             >
               ⤓ 下载 SVG
@@ -422,7 +482,7 @@ function SvgZoomModal({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={blobUrl}
-            alt="SVG Full Preview"
+            alt="Full Diagram Preview"
             style={{
               transform: `scale(${scale})`,
               transformOrigin: "center center",

@@ -1,4 +1,5 @@
 import { isSvgCode, normalizeSvg, extractSvg, validateSvgSyntax } from "../lib/svg";
+import { isMermaidCode, isMermaidLang } from "../lib/mermaid";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
@@ -35,13 +36,19 @@ if (normalized1.includes("<script>")) {
 }
 console.log("✓ normalizeSvg handles xmlns, viewBox and sanitization");
 
-console.log("=== 2. Testing SVG Code Block Detection ===");
+console.log("=== 2. Testing SVG & Mermaid Code Block Detection ===");
 
 if (!isSvgCode(raw1, "xml")) throw new Error("Should recognize SVG with xml tag");
 if (!isSvgCode("<svg viewBox='0 0 10 10'></svg>", "svg")) throw new Error("Should recognize svg tag");
 if (isSvgCode("const a = 1; console.log(a);", "typescript")) throw new Error("Should NOT recognize ts as svg");
 if (isSvgCode("<note><to>User</to><from>Bot</from></note>", "xml")) throw new Error("Should NOT recognize general XML as svg");
 console.log("✓ isSvgCode correctly distinguishes SVG from other code blocks");
+
+if (!isMermaidLang("mermaid")) throw new Error("isMermaidLang failed");
+if (!isMermaidCode("graph TD\n  A-->B", "mermaid")) throw new Error("isMermaidCode failed");
+if (!isMermaidCode("sequenceDiagram\n  Alice->>Bob: Hello", "")) throw new Error("isMermaidCode starter detection failed");
+if (isMermaidCode("const foo = 'bar';", "javascript")) throw new Error("isMermaidCode false positive");
+console.log("✓ isMermaidCode & isMermaidLang correctly detect Mermaid diagrams");
 
 console.log("=== 3. Testing Markdown unified pipeline ===");
 

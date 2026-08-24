@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-全平台 SVG 渲染与交互体系优化（S121）已落地待部署；cpa codex 故障在查（failures.md）。
+全平台 SVG 与 Mermaid 图表渲染与交互体系优化（S121）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
