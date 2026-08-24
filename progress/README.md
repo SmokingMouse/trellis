@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Compact Continuation 拓扑桥接修复（S123）与自动压缩感知增强（S122）已就绪待部署。
+工作区读写与侧栏交互重构（S124）与 Compact 拓扑桥接（S123）已就绪待部署。
 
 ## Goals
 

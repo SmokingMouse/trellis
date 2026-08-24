@@ -18,10 +18,13 @@ import {
   HOME_CLUSTER_KEY,
   SCRATCH_CLUSTER_KEY,
   type ProjectSummary,
+  type WorkspaceSummary,
   type Session,
   type SidebarTask,
   type WorkspaceGitStatus,
 } from "@/lib/types";
+import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
+import { BatchCleanModal } from "@/components/BatchCleanModal";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
 // 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
@@ -78,6 +81,15 @@ export function SessionSidebar() {
   const setDraftMode = useSessionStore((s) => s.setDraftMode);
   const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [diffTarget, setDiffTarget] = useState<{
+    id: string;
+    name?: string;
+    path?: string;
+  } | null>(null);
+  const [batchCleanTarget, setBatchCleanTarget] = useState<{
+    ids: string[];
+    projectName?: string;
+  } | null>(null);
   // 新建 worktree 的行内表单：值 = 正在建的 projectId，null = 没在建
   const [wtFor, setWtFor] = useState<string | null>(null);
   const [wtBranch, setWtBranch] = useState("");
@@ -487,6 +499,54 @@ export function SessionSidebar() {
   // 但三级不是恒定的：workspace 那一层**不带信息时就该消失**，否则它只是
   // 白占一级缩进、把真正要扫的会话往里推。两种不带信息的情形（见 isFlat）
   // 走两级渲染 —— Project → Session 直挂。
+  const renderWorkspaceItem = (w: WorkspaceSummary, isReclaimable = false) => {
+    const list = byWorkspace.get(w.id) ?? [];
+    const wCollapsed = collapsed.has(w.id);
+    const g = gitStatus.get(w.id);
+    const br = g?.branch ?? w.gitBranch;
+
+    return (
+      <div key={w.id}>
+        <GroupRow
+          level={isReclaimable ? 2 : 1}
+          collapsed={wCollapsed}
+          label={w.name}
+          // 有 session 才可折叠；空的没有子内容，给三角就是个骗人的开关。
+          toggleable={list.length > 0}
+          tag={w.kind === "worktree" && !br ? "worktree" : null}
+          git={g ?? null}
+          muted={list.length === 0 || isReclaimable}
+          title={`${w.path}${(() => {
+            return [
+              br ? `\n分支: ${br}` : "",
+              g?.dirty ? `\n${g.dirty} 个文件有改动或未跟踪 (点击角标查看 Diff)` : "",
+              g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以安全回收" : "",
+            ].join("");
+          })()}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
+          badge={wCollapsed && list.length > 0 ? String(list.length) : null}
+          onToggle={() => toggleCollapsed(w.id)}
+          onInspectDiff={
+            g?.dirty && g.dirty > 0
+              ? () => setDiffTarget({ id: w.id, name: w.name, path: w.path })
+              : undefined
+          }
+          onAdd={() => startSessionIn(w.path)}
+          addTitle="在这个工作区下开新会话"
+          onRemove={
+            w.kind === "worktree"
+              ? () => void removeWorktree(w)
+              : undefined
+          }
+        />
+        {!wCollapsed && list.length > 0 && (
+          <IndentGuide level={isReclaimable ? 2 : 1}>
+            {list.map((s) => renderRow(s, isReclaimable ? 3 : 2))}
+          </IndentGuide>
+        )}
+      </div>
+    );
+  };
+
   const renderProjects = () =>
     projects.map((p) => {
       const pCollapsed = collapsed.has(p.id);
@@ -504,6 +564,27 @@ export function SessionSidebar() {
       // 一个会话都没有就别平铺 —— 那会剩下个底下空无一物的项目行，
       // 还不如留着那条灰的 workspace 行说明「这里还没开过会话」。
       const flat = flatList.length > 0;
+
+      // 划分活跃工作区 vs 已合并/可清理工作区
+      const activeWorkspaces: WorkspaceSummary[] = [];
+      const reclaimableWorkspaces: WorkspaceSummary[] = [];
+
+      for (const w of p.workspaces) {
+        const g = gitStatus.get(w.id);
+        const sessionList = byWorkspace.get(w.id) ?? [];
+        const hasRunning = sessionList.some((s) => isRunning(s.id));
+        // 已合并且本地无改动、无正在运行会话
+        if (g?.reclaimable && !hasRunning && (g?.dirty ?? 0) === 0) {
+          reclaimableWorkspaces.push(w);
+        } else {
+          activeWorkspaces.push(w);
+        }
+      }
+
+      const reclaimKey = `__reclaim_${p.id}`;
+      // 默认折叠已合并分组（不在 collapsed 集合内算折叠）
+      const isReclaimCollapsed = !collapsed.has(reclaimKey);
+
       return (
         <div key={p.id} className="mb-3">
           <GroupRow
@@ -511,11 +592,9 @@ export function SessionSidebar() {
             collapsed={pCollapsed}
             label={p.name}
             title={`${p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${
-              // 平铺掉 workspace 行后，路径没别处可看了 —— 挪进 project 的
-              // tooltip，别让它随那一级一起消失。
               flat && p.workspaces.length === 1
                 ? `${p.workspaces[0].path}\n`
-                : `${p.workspaces.length} 个工作区 · `
+                : `${p.workspaces.length} 个工作区 (${activeWorkspaces.length} 活跃 · ${reclaimableWorkspaces.length} 已合并) · `
             }${pCount} 个会话`}
             badge={pCollapsed && pCount > 0 ? String(pCount) : null}
             onToggle={() => toggleCollapsed(p.id)}
@@ -558,66 +637,36 @@ export function SessionSidebar() {
             </IndentGuide>
           )}
           {!pCollapsed && !flat && (
-          <IndentGuide level={0}>
-            {p.workspaces.map((w) => {
-              const list = byWorkspace.get(w.id) ?? [];
-              const wCollapsed = collapsed.has(w.id);
-              return (
-                <div key={w.id}>
+            <IndentGuide level={0}>
+              {activeWorkspaces.map((w) => renderWorkspaceItem(w, false))}
+              {reclaimableWorkspaces.length > 0 && (
+                <div>
                   <GroupRow
                     level={1}
-                    collapsed={wCollapsed}
-                    label={w.name}
-                    // 有 session 才可折叠；空的（worktree 扫出来还没用过）
-                    // 没有子内容，给三角就是个骗人的开关。
-                    toggleable={list.length > 0}
-                    // 有实时分支可显示时就不再挂「worktree」这个静态标签 ——
-                    // 分支名信息量大得多，而一行里放不下两样。
-                    tag={
-                      w.kind === "worktree" && !gitStatus.get(w.id)?.branch
-                        ? "worktree"
-                        : null
+                    collapsed={isReclaimCollapsed}
+                    label="✓ 已合并"
+                    badge={String(reclaimableWorkspaces.length)}
+                    muted
+                    title={`已合并的工作区 · ${reclaimableWorkspaces.length} 个\n分支已并入主干且本地干净，可安全批量清理`}
+                    onToggle={() => toggleCollapsed(reclaimKey)}
+                    onBatchClean={() =>
+                      setBatchCleanTarget({
+                        ids: reclaimableWorkspaces.map((w) => w.id),
+                        projectName: p.name,
+                      })
                     }
-                    git={gitStatus.get(w.id) ?? null}
-                    muted={list.length === 0}
-                    title={`${w.path}${(() => {
-                      const g = gitStatus.get(w.id);
-                      const br = g?.branch ?? w.gitBranch;
-                      return [
-                        br ? `\n分支 ${br}` : "",
-                        g?.dirty ? `\n${g.dirty} 个文件有改动或未跟踪` : "",
-                        g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以回收" : "",
-                      ].join("");
-                    })()}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
-                    badge={
-                      wCollapsed && list.length > 0 ? String(list.length) : null
-                    }
-                    onToggle={() => toggleCollapsed(w.id)}
-                    // 「0 会话（还没在这里开过会话）」那行以前是条死路：看得见、
-                    // 点不动、没有任何办法从它进到会话里。＋ 在这一级就是它的
-                    // 出口，也是**已有** worktree（CLI 里建的、上次建完没用的）
-                    // 唯一一个不用过 WorkspacePicker 的入口。
-                    onAdd={() => startSessionIn(w.path)}
-                    addTitle="在这个工作区下开新会话"
-                    // 删磁盘只给 trellis 自己 worktree add 出来的 —— 用户在 CLI 里
-                    // 建的该在 CLI 里删。至于「列表里留着已不存在的行」，由重扫的
-                    // 自动 prune 解决，不需要一个手动的「移除」入口（实测过：
-                    // 手动摘掉目录仍在的行，下次重扫就把它加回来了）。
-                    onRemove={
-                      w.createdBy === "trellis" && w.kind === "worktree"
-                        ? () => void removeWorktree(w)
-                        : undefined
-                    }
+                    batchCleanTitle="批量清理这组已合并工作区"
                   />
-                  {!wCollapsed && list.length > 0 && (
+                  {!isReclaimCollapsed && (
                     <IndentGuide level={1}>
-                      {list.map((s) => renderRow(s, 2))}
+                      {reclaimableWorkspaces.map((w) =>
+                        renderWorkspaceItem(w, true),
+                      )}
                     </IndentGuide>
                   )}
                 </div>
-              );
-            })}
-          </IndentGuide>
+              )}
+            </IndentGuide>
           )}
         </div>
       );
@@ -788,6 +837,31 @@ export function SessionSidebar() {
           </aside>
         </div>
       )}
+
+      {/* 工作区代码改动检视抽屉/弹窗 */}
+      {diffTarget && (
+        <WorkspaceDiffModal
+          workspaceId={diffTarget.id}
+          workspaceName={diffTarget.name}
+          workspacePath={diffTarget.path}
+          onClose={() => setDiffTarget(null)}
+          onStartSession={(p) => startSessionIn(p)}
+        />
+      )}
+
+      {/* 批量清理已合并工作区弹窗 */}
+      {batchCleanTarget && (
+        <BatchCleanModal
+          open={Boolean(batchCleanTarget)}
+          workspaceIds={batchCleanTarget.ids}
+          projectName={batchCleanTarget.projectName}
+          onClose={() => setBatchCleanTarget(null)}
+          onSuccess={() => {
+            bumpSessionsRevision();
+            setGitNonce((n) => n + 1);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -825,7 +899,7 @@ function IndentGuide({
   level,
   children,
 }: {
-  level: 0 | 1;
+  level: number;
   children: React.ReactNode;
 }) {
   return (
@@ -846,30 +920,42 @@ function IndentGuide({
 // 外层刻意是 div 而非 button：行上要挂「+ 新建 worktree」「删除」这类操作，
 // button 里套 button 是非法 HTML（SidebarRow 同款处理）。
 /**
- * workspace 行右侧的 git 角标：分支 · 脏文件数 · 可回收。
+ * workspace 行右侧的 git 角标：脏文件数 · 可回收。
  *
- * 这一行以前只有目录名和一个静态的「worktree」标签 —— 也就是说，三个并行
- * 工作区摆在一起，你看不出哪个有未提交的活、哪个已经可以清掉了。
+ * 点击脏文件角标可直接打开 Diff 变更检视抽屉。
  */
 function GitBadge({
   git,
-  label,
+  onInspectDiff,
 }: {
   git: WorkspaceGitStatus;
-  label: string;
+  onInspectDiff?: () => void;
 }) {
-  // 分支名和目录名相同时不重复显示 —— worktree 通常同名，重复只是噪音。
-  const branch = git.branch && git.branch !== label ? git.branch : null;
-  if (!branch && !git.dirty && !git.reclaimable) return null;
+  if (!git.dirty && !git.reclaimable) return null;
   return (
     <span className="shrink-0 flex items-center gap-1 text-nano md:group-hover:hidden">
-      {branch && (
-        <span className="text-ink-faint truncate max-w-24">{branch}</span>
-      )}
       {git.dirty > 0 && (
-        <span className="text-warn tabular-nums">●{git.dirty}</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            if (onInspectDiff) {
+              e.stopPropagation();
+              onInspectDiff();
+            }
+          }}
+          title={`${git.dirty} 个文件有改动或未跟踪（点击查看改动详情）`}
+          className={`tabular-nums text-warn font-medium px-1 py-0.5 rounded hover:bg-warn-muted transition-colors ${
+            onInspectDiff ? "cursor-pointer" : ""
+          }`}
+        >
+          ●{git.dirty}
+        </button>
       )}
-      {git.reclaimable && <span className="text-positive">✓</span>}
+      {git.reclaimable && (
+        <span className="text-positive font-semibold" title="已合并入主干且工作区干净">
+          ✓
+        </span>
+      )}
     </span>
   );
 }
@@ -887,9 +973,14 @@ function GroupRow({
   onToggle,
   onAdd,
   addTitle = "在这个项目下新建 worktree",
+  onInspectDiff,
+  diffTitle = "查看工作区代码改动",
+  onBatchClean,
+  batchCleanTitle = "批量清理已合并工作区",
   onRemove,
+  removeTitle = "删除这个 worktree（会先列出将被删掉的东西）",
 }: {
-  level: 0 | 1;
+  level: number;
   collapsed: boolean;
   label: string;
   title: string;
@@ -902,7 +993,12 @@ function GroupRow({
   onAdd?: () => void;
   /** ＋ 在两级上意思不同：project 级是「开 worktree」，workspace 级是「开会话」 */
   addTitle?: string;
+  onInspectDiff?: () => void;
+  diffTitle?: string;
+  onBatchClean?: () => void;
+  batchCleanTitle?: string;
   onRemove?: () => void;
+  removeTitle?: string;
 }) {
   return (
     <div
@@ -933,38 +1029,34 @@ function GroupRow({
         </span>
         <span className="flex-1 min-w-0 truncate">{label}</span>
       </button>
-      {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 ——
-          Tailwind 的 group-hover 自带 `@media (hover:hover)` 包装，触屏上
-          这条规则根本不匹配，于是那里三者共存。挤不下由 label 的 truncate
-          吸收，这是可接受的降级。 */}
+      {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 */}
       {tag && (
         <span className="shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint group-hover:hidden">
           {tag}
         </span>
       )}
-      {git && <GitBadge git={git} label={label} />}
+      {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
       {badge && (
         <span className="shrink-0 text-nano tabular-nums text-ink-faint group-hover:hidden">
           {badge}
         </span>
       )}
-      {/* 判据是「有没有 hover 能力」，不是「屏幕多宽」。
-          原来只有 `hidden group-hover:flex`，而移动端抽屉与桌面 rail 复用同一份
-          renderPanel —— Tailwind 的 group-hover 自带 `@media (hover:hover)`
-          包装，触屏上那条规则根本不匹配，于是这两个按钮**永远点不到**。
-          实测后果：上线至今 workspaces.created_by='trellis' 行数为 0，
-          「新建 worktree」入口一次都没被成功用过，而这正是 S1 判据未达标最直接
-          的原因。所以补的是 `pointer-coarse:flex`（触屏常显），不是 `md:` 断点
-          —— iPad / 触屏笔记本是**大屏且无 hover**，按宽度判会漏掉它们。
-
-          写成「基础态 hidden + 两条互斥的显示规则」而不是「基础 flex + 隐藏
-          规则」，是被实测逼出来的：`pointer-fine:hidden` 在产物 CSS 里排在
-          `group-hover:flex` **之后**（offset 55476 vs 47049），两者特异性又
-          相同（`:where()` 计 0），于是隐藏反过来把 hover 显示覆盖掉，鼠标设备
-          上按钮再也出不来 —— 比原来的 bug 还糟。现在两条规则都是「显示」，
-          谁先谁后都不影响结果。 */}
-      {(onAdd || onRemove) && (
+      {(onAdd || onInspectDiff || onBatchClean || onRemove) && (
         <div className="shrink-0 hidden group-hover:flex pointer-coarse:flex items-center gap-0.5">
+          {onInspectDiff && (
+            <RowIconButton title={diffTitle} onClick={onInspectDiff}>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9" y1="13" x2="15" y2="13" />
+              <line x1="9" y1="17" x2="15" y2="17" />
+            </RowIconButton>
+          )}
+          {onBatchClean && (
+            <RowIconButton title={batchCleanTitle} onClick={onBatchClean}>
+              <path d="M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z" />
+              <path d="M5 21h14" />
+            </RowIconButton>
+          )}
           {onAdd && (
             <RowIconButton title={addTitle} onClick={onAdd}>
               <path d="M12 5v14M5 12h14" />
@@ -972,7 +1064,7 @@ function GroupRow({
           )}
           {onRemove && (
             <RowIconButton
-              title="删除这个 worktree（会先列出将被删掉的东西）"
+              title={removeTitle}
               danger
               onClick={onRemove}
             >
