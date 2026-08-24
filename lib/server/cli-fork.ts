@@ -226,7 +226,7 @@ export type NativeLineage = {
   lineageSid: string;
   jsonlPath: string;
   // 该节点的 turn 在 lineage jsonl 里的 uuid（nodes.cli_turn_uuid）。NULL =
-  // 回填缺失 → 调用方在该点分叉须降级线性 resume。
+  // 回填缺失 → 调用方在该点分叉须安全降级为起 fresh 独立 session 并由 DB 历史折叠供给上下文。
   nodeTurnUuid: string | null;
   isJsonlTip: boolean;
 };
@@ -279,9 +279,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // done 后回填该 native isolated 节点的 turn uuid（run-bus 钩子，best-effort）。
 // jsonl 落盘略滞后于 done 事件（与 reconcileAttachedTurn 同时序）→ 轮询 ≤8×300ms。
-// 防错配闸：最新 turn 的 question 必须包含节点 question（project prompt = 原文或
-// anchor 包裹原文，contains 恒成立；skill 命令轮会被解析器滤成噪音则匹配不上）——
-// 匹配不上就放弃：错误的 uuid 会让分叉切错位置，缺失只是降级线性，后者严格更安全。
+// 防错配闸：在逆序（最新优先）轮次中寻找 question 包含节点 question 的 turn
+// （project prompt = 原文或 anchor 包裹原文，contains 恒成立；skill 命令轮会被解析器滤成噪音则匹配不上）——
+// 匹配不上就放弃：错误的 uuid 会让分叉切错位置；缺失只是降级 fresh+DB 历史折叠，严格更安全。
 export async function backfillNativeTurnUuid(nodeId: string): Promise<void> {
   const db = getDB();
   const row = db
@@ -318,13 +318,16 @@ export async function backfillNativeTurnUuid(nodeId: string): Promise<void> {
     if (lin) {
       const parsed = parseCliSessionJsonl(lin.jsonlPath);
       if (parsed && parsed.turns.length > 0) {
-        const newest = [...parsed.turns].sort(
+        const sortedTurns = [...parsed.turns].sort(
           (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
-        )[0];
-        if (!q || newest.question.includes(q)) {
+        );
+        const match = q
+          ? sortedTurns.find((t) => t.question.includes(q))
+          : sortedTurns[0];
+        if (match) {
           db.prepare(
             "UPDATE nodes SET cli_turn_uuid = ? WHERE id = ? AND cli_turn_uuid IS NULL",
-          ).run(newest.id, nodeId);
+          ).run(match.id, nodeId);
           return;
         }
       }

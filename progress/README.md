@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-工具动线冷热重排（S119）、trellisctl 操作面（S118）、定时任务侧栏（S117）已落地待部署；cpa codex 故障在查（failures.md）。
+Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已落地待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -17,7 +17,7 @@
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S118–114） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S120–116） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
