@@ -227,7 +227,81 @@ function writeFixture(entries: CliRawEntry[]): string {
   check("fork 也能在兜底 turn 上截前缀", terminalAssistantLine(rawLines, meta) !== null);
 }
 
-// ── 4. import ↔ fork 边界一致（真语料全扫）─────────────────────────────────
+// ── 4. Compact Continuation：长动线上下文压缩后不丢最终回复且不断链 ─────────
+{
+  section("Compact Continuation 拓扑桥接与最终答复保留");
+
+  const q1 = uid("q");
+  const t1 = uid("a");
+  const tr1 = uid("u");
+  const sysCompact = uid("s");
+  const compactSummary = uid("u");
+  const att1 = uid("att");
+  const aFinal = uid("a");
+  const q2 = uid("q");
+  const a2 = uid("a");
+
+  // 场景：Turn 1 发起 -> 工具调用 -> 触发自动 Compact (system parent null + isCompactSummary)
+  // -> Attachments -> 最终答复 aFinal -> Turn 2 发起 q2 -> 回答 a2
+  const entries: CliRawEntry[] = [
+    user(q1, null, "帮我分析全景车信与拓扑的过滤逻辑"),
+    assistant(t1, q1, "", {
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call_1", name: "Read", input: {} }],
+      },
+    }),
+    user(tr1, t1, "", {
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "call_1", content: "file content" }],
+      },
+    }),
+    // Compact 块
+    {
+      type: "system",
+      uuid: sysCompact,
+      parentUuid: null,
+      message: { role: "system", content: [] },
+    },
+    user(compactSummary, sysCompact, "This session is being continued from a previous conversation...", {
+      isCompactSummary: true,
+      isVisibleInTranscriptOnly: true,
+    }),
+    {
+      type: "attachment",
+      uuid: att1,
+      parentUuid: compactSummary,
+    },
+    assistant(aFinal, att1, "在当前的架构中，路网车信数据主要分为两个层级..."),
+    // 下一轮
+    user(q2, aFinal, "所以是完全匹配才算挂上吗？"),
+    assistant(a2, q2, "是的，只有完全重合的拓扑才会挂接。"),
+  ];
+
+  const p = writeFixture(entries);
+  const byUuid = indexByUuid(entries);
+  const { resolveOwner } = makeTurnOwnership(byUuid);
+
+  check("Compact 内的最终答复归属于 Turn 1", resolveOwner(aFinal) === q1, resolveOwner(aFinal));
+  check("Turn 2 的 parentTurn 归属于 Turn 1", resolveOwner(q2) === q2);
+
+  const parsed = parseCliSessionJsonl(p);
+  check("解析出正好 2 个有效 Turn（无伪 Turn 节点）", parsed?.turns.length === 2, parsed?.turns.length);
+
+  const turn1 = parsed?.turns.find((t) => t.id === q1);
+  const turn2 = parsed?.turns.find((t) => t.id === q2);
+
+  check("Turn 1 包含工具调用记录", (turn1?.toolCalls.length ?? 0) === 1);
+  check("Turn 1 成功保留 Compact 后的最终文本回复", Boolean(turn1?.response.includes("路网车信数据主要分为两个层级")), turn1?.response);
+  check("Turn 2 的 parentId 正确指向 Turn 1（拓扑不裂成根）", turn2?.parentId === q1, turn2?.parentId);
+
+  const rawLines = readJsonlLines(p)!;
+  const tail1 = terminalAssistantLine(rawLines, q1);
+  check("Turn 1 截前缀 tail 正确指向 Compact 后的 aFinal", tail1?.entry.uuid === aFinal, tail1?.entry.uuid);
+}
+
+// ── 5. import ↔ fork 边界一致（真语料全扫）─────────────────────────────────
 // 这是本 harness 的主断言：import 造出来的每个 turn，fork 都必须能在**同一条**
 // turn 上找到 tail。两边判据一分家这里立刻红。
 {

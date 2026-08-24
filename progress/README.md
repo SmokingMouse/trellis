@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Lineage 隔离分叉串线修复与紧凑摘要判据收紧（S120）已上线；cpa codex 故障在查（failures.md）。
+Compact Continuation 拓扑桥接与长动线最终回复丢失修复（S121）已就绪待部署。
 
 ## Goals
 
