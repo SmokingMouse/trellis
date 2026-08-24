@@ -50,7 +50,7 @@ export function filePreviewUrl(sessionId: string, absPath: string): string {
 // Extensions we offer a preview for. Mirrors the server mime table; anything
 // else stays plain text (no clickable affordance).
 const PREVIEWABLE_EXT =
-  /\.(html?|svg|png|jpe?g|gif|webp|pdf|md|markdown|json|css|m?js|tsx?|jsx|py|csv|ya?ml|toml|sh|sql|go|rs|java|rb|txt|xml)$/i;
+  /\.(html?|svg|png|jpe?g|gif|webp|pdf|md|markdown|mmd|mermaid|json|css|m?js|tsx?|jsx|py|csv|ya?ml|toml|sh|sql|go|rs|java|rb|txt|xml)$/i;
 
 // Decide whether an inline-code string is a previewable file path, returning
 // the ABSOLUTE path (for filePreviewUrl) or null. Strict, to keep false
@@ -114,7 +114,13 @@ export function remoteImageHref(href: string): boolean {
   }
 }
 
-export type PreviewKind = "html" | "image" | "pdf" | "markdown" | "text";
+export type PreviewKind =
+  | "html"
+  | "image"
+  | "pdf"
+  | "markdown"
+  | "mermaid"
+  | "text";
 
 export function previewKind(name: string): PreviewKind {
   const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
@@ -123,5 +129,6 @@ export function previewKind(name: string): PreviewKind {
     return "image";
   if (ext === ".pdf") return "pdf";
   if (ext === ".md" || ext === ".markdown") return "markdown";
+  if (ext === ".mmd" || ext === ".mermaid") return "mermaid";
   return "text";
 }

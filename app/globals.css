@@ -892,6 +892,19 @@ html, body {
 }
 .md-body blockquote p { margin: 0.3em 0; }
 
+/* Markdown 内联/嵌入式 SVG 矢量图与图像优化：防溢出、自适应尺寸、居中展示 */
+.md-body svg:not([class*="lucide"]):not([aria-hidden]) {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.85em auto;
+  border-radius: 6px;
+}
+.md-body img {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Horizontal rule */
 .md-body hr {
   border: 0;
