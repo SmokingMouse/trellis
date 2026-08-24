@@ -132,5 +132,23 @@ describe("tree-panel", () => {
   it("treeLabel formats correctly", () => {
     const n = makeMockNode("root1", null, 100, "My Label");
     expect(treeLabel(n)).toBe("My Label");
+
+    const nNoTopic = makeMockNode("root2", null, 100, undefined);
+    expect(treeLabel(nNoTopic)).toBe("Question for root2");
+
+    const nRef = makeMockNode("root3", null, 100, undefined);
+    nRef.kind = "reference";
+    nRef.reference = {
+      sourceType: "url",
+      sourceUri: "https://example.com",
+      fetchedAt: 100,
+      contentMd: "content",
+      meta: { title: "Ref Title" },
+    };
+    expect(treeLabel(nRef)).toBe("Ref Title");
+
+    // When topicLabel is provided, it takes precedence even on reference nodes
+    nRef.topicLabel = "Custom Ref Name";
+    expect(treeLabel(nRef)).toBe("Custom Ref Name");
   });
 });

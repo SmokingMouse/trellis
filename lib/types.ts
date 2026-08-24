@@ -361,6 +361,15 @@ export type Session = {
   agentId?: string | null;
 };
 
+// S117：侧栏「定时任务」分组的骨架行（GET /api/sessions 的 tasks 字段）。
+// 行的实体是任务而非会话 —— 会话是懒建的，没跑过的任务也该有固定入口。
+export type SidebarTask = {
+  id: string;
+  name: string;
+  homeSessionId: string | null;
+  enabled: boolean;
+};
+
 // Notebook entry: a quoted excerpt the user captured from a node while
 // reading. Stays per-session (cascades when the session is deleted).
 // sourceNodeId carries the originating node so the UI can navigate back

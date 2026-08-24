@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import type { ToolNode } from "@/lib/tool-tree";
@@ -57,6 +58,11 @@ export function WorkflowView({ node }: { node: ToolNode }) {
         <span>{phases.length} 阶段</span>
         <span>{agents.length} agent</span>
         <span>{agents.filter((a) => a.state === "done").length} 完成</span>
+        {agents.some((a) => a.state !== "done") && (
+          <span className="text-warn-ink">
+            {agents.filter((a) => a.state !== "done").length} 运行中
+          </span>
+        )}
         {sumTokens(agents) > 0 && <span>{formatTokens(sumTokens(agents))}</span>}
       </div>
 
@@ -93,6 +99,10 @@ export function WorkflowView({ node }: { node: ToolNode }) {
   );
 }
 
+// 一个 phase：活跃的（还有 agent 没跑完）自动铺开 agent 行 —— 那是热区；
+// 跑完的收成一行 ✔ 标题 + 计数，点击才重新铺开。和 ToolRow 同一套
+// 「自动规则 + 用户点击置顶」心智：用户手动开过的完成 phase 不会被
+// 下一帧快照收回去。
 function PhaseBlock({
   title,
   agents,
@@ -102,9 +112,20 @@ function PhaseBlock({
 }) {
   const done = agents.filter((a) => a.state === "done").length;
   const running = agents.some((a) => a.state !== "done");
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? running;
+  const toggleable = agents.length > 0;
   return (
     <div className="border-l-2 border-line ml-1 pl-2">
-      <div className="flex items-center gap-2 text-label">
+      <button
+        type="button"
+        onClick={toggleable ? () => setUserOpen(!open) : undefined}
+        aria-expanded={toggleable ? open : undefined}
+        disabled={!toggleable}
+        className={`w-full flex items-center gap-2 text-label text-left rounded px-1 -mx-1 ${
+          toggleable ? "hover:bg-surface-muted/60 cursor-pointer" : ""
+        }`}
+      >
         <span className="shrink-0 select-none text-ink-faint">
           {agents.length > 0 && done === agents.length ? "✔" : running ? "▸" : "○"}
         </span>
@@ -114,8 +135,8 @@ function PhaseBlock({
             {done}/{agents.length}
           </span>
         )}
-      </div>
-      {agents.length > 0 && (
+      </button>
+      {toggleable && open && (
         <div className="mt-1 space-y-0.5">
           {agents.map((a) => (
             <AgentRow key={`${a.index}-${a.agentId ?? a.label}`} agent={a} />

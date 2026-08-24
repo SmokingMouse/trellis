@@ -45,6 +45,42 @@ export function hiddenByCollapse(
   return hidden;
 }
 
+// All node ids that should disappear from the canvas:
+// 1. Descendants of collapsed nodes (the collapsed node itself stays visible)
+// 2. All nodes in hidden trees (root.hiddenAt !== null) — the root and all its descendants are hidden
+export function hiddenCanvasNodeIds(
+  collapsed: Iterable<string>,
+  nodes: Record<string, ChatNode>,
+): Set<string> {
+  const idx = buildChildrenIndex(nodes);
+  const hidden = new Set<string>();
+
+  // 1. Descendants of collapsed nodes
+  const walkCollapsed = (id: string) => {
+    for (const k of idx.get(id) ?? []) {
+      if (hidden.has(k)) continue;
+      hidden.add(k);
+      walkCollapsed(k);
+    }
+  };
+  for (const id of collapsed) walkCollapsed(id);
+
+  // 2. Entire hidden trees (root + all descendants)
+  const walkSubtree = (id: string) => {
+    hidden.add(id);
+    for (const k of idx.get(id) ?? []) {
+      walkSubtree(k);
+    }
+  };
+  for (const n of Object.values(nodes)) {
+    if (!n.parentId && n.hiddenAt !== null) {
+      walkSubtree(n.id);
+    }
+  }
+
+  return hidden;
+}
+
 // Direct + indirect descendant count for a node — drives the "▶ N" / "▼ N"
 // chip on cards and the muted suffix in Outline rows.
 export function descendantCount(

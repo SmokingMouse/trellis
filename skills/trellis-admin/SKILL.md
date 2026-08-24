@@ -1,11 +1,11 @@
 ---
 name: trellis-admin
-description: 配置 Trellis 平台的后台——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「让它盯着某个目录，一改就跑」「这个跑完之后自动做 Y」「这个任务上次为什么失败」「看看有哪些定时任务」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「让这台机器上的某个 agent 定时地、或被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、后台跑完再触发、同步完成后、任务失败、run 历史、看看任务。边界：只操作 Trellis 的 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
+description: 操作与配置 Trellis 平台。两个面：①平台操作——列会话、看某棵树/某个节点的运行情况（在跑/停着等回答/失败）、读它的回答正文、在某个节点下追问（分支）、在某会话里开平行新树、开全新会话（可带工作目录）、守着一个节点跑完、叫停、回答它停下来等的审批卡/提问卡；②后台配置——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「看看 trellis 上那棵树/那个会话跑得怎么样」「在那棵树上接着问一句」「给 trellis 开棵新树/新会话」「替我盯着它跑完」「它停在审批上了帮我处理」「把那个 run 停了」「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「这个跑完之后自动做 Y」「这个任务上次为什么失败」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「读写这台机器上 Trellis 里的会话/树/节点」或「让某个 agent 定时地、被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、那棵树、隔壁的树、开新树、树的运行情况、盯着跑完、停掉那个节点、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、任务失败、run 历史、看看任务。边界：操作 Trellis 的会话/节点与 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
 ---
 
-# Trellis 后台配置
+# Trellis 平台操作与后台配置
 
-界面上能点的东西（管理台 `/settings/agents` 和 `/settings/tasks`），这里用一句话就能做完。价值不在"能做"，在于**建一个任务要填八个字段**，而对话里说清楚只要一句。
+界面上能点的东西——画布上的树和节点、管理台 `/settings/agents` `/settings/tasks`——这里用一句话就能做完。两个面：**平台操作面**读写会话/树/节点（trellisctl 之于 Trellis 画布，如 herdr 之于终端 pane），**后台配置面**管 agents / tasks / triggers。
 
 所有操作都走 `scripts/trellisctl.ts`：
 
@@ -13,7 +13,38 @@ description: 配置 Trellis 平台的后台——建/改自定义 Agent（人设
 bun <skill目录>/scripts/trellisctl.ts health      # 先探这一下，确认连上的是哪个实例
 ```
 
-裸 `trellisctl` 不带参数会打完整用法。下文只讲**字段语义和它们的坑**——那些是光看用法看不出来的。
+裸 `trellisctl` 不带参数会打完整用法。下文只讲**语义和坑**——那些是光看用法看不出来的。
+
+## 平台操作面：会话 / 树 / 节点
+
+概念对齐（拿错层级是这个面唯一的高频错误）：
+
+- **会话（session）** = 一块画布 = UI 顶栏的一个 tab。有稳定 id、有标题（自动命名，手动改过就不再被覆盖）。纯对话，或绑一个工作目录（project 模式，能读写文件）。
+- **树** = 会话画布里的一个根节点。一个会话可以有多棵平行树。**树没有独立 id——树就是它的根节点**，拿 nodeId 当树柄。
+- **节点（node）** = 一轮问答。状态三值 `streaming / done / error`，外加一个更要紧的横切态：`pendingInteraction` 非空 = run 被交互式工具挂起、**停着等人回答**（输出里的 ⏸）。
+
+读随便跑：`sessions`（列会话，▶ 标在跑）→ `sessions get <id>`（树形大纲）→ `node get <id>` / `node read <id>`；`ps` 直接回答「现在谁在跑、谁停着等回答」。id 一律从上一条命令的输出里拿，别凭记忆拼。
+
+写操作 = `ask`，它**真 spawn 一次 LLM run**（花钱；project 模式还真改文件），发之前把问题和目标给用户看一眼。三个目标形态的区别在**上文**：
+
+| 形态 | 语义 | 上文 |
+|---|---|---|
+| `ask "..." --node <id>` | 在那个节点下追问（树上长分支） | 继承该链路的全部上文 |
+| `ask "..." --session <id>` | 同画布开一棵平行新树 | 全新，与旧树无关 |
+| `ask "..." --new [--workspace <dir>]` | 全新会话 | 全新；带 workspace 进 project 模式 |
+
+「在那棵树上接着问」= `--node` 给它的**叶子**节点（给中间节点就是分叉，那是刻意动作）。`--new --workspace` 默认 YOLO（工具全放行、真改文件）；加 `--approval` 让可变更工具逐个弹卡，卡会变成 ⏸，用 `respond` 回——闭环成立，这是交互式路径上唯一的闸。
+
+**默认发完即走**：拿到 `node=<id>` 就返回，run 在服务端继续（run 与 HTTP 解耦，断开不杀 run）。`--wait` 才守到终态；**`--wait` 超时不是失败**，`wait <nodeId>` 随时接着守。
+
+等与接管：
+
+- `wait <nodeId>` —— 守到 done / error，或它变 ⏸（此时会打出卡内容和回法）。
+- ⏸ 的回法：`respond <nodeId> --allow / --deny`。AskUserQuestion 加 `--answers '{"<问题原文>":"<选项label>"}'`；allow 不带参数时脚本把原 input 原样回传（SDK 要求 record，前端同款行为）；`--deny --message "..."` 给理由。toolUseId 脚本现场从节点上取，不用抄。
+- `abort <nodeId>` —— 叫停。**只停自己发起的 run**：画布是用户的工作台，别的 run 可能是他在界面上亲手点的，停之前先问。
+- `retry <nodeId>` —— 失败节点原地重跑（复用同一节点，不新建）。
+
+与任务面的分工：`ask` 是「现在、替我问一句 / 干一件」，`tasks` 是「反复、无人值守」。一次性的事不建任务。组合技：`ask --new` 跑长活拿到 sessionId，再建任务挂 `session_done` 触发器 = 「那个会话跑完后自动做 X」。
 
 ## 三个概念
 
@@ -115,6 +146,12 @@ bun .../trellisctl.ts triggers add <taskId> '{"kind":"cron","config":{"expr":"0 
 - **没有 once 触发器。** kind 只有 cron / fs / git / session_done；「就这一次，X 点跑一下」用手动 `tasks run`、或「cron + 跑完 `triggers rm`」顶上，别造不存在的 kind。
 
 ## Known Failure Modes
+
+- **`ask --wait` 超时 / 中途断开后以为消息丢了，又重发一遍**：run 与 HTTP 解耦，断开只是不看了，run 还在服务端跑、结果照落库。重发 = 同一个问题跑两遍、花两遍钱。规避：超时后 `node get <nodeId>` 看状态，`wait <nodeId>` 接着守——`created` 回显里的 nodeId 就是为这一刻打出来的。
+
+- **`node get` / `node read` 对着确实存在的节点报 404 not_found**：`GET /api/nodes/[id]` 是 S118 才加的服务端 route，打到旧版本实例上就是 404。判据：`sessions get <sessionId>` 里明明看得到这个节点。修法：部署包含该 route 的版本；其余命令不受影响（走的都是老 API）。
+
+- **`respond` 报 409**：`no_pending` = 卡已被别处（多半是用户在界面上）回掉了；`mismatch` 理论上不会出现——脚本每次现场从节点取 toolUseId，真遇到就是取和回之间卡换代了，`node get` 重看再回。
 
 - **给 agent 勾了「需要审批」，但定时任务里它跑得毫无阻拦**：根因是审批闸要靠交互通道（`onCanUseTool`），而任务是无人值守的（`interactive:false`），那个条件永远不成立，于是整条降档逻辑被静默跳过，实际落到 `permission:"full"`。规避：**无人值守的限制只能靠 `permission:"readonly"` 或 `tools` 白名单**，别把 `requireApproval` 当保险；见 `lib/llm/sdk-adapter.ts:73` 与 `lib/server/tasks.ts:526`。
 

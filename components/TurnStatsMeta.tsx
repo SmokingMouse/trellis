@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
-import { formatTokens } from "@/lib/format-tokens";
-import { computeToolActiveDuration } from "@/lib/tool-duration";
+import { formatTokens, computeToolActiveDuration } from "@/lib/format-tokens";
 import type { ChatNode, ToolCall } from "@/lib/types";
 
 export { computeToolActiveDuration };

@@ -644,6 +644,8 @@ type Actions = {
   // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
   // 失败回滚。幂等。
   setTreeHidden: (nodeId: string, hidden: boolean) => Promise<void>;
+  // 树命名 / 重命名：修改 nodeId 所在树根的 topicLabel。乐观更新，失败回滚。
+  renameTree: (nodeId: string, title: string) => Promise<void>;
   // A路③: answer a paused interactive tool (AskUserQuestion / ExitPlanMode).
   // Optimistically clears node.pendingInteraction (the interaction_resolved
   // SSE event also clears it — idempotent). On 404/409 (stale: run no longer
@@ -832,6 +834,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   mobileNavOpen: false,
 
   hydrate: async (sessionId) => {
+    // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
+    // 一次 hydrate —— 不挡住的话它会把画面拽回 sessions[0]、把 preview tab
+    // 覆盖成别的会话（与深链 loadSession 赛跑，谁后完成谁赢）。已经活着的
+    // store 不需要二次自举。in-flight 标记防的是并发双跑（dev StrictMode
+    // effect 双调时 hydrated 还没来得及变 true，实测第二个实例会在深链
+    // previewSession 之后完成、把 preview tab 覆盖回 sessions[0]）。
+    if (get().hydrated || hydrateInFlight) return;
+    hydrateInFlight = true;
     set({
       provider: loadProvider(),
       draftMode: loadDraftMode(),
@@ -863,11 +873,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // it pinned across reloads, it's already an open tab; otherwise show
       // it as the (transient) preview tab so the strip isn't empty while a
       // session is active.
+      // S117: 只在 preview 位还空着时落座 —— 深链的 previewSession 可能已经
+      // 抢先占了位，hydrate 是兜底不是主张，不该把人挤下去。
       set((s) => ({
         hydrated: true,
-        previewSessionId: s.pinnedSessionIds.includes(targetId!)
-          ? s.previewSessionId
-          : targetId!,
+        previewSessionId:
+          s.previewSessionId ??
+          (s.pinnedSessionIds.includes(targetId!) ? null : targetId!),
       }));
       // Stage 17: any rows still status='streaming' after hydrate must
       // be a stream that was alive when we last saw the page. Attach
@@ -877,6 +889,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       const message = err instanceof Error ? err.message : String(err);
       console.error("[trellis] hydrate failed:", err);
       set({ hydrated: true, hydrateError: message });
+    } finally {
+      hydrateInFlight = false;
     }
   },
 
@@ -1141,10 +1155,27 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // have no edit record yet (e.g. straight after a page reload with
       // no nodes touched since).
       const { lastEditedNodeId, nodes, activeNodeId } = get();
-      const focus =
+      let focus =
         lastEditedNodeId && nodes[lastEditedNodeId]
           ? lastEditedNodeId
           : activeNodeId;
+
+      // If focus is in a hidden tree, prefer focusing on a visible tree node
+      if (focus && nodes[focus]) {
+        let root = nodes[focus];
+        while (root.parentId && nodes[root.parentId]) {
+          root = nodes[root.parentId];
+        }
+        if (root.hiddenAt !== null) {
+          const visibleRoots = Object.values(nodes).filter(
+            (n) => !n.parentId && n.hiddenAt === null,
+          );
+          if (visibleRoots.length > 0) {
+            focus = visibleRoots[0].id;
+          }
+        }
+      }
+
       if (focus) get().expandAncestors(focus);
       set({ viewMode: "canvas", activeNodeId: focus });
       return;
@@ -2089,6 +2120,40 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  renameTree: async (nodeId, title) => {
+    // 客户端走到根 —— 支持传根 id 或子树任意节点 id。
+    const nodes = get().nodes;
+    let rootId = nodeId;
+    for (let i = 0; i < 1000; i++) {
+      const cur: ChatNode | undefined = nodes[rootId];
+      if (!cur) return;
+      if (!cur.parentId) break;
+      rootId = cur.parentId;
+    }
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const prev = nodes[rootId]?.topicLabel ?? null;
+    const patch = (label: string | null) =>
+      set((s) => {
+        const cur = s.nodes[rootId];
+        if (!cur) return s;
+        return { nodes: { ...s.nodes, [rootId]: { ...cur, topicLabel: label } } };
+      });
+    patch(trimmed);
+    try {
+      const res = await fetch(`/api/nodes/${rootId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topicLabel: trimmed }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { topicLabel } = (await res.json()) as { topicLabel: string };
+      patch(topicLabel);
+    } catch {
+      patch(prev); // 回滚
+    }
+  },
+
   respondToInteraction: async (nodeId, toolUseId, decision) => {
     const existing = get().nodes[nodeId];
     const pending = existing?.pendingInteraction ?? null;
@@ -2356,6 +2421,9 @@ function evictSessionFromTabs(
 // two rapid switches) can resolve LAST and flip the view back to the wrong
 // session — the "switched to B but A's running content shows" 串台.
 let loadSeq = 0;
+
+// S117: hydrate 防重入（hydrated 变 true 之前的并发双跑，见 hydrate 注释）。
+let hydrateInFlight = false;
 
 async function loadSessionInternal(sessionId: string, set: Setter) {
   const seq = ++loadSeq;

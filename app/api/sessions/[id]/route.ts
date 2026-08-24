@@ -8,6 +8,7 @@ import {
   listNotesBySession,
 } from "@/lib/server/repo";
 import { isProviderId } from "@/lib/llm";
+import { detachHomeSession } from "@/lib/server/tasks";
 import {
   buildToolTree,
   countToolTree,
@@ -88,6 +89,9 @@ export async function PATCH(
     if (!session) {
       return Response.json({ error: "not found" }, { status: 404 });
     }
+    // S117: 归档任务的常驻会话 = 「这段历史收起来」，解绑让下次执行重开新会话，
+    // 否则归档行会被后台执行悄悄写回新节点、在归档区里一直长。
+    if (obj.archived) detachHomeSession(id);
     return Response.json({ session });
   }
 
@@ -131,5 +135,7 @@ export async function DELETE(
 ) {
   const { id } = await ctx.params;
   deleteSession(id);
+  // S117: 防悬挂 —— 被删的可能是某个任务的常驻会话，下次执行时重建。
+  detachHomeSession(id);
   return Response.json({ ok: true });
 }
