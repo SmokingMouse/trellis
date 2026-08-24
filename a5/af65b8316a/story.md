@@ -1,0 +1,301 @@
+---
+id: a5af65b8316a
+commit: 5b8fa1b45610cd8f074097d7edf3f13a38a4187d
+branch: worktree/quiet-stone-94f5
+timestamp: 2026-08-24T20:23:19+08:00
+commit_message: "feat(ui): 自动压缩感知增强——工具连跑折叠状态标识 + 轮次上下文自动压缩分隔条，记 S122"
+files_modified: ["components/LinearThreadView.tsx", "components/tools/ToolRow.tsx", "lib/context-usage.test.ts", "lib/context-usage.ts", "progress/README.md", "progress/archive.md", "progress/sessions.md", "scripts/test-timeline-render.tsx"]
+agent_percentage: 7.0
+---
+
+## Prompt
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   - The user originally asked to demonstrate and explain the compression rendering process in Trellis (`能把压缩渲染的过程展示出来吗`).
+   - The user then clarified their specific intent and core requirement: **"我指的是触发自动压缩时,能让人感知到"** (When automatic compression is triggered, make it clearly perceptible to the user).
+   - After approving the plan (`开始吧`), the goal was to implement direct visual and perceptual indicators for automatic compression across two distinct tiers:
+     1. **Tool Timeline Auto-folding**: When consecutive completed plain tools (≥ 3 steps) are collapsed into a single summary chip, show an unambiguous `[已自动收起]` status badge, hover guidance, and live active indicators so the user perceives the folding action rather than thinking steps disappeared.
+     2. **Turn-Level Context Compaction**: When a conversation runs into context pressure and triggers automatic compaction (or CLI `/compact`), render a clear separator (`🗜️ 上下文已自动压缩`) between turns in `LinearThreadView`.
+
+2. Key Technical Concepts:
+   - **Three-Tier Tool Temperature Model (`lib/tool-tree.ts`)**:
+     - *Hot (🔥)*: Live streaming running tools, execution failures (`status === 'error'`), narrative checkpoints (`TodoWrite`, `ExitPlanMode`, `AskUserQuestion`), and running chain breadcrumbs (`runningChain()`).
+     - *Warm (☕)*: Delegation skeleton (Sub-agents `🤖`, Workflows `⚙`, long-running commands `⏱`).
+     - *Cold (🧊)*: Consecutive completed plain tools (≥ 3 calls, `segmentable`) compressed into a `SegmentRow` chip (`⋯ N 步 · Read ×2 · Bash`).
+   - **Automatic Tool Folding Perception (`components/tools/ToolRow.tsx`)**:
+     - Explicit status badge: `<span ...>已自动收起</span>` / `<span ...>已展开</span>`.
+     - Hover title explaining action: `"点击展开已自动收起的明细"` / `"点击收起明细"`.
+     - Live indicator styling: `bg-surface/80 border-l-2 border-l-line-strong/60`.
+   - **Context Window Auto-Compaction Detection (`lib/context-usage.ts`)**:
+     - Structural/textual marker detection: CLI continuation prompt markers (`This session is being continued from a previous conversation that ran out of context`, `The summary below covers the earlier portion of the conversation`).
+     - Quantitative token occupancy drop: Triggered when `prevCtx >= 40_000`, `currCtx > 0`, `currCtx <= prevCtx * 0.6`, and `prevCtx - currCtx >= 30_000`.
+   - **Linear Thread Context Boundary (`components/LinearThreadView.tsx`)**:
+     - Renders a dashed divider with a pill badge `🗜️ 上下文已自动压缩（早期历史已转入模型紧凑摘要）` between compacted turns.
+
+3. Files and Code Sections:
+   - `components/tools/ToolRow.tsx`:
+     - *Role*: Renders the tool timeline recursively (`TimelineList`, `SegmentRow`, `ToolRow`).
+     - *Changes*: Added the `[已自动收起]` / `[已展开]` badge, action title tooltips, and live border styling to `SegmentRow`.
+     - *Code Snippet*:
+       ```tsx
+       function SegmentRow({
+         entry,
+         live,
+         depth,
+       }: {
+         entry: Extract<TimelineEntry, { type: "segment" }>;
+         live: boolean;
+         depth: number;
+       }) {
+         const [open, setOpen] = useState(false);
+         const { nodes } = entry;
+
+         return (
+           <div
+             className={`transition-colors ${
+               live
+                 ? "bg-surface/80 border-l-2 border-l-line-strong/60 hover:bg-surface-muted/60"
+                 : "bg-surface/60 hover:bg-surface-muted/60"
+             }`}
+           >
+             <button
+               type="button"
+               onClick={() => setOpen(!open)}
+               aria-expanded={open}
+               title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
+               className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:text-ink-muted transition-colors group"
+             >
+               <span
+                 className="transition-transform shrink-0"
+                 style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
+                 aria-hidden
+               >
+                 ▸
+               </span>
+               <span className="shrink-0 select-none" aria-hidden>
+                 ⋯
+               </span>
+               <span className="tabular-nums shrink-0 font-mono text-ink-muted">
+                 {nodes.length} 步
+               </span>
+               <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
+               <span className="shrink-0 text-nano px-1.5 py-0.5 rounded bg-surface-muted border border-line/60 text-ink-faint group-hover:text-ink-muted transition-colors">
+                 {open ? "已展开" : "已自动收起"}
+               </span>
+               <span className="flex-1" />
+               <span className="text-nano tabular-nums shrink-0">
+                 {segmentDuration(nodes)}
+               </span>
+             </button>
+             {open && (
+               <div className="border-t border-line/70 divide-y divide-line/70">
+                 {nodes.map((n) => (
+                   <ToolRow key={n.call.id} node={n} live={live} depth={depth} />
+                 ))}
+               </div>
+             )}
+           </div>
+         );
+       }
+       ```
+
+   - `scripts/test-timeline-render.tsx`:
+     - *Role*: Static render smoke tests verifying timeline rendering behavior.
+     - *Changes*: Added test assertion verifying that the `已自动收起` badge is present in the rendered HTML output.
+     - *Code Snippet*:
+       ```tsx
+       check("已完成连跑折成段落 chip", liveHtml.includes("3 步"));
+       check("chip 点名工具与次数", liveHtml.includes("Bash ×2") && liveHtml.includes("Read"));
+       check("chip 带有已自动收起提示", liveHtml.includes("已自动收起"));
+       check("段内明细不进 DOM（冷数据点击才展开）", !liveHtml.includes("cmd-0"));
+       ```
+
+   - `lib/context-usage.ts`:
+     - *Role*: Context token calculation and lineage traversal logic.
+     - *Changes*: Added `isContextCompacted` helper to detect conversation compaction boundaries.
+     - *Code Snippet*:
+       ```tsx
+       export function isContextCompacted(
+         currNode: { question?: string; tokenCount: ChatNode["tokenCount"] },
+         prevNode?: { question?: string; tokenCount: ChatNode["tokenCount"] },
+       ): boolean {
+         if (!currNode) return false;
+
+         const q = currNode.question ?? "";
+         if (
+           q.includes("This session is being continued from a previous conversation that ran out of context") ||
+           q.includes("The summary below covers the earlier portion of the conversation")
+         ) {
+           return true;
+         }
+
+         if (prevNode) {
+           const prevCtx = ctxTokensOf(prevNode as any);
+           const currCtx = ctxTokensOf(currNode as any);
+           if (
+             prevCtx >= 40_000 &&
+             currCtx > 0 &&
+             currCtx <= prevCtx * 0.6 &&
+             prevCtx - currCtx >= 30_000
+           ) {
+             return true;
+           }
+         }
+
+         return false;
+       }
+       ```
+
+   - `lib/context-usage.test.ts`:
+     - *Role*: Unit tests for context token evaluation and compaction detection.
+     - *Changes*: Added test suite for `isContextCompacted`.
+     - *Code Snippet*:
+       ```tsx
+       describe("isContextCompacted", () => {
+         test("detects continuation summary marker in question", () => {
+           const summaryNode = {
+             question:
+               "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
+             tokenCount: { input: 1000, output: 200, cacheRead: 0, cacheCreation: 0 },
+           };
+           expect(isContextCompacted(summaryNode)).toBe(true);
+         });
+
+         test("detects context occupancy plunge", () => {
+           const prev = {
+             question: "Previous long turn",
+             tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 120_000 },
+           };
+           const curr = {
+             question: "Next turn after compact",
+             tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 25_000 },
+           };
+           expect(isContextCompacted(curr, prev)).toBe(true);
+         });
+
+         test("returns false for normal consecutive turns", () => {
+           const prev = {
+             question: "Step 1",
+             tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 30_000 },
+           };
+           const curr = {
+             question: "Step 2",
+             tokenCount: { input: 100, output: 200, cacheRead: 0, cacheCreation: 0, contextTokens: 35_000 },
+           };
+           expect(isContextCompacted(curr, prev)).toBe(false);
+         });
+       });
+       ```
+
+   - `components/LinearThreadView.tsx`:
+     - *Role*: Unified linear reading and interaction interface.
+     - *Changes*: Wrapped node sections with `Fragment`, evaluated `isContextCompacted(node, prevNode)`, and rendered the visual compaction separator.
+     - *Code Snippet*:
+       ```tsx
+       threadData.thread.map((node, idx) => {
+         const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
+         const isCompacted = isContextCompacted(node, prevNode);
+         const branches = threadData.branchesByNode.get(node.id) ?? [];
+         const isActive = node.id === threadData.anchorId;
+         const canDelete =
+           session.rootNodeId !== node.id && node.status !== "streaming";
+         const canBranch =
+           node.status !== "streaming" && node.id !== tipNode?.id;
+         const isBranchTarget = branchFrom?.id === node.id;
+         return (
+           <Fragment key={node.id}>
+             {isCompacted && (
+               <div
+                 className="my-3 py-1 flex items-center gap-3 text-xs select-none"
+                 role="separator"
+                 aria-label="上下文已自动压缩"
+               >
+                 <div className="flex-1 border-t border-dashed border-line-strong/70" />
+                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface border border-line shadow-raise text-ink-muted text-ui">
+                   <span aria-hidden>🗜️</span>
+                   <span className="font-medium text-ink-strong">上下文已自动压缩</span>
+                   <span className="text-nano text-ink-faint">（早期历史已转入模型紧凑摘要）</span>
+                 </div>
+                 <div className="flex-1 border-t border-dashed border-line-strong/70" />
+               </div>
+             )}
+             <section
+               ref={setRoundRef(node.id)}
+               data-thread-node-id={node.id}
+               className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
+                 isActive
+                   ? "border-accent-line ring-2 ring-accent-muted"
+                   : "border-line"
+               }`}
+             >
+               {/* Turn header and card body */}
+             </section>
+           </Fragment>
+         );
+       })
+       ```
+
+4. Errors and fixes:
+   - **`scripts/test-timeline-render.tsx` test assertion failure**:
+     - *Error*: Initial `SegmentRow` implementation included child command descriptions in the button's `title` attribute. This broke the assertion `!liveHtml.includes("cmd-0")` (which tests that cold child steps do not leak into the DOM before expansion) and duplicated count matches.
+     - *Fix*: Replaced detailed child descriptions in the `title` attribute with `"点击展开已自动收起的明细"` / `"点击收起明细"`, while rendering the visible badge `<span ...>已自动收起</span>`. All smoke tests in `scripts/test-timeline-render.tsx` passed.
+   - **TypeScript compiler missing in isolated worktree**:
+     - *Error*: `bun x tsc --noEmit` initially could not resolve typescript module path in the fresh git worktree.
+     - *Fix*: Executed `bun install` which linked the 714 dependencies into `node_modules` in 505ms. `bun x tsc --noEmit` then succeeded with 0 errors.
+
+5. Problem Solving:
+   - Addressed user feedback by transforming passive/silent compression into active, perceptible UI elements across both tool execution chains and long context window continuations.
+   - Preserved cold/hot rendering boundaries: avoided inflating DOM sizes for folded rows while delivering instant visual feedback.
+
+6. All user messages:
+   - `能把压缩渲染的过程展示出来吗`
+   - `开始吧`
+   - `3`
+   - `我指的是触发自动压缩时,能让人感知到`
+   - `开始吧`
+
+7. Pending Tasks:
+   - None. All requested automatic compression perception features (tool auto-folding chips and turn-level context compaction indicators) are implemented, tested, and type-checked.
+
+8. Current Work:
+   - Completed verification:
+     - `bun test`: 44/44 pass (including new `lib/context-usage.test.ts` cases).
+     - `bun scripts/test-timeline-render.tsx`: ALL PASS.
+     - `bun scripts/test-cli-jsonl.ts`: ALL PASS.
+     - `bun scripts/test-tool-tree.ts`: ALL PASS.
+     - `bun x tsc --noEmit`: 0 errors.
+
+9. Optional Next Step:
+   - If desired, record the changes into `progress/sessions.md` according to the progress protocol and commit the worktree branch.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/zhangpeng.pada/.claude/projects/-data00-home-zhangpeng-pada--herdr-worktrees-trellis-worktree-quiet-stone-94f5/18415e4b-83b2-4618-8649-b8e55132097b.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+## Summary
+
+自动压缩感知增强（S121）已全部实现并完成测试验证：
+
+### 1. 落地内容
+
+1. **工具链级连跑折叠状态标识 (`components/tools/ToolRow.tsx`)**：
+   - 当连续 ≥ 3 个已完成普通工具折叠为 `SegmentRow` 段落 chip 时，显式展示 `[已自动收起]` / `[已展开]` 状态徽章与 hover 说明（`"点击展开已自动收起的明细"`）。
+   - 保留冷数据不进入 DOM 的轻量特性，同时在流式 live 期间提供清晰的视觉边界。
+
+2. **会话轮次级上下文自动压缩分隔条 (`lib/context-usage.ts` + `components/LinearThreadView.tsx`)**：
+   - 新增 `isContextCompacted` 判据，综合检测 CLI 注入的延续摘要标记及定量 token 占用降幅（≥40k token 降幅 ≥40%）。
+   - 在触发自动压缩的长会话前后轮次之间，渲染视觉分隔条：
+     ```
+     ─── 🗜️ 上下文已自动压缩（早期历史已转入模型紧凑摘要） ───
+     ```
+
+### 2. 验证结果
+
+- `bun test`: 44/44 pass（涵盖 `lib/context-usage.test.ts` 中针对标记与 token 突降的判据测试）。
+- `bun scripts/test-timeline-render.tsx`: 渲染断言全通过（包含段落折叠 chip 的 `已自动收起` 提示与 DOM 隔离验证）。
+- `bun scripts/test-cli-jsonl.ts` & `bun scripts/test-tool-tree.ts`: 全绿。
+- `bun x tsc --noEmit`: 0 errors。
+- `progress/`: 同步更新 `README.md`、`sessions.md` (S121) 并按协议完成 `archive.md` 轮转。
+

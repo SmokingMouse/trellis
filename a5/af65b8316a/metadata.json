@@ -1,0 +1,33 @@
+{
+  "id": "a5af65b8316a",
+  "timestamp": "2026-08-24T20:23:19+08:00",
+  "branch": "worktree/quiet-stone-94f5",
+  "commitHash": "5b8fa1b45610cd8f074097d7edf3f13a38a4187d",
+  "commitMessage": "feat(ui): 自动压缩感知增强——工具连跑折叠状态标识 + 轮次上下文自动压缩分隔条，记 S122",
+  "filesModified": [
+    "components/LinearThreadView.tsx",
+    "components/tools/ToolRow.tsx",
+    "lib/context-usage.test.ts",
+    "lib/context-usage.ts",
+    "progress/README.md",
+    "progress/archive.md",
+    "progress/sessions.md",
+    "scripts/test-timeline-render.tsx"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 10,
+    "agentRemoved": 13,
+    "humanAdded": 103,
+    "humanModified": 17,
+    "humanRemoved": 0,
+    "totalLinesChanged": 143,
+    "agentPercentage": 7.0,
+    "agentFiles": [
+      "progress/README.md",
+      "progress/archive.md",
+      "progress/sessions.md"
+    ]
+  },
+  "reason": "commit"
+}
