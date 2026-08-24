@@ -4,6 +4,17 @@
 
 ## Session Log
 
+### Session 117（2026-08-22，定时任务固定入口：侧栏「⏱ 定时任务」分组 + 深链跳转修复）
+- **触发**: 用户「希望给定时任务单独分配一个固定的工作区，通过左边的列表点进去看执行情况；现在点历史运行记录，跳转目标特别奇怪」。
+- **根因（跳转奇怪）**: 任务会话 `kind='task'` 被 `/api/sessions` 全量排除 → 深链落地后侧栏无行可高亮、tab 条 `byId` resolve 不出该会话；且主页深链只 `loadSession` 不占 tab 位，`hydrate` 又把 preview tab 设回 `sessions[0]`——dev StrictMode 双跑下第二个 hydrate 实例在深链之后完成、覆盖 preview，**画面与 tab/侧栏指向两个不同会话**。
+- **Done ① 侧栏固定分组（SessionSidebar）**: 新增「⏱ 定时任务」分组，行骨架来自 **tasks 表**（任务是常驻实体——没跑过的任务渲染灰行占位，不因会话未懒建而隐身）；有 home 会话的行走 SidebarRow（preview/pin/改名/归档/删除、running 脉冲与未读角标全部免费复用，`/api/runs` 本就不分 kind）；分组 ＋ 号跳 `/settings/tasks`；任务已删的存量孤儿 task 会话也列出不吞。
+- **Done ② API**: `/api/sessions` 响应加 `tasks`（id/name/homeSessionId/enabled）+ `taskSessions`；repo 新增 `listTaskSessions()`；归档视图放宽 kind（`archived=1` 时 user+task 都列，`countArchivedSessions` 同口径）——否则归档的任务会话从每个列表里消失。
+- **Done ③ 生命周期闭环（lib/server/tasks.ts）**: `updateTask` 改名/改目录同步 home 会话（title `⏱ name` / workspace_path）；`deleteTask` 把 home 会话翻回 `kind='user'`（历史落进常规列表）；新增 `detachHomeSession()` 挂在会话 DELETE / 归档 PATCH 上解绑指针（归档语义 = 历史收起、下次执行重开新会话）；`ensureTaskSession` 校验 home 会话行仍存活，悬挂即重建。
+- **Done ④ 深链修复**: `page.tsx` 深链改走 `previewSession`（占 tab 位，与侧栏点行同路径）；`sessionStore.hydrate` 加 hydrated guard + `hydrateInFlight` 防重入（双跑并发），尾部 preview **只在空位落座**（深链先到就不挤）；`SessionTabs.byId` 并入 taskSessions。
+- **Done ⑤ TaskToast**: run_started/run_finished 事件 `bumpSessionsRevision()`（首跑懒建的会话行即时长出）；点击 toast 从 `window.location.href` 整页刷新改为 store 内 `previewSession + setActiveNode`（同路由改 URL 本就不触发深链 effect，老写法靠整页重启 store 才凑效）。
+- **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
+- **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
+
 ### Session 116（2026-08-21，画布完全剔除隐藏树 + 大纲分组与一键恢复）
 - **触发**: 用户反馈隐藏的树在画布上仍然会出现。
 - **根因**: `Canvas.tsx` 中 `hiddenIds` 仅通过 `hiddenByCollapse` 处理折叠节点的后代，未将 `hiddenAt !== null` 的雪藏树（根及全部后代）加入排除集合；`Outline.tsx` 未区分可见树与雪藏树，且缺少对雪藏树的恢复/隐藏控制。

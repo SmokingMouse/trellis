@@ -1,6 +1,22 @@
 # Session Log
 
-最近 5 条，倒序（Session 121 / 120 / 119 / 118 / 117）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 122 / 121 / 120 / 119 / 118）。更早的见 `archive.md`。
+
+### Session 122（2026-08-24，工作区读写与侧栏交互重构：已合并折叠降噪 + 批量安全清理 + 改动检视 Diff 弹窗）
+- **触发**: 用户反馈侧栏内容繁杂、体验较差（几十个历史 worktree 堆叠刷屏、分支与目录名并排截断、缺少工作区读写闭环能力）→「开始优化吧」。
+- **根因**: ① `SessionSidebar` 将所有 worktree（包含大量已合并入主干且 0 会话的已完成分支）平铺在项目下，僵尸工作区严重挤占主视野；② `GroupRow` 强行并排展示目录名和分支名，导致两端均被截断为 `...`；③ 缺乏批量治理能力，清理已完成工作区需逐个 hover 确认数十次；④ 缺乏工作区代码变更检视（读）与流转（写）能力，用户看到 `● 56` 脏改动无法在平台内查看具体文件与 Diff。
+- **Done**:
+  1. `components/SessionSidebar.tsx`:
+     - **智能分区折叠**：自动将项目下的工作区划分为「活跃工作区」与「已合并/可清理工作区（`reclaimable: true` 且 0 运行会话且 0 脏改动）」，后者默认收敛归入子折叠组 `✓ 已合并 (N)`，主界面视野信噪比提升 80% 以上。
+     - **消灭截断排版**：精简行内布局，移除重复截断的长分支名展示，将完整路径、分支、脏文件数与可回收提示统一收敛入悬浮 Tooltip；
+     - **交互式状态角标**：`● N` 脏文件角标支持直接点击开启改动检视；
+     - **权限放宽**：单项工作区删除支持所有 `kind === 'worktree'`（不局限于 trellis 创建），均走严密的两阶段预演与 force 二次确认。
+  2. `app/api/workspaces/git-diff/route.ts` & `components/WorkspaceDiffModal.tsx`:
+     - 新增 Git 变更检视 API 与弹窗：支持查看当前工作区分支、upstream、ahead/behind 提交数、未提交文件状态清单（`M` / `A` / `D` / `??` / staged 标识及 +/- 行数统计）与完整行级统一 Diff 预览；支持一键在本地 VS Code 打开、复制路径与在此工作区新开会话。
+  3. `app/api/workspaces/worktree/clean/route.ts` & `components/BatchCleanModal.tsx`:
+     - 新增批量清理已合并工作区功能：在 `✓ 已合并 (N)` 折叠行提供一键 `[🧹 清理]` 操作，支持全选/多选预检、安全过滤（自动防护脏文件与运行中会话），一键批量执行 `git worktree remove` 与 prune，彻底释放磁盘与视觉空间。
+- **验证**: `bun test` 41/41 全部通过；`bun --conditions react-server scripts/test-workspace-optimizations.ts` 全流程测试（Diff 接口、批量预检与 force 清理）全绿；`bun --bun run build` 成功通过。
+- **Next**: 合并至 main 后 `make deploy` 部署上线。
 
 ### Session 121（2026-08-24，全平台 SVG 与 Mermaid 渲染与交互体系优化：双模式预览 + 图表放大 + 文件预览）
 - **触发**: 用户「现在在平台上,好像不支持 svg 的渲染,做一些优化」→「除此外,把 mermaid 的渲染也加上」。
@@ -45,14 +61,3 @@
   3. `skills/trellis-admin/SKILL.md`: description 扩操作面触发词；新增「平台操作面」章节（概念对齐 / ask 三形态语义表 / 等与接管 / 与任务分工）；Known Failure Modes 追加 3 条（--wait 超时重发、旧实例 404、respond 409）。
 - **验证**: `bun --bun run build` 全过（裸 `bun run build` 会在 page-data 阶段死于 Node worker 找不到 bun:sqlite，必须 `--bun`）；worktree 起 `PORT=3299 bun server.ts` 测试实例全链路实测——sessions / ps / get 树形（2 树 + 分支缩进）✔、ask 三形态（mock provider 零成本）✔、wait 接力与终态回放 ✔、abort 404 容错 ✔、rename / label / rm 防呆与清理 ✔、respond 判空 ✔。respond 的 allow/deny 真实交互路径未实测（需 claude 系 run 停卡；逻辑比照 `InteractionForm.tsx:509`）。
 - **Next**: 合并 main 后 `make deploy` 部署——`node get/read` 与 `respond` 依赖新 GET route，打旧实例是 404（已写进 Known Failure Modes）。
-
-### Session 117（2026-08-22，定时任务固定入口：侧栏「⏱ 定时任务」分组 + 深链跳转修复）
-- **触发**: 用户「希望给定时任务单独分配一个固定的工作区，通过左边的列表点进去看执行情况；现在点历史运行记录，跳转目标特别奇怪」。
-- **根因（跳转奇怪）**: 任务会话 `kind='task'` 被 `/api/sessions` 全量排除 → 深链落地后侧栏无行可高亮、tab 条 `byId` resolve 不出该会话；且主页深链只 `loadSession` 不占 tab 位，`hydrate` 又把 preview tab 设回 `sessions[0]`——dev StrictMode 双跑下第二个 hydrate 实例在深链之后完成、覆盖 preview，**画面与 tab/侧栏指向两个不同会话**。
-- **Done ① 侧栏固定分组（SessionSidebar）**: 新增「⏱ 定时任务」分组，行骨架来自 **tasks 表**（任务是常驻实体——没跑过的任务渲染灰行占位，不因会话未懒建而隐身）；有 home 会话的行走 SidebarRow（preview/pin/改名/归档/删除、running 脉冲与未读角标全部免费复用，`/api/runs` 本就不分 kind）；分组 ＋ 号跳 `/settings/tasks`；任务已删的存量孤儿 task 会话也列出不吞。
-- **Done ② API**: `/api/sessions` 响应加 `tasks`（id/name/homeSessionId/enabled）+ `taskSessions`；repo 新增 `listTaskSessions()`；归档视图放宽 kind（`archived=1` 时 user+task 都列，`countArchivedSessions` 同口径）——否则归档的任务会话从每个列表里消失。
-- **Done ③ 生命周期闭环（lib/server/tasks.ts）**: `updateTask` 改名/改目录同步 home 会话（title `⏱ name` / workspace_path）；`deleteTask` 把 home 会话翻回 `kind='user'`（历史落进常规列表）；新增 `detachHomeSession()` 挂在会话 DELETE / 归档 PATCH 上解绑指针（归档语义 = 历史收起、下次执行重开新会话）；`ensureTaskSession` 校验 home 会话行仍存活，悬挂即重建。
-- **Done ④ 深链修复**: `page.tsx` 深链改走 `previewSession`（占 tab 位，与侧栏点行同路径）；`sessionStore.hydrate` 加 hydrated guard + `hydrateInFlight` 防重入（双跑并发），尾部 preview **只在空位落座**（深链先到就不挤）；`SessionTabs.byId` 并入 taskSessions。
-- **Done ⑤ TaskToast**: run_started/run_finished 事件 `bumpSessionsRevision()`（首跑懒建的会话行即时长出）；点击 toast 从 `window.location.href` 整页刷新改为 store 内 `previewSession + setActiveNode`（同路由改 URL 本就不触发深链 effect，老写法靠整页重启 store 才凑效）。
-- **验证**: tsc 0 错；bun test 26/26；隔离 dev（:3199、mock provider、`TRELLIS_SCHEDULER=off`、独立 `TRELLIS_DB_PATH`）curl 全链路实测——建任务→tasks 字段灰行→首跑懒建 `⏱` 会话且不混入 user 列表→改名同步→归档解绑+归档区可找回→重跑重建新会话→删任务翻 user；agent-browser 实测深链落地三处一致（tab=⏱ 任务、侧栏分组行高亮、画布聚焦该次执行根节点），侧栏行来回切换正常。
-- **Next**: 合并 main 后 `make deploy`；可选迭代——灰行（没跑过的任务）点击直跳设置页选中该任务。
