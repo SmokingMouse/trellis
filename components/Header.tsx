@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
 import { ExportMenu } from "./ExportMenu";
@@ -105,6 +105,22 @@ export function Header() {
   // badge stays a plain non-interactive readout to avoid nagging.
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const ctxActionable = ctx != null && ctx.percent >= 50;
+
+  const [gwMe, setGwMe] = useState<{ role?: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("/__gw/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data?.role) setGwMe(data);
+      })
+      .catch(() => {
+        // 单人版或网关不可达：静默降级
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <header className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
@@ -349,6 +365,19 @@ export function Header() {
             ⏱
           </span>
         </a>
+        {/* 管理员入口：调 GET /__gw/api/me 感知，role=admin 时露出 */}
+        {gwMe?.role === "admin" && (
+          <a
+            href="/admin"
+            title="管理后台"
+            aria-label="管理后台"
+            className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"
+          >
+            <span aria-hidden className="text-[13px] leading-none">
+              🛡️
+            </span>
+          </a>
+        )}
         {/* 设置是整页而不是 popover：版本、落后的 commit、部署进度、失败日志，
             没有一样塞得进一个下拉。用 <a> 而不是 <Link> —— 从画布跳走时让浏览器
             真的换一页，别把一整棵 React Flow 的状态背着走。 */}

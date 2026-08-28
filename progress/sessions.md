@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 127 / 126 / 125 / 124 / 123）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 128 / 127 / 126 / 125 / 124）。更早的见 `archive.md`。
+
+### Session 128（2026-08-28，S4 二期统一门户:邀请码自助注册 + 管理员宿主路由 + 用户间模型共享;焚决双单并行交付）
+- **触发**: 用户「现在的多租户模式不是我想要的:统一注册&登录入口、管理员占据宿主机、普通用户工作目录在 docker 文件隔离、支持不同用户间模型共享」→ 主 Agent 协调,AskUserQuestion 对齐四项拍板(邀请码自助注册 / 任意用户互享 / Claude token + 第三方 endpoint 双类 / 管理面板要在 trellis 里)。（原记 S127，与飞书向导单撞号顺延 S128。）
+- **方案定盘**（[二期 ADR](decisions/2026-08-28-multi-tenancy-unified-portal.md)）: 一期容器隔离与统一登录保留,真差距三点(自助注册 / 管理员入网关 / 共享系统化)。核心分层:**UI 在 trellis 本体(`TRELLIS_ADMIN_UI=1` 闸的 `/admin` + `/settings/shares`),控制面 API 在网关(`/__gw/api/*` 拦截自答,role 两级鉴权)**,docker/gateway.db 特权全集中网关进程;admin 经 tenants/*.json 三字段 host 记录路由到宿主实例(一期路由机制无容器假设,顺纹理);共享池发布/订阅,claude-token=env+容器重建(每租户单激活新换旧),endpoint=endpoints.yaml `# fj-share:<id>` 标记块(幂等可撤不碰自有条目);修订一期「本体零改动」原则为「只读 env 开关+调 /__gw/api 的薄层」(ADR 记收窄续期)。
+- **执行**（焚决两单,接口先行:`tenancy/gateway/API.md` 由主控写死进两张契约作共同真理源;worktree 隔离并行,FENJUE_ROOT 指回主控信箱）:
+  1. `fj-gw-portal-be6e`（codex）: `tenancy/gateway/` 新增 api.ts/endpoint-share.ts/orchestrator.ts——role/invites/共享池 additive 迁移、自助注册异步 provision(spawn tenantctl,状态可轮询)、admin API 全量、订阅注入编排(TRELLIS_GW_TENANTCTL 可替身)、selftest 12→21 项;endpoint payload 按 UpsertProviderInput 定稿回写 API.md。~50min 交付,1 blocker(build 命令口径,fallback 正确)。
+  2. `fj-admin-ui-2029`（gemini）: `app/admin/`(用户表/容器态/禁用启用重启/邀请码管理/共享总览,无闸 404)+ `app/settings/shares/`(发布/撤销/订阅退订,willRestart 确认,「共享=交出」固定明示)+ `lib/gw-client.ts`/`gw-types.ts` + Header role 感知入口 + `scripts/selftest-admin-ui.ts`(双 next 实例+反代型 mock 网关,断言含网关不可达降级不白屏);settings-tabs.ts 未漏。1 轮 rework(selftest 冷启动)。
+- **治理经验（实弹）**: ① 主控契约 verify 命令写错——`bun run build` 用 node 跑 next,`bun:sqlite` 顶层 import 即炸,本仓必须 `bun --bun run build`;且全仓 lint 存量脏(56 errors)——settle 误 fail 后先在主控树验基线分清存量/引入,修契约 verify(--bun + 定向 lint)再重判,坐席不背存量账。② 并行坐席 selftest 固定端口互踩:A 单 settle 复跑恰逢 B 返工起测试服务,瞬态 fail;手动复跑全绿定性后**串行 settle** 通过——并行单的 verify 涉起服务时端口需隔离或结算串行。
+- **验证**: 两单 settle 独立复跑 pass + scope 零越界(不采信坐席自述);merge 后合并体三条全绿(`bun --bun run build` / gateway selftest 21 项 / admin-ui selftest 含降级态)。
+- **Next**: ① 契约 C 接线联调:宿主实例开 auth gate + host 记录正式化 + 真容器端到端(注册→开容→admin→共享注入)——**涉重启宿主 prod trellis,时机待用户拍板**;② 公网接入仍待拍板(caddy+域名);③ 一期 S126 Next 的 memos/stirling 改绑 127.0.0.1 未动。
 
 ### Session 127（2026-08-28，飞书机器人 Agent 优先与双向自然绑定重构：一键接入向导 + 渠道接入面板 + 就地新建 Agent）
 - **触发**: 用户反馈「现在的飞书机器人不是很好用，他应该是绑定在 Agent 上的，不应该是只是绑定现成的，而是可以支持新建然后自然绑定，参考 happyclaw 的逻辑」→「飞书机器人应该是有个页面，可以一键创建/绑定的」。
@@ -60,14 +70,3 @@
      - 新增批量清理已合并工作区功能：在 `✓ 已合并 (N)` 折叠行提供一键 `[🧹 清理]` 操作，支持全选/多选预检、安全过滤（自动防护脏文件与运行中会话），一键批量执行 `git worktree remove` 与 prune，彻底释放磁盘与视觉空间。
 - **验证**: `bun test` 41/41 全部通过；`bun --conditions react-server scripts/test-workspace-optimizations.ts` 全流程测试（Diff 接口、批量预检与 force 清理）全绿；`bun --bun run build` 成功通过。
 - **Next**: 合并至 main 后 `make deploy` 部署上线。
-
-### Session 123（2026-08-24，Compact Continuation 拓扑桥接：长动线上下文压缩后最终回复丢失与孤根断链修复）
-- **触发**: 用户反馈 Turn 出现 25 步工具调用却显示「本轮暂无文本回复（只有工具调用）」，结合 Mac mini trellis workspace 与本地 chat transcript 分析归因。
-- **根因**: Claude CLI 遇上下文超限自动 /compact 或手工 /compact 时，写入 `type: "system"` (parentUuid: null) 与 `type: "user"` (isCompactSummary: true) 条目。S120 为防止伪造 turn-start 劫持回复将 `isCompactSummary` 排除在 `isTurnStart` 和 `looseTurnStart` 之外；因 system 节点父链指向 null，紧随其后的 assistant 最终答复沿父链上溯到 null 被静默丢弃（resolveOwner 为 null），UI 呈现为只有工具调用、response 为空的僵尸状态，且 compact 之后的后续 turn 孤立成根。
-- **Done**:
-  1. `lib/server/cli-jsonl.ts`: `indexByUuid` 引入「拓扑桥接（Virtual Parent Linking）」，当 entry 为 compact 相关节点（`isCompactSummary`、`isVisibleInTranscriptOnly` 或 parentUuid 为 null 的 system 节点）且父链断开时，物理序列向前连接至最近有效的带 uuid entry，修复父链 DAG 遍历。
-  2. `scripts/test-cli-jsonl.ts`: 新增 Section 4 专项回归断言「Compact Continuation 拓扑桥接与最终答复保留」，全链路验证 import 不丢最终回复、不伪造多余 Turn 节点、后续 Turn 正确继承 parentId、fork 截前缀 tail 正确指向 compact 后的 assistant 最终回复。
-- **验证**:
-  - `bun scripts/test-cli-jsonl.ts`: 12,752 个 JSONL 文件 / 14,351 个可见 Turn 全量真语料扫描 100% 通过（`noTail: 0, wrongTurn: 0`）。
-  - 实测从 112 个真实 compact jsonl 恢复 32,982 条此前断链被弃的 assistant 消息与 82 个长动线最终答复。
-- **Next**: 合并至 main 后部署上线。

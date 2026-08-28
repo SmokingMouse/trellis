@@ -43,6 +43,12 @@ export const SETTINGS_TABS: SettingsTab[] = [
     title: "endpoints.yaml 的图形入口：provider、端点 URL、API key、模型列表（跨 sm-toolkit 共享）",
   },
   {
+    segment: "shares",
+    label: "共享池",
+    icon: "🤝",
+    title: "模型与 Token 共享池：发布与订阅 Claude Token 或大模型 API 端点",
+  },
+  {
     segment: "workspaces",
     label: "工作区 / CLI",
     icon: "📁",
