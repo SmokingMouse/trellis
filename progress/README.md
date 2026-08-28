@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-飞书机器人载体（S122）已交付，待真凭证联调 + merge + 部署；S121 图表渲染同待部署；cpa codex 故障在查（failures.md）。
+飞书机器人载体（S125）待真机联调与部署；S124/S123 亦待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -17,7 +17,7 @@
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S121–117） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S125–121） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

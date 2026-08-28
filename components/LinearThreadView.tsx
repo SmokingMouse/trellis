@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
+import { isContextCompacted } from "@/lib/context-usage";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, nodeSort } from "@/lib/tree-panel";
 import { subscribeStream } from "@/lib/stream-bus";
@@ -492,6 +493,8 @@ export function LinearThreadView() {
           </div>
         ) : (
           threadData.thread.map((node, idx) => {
+            const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
+            const isCompacted = isContextCompacted(node, prevNode);
             const branches = threadData.branchesByNode.get(node.id) ?? [];
             const isActive = node.id === threadData.anchorId;
             const canDelete =
@@ -502,16 +505,31 @@ export function LinearThreadView() {
               node.status !== "streaming" && node.id !== tipNode?.id;
             const isBranchTarget = branchFrom?.id === node.id;
             return (
-              <section
-                key={node.id}
-                ref={setRoundRef(node.id)}
-                data-thread-node-id={node.id}
-                className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
-                  isActive
-                    ? "border-accent-line ring-2 ring-accent-muted"
-                    : "border-line"
-                }`}
-              >
+              <Fragment key={node.id}>
+                {isCompacted && (
+                  <div
+                    className="my-3 py-1 flex items-center gap-3 text-xs select-none"
+                    role="separator"
+                    aria-label="上下文已自动压缩"
+                  >
+                    <div className="flex-1 border-t border-dashed border-line-strong/70" />
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface border border-line shadow-raise text-ink-muted text-ui">
+                      <span aria-hidden>🗜️</span>
+                      <span className="font-medium text-ink-strong">上下文已自动压缩</span>
+                      <span className="text-nano text-ink-faint">（早期历史已转入模型紧凑摘要）</span>
+                    </div>
+                    <div className="flex-1 border-t border-dashed border-line-strong/70" />
+                  </div>
+                )}
+                <section
+                  ref={setRoundRef(node.id)}
+                  data-thread-node-id={node.id}
+                  className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
+                    isActive
+                      ? "border-accent-line ring-2 ring-accent-muted"
+                      : "border-line"
+                  }`}
+                >
                 <div className="px-4 py-2.5 border-b border-line-faint flex items-center gap-2 text-xs">
                   <span className="font-mono text-ink-faint">
                     #{nodeIndices[node.id] ?? idx + 1}
@@ -687,8 +705,9 @@ export function LinearThreadView() {
                   )}
                 </div>
               </section>
-            );
-          })
+            </Fragment>
+          );
+        })
         )}
         </main>
       </div>
