@@ -1,6 +1,13 @@
 # Session Log
 
-最近 5 条，倒序（Session 124 / 123 / 122 / 121 / 120）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 125 / 124 / 123 / 122 / 121）。更早的见 `archive.md`。
+
+### Session 125（2026-08-28，飞书机器人载体：注册/绑定 Bot + WS 长连接双向对话；焚决派发 codex 实现）
+- **触发**: 用户「定时任务是调度机制、agent 是身份，但没有一个载体——先支持飞书机器人，支持绑定/注册，也支持在飞书对话，参考 happyclaw 方案」。正是 custom-agents-plan 明确「推迟」的飞书载体项启动。（原记 S122，与并行 worktree 撞号顺延 S125。）
+- **方案定盘（Owner 侧，两路 Explore 侦察后）**: 采 happyclaw 的**形状**（`@larksuiteoapi/node-sdk` WS 长连接、EventDispatcher、mention 门控），拒其**厚度**（六态耐久投递/流式卡片/多级绑定 = 多租户账单，happyclaw-contrast.md 既有裁决）。核心决策：①三表 `lark_bots`/`lark_chats`/`lark_inbox`（去重照 `task_runs_slot` 抢槽 idiom，仅 `SQLITE_CONSTRAINT_UNIQUE|PRIMARYKEY` 算 dup）②每飞书 chat = `kind='lark'` 会话内一条线性链（新消息 = `last_node_id` 子节点 + resume，侧栏可见）③per-chat 内存串行队列（深度 5）+ 全局并发 2（`AsyncSemaphore` 原子交接）④群聊必须 @bot（`bot_open_id` 缺失 fail-closed）、bot 自身消息无条件忽略（防自触发烧钱循环）⑤连接管理 = instrumentation 挂 `startLarkManager()` 15s 对账 tick，route 只写 DB（跨 bundle 模块实例不共享，S87 坑）⑥`TRELLIS_LARK=off` deploy smoke 闸。
+- **执行（焚决 fj-lark-bot-28f1，codex+gpt-5.6-sol 坐席）**: 33min 交付 + 1 轮缺陷收尾，全程 3 progress + 1 blocker（settings-tabs.ts 补授权）+ 2 result。产物：`lib/server/lark/`（protocol/store/sdk/handler/manager/semaphore 六模块）+ `/api/lark-bots` CRUD/test + `app/settings/bots` 整页 UI（secret 不回显、连接状态徽标、chats 深链）+ `scripts/test-lark-bot.ts`（18 断言）+ `scripts/lark-ws-smoke.ts`（无凭证 SKIP）。commit `ac78755`。
+- **验证**: settle 独立复跑两轮全绿（tsc 0 错 / 18 断言 / production build / WS 冒烟 SKIP / TRELLIS_LARK 三文件命中），scope 零越界；falsification-verifier 对 8 条不变式逐条 PoC 证伪全 HOLDS（防自触发 10 种 sender 变体 fail-closed、per-chat 串行 30k 压测零重叠、`SQLITE_BUSY` 真抛不吞、secret 三面不漏），其揪出的全局信号量非原子交接（微任务窗口可越 cap 2 倍）已由坐席修复（`semaphore.ts` 原子 handoff + 压测断言 peak=2）。
+- **Next**: ①真凭证端到端联调（`LARK_SMOKE_APP_ID/SECRET` 跑 lark-ws-smoke + 开放平台开通机器人能力/事件订阅长连接/im 权限，本机 lark-cli app `cli_a923d94f1bf89bef` 凭证已验活）②PR #23 合并后 `make deploy` 上线。
 
 ### Session 124（2026-08-24，工作区读写与侧栏交互重构：已合并折叠降噪 + 批量安全清理 + 改动检视 Diff 弹窗）
 - **触发**: 用户反馈侧栏内容繁杂、体验较差（几十个历史 worktree 堆叠刷屏、分支与目录名并排截断、缺少工作区读写闭环能力）→「开始优化吧」。
@@ -53,14 +60,3 @@
   5. `components/HoverPreview.tsx` & `app/globals.css`: 悬浮卡片增加高对比网格背景并支持 Mermaid 悬浮图表渲染；全局为 `.md-body svg` 增加自适应 `max-width: 100%`、`height: auto` 与居中展示，彻底杜绝内容溢出卡片。
 - **验证**: `scripts/test-svg-rendering.tsx` 全流程断言通过（包含 SVG 提取/规范化/清洗、Mermaid 识别与 Markdown Unified AST/JSX 转换）；`bun --bun run build` 成功完成 Turbopack 生产编译。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
-
-### Session 120（2026-08-23，Lineage 隔离分叉串线修复：切片失败安全降级 + 紧凑摘要/turn 判据收紧）
-- **触发**: 用户反馈从历史节点分叉发问时，分支接续了另一条并行分支的上下文和执行历史。
-- **根因**: ① `backfillNativeTurnUuid` 仅比对 `sortedTurns[0]`，遇末尾有新 turn 或 compact summary 插入时匹配失败致 `cli_turn_uuid` 漏填；② `looseTurnStart` 未过滤 Claude CLI 的 `isCompactSummary: true` 和 `isVisibleInTranscriptOnly: true` 合成条目；③ `route.ts` 分叉遇切片失败或 `nodeTurnUuid` 为 NULL 时，fallback 错误继承 `claudeSessionId = lin.lineageSid`，直接 resume 原 session 的 tip（导致并发生长分支互相串线污染）。
-- **Done**:
-  1. `lib/server/cli-jsonl.ts`: `looseTurnStart` 严格剔除 `isCompactSummary === true` 与 `isVisibleInTranscriptOnly === true`。
-  2. `lib/server/cli-fork.ts`: `backfillNativeTurnUuid` 遍历 `sortedTurns` 匹配 question 文本，提升回填鲁棒性；无法匹配时安全放弃。
-  3. `app/api/chat/route.ts`: 修复 native project 分叉降级逻辑，在无 lineage、切片失败或 `nodeTurnUuid` 缺失时，统一强制 `claudeSessionId = null` 并使用 `buildHistoryForNode(nodeId, { maxDepth: foldDepth })` 起 fresh 独立会话，彻底杜绝串线。
-  4. 验证与对齐：`computeToolActiveDuration` 移入 `lib/format-tokens.ts`，测试与构建完全对齐。
-- **验证**: `bun test` 41/41 全部通过；`bun scripts/test-cli-jsonl.ts` 新增 compact 摘要判定用例全通；`bun scripts/test-tool-tree.ts` 全通；`tsc --noEmit` 0 错。
-- **Next**: 合并至 main 后 `make deploy` 部署上线。

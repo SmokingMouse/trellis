@@ -52,4 +52,9 @@ export async function register() {
   installDefaultChannels();
   const { startTaskScheduler } = await import("./lib/server/task-scheduler");
   startTaskScheduler();
+  // 飞书连接同样由 instrumentation 进程持有；CRUD route 只改 DB，下一次 15s
+  // 对账 tick 才连接/断开，避免跨 Next bundle 直调一个并不共享的模块 Map。
+  // deploy smoke 通过 TRELLIS_LARK=off 关闸；判断留在 manager 入口，单一真源。
+  const { startLarkManager } = await import("./lib/server/lark/manager");
+  startLarkManager();
 }

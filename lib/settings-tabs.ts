@@ -25,6 +25,12 @@ export const SETTINGS_TABS: SettingsTab[] = [
     title: "自定义人设：系统提示词、技能、模型、工具白/黑名单",
   },
   {
+    segment: "bots",
+    label: "飞书机器人",
+    icon: "💬",
+    title: "飞书自建应用、Agent 与工作目录绑定、连接状态和会话入口",
+  },
+  {
     segment: "tasks",
     label: "自动化任务",
     icon: "⏱",
