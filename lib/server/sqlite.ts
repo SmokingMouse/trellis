@@ -745,7 +745,7 @@ function migrate(db: Database) {
       WHERE trigger_id IS NOT NULL;
   `);
 
-  // 任务会话不该挤在用户的会话侧栏里。'user' | 'task'。
+  // 任务会话不该挤在用户的会话侧栏里。'user' | 'task' | 'lark'。
   // 注意：这个 `kind` 与 `nodes.kind`（'qa' | 'reference'）**同名不同义**，
   // 两者没有任何关系，写查询时别把两张表的 kind 当同一个枚举（S89 记）。
   const hasSessionKind = db
@@ -754,6 +754,50 @@ function migrate(db: Database) {
   if (!hasSessionKind) {
     db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
   }
+
+  // 飞书是入口，Trellis 的 session/node 树仍是对话真源。bot 只保存连接与执行配置，
+  // chat 只保存飞书会话到树链尾的映射，inbox 只承担消息去重；三者不复制回答正文。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lark_bots (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      app_id TEXT NOT NULL UNIQUE,
+      app_secret TEXT NOT NULL,
+      agent_id TEXT,
+      workspace_path TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      bot_open_id TEXT,
+      bot_name TEXT,
+      last_connected_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS lark_bots_enabled ON lark_bots(enabled);
+
+    CREATE TABLE IF NOT EXISTS lark_chats (
+      id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL REFERENCES lark_bots(id) ON DELETE CASCADE,
+      chat_id TEXT NOT NULL,
+      chat_type TEXT NOT NULL,
+      session_id TEXT,
+      last_node_id TEXT,
+      title TEXT,
+      last_message_at INTEGER,
+      created_at INTEGER NOT NULL,
+      UNIQUE(bot_id, chat_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS lark_chats_bot ON lark_chats(bot_id, last_message_at DESC);
+
+    CREATE TABLE IF NOT EXISTS lark_inbox (
+      message_id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      node_id TEXT
+    );
+  `);
 
   // S89: `tasks.model` 这一列名不副实 —— 它存的一直是 **providerId**
   // （`lib/server/tasks.ts` 里 `isProviderId(task.model) ? task.model : DEFAULT_PROVIDER`），
@@ -829,6 +873,12 @@ function migrate(db: Database) {
             ended_at = ?
      WHERE status IN ('running', 'pending')`,
   ).run(Date.now());
+
+  // 长连接事件已被飞书投递过，崩溃后不擅自重放；用户重发会得到新的 message_id。
+  // 只收尸 processing，done/error/ignored 都是终态，保留作去重锚。
+  db.prepare(
+    "UPDATE lark_inbox SET status = 'error' WHERE status = 'processing'",
+  ).run();
 
   // First-boot backfill: if the search_index has zero rows but the DB
   // already holds data (upgrade from a pre-Stage-16 build), seed it
