@@ -1,6 +1,8 @@
 # Verified Facts
 
 
+- **本仓 `next build` 必须 `bun --bun run build`——裸 `bun run build` 用 node 跑 next,collect page data 阶段 import `bun:sqlite` 直接炸**(S127 settle 实弹两次误判,`lib/server/sqlite.ts:2`;主控树复现:裸命令 `Failed to collect page data for /api/agents`,`--bun` 全绿)。给坐席/CI 写 verify 一律 `--bun`。
+- **全仓 `bun run lint` 存量脏:56 errors/16 warnings(base ca0424e 实测)**(S127):给增量改动定 lint 验收必须定向 eslint 改动文件,全仓命令会把存量账算到本次头上。
 - **宿主 clash TUN 透明覆盖 Docker Desktop VM 的出站,容器内直连 api.anthropic.com/npm/claude.ai 全通,零代理配置**(S126 实测,`.fenjue/archive/fj-mt-spike-54c5/out/report.md`):容器 DNS 解析到 fake-ip 段(198.18.0.119)但 TLS 握手与 HTTP 全部成功——「fake-ip 但 TUN 接管成功」;备用路径 `HTTPS_PROXY=http://host.docker.internal:7897`(verge-mihomo mixed-port,root 进程宿主 lsof 平权查不到,容器实测可达)。多租户容器与任何"容器里跑 claude"的场景不需要任何网络 env。
 - **debian bookworm 的 apt 没有 ttyd 包(arm64),GitHub release `ttyd.aarch64` 1.7.7 静态二进制可用**(S126 实测,同上 report E 节);tmux 走 apt(3.3a)。`node:22-bookworm-slim` 内置 UID 1000 的 node 用户,`useradd -u 1000` 必撞——正解是原位重命名 node→tenant 并迁 home(`tenancy/image/Dockerfile`)。
 - **macOS 宿主既无 `timeout` 也无 `gtimeout`**(S126 踩到):任何要跨 mac/Linux 复跑的 verify/脚本别用外层 timeout 包装,让脚本内建 watchdog(`tenancy/gateway/selftest.ts` 尾部即范例)。
