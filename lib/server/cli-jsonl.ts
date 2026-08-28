@@ -156,11 +156,45 @@ export function looseTurnStart(e: CliRawEntry): boolean {
 // byUuid 必须收**全部**带 uuid 的 entry（含 type:"system" 的 compact/边界标记）——
 // CLI 在每个 turn 之间插 system 节点承载父链，过滤掉会把链打断、让每个 turn
 // 变成孤根。ownerTurn 上溯时需穿过这些非对话节点继续走。
+//
+// 拓扑桥接（Compact Continuation 断链修复）：
+// 上下文超限自动 /compact 或手工 /compact 时，CLI 会写入一条带有 parentUuid: null 的
+// system 节点，紧接着一条带有 isCompactSummary: true / isVisibleInTranscriptOnly: true
+// 的 user 摘要节点。因为 isCompactSummary 被 isTurnStart / looseTurnStart 排除（避免生
+// 成多余伪 turn 节点），且 system 节点的 parentUuid 为 null，导致紧随其后的 assistant
+// 最终答复以及 compact 之后的后续 turn 沿父链上溯到 null 被静默丢弃（UI 呈现为只有工具调用、
+// response 为空的僵尸状态，且后续 turn 孤立成根）。
+// 在此做拓扑桥接：若 compact 相关节点其 parentUuid 缺失或为 null，且物理序列前面存在带
+// uuid 的前序 entry，则将其父节点连接到 compact 前最后一条有效的 entry，恢复完整的逻辑树链路。
 export function indexByUuid(
   entries: Iterable<CliRawEntry>,
 ): Map<string, CliRawEntry> {
   const byUuid = new Map<string, CliRawEntry>();
-  for (const e of entries) if (typeof e.uuid === "string") byUuid.set(e.uuid, e);
+  const list = Array.isArray(entries) ? entries : Array.from(entries);
+  for (const e of list) if (typeof e.uuid === "string") byUuid.set(e.uuid, e);
+
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (!e || typeof e.uuid !== "string") continue;
+    const isCompactRoot =
+      e.isCompactSummary === true ||
+      e.isVisibleInTranscriptOnly === true ||
+      (e.type === "system" && (e.parentUuid === null || !e.parentUuid) && i > 0);
+
+    if (
+      isCompactRoot &&
+      (e.parentUuid === null || !e.parentUuid || !byUuid.has(e.parentUuid))
+    ) {
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = list[j];
+        if (prev && typeof prev.uuid === "string") {
+          byUuid.set(e.uuid, { ...e, parentUuid: prev.uuid });
+          break;
+        }
+      }
+    }
+  }
+
   return byUuid;
 }
 

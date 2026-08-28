@@ -313,6 +313,7 @@ console.log("\n── 冷热分段：历史折叠，热区常驻");
   );
   check("已完成连跑折成段落 chip", liveHtml.includes("3 步"));
   check("chip 点名工具与次数", liveHtml.includes("Bash ×2") && liveHtml.includes("Read"));
+  check("chip 带有已自动收起提示", liveHtml.includes("已自动收起"));
   check("段内明细不进 DOM（冷数据点击才展开）", !liveHtml.includes("cmd-0"));
   check("正在跑的调用不被吞进段里", liveHtml.includes("npm test"));
 
