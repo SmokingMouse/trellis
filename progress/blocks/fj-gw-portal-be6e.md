@@ -4,8 +4,9 @@
 
 - [x] additive-only `users.role`、`invites`、共享池表迁移；gateway.db 权限收紧为 0600。
 - [x] 自助注册、异步 tenantctl provision、注册状态、role 两级鉴权、admin users/invites/disable/enable/restart 基础 API。
-- [ ] 共享池 CRUD、订阅编排、endpoint 标记块。
-- [ ] 扩展 selftest、更新 API.md、完成 D1/D2/D3 验收。
+- [x] 共享池 CRUD、订阅编排、endpoint 标记块；endpoint schema 已回写 API.md。
+- [x] selftest 扩展为 21 项，覆盖注册/role/admin/共享池/fake tenantctl/标记块/旧库迁移。
+- [ ] 完成 D1/D2/D3 最终复跑与 result 上行。
 
 ## 边界与取舍
 
@@ -14,4 +15,4 @@
 
 ## Next
 
-实现共享池和纯函数 endpoint 注入器，再用 fake tenantctl 扩展单命令 selftest。
+执行 D1/D2/D3，复核 diff 与边界后发送 result。
