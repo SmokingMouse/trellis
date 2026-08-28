@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S4 二期统一门户（S127）双单交付，余契约C接线联调（涉重启宿主 prod 待拍板）；S121-S127 待 make deploy；公网接入待拍板；cpa codex 故障在查（failures.md）。
+S4 二期统一门户（S128）双单交付，余契约C接线联调（涉重启宿主 prod 待拍板）；S121-S128 待 make deploy；公网接入待拍板；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
