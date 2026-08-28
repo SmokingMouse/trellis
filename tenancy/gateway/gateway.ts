@@ -136,8 +136,10 @@ function startGateway(): void {
         if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
         const body = await fields(req);
         const result = await login(db, body.name || "", body.password || "", clientIP(req));
-        if (result.status === 429) return new Response("尝试过于频繁", { status: 429, headers: { "retry-after": "60" } });
-        if (result.status === 401) return new Response("用户名或密码错误", { status: 401 });
+        if (result.status !== 200) {
+          if (result.status === 429) return new Response("尝试过于频繁", { status: 429, headers: { "retry-after": "60" } });
+          return new Response("用户名或密码错误", { status: 401 });
+        }
         return Response.json({ ok: true }, { headers: { "set-cookie": sessionCookie(result.token, secure(req)) } });
       }
 
@@ -181,8 +183,14 @@ function startGateway(): void {
       idleTimeout: 0,
       open(ws) {
         const data = ws.data;
+        // Bun 的 WebSocket 客户端支持握手自定义 headers/protocols(bun-types WebSocketOptionsHeaders);
+        // next build 的 tsc 走 DOM lib 看不到这个扩展签名,局部断言之。
+        type BunWebSocketCtor = new (
+          url: string,
+          opts?: { headers?: Record<string, string>; protocols?: string[] },
+        ) => WebSocket;
         const options = { headers: { cookie: data.cookie }, protocols: data.protocols };
-        const upstream = new WebSocket(data.target, options);
+        const upstream = new (WebSocket as unknown as BunWebSocketCtor)(data.target, options);
         upstream.binaryType = "arraybuffer";
         data.upstream = upstream;
         upstream.onopen = () => {

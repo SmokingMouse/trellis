@@ -87,7 +87,8 @@ async function test(number: number, name: string, action: () => Promise<void>): 
 
 function cookie(response: Response): string {
   const value = response.headers.get("set-cookie");
-  assert(value?.includes("SameSite=Strict"), "session cookie must be SameSite=Strict");
+  assert(value, "set-cookie header missing");
+  assert(value.includes("SameSite=Strict"), "session cookie must be SameSite=Strict");
   return value.split(";", 1)[0];
 }
 
@@ -108,8 +109,9 @@ async function main(): Promise<void> {
   };
   const tenant = (name: string, port: number, authToken: string) =>
     writeFileSync(join(tenantDir, `${name}.json`), JSON.stringify({ name, hostPort: port, authToken }));
-  tenant("alice", mockA.server.port, "token-alice");
-  tenant("bob", mockB.server.port, "token-bob");
+  // Bun.serve().port 类型是 number | undefined;listen 成功后必有值
+  tenant("alice", mockA.server.port!, "token-alice");
+  tenant("bob", mockB.server.port!, "token-bob");
   tenant("maint", deadPort, "token-maint");
 
   const gateway = Bun.spawn({
@@ -232,7 +234,12 @@ async function main(): Promise<void> {
       const received: (string | Uint8Array)[] = [];
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("WebSocket timeout")), 5000);
-        const ws = new WebSocket(`${base.replace("http", "ws")}/term`, {
+        // Bun WS 客户端的 headers/protocols 扩展签名,DOM lib 看不到(同 gateway.ts)
+        type BunWebSocketCtor = new (
+          url: string,
+          opts?: { headers?: Record<string, string>; protocols?: string[] },
+        ) => WebSocket;
+        const ws = new (WebSocket as unknown as BunWebSocketCtor)(`${base.replace("http", "ws")}/term`, {
           headers: { cookie: aliceCookie }, protocols: ["echo.v1"],
         });
         ws.binaryType = "arraybuffer";
