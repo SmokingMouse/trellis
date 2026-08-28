@@ -1,12 +1,14 @@
 # Trellis Progress
 
 ## Current Focus
-全平台 SVG 与 Mermaid 图表渲染与交互体系优化（S121）已落地待部署；cpa codex 故障在查（failures.md）。
+S4 多租户第一期（tenancy/ 实例级隔离+租户网关）已落地，与 S121 一起待 make deploy；公网接入待拍板；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
-- [ ] **自定义 Agent + 自动化任务** → [计划](custom-agents-plan.md) · [ADR](decisions/2026-07-31-custom-agents.md)
-  A1-A4 · T1-T4 全部落地实测。本机 prod 已上线。待办：BOE 未部（需 devbox 手跑，见 sessions.md S88 Next）。
+- [ ] **S4: 多租户开放（实例级隔离 + 租户网关）** → [运维手册](../tenancy/README.md) · [ADR](decisions/2026-08-28-multi-tenancy-instance-isolation.md)
+  四单交付全 settle pass；余：公网接入（待拍板）、真人租户端到端。
+- [x] **自定义 Agent + 自动化任务** → [计划](custom-agents-plan.md) · [ADR](decisions/2026-07-31-custom-agents.md)
+  A1-A4 · T1-T4 全部落地实测，本机 prod 已上线，开发完结。残留运维待办：BOE 未部（见 sessions.md S88 Next）。
 - [ ] **S1: Project/Workspace 层级 + 工作区终端** → [spec](project-workspace-layer.md) · [ADR](decisions/2026-07-27-project-workspace-layer.md)
   P0/P1/P2 均已落地，S83/S87 修掉可用性堵点后计时观测。S2/S3/S4 依赖它。
 - [ ] **替代 CLI + GPT 客户端** → [roadmap](roadmap-2026q2.md) · [工作台](session-workbench.md) · [体验优化](optimization-roadmap.md)

@@ -282,7 +282,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack : error);
-  process.exitCode = 1;
-});
+// 全局 watchdog:selftest 实测 ~5s 跑完;挂死时必须以非零退出,settle 的 verify 复跑不能被卡住
+const watchdog = setTimeout(() => {
+  console.error("SELFTEST_TIMEOUT");
+  process.exit(1);
+}, 120_000);
+
+main()
+  .catch((error) => {
+    console.error(error instanceof Error ? error.stack : error);
+    process.exitCode = 1;
+  })
+  .finally(() => clearTimeout(watchdog));
