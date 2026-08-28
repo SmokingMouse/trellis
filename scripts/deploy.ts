@@ -422,6 +422,9 @@ async function smoke(dir: string): Promise<void> {
     // 临时实例会看到到期任务并**真 spawn claude 去跑** —— 花真钱、动真 workspace。
     // 「验证新版本能不能跑」绝不该顺带执行一遍用户的自动化任务。
     TRELLIS_SCHEDULER: "off",
+    // 真库快照也含真 app_secret；smoke 绝不能抢走生产实例的 WS 事件分片，
+    // 更不能把测试期间收到的用户消息交给临时进程处理。
+    TRELLIS_LARK: "off",
   };
   // 关掉认证闸，否则每个断言都要先登录。
   delete env.TRELLIS_AUTH_PASS;

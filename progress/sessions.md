@@ -1,8 +1,8 @@
 # Session Log
 
-最近 5 条，倒序（Session 125 / 124 / 123 / 122 / 121）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 126 / 125 / 124 / 123 / 122）。更早的见 `archive.md`。
 
-### Session 125（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
+### Session 126（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
 - **触发**: 用户「我想支持多租户模式，可以把我这个平台开放出去；对文件系统做隔离」→ plan mode 三路探索 + 用户拍板（小圈子邀请制 / 租户自带凭证可共享 / 每租户一容器 / Mac mini 本机）→「全部实现，用 fenjue 调度」。
 - **架构决策**（[ADR](decisions/2026-08-28-multi-tenancy-instance-isolation.md)）: **实例级隔离**——每租户一个 Docker 容器跑完整 trellis 实例，宿主薄网关做认证+路由+cookie 翻译，**trellis 本体零改动**。否掉单实例多租户改造（10 表+73 仓储函数+52 route+2 条全局 SSE 广播全要加 owner，漏一处即泄露，且防不住 CLI 的 Bash）；所有路径根都是 `os.homedir()`，容器 HOME 即天然隔离。
 - **Done**（焚决四单全部 settle pass + accepted，全新代码集中 `tenancy/`）:
@@ -14,6 +14,13 @@
 - **验证**: 四单 settle 全部独立复跑（不采信坐席自述）——spike D1/D2、image 九条 verify（完整容器生命周期重放）、gateway selftest 12 项+独立启动+plist、M3 四条；merge 后 main 上 selftest 全绿；真容器×网关端到端 curl 联调全绿。
 - **Next**: ① 公网接入待房主拍板（caddy 站点块+域名，见 tenancy/README.md）；② 宿主 memos/stirling 建议改绑 127.0.0.1（容器可经 host.docker.internal 触达）；③ 第一位真实朋友上车时做真人端到端（真 claude login+Web 终端）；④ S121+S122 一起 `make deploy`（tenancy/ 不影响单人版运行时，零风险合部）。
 
+
+### Session 125（2026-08-28，飞书机器人载体：注册/绑定 Bot + WS 长连接双向对话；焚决派发 codex 实现）
+- **触发**: 用户「定时任务是调度机制、agent 是身份，但没有一个载体——先支持飞书机器人，支持绑定/注册，也支持在飞书对话，参考 happyclaw 方案」。正是 custom-agents-plan 明确「推迟」的飞书载体项启动。（原记 S122，与并行 worktree 撞号顺延 S125。）
+- **方案定盘（Owner 侧，两路 Explore 侦察后）**: 采 happyclaw 的**形状**（`@larksuiteoapi/node-sdk` WS 长连接、EventDispatcher、mention 门控），拒其**厚度**（六态耐久投递/流式卡片/多级绑定 = 多租户账单，happyclaw-contrast.md 既有裁决）。核心决策：①三表 `lark_bots`/`lark_chats`/`lark_inbox`（去重照 `task_runs_slot` 抢槽 idiom，仅 `SQLITE_CONSTRAINT_UNIQUE|PRIMARYKEY` 算 dup）②每飞书 chat = `kind='lark'` 会话内一条线性链（新消息 = `last_node_id` 子节点 + resume，侧栏可见）③per-chat 内存串行队列（深度 5）+ 全局并发 2（`AsyncSemaphore` 原子交接）④群聊必须 @bot（`bot_open_id` 缺失 fail-closed）、bot 自身消息无条件忽略（防自触发烧钱循环）⑤连接管理 = instrumentation 挂 `startLarkManager()` 15s 对账 tick，route 只写 DB（跨 bundle 模块实例不共享，S87 坑）⑥`TRELLIS_LARK=off` deploy smoke 闸。
+- **执行（焚决 fj-lark-bot-28f1，codex+gpt-5.6-sol 坐席）**: 33min 交付 + 1 轮缺陷收尾，全程 3 progress + 1 blocker（settings-tabs.ts 补授权）+ 2 result。产物：`lib/server/lark/`（protocol/store/sdk/handler/manager/semaphore 六模块）+ `/api/lark-bots` CRUD/test + `app/settings/bots` 整页 UI（secret 不回显、连接状态徽标、chats 深链）+ `scripts/test-lark-bot.ts`（18 断言）+ `scripts/lark-ws-smoke.ts`（无凭证 SKIP）。commit `ac78755`。
+- **验证**: settle 独立复跑两轮全绿（tsc 0 错 / 18 断言 / production build / WS 冒烟 SKIP / TRELLIS_LARK 三文件命中），scope 零越界；falsification-verifier 对 8 条不变式逐条 PoC 证伪全 HOLDS（防自触发 10 种 sender 变体 fail-closed、per-chat 串行 30k 压测零重叠、`SQLITE_BUSY` 真抛不吞、secret 三面不漏），其揪出的全局信号量非原子交接（微任务窗口可越 cap 2 倍）已由坐席修复（`semaphore.ts` 原子 handoff + 压测断言 peak=2）。
+- **Next**: ①真凭证端到端联调（`LARK_SMOKE_APP_ID/SECRET` 跑 lark-ws-smoke + 开放平台开通机器人能力/事件订阅长连接/im 权限，本机 lark-cli app `cli_a923d94f1bf89bef` 凭证已验活）②PR #23 合并后 `make deploy` 上线。
 
 ### Session 124（2026-08-24，工作区读写与侧栏交互重构：已合并折叠降噪 + 批量安全清理 + 改动检视 Diff 弹窗）
 - **触发**: 用户反馈侧栏内容繁杂、体验较差（几十个历史 worktree 堆叠刷屏、分支与目录名并排截断、缺少工作区读写闭环能力）→「开始优化吧」。
@@ -54,16 +61,4 @@
   4. `scripts/test-timeline-render.tsx`: 补全段落 chip 带有「已自动收起」提示的断言。
 - **验证**: `bun test` 44/44 全部通过；`bun scripts/test-timeline-render.tsx`、`bun scripts/test-cli-jsonl.ts`、`bun scripts/test-tool-tree.ts` 全通过；`tsc --noEmit` 0 错。
 - **Next**: 合并至 main 后部署上线。
-
-### Session 121（2026-08-24，全平台 SVG 与 Mermaid 渲染与交互体系优化：双模式预览 + 图表放大 + 文件预览）
-- **触发**: 用户「现在在平台上,好像不支持 svg 的渲染,做一些优化」→「除此外,把 mermaid 的渲染也加上」。
-- **根因**: ① CodeBlock 仅将 `svg/xml/html/mermaid` 作为普通文本代码高亮展示，用户生成图表/流程图/矢量图只能看到一长串代码，无法直接看到渲染后的视觉图形；② 缺少「预览/源码」切换、背景色切换（网格/亮色/暗色防深浅冲突）、缩放与放大模态框、下载 SVG 等操作；③ FilePreview 对 `.svg` / `.mmd` / `.mermaid` 文件缺乏专用图表预览与源码双模式；④ Markdown 内直接嵌入的 `<svg>` 缺少响应式防溢出样式。
-- **Done**:
-  1. `lib/svg.ts`: 新增纯工具库——`isSvgCode`（语言与内容特征识别）、`extractSvg`、`normalizeSvg`（自动补全缺失的 `xmlns`、视口 `viewBox` 兜底、去除危险脚本）、`validateSvgSyntax`（DOMParser XML 解析校验）、`createSvgBlobUrl`（沙箱安全 Blob URL）、`downloadSvgFile`（一键下载）。
-  2. `lib/mermaid.ts`: 新增异步懒加载 Mermaid 渲染引擎——`isMermaidCode`（语言与主流图表 starters 自动探测）、`renderMermaidToSvg`（根据当前暗亮主题动态配置 `mermaid.initialize`，支持 flow/sequence/class/state/er/gantt/mindmap 等全系图表语法，安全异常捕获）。
-  3. `components/CodeBlock.tsx`: 全面升级支持 SVG 与 Mermaid 代码块——检测到矢量图或 Mermaid 图表时默认开启「👁 预览」视图；提供「👁 预览 / 📄 源码」一键切换；支持背景切换（网格底 / 亮底 / 暗底）、点击放大 / ⛶ 全屏弹窗大图预览（支持 20%~400% 缩放调节与 1:1 重置）、一键下载 `.svg` 矢量图、复制源码，遇到语法畸形或未完成生成时优雅降级提示并引导查看源码。
-  4. `components/FilePreview.tsx`: 增加 `SvgFilePreview` 与 `MermaidFilePreview` 专属文件预览组件，支持视觉预览与源码查看双模式、缩放比例控制器、背景色切换与复制/下载；`lib/generated-files.ts` 与 `lib/server/workspace-files.ts` 扩展 `.mmd` / `.mermaid` 文件扩展名识别与 MIME 映射。
-  5. `components/HoverPreview.tsx` & `app/globals.css`: 悬浮卡片增加高对比网格背景并支持 Mermaid 悬浮图表渲染；全局为 `.md-body svg` 增加自适应 `max-width: 100%`、`height: auto` 与居中展示，彻底杜绝内容溢出卡片。
-- **验证**: `scripts/test-svg-rendering.tsx` 全流程断言通过（包含 SVG 提取/规范化/清洗、Mermaid 识别与 Markdown Unified AST/JSX 转换）；`bun --bun run build` 成功完成 Turbopack 生产编译。
-- **Next**: 合并至 main，下次 `make deploy` 部署上线。
 

@@ -354,11 +354,12 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const want = opts?.archived ? 1 : 0;
   const rows = db
     .prepare(
-      // S88: kind='task' 是自动化任务的常驻会话，不挤进用户的**活跃**列表
+      // S88: kind='task' 是自动化任务的常驻会话，不挤进用户的**活跃**列表；
+      // kind='lark' 则必须与 user 一起展示——飞书只是入口，树才是对话本体。
       // —— 它们在侧栏有自己的「定时任务」分组（S117，listTaskSessions）。
       // 归档视图放宽 kind：归档的任务会话若也被排除，就从每个列表里都消失了。
       `SELECT ${SESSION_COLS} FROM sessions
-       WHERE archived = ? AND (kind = 'user' OR (? = 1 AND kind = 'task'))
+       WHERE archived = ? AND (kind IN ('user', 'lark') OR (? = 1 AND kind = 'task'))
        ORDER BY updated_at DESC`,
     )
     .all(want, want) as SessionRow[];
@@ -384,7 +385,7 @@ export function countArchivedSessions(): number {
   // 与 listSessions 的归档视图同一口径：任务会话也计入（能找回才敢归档）。
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task')",
+      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task','lark')",
     )
     .get() as { n: number };
   return row.n;

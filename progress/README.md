@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S4 多租户第一期（S125，tenancy/ 实例级隔离+租户网关）落地，与 S121-S124 一起待 make deploy；公网接入待拍板；cpa codex 故障在查（failures.md）。
+S4 多租户（S126）与飞书机器人（S125）落地，同 S121-S124 一起待 make deploy；多租户公网接入待拍板；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
@@ -19,7 +19,7 @@ S4 多租户第一期（S125，tenancy/ 实例级隔离+租户网关）落地，
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S125–121） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S126–122） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
