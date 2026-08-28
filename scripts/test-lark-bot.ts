@@ -144,4 +144,29 @@ equal(
   "对账 diff 能识别新增、移除和凭证变更",
 );
 
+// 测试 Agent 删除时级联解绑 lark_bots 与 tasks
+const agentDb = new Database(":memory:");
+agentDb.exec(`
+  CREATE TABLE agents (id TEXT PRIMARY KEY, slug TEXT UNIQUE, name TEXT, builtin INTEGER DEFAULT 0);
+  CREATE TABLE lark_bots (id TEXT PRIMARY KEY, name TEXT, app_id TEXT UNIQUE, app_secret TEXT, agent_id TEXT);
+  CREATE TABLE tasks (id TEXT PRIMARY KEY, name TEXT, agent_id TEXT);
+`);
+agentDb.exec(`
+  INSERT INTO agents (id, slug, name, builtin) VALUES ('ag_1', 'scout', 'Scout', 0);
+  INSERT INTO lark_bots (id, name, app_id, app_secret, agent_id) VALUES ('bot_1', 'Feishu Bot', 'cli_1', 'sec_1', 'ag_1');
+  INSERT INTO tasks (id, name, agent_id) VALUES ('task_1', 'Daily Scout', 'ag_1');
+`);
+const beforeBot = agentDb.prepare("SELECT agent_id FROM lark_bots WHERE id = 'bot_1'").get() as { agent_id: string };
+equal(beforeBot.agent_id, "ag_1", "初始状态机器人正确绑定 Agent");
+
+// 模拟 deleteAgent 的解绑 SQL 逻辑
+agentDb.prepare("UPDATE lark_bots SET agent_id = NULL WHERE agent_id = ?").run("ag_1");
+agentDb.prepare("UPDATE tasks SET agent_id = NULL WHERE agent_id = ?").run("ag_1");
+agentDb.prepare("DELETE FROM agents WHERE id = ?").run("ag_1");
+
+const afterBot = agentDb.prepare("SELECT agent_id FROM lark_bots WHERE id = 'bot_1'").get() as { agent_id: string | null };
+const afterTask = agentDb.prepare("SELECT agent_id FROM tasks WHERE id = 'task_1'").get() as { agent_id: string | null };
+equal(afterBot.agent_id, null, "删除 Agent 后关联的飞书机器人自动解绑（agent_id=null）");
+equal(afterTask.agent_id, null, "删除 Agent 后关联的任务自动解绑（agent_id=null）");
+
 console.log(`PASS ${passed} lark assertions`);

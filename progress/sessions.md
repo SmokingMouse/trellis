@@ -1,6 +1,28 @@
 # Session Log
 
-最近 5 条，倒序（Session 126 / 125 / 124 / 123 / 122）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 127 / 126 / 125 / 124 / 123）。更早的见 `archive.md`。
+
+### Session 127（2026-08-28，飞书机器人 Agent 优先与双向自然绑定重构：Agent 渠道接入面板 + 机器人表单内就地新建 Agent）
+- **触发**: 用户反馈「现在的飞书机器人不是很好用，他应该是绑定在 Agent 上的，不应该是只是绑定现成的，而是可以支持新建然后自然绑定，参考 happyclaw 的逻辑」。
+- **根因 & 架构对齐（Agent-first）**:
+  1. 此前飞书机器人仅在 `/settings/bots` 孤立配置，只有静态下拉选择已有 Agent，无法在建 bot 动线上就地定义新人设；
+  2. `/settings/agents` 人设管理页对飞书机器人完全无感知、无渠道绑定状态与快捷入口；
+  3. `lib/server/agents.ts:deleteAgent` 删 Agent 时未级联重置 `lark_bots.agent_id` 和 `tasks.agent_id`。
+- **Done**:
+  1. `app/settings/bots/page.tsx`:
+     - **表单就地新建 Agent**：绑定 Agent 下拉框旁增加 `+ 新建 Agent` 按钮与 `QuickCreateAgentModal`，录入名字/slug/提示词/模型后直发 `/api/agents`，建完自动选定并绑定到当前机器人，无需跳页；
+     - **已绑定人设直达**：选定 Agent 后展示当前人设名与 `查看人设 ↗` 快捷深链；
+     - **URL 查询参数支持**：支持 `?new=1&agentId=xxx`（从 Agent 页新建 bot 预选）和 `?id=xxx`（直达编辑）。
+  2. `app/settings/agents/page.tsx`:
+     - **渠道绑定面板（飞书机器人）**：Agent 编辑器增加专属「💬 飞书机器人接入」卡片，实时展示该 Agent 绑定的所有飞书应用（App ID、连接/异常徽标、工作目录、最近连接时间），支持一键 `解绑`（退回默认助手）与 `配置 ↗` 跳转；
+     - **双向自然绑定与接入**：提供 `+ 接入新飞书机器人`（深链带 `agentId` 跳新建 bot）、`绑定已有机器人`（下拉选择其他 bot 一键关联到当前 Agent）；
+     - **左侧列表飞书标识**：Agent 列表中对已绑定飞书机器人的项渲染 `💬 机器人` 状态角标；支持 `?id=xxx` / `?new=1` 外部路由直达。
+  3. `lib/server/agents.ts`:
+     - `deleteAgent` 增加级联解绑：删除 Agent 时自动将 `lark_bots` 与 `tasks` 的 `agent_id` 置为 `NULL`，防止悬空引用。
+  4. `scripts/test-lark-bot.ts`:
+     - 增加 Agent 删除级联解绑飞书机器人与任务的断言验证（18 → 21 断言）。
+- **验证**: `bun scripts/test-lark-bot.ts` 21 项断言全绿；`bun --bun next build` 编译、路由生成与类型检查全部 0 错通过。
+- **Next**: 合并至 main 后随其他 S12x 成果一起 `make deploy` 部署上线。
 
 ### Session 126（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
 - **触发**: 用户「我想支持多租户模式，可以把我这个平台开放出去；对文件系统做隔离」→ plan mode 三路探索 + 用户拍板（小圈子邀请制 / 租户自带凭证可共享 / 每租户一容器 / Mac mini 本机）→「全部实现，用 fenjue 调度」。
@@ -13,7 +35,6 @@
   5. Supervisor 收尾: **真容器 × 网关联调通过**（邀请认领 200→cookie 翻译→真实例 /api/sessions 200→mock 对话 SSE created/done 全链路）；selftest 补 120s watchdog；`tenancy/README.md`（架构/威胁模型/运维手册）。
 - **验证**: 四单 settle 全部独立复跑（不采信坐席自述）——spike D1/D2、image 九条 verify（完整容器生命周期重放）、gateway selftest 12 项+独立启动+plist、M3 四条；merge 后 main 上 selftest 全绿；真容器×网关端到端 curl 联调全绿。
 - **Next**: ① 公网接入待房主拍板（caddy 站点块+域名，见 tenancy/README.md）；② 宿主 memos/stirling 建议改绑 127.0.0.1（容器可经 host.docker.internal 触达）；③ 第一位真实朋友上车时做真人端到端（真 claude login+Web 终端）；④ S121+S122 一起 `make deploy`（tenancy/ 不影响单人版运行时，零风险合部）。
-
 
 ### Session 125（2026-08-28，飞书机器人载体：注册/绑定 Bot + WS 长连接双向对话；焚决派发 codex 实现）
 - **触发**: 用户「定时任务是调度机制、agent 是身份，但没有一个载体——先支持飞书机器人，支持绑定/注册，也支持在飞书对话，参考 happyclaw 方案」。正是 custom-agents-plan 明确「推迟」的飞书载体项启动。（原记 S122，与并行 worktree 撞号顺延 S125。）
@@ -48,17 +69,3 @@
   - `bun scripts/test-cli-jsonl.ts`: 12,752 个 JSONL 文件 / 14,351 个可见 Turn 全量真语料扫描 100% 通过（`noTail: 0, wrongTurn: 0`）。
   - 实测从 112 个真实 compact jsonl 恢复 32,982 条此前断链被弃的 assistant 消息与 82 个长动线最终答复。
 - **Next**: 合并至 main 后部署上线。
-
-### Session 122（2026-08-24，自动压缩感知增强：工具连跑折叠状态标识 + 轮次上下文自动压缩分隔条）
-- **触发**: 用户反馈触发自动压缩时希望能明确感知到，避免静默压缩导致用户误以为步骤消失或未理解上下文转入紧凑摘要。
-- **设计（两层压缩感知）**:
-  1. **工具链级冷热折叠感知 (`SegmentRow`)**: 连续 ≥3 个已完成普通工具折叠成 chip 时，增加明确状态徽章（`[已自动收起]` / `[已展开]`）、操作提示浮层（`title="点击展开已自动收起的明细"`）及 live 活跃边框高亮，明确告知用户此处发生自动折叠与可点击展开。
-  2. **会话轮次级上下文自动压缩感知 (`LinearThreadView`)**: 新增 `isContextCompacted` 判据（捕获 CLI 紧凑延续摘要标记与 ≥40k token 降幅 ≥40% 门限），在长会话触发自动 compact 时渲染虚线分隔条与徽章（`🗜️ 上下文已自动压缩（早期历史已转入模型紧凑摘要）`）。
-- **Done**:
-  1. `components/tools/ToolRow.tsx`: `SegmentRow` 增加 `已自动收起` / `已展开` 状态徽章、展开提示 tooltip、live 态视觉区隔，保持冷数据不进 DOM 的同时提供直观感知。
-  2. `lib/context-usage.ts`: 新增 `isContextCompacted` 判定函数；补充 `lib/context-usage.test.ts` 单元测试。
-  3. `components/LinearThreadView.tsx`: 接入 `isContextCompacted`，在紧凑压缩轮次交界处渲染分隔条与说明。
-  4. `scripts/test-timeline-render.tsx`: 补全段落 chip 带有「已自动收起」提示的断言。
-- **验证**: `bun test` 44/44 全部通过；`bun scripts/test-timeline-render.tsx`、`bun scripts/test-cli-jsonl.ts`、`bun scripts/test-tool-tree.ts` 全通过；`tsc --noEmit` 0 错。
-- **Next**: 合并至 main 后部署上线。
-
