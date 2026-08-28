@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-全平台 SVG 与 Mermaid 图表渲染与交互体系优化（S121）已落地待部署；cpa codex 故障在查（failures.md）。
+飞书机器人载体（S122）已交付，待真凭证联调 + merge + 部署；S121 图表渲染同待部署；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
