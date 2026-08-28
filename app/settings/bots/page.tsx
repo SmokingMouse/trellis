@@ -28,10 +28,17 @@ export default function LarkBotsSettingsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"save" | "test" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "delete" | "one-click" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [createAgentOpen, setCreateAgentOpen] = useState(false);
+
+  // 一键创建向导中的 Agent 模式：选择已有 vs 就地新建
+  const [agentMode, setAgentMode] = useState<"existing" | "new">("existing");
+  const [newAgentName, setNewAgentName] = useState("");
+  const [newAgentSlug, setNewAgentSlug] = useState("");
+  const [newAgentDesc, setNewAgentDesc] = useState("");
+  const [newAgentPrompt, setNewAgentPrompt] = useState("");
+  const [newAgentModel, setNewAgentModel] = useState("");
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -61,7 +68,6 @@ export default function LarkBotsSettingsPage() {
   useEffect(() => {
     const initial = setTimeout(() => void refresh(), 0);
     void refreshAgents();
-    // manager 的产品语义是 15 秒对账；页面短轮询让状态徽标无需手动刷新。
     const timer = setInterval(() => void refresh(true), 5_000);
     return () => {
       clearTimeout(initial);
@@ -83,6 +89,7 @@ export default function LarkBotsSettingsPage() {
         ...EMPTY,
         agentId: agentIdParam || null,
       });
+      setAgentMode("existing");
     } else if (idParam) {
       setSelectedId(idParam);
     }
@@ -127,6 +134,12 @@ export default function LarkBotsSettingsPage() {
       ...EMPTY,
       agentId: defaultAgentId ?? null,
     });
+    setAgentMode("existing");
+    setNewAgentName("");
+    setNewAgentSlug("");
+    setNewAgentDesc("");
+    setNewAgentPrompt("");
+    setNewAgentModel("");
     setMessage(null);
     setError(null);
   };
@@ -136,6 +149,87 @@ export default function LarkBotsSettingsPage() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "请求失败");
     return data;
+  };
+
+  // 一键创建并测试绑定
+  const handleOneClickSetup = async () => {
+    if (!draft) return;
+    if (!draft.name.trim() || !draft.appId.trim() || !draft.appSecret.trim()) {
+      setError("请填写配置名称、飞书 App ID 和 App Secret");
+      return;
+    }
+
+    setBusy("one-click");
+    setMessage(null);
+    setError(null);
+
+    try {
+      let targetAgentId = draft.agentId;
+
+      // 1. 如果选择了就地新建 Agent，先创建 Agent
+      if (agentMode === "new") {
+        if (!newAgentName.trim() || !newAgentSlug.trim()) {
+          throw new Error("请填写新 Agent 的名称与 slug");
+        }
+        const agentRes = await request("/api/agents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: newAgentName.trim(),
+            slug: newAgentSlug.trim(),
+            description: newAgentDesc.trim(),
+            systemPrompt: newAgentPrompt.trim(),
+            model: newAgentModel.trim() || null,
+            inheritEnv: true,
+            enabled: true,
+          }),
+        });
+        targetAgentId = agentRes.agent.id;
+        await refreshAgents();
+      }
+
+      // 2. 创建飞书机器人
+      const botPayload = {
+        name: draft.name.trim(),
+        appId: draft.appId.trim(),
+        appSecret: draft.appSecret.trim(),
+        agentId: targetAgentId,
+        workspacePath: draft.workspacePath.trim() || null,
+        enabled: draft.enabled,
+      };
+      const botRes = await request("/api/lark-bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(botPayload),
+      });
+
+      const newBotId = botRes.bot.id;
+
+      // 3. 自动测试凭证连通性
+      let testMessage = "";
+      try {
+        const testRes = await request(`/api/lark-bots/${newBotId}/test`, { method: "POST" });
+        testMessage = `凭证测试成功：已连接飞书应用「${testRes.bot.name}」(${testRes.bot.openId})`;
+      } catch (testErr) {
+        testMessage = `机器人已保存，但凭证测试未通过：${testErr instanceof Error ? testErr.message : String(testErr)}（请检查 App Secret 或应用发布状态）`;
+      }
+
+      setSelectedId(newBotId);
+      setDraft({
+        name: botRes.bot.name,
+        appId: botRes.bot.appId,
+        appSecret: "",
+        agentId: botRes.bot.agentId,
+        workspacePath: botRes.bot.workspacePath ?? "",
+        enabled: botRes.bot.enabled,
+      });
+      setMessage(`🎉 飞书机器人接入成功！${testMessage}。服务端长连接将在 15 秒内就绪，现在可以在飞书中向机器人发消息测试。`);
+      await refresh(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
   };
 
   const save = async () => {
@@ -207,9 +301,10 @@ export default function LarkBotsSettingsPage() {
 
   return (
     <div className="flex flex-col md:flex-row gap-4">
+      {/* 左侧：机器人列表与新建入口 */}
       <aside className="md:w-[280px] shrink-0 flex flex-col gap-2">
         <Button type="button" variant="primary" size="sm" onClick={() => create()}>
-          + 登记飞书机器人
+          + 一键接入飞书机器人
         </Button>
         <div className="text-label text-ink-faint px-1">
           保存后由服务端长连接接收消息，无需公网 webhook。
@@ -235,104 +330,222 @@ export default function LarkBotsSettingsPage() {
               <div className={`text-label font-mono truncate ${selectedId === bot.id ? "opacity-75" : "text-ink-faint"}`}>
                 {bot.appId}
               </div>
-              {botAgent && (
+              {botAgent ? (
                 <div className={`text-nano truncate mt-0.5 ${selectedId === bot.id ? "opacity-90" : "text-accent-ink"}`}>
                   🎭 {botAgent.name}
+                </div>
+              ) : (
+                <div className={`text-nano truncate mt-0.5 ${selectedId === bot.id ? "opacity-70" : "text-ink-faint"}`}>
+                  默认助手
                 </div>
               )}
             </button>
           );
         })}
         {!loading && bots.length === 0 && (
-          <div className="rounded-lg border border-dashed border-line px-3 py-5 text-ui text-ink-faint">
-            还没有机器人。先在飞书开放平台创建自建应用并开启机器人能力。
+          <div className="rounded-lg border border-dashed border-line px-3 py-5 text-ui text-ink-faint text-center">
+            尚未接入机器人。点击上方按钮一键创建并绑定。
           </div>
         )}
       </aside>
 
+      {/* 右侧：向导式创建 / 编辑面板 */}
       <main className="flex-1 min-w-0">
         {!draft ? (
-          <div className="py-8 text-ui text-ink-faint">左边选一个机器人编辑，或登记新应用。</div>
+          <div className="py-8 text-ui text-ink-faint">左边选一个机器人编辑，或点击上方一键接入新应用。</div>
         ) : (
           <div className="flex flex-col gap-4">
-            <div className="rounded-xl border border-line bg-surface px-4 py-3">
-              <div className="text-ui font-semibold">连接与身份</div>
-              <div className="text-label text-ink-faint mt-1">
-                P2P 消息直接触发；群聊只有明确 @bot 才触发。每个飞书 chat 会生成一条可分叉的 Trellis 会话。
+            {/* 顶栏指南卡片 */}
+            <div className="rounded-xl border border-line bg-surface p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-ui font-semibold flex items-center gap-2">
+                    <span>🚀 飞书开放平台极速接入指南</span>
+                  </div>
+                  <div className="text-label text-ink-muted mt-1 leading-relaxed space-y-1">
+                    <div>1. 在飞书开放平台创建「企业自建应用」，并在应用能力中启用「机器人」；</div>
+                    <div>2. 在「凭证与基础信息」中复制 <b>App ID</b> 与 <b>App Secret</b> 填入下方；</div>
+                    <div>3. 在「事件与回调」配置<b>长连接</b>并订阅 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">im.message.receive_v1</code>，申请权限后<b>发布版本</b>即可。</div>
+                  </div>
+                </div>
+                <a
+                  href="https://open.feishu.cn/app"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong shrink-0 transition-colors"
+                >
+                  打开开放平台 ↗
+                </a>
               </div>
             </div>
 
             {error && <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">{error}</div>}
-            {message && <div className="px-3 py-2 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted">{message}</div>}
+            {message && <div className="px-3 py-2 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted leading-relaxed">{message}</div>}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="配置名称" hint="只在 Trellis 设置页显示">
-                <input className={INPUT} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：研发助手" />
+            {/* 1. 基础与凭证信息 */}
+            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+              <div className="text-ui font-semibold">1. 应用与凭证信息</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="配置名称" hint="在 Trellis 中显示的易记名称">
+                  <input className={INPUT} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：代码评审专家" />
+                </Field>
+                <Field label="飞书 App ID" hint="开放平台以 cli_ 开头的唯一标识">
+                  <input className={`${INPUT} font-mono`} value={draft.appId} onChange={(e) => setDraft({ ...draft, appId: e.target.value })} placeholder="cli_xxxxxxxxxxxxxxxx" autoComplete="off" />
+                </Field>
+              </div>
+
+              <Field
+                label="飞书 App Secret"
+                hint={selected?.hasSecret ? "已保存安全凭证。留空表示不修改；服务端永不回显。" : "在“凭证与基础信息”中复制。只在服务端 DB 加密保存。"}
+              >
+                <input className={`${INPUT} font-mono`} type="password" value={draft.appSecret} onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })} placeholder={selected ? "留空不改" : "请输入 app_secret"} autoComplete="new-password" />
               </Field>
-              <Field label="飞书 app_id">
-                <input className={`${INPUT} font-mono`} value={draft.appId} onChange={(e) => setDraft({ ...draft, appId: e.target.value })} placeholder="cli_xxxxxxxxxxxxxxxx" autoComplete="off" />
-              </Field>
-            </div>
+            </section>
 
-            <Field
-              label="飞书 app_secret"
-              hint={selected?.hasSecret ? "已保存。留空表示不修改；服务端永不回显原值。" : "只在服务端 DB 保存，提交后不再回显。"}
-            >
-              <input className={`${INPUT} font-mono`} type="password" value={draft.appSecret} onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })} placeholder={selected ? "留空不改" : "请输入 app_secret"} autoComplete="new-password" />
-            </Field>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="绑定 Agent" hint="绑定专属 Agent 人设、技能与工具策略">
-                <div className="flex gap-2">
-                  <select
-                    className={`${INPUT} flex-1`}
-                    value={draft.agentId ?? ""}
-                    onChange={(e) => setDraft({ ...draft, agentId: e.target.value || null })}
-                  >
-                    <option value="">默认助手（不附加自定义人设）</option>
-                    {agents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.name} (@{agent.slug})
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => setCreateAgentOpen(true)}
-                    title="新建自定义 Agent 并自动绑定"
-                  >
-                    + 新建 Agent
-                  </Button>
+            {/* 2. 绑定 Agent 策略（Agent-first 体验） */}
+            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-ui font-semibold">2. 绑定执行 Agent（人设、技能与工具）</div>
+                  <div className="text-label text-ink-faint mt-0.5">飞书用户发消息时，将以该 Agent 的专属提示词、挂载技能与模型运行。</div>
                 </div>
-                {boundAgent && (
-                  <div className="mt-1.5 flex items-center gap-1.5 text-label">
-                    <span className="text-ink-faint">当前人设：</span>
-                    <span className="text-ink font-medium">{boundAgent.name}</span>
-                    <Link
-                      href={`/settings/agents?id=${encodeURIComponent(boundAgent.id)}`}
-                      className="text-accent-ink hover:underline ml-1"
+                {!selected && (
+                  <div className="flex rounded-lg border border-line p-0.5 bg-surface-muted text-label">
+                    <button
+                      type="button"
+                      onClick={() => setAgentMode("existing")}
+                      className={`px-2 py-0.5 rounded transition-colors ${agentMode === "existing" ? "bg-surface font-medium text-ink shadow-sm" : "text-ink-muted hover:text-ink"}`}
                     >
-                      查看人设 ↗
-                    </Link>
+                      选择已有 Agent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAgentMode("new")}
+                      className={`px-2 py-0.5 rounded transition-colors ${agentMode === "new" ? "bg-surface font-medium text-ink shadow-sm" : "text-ink-muted hover:text-ink"}`}
+                    >
+                      就地新建 Agent
+                    </button>
                   </div>
                 )}
-              </Field>
-              <Field label="工作目录" hint="留空使用聊天工作区；填写后以 project 模式在该目录运行">
+              </div>
+
+              {agentMode === "existing" || selected ? (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <select
+                      className={`${INPUT} flex-1`}
+                      value={draft.agentId ?? ""}
+                      onChange={(e) => setDraft({ ...draft, agentId: e.target.value || null })}
+                    >
+                      <option value="">默认助手（不附加自定义人设）</option>
+                      {agents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name} (@{agent.slug})
+                        </option>
+                      ))}
+                    </select>
+                    {!selected && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => setAgentMode("new")}
+                      >
+                        + 新建 Agent
+                      </Button>
+                    )}
+                  </div>
+                  {boundAgent && (
+                    <div className="flex items-center gap-1.5 text-label">
+                      <span className="text-ink-faint">当前绑定人设：</span>
+                      <span className="text-ink font-medium">{boundAgent.name}</span>
+                      <Link
+                        href={`/settings/agents?id=${encodeURIComponent(boundAgent.id)}`}
+                        className="text-accent-ink hover:underline ml-1"
+                      >
+                        查看 / 编辑人设 ↗
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* 就地新建 Agent 表单 */
+                <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-3">
+                  <div className="text-label text-ink-muted font-medium">✨ 在此处定义新人设，创建后自动与该机器人绑定：</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Agent 名字" hint="例如：技术支持">
+                      <input
+                        className={INPUT}
+                        value={newAgentName}
+                        onChange={(e) => {
+                          setNewAgentName(e.target.value);
+                          if (!newAgentSlug) {
+                            const s = e.target.value
+                              .toLowerCase()
+                              .replace(/[^a-z0-9]+/g, "-")
+                              .replace(/^-|-$/g, "");
+                            if (s) setNewAgentSlug(s);
+                          }
+                        }}
+                        placeholder="例如：代码审查专家"
+                      />
+                    </Field>
+                    <Field label="slug" hint="英文/数字/连字符，≤32字符">
+                      <input
+                        className={`${INPUT} font-mono`}
+                        value={newAgentSlug}
+                        onChange={(e) => setNewAgentSlug(e.target.value)}
+                        placeholder="code-reviewer"
+                      />
+                    </Field>
+                  </div>
+                  <Field label="一句话职责自述">
+                    <input
+                      className={INPUT}
+                      value={newAgentDesc}
+                      onChange={(e) => setNewAgentDesc(e.target.value)}
+                      placeholder="例如：专注代码架构与潜在缺陷审查"
+                    />
+                  </Field>
+                  <Field label="系统提示词（人设 Prompt）">
+                    <textarea
+                      className={`${INPUT} resize-y font-mono text-ui`}
+                      rows={3}
+                      value={newAgentPrompt}
+                      onChange={(e) => setNewAgentPrompt(e.target.value)}
+                      placeholder="你是飞书助手，主要职责是..."
+                    />
+                  </Field>
+                  <Field label="指定模型" hint="留空跟随会话默认模型">
+                    <input
+                      className={`${INPUT} font-mono`}
+                      value={newAgentModel}
+                      onChange={(e) => setNewAgentModel(e.target.value)}
+                      placeholder="haiku / sonnet / opus / codex（留空默认）"
+                    />
+                  </Field>
+                </div>
+              )}
+            </section>
+
+            {/* 3. 运行选项与工作目录 */}
+            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+              <div className="text-ui font-semibold">3. 运行目录与连接控制</div>
+              <Field label="工作目录（选填）" hint="留空使用通用聊天工作区；填写绝对路径后，机器人将以 project 模式在该目录执行与读写文件">
                 <input className={`${INPUT} font-mono`} value={draft.workspacePath} onChange={(e) => setDraft({ ...draft, workspacePath: e.target.value })} placeholder="/absolute/path/to/project" />
               </Field>
-            </div>
 
-            <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-line bg-surface px-3 py-2.5">
-              <input className="mt-1" type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
-              <span className="text-ui">
-                启用长连接
-                <span className="block text-label text-ink-faint">停用或改凭证后无需重启；后台每 15 秒对账一次。</span>
-              </span>
-            </label>
+              <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-line bg-surface-muted px-3 py-2.5">
+                <input className="mt-1" type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
+                <span className="text-ui">
+                  启用长连接监听
+                  <span className="block text-label text-ink-faint">保存或修改凭证后无需重启 Trellis；后台每 15 秒自动对账并保持长连接。</span>
+                </span>
+              </label>
+            </section>
 
+            {/* 连接状态与会话明细（编辑模式） */}
             {selected && (
               <section className="rounded-xl border border-line bg-surface overflow-hidden">
                 <div className="px-4 py-3 border-b border-line flex items-center gap-2">
@@ -344,9 +557,9 @@ export default function LarkBotsSettingsPage() {
                 </div>
                 {selected.lastError && <div className="px-4 py-2.5 text-label text-danger-ink bg-danger-muted">{selected.lastError}</div>}
                 <div className="px-4 py-3">
-                  <div className="text-ui font-medium mb-2">飞书会话</div>
+                  <div className="text-ui font-medium mb-2">飞书会话（最近）</div>
                   <div className="flex flex-col gap-1.5">
-                    {selected.chats.length === 0 && <div className="text-label text-ink-faint">还没有收到消息</div>}
+                    {selected.chats.length === 0 && <div className="text-label text-ink-faint">还没有收到消息。在飞书里向机器人发一条私聊开始对话。</div>}
                     {selected.chats.map((chat) => (
                       <a
                         key={chat.id}
@@ -369,176 +582,53 @@ export default function LarkBotsSettingsPage() {
               </section>
             )}
 
+            {/* 提交动作栏 */}
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line">
-              <Button type="button" variant="primary" size="sm" onClick={() => void save()} disabled={busy !== null || !draft.name.trim() || !draft.appId.trim() || (!selected && !draft.appSecret.trim())}>
-                {busy === "save" ? "保存中…" : selected ? "保存" : "创建"}
-              </Button>
-              {selected && <Button type="button" variant="ghost" size="sm" onClick={() => void test()} disabled={busy !== null}>{busy === "test" ? "测试中…" : "测试凭证"}</Button>}
-              {selected && <Button type="button" variant="ghost" size="sm" onClick={() => void remove()} disabled={busy !== null}>{busy === "delete" ? "删除中…" : "删除"}</Button>}
+              {!selected ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  onClick={() => void handleOneClickSetup()}
+                  disabled={busy !== null || !draft.name.trim() || !draft.appId.trim() || !draft.appSecret.trim()}
+                >
+                  {busy === "one-click" ? "正在测试并创建接入…" : "⚡ 一键测试凭证并接入绑定"}
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => void save()}
+                    disabled={busy !== null || !draft.name.trim() || !draft.appId.trim()}
+                  >
+                    {busy === "save" ? "保存中…" : "保存变更"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void test()}
+                    disabled={busy !== null}
+                  >
+                    {busy === "test" ? "测试中…" : "测试凭证"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void remove()}
+                    disabled={busy !== null}
+                  >
+                    {busy === "delete" ? "删除中…" : "删除"}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}
       </main>
-
-      <QuickCreateAgentModal
-        open={createAgentOpen}
-        onClose={() => setCreateAgentOpen(false)}
-        onCreated={(agent) => {
-          setAgents((prev) => [...prev.filter((a) => a.id !== agent.id), agent]);
-          setDraft((prev) => (prev ? { ...prev, agentId: agent.id } : prev));
-          setMessage(`已创建 Agent「${agent.name}」并自动绑定到此机器人。`);
-        }}
-      />
-    </div>
-  );
-}
-
-function QuickCreateAgentModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: (agent: AgentOption) => void;
-}) {
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [description, setDescription] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [model, setModel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (!open) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !slug.trim()) {
-      setError("名字和 slug 不能为空");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/agents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          slug: slug.trim(),
-          description: description.trim(),
-          systemPrompt: systemPrompt.trim(),
-          model: model.trim() || null,
-          inheritEnv: true,
-          enabled: true,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "创建失败");
-      onCreated({ id: data.agent.id, name: data.agent.name, slug: data.agent.slug });
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-surface border border-line rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between border-b border-line pb-3">
-          <div>
-            <h2 className="text-ui font-semibold">新建 Agent 并绑定</h2>
-            <p className="text-label text-ink-faint mt-0.5">
-              创建后将自动选定为此飞书机器人的执行人设
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-ink-muted hover:text-ink text-sm p-1"
-          >
-            ✕
-          </button>
-        </div>
-
-        {error && (
-          <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Agent 名字" hint="显示名称，如：技术支持">
-              <input
-                className={INPUT}
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (!slug) {
-                    const s = e.target.value
-                      .toLowerCase()
-                      .replace(/[^a-z0-9]+/g, "-")
-                      .replace(/^-|-$/g, "");
-                    if (s) setSlug(s);
-                  }
-                }}
-                placeholder="例如：技术支持"
-                required
-              />
-            </Field>
-            <Field label="slug" hint="英文/数字/连字符，≤32字符">
-              <input
-                className={`${INPUT} font-mono`}
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="tech-support"
-                required
-              />
-            </Field>
-          </div>
-
-          <Field label="一句话说明" hint="Agent 职责说明">
-            <input
-              className={INPUT}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="例如：解答日常技术支持与架构问题"
-            />
-          </Field>
-
-          <Field label="系统提示词" hint="定义 Agent 的角色人设和回答风格">
-            <textarea
-              className={`${INPUT} resize-y font-mono text-ui`}
-              rows={4}
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="你是飞书技术支持助手..."
-            />
-          </Field>
-
-          <Field label="指定模型" hint="留空跟随默认会话模型">
-            <input
-              className={`${INPUT} font-mono`}
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="haiku / sonnet / opus / codex（留空默认）"
-            />
-          </Field>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-line mt-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={busy}>
-              取消
-            </Button>
-            <Button type="submit" variant="primary" size="sm" disabled={busy || !name.trim() || !slug.trim()}>
-              {busy ? "创建中…" : "创建并绑定"}
-            </Button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 }

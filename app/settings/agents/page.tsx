@@ -34,6 +34,7 @@ export default function AgentsSettingsPage() {
   const [bots, setBots] = useState<LarkBot[]>([]);
   const [botToBind, setBotToBind] = useState<string>("");
   const [botBusy, setBotBusy] = useState<string | null>(null);
+  const [createBotModalOpen, setCreateBotModalOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgentInput | null>(null);
   const [hostSkills, setHostSkills] = useState<HostSkill[]>([]);
@@ -353,7 +354,7 @@ export default function AgentsSettingsPage() {
               />
             </Field>
 
-            {/* 隔离开关 —— 代价必须写全，别让人事后才发现 MCP 没了 */}
+            {/* 隔离开关 */}
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -481,12 +482,23 @@ export default function AgentsSettingsPage() {
                       接入飞书自建应用。飞书用户发消息时将直接以该 Agent 的人设、模型与挂载技能作答。
                     </div>
                   </div>
-                  <Link
-                    href={`/settings/bots?new=1&agentId=${encodeURIComponent(selected.id)}`}
-                    className="inline-flex items-center gap-1 text-label font-medium text-accent-ink hover:underline shrink-0"
-                  >
-                    + 接入新飞书机器人
-                  </Link>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setCreateBotModalOpen(true)}
+                    >
+                      + 一键接入飞书机器人
+                    </Button>
+                    <Link
+                      href={`/settings/bots?new=1&agentId=${encodeURIComponent(selected.id)}`}
+                      className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
+                      title="打开完整机器人设置向导"
+                    >
+                      向导页 ↗
+                    </Link>
+                  </div>
                 </div>
 
                 {(() => {
@@ -499,12 +511,14 @@ export default function AgentsSettingsPage() {
                         <div className="rounded-lg border border-dashed border-line px-4 py-4 text-center text-ui text-ink-faint">
                           <div>当前 Agent 尚未绑定飞书机器人。</div>
                           <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2">
-                            <Link
-                              href={`/settings/bots?new=1&agentId=${encodeURIComponent(selected.id)}`}
-                              className="px-2.5 py-1 text-label rounded-md bg-accent text-ink-inverse hover:bg-accent-strong transition-colors"
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              onClick={() => setCreateBotModalOpen(true)}
                             >
-                              + 新建飞书机器人并绑定
-                            </Link>
+                              + 一键接入新机器人并绑定
+                            </Button>
                             {otherBots.length > 0 && (
                               <div className="flex items-center gap-1.5">
                                 <select
@@ -695,6 +709,160 @@ export default function AgentsSettingsPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {selected && (
+        <QuickCreateBotModal
+          open={createBotModalOpen}
+          agent={selected}
+          onClose={() => setCreateBotModalOpen(false)}
+          onSuccess={async (botName) => {
+            await refreshBots();
+            setMsg(`🎉 飞书机器人「${botName}」已成功接入并绑定到 Agent「${selected.name}」！`);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuickCreateBotModal({
+  open,
+  agent,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  agent: Agent;
+  onClose: () => void;
+  onSuccess: (botName: string) => Promise<void> | void;
+}) {
+  const [name, setName] = useState(`${agent.name}助手`);
+  const [appId, setAppId] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [workspacePath, setWorkspacePath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !appId.trim() || !appSecret.trim()) {
+      setError("请填写应用名称、App ID 和 App Secret");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      // 1. 创建机器人并绑定当前 Agent
+      const res = await fetch("/api/lark-bots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          appId: appId.trim(),
+          appSecret: appSecret.trim(),
+          agentId: agent.id,
+          workspacePath: workspacePath.trim() || null,
+          enabled: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "创建失败");
+
+      // 2. 自动测试凭证
+      try {
+        await fetch(`/api/lark-bots/${data.bot.id}/test`, { method: "POST" });
+      } catch {
+        // test error non-fatal
+      }
+
+      await onSuccess(data.bot.name);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-surface border border-line rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between border-b border-line pb-3">
+          <div>
+            <h2 className="text-ui font-semibold">一键接入飞书机器人</h2>
+            <p className="text-label text-ink-faint mt-0.5">
+              绑定执行人设：<span className="font-medium text-ink">{agent.name}</span> (@{agent.slug})
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-ink-muted hover:text-ink text-sm p-1"
+          >
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="配置名称" hint="例如：研发助手">
+              <input
+                className={INPUT}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="例如：苏格拉底导师"
+                required
+              />
+            </Field>
+            <Field label="飞书 App ID" hint="开放平台 cli_ 开头标识">
+              <input
+                className={`${INPUT} font-mono`}
+                value={appId}
+                onChange={(e) => setAppId(e.target.value)}
+                placeholder="cli_xxxxxxxxxxxxxxxx"
+                required
+              />
+            </Field>
+          </div>
+
+          <Field label="飞书 App Secret" hint="在开放平台“凭证与基础信息”中复制">
+            <input
+              className={`${INPUT} font-mono`}
+              type="password"
+              value={appSecret}
+              onChange={(e) => setAppSecret(e.target.value)}
+              placeholder="请输入 app_secret"
+              required
+            />
+          </Field>
+
+          <Field label="工作目录（选填）" hint="留空使用聊天工作区；填写后以 project 模式在该目录执行">
+            <input
+              className={`${INPUT} font-mono`}
+              value={workspacePath}
+              onChange={(e) => setWorkspacePath(e.target.value)}
+              placeholder="/absolute/path/to/project"
+            />
+          </Field>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-line mt-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={busy}>
+              取消
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={busy || !name.trim() || !appId.trim() || !appSecret.trim()}>
+              {busy ? "正在接入与测试…" : "⚡ 一键测试并接入绑定"}
+            </Button>
+          </div>
+        </form>
       </div>
     </div>
   );
