@@ -11,8 +11,11 @@ export function gatewayDBPath(): string {
 
 export function openGatewayDB(file = gatewayDBPath()): Database {
   if (file !== ":memory:") {
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    chmodSync(dirname(file), 0o700);
+    const directory = dirname(file);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    // Only the owned default state root may have its existing mode tightened.
+    // A test/operator override such as /tmp/gateway.db must never chmod /tmp.
+    if (directory === join(homedir(), ".trellis-tenancy")) chmodSync(directory, 0o700);
   }
   const db = new Database(file);
   if (file !== ":memory:") chmodSync(file, 0o600);
@@ -35,7 +38,7 @@ function migrate(db: Database): void {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, pass_hash TEXT,
       invite_code TEXT, tenant TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0,
-      role TEXT NOT NULL DEFAULT 'user',
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
       created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (

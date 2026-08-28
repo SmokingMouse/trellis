@@ -100,7 +100,9 @@ async function hostState(tenant: Tenant): Promise<ContainerState> {
     const response = await fetch(`http://127.0.0.1:${tenant.hostPort}/__gate/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    return { state: "host", healthy: response.ok };
+    if (!response.ok) return { state: "host", healthy: false };
+    const health = await response.json() as { next?: unknown };
+    return { state: "host", healthy: health.next === "ready" };
   } catch {
     return { state: "host", healthy: null };
   }

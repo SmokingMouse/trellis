@@ -104,14 +104,16 @@ async function main(): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "trellis-gw-selftest-"));
   const tenantDir = join(root, "tenants");
   const envDir = join(root, "env");
+  const dbDir = join(root, "custom-db-parent");
   mkdirSync(tenantDir);
   mkdirSync(envDir);
+  mkdirSync(dbDir, { mode: 0o755 });
   const mockA = mockUpstream("mock-a");
   const mockB = mockUpstream("mock-b");
   const gatewayPort = unusedPort();
   const deadPort = unusedPort();
   const gatewayFile = join(import.meta.dir, "gateway.ts");
-  const dbFile = join(root, "gateway.db");
+  const dbFile = join(dbDir, "gateway.db");
   const callsFile = join(root, "tenantctl-calls.jsonl");
   const fakeTenantctl = join(root, "fake-tenantctl.ts");
   writeFileSync(fakeTenantctl, `
@@ -380,6 +382,7 @@ if (command === "add") {
       assert(role?.dflt_value === "'user'", `role migration default was ${role?.dflt_value}`);
       assert(tables.has("invites") && tables.has("shares") && tables.has("share_subscriptions"), "new tables missing after migration");
       assert((statSync(dbFile).mode & 0o777) === 0o600, "gateway.db is not 0600");
+      assert((statSync(dbDir).mode & 0o777) === 0o755, "custom DB parent permissions were changed");
     });
 
     const createInvite = async (): Promise<{ code: string; url: string }> => {
