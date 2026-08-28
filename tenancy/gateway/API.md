@@ -42,6 +42,8 @@
 
 container 对象:`{state: "running"|"stopped"|"missing"|"host", healthy: boolean|null}`——state 来自 docker inspect(spawn,缓存数秒防抖);`host` = 宿主实例记录(不查 docker,healthy 来自 `/__gate/health` 探测或 null)。
 
+`createdAt` / `created_at` 均为 Unix epoch milliseconds。三字段租户记录(`name/hostPort/authToken`,无 `container`)识别为 `host`;tenantctl 生成、带 `container` 的记录识别为容器租户。
+
 ## 共享池 API
 
 Share 对象(**payload 永不回显**):
@@ -61,7 +63,11 @@ Share 对象(**payload 永不回显**):
 payload 形状:
 
 - `claude-token` → `{token: string}`(`claude setup-token` 产物)。注入 = 写 `env/<tenant>.env` 的 `CLAUDE_CODE_OAUTH_TOKEN` + 容器重建(沿 creds-share 路径)→ `willRestart: true`。**每租户同时仅一个激活的 claude-token 订阅**,新订阅自动替换旧的(响应 202,UI 提示替换)。
-- `endpoint` → 字段与 trellis endpoints.yaml 条目 schema 对齐(实现方读 `lib/server/model-config.ts` / `lib/llm/providers.ts` 定稿字段清单,**回写本文档**)。注入 = 写入订阅者租户 HOME 的 endpoints.yaml **标记块**(如 `# fj-share:<id>` 括起),幂等可撤,绝不触碰用户自有条目 → `willRestart: false`。
+- `endpoint` → `{name, anthropic_url?, openai_url?, api_key_env?, apiKey?, models}`，与 `lib/server/model-config.ts` 的 `UpsertProviderInput` 对齐：
+  - `name` 匹配 `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`;`models` 是非空 string 数组;URL 若提供必须为 `http(s)://`;`api_key_env` 缺省为 `<NAME>_API_KEY`。
+  - `apiKey` 是可选明文密钥，仅存 gateway.db payload，并注入 endpoints.yaml 的 `env_file`(没有则设 `~/.config/sm/.env`)；密钥不进入 YAML/API 响应。
+  - provider 节点用 `# fj-share:<id>:begin` / `# fj-share:<id>:end` 标记；env key 也用同 ID 标记块。重复订阅先移除本 ID 旧块再写，撤销只移除本 ID 块；若同名用户自有 provider 已存在则拒绝注入，绝不覆盖。
+  - 容器租户通过 tenantctl 的一次性 volume helper 写 HOME；host 租户按 `$SM_ENDPOINTS_PATH` → `~/.config/sm/endpoints.yaml` → legacy `~/.claude/global/endpoints.yaml` 搜索顺序写宿主文件。→ `willRestart: false`。
 
 边界语义:
 
@@ -73,4 +79,5 @@ payload 形状:
 
 - **共享 = 交出**:订阅方容器内一切进程可提取凭证明文;撤销只保证停止后续注入,不能召回已泄出的值。
 - 网关侧凭证明文落 0600 文件 / gateway.db;任何 API 不回显 payload。
+- 本实现选 gateway.db 存 payload：共享元数据、owner、subscription 与凭证同库，便于事务一致性；状态根目录保持 0700、gateway.db 强制 0600。代价是数据库备份本身属于敏感凭证备份，运维必须按 secret 处理。
 - 注册页 / 登录页限速沿现有内存计数机制扩展(register 亦 5 次/分钟)。

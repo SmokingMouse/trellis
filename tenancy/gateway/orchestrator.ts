@@ -13,6 +13,18 @@ export type ContainerState = {
   healthy: boolean | null;
 };
 
+export class OrchestrationError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+export type ShareInjection = {
+  id: string;
+  type: "claude-token" | "endpoint";
+  payload: unknown;
+};
+
 function commandPrefix(): string[] {
   const configured = process.env.TRELLIS_GW_TENANTCTL?.trim();
   if (!configured) return ["bun", "tenancy/tenantctl.ts"];
@@ -112,4 +124,50 @@ export async function containerState(name: string): Promise<ContainerState> {
   }
   statusCache.set(name, { expires: Date.now() + 3000, value });
   return value;
+}
+
+async function requireSuccess(args: string[], input?: string): Promise<void> {
+  const result = await runTenantctl(args, input);
+  if (result.status !== 0) {
+    console.error(`[trellis-gw] tenantctl ${args[0]} failed: ${tail(result)}`);
+    throw new OrchestrationError(500, "tenant orchestration failed");
+  }
+}
+
+export async function applyShareInjection(name: string, share: ShareInjection): Promise<boolean> {
+  const tenant = getTenant(name);
+  if (!tenant) throw new OrchestrationError(409, "tenant container not running");
+  if (share.type === "claude-token" && tenant.kind === "host") {
+    throw new OrchestrationError(501, "host claude-token injection is not managed");
+  }
+  if (tenant.kind === "container") {
+    const state = await containerState(name);
+    if (state.state !== "running") {
+      throw new OrchestrationError(409, "tenant container not running");
+    }
+  }
+  if (share.type === "claude-token") {
+    const token = (share.payload as { token?: unknown })?.token;
+    if (typeof token !== "string" || !token) throw new OrchestrationError(500, "invalid stored share payload");
+    await requireSuccess(["creds-share", name, "--claude-token-stdin"], `${token}\n`);
+    return true;
+  }
+  const args = ["endpoint-share", name, "--share-id", share.id, "--set"];
+  if (tenant.kind === "host") args.push("--host");
+  await requireSuccess(args, JSON.stringify(share.payload));
+  return false;
+}
+
+export async function removeShareInjection(name: string, share: ShareInjection): Promise<boolean> {
+  const tenant = getTenant(name);
+  if (!tenant) throw new OrchestrationError(500, "tenant record missing during revocation");
+  if (share.type === "claude-token") {
+    if (tenant.kind === "host") return true;
+    await requireSuccess(["creds-share", name, "--revoke"]);
+    return true;
+  }
+  const args = ["endpoint-share", name, "--share-id", share.id, "--revoke"];
+  if (tenant.kind === "host") args.push("--host");
+  await requireSuccess(args);
+  return false;
 }

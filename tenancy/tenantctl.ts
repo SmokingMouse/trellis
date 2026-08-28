@@ -19,6 +19,12 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import {
+  injectEndpointConfig,
+  injectEndpointEnv,
+  removeEndpointConfig,
+  removeEndpointEnv,
+} from "./gateway/endpoint-share";
 
 const DEFAULT_IMAGE = "trellis:dev";
 const FIRST_TENANT_PORT = 42001;
@@ -74,6 +80,24 @@ function mustDocker(args: string[], inherit = false): CommandResult {
     throw new CliError(`docker ${args[0]} 失败: ${detail}`);
   }
   return result;
+}
+
+function mustDockerRaw(args: string[], input?: string): CommandResult {
+  const result = spawnSync("docker", args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    input,
+    stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+  });
+  if (result.error) throw new CliError(`无法执行 docker: ${result.error.message}`);
+  if (result.status !== 0) {
+    throw new CliError(result.stderr?.trim() || result.stdout?.trim() || `docker ${args[0]} 失败`);
+  }
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
 }
 
 function validateName(name: string | undefined): asserts name is string {
@@ -618,16 +642,15 @@ async function commandInspect(name: string | undefined, args: string[]): Promise
 async function commandCredsShare(name: string | undefined, args: string[]): Promise<void> {
   validateName(name);
   const claudeToken = takeOption(args, "--claude-token");
+  const tokenStdin = takeFlag(args, "--claude-token-stdin");
   const revoke = takeFlag(args, "--revoke");
   ensureNoArgs(args);
 
-  if (claudeToken !== undefined && revoke) {
-    throw new CliError("--claude-token 与 --revoke 互斥");
+  if ([claudeToken !== undefined, tokenStdin, revoke].filter(Boolean).length !== 1) {
+    throw new CliError("--claude-token / --claude-token-stdin / --revoke 三选一");
   }
-  if (claudeToken === undefined && !revoke) {
-    throw new CliError("必须指定 --claude-token <tok> 或 --revoke");
-  }
-  if (claudeToken !== undefined && !claudeToken.trim()) {
+  const suppliedToken = tokenStdin ? (await Bun.stdin.text()).trim() : claudeToken;
+  if (suppliedToken !== undefined && !suppliedToken.trim()) {
     throw new CliError("token 不能为空");
   }
 
@@ -644,15 +667,15 @@ async function commandCredsShare(name: string | undefined, args: string[]): Prom
   while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
     lines.pop();
   }
-  if (claudeToken !== undefined) {
-    lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${claudeToken.trim()}`);
+  if (suppliedToken !== undefined) {
+    lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${suppliedToken.trim()}`);
   }
   atomicWrite(path, lines.length > 0 ? `${lines.join("\n")}\n` : "");
 
   await recreateContainer(record);
 
-  if (claudeToken !== undefined) {
-    const trimmed = claudeToken.trim();
+  if (suppliedToken !== undefined) {
+    const trimmed = suppliedToken.trim();
     const masked = trimmed.length > 4 ? `...${trimmed.slice(-4)}` : trimmed;
     console.log(`租户凭证共享完成: ${name} (CLAUDE_CODE_OAUTH_TOKEN: ${masked})`);
     console.log("共享 = 租户可提取该 token(env 对容器内进程全程可见)");
@@ -660,6 +683,101 @@ async function commandCredsShare(name: string | undefined, args: string[]): Prom
   } else {
     console.log(`租户凭证已撤销: ${name}`);
   }
+}
+
+function hostEndpointsPath(): string {
+  if (process.env.SM_ENDPOINTS_PATH) return resolve(process.env.SM_ENDPOINTS_PATH);
+  const preferred = join(homedir(), ".config", "sm", "endpoints.yaml");
+  const legacy = join(homedir(), ".claude", "global", "endpoints.yaml");
+  return existsSync(preferred) || !existsSync(legacy) ? preferred : legacy;
+}
+
+function expandHostPath(path: string): string {
+  return path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(path);
+}
+
+function volumeCommand(record: TenantRecord, script: string, args: string[] = [], input?: string): CommandResult {
+  const command = [
+    "run", "--rm", "-i",
+    "-v", `${volumeName(record.name)}:/home/tenant`,
+    "--env-file", envPath(record.name),
+    "--entrypoint", "sh",
+    record.image,
+    "-c", script,
+    "sh",
+    ...args,
+  ];
+  return mustDockerRaw(command, input);
+}
+
+function containerEndpointsPath(record: TenantRecord): string {
+  return volumeCommand(record, `
+    if [ -n "\${SM_ENDPOINTS_PATH:-}" ]; then printf %s "$SM_ENDPOINTS_PATH"
+    elif [ -f "$HOME/.config/sm/endpoints.yaml" ]; then printf %s "$HOME/.config/sm/endpoints.yaml"
+    elif [ -f "$HOME/.claude/global/endpoints.yaml" ]; then printf %s "$HOME/.claude/global/endpoints.yaml"
+    else printf %s "$HOME/.config/sm/endpoints.yaml"; fi
+  `).stdout.trim();
+}
+
+function expandContainerPath(path: string): string {
+  return path.startsWith("~/") ? `/home/tenant/${path.slice(2)}` : path;
+}
+
+function readHostFile(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
+
+function readVolumeFile(record: TenantRecord, path: string): string {
+  return volumeCommand(record, 'if [ -f "$1" ]; then cat -- "$1"; fi', [path]).stdout;
+}
+
+function writeVolumeFile(record: TenantRecord, path: string, contents: string): void {
+  volumeCommand(record, `
+    set -eu; path="$1"; dir="$(dirname -- "$path")"; mkdir -p -- "$dir";
+    tmp="$path.fj.$$"; umask 077; cat > "$tmp"; chmod 600 "$tmp"; mv -f "$tmp" "$path"
+  `, [path], contents);
+}
+
+async function commandEndpointShare(name: string | undefined, args: string[]): Promise<void> {
+  validateName(name);
+  const id = takeOption(args, "--share-id");
+  const set = takeFlag(args, "--set");
+  const revoke = takeFlag(args, "--revoke");
+  const host = takeFlag(args, "--host");
+  ensureNoArgs(args);
+  if (!id || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new CliError("无效 share id");
+  if (set === revoke) throw new CliError("--set 与 --revoke 必须二选一");
+
+  const record = host ? null : readRecord(name);
+  const configPath = host ? hostEndpointsPath() : containerEndpointsPath(record!);
+  const read = (path: string) => host ? readHostFile(expandHostPath(path)) : readVolumeFile(record!, expandContainerPath(path));
+  const write = (path: string, contents: string) => host
+    ? atomicWrite(expandHostPath(path), contents)
+    : writeVolumeFile(record!, expandContainerPath(path), contents);
+  const currentConfig = read(configPath);
+
+  if (set) {
+    let input: unknown;
+    try { input = JSON.parse(await Bun.stdin.text()); } catch { throw new CliError("endpoint payload 必须是 JSON"); }
+    const injected = injectEndpointConfig(currentConfig, id, input);
+    if (injected.payload.apiKey && injected.envFile) {
+      const currentEnv = read(injected.envFile);
+      write(injected.envFile, injectEndpointEnv(
+        currentEnv, id, injected.payload.api_key_env, injected.payload.apiKey,
+      ));
+    }
+    write(configPath, injected.contents);
+    console.log(`endpoint share 已注入: ${name} (${id})`);
+    return;
+  }
+
+  const removed = removeEndpointConfig(currentConfig, id);
+  if (removed.envFile) {
+    const currentEnv = read(removed.envFile);
+    write(removed.envFile, removeEndpointEnv(currentEnv, id));
+  }
+  write(configPath, removed.contents);
+  console.log(`endpoint share 已撤销: ${name} (${id})`);
 }
 
 async function commandBackup(name: string | undefined, args: string[]): Promise<void> {
@@ -736,7 +854,8 @@ function usage(): string {
   tenantctl upgrade <name> [--image <tag>]
   tenantctl port <name>
   tenantctl inspect <name>
-  tenantctl creds-share <name> (--claude-token <tok> | --revoke)
+  tenantctl creds-share <name> (--claude-token <tok> | --claude-token-stdin | --revoke)
+  tenantctl endpoint-share <name> --share-id <id> (--set | --revoke) [--host]
   tenantctl backup <name>`;
 }
 
@@ -775,6 +894,9 @@ async function main(): Promise<void> {
       break;
     case "creds-share":
       await commandCredsShare(name, rest);
+      break;
+    case "endpoint-share":
+      await commandEndpointShare(name, rest);
       break;
     case "backup":
       await commandBackup(name, rest);

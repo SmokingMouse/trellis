@@ -27,7 +27,8 @@
 ```bash
 bun tenancy/tenantctl.ts build                      # 构建镜像 trellis:dev(git sha 可 --tag)
 bun tenancy/tenantctl.ts add alice                  # 起租户:分配端口、生成闸凭证、等健康、打印一次性 PASS
-bun tenancy/gateway/gateway.ts user add alice --tenant alice   # 网关建用户 → 打印邀请 URL(发给朋友)
+bun tenancy/gateway/gateway.ts user add alice --tenant alice   # 网关建普通用户 → 打印旧式认领 URL
+bun tenancy/gateway/gateway.ts user add admin --tenant host-admin --role admin  # 建管理员
 bun tenancy/gateway/gateway.ts user invite alice    # 重新生成邀请(兼密码重置)
 bun tenancy/tenantctl.ts status                     # 容器/健康/磁盘
 bun tenancy/tenantctl.ts backup alice               # volume 打包到 backups/(升级前必做)

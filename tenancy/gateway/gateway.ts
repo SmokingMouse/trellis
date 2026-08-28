@@ -37,7 +37,7 @@ async function userCLI(args: string[]): Promise<void> {
     console.table(rows);
     return;
   }
-  if (!name) throw new Error("usage: user add|invite|disable <name> [--tenant <tenant>] | user ls");
+  if (!name) throw new Error("usage: user add <name> --tenant <tenant> [--role admin|user] | user invite|disable <name> | user ls");
   if (command === "add") {
     const index = args.indexOf("--tenant");
     const tenant = index >= 0 ? args[index + 1] : undefined;
