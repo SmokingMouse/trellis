@@ -862,6 +862,9 @@ function usage(): string {
 async function main(): Promise<void> {
   const [command, name, ...rest] = process.argv.slice(2);
   switch (command) {
+    case undefined:
+      console.log(usage());
+      break;
     case "build":
       await commandBuild([name, ...rest].filter((value): value is string => value !== undefined));
       break;
