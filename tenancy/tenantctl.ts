@@ -4,11 +4,14 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -28,6 +31,7 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
 const STATE_ROOT = join(homedir(), ".trellis-tenancy");
 const ENV_DIR = join(STATE_ROOT, "env");
 const TENANT_DIR = join(STATE_ROOT, "tenants");
+const BACKUP_DIR = join(STATE_ROOT, "backups");
 
 type TenantRecord = {
   name: string;
@@ -112,7 +116,7 @@ function recordPath(name: string): string {
 }
 
 function ensureStateDirs(): void {
-  for (const dir of [STATE_ROOT, ENV_DIR, TENANT_DIR]) {
+  for (const dir of [STATE_ROOT, ENV_DIR, TENANT_DIR, BACKUP_DIR]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
   }
@@ -538,6 +542,34 @@ async function commandStatus(name: string | undefined, args: string[]): Promise<
   for (const record of records) await printStatus(record);
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function utcTimestamp(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+}
+
+async function recreateContainer(record: TenantRecord): Promise<void> {
+  assertSafeContainer(record.container);
+  if (!existsSync(envPath(record.name))) {
+    throw new CliError(`env-file 不存在，拒绝无认证重建: ${envPath(record.name)}`);
+  }
+
+  if (containerExists(record.container)) {
+    stopContainer(record);
+    mustDocker(["rm", record.container]);
+  }
+  ensureResources(record.name);
+  runContainer(record);
+  await waitHealthy(record);
+  writeRecord(record);
+}
+
 async function commandUpgrade(name: string | undefined, args: string[]): Promise<void> {
   validateName(name);
   const requestedImage = takeOption(args, "--image");
@@ -547,19 +579,7 @@ async function commandUpgrade(name: string | undefined, args: string[]): Promise
     ...existing,
     image: requestedImage ?? existing.image,
   };
-  assertSafeContainer(existing.container);
-  if (!existsSync(envPath(name))) {
-    throw new CliError(`env-file 不存在，拒绝无认证重建: ${envPath(name)}`);
-  }
-
-  if (containerExists(existing.container)) {
-    stopContainer(existing);
-    mustDocker(["rm", existing.container]);
-  }
-  ensureResources(name);
-  runContainer(upgraded);
-  await waitHealthy(upgraded);
-  writeRecord(upgraded);
+  await recreateContainer(upgraded);
   console.log(`租户升级完成: ${name} (${upgraded.image})`);
 }
 
@@ -567,6 +587,117 @@ async function commandPort(name: string | undefined, args: string[]): Promise<vo
   validateName(name);
   ensureNoArgs(args);
   console.log(readRecord(name).hostPort);
+}
+
+async function commandCredsShare(name: string | undefined, args: string[]): Promise<void> {
+  validateName(name);
+  const claudeToken = takeOption(args, "--claude-token");
+  const revoke = takeFlag(args, "--revoke");
+  ensureNoArgs(args);
+
+  if (claudeToken !== undefined && revoke) {
+    throw new CliError("--claude-token 与 --revoke 互斥");
+  }
+  if (claudeToken === undefined && !revoke) {
+    throw new CliError("必须指定 --claude-token <tok> 或 --revoke");
+  }
+  if (claudeToken !== undefined && !claudeToken.trim()) {
+    throw new CliError("token 不能为空");
+  }
+
+  const record = readRecord(name);
+  const path = envPath(name);
+  if (!existsSync(path)) {
+    throw new CliError(`env-file 不存在: ${path}`);
+  }
+
+  const current = readFileSync(path, "utf8");
+  const lines = current
+    .split("\n")
+    .filter((line) => !line.startsWith("CLAUDE_CODE_OAUTH_TOKEN="));
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+    lines.pop();
+  }
+  if (claudeToken !== undefined) {
+    lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${claudeToken.trim()}`);
+  }
+  atomicWrite(path, lines.length > 0 ? `${lines.join("\n")}\n` : "");
+
+  await recreateContainer(record);
+
+  if (claudeToken !== undefined) {
+    const trimmed = claudeToken.trim();
+    const masked = trimmed.length > 4 ? `...${trimmed.slice(-4)}` : trimmed;
+    console.log(`租户凭证共享完成: ${name} (CLAUDE_CODE_OAUTH_TOKEN: ${masked})`);
+    console.log("共享 = 租户可提取该 token(env 对容器内进程全程可见)");
+    console.log("撤销 = creds-share --revoke(或换 token 后重新 share)");
+  } else {
+    console.log(`租户凭证已撤销: ${name}`);
+  }
+}
+
+async function commandBackup(name: string | undefined, args: string[]): Promise<void> {
+  validateName(name);
+  ensureNoArgs(args);
+  readRecord(name);
+  const volume = volumeName(name);
+  if (!volumeExists(volume)) {
+    throw new CliError(`volume 不存在: ${volume}`);
+  }
+
+  console.log("提示: 如需强一致先 stop 再 backup");
+
+  ensureStateDirs();
+  const timestamp = utcTimestamp();
+  const backupFile = join(BACKUP_DIR, `${name}-${timestamp}.tar.gz`);
+
+  const outFd = openSync(backupFile, "w", 0o600);
+  let runError: Error | null = null;
+  try {
+    const result = spawnSync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "-v",
+        `${volume}:/src`,
+        "busybox",
+        "tar",
+        "czf",
+        "-",
+        "-C",
+        "/",
+        "src",
+      ],
+      {
+        cwd: REPO_ROOT,
+        stdio: ["ignore", outFd, "pipe"],
+        encoding: "utf8",
+      },
+    );
+    if (result.error) {
+      runError = new CliError(`无法执行 docker: ${result.error.message}`);
+    } else if (result.status !== 0) {
+      const detail = result.stderr || `exit ${result.status}`;
+      runError = new CliError(`备份 volume 失败: ${detail}`);
+    }
+  } finally {
+    closeSync(outFd);
+  }
+
+  if (runError) {
+    if (existsSync(backupFile)) {
+      try {
+        unlinkSync(backupFile);
+      } catch {}
+    }
+    throw runError;
+  }
+  chmodSync(backupFile, 0o600);
+
+  const stat = statSync(backupFile);
+  console.log(`归档路径: ${backupFile}`);
+  console.log(`归档大小: ${formatBytes(stat.size)} (${stat.size} 字节)`);
 }
 
 function usage(): string {
@@ -577,7 +708,9 @@ function usage(): string {
   tenantctl rm <name> [--purge] [--yes]
   tenantctl status [name]
   tenantctl upgrade <name> [--image <tag>]
-  tenantctl port <name>`;
+  tenantctl port <name>
+  tenantctl creds-share <name> (--claude-token <tok> | --revoke)
+  tenantctl backup <name>`;
 }
 
 async function main(): Promise<void> {
@@ -609,6 +742,12 @@ async function main(): Promise<void> {
       break;
     case "port":
       await commandPort(name, rest);
+      break;
+    case "creds-share":
+      await commandCredsShare(name, rest);
+      break;
+    case "backup":
+      await commandBackup(name, rest);
       break;
     case "help":
     case "--help":
