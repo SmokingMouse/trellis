@@ -19,7 +19,7 @@
    - 断言 3: `/settings/shares` 返回 200 且明示「共享 = 交出」
    - 断言 4: Mock 网关 API 契约自测 (me/users/invites/shares/subscribe) 全部符合 `API.md`
    - 断言 5: 直连 Trellis (网关不可达/单人模式) 时 `/admin` 与 `/settings/shares` 仍 200 优雅渲染降级提示不白屏
-3. D3 Lint: `bun x eslint app/admin/ app/settings/shares/ components/Header.tsx lib/settings-tabs.ts lib/gw-client.ts lib/gw-types.ts scripts/selftest-admin-ui.ts` 0 错误 0 警告通过
+3. D3 Lint: `bun x eslint app/admin app/settings/shares lib/gw-types.ts lib/gw-client.ts scripts/selftest-admin-ui.ts` 0 错误 0 警告通过
 
 ## API.md 缺口与疑问
 - 本单开发过程严格对齐 `tenancy/gateway/API.md`，未发现阻塞性契约缺口。
