@@ -44,22 +44,39 @@ process.on("SIGTERM", () => {
   process.exit(1);
 });
 
-async function waitForPort(port: number, timeoutMs = 25000): Promise<boolean> {
+async function portOpen(port: number): Promise<boolean> {
+  try {
+    const sock = await Bun.connect({
+      hostname: "127.0.0.1",
+      port,
+      socket: { data() {} },
+    });
+    sock.end();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPort(port: number, timeoutMs = 60000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const sock = await Bun.connect({
-        hostname: "127.0.0.1",
-        port,
-        socket: { data() {} },
-      });
-      sock.end();
-      return true;
-    } catch {
-      await Bun.sleep(150);
-    }
+    if (await portOpen(port)) return true;
+    await Bun.sleep(200);
   }
   return false;
+}
+
+async function waitForServer(proc: Subprocess, port: number, timeoutMs = 60000): Promise<void> {
+  const listened = await Promise.race([
+    waitForPort(port, timeoutMs),
+    proc.exited.then((code) => {
+      throw new Error(`Server process exited prematurely with code ${code} before listening on port ${port}`);
+    }),
+  ]);
+  if (!listened) {
+    throw new Error(`Server on port ${port} did not respond within ${timeoutMs}ms`);
+  }
 }
 
 function startMockGateway(trellisUpstreamPort: number) {
@@ -249,22 +266,31 @@ function spawnNextServer(port: number, env: Record<string, string>): Subprocess 
   return p;
 }
 
-async function runTests() {
-  console.log("=== fj-admin-ui-2029 自动化测试开始 ===");
-
-  // 确保 .next 存在
-  if (!fs.existsSync(path.join(process.cwd(), ".next"))) {
-    console.log("-> 正在执行 Next.js build...");
+async function ensureBuild(): Promise<void> {
+  const nextDir = path.join(process.cwd(), ".next");
+  if (!fs.existsSync(nextDir)) {
+    console.log("-> 检测到未编译构建，正在执行 bun --bun run build...");
     const buildProc = spawn({
-      cmd: ["bun", "--bun", "run", "build"],
+      cmd: ["bun", "--bun", "node_modules/.bin/next", "build"],
+      env: {
+        ...process.env,
+      },
       stdout: "inherit",
       stderr: "inherit",
     });
     const exitCode = await buildProc.exited;
     if (exitCode !== 0) {
-      throw new Error(`Build failed with exit code ${exitCode}`);
+      throw new Error(`Next.js build failed with exit code ${exitCode}`);
     }
+    console.log("-> Next.js build 完成。");
   }
+}
+
+async function runTests() {
+  console.log("=== fj-admin-ui-2029 自动化测试开始 ===");
+
+  // 1. 确保生产构建就绪
+  await ensureBuild();
 
   const assertions: string[] = [];
 
@@ -273,8 +299,7 @@ async function runTests() {
   // -------------------------------------------------------------
   console.log("\n[Test 1] 验证 TRELLIS_ADMIN_UI 未设时 /admin 404");
   const pNoAdmin = spawnNextServer(TRELLIS_PORT_NOADMIN, { TRELLIS_ADMIN_UI: "" });
-  const ready1 = await waitForPort(TRELLIS_PORT_NOADMIN);
-  if (!ready1) throw new Error(`Server on port ${TRELLIS_PORT_NOADMIN} failed to start`);
+  await waitForServer(pNoAdmin, TRELLIS_PORT_NOADMIN);
 
   const res1 = await fetch(`http://127.0.0.1:${TRELLIS_PORT_NOADMIN}/admin`);
   if (res1.status !== 404) {
@@ -282,14 +307,14 @@ async function runTests() {
   }
   assertions.push("✓ TRELLIS_ADMIN_UI 未设时 /admin 返回 404 (notFound 生效)");
   pNoAdmin.kill();
+  await Bun.sleep(500);
 
   // -------------------------------------------------------------
   // Test 2: TRELLIS_ADMIN_UI=1 时 /admin 200 + 关键元素
   // -------------------------------------------------------------
   console.log("\n[Test 2] 验证 TRELLIS_ADMIN_UI=1 时 /admin 200 且含用户列表关键元素");
-  spawnNextServer(TRELLIS_PORT_ADMIN, { TRELLIS_ADMIN_UI: "1" });
-  const ready2 = await waitForPort(TRELLIS_PORT_ADMIN);
-  if (!ready2) throw new Error(`Server on port ${TRELLIS_PORT_ADMIN} failed to start`);
+  const pAdmin = spawnNextServer(TRELLIS_PORT_ADMIN, { TRELLIS_ADMIN_UI: "1" });
+  await waitForServer(pAdmin, TRELLIS_PORT_ADMIN);
 
   mockGwServer = startMockGateway(TRELLIS_PORT_ADMIN);
   const readyGw = await waitForPort(GW_PORT);
