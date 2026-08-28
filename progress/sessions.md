@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 126 / 125 / 124 / 123 / 122）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 127 / 126 / 125 / 124 / 123）。更早的见 `archive.md`。
+
+### Session 127（2026-08-28，S4 二期统一门户:邀请码自助注册 + 管理员宿主路由 + 用户间模型共享;焚决双单并行交付）
+- **触发**: 用户「现在的多租户模式不是我想要的:统一注册&登录入口、管理员占据宿主机、普通用户工作目录在 docker 文件隔离、支持不同用户间模型共享」→ 主 Agent 协调,AskUserQuestion 对齐四项拍板(邀请码自助注册 / 任意用户互享 / Claude token + 第三方 endpoint 双类 / 管理面板要在 trellis 里)。
+- **方案定盘**（[二期 ADR](decisions/2026-08-28-multi-tenancy-unified-portal.md)）: 一期容器隔离与统一登录保留,真差距三点(自助注册 / 管理员入网关 / 共享系统化)。核心分层:**UI 在 trellis 本体(`TRELLIS_ADMIN_UI=1` 闸的 `/admin` + `/settings/shares`),控制面 API 在网关(`/__gw/api/*` 拦截自答,role 两级鉴权)**,docker/gateway.db 特权全集中网关进程;admin 经 tenants/*.json 三字段 host 记录路由到宿主实例(一期路由机制无容器假设,顺纹理);共享池发布/订阅,claude-token=env+容器重建(每租户单激活新换旧),endpoint=endpoints.yaml `# fj-share:<id>` 标记块(幂等可撤不碰自有条目);修订一期「本体零改动」原则为「只读 env 开关+调 /__gw/api 的薄层」(ADR 记收窄续期)。
+- **执行**（焚决两单,接口先行:`tenancy/gateway/API.md` 由主控写死进两张契约作共同真理源;worktree 隔离并行,FENJUE_ROOT 指回主控信箱）:
+  1. `fj-gw-portal-be6e`（codex）: `tenancy/gateway/` 新增 api.ts/endpoint-share.ts/orchestrator.ts——role/invites/共享池 additive 迁移、自助注册异步 provision(spawn tenantctl,状态可轮询)、admin API 全量、订阅注入编排(TRELLIS_GW_TENANTCTL 可替身)、selftest 12→21 项;endpoint payload 按 UpsertProviderInput 定稿回写 API.md。~50min 交付,1 blocker(build 命令口径,fallback 正确)。
+  2. `fj-admin-ui-2029`（gemini）: `app/admin/`(用户表/容器态/禁用启用重启/邀请码管理/共享总览,无闸 404)+ `app/settings/shares/`(发布/撤销/订阅退订,willRestart 确认,「共享=交出」固定明示)+ `lib/gw-client.ts`/`gw-types.ts` + Header role 感知入口 + `scripts/selftest-admin-ui.ts`(双 next 实例+反代型 mock 网关,断言含网关不可达降级不白屏);settings-tabs.ts 未漏。1 轮 rework(selftest 冷启动)。
+- **治理经验（实弹）**: ① 主控契约 verify 命令写错——`bun run build` 用 node 跑 next,`bun:sqlite` 顶层 import 即炸,本仓必须 `bun --bun run build`;且全仓 lint 存量脏(56 errors)——settle 误 fail 后先在主控树验基线分清存量/引入,修契约 verify(--bun + 定向 lint)再重判,坐席不背存量账。② 并行坐席 selftest 固定端口互踩:A 单 settle 复跑恰逢 B 返工起测试服务,瞬态 fail;手动复跑全绿定性后**串行 settle** 通过——并行单的 verify 涉起服务时端口需隔离或结算串行。
+- **验证**: 两单 settle 独立复跑 pass + scope 零越界(不采信坐席自述);merge 后合并体三条全绿(`bun --bun run build` / gateway selftest 21 项 / admin-ui selftest 含降级态)。
+- **Next**: ① 契约 C 接线联调:宿主实例开 auth gate + host 记录正式化 + 真容器端到端(注册→开容→admin→共享注入)——**涉重启宿主 prod trellis,时机待用户拍板**;② 公网接入仍待拍板(caddy+域名);③ 一期 S126 Next 的 memos/stirling 改绑 127.0.0.1 未动。
 
 ### Session 126（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
 - **触发**: 用户「我想支持多租户模式，可以把我这个平台开放出去；对文件系统做隔离」→ plan mode 三路探索 + 用户拍板（小圈子邀请制 / 租户自带凭证可共享 / 每租户一容器 / Mac mini 本机）→「全部实现，用 fenjue 调度」。
@@ -48,17 +58,3 @@
   - `bun scripts/test-cli-jsonl.ts`: 12,752 个 JSONL 文件 / 14,351 个可见 Turn 全量真语料扫描 100% 通过（`noTail: 0, wrongTurn: 0`）。
   - 实测从 112 个真实 compact jsonl 恢复 32,982 条此前断链被弃的 assistant 消息与 82 个长动线最终答复。
 - **Next**: 合并至 main 后部署上线。
-
-### Session 122（2026-08-24，自动压缩感知增强：工具连跑折叠状态标识 + 轮次上下文自动压缩分隔条）
-- **触发**: 用户反馈触发自动压缩时希望能明确感知到，避免静默压缩导致用户误以为步骤消失或未理解上下文转入紧凑摘要。
-- **设计（两层压缩感知）**:
-  1. **工具链级冷热折叠感知 (`SegmentRow`)**: 连续 ≥3 个已完成普通工具折叠成 chip 时，增加明确状态徽章（`[已自动收起]` / `[已展开]`）、操作提示浮层（`title="点击展开已自动收起的明细"`）及 live 活跃边框高亮，明确告知用户此处发生自动折叠与可点击展开。
-  2. **会话轮次级上下文自动压缩感知 (`LinearThreadView`)**: 新增 `isContextCompacted` 判据（捕获 CLI 紧凑延续摘要标记与 ≥40k token 降幅 ≥40% 门限），在长会话触发自动 compact 时渲染虚线分隔条与徽章（`🗜️ 上下文已自动压缩（早期历史已转入模型紧凑摘要）`）。
-- **Done**:
-  1. `components/tools/ToolRow.tsx`: `SegmentRow` 增加 `已自动收起` / `已展开` 状态徽章、展开提示 tooltip、live 态视觉区隔，保持冷数据不进 DOM 的同时提供直观感知。
-  2. `lib/context-usage.ts`: 新增 `isContextCompacted` 判定函数；补充 `lib/context-usage.test.ts` 单元测试。
-  3. `components/LinearThreadView.tsx`: 接入 `isContextCompacted`，在紧凑压缩轮次交界处渲染分隔条与说明。
-  4. `scripts/test-timeline-render.tsx`: 补全段落 chip 带有「已自动收起」提示的断言。
-- **验证**: `bun test` 44/44 全部通过；`bun scripts/test-timeline-render.tsx`、`bun scripts/test-cli-jsonl.ts`、`bun scripts/test-tool-tree.ts` 全通过；`tsc --noEmit` 0 错。
-- **Next**: 合并至 main 后部署上线。
-
