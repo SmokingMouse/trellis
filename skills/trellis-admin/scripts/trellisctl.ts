@@ -26,6 +26,40 @@ function die(msg: string): never {
 }
 
 // ---------------------------------------------------------------------------
+// 平台自感知（caller context，对标 herdr 的 HERDR_ENV / HERDR_PANE_ID）
+// 跑在 Trellis 会话里的 agent 由平台注入 TRELLIS_ENV / TRELLIS_SESSION_ID /
+// TRELLIS_NODE_ID / TRELLIS_URL（见 lib/llm/sdk-adapter.ts 的 platformEnv）。
+// 凡收 会话id / 节点id 的地方，"." 解析为「当前会话 / 当前节点」。
+// ---------------------------------------------------------------------------
+
+const IN_PLATFORM = process.env.TRELLIS_ENV === "1";
+const SELF_SESSION = process.env.TRELLIS_SESSION_ID || null;
+const SELF_NODE = process.env.TRELLIS_NODE_ID || null;
+
+function resolveSessionArg(raw: string | undefined, what = "会话 id"): string {
+  if (!raw) die(`要${what}（在 Trellis 会话内可用 "." 指当前会话）`);
+  if (raw !== ".") return raw;
+  if (!SELF_SESSION) die(`"." 只在 Trellis 会话内可用（TRELLIS_SESSION_ID 未注入）`);
+  return SELF_SESSION;
+}
+
+function resolveNodeArg(raw: string | undefined, what = "节点 id"): string {
+  if (!raw) die(`要${what}（在 Trellis 会话内可用 "." 指当前节点）`);
+  if (raw !== ".") return raw;
+  if (!SELF_NODE) die(`"." 只在 Trellis 会话内可用（TRELLIS_NODE_ID 未注入）`);
+  return SELF_NODE;
+}
+
+/** 自指防护：wait / abort / retry 对「自己正在跑的这个节点」没有合法语义 ——
+ *  wait 自己 = 死锁到超时（你不结束它就不终态），abort 自己 = 把自己这轮当场
+ *  砍断，retry 自己 = 它还在跑。这类调用一律硬拒，不给 --force。 */
+function forbidSelf(nodeId: string, verb: string, hint: string): void {
+  if (SELF_NODE && nodeId === SELF_NODE) {
+    die(`${verb} 的目标是你自己这个节点（这个 run 正是你）。${hint}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 连上哪个 Trellis
 // ---------------------------------------------------------------------------
 
@@ -311,6 +345,50 @@ async function cmdHealth() {
   console.log(`base: ${base}`);
   console.log(`token: ${authToken() ? "已拿到" : "没拿到（闸关着的话不影响）"}`);
   out(j);
+}
+
+/** 我是谁、我在哪。身份来自 env（平台 spawn 时注入），永不因 API 不可达而
+ *  失败 —— API 增强部分（会话标题 / 树位置）手写 fetch、失败静默降级，
+ *  刻意不走 api()（那里探不到就 die，而「报出自己身份」不该依赖网络）。 */
+async function cmdWhoami() {
+  if (!IN_PLATFORM) {
+    console.log(`不在 Trellis 会话里（TRELLIS_ENV 未注入）—— 这是终端 / 外部环境。`);
+    console.log(`平台操作照常可用：sessions / ps / ask …（连接走端口发现链，见 health）`);
+    return;
+  }
+  console.log(`在 Trellis 会话内`);
+  console.log(`  session=${SELF_SESSION ?? "?"}`);
+  console.log(`  node=${SELF_NODE ?? "?"}（= 你当前这轮问答）`);
+  if (process.env.TRELLIS_URL) console.log(`  api=${process.env.TRELLIS_URL}`);
+  if (!SELF_SESSION) return;
+  try {
+    const base =
+      process.env.TRELLIS_URL?.replace(/\/$/, "") ??
+      `http://127.0.0.1:${process.env.TRELLIS_PORT || 3088}`;
+    const r = await fetch(`${base}/api/sessions/${SELF_SESSION}`, {
+      headers: authHeaders(false),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) throw new Error(String(r.status));
+    const body = (await r.json()) as any;
+    const s = body.session;
+    const nodes: any[] = body.nodes ?? [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    let cur = byId.get(SELF_NODE ?? "");
+    let depth = 0;
+    while (cur?.parentId) {
+      cur = byId.get(cur.parentId);
+      depth++;
+    }
+    console.log(`  会话「${s.title}」 ${s.mode === "chat" ? "纯对话" : (s.workspacePath ?? s.mode)}`);
+    console.log(
+      `  画布共 ${nodes.filter((n) => !n.parentId).length} 棵树、${nodes.length} 个节点` +
+        (cur ? `；你在树「${clip(nodeLabel(cur), 24)}」深度 ${depth} 处` : ""),
+    );
+    console.log(`\n常用：看整个画布 sessions get . ；在本会话开平行树 ask "..." --session .`);
+  } catch {
+    console.log(`  （API 未达，树位置略 —— 身份来自 env，不影响使用）`);
+  }
 }
 
 async function cmdAgents(sub: string) {
@@ -606,7 +684,7 @@ async function cmdSessions(sub: string) {
     return;
   }
   if (sub === "get") {
-    const id = pos[2] ?? die("要会话 id");
+    const id = resolveSessionArg(pos[2]);
     const { body } = await api("GET", `/api/sessions/${id}`);
     if (has("--json")) return out(body);
     const s = body.session;
@@ -649,21 +727,24 @@ async function cmdSessions(sub: string) {
     return;
   }
   if (sub === "rename") {
-    const id = pos[2] ?? die("要会话 id");
+    const id = resolveSessionArg(pos[2]);
     const title = pos[3] ?? die("要新标题");
     const { body } = await api("PATCH", `/api/sessions/${id}`, { title });
     console.log(`✓ 改名为「${body.session.title}」（此后自动命名不再覆盖）`);
     return;
   }
   if (sub === "archive") {
-    const id = pos[2] ?? die("要会话 id");
+    const id = resolveSessionArg(pos[2]);
     const undo = has("--undo");
     await api("PATCH", `/api/sessions/${id}`, { archived: !undo });
     console.log(undo ? `✓ 已从归档区恢复` : `✓ 已归档（可逆，--undo 恢复）`);
     return;
   }
   if (sub === "rm") {
-    const id = pos[2] ?? die("要会话 id");
+    const id = resolveSessionArg(pos[2]);
+    if (SELF_SESSION && id === SELF_SESSION) {
+      die(`要删的是你自己所在的会话 —— 那会连你正在跑的这个节点一起删掉。真要清理请让用户在界面上做。`);
+    }
     const { body } = await api("GET", `/api/sessions/${id}`);
     const n = body.nodes?.length ?? 0;
     if (!has("--yes")) {
@@ -701,8 +782,52 @@ async function cmdPs() {
   console.log(`\n盯到跑完：wait <nodeId>；看输出：node read <nodeId>；停掉：abort <nodeId>`);
 }
 
+/** 全文检索（FTS5 trigram，≥3 字符）：问题 / 回答 / 引用 / 笔记全算。找「上次
+ *  聊过 X 的那棵树在哪」比肉眼翻 sessions 快得多。 */
+async function cmdSearch() {
+  const q = pos.slice(1).join(" ").trim();
+  if (!q) die(`用法：trellisctl search <关键词>（≥3 字符，检索所有会话的问题/回答/引用/笔记）`);
+  const limit = flagVal("--limit") ?? "40";
+  const { body } = await api("GET", `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  const results: any[] = body.results ?? [];
+  if (has("--json")) return out(results);
+  if (!results.length) {
+    return console.log(q.length < 3 ? "（关键词至少 3 个字符）" : "（没搜到，试换个词）");
+  }
+  const strip = (s: string) => s.replace(/<\/?mark>/g, "");
+  const kindLabel: Record<string, string> = {
+    node_question: "问",
+    node_response: "答",
+    node_reference: "引",
+    note: "记",
+  };
+  for (const r of results) {
+    const ws = r.sessionWorkspacePath ? path.basename(r.sessionWorkspacePath) : "纯对话";
+    console.log(`「${clip(r.sessionTitle, 30)}」 ${ws}  session=${r.sessionId}`);
+    for (const h of (r.hits as any[]).slice(0, 3)) {
+      const loc = h.sourceKind === "note" ? "" : `node=${h.sourceId}  `;
+      console.log(`   ${kindLabel[h.sourceKind] ?? "?"} ${loc}${clip(strip(h.snippet), 84)}`);
+    }
+    if (r.hits.length > 3) console.log(`   …还有 ${r.hits.length - 3} 处命中`);
+  }
+  console.log(`\n看会话全貌：sessions get <id>；读某节点：node read <nodeId>`);
+}
+
+/** 最近工作目录（trellis 会话用过的 + 本机 claude 用过的 + 刚建的 worktree），
+ *  开新 project 会话前先看这里，别凭记忆拼路径。 */
+async function cmdWorkspaces() {
+  const { body } = await api("GET", "/api/workspaces/recent");
+  const list: any[] = body.workspaces ?? [];
+  if (has("--json")) return out(list);
+  if (!list.length) return console.log("（还没有任何工作目录记录）");
+  for (const w of list) {
+    console.log(`${pad(w.shortName, 26)} ${pad(ts(w.lastUsedAt), 13)} ${w.path}`);
+  }
+  console.log(`\n在某目录开新会话：ask "..." --new --workspace <path>`);
+}
+
 async function cmdNode(sub: string) {
-  const id = pos[2] ?? die("要节点 id");
+  const id = resolveNodeArg(pos[2]);
   if (sub === "get") {
     const { body } = await api("GET", `/api/nodes/${id}`);
     if (has("--json")) return out(body.node);
@@ -839,9 +964,20 @@ async function runChat(payload: any, o: { wait: boolean; timeoutS: number }) {
 
 async function cmdAsk() {
   const question = readTextArg(pos[1], "问题");
-  const nodeT = flagVal("--node");
-  const sessT = flagVal("--session");
+  const rawNode = flagVal("--node");
+  const nodeT = rawNode ? resolveNodeArg(rawNode) : null;
+  const rawSess = flagVal("--session");
+  const sessT = rawSess ? resolveSessionArg(rawSess) : null;
   const isNew = has("--new");
+  // 自指防护：在「自己这个还在跑的节点」下追问没有合法语义 —— 你就是这个
+  // 节点的 run，想补充直接写进回答；同画布另起一线才是真需求（--session .）。
+  // project 模式下这还会造成两个 CLI 进程并发写同一个 lineage 的 jsonl。
+  if (nodeT && SELF_NODE && nodeT === SELF_NODE) {
+    die(
+      `--node 指向你自己（这轮还在跑）。想补充内容直接写进你的回答；` +
+        `想在同一画布另起平行树：ask "..." --session .`,
+    );
+  }
   if ([nodeT, sessT, isNew ? "y" : null].filter(Boolean).length !== 1) {
     die(
       `要恰好一个目标：\n` +
@@ -887,7 +1023,8 @@ async function cmdAsk() {
 }
 
 async function cmdRetry() {
-  const nodeId = pos[1] ?? die("要节点 id");
+  const nodeId = resolveNodeArg(pos[1]);
+  forbidSelf(nodeId, "retry", "它还在跑（你就是它这次执行）。");
   const payload: any = { kind: "retry", nodeId };
   const provider = flagVal("--provider");
   if (provider) payload.provider = provider;
@@ -898,7 +1035,12 @@ async function cmdRetry() {
 }
 
 async function cmdAbort() {
-  const nodeId = pos[1] ?? die("要节点 id");
+  const nodeId = resolveNodeArg(pos[1]);
+  forbidSelf(
+    nodeId,
+    "abort",
+    "叫停自己 = 这一轮当场被砍断，你后面的话没人会看到。想结束就直接把回答收尾。",
+  );
   const { status } = await api("POST", `/api/chat/${nodeId}/abort`, undefined, { tolerate: [404] });
   console.log(status === 404 ? "（本来就没在跑 —— 已结束或从没跑过）" : `✓ 已叫停 ${nodeId}`);
 }
@@ -906,7 +1048,12 @@ async function cmdAbort() {
 /** 守一个节点到终态。挂 GET /api/nodes/[id]/stream：catchup 先到（当前快照），
  *  live 时续推增量，无 live run 时直接回放 DB 终态并关流 —— 两种情况一套逻辑。 */
 async function cmdWait() {
-  const nodeId = pos[1] ?? die("要节点 id");
+  const nodeId = resolveNodeArg(pos[1]);
+  forbidSelf(
+    nodeId,
+    "wait",
+    "等自己 = 死锁到超时（你不结束，它就不到终态）。要守别的节点，先 ps 看在跑的是谁。",
+  );
   const timeoutS = Number(flagVal("--timeout") ?? 600);
   const r = await apiSse("GET", `/api/nodes/${nodeId}/stream`, undefined, timeoutS * 1000);
   let text = "";
@@ -959,7 +1106,7 @@ async function cmdWait() {
  *  toolUseId 从节点的 pendingInteraction 现取，不让调用方抄 —— 抄错的表现是
  *  409 mismatch，而现取永远是对的那一个。 */
 async function cmdRespond() {
-  const nodeId = pos[1] ?? die("要节点 id");
+  const nodeId = resolveNodeArg(pos[1]);
   const allow = has("--allow");
   const deny = has("--deny");
   if (allow === deny) die("要 --allow 或 --deny 之一");
@@ -990,6 +1137,10 @@ async function cmdRespond() {
 
 const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
 
+自我感知（跑在 Trellis 会话里时，平台注入 TRELLIS_ENV/SESSION_ID/NODE_ID/URL）：
+  whoami                                   我是哪个会话的哪个节点、树位置
+  ※ 平台内所有收 <会话id>/<节点id> 的地方都可用 "." 指当前会话/当前节点
+
 平台操作（会话 / 树 / 节点）：
   sessions [--archived] [--json]           列会话（▶ = 有节点在跑）
   sessions get <id> [--json]               会话详情 + 树形大纲（一段一棵树）
@@ -997,6 +1148,8 @@ const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
   sessions archive <id> [--undo]           归档 / 恢复（可逆）
   sessions rm <id> --yes                   连节点一起删（不可逆）
   ps                                       现在谁在跑 / 谁停着等回答
+  search <关键词> [--limit N] [--json]     全文检索问题/回答/引用/笔记（≥3 字符）
+  workspaces [--json]                      最近工作目录（开 project 会话前先看）
   node get <id> [--json]                   单节点：状态、token、工具、暂停详情
   node read <id> [--tail N|--full]         读回答正文（默认尾 120 行）
   node label <id> <标签>                    改节点主题标签
@@ -1054,6 +1207,9 @@ async function main() {
     case "cron": return cmdCron();
     case "sessions": return cmdSessions(pos[1]);
     case "ps": return cmdPs();
+    case "whoami": return cmdWhoami();
+    case "search": return cmdSearch();
+    case "workspaces": return cmdWorkspaces();
     case "node": return cmdNode(pos[1]);
     case "ask": return cmdAsk();
     case "retry": return cmdRetry();

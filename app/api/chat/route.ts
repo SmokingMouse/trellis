@@ -788,6 +788,9 @@ export async function POST(req: Request) {
         question: questionForLLM,
         parentAnchor,
         signal,
+        // 平台自感知：让 spawn 出的 CLI 知道自己是哪个会话的哪个节点
+        // （TRELLIS_* env，见 sdk-adapter.platformEnv）。
+        platform: { sessionId: trellisSessionId, nodeId },
         claudeSessionId,
         cwd: spawnCwd,
         systemPrompt: resolvedSystemPrompt,

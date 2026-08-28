@@ -568,6 +568,9 @@ export function launch(task: Task, runId: string): StartTaskRunResult {
         question,
         parentAnchor: null,
         signal,
+        // 任务 run 与交互会话同权：无人值守的 agent 一样能感知自己在平台里
+        // 的位置（TRELLIS_* env，见 sdk-adapter.platformEnv）。
+        platform: { sessionId, nodeId },
         claudeSessionId: null,
         cwd: spawnCwd,
         systemPrompt: null,

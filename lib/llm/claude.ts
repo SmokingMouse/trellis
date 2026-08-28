@@ -5,6 +5,7 @@
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
 import { buildPrompt } from "./prompt";
 import { ClaudeBackend } from "@smokingmouse/agent";
+import { platformPackDir } from "@/lib/server/platform-pack";
 import {
   modeToRunOptions,
   toStreamEvent,
@@ -35,6 +36,16 @@ export function makeClaudeProvider(
       // chat (enhanced AND pure B-fork) spawns in CHAT_SCRATCH, so ensure it.
       if (mode === "chat") ensureChatScratch();
       const runOpts = { ...modeToRunOptions(mode, opts.model ?? "sonnet", req), signal: req.signal };
+      // 平台 pack：凡有工具能力的 spawn（enhanced chat / project）默认带内置
+      // 技能（trellis:trellis-admin 等）—— 平台内的 agent 天然会操作平台，
+      // 对标「Herdr pane 里的 agent 天然有 herdr CLI」。纯对话没有 Skill 工具，
+      // 挂了也调不动，不挂。数组追加：与自定义 agent 的 pack 并存。隔离
+      // agent（settingSources:false）也挂 —— 隔的是「本机个人环境」（CLAUDE.md
+      // / 个人 skill / MCP），不是「所在平台的自身能力」。
+      if (mode === "project" || (mode === "chat" && req.chatEnhanced)) {
+        const pack = platformPackDir();
+        if (pack) runOpts.pluginDirs = [...(runOpts.pluginDirs ?? []), pack];
+      }
       for await (const e of backend.run(prompt, runOpts)) {
         const se = toStreamEvent(e);
         if (se) yield se;

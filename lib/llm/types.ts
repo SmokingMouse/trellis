@@ -129,6 +129,11 @@ export type StreamRequest = {
   // Stage 14: cwd to spawn the CLI in. null = home dir (chat default,
   // or project fallback when path missing).
   cwd?: string | null;
+  // 平台自感知（caller context，对标 Herdr 的 HERDR_ENV/HERDR_PANE_ID）：
+  // spawn 出的 CLI 子进程经 TRELLIS_* env 知道「自己是哪个会话里的哪个节点」，
+  // 内置 trellis-admin 技能靠它在自己所在的画布上开树 / 追问 / 守节点。
+  // undefined = 不注入（mock 等无节点语境）。注入逻辑收口在 sdk-adapter。
+  platform?: { sessionId: string; nodeId: string };
   // Stage 15: image attachments. Each is a resolved on-disk path
   // (provider reads it as needed) plus mime so the right wrapper is
   // emitted. Empty array when none.

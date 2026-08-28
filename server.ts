@@ -132,6 +132,10 @@ async function bootNext(): Promise<boolean> {
     env: {
       ...process.env,
       PORT: String(NEXT_PORT),
+      // 大门（gate）端口。Next 进程自己拼不出来（它的 PORT 是内部口），而
+      // sdk-adapter 给 spawn 的 CLI 子进程注 TRELLIS_URL、trellisctl 的端口
+      // 发现链都认这个名字 —— 这里是它唯一的授源点。
+      TRELLIS_PORT: String(PORT),
       TRELLIS_SHUTDOWN_TOKEN: SHUTDOWN_TOKEN,
     },
     stdout: "inherit",

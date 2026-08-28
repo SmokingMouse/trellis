@@ -106,7 +106,33 @@ export function modeToRunOptions(mode: Mode, model: string, req: StreamRequest):
     delete base.resume;
   }
   if (req.extraArgs?.length) base = { ...base, extraArgs: req.extraArgs };
-  return req.agent ? applyAgent(base, req.agent) : base;
+  const out = req.agent ? applyAgent(base, req.agent) : base;
+  // 平台 env 放在 applyAgent **之后**统一收尾：agent 层的铁律是不碰上下文与
+  // 身份，而「你在哪」正是上下文 —— 自定义 agent、@提及、任务 run 一视同仁
+  // 都拿到。合并进已有 env（纯 chat 的 CLAUDE_CODE_EFFORT_LEVEL）而不是覆盖。
+  const penv = platformEnv(req);
+  return penv ? { ...out, env: { ...out.env, ...penv } } : out;
+}
+
+/** 平台自感知 env（对标 Herdr 注入 HERDR_ENV / HERDR_PANE_ID）。
+ *
+ * 子进程里的 trellisctl / 任意脚本靠这四个变量回答「我在 Trellis 里吗、我是
+ * 哪个会话的哪个节点、API 在哪」。TRELLIS_URL 只在 TRELLIS_PORT 在场时注 ——
+ * 那是 server.ts（大门）boot Next 时传下来的 gate 端口；`next dev` 裸跑没有
+ * 大门，这时注一个探不通的 URL 反而会让 trellisctl 直接 die（它对显式 URL
+ * 不做降级），宁可让它走默认端口发现链。
+ *
+ * 注意 process.env.PORT 在 Next 进程里是**内部口**（server.ts bootNext 设成
+ * NEXT_PORT），/__gate/health 不在那层，绝不能拿它拼 URL。 */
+function platformEnv(req: StreamRequest): Record<string, string> | null {
+  if (!req.platform) return null;
+  const gatePort = process.env.TRELLIS_PORT;
+  return {
+    TRELLIS_ENV: "1",
+    ...(gatePort ? { TRELLIS_URL: `http://127.0.0.1:${gatePort}` } : {}),
+    TRELLIS_SESSION_ID: req.platform.sessionId,
+    TRELLIS_NODE_ID: req.platform.nodeId,
+  };
 }
 
 function baseRunOptions(mode: Mode, model: string, req: StreamRequest): RunOptions {
