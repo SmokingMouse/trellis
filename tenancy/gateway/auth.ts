@@ -12,9 +12,11 @@ type UserRow = {
   invite_code: string | null;
   tenant: string;
   disabled: number;
+  role: UserRole;
 };
 
-export type SessionUser = Pick<UserRow, "id" | "name" | "tenant">;
+export type UserRole = "admin" | "user";
+export type SessionUser = Pick<UserRow, "id" | "name" | "tenant" | "role">;
 
 export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -24,11 +26,16 @@ export function inviteCode(): string {
   return randomBytes(24).toString("base64url");
 }
 
-export function addUser(db: Database, name: string, tenant: string): string {
+export function addUser(
+  db: Database,
+  name: string,
+  tenant: string,
+  role: UserRole = "user",
+): string {
   const code = inviteCode();
   db.prepare(
-    "INSERT INTO users (id,name,pass_hash,invite_code,tenant,created_at) VALUES (?,?,?,?,?,?)",
-  ).run(randomUUID(), name, null, code, tenant, Date.now());
+    "INSERT INTO users (id,name,pass_hash,invite_code,tenant,role,created_at) VALUES (?,?,?,?,?,?,?)",
+  ).run(randomUUID(), name, null, code, tenant, role, Date.now());
   return code;
 }
 
@@ -46,6 +53,10 @@ export function disableUser(db: Database, name: string): boolean {
   return db.prepare("UPDATE users SET disabled=1 WHERE name=?").run(name).changes > 0;
 }
 
+export function enableUser(db: Database, name: string): boolean {
+  return db.prepare("UPDATE users SET disabled=0 WHERE name=?").run(name).changes > 0;
+}
+
 function issueSession(db: Database, userId: string): string {
   const token = randomBytes(32).toString("base64url");
   const now = Date.now();
@@ -55,8 +66,8 @@ function issueSession(db: Database, userId: string): string {
   return token;
 }
 
-function failureKey(ip: string, name: string): string {
-  return `${ip}\0${name.trim().toLocaleLowerCase("en-US")}`;
+function failureKey(scope: string, ip: string, name: string): string {
+  return `${scope}\0${ip}\0${name.trim().toLocaleLowerCase("en-US")}`;
 }
 
 function isLimited(key: string): boolean {
@@ -71,13 +82,25 @@ function recordFailure(key: string): void {
   attempts.set(key, [...(attempts.get(key) || []), Date.now()]);
 }
 
+export function rateLimited(scope: "login" | "register", ip: string, name: string): boolean {
+  return isLimited(failureKey(scope, ip, name));
+}
+
+export function recordRateFailure(scope: "login" | "register", ip: string, name: string): void {
+  recordFailure(failureKey(scope, ip, name));
+}
+
+export function clearRateFailures(scope: "login" | "register", ip: string, name: string): void {
+  attempts.delete(failureKey(scope, ip, name));
+}
+
 export async function login(
   db: Database,
   name: string,
   password: string,
   ip: string,
 ): Promise<{ status: 200; token: string } | { status: 401 | 429 }> {
-  const key = failureKey(ip, name);
+  const key = failureKey("login", ip, name);
   if (isLimited(key)) return { status: 429 };
   const user = db.prepare("SELECT * FROM users WHERE name=?").get(name) as UserRow | null;
   const valid = Boolean(
@@ -89,6 +112,46 @@ export async function login(
   }
   attempts.delete(key);
   return { status: 200, token: issueSession(db, user.id) };
+}
+
+export type RegisterResult =
+  | { status: "ok"; token: string }
+  | { status: "invalid_invite" | "username_taken" };
+
+export async function registerUser(
+  db: Database,
+  code: string,
+  name: string,
+  password: string,
+): Promise<RegisterResult> {
+  const invite = db.prepare("SELECT 1 FROM invites WHERE code=? AND used_at IS NULL").get(code);
+  if (!invite) return { status: "invalid_invite" };
+  if (db.prepare("SELECT 1 FROM users WHERE name=?").get(name)) {
+    return { status: "username_taken" };
+  }
+
+  const id = randomUUID();
+  const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
+  try {
+    return db.transaction(() => {
+      db.prepare(
+        "INSERT INTO users (id,name,pass_hash,invite_code,tenant,role,created_at) VALUES (?,?,?,?,?,?,?)",
+      ).run(id, name, hash, null, name, "user", Date.now());
+      const consumed = db.prepare(
+        "UPDATE invites SET used_by=?,used_at=? WHERE code=? AND used_at IS NULL",
+      ).run(name, Date.now(), code);
+      if (!consumed.changes) throw new Error("invite already used");
+      return { status: "ok", token: issueSession(db, id) } as const;
+    })();
+  } catch (error) {
+    if (db.prepare("SELECT 1 FROM users WHERE name=?").get(name)) {
+      return { status: "username_taken" };
+    }
+    if (!db.prepare("SELECT 1 FROM invites WHERE code=? AND used_at IS NULL").get(code)) {
+      return { status: "invalid_invite" };
+    }
+    throw error;
+  }
 }
 
 export async function claimInvite(
@@ -120,7 +183,7 @@ export function authenticate(db: Database, req: Request): SessionUser | null {
   if (!token) return null;
   const now = Date.now();
   const user = db.prepare(`
-    SELECT u.id,u.name,u.tenant FROM sessions s JOIN users u ON u.id=s.user_id
+    SELECT u.id,u.name,u.tenant,u.role FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>? AND u.disabled=0
   `).get(sha256(token), now) as SessionUser | null;
   if (user) {

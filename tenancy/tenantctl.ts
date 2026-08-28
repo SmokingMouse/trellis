@@ -589,6 +589,32 @@ async function commandPort(name: string | undefined, args: string[]): Promise<vo
   console.log(readRecord(name).hostPort);
 }
 
+async function commandInspect(name: string | undefined, args: string[]): Promise<void> {
+  validateName(name);
+  ensureNoArgs(args);
+  const record = readRecord(name);
+  const result = docker([
+    "container",
+    "inspect",
+    "--format",
+    "{{json .State}}",
+    record.container,
+  ]);
+  if (result.status !== 0) {
+    if (missingDockerObject(result)) {
+      console.log(JSON.stringify({ state: "missing", healthy: false }));
+      return;
+    }
+    throw new CliError(result.stderr || "docker container inspect 失败");
+  }
+  const state = JSON.parse(result.stdout) as { Running?: boolean };
+  const running = state.Running === true;
+  console.log(JSON.stringify({
+    state: running ? "running" : "stopped",
+    healthy: running ? await probeReady(record.hostPort) : false,
+  }));
+}
+
 async function commandCredsShare(name: string | undefined, args: string[]): Promise<void> {
   validateName(name);
   const claudeToken = takeOption(args, "--claude-token");
@@ -709,6 +735,7 @@ function usage(): string {
   tenantctl status [name]
   tenantctl upgrade <name> [--image <tag>]
   tenantctl port <name>
+  tenantctl inspect <name>
   tenantctl creds-share <name> (--claude-token <tok> | --revoke)
   tenantctl backup <name>`;
 }
@@ -742,6 +769,9 @@ async function main(): Promise<void> {
       break;
     case "port":
       await commandPort(name, rest);
+      break;
+    case "inspect":
+      await commandInspect(name, rest);
       break;
     case "creds-share":
       await commandCredsShare(name, rest);

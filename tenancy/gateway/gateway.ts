@@ -3,15 +3,22 @@ import {
   addUser,
   authenticate,
   claimInvite,
+  clearRateFailures,
   clearSessionCookie,
   disableUser,
   login,
   logout,
+  rateLimited,
+  recordRateFailure,
+  registerUser,
   renewInvite,
   sessionCookie,
+  type UserRole,
 } from "./auth";
+import { handleGatewayAPI } from "./api";
 import { getGatewayDB } from "./db";
-import { invitePage, loginPage, maintenancePage } from "./pages";
+import { invitePage, loginPage, maintenancePage, registerPage, registerPendingPage } from "./pages";
+import { provisionTenant } from "./orchestrator";
 import { responseHeaders, translatedCookie, upstreamHeaders } from "./proxy-util";
 import { getTenant, type Tenant } from "./tenants";
 
@@ -26,7 +33,7 @@ async function userCLI(args: string[]): Promise<void> {
   const [command, name] = args;
   const db = getGatewayDB();
   if (command === "ls") {
-    const rows = db.prepare("SELECT name,tenant,disabled,pass_hash IS NOT NULL AS claimed FROM users ORDER BY name").all();
+    const rows = db.prepare("SELECT name,tenant,role,disabled,pass_hash IS NOT NULL AS claimed FROM users ORDER BY name").all();
     console.table(rows);
     return;
   }
@@ -35,7 +42,10 @@ async function userCLI(args: string[]): Promise<void> {
     const index = args.indexOf("--tenant");
     const tenant = index >= 0 ? args[index + 1] : undefined;
     if (!tenant) throw new Error("user add requires --tenant <tenant>");
-    const code = addUser(db, name, tenant);
+    const roleIndex = args.indexOf("--role");
+    const role = (roleIndex >= 0 ? args[roleIndex + 1] : "user") as UserRole;
+    if (role !== "admin" && role !== "user") throw new Error("--role must be admin or user");
+    const code = addUser(db, name, tenant, role);
     console.log(inviteURL(code));
   } else if (command === "invite") {
     const code = renewInvite(db, name);
@@ -76,6 +86,9 @@ function redirect(location: string): Response {
 }
 
 function unauthenticated(req: Request, url: URL): Response {
+  if (url.pathname.startsWith("/__gw/api/")) {
+    return Response.json({ error: "unauthenticated" }, { status: 401 });
+  }
   if (req.method === "GET" && (req.headers.get("accept") || "").includes("text/html")) {
     return redirect(`/__gw/login?from=${encodeURIComponent(url.pathname + url.search)}`);
   }
@@ -143,6 +156,44 @@ function startGateway(): void {
         return Response.json({ ok: true }, { headers: { "set-cookie": sessionCookie(result.token, secure(req)) } });
       }
 
+      if (url.pathname === "/__gw/register") {
+        if (req.method === "GET") return registerPage(url.searchParams.get("code") || "");
+        if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+        const body = await fields(req);
+        const name = (body.username || "").trim();
+        const code = (body.code || "").trim();
+        const password = body.password || "";
+        const ip = clientIP(req);
+        if (rateLimited("register", ip, name)) {
+          return registerPage(code, "尝试过于频繁，请稍后再试", 429);
+        }
+        let message = "";
+        let status = 400;
+        if (!/^[a-z0-9-]{1,32}$/.test(name)) message = "用户名格式无效";
+        else if (password.length < 8) message = "密码至少 8 个字符";
+        else if (getTenant(name)) { message = "用户名已被占用"; status = 409; }
+        if (message) {
+          recordRateFailure("register", ip, name);
+          return registerPage(code, message, status);
+        }
+        const result = await registerUser(db, code, name, password);
+        if (result.status !== "ok") {
+          recordRateFailure("register", ip, name);
+          const error = result.status === "invalid_invite" ? "邀请码无效或已使用" : "用户名已被占用";
+          return registerPage(code, error, result.status === "invalid_invite" ? 400 : 409);
+        }
+        clearRateFailures("register", ip, name);
+        provisionTenant(name);
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "/__gw/register/pending",
+            "cache-control": "no-store",
+            "set-cookie": sessionCookie(result.token, secure(req)),
+          },
+        });
+      }
+
       const invite = url.pathname.match(/^\/__gw\/invite\/([^/]+)$/);
       if (invite) {
         const code = decodeURIComponent(invite[1]);
@@ -162,6 +213,12 @@ function startGateway(): void {
 
       const user = authenticate(db, req);
       if (!user) return unauthenticated(req, url);
+      if (url.pathname === "/__gw/register/pending" && req.method === "GET") {
+        return registerPendingPage();
+      }
+      if (url.pathname.startsWith("/__gw/api/")) {
+        return handleGatewayAPI(req, url, user, db);
+      }
       if (req.method === "GET" && url.pathname === "/login") return redirect("/");
       if ((req.method === "POST" || req.method === "DELETE") && url.pathname === "/api/login") {
         return new Response("Not Found", { status: 404 });
