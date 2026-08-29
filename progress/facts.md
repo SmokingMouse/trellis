@@ -1,6 +1,9 @@
 # Verified Facts
 
 
+- **`TRELLIS_PORT` = 大门（gate）口的唯一授源；Next 进程的 `process.env.PORT` 是内部口（NEXT_PORT），`/__gate/health` 不在那层**（S129，`server.ts` bootNext env 与 `lib/llm/sdk-adapter.ts` platformEnv）：任何要拼 Trellis base URL 的服务端代码只认 TRELLIS_PORT，拿 PORT 拼出来的 URL 探活必失败。裸 `next dev` 两者皆无——platformEnv 对此宁缺毋错（不注 TRELLIS_URL）。
+- **repo 内相对 symlink 经两条部署链均原样保留**（S129 核实：`scripts/deploy.ts:338` `git archive --format=tar` + tar 解包；`tenancy/image/Dockerfile:12` `COPY . .`）：`platform-plugin/skills -> ../skills` 依赖此事实；将来换 rsync/cp 类同步方式须确认 `-l` 语义，否则平台内置技能静默变拷贝再漂移。
+- **`~/.claude/skills/trellis-admin` 是 symlink → 本仓 `skills/trellis-admin`，不是拷贝**（S129 实测，曾误判）：`ls -la <dir>/` 列的是链接**目标**的内容（`.` 显示目标属性），看不出父项本身是链接，判定要用 `ls -la <parent>/` 或 `readlink`；对它 `cp` 会**写穿到仓库工作区**（S129 实弹：真仓 main 凭空多出两个未提交 M）。
 - **本仓 `next build` 必须 `bun --bun run build`——裸 `bun run build` 用 node 跑 next,collect page data 阶段 import `bun:sqlite` 直接炸**(S128 settle 实弹两次误判,`lib/server/sqlite.ts:2`;主控树复现:裸命令 `Failed to collect page data for /api/agents`,`--bun` 全绿)。给坐席/CI 写 verify 一律 `--bun`。
 - **全仓 `bun run lint` 存量脏:56 errors/16 warnings(base ca0424e 实测)**(S128):给增量改动定 lint 验收必须定向 eslint 改动文件,全仓命令会把存量账算到本次头上。
 - **宿主 clash TUN 透明覆盖 Docker Desktop VM 的出站,容器内直连 api.anthropic.com/npm/claude.ai 全通,零代理配置**(S126 实测,`.fenjue/archive/fj-mt-spike-54c5/out/report.md`):容器 DNS 解析到 fake-ip 段(198.18.0.119)但 TLS 握手与 HTTP 全部成功——「fake-ip 但 TUN 接管成功」;备用路径 `HTTPS_PROXY=http://host.docker.internal:7897`(verge-mihomo mixed-port,root 进程宿主 lsof 平权查不到,容器实测可达)。多租户容器与任何"容器里跑 claude"的场景不需要任何网络 env。

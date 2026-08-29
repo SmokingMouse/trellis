@@ -1,6 +1,16 @@
 # Session Log
 
-最近 5 条，倒序（Session 128 / 127 / 126 / 125 / 124）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 129 / 128 / 127 / 126 / 125）。更早的见 `archive.md`。
+
+### Session 129（2026-08-28~29，trellis-admin 平台原生化：caller context 注入 + 内置技能默认挂载 + trellisctl 自我感知；PR #28 已合）
+- **触发**: 用户「让 trellis-admin 成为平台内置技能，像 herdr 一样感知整个平台（树/树链/tab），能动态增加树、节点」。盘点后真缺口不在分发（`builtinSkillsRoot` 多根解析早已在）：**平台内会话的自我感知**（spawn 的 CLI 不知道自己是谁，全仓 grep TRELLIS_ 零命中）与**默认可用**（技能只能靠自定义 agent 显式绑）。
+- **Done**（worktree calm-meadow-e229，PR #28）:
+  1. **caller context 注入**（对标 HERDR_ENV/HERDR_PANE_ID）: StreamRequest+`platform` 字段，`sdk-adapter.platformEnv()` 单点收口注 `TRELLIS_ENV/SESSION_ID/NODE_ID/URL`（在 applyAgent **之后**——agent 层铁律不碰上下文；纯 chat 已有 env 合并不覆盖；URL 仅 TRELLIS_PORT 在场才注，裸 `next dev` 无大门宁缺毋错）；chat route 与 tasks 两个 spawn 点接线（无人值守任务同权）；`server.ts` bootNext 传 `TRELLIS_PORT`（gate 口唯一授源）。
+  2. **平台 pack 默认挂载**: repo 静态 plugin 结构 `platform-plugin/`（plugin.json + `skills -> ../skills` 整目录相对 symlink，新增内置技能零维护）；`claude.ts` 对 enhanced chat / project spawn 默认 `pluginDirs` 追加（与 agent pack 并存；纯 chat 无 Skill 工具刻意不挂；**隔离 agent 也挂**——拍板：隔离隔「本机个人环境」不隔「平台自身能力」）；`TRELLIS_BUILTIN_SKILLS=off` 冒烟闸。首日曾做运行时物化版（内容寻址，agent-pack 同套），次日形态收敛砍掉——那套解决「每 agent 一份、内容会变」，平台 pack 全局一份结构恒定，物化是多余一层（净 -59 行）。
+  3. **trellisctl 自我感知**: `whoami`（API 增强部分手写 fetch 降级、身份永不因网络失败）；`.` 在一切收会话/节点 id 处指当前会话/节点；自指硬拒（`wait`/`abort`/`retry`/`ask --node` 自己 = 死锁/自杀/还在跑，`sessions rm` 自己所在会话）；新增 `search`（FTS5 全文）/ `workspaces`（最近工作目录）。SKILL.md 增「你可能就跑在 Trellis 里：先分清立场」节 + Known Failure Modes 两条（dev 裸跑错连实例 / 纯对话无内置技能）。
+- **验证**: 新 `scripts/test-platform-context.ts` 21/21（env 三 mode 注入/合并/URL 门控/off 闸/静态结构/自指冒烟）；`bun test` 44/44；tsc 0 错；build 过（merge origin/main #27 后复跑）；新 trellisctl 对旧 prod 3088 只读兼容全绿；经 symlink 跑正常（白捡：cronLib 仓内相对路径经 bun realpath 恢复可用，拷贝态下永远 fallback）。
+- **额外发现**: `~/.claude/skills/trellis-admin` **本来就是 symlink → 真仓**——`ls -la <dir>/` 列的是目标内容看不出父项是链接，首日误判为独立拷贝并用 cp「同步」，实际写穿真仓工作区；已核对内容一致后 `git restore` 恢复干净。收敛后心智模型：一个真源（repo `skills/trellis-admin/`）+ 两个静态装载点（终端 `~/.claude/skills` symlink / 平台 `platform-plugin/`），零物化零拷贝。
+- **Next**: ① 并入 S121-S129 攒批 `make deploy`，之后活体验证：开 enhanced chat 跑 `env | grep TRELLIS` + `trellisctl whoami` 确认注入与技能可调，再 `ask "..." --session .` 验证画布真长出平行树；② codex 系平台 pack 未做（environmentSkills 另一套机制；TRELLIS_* env 注入已顺带覆盖 codex 子进程）。
 
 ### Session 128（2026-08-28，S4 二期统一门户:邀请码自助注册 + 管理员宿主路由 + 用户间模型共享;焚决双单并行交付）
 - **触发**: 用户「现在的多租户模式不是我想要的:统一注册&登录入口、管理员占据宿主机、普通用户工作目录在 docker 文件隔离、支持不同用户间模型共享」→ 主 Agent 协调,AskUserQuestion 对齐四项拍板(邀请码自助注册 / 任意用户互享 / Claude token + 第三方 endpoint 双类 / 管理面板要在 trellis 里)。（原记 S127，与飞书向导单撞号顺延 S128。）
@@ -54,19 +64,3 @@
 - **执行（焚决 fj-lark-bot-28f1，codex+gpt-5.6-sol 坐席）**: 33min 交付 + 1 轮缺陷收尾，全程 3 progress + 1 blocker（settings-tabs.ts 补授权）+ 2 result。产物：`lib/server/lark/`（protocol/store/sdk/handler/manager/semaphore 六模块）+ `/api/lark-bots` CRUD/test + `app/settings/bots` 整页 UI（secret 不回显、连接状态徽标、chats 深链）+ `scripts/test-lark-bot.ts`（18 断言）+ `scripts/lark-ws-smoke.ts`（无凭证 SKIP）。commit `ac78755`。
 - **验证**: settle 独立复跑两轮全绿（tsc 0 错 / 18 断言 / production build / WS 冒烟 SKIP / TRELLIS_LARK 三文件命中），scope 零越界；falsification-verifier 对 8 条不变式逐条 PoC 证伪全 HOLDS（防自触发 10 种 sender 变体 fail-closed、per-chat 串行 30k 压测零重叠、`SQLITE_BUSY` 真抛不吞、secret 三面不漏），其揪出的全局信号量非原子交接（微任务窗口可越 cap 2 倍）已由坐席修复（`semaphore.ts` 原子 handoff + 压测断言 peak=2）。
 - **Next**: ①真凭证端到端联调（`LARK_SMOKE_APP_ID/SECRET` 跑 lark-ws-smoke + 开放平台开通机器人能力/事件订阅长连接/im 权限，本机 lark-cli app `cli_a923d94f1bf89bef` 凭证已验活）②PR #23 合并后 `make deploy` 上线。
-
-### Session 124（2026-08-24，工作区读写与侧栏交互重构：已合并折叠降噪 + 批量安全清理 + 改动检视 Diff 弹窗）
-- **触发**: 用户反馈侧栏内容繁杂、体验较差（几十个历史 worktree 堆叠刷屏、分支与目录名并排截断、缺少工作区读写闭环能力）→「开始优化吧」。
-- **根因**: ① `SessionSidebar` 将所有 worktree（包含大量已合并入主干且 0 会话的已完成分支）平铺在项目下，僵尸工作区严重挤占主视野；② `GroupRow` 强行并排展示目录名和分支名，导致两端均被截断为 `...`；③ 缺乏批量治理能力，清理已完成工作区需逐个 hover 确认数十次；④ 缺乏工作区代码变更检视（读）与流转（写）能力，用户看到 `● 56` 脏改动无法在平台内查看具体文件与 Diff。
-- **Done**:
-  1. `components/SessionSidebar.tsx`:
-     - **智能分区折叠**：自动将项目下的工作区划分为「活跃工作区」与「已合并/可清理工作区（`reclaimable: true` 且 0 运行会话且 0 脏改动）」，后者默认收敛归入子折叠组 `✓ 已合并 (N)`，主界面视野信噪比提升 80% 以上。
-     - **消灭截断排版**：精简行内布局，移除重复截断的长分支名展示，将完整路径、分支、脏文件数与可回收提示统一收敛入悬浮 Tooltip；
-     - **交互式状态角标**：`● N` 脏文件角标支持直接点击开启改动检视；
-     - **权限放宽**：单项工作区删除支持所有 `kind === 'worktree'`（不局限于 trellis 创建），均走严密的两阶段预演与 force 二次确认。
-  2. `app/api/workspaces/git-diff/route.ts` & `components/WorkspaceDiffModal.tsx`:
-     - 新增 Git 变更检视 API 与弹窗：支持查看当前工作区分支、upstream、ahead/behind 提交数、未提交文件状态清单（`M` / `A` / `D` / `??` / staged 标识及 +/- 行数统计）与完整行级统一 Diff 预览；支持一键在本地 VS Code 打开、复制路径与在此工作区新开会话。
-  3. `app/api/workspaces/worktree/clean/route.ts` & `components/BatchCleanModal.tsx`:
-     - 新增批量清理已合并工作区功能：在 `✓ 已合并 (N)` 折叠行提供一键 `[🧹 清理]` 操作，支持全选/多选预检、安全过滤（自动防护脏文件与运行中会话），一键批量执行 `git worktree remove` 与 prune，彻底释放磁盘与视觉空间。
-- **验证**: `bun test` 41/41 全部通过；`bun --conditions react-server scripts/test-workspace-optimizations.ts` 全流程测试（Diff 接口、批量预检与 force 清理）全绿；`bun --bun run build` 成功通过。
-- **Next**: 合并至 main 后 `make deploy` 部署上线。
