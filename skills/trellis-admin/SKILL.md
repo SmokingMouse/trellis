@@ -1,6 +1,6 @@
 ---
 name: trellis-admin
-description: 操作与配置 Trellis 平台。两个面：①平台操作——列会话、看某棵树/某个节点的运行情况（在跑/停着等回答/失败）、读它的回答正文、在某个节点下追问（分支）、在某会话里开平行新树、开全新会话（可带工作目录）、守着一个节点跑完、叫停、回答它停下来等的审批卡/提问卡；②后台配置——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「看看 trellis 上那棵树/那个会话跑得怎么样」「在那棵树上接着问一句」「给 trellis 开棵新树/新会话」「替我盯着它跑完」「它停在审批上了帮我处理」「把那个 run 停了」「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「这个跑完之后自动做 Y」「这个任务上次为什么失败」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「读写这台机器上 Trellis 里的会话/树/节点」或「让某个 agent 定时地、被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、那棵树、隔壁的树、开新树、树的运行情况、盯着跑完、停掉那个节点、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、任务失败、run 历史、看看任务。边界：操作 Trellis 的会话/节点与 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
+description: 操作与配置 Trellis 平台。两个面：①平台操作——列会话、看某棵树/某个节点的运行情况（在跑/停着等回答/失败）、读它的回答正文、在某个节点下追问（分支）、在某会话里开平行新树、开全新会话（可带工作目录）、守着一个节点跑完、叫停、回答它停下来等的审批卡/提问卡；②后台配置——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「看看 trellis 上那棵树/那个会话跑得怎么样」「在那棵树上接着问一句」「给 trellis 开棵新树/新会话」「替我盯着它跑完」「它停在审批上了帮我处理」「把那个 run 停了」「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「这个跑完之后自动做 Y」「这个任务上次为什么失败」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「读写这台机器上 Trellis 里的会话/树/节点」或「让某个 agent 定时地、被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、那棵树、隔壁的树、开新树、树的运行情况、盯着跑完、停掉那个节点、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、任务失败、run 历史、看看任务。它同时是 Trellis 的平台内置技能：enhanced chat / project 会话里的 agent 默认就有，且被注入 TRELLIS_ENV/TRELLIS_SESSION_ID/TRELLIS_NODE_ID 而能自我感知——「我是哪个会话的哪个节点」（whoami）、「看我这个画布上别的树」（sessions get .）、「在我自己的会话里开棵平行树」（ask --session .）这类平台内自指操作也归它。边界：操作 Trellis 的会话/节点与 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
 ---
 
 # Trellis 平台操作与后台配置
@@ -15,6 +15,26 @@ bun <skill目录>/scripts/trellisctl.ts health      # 先探这一下，确认�
 
 裸 `trellisctl` 不带参数会打完整用法。下文只讲**语义和坑**——那些是光看用法看不出来的。
 
+## 你可能就跑在 Trellis 里：先分清立场
+
+这个 skill 有两种持有者，动作语义完全不同：
+
+- **终端 / 外部 claude**：你在平台**外**替用户遥控 Trellis——老用法，全部命令照旧。
+- **Trellis 会话里的 agent**：本技能是**平台内置技能**（随部署走，任何 enhanced chat / project 会话默认自带，管理台给 agent 配技能也能选到）。平台 spawn 你时注入了 caller context——如 herdr 之于 pane：
+
+```bash
+test "${TRELLIS_ENV:-}" = 1   # 过 = 你在 Trellis 会话里
+bun <skill目录>/scripts/trellisctl.ts whoami   # 我是哪个会话的哪个节点、树位置
+```
+
+注入的变量：`TRELLIS_SESSION_ID`（你所在画布）、`TRELLIS_NODE_ID`（你当前这轮问答）、`TRELLIS_URL`（API 地址，trellisctl 自动认）。在平台内，**所有收 `<会话id>` / `<节点id>` 的地方都可以写 `.`** 指当前会话 / 当前节点：`sessions get .` 看自己所在的整个画布，`ask "..." --session .` 在自己画布上开平行树（给用户留下持久可见的工作线），`node read <隔壁树的id>` 读平行树的产出。
+
+平台内的三条纪律（trellisctl 会硬拒，这里讲清为什么）：
+
+- **不 `wait` / `abort` / `retry` 自己的节点**（`$TRELLIS_NODE_ID`）——你就是那个 run：等自己 = 死锁到超时，停自己 = 这轮当场被砍。
+- **不 `ask --node` 自己**——想补充直接写进回答；同画布另起一线用 `--session .`。
+- **不 `sessions rm` 自己所在的会话**——那会连你一起删。
+
 ## 平台操作面：会话 / 树 / 节点
 
 概念对齐（拿错层级是这个面唯一的高频错误）：
@@ -23,7 +43,7 @@ bun <skill目录>/scripts/trellisctl.ts health      # 先探这一下，确认�
 - **树** = 会话画布里的一个根节点。一个会话可以有多棵平行树。**树没有独立 id——树就是它的根节点**，拿 nodeId 当树柄。
 - **节点（node）** = 一轮问答。状态三值 `streaming / done / error`，外加一个更要紧的横切态：`pendingInteraction` 非空 = run 被交互式工具挂起、**停着等人回答**（输出里的 ⏸）。
 
-读随便跑：`sessions`（列会话，▶ 标在跑）→ `sessions get <id>`（树形大纲）→ `node get <id>` / `node read <id>`；`ps` 直接回答「现在谁在跑、谁停着等回答」。id 一律从上一条命令的输出里拿，别凭记忆拼。
+读随便跑：`sessions`（列会话，▶ 标在跑）→ `sessions get <id>`（树形大纲）→ `node get <id>` / `node read <id>`；`ps` 直接回答「现在谁在跑、谁停着等回答」；`search <关键词>` 全文检索所有会话的问题/回答/引用/笔记（找「上次聊 X 的那棵树」用这个，别翻列表）；`workspaces` 列最近工作目录（开 project 会话前先看，别凭记忆拼路径）。id 一律从上一条命令的输出里拿，别凭记忆拼。
 
 写操作 = `ask`，它**真 spawn 一次 LLM run**（花钱；project 模式还真改文件），发之前把问题和目标给用户看一眼。三个目标形态的区别在**上文**：
 
@@ -72,7 +92,7 @@ bun .../trellisctl.ts agents create '{"slug":"pr-reviewer","name":"PR 审查","s
 | `systemPrompt` | 人设正文。选了 agent 的会话，会话级 systemPrompt 会被删掉——**agent 赢，两者不叠加**。 |
 | `model` | CLI 模型名，`null` = 跟随会话。**注意别和任务的 `providerId` 搞混**，那是两个东西。 |
 | `tools` | `null` = 不限制；`[]` = 一个工具都不给；给了数组就是白名单。名字要和 CLI 的工具名字面一致（`Read`/`Write`/`Edit`/`Bash`/`Grep`/`Glob`/`WebFetch`/`Skill`…），**拼错不会报错，只会静默少一个工具**。 |
-| `skills` | `[{"kind":"host","name":"<目录名>"}]`。目录逐根解析：本机 `~/.claude/skills/<name>` 优先，找不到再取 trellis 自带 `skills/<name>`（内置技能随部署走，`trellis-admin` 属于后者，不需要任何手工 symlink）。名字取**目录名**不是 frontmatter 里的 `name`。用 `trellisctl skills [关键词]` 查。 |
+| `skills` | `[{"kind":"host","name":"<目录名>"}]`。目录逐根解析：本机 `~/.claude/skills/<name>` 优先，找不到再取 trellis 自带 `skills/<name>`（内置技能随部署走，`trellis-admin` 属于后者，不需要任何手工 symlink）。名字取**目录名**不是 frontmatter 里的 `name`。用 `trellisctl skills [关键词]` 查。注意：enhanced chat / project 会话**本就默认带全部内置技能**（平台 pack，`TRELLIS_BUILTIN_SKILLS=off` 可整体关掉）——给 agent 配 `skills` 是在此之上加选**个人**技能，不需要也不必把 `trellis-admin` 写进去。 |
 | `inheritEnv` | **新建的 agent 默认是 `false` = 隔离**，而隔离是三件套：没有 CLAUDE.md、没有本机 skill、**也没有 MCP**。想让它像平时的 claude 一样什么都看得见，显式写 `"inheritEnv":true`。 |
 | `permission` | `full` / `default` / `readonly` / `auto-edit`，`null` = 跟随会话。**这是无人值守场景下唯一真正起作用的闸**（见下面的失败模式）。 |
 | `requireApproval` | 三态（`true`/`false`/`null`）。只在交互式会话里有意义。 |
@@ -164,5 +184,9 @@ bun .../trellisctl.ts triggers add <taskId> '{"kind":"cron","config":{"expr":"0 
 - **agent 配了但完全没生效，回答却一切正常**：先看会话/任务的 provider 是不是 codex 系——自定义 agent 只在 claude 系生效，切过去是静默失效。
 
 - **`trellisctl health` 探不到，但浏览器能打开 Trellis**：环境里有 `http_proxy` 时 bun 的 fetch 可能被劫走。先 `unset http_proxy https_proxy` 再试，或显式 `TRELLIS_URL=http://127.0.0.1:<port>`。
+
+- **平台内子进程的 trellisctl 打到了另一个实例 / 探不到**：裸 `next dev` 起的 dev 实例没有大门（server.ts），`TRELLIS_URL` 不注入，子进程的端口发现链会去探 3088——本机若同时跑着 prod 实例就会**错连**（判据：`whoami` 报的 session 拿去 `sessions get` 是 404）。修法：要完整的平台内闭环就经 server.ts 起（prod 部署本来就是），或临时显式 `TRELLIS_URL`。
+
+- **会话里配了/应有内置技能，agent 却说没有**：纯对话（非增强）没有 Skill 工具，平台 pack 刻意不挂——切「增强」或用 project 会话；再查 `TRELLIS_BUILTIN_SKILLS` 是否被设成 `off`（部署冒烟闸，开着 = 内置技能整体摘除）。
 
 - **在 A 机器上建的任务，B 机器上看不到**：两台实例不共享数据库，这是刻意的——`workspacePath` 本来就是机器本地路径，任务天然属于它该跑的那台机器。
