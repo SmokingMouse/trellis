@@ -5,7 +5,7 @@
 
 ## Current Focus
 
-**trellis-admin 平台原生化：caller context 注入 + 平台 pack 默认挂载 + trellisctl 自我感知——已实现，本地全绿，待 merge + deploy 后做活体验证。**
+**trellis-admin 平台原生化：caller context 注入 + 平台 pack 默认挂载 + trellisctl 自我感知——已实现并完成形态收敛（静态 plugin 结构，零物化），本地全绿，待 merge + deploy 后做活体验证。**
 
 ## Session Log
 
@@ -37,4 +37,14 @@
 - **Next**：
   - ① merge 回 main，与 S121-S126 一起 `make deploy`。
   - ② **部署后活体验证**（本地验不了：起第二个实例会与 prod 共库双跑 scheduler，刻意不做）：开一个 enhanced chat 问「跑 `env | grep TRELLIS` 和 `trellisctl whoami`」确认注入与内置技能可调；再让它 `ask "..." --session .` 验证画布上真长出平行树。
-  - ③ 待议：用户级 `~/.claude/skills/trellis-admin` 单源化（symlink 真仓或部署钩子同步），消灭双份漂移。
+  - ③ ~~待议：用户级单源化~~ → S2 查明它**本来就是 symlink**，无此债（见下）。
+
+### Session 2（2026-08-29，形态收敛：多形态 → 一个真源 + 静态装载点）
+
+- **缘起**：用户拷问「为啥需要这么多形态？一个 skill 不就行了吗」→ 对齐认知（形态数 = 消费者装载机制数，非设计偏好）后拍板砍掉两处非本质冗余。
+- **Done**：
+  1. **平台 pack 物化 → repo 静态 plugin 结构**：新增 `platform-plugin/`（`.claude-plugin/plugin.json` + `skills -> ../skills` 整目录相对 symlink，新增内置技能零维护）。`lib/server/platform-pack.ts` 从 120 行物化机（内容寻址/tmp+rename/TTL sweep）缩成静态解析 + 结构校验；`skills.ts` 提取 `appRoot()`（prod 经 `current` 软链，防 release 清理悬空）。物化那套解决的是 agent-pack「每 agent 一份、内容会变」的问题，平台 pack 全局一份结构恒定，物化纯属多余一层。symlink 经 deploy 两条链（`git archive`→tar / Docker `COPY . .`）均原样保留，已核实。本机 `~/.trellis/platform-pack/` 测试残留已清（生产从未部署过物化版）。
+  2. **用户级「拷贝」查明真相**：`~/.claude/skills/trellis-admin` **一直就是 symlink → 真仓**（S1 误判为独立拷贝——`ls -la <dir>/` 列的是目标内容，看不出父项是链接）。S1 的「cp 同步」实际经 symlink **写穿到真仓工作区**（真仓 main 上两个未提交 M）。本次：确认 M 内容 == worktree 新版无独立改动 → `git restore` 真仓恢复干净（消除 merge 撞车）→ symlink 重建如初。**副作用：merge 前终端 claude 经 symlink 看到的是 main 旧版 trellisctl（无 whoami/search/workspaces/"."），merge 后自动新版**——旧版功能完整，可接受。
+- **验证**：test-platform-context 21/21（pack 段改为静态结构断言：路径即 repo 目录 / plugin 名 / skills 是整目录 symlink / 经 pack 与经内置根同真身 / off 闸）；`tsc --noEmit` 0 错；`bun test` 44/44；build 过；经 symlink 跑 trellisctl 正常（额外收益：`cron` 命令的 cronLib 仓内相对路径经 bun realpath 解析恢复可用——拷贝态下它永远 fallback）。
+- **收敛后的心智模型**：一个真源（repo `skills/trellis-admin/`）+ 两个静态装载点（终端侧 `~/.claude/skills` symlink / 平台侧 `platform-plugin/` 静态 plugin 结构），零运行时物化、零拷贝；agent-pack 是与它无关的通用机制（且配 trellis-admin 已属多余，SKILL.md 已注明）。
+- **Next**：同 S1（merge + deploy → 活体验证）；S1-Next③ 已销。

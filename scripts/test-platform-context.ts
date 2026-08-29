@@ -6,8 +6,8 @@
 //  ① modeToRunOptions 注入 TRELLIS_* env：三个 mode（纯 chat / enhanced / project）
 //     都注；纯 chat 已有的 CLAUDE_CODE_EFFORT_LEVEL 不被覆盖；无 platform 不注；
 //     TRELLIS_URL 只在 TRELLIS_PORT（gate 口）在场时注。
-//  ② platformPackDir 物化：plugin.json + skills/<dir> symlink 指向内置技能根、
-//     内容寻址幂等、TRELLIS_BUILTIN_SKILLS=off 整体摘除。
+//  ② platformPackDir 静态结构：repo 内 platform-plugin/（plugin.json + skills
+//     整目录 symlink → ../skills）解析可用、TRELLIS_BUILTIN_SKILLS=off 整体摘除。
 //  ③ trellisctl 的自指防护：wait / abort / ask --node 对「自己这个节点」硬拒，
 //     whoami 在平台外如实报告。
 //
@@ -79,7 +79,7 @@ delete process.env.TRELLIS_PORT;
 }
 
 // ---------------------------------------------------------------------------
-// ② 平台 pack 物化
+// ② 平台 pack 静态结构（repo 内 platform-plugin/）
 // ---------------------------------------------------------------------------
 
 {
@@ -90,23 +90,26 @@ delete process.env.TRELLIS_PORT;
 
 {
   const dir = platformPackDir();
-  ok(dir !== null, "平台 pack：物化成功（dev 下内置根 = <cwd>/skills）");
+  ok(dir !== null, "平台 pack：静态结构解析可用（dev 下 = <cwd>/platform-plugin）");
   if (dir) {
+    ok(dir === path.join(process.cwd(), "platform-plugin"), "平台 pack：路径即 repo 静态目录");
     const plugin = JSON.parse(
       fs.readFileSync(path.join(dir, ".claude-plugin", "plugin.json"), "utf8"),
     );
     ok(plugin.name === "trellis", "平台 pack：plugin 名为 trellis（技能列出为 trellis:<dir>）");
-    const link = path.join(dir, "skills", "trellis-admin");
-    ok(fs.lstatSync(link).isSymbolicLink(), "平台 pack：trellis-admin 是 symlink（正文改动自动跟随）");
     ok(
-      fs.realpathSync(link) === fs.realpathSync(path.join(builtinSkillsRoot(), "trellis-admin")),
-      "平台 pack：symlink 指向内置技能根",
+      fs.lstatSync(path.join(dir, "skills")).isSymbolicLink(),
+      "平台 pack：skills 是整目录 symlink（新增内置技能零维护，勿替换成拷贝）",
+    );
+    const viaPack = path.join(dir, "skills", "trellis-admin");
+    ok(
+      fs.realpathSync(viaPack) === fs.realpathSync(path.join(builtinSkillsRoot(), "trellis-admin")),
+      "平台 pack：经 pack 与经内置根解析到同一真身",
     );
     ok(
-      fs.readFileSync(path.join(link, "SKILL.md"), "utf8").includes("trellis-admin"),
+      fs.readFileSync(path.join(viaPack, "SKILL.md"), "utf8").includes("trellis-admin"),
       "平台 pack：经 symlink 能读到 SKILL.md",
     );
-    ok(platformPackDir() === dir, "平台 pack：内容寻址幂等（第二次命中同一目录）");
   }
 }
 

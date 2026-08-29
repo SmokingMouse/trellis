@@ -106,17 +106,20 @@ function projectSkillRoots(workspace?: string | null): string[] {
   return roots;
 }
 
-/** trellis 自带技能根（`<app>/skills`，随部署走）。
+/** 应用根（随部署走的稳定路径）。
  *
  * prod 的 cwd 是具体 release 目录（`<root>/releases/<ts>-<sha>`，会被清理），
- * 必须经 `current` 软链取 —— agent-pack 里指向这里的 symlink 才不会随 release
- * 清理悬空，且升级后自动跟到新版。dev checkout 直接用 cwd 下的 skills/。
+ * 必须经 `current` 软链取 —— 指向这下面的 symlink / plugin-dir 引用才不会随
+ * release 清理悬空，且升级后自动跟到新版。dev checkout 直接用 cwd。
  * 部署根统一走 deployPaths()，TRELLIS_DEPLOY_ROOT 挪走时这里要跟着挪。 */
-export function builtinSkillsRoot(): string {
+export function appRoot(): string {
   const p = deployPaths();
-  return process.cwd().startsWith(p.releases + path.sep)
-    ? path.join(p.current, "skills")
-    : path.join(process.cwd(), "skills");
+  return process.cwd().startsWith(p.releases + path.sep) ? p.current : process.cwd();
+}
+
+/** trellis 自带技能根（`<app>/skills`）。agent-pack 的逐根解析用它兜底。 */
+export function builtinSkillsRoot(): string {
+  return path.join(appRoot(), "skills");
 }
 
 /** claude 侧技能搜索根。顺序即优先级：用户目录赢，内置兜底 —— 同名时用户
