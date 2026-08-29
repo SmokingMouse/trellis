@@ -244,6 +244,9 @@ export function deleteAgent(id: string): { ok: boolean; reason?: string } {
   if (!a) return { ok: false, reason: "not found" };
   if (a.builtin) return { ok: false, reason: "内置 Agent 不可删除，请改用「停用」" };
   // sessions.agent_id 是 ON DELETE SET NULL —— 用过它的历史会话退回默认人设，不连坐。
+  // 清理可能绑定在该 agent 上的飞书机器人和任务，避免悬空 id。
+  getDB().prepare("UPDATE lark_bots SET agent_id = NULL WHERE agent_id = ?").run(id);
+  getDB().prepare("UPDATE tasks SET agent_id = NULL WHERE agent_id = ?").run(id);
   getDB().prepare("DELETE FROM agents WHERE id = ?").run(id);
   return { ok: true };
 }

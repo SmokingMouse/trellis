@@ -2,7 +2,12 @@ import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export type Tenant = { name: string; hostPort: number; authToken: string };
+export type Tenant = {
+  name: string;
+  hostPort: number;
+  authToken: string;
+  kind: "container" | "host";
+};
 const cache = new Map<string, { mtimeMs: number; size: number; tenant: Tenant }>();
 
 export function tenantsDir(): string {
@@ -27,7 +32,10 @@ export function getTenant(name: string): Tenant | null {
       typeof raw.authToken !== "string" ||
       !raw.authToken
     ) return null;
-    const tenant = { name, hostPort: raw.hostPort, authToken: raw.authToken } as Tenant;
+    const kind = typeof (raw as { container?: unknown }).container === "string"
+      ? "container"
+      : "host";
+    const tenant = { name, hostPort: raw.hostPort, authToken: raw.authToken, kind } as Tenant;
     cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, tenant });
     return tenant;
   } catch {
