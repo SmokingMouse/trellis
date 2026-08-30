@@ -1,6 +1,20 @@
 # Session Log
 
-最近 5 条，倒序（Session 129 / 128 / 127 / 126 / 125）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 130 / 129 / 128 / 127 / 126）。更早的见 `archive.md`。
+
+### Session 130（2026-08-30，S4 契约C接线联调：宿主入网关 + 真容器端到端全绿，多租户体系正式上线）
+- **触发**: 用户看 `/settings/shares` 报「未启用多租户网关服务 (HTTP 404)」问为啥 → 诊断：S128 只交付了代码，网关未部署、宿主未入网关（正是 S128 Next 挂着的"契约C待拍板"）→ 用户拍板「开始吧」。另发现 prod 已在当日 13:55 部到 47e13aa（"S121-S129 待 make deploy"过时）。
+- **接线 Done**（纯宿主运维 + 2 处代码修复，零 UI 改动）:
+  1. 宿主 prod 开 auth gate：launchd plist 注入 `TRELLIS_AUTH_PASS/TOKEN` + `TRELLIS_ADMIN_UI=1` 重启，无 cookie 401 / 带 token 200；凭证记录 `~/.trellis-tenancy/env/host-admin.env`(0600，含 gw admin 密码)。
+  2. host 记录正式化：`tenants/host-admin.json`（hostPort 3088 + authToken，无 container 字段 = kind host）。
+  3. 网关常驻：`com.smokingmouse.trellis-gw` launchd bootstrap（WorkingDirectory=`~/.trellis/current`；**模板缺 EnvironmentVariables，launchd 默认 PATH 找不到 bun/docker，已补 HOME/PATH**），127.0.0.1:3200 起。
+  4. 网关 admin 用户（tenant=host-admin, role=admin）认领+登录，curl 全链绿：`/__gw/api/me`、shares、cookie 翻译代理宿主 `/` 与 `/api/sessions`、admin users（host healthy）。
+  5. 真容器端到端：镜像 rebuild(47e13aa) → admin 建邀请码 → 自助注册 e2e-smoke → provision 起容 → 双租户 admin 可见（host + running 皆 healthy）→ endpoint 共享发布/订阅（容器内 `~/.config/sm/endpoints.yaml` + `.env` 标记块 docker exec 实测）→ 退订清除 → 撤销级联；测试租户 `rm --purge` 零残留、gw 用户 disable。
+- **实弹揪出两 bug**（commit 7928b89，selftest 21 项全绿，release 树已手动同步三文件）:
+  ① `tenantctl readAllRecords` 枚举 tenants/ 撞 host 记录格式校验直接炸——host-admin.json 一落地，自助注册 provision 必挂；修：无 container 字段 = 网关 host 路由记录，跳过（判定与 `gateway/tenants.ts` 对齐）。
+  ② endpoint 注入对空/不存在的 endpoints.yaml 必炸 `providers must be a map`——parse 空串兜底 `"{}"` 产 flow map 根，yaml 库 `doc.set` 塞裸 JS 对象过不了 `isMap`；修：空文档解析 + `createNode` 包装；selftest test20 补空文件注入/撤销断言（此前替身 mock 不走真 yaml 路径，漏此分支）。
+- **验证**: 全链 curl/docker exec 逐步实测；selftest 全绿；lint 基线对比零新增（存量 21 不背账）。
+- **Next**: ① 多租户入口 = `http://127.0.0.1:3200`（gw 凭证在 host-admin.env；直连 3088 走 trellis /login 用 PASS）；② 公网接入仍待拍板（caddy + 域名 + secure cookie + 真浏览器过全链 WS/SSE）；③ 下次 `make deploy` 收敛 release 的 sha 记录（7928b89 已文件级同步，运行体一致）；④ S126 Next 的 memos/stirling 改绑 127.0.0.1 仍未动。
 
 ### Session 129（2026-08-28~29，trellis-admin 平台原生化：caller context 注入 + 内置技能默认挂载 + trellisctl 自我感知；PR #28 已合）
 - **触发**: 用户「让 trellis-admin 成为平台内置技能，像 herdr 一样感知整个平台（树/树链/tab），能动态增加树、节点」。盘点后真缺口不在分发（`builtinSkillsRoot` 多根解析早已在）：**平台内会话的自我感知**（spawn 的 CLI 不知道自己是谁，全仓 grep TRELLIS_ 零命中）与**默认可用**（技能只能靠自定义 agent 显式绑）。
@@ -60,10 +74,3 @@
   5. Supervisor 收尾: **真容器 × 网关联调通过**（邀请认领 200→cookie 翻译→真实例 /api/sessions 200→mock 对话 SSE created/done 全链路）；selftest 补 120s watchdog；`tenancy/README.md`（架构/威胁模型/运维手册）。
 - **验证**: 四单 settle 全部独立复跑（不采信坐席自述）——spike D1/D2、image 九条 verify（完整容器生命周期重放）、gateway selftest 12 项+独立启动+plist、M3 四条；merge 后 main 上 selftest 全绿；真容器×网关端到端 curl 联调全绿。
 - **Next**: ① 公网接入待房主拍板（caddy 站点块+域名，见 tenancy/README.md）；② 宿主 memos/stirling 建议改绑 127.0.0.1（容器可经 host.docker.internal 触达）；③ 第一位真实朋友上车时做真人端到端（真 claude login+Web 终端）；④ S121+S122 一起 `make deploy`（tenancy/ 不影响单人版运行时，零风险合部）。
-
-### Session 125（2026-08-28，飞书机器人载体：注册/绑定 Bot + WS 长连接双向对话；焚决派发 codex 实现）
-- **触发**: 用户「定时任务是调度机制、agent 是身份，但没有一个载体——先支持飞书机器人，支持绑定/注册，也支持在飞书对话，参考 happyclaw 方案」。正是 custom-agents-plan 明确「推迟」的飞书载体项启动。（原记 S122，与并行 worktree 撞号顺延 S125。）
-- **方案定盘（Owner 侧，两路 Explore 侦察后）**: 采 happyclaw 的**形状**（`@larksuiteoapi/node-sdk` WS 长连接、EventDispatcher、mention 门控），拒其**厚度**（六态耐久投递/流式卡片/多级绑定 = 多租户账单，happyclaw-contrast.md 既有裁决）。核心决策：①三表 `lark_bots`/`lark_chats`/`lark_inbox`（去重照 `task_runs_slot` 抢槽 idiom，仅 `SQLITE_CONSTRAINT_UNIQUE|PRIMARYKEY` 算 dup）②每飞书 chat = `kind='lark'` 会话内一条线性链（新消息 = `last_node_id` 子节点 + resume，侧栏可见）③per-chat 内存串行队列（深度 5）+ 全局并发 2（`AsyncSemaphore` 原子交接）④群聊必须 @bot（`bot_open_id` 缺失 fail-closed）、bot 自身消息无条件忽略（防自触发烧钱循环）⑤连接管理 = instrumentation 挂 `startLarkManager()` 15s 对账 tick，route 只写 DB（跨 bundle 模块实例不共享，S87 坑）⑥`TRELLIS_LARK=off` deploy smoke 闸。
-- **执行（焚决 fj-lark-bot-28f1，codex+gpt-5.6-sol 坐席）**: 33min 交付 + 1 轮缺陷收尾，全程 3 progress + 1 blocker（settings-tabs.ts 补授权）+ 2 result。产物：`lib/server/lark/`（protocol/store/sdk/handler/manager/semaphore 六模块）+ `/api/lark-bots` CRUD/test + `app/settings/bots` 整页 UI（secret 不回显、连接状态徽标、chats 深链）+ `scripts/test-lark-bot.ts`（18 断言）+ `scripts/lark-ws-smoke.ts`（无凭证 SKIP）。commit `ac78755`。
-- **验证**: settle 独立复跑两轮全绿（tsc 0 错 / 18 断言 / production build / WS 冒烟 SKIP / TRELLIS_LARK 三文件命中），scope 零越界；falsification-verifier 对 8 条不变式逐条 PoC 证伪全 HOLDS（防自触发 10 种 sender 变体 fail-closed、per-chat 串行 30k 压测零重叠、`SQLITE_BUSY` 真抛不吞、secret 三面不漏），其揪出的全局信号量非原子交接（微任务窗口可越 cap 2 倍）已由坐席修复（`semaphore.ts` 原子 handoff + 压测断言 peak=2）。
-- **Next**: ①真凭证端到端联调（`LARK_SMOKE_APP_ID/SECRET` 跑 lark-ws-smoke + 开放平台开通机器人能力/事件订阅长连接/im 权限，本机 lark-cli app `cli_a923d94f1bf89bef` 凭证已验活）②PR #23 合并后 `make deploy` 上线。

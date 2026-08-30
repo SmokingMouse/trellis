@@ -1,12 +1,12 @@
 # Trellis Progress
 
 ## Current Focus
-S4 二期统一门户（S128）双单交付，余契约C接线联调（涉重启宿主 prod 待拍板）；S121-S129 待 make deploy；公网接入待拍板；cpa codex 故障在查（failures.md）。
+S4 契约C接线完成（S130），多租户网关+宿主+真容器端到端上线，入口 3200；余公网接入待拍板；cpa codex 故障在查（failures.md）。
 
 ## Goals
 
 - [ ] **S4: 多租户开放（实例级隔离 + 统一门户）** → [运维手册](../tenancy/README.md) · [一期 ADR](decisions/2026-08-28-multi-tenancy-instance-isolation.md) · [二期 ADR](decisions/2026-08-28-multi-tenancy-unified-portal.md)
-  一期四单+二期双单全 settle pass；余：接线联调（宿主入网关+真容器端到端）、公网接入（待拍板）。
+  一期四单+二期双单+契约C接线（S130）全落地，本机多租户体系已上线；余：公网接入（待拍板）。
 - [x] **自定义 Agent + 自动化任务** → [计划](custom-agents-plan.md) · [ADR](decisions/2026-07-31-custom-agents.md)
   A1-A4 · T1-T4 全部落地实测，本机 prod 已上线，开发完结。残留运维待办：BOE 未部（见 sessions.md S88 Next）。
 - [ ] **S1: Project/Workspace 层级 + 工作区终端** → [spec](project-workspace-layer.md) · [ADR](decisions/2026-07-27-project-workspace-layer.md)

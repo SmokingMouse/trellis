@@ -1,6 +1,8 @@
 # Verified Facts
 
 
+- **多租户体系本机部署形态（S130 接线实测）**：网关 `com.smokingmouse.trellis-gw`（launchd，WorkingDirectory=`~/.trellis/current`）监听 `127.0.0.1:3200` = 多租户唯一入口（gw 账号登录，admin 经 cookie 翻译路由到宿主 3088）；宿主 prod `com.smokingmouse.trellis` 3088 已开 auth gate（直连需 `/login` 输 PASS）+ `TRELLIS_ADMIN_UI=1`；全部凭证（宿主 PASS/TOKEN + gw admin 密码）在 `~/.trellis-tenancy/env/host-admin.env`(0600)，host 路由记录在 `~/.trellis-tenancy/tenants/host-admin.json`。**网关 plist 模板（`tenancy/launchd/`）没有 EnvironmentVariables——launchd 默认 PATH 找不到 bun/docker，装的时候必须补 HOME/PATH**（实机 plist 已补）。
+- **`tenants/*.json` 是双方消费的窄接口，两侧 schema 校验必须互相容忍**（S130 实弹，commit 7928b89）：网关只认三字段（name/hostPort/authToken，无 container 字段判 kind=host），tenantctl 的容器记录校验则要求 container/authPass/image/createdAt 全齐——host-admin.json 一落地，tenantctl `add` 枚举 tenants/ 直接炸（自助注册 provision 全线挂）。已修（readAllRecords 按"无 container 字段"跳过）；将来任何一侧改 schema，先想另一侧的枚举/校验路径。
 - **`TRELLIS_PORT` = 大门（gate）口的唯一授源；Next 进程的 `process.env.PORT` 是内部口（NEXT_PORT），`/__gate/health` 不在那层**（S129，`server.ts` bootNext env 与 `lib/llm/sdk-adapter.ts` platformEnv）：任何要拼 Trellis base URL 的服务端代码只认 TRELLIS_PORT，拿 PORT 拼出来的 URL 探活必失败。裸 `next dev` 两者皆无——platformEnv 对此宁缺毋错（不注 TRELLIS_URL）。
 - **repo 内相对 symlink 经两条部署链均原样保留**（S129 核实：`scripts/deploy.ts:338` `git archive --format=tar` + tar 解包；`tenancy/image/Dockerfile:12` `COPY . .`）：`platform-plugin/skills -> ../skills` 依赖此事实；将来换 rsync/cp 类同步方式须确认 `-l` 语义，否则平台内置技能静默变拷贝再漂移。
 - **`~/.claude/skills/trellis-admin` 是 symlink → 本仓 `skills/trellis-admin`，不是拷贝**（S129 实测，曾误判）：`ls -la <dir>/` 列的是链接**目标**的内容（`.` 显示目标属性），看不出父项本身是链接，判定要用 `ls -la <parent>/` 或 `readlink`；对它 `cp` 会**写穿到仓库工作区**（S129 实弹：真仓 main 凭空多出两个未提交 M）。

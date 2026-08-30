@@ -39,7 +39,14 @@ bun tenancy/tenantctl.ts creds-share alice --revoke # 撤销共享
 
 租户 onboarding:开邀请 URL → 设密码 → 进自己的 trellis → 开 Web 终端跑 `claude login`(headless 贴 code 流程,实测容器内 OAuth URL 正常生成)→ 开聊。第三方端点:设置页配 endpoints.yaml(落在自己容器里)。
 
-## 凭证模型
+## 宿主接线(host-admin,S130 已上线)
+
+管理员经同一网关入口登录、路由到宿主单人版实例。本机现状(2026-08-30 接线,全链实测):
+
+- **host 路由记录** `~/.trellis-tenancy/tenants/host-admin.json`:手写三字段 `{name, hostPort: 3088, authToken}`,**不带 container 字段**(网关判 kind=host;tenantctl 枚举时按此跳过,别补容器字段)。
+- **宿主 prod 开闸**:`com.smokingmouse.trellis` plist 的 EnvironmentVariables 加 `TRELLIS_AUTH_PASS` / `TRELLIS_AUTH_TOKEN`(= host 记录 authToken) / `TRELLIS_ADMIN_UI=1`,bootout+bootstrap 重启生效。凭证记录在 `~/.trellis-tenancy/env/host-admin.env`(0600,含 gw admin 登录密码)。
+- **网关常驻**:`~/Library/LaunchAgents/com.smokingmouse.trellis-gw.plist`,WorkingDirectory=`~/.trellis/current`(与 prod 同 release,deploy 后需手动重启网关吃新代码)。**模板缺 EnvironmentVariables——必须补 HOME 与含 bun/docker 的 PATH**,否则自助注册 spawn tenantctl/docker 全挂。
+- **入口语义**:多租户走 `http://127.0.0.1:3200`(gw 账号);直连 3088 是单人版闸口(/login 输 PASS),看不到 /__gw 功能属预期降级。
 
 - **默认租户自带**:容器内 `claude login`,凭证落 volume 的 `~/.claude/.credentials.json`(Linux 文件存储,无 keychain 坑)。
 - **房主共享**:`claude setup-token` 一年期 token 经 `CLAUDE_CODE_OAUTH_TOKEN` env 注入(官方 headless 路径)。**绝不拷 credentials.json**——refresh 轮换会让双副本互相作废(decisions.md 2026-08-04);也绝不拷宿主 `.claude.json`(feature flags 会让容器内初始化挂起)。
