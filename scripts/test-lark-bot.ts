@@ -169,4 +169,15 @@ const afterTask = agentDb.prepare("SELECT agent_id FROM tasks WHERE id = 'task_1
 equal(afterBot.agent_id, null, "删除 Agent 后关联的飞书机器人自动解绑（agent_id=null）");
 equal(afterTask.agent_id, null, "删除 Agent 后关联的任务自动解绑（agent_id=null）");
 
+// 测试本地凭证发现 (discoverLocalLarkCredentials)
+import { discoverLocalLarkCredentials } from "@/lib/server/lark/discover";
+const discovered = discoverLocalLarkCredentials();
+ok(Array.isArray(discovered), "本地凭证扫描返回数组");
+if (discovered.length > 0) {
+  const first = discovered[0];
+  ok(first.appId.startsWith("cli_"), "扫描到的 App ID 具备 cli_ 前缀");
+  ok(first.appSecret.length > 0, "扫描到的 App Secret 非空");
+  ok(typeof first.source === "string" && first.source.length > 0, "扫描结果包含来源路径");
+}
+
 console.log(`PASS ${passed} lark assertions`);

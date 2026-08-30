@@ -14,6 +14,21 @@ import type { LarkBot } from "@/lib/lark-types";
 
 type HostSkill = { name: string; dir: string; description: string };
 
+type DiscoveredBot = {
+  appId: string;
+  name: string;
+  openId: string | null;
+  source: string;
+  sourceType: "feishu-cli" | "lark-cli" | "env" | "agent-gateway";
+  online: boolean;
+  error?: string;
+  alreadyRegistered: boolean;
+  registeredBotId: string | null;
+  boundAgentId: string | null;
+  boundAgentName: string | null;
+  boundAgentSlug: string | null;
+};
+
 const EMPTY: AgentInput = {
   slug: "",
   name: "",
@@ -32,6 +47,7 @@ const EMPTY: AgentInput = {
 export default function AgentsSettingsPage() {
   const { agents, loading, error, refresh, create, update, remove } = useAgentStore();
   const [bots, setBots] = useState<LarkBot[]>([]);
+  const [discovered, setDiscovered] = useState<DiscoveredBot[]>([]);
   const [botToBind, setBotToBind] = useState<string>("");
   const [botBusy, setBotBusy] = useState<string | null>(null);
   const [createBotModalOpen, setCreateBotModalOpen] = useState(false);
@@ -45,9 +61,16 @@ export default function AgentsSettingsPage() {
 
   const refreshBots = useCallback(async () => {
     try {
-      const res = await fetch("/api/lark-bots");
-      const data = await res.json();
-      setBots(data.bots ?? []);
+      const [botRes, discRes] = await Promise.allSettled([
+        fetch("/api/lark-bots").then((r) => r.json()),
+        fetch("/api/lark-bots/discover").then((r) => r.json()),
+      ]);
+      if (botRes.status === "fulfilled" && botRes.value.bots) {
+        setBots(botRes.value.bots);
+      }
+      if (discRes.status === "fulfilled" && discRes.value.discovered) {
+        setDiscovered(discRes.value.discovered);
+      }
     } catch {
       setBots([]);
     }
@@ -489,7 +512,7 @@ export default function AgentsSettingsPage() {
                       size="sm"
                       onClick={() => setCreateBotModalOpen(true)}
                     >
-                      + 一键接入飞书机器人
+                      + 接入飞书机器人
                     </Button>
                     <Link
                       href={`/settings/bots?new=1&agentId=${encodeURIComponent(selected.id)}`}
@@ -500,6 +523,69 @@ export default function AgentsSettingsPage() {
                     </Link>
                   </div>
                 </div>
+
+                {/* 本机已发现应用一键接入（免输入 App ID / Secret） */}
+                {discovered.filter((d) => d.boundAgentId !== selected.id).length > 0 && (
+                  <div className="rounded-lg border border-accent-line bg-accent-muted/20 p-3 space-y-2">
+                    <div className="text-ui font-medium text-ink flex items-center gap-1.5">
+                      <span>✨ 检测到本机已配置的飞书应用（免复制凭证，一键直连绑定）：</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {discovered
+                        .filter((d) => d.boundAgentId !== selected.id)
+                        .map((disc) => (
+                          <div
+                            key={disc.appId}
+                            className="flex items-center justify-between gap-2 p-2.5 rounded-lg border border-line bg-surface shadow-sm"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium text-ui text-ink truncate">
+                                🤖 {disc.name}
+                              </div>
+                              <div className="text-nano font-mono text-ink-faint truncate">
+                                {disc.appId} · {disc.source}
+                              </div>
+                              {disc.alreadyRegistered && disc.boundAgentName && (
+                                <div className="text-nano text-ink-faint truncate">
+                                  当前绑定于: @{disc.boundAgentSlug}
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              className="shrink-0 text-xs"
+                              disabled={botBusy === `import-${disc.appId}`}
+                              onClick={async () => {
+                                setBotBusy(`import-${disc.appId}`);
+                                try {
+                                  const res = await fetch("/api/lark-bots/import-local", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      appId: disc.appId,
+                                      name: disc.name,
+                                      agentId: selected.id,
+                                    }),
+                                  });
+                                  if (!res.ok) throw new Error("接入失败");
+                                  await refreshBots();
+                                  setMsg(`🎉 已成功将飞书应用「${disc.name}」一键接入并绑定到 Agent「${selected.name}」！`);
+                                } catch (e) {
+                                  setMsg(e instanceof Error ? e.message : "接入失败");
+                                } finally {
+                                  setBotBusy(null);
+                                }
+                              }}
+                            >
+                              {botBusy === `import-${disc.appId}` ? "接入中…" : "⚡ 一键接入"}
+                            </Button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
 
                 {(() => {
                   const boundBots = bots.filter((b) => b.agentId === selected.id);
@@ -517,7 +603,7 @@ export default function AgentsSettingsPage() {
                               size="sm"
                               onClick={() => setCreateBotModalOpen(true)}
                             >
-                              + 一键接入新机器人并绑定
+                              + 手动录入并绑定
                             </Button>
                             {otherBots.length > 0 && (
                               <div className="flex items-center gap-1.5">
@@ -715,6 +801,7 @@ export default function AgentsSettingsPage() {
         <QuickCreateBotModal
           open={createBotModalOpen}
           agent={selected}
+          discovered={discovered.filter((d) => d.boundAgentId !== selected.id)}
           onClose={() => setCreateBotModalOpen(false)}
           onSuccess={async (botName) => {
             await refreshBots();
@@ -729,11 +816,13 @@ export default function AgentsSettingsPage() {
 function QuickCreateBotModal({
   open,
   agent,
+  discovered,
   onClose,
   onSuccess,
 }: {
   open: boolean;
   agent: Agent;
+  discovered: DiscoveredBot[];
   onClose: () => void;
   onSuccess: (botName: string) => Promise<void> | void;
 }) {
@@ -745,6 +834,31 @@ function QuickCreateBotModal({
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
+
+  const handleImportDisc = async (disc: DiscoveredBot) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/lark-bots/import-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appId: disc.appId,
+          name: disc.name,
+          agentId: agent.id,
+          workspacePath: workspacePath.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "导入失败");
+      await onSuccess(data.testedName || data.bot.name);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -792,7 +906,7 @@ function QuickCreateBotModal({
       <div className="bg-surface border border-line rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between border-b border-line pb-3">
           <div>
-            <h2 className="text-ui font-semibold">一键接入飞书机器人</h2>
+            <h2 className="text-ui font-semibold">接入飞书机器人</h2>
             <p className="text-label text-ink-faint mt-0.5">
               绑定执行人设：<span className="font-medium text-ink">{agent.name}</span> (@{agent.slug})
             </p>
@@ -812,7 +926,44 @@ function QuickCreateBotModal({
           </div>
         )}
 
+        {/* 发现的本地应用免复制区 */}
+        {discovered.length > 0 && (
+          <div className="rounded-lg border border-accent-line bg-accent-muted/20 p-3 space-y-2">
+            <div className="text-label font-medium text-ink">
+              ✨ 从本机已发现的应用一键接入（免填写凭证）：
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {discovered.map((disc) => (
+                <div
+                  key={disc.appId}
+                  className="flex items-center justify-between gap-2 p-2 rounded-md bg-surface border border-line"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-ui truncate text-ink">
+                      🤖 {disc.name}
+                    </div>
+                    <div className="text-nano font-mono text-ink-faint truncate">
+                      {disc.appId} · {disc.source}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    className="shrink-0 text-xs"
+                    disabled={busy}
+                    onClick={() => void handleImportDisc(disc)}
+                  >
+                    ⚡ 一键接入
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="text-label text-ink-muted font-medium pt-1">或手动输入凭证接入：</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="配置名称" hint="例如：研发助手">
               <input
@@ -859,7 +1010,7 @@ function QuickCreateBotModal({
               取消
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={busy || !name.trim() || !appId.trim() || !appSecret.trim()}>
-              {busy ? "正在接入与测试…" : "⚡ 一键测试并接入绑定"}
+              {busy ? "正在接入与测试…" : "手动测试并接入"}
             </Button>
           </div>
         </form>
