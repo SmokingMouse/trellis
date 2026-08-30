@@ -33,12 +33,13 @@
      - **本机凭证自动发现**：自动扫描 `~/.feishu-cli/*.yaml`、`~/.lark-cli/config.json`、`~/.agent-gateway.env`、`~/.trellis/shared/.env.local` 与 `process.env`，去重解析出可用 App ID 与 Secret；
      - **免复制一键直连 (`importLocalLarkBot`)**：后端直读本机凭证并调飞书 API 自动验活（获取应用真实名与 bot open_id），一键完成 `lark_bots` 登记与 Agent 绑定，**前端全程无需接触或输入 Secret**。
   2. `app/settings/bots/page.tsx`:
+     - **官方 Launcher 一键创建模板直达**：在指南与操作区增加 `⚡ 飞书一键创建 (Launcher) ↗`（`https://open.feishu.cn/page/launcher?from=backend_oneclick`）与 `Lark 国际版 ↗` 直达链接，用户可一键自动拉起预配好的机器人应用创建向导；
      - **顶层本机发现卡片区**：自动呈现「✨ 检测到本机已配置的飞书应用（免复制 App ID / Secret）」，列出在线状态、来源路径与绑定状态，提供 `⚡ 一键接入并连接`；
      - **向导式一键接入**：提供开放平台接入指南 + Agent 绑定模式切换（选择已有 vs 就地新建 Agent）；
      - **已绑定人设直达**：选定 Agent 后展示当前人设名与 `查看 / 编辑人设 ↗` 快捷深链；
      - **URL 查询参数支持**：支持 `?new=1&agentId=xxx`（从 Agent 页新建 bot 预选）和 `?id=xxx`（直达编辑）。
   3. `app/settings/agents/page.tsx`:
-     - **渠道绑定面板（飞书机器人）**：Agent 编辑器专属「💬 飞书机器人接入」卡片，实时展示该 Agent 绑定的飞书应用（App ID、连接/异常徽标、工作目录、最近连接时间），支持一键 `解绑` 与 `配置 ↗` 跳转；
+     - **渠道绑定面板（飞书机器人）**：Agent 编辑器专属「💬 飞书机器人接入」卡片，集成 Launcher 一键创建链接，实时展示该 Agent 绑定的飞书应用（App ID、连接/异常徽标、工作目录、最近连接时间），支持一键 `解绑` 与 `配置 ↗` 跳转；
      - **本机发现应用一键直连绑定**：面板直接列出本机已发现但未绑定此 Agent 的飞书应用，点击 **`⚡ 一键接入`** 即可**0 复制粘贴、0 手动输入**原子绑定到当前 Agent；
      - **左侧列表飞书标识**：Agent 列表中对已绑定飞书机器人的项渲染 `💬 机器人` 状态角标。
   4. `lib/server/agents.ts`:
