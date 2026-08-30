@@ -37,6 +37,9 @@ const EMPTY: Draft = {
   enabled: true,
 };
 
+const FEISHU_LAUNCHER_URL = "https://open.feishu.cn/page/launcher?from=backend_oneclick";
+const LARK_LAUNCHER_URL = "https://open.larkoffice.com/page/launcher?from=backend_oneclick";
+
 export default function LarkBotsSettingsPage() {
   const [bots, setBots] = useState<LarkBot[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
@@ -508,27 +511,39 @@ export default function LarkBotsSettingsPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* 指南卡片 */}
+            {/* 指南卡片与一键创建链接 */}
             <div className="rounded-xl border border-line bg-surface p-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
                 <div>
                   <div className="text-ui font-semibold flex items-center gap-2">
-                    <span>🚀 飞书自建应用接入指引</span>
+                    <span>🚀 飞书 / Lark 应用一键极速创建与接入</span>
                   </div>
                   <div className="text-label text-ink-muted mt-1 leading-relaxed space-y-1">
-                    <div>1. 在飞书开放平台创建「企业自建应用」，启用「机器人」能力；</div>
-                    <div>2. 在「事件与回调」配置<b>长连接</b>并订阅 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">im.message.receive_v1</code> 消息事件，申请权限后<b>发布版本</b>；</div>
-                    <div>3. 若本机已配置 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">feishu-cli</code>，直接在上方卡片点击一键接入即可。</div>
+                    <div>1. 点击右侧 <b>「⚡ 飞书一键创建应用 (Launcher)」</b> 直达预置模板快速生成自建应用；</div>
+                    <div>2. 模板已预配好机器人与长连接事件，创建后将自动生成的 <b>App ID</b> 和 <b>App Secret</b> 填入下方；</div>
+                    <div>3. 若本机已安装并登录 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">feishu-cli</code>，上方卡片会<b>自动探测识别</b>，直接点击一键接入即可。</div>
                   </div>
                 </div>
-                <a
-                  href="https://open.feishu.cn/app"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong shrink-0 transition-colors"
-                >
-                  打开开放平台 ↗
-                </a>
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                  <a
+                    href={FEISHU_LAUNCHER_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 text-label rounded-md bg-accent text-ink-inverse hover:bg-accent-strong transition-colors font-medium"
+                    title="在飞书开放平台通过官方 Launcher 模板一键创建机器人应用"
+                  >
+                    ⚡ 飞书一键创建 (Launcher) ↗
+                  </a>
+                  <a
+                    href={LARK_LAUNCHER_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
+                    title="在 Lark 国际版通过官方 Launcher 模板一键创建机器人应用"
+                  >
+                    Lark 国际版 ↗
+                  </a>
+                </div>
               </div>
             </div>
 

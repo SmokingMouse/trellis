@@ -44,6 +44,9 @@ const EMPTY: AgentInput = {
   requireApproval: null,
 };
 
+const FEISHU_LAUNCHER_URL = "https://open.feishu.cn/page/launcher?from=backend_oneclick";
+const LARK_LAUNCHER_URL = "https://open.larkoffice.com/page/launcher?from=backend_oneclick";
+
 export default function AgentsSettingsPage() {
   const { agents, loading, error, refresh, create, update, remove } = useAgentStore();
   const [bots, setBots] = useState<LarkBot[]>([]);
@@ -505,7 +508,7 @@ export default function AgentsSettingsPage() {
                       接入飞书自建应用。飞书用户发消息时将直接以该 Agent 的人设、模型与挂载技能作答。
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <Button
                       type="button"
                       variant="primary"
@@ -514,9 +517,18 @@ export default function AgentsSettingsPage() {
                     >
                       + 接入飞书机器人
                     </Button>
+                    <a
+                      href={FEISHU_LAUNCHER_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
+                      title="打开飞书开放平台 Launcher 模板快速创建机器人应用"
+                    >
+                      ⚡ 飞书一键创建 (Launcher) ↗
+                    </a>
                     <Link
                       href={`/settings/bots?new=1&agentId=${encodeURIComponent(selected.id)}`}
-                      className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
+                      className="px-2 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
                       title="打开完整机器人设置向导"
                     >
                       向导页 ↗
@@ -925,6 +937,29 @@ function QuickCreateBotModal({
             {error}
           </div>
         )}
+
+        {/* 快捷 Launcher 引导 */}
+        <div className="rounded-lg border border-line bg-surface-muted p-2.5 flex flex-wrap items-center justify-between gap-2 text-label">
+          <span className="text-ink-muted">尚未创建飞书应用？可通过官方 Launcher 模板一键秒级生成：</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <a
+              href={FEISHU_LAUNCHER_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="px-2 py-0.5 rounded bg-accent text-ink-inverse hover:bg-accent-strong text-nano font-medium transition-colors"
+            >
+              ⚡ 飞书一键创建 (Launcher) ↗
+            </a>
+            <a
+              href={LARK_LAUNCHER_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="px-2 py-0.5 rounded border border-line bg-surface text-ink hover:text-ink-strong text-nano transition-colors"
+            >
+              Lark 国际版 ↗
+            </a>
+          </div>
+        </div>
 
         {/* 发现的本地应用免复制区 */}
         {discovered.length > 0 && (
