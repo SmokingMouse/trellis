@@ -86,7 +86,9 @@ export function validateEndpointPayload(value: unknown): EndpointPayload {
 }
 
 function parse(contents: string) {
-  const doc = parseDocument(contents || "{}\n");
+  // 空内容给空文档而非 "{}"：flow map 根会让 doc.set 塞裸 JS 对象(非 YAMLMap)，
+  // 且新文件应输出块风格。
+  const doc = parseDocument(contents);
   if (doc.errors.length > 0) throw new Error(`invalid endpoints.yaml: ${doc.errors[0].message}`);
   return doc;
 }
@@ -107,7 +109,7 @@ export function injectEndpointConfig(
   const doc = parse(clean);
   let providers = doc.get("providers", true);
   if (providers === undefined) {
-    doc.set("providers", {});
+    doc.set("providers", doc.createNode({}));
     providers = doc.get("providers", true);
   }
   if (!isMap(providers)) throw new Error("endpoints.yaml providers must be a map");

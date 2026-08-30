@@ -548,6 +548,9 @@ if (command === "add") {
         name: "shared", openai_url: "https://api.example.test/v1", api_key_env: "SHARED_KEY",
         apiKey: "endpoint-secret", models: ["shared-model"],
       };
+      const fresh = injectEndpointConfig("", "marker-test", payload);
+      assert(fresh.contents.includes("shared:") && fresh.contents.includes("# fj-share:marker-test:begin"), "fresh-file injection failed (empty endpoints.yaml)");
+      assert(!removeEndpointConfig(fresh.contents, "marker-test").contents.includes("fj-share"), "fresh-file revoke left marker");
       const once = injectEndpointConfig(own, "marker-test", payload);
       const twice = injectEndpointConfig(once.contents, "marker-test", payload);
       const occurrences = twice.contents.split("# fj-share:marker-test:begin").length - 1;

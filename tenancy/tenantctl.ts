@@ -191,6 +191,18 @@ function readRecord(name: string): TenantRecord {
   return parsed;
 }
 
+// 网关的 host 路由记录（如 host-admin.json）与容器记录同住 tenants/，
+// 判定与 gateway/tenants.ts 一致：无 container 字段 = host,不归 tenantctl 管辖。
+function isGatewayHostRecord(name: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(recordPath(name), "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return false;
+    return typeof (parsed as Record<string, unknown>).container !== "string";
+  } catch {
+    return false; // 损坏文件留给 readRecord 抛可诊断错误
+  }
+}
+
 function readAllRecords(): TenantRecord[] {
   ensureStateDirs();
   const records: TenantRecord[] = [];
@@ -198,6 +210,7 @@ function readAllRecords(): TenantRecord[] {
     if (!filename.endsWith(".json")) continue;
     const name = filename.slice(0, -5);
     if (!NAME_RE.test(name)) continue;
+    if (isGatewayHostRecord(name)) continue;
     records.push(readRecord(name));
   }
   return records;
