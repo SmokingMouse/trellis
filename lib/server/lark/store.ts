@@ -99,8 +99,20 @@ export function getLarkBotRecord(id: string): LarkBotRecord | null {
   return row ? rowToBot(row) : null;
 }
 
+export function getLarkBotRecordByAppId(appId: string): LarkBotRecord | null {
+  const row = getDB().query(`SELECT ${BOT_COLUMNS} FROM lark_bots WHERE app_id = ?`).get(appId) as
+    | BotRow
+    | undefined;
+  return row ? rowToBot(row) : null;
+}
+
 export function getLarkBot(id: string): LarkBot | null {
   const record = getLarkBotRecord(id);
+  return record ? publicBot(record) : null;
+}
+
+export function getLarkBotByAppId(appId: string): LarkBot | null {
+  const record = getLarkBotRecordByAppId(appId);
   return record ? publicBot(record) : null;
 }
 

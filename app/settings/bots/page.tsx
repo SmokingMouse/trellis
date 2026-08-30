@@ -13,6 +13,21 @@ type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
   enabled: boolean;
 };
 
+type DiscoveredBot = {
+  appId: string;
+  name: string;
+  openId: string | null;
+  source: string;
+  sourceType: "feishu-cli" | "lark-cli" | "env" | "agent-gateway";
+  online: boolean;
+  error?: string;
+  alreadyRegistered: boolean;
+  registeredBotId: string | null;
+  boundAgentId: string | null;
+  boundAgentName: string | null;
+  boundAgentSlug: string | null;
+};
+
 const EMPTY: Draft = {
   name: "",
   appId: "",
@@ -25,10 +40,11 @@ const EMPTY: Draft = {
 export default function LarkBotsSettingsPage() {
   const [bots, setBots] = useState<LarkBot[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [discovered, setDiscovered] = useState<DiscoveredBot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"save" | "test" | "delete" | "one-click" | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "delete" | "one-click" | string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,10 +59,17 @@ export default function LarkBotsSettingsPage() {
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const response = await fetch("/api/lark-bots", { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "加载失败");
-      setBots(data.bots ?? []);
+      const [botRes, discRes] = await Promise.allSettled([
+        fetch("/api/lark-bots", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/lark-bots/discover", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+
+      if (botRes.status === "fulfilled" && botRes.value.bots) {
+        setBots(botRes.value.bots);
+      }
+      if (discRes.status === "fulfilled" && discRes.value.discovered) {
+        setDiscovered(discRes.value.discovered);
+      }
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -151,7 +174,45 @@ export default function LarkBotsSettingsPage() {
     return data;
   };
 
-  // 一键创建并测试绑定
+  // 一键导入本机已发现的凭证并接入绑定（免复制 App ID / Secret）
+  const handleImportDiscovered = async (disc: DiscoveredBot, customAgentId?: string | null) => {
+    setBusy(`import-${disc.appId}`);
+    setMessage(null);
+    setError(null);
+    try {
+      const data = await request("/api/lark-bots/import-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appId: disc.appId,
+          name: disc.name,
+          agentId: customAgentId !== undefined ? customAgentId : draft?.agentId ?? null,
+        }),
+      });
+
+      setSelectedId(data.bot.id);
+      setDraft({
+        name: data.bot.name,
+        appId: data.bot.appId,
+        appSecret: "",
+        agentId: data.bot.agentId,
+        workspacePath: data.bot.workspacePath ?? "",
+        enabled: data.bot.enabled,
+      });
+
+      const agentName = agents.find((a) => a.id === data.bot.agentId)?.name || "默认助手";
+      setMessage(
+        `🎉 成功从本机（${disc.source}）一键导入并连接飞书应用「${data.testedName || data.bot.name}」！已自动绑定到「${agentName}」。长连接将在 15 秒内就绪。`,
+      );
+      await refresh(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 手动表单的一键接入
   const handleOneClickSetup = async () => {
     if (!draft) return;
     if (!draft.name.trim() || !draft.appId.trim() || !draft.appSecret.trim()) {
@@ -223,7 +284,7 @@ export default function LarkBotsSettingsPage() {
         workspacePath: botRes.bot.workspacePath ?? "",
         enabled: botRes.bot.enabled,
       });
-      setMessage(`🎉 飞书机器人接入成功！${testMessage}。服务端长连接将在 15 秒内就绪，现在可以在飞书中向机器人发消息测试。`);
+      setMessage(`🎉 飞书机器人接入成功！${testMessage}。服务端长连接将在 15 秒内就绪。`);
       await refresh(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -304,7 +365,7 @@ export default function LarkBotsSettingsPage() {
       {/* 左侧：机器人列表与新建入口 */}
       <aside className="md:w-[280px] shrink-0 flex flex-col gap-2">
         <Button type="button" variant="primary" size="sm" onClick={() => create()}>
-          + 一键接入飞书机器人
+          + 接入飞书机器人
         </Button>
         <div className="text-label text-ink-faint px-1">
           保存后由服务端长连接接收消息，无需公网 webhook。
@@ -344,28 +405,120 @@ export default function LarkBotsSettingsPage() {
         })}
         {!loading && bots.length === 0 && (
           <div className="rounded-lg border border-dashed border-line px-3 py-5 text-ui text-ink-faint text-center">
-            尚未接入机器人。点击上方按钮一键创建并绑定。
+            尚未接入机器人。
           </div>
         )}
       </aside>
 
-      {/* 右侧：向导式创建 / 编辑面板 */}
-      <main className="flex-1 min-w-0">
+      {/* 右侧：发现区 + 向导式创建 / 编辑面板 */}
+      <main className="flex-1 min-w-0 space-y-4">
+        {/* 本机已发现应用推荐区（无需复制 App ID / Secret） */}
+        {discovered.length > 0 && (
+          <section className="rounded-xl border border-accent-line bg-accent-muted/20 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base" aria-hidden>✨</span>
+                <span className="font-semibold text-ui text-ink">
+                  检测到本机已配置的飞书应用（一键直连，无需复制 App ID / Secret）
+                </span>
+              </div>
+              <span className="text-label text-ink-faint">
+                来源：~/.feishu-cli / 环境变量
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {discovered.map((disc) => {
+                const isImporting = busy === `import-${disc.appId}`;
+                return (
+                  <div
+                    key={disc.appId}
+                    className="flex flex-col justify-between p-3 rounded-lg border border-line bg-surface gap-2.5 shadow-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-ui truncate text-ink">
+                          🤖 {disc.name}
+                        </span>
+                        {disc.online ? (
+                          <span className="px-1.5 py-0.2 rounded-full text-nano bg-accent-muted text-accent-ink border border-accent-line shrink-0">
+                            在线可用
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.2 rounded-full text-nano bg-danger-muted text-danger-ink shrink-0">
+                            离线
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-label font-mono text-ink-faint truncate mt-0.5">
+                        {disc.appId}
+                      </div>
+                      <div className="text-nano text-ink-faint truncate mt-0.5">
+                        来源: {disc.source}
+                        {disc.alreadyRegistered && disc.boundAgentName && (
+                          <span className="text-accent-ink ml-1 font-sans">
+                            · 绑定于 @{disc.boundAgentSlug}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-line">
+                      {disc.alreadyRegistered && disc.registeredBotId ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="w-full text-xs"
+                          onClick={() => {
+                            const found = bots.find((b) => b.id === disc.registeredBotId);
+                            if (found) edit(found);
+                          }}
+                        >
+                          已接入（点击查看/编辑） ↗
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="w-full text-xs"
+                          disabled={isImporting}
+                          onClick={() => void handleImportDiscovered(disc)}
+                        >
+                          {isImporting ? "正在接入…" : "⚡ 一键接入并连接"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {error && <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">{error}</div>}
+        {message && <div className="px-3 py-2 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted leading-relaxed">{message}</div>}
+
         {!draft ? (
-          <div className="py-8 text-ui text-ink-faint">左边选一个机器人编辑，或点击上方一键接入新应用。</div>
+          <div className="py-8 text-ui text-ink-faint text-center">
+            {discovered.length === 0
+              ? "左边选一个机器人编辑，或点击上方接入新应用。"
+              : "可在上方直接一键接入本机发现的应用，或在左侧编辑已接入的机器人。"}
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* 顶栏指南卡片 */}
+            {/* 指南卡片 */}
             <div className="rounded-xl border border-line bg-surface p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-ui font-semibold flex items-center gap-2">
-                    <span>🚀 飞书开放平台极速接入指南</span>
+                    <span>🚀 飞书自建应用接入指引</span>
                   </div>
                   <div className="text-label text-ink-muted mt-1 leading-relaxed space-y-1">
-                    <div>1. 在飞书开放平台创建「企业自建应用」，并在应用能力中启用「机器人」；</div>
-                    <div>2. 在「凭证与基础信息」中复制 <b>App ID</b> 与 <b>App Secret</b> 填入下方；</div>
-                    <div>3. 在「事件与回调」配置<b>长连接</b>并订阅 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">im.message.receive_v1</code>，申请权限后<b>发布版本</b>即可。</div>
+                    <div>1. 在飞书开放平台创建「企业自建应用」，启用「机器人」能力；</div>
+                    <div>2. 在「事件与回调」配置<b>长连接</b>并订阅 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">im.message.receive_v1</code> 消息事件，申请权限后<b>发布版本</b>；</div>
+                    <div>3. 若本机已配置 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">feishu-cli</code>，直接在上方卡片点击一键接入即可。</div>
                   </div>
                 </div>
                 <a
@@ -379,9 +532,6 @@ export default function LarkBotsSettingsPage() {
               </div>
             </div>
 
-            {error && <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">{error}</div>}
-            {message && <div className="px-3 py-2 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted leading-relaxed">{message}</div>}
-
             {/* 1. 基础与凭证信息 */}
             <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
               <div className="text-ui font-semibold">1. 应用与凭证信息</div>
@@ -389,14 +539,14 @@ export default function LarkBotsSettingsPage() {
                 <Field label="配置名称" hint="在 Trellis 中显示的易记名称">
                   <input className={INPUT} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：代码评审专家" />
                 </Field>
-                <Field label="飞书 App ID" hint="开放平台以 cli_ 开头的唯一标识">
+                <Field label="飞书 App ID" hint="开放平台 cli_ 开头的唯一标识">
                   <input className={`${INPUT} font-mono`} value={draft.appId} onChange={(e) => setDraft({ ...draft, appId: e.target.value })} placeholder="cli_xxxxxxxxxxxxxxxx" autoComplete="off" />
                 </Field>
               </div>
 
               <Field
                 label="飞书 App Secret"
-                hint={selected?.hasSecret ? "已保存安全凭证。留空表示不修改；服务端永不回显。" : "在“凭证与基础信息”中复制。只在服务端 DB 加密保存。"}
+                hint={selected?.hasSecret ? "已保存安全凭证。留空表示不修改；服务端永不回显。" : "在开放平台复制，或直接从上方本机发现中一键接入免填。"}
               >
                 <input className={`${INPUT} font-mono`} type="password" value={draft.appSecret} onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })} placeholder={selected ? "留空不改" : "请输入 app_secret"} autoComplete="new-password" />
               </Field>
@@ -592,7 +742,7 @@ export default function LarkBotsSettingsPage() {
                   onClick={() => void handleOneClickSetup()}
                   disabled={busy !== null || !draft.name.trim() || !draft.appId.trim() || !draft.appSecret.trim()}
                 >
-                  {busy === "one-click" ? "正在测试并创建接入…" : "⚡ 一键测试凭证并接入绑定"}
+                  {busy === "one-click" ? "正在测试并创建接入…" : "⚡ 测试凭证并接入绑定"}
                 </Button>
               ) : (
                 <>
