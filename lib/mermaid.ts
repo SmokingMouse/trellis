@@ -45,11 +45,12 @@ export function isMermaidCode(code: string, lang?: string): boolean {
   return false;
 }
 
-// --- LLM 产出兼容层 ---------------------------------------------------------
-// 大模型生成的 flowchart 常在节点 label 里裸写 [] {} () | 等符号（如
-// `A{在 [L_i ... L_{i+k}] 中?}`），mermaid 会把它们解析成图形定义符号导致
-// parse error。以下修复只在原文 parse 失败时启用：把含风险字符的 label 包进
-// 双引号（引号内除 `"` 外任意字符合法），对已合法的图零影响。
+// --- LLM 方言归一化层 -------------------------------------------------------
+// 大模型生成 flowchart 时有稳定的偏好：节点 label 裸写 [] {} () | 等符号（如
+// `A{在 [L_i ... L_{i+k}] 中?}`），而 mermaid 会把它们解析成图形定义符号。
+// 这里把这种方言当成一等输入做常开归一化——渲染前统一把含风险字符的 label
+// 包进双引号（引号内除 `"` 外任意字符合法）。规则保守：已加引号的、不含
+// 风险字符的、非 flowchart 的一律原样透传；万一归一化版解析不过则回退原文。
 
 // 节点形状定界符，长的在前保证最长匹配（`([` 必须先于 `(` 判断）
 const NODE_SHAPES: Array<[string, string]> = [
@@ -74,7 +75,7 @@ function quoteLabel(label: string): string {
 
 // 一段最多含一个节点定义（段以边操作符切开），用贪婪的 lastIndexOf 找闭合符，
 // 这样 label 内部的同类括号（`[L_i ... L_{i+k}]`）不会被误认为提前闭合。
-function repairSegment(seg: string): string {
+function normalizeSegment(seg: string): string {
   const m = seg.match(/^(\s*)([A-Za-z0-9_.:-]+)([\s\S]*?)(\s*)$/);
   if (!m) return seg;
   const [, lead, id, rest, tail] = m;
@@ -98,28 +99,28 @@ const SKIP_LINE =
 const EDGE_SPLIT =
   /(<?-{2,3}>?|<?={2,3}>?|-\.+->?|--\s?[xo](?=\s|$)|[xo]--|&|\|[^|]*\|)/;
 
-function repairFlowchartLine(line: string): string {
+function normalizeFlowchartLine(line: string): string {
   if (SKIP_LINE.test(line)) return line;
   // 先处理边 label：|text| 内含风险字符时加引号
   const withEdgeLabels = line.replace(/\|([^|"]+)\|/g, (whole, inner: string) =>
     RISKY_LABEL_CHARS.test(inner) ? `|${quoteLabel(inner)}|` : whole,
   );
-  return withEdgeLabels.split(EDGE_SPLIT).map(repairSegment).join("");
+  return withEdgeLabels.split(EDGE_SPLIT).map(normalizeSegment).join("");
 }
 
 /**
- * Best-effort repair for LLM-generated flowchart/graph source whose node or
- * edge labels contain unquoted special characters. Returns the input untouched
- * for non-flowchart diagrams.
+ * Normalizes LLM-dialect flowchart/graph source into standard Mermaid by
+ * quoting node/edge labels that contain unquoted special characters. Returns
+ * the input untouched for non-flowchart diagrams and already-standard source.
  */
-export function repairMermaidSource(code: string): string {
+export function normalizeMermaidSource(code: string): string {
   const firstMeaningful =
     code
       .split("\n")
       .find((l) => l.trim() && !l.trim().startsWith("%%"))
       ?.trim() ?? "";
   if (!/^(flowchart|graph)\s/i.test(firstMeaningful)) return code;
-  return code.split("\n").map(repairFlowchartLine).join("\n");
+  return code.split("\n").map(normalizeFlowchartLine).join("\n");
 }
 
 /**
@@ -161,28 +162,26 @@ export async function renderMermaidToSvg(
     const mermaid = await getMermaid(isDark);
     const id = `mermaid-svg-${Date.now().toString(36)}-${++renderCounter}`;
 
-    // Validate syntax first; on failure, try the auto-repaired source once
-    let source = trimmed;
-    try {
-      await mermaid.parse(source, { suppressErrors: false });
-    } catch (parseErr: unknown) {
-      const repaired = repairMermaidSource(trimmed);
-      let recovered = false;
-      if (repaired !== trimmed) {
-        try {
-          await mermaid.parse(repaired, { suppressErrors: false });
-          source = repaired;
-          recovered = true;
-        } catch {
-          // fall through to original error
-        }
+    // 常开归一化：LLM 方言先转标准 mermaid 再解析；归一化版不过则回退原文
+    const normalized = normalizeMermaidSource(trimmed);
+    const candidates =
+      normalized === trimmed ? [trimmed] : [normalized, trimmed];
+    let source: string | null = null;
+    let parseError: unknown = null;
+    for (const candidate of candidates) {
+      try {
+        await mermaid.parse(candidate, { suppressErrors: false });
+        source = candidate;
+        break;
+      } catch (err: unknown) {
+        parseError = err; // 候选按归一化→原文排序，最终留下原文的报错
       }
-      if (!recovered) {
-        return {
-          svg: null,
-          error: (parseErr as Error)?.message || "Mermaid 语法未完成或有误",
-        };
-      }
+    }
+    if (source === null) {
+      return {
+        svg: null,
+        error: (parseError as Error)?.message || "Mermaid 语法未完成或有误",
+      };
     }
 
     const { svg } = await mermaid.render(id, source);

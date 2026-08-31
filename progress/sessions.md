@@ -2,11 +2,12 @@
 
 最近 5 条，倒序（Session 132 / 131 / 130 / 129 / 128）。更早的见 `archive.md`。
 
-### Session 132（2026-08-31，Mermaid 渲染兼容层：LLM 生成的 flowchart label 含裸特殊字符时自动修复重试）
+### Session 132（2026-08-31，Mermaid LLM 方言归一化层：flowchart label 裸特殊字符常开归一化，PR #32 + 定位重构）
 - **触发**: 用户贴出画布上一张无法预览的 mermaid 图——LLM 生成的 flowchart 节点 label 里裸写 `[L_i ... L_{i+k}]`、`(有全景无前景)` 等符号，mermaid 把 `[` 解析成节点形状定界符（parse error `got 'SQS'`），只能落到黄色兜底卡。问「怎么做兼容」。
-- **修法**（`lib/mermaid.ts`，唯一渲染入口，三个调用组件 CodeBlock/HoverPreview/FilePreview 全覆盖）: 新增 `repairMermaidSource` 兼容层，**仅在原文 parse 失败时启用**（对已合法图零风险）——限 flowchart/graph；按行处理，跳过指令行；先给含风险字符的边 label `|...|` 加引号，再按边操作符切段，每段用「最长匹配形状定界符 + 贪婪 lastIndexOf 找闭合」提取节点 label，含 `[]{}()|"` 时包双引号（`"` 转 `#quot;`）；未闭合（流式中）不动。`renderMermaidToSvg` 里 parse 失败 → 修复 → 重 parse 通过才用修复版渲染，否则回落原错误。
-- **验证**: 临时 jsdom 环境跑真 mermaid parser——事故原图 parse fail → 修复版 parse PASS；回归组（各形状合法 flowchart / sequenceDiagram）零改动且仍可解析；`bunx tsc --noEmit` 0 错（顺手修掉 dotAll flag 与项目 TS target 不兼容）。
-- **Next**: 可选的第二道防线——给平台生成 mermaid 的 prompt 加「节点文字含特殊符号必须用引号包裹」约定，减少触发修复层的频率。（2026-08-31，修 slash command 后上下文失忆：turn 识别漏斗 + lineage 降级丢历史双 bug）
+- **定位演进**: 初版做成「parse 失败 → 自动修复 → 重试」（PR #32 已合），用户指出定位不对——**裸写特殊字符是模型稳定的生成偏好，不是偶发错误**，应当成「LLM 方言」做常开归一化而非错误驱动的补救。重构为：渲染前恒先 `normalizeMermaidSource`，归一化版 parse 不过再回退原文（安全网），两版都挂才报错（报原文的错）。
+- **归一化规则**（`lib/mermaid.ts`，唯一渲染入口，CodeBlock/HoverPreview/FilePreview 全覆盖）: 限 flowchart/graph；逐行处理跳过指令行；含风险字符的边 label `|...|` 加引号；按边操作符切段，每段「最长匹配形状定界符 + 贪婪 lastIndexOf 找闭合」提取节点 label（内部嵌套同类括号不误判提前闭合），含 `[]{}()|"` 时包双引号（`"` 转 `#quot;`）。保守透传：已引号 / 无风险字符 / 非 flowchart / 未闭合（流式半截）一律不动。
+- **验证**: 临时 jsdom 跑真 mermaid parser 四组——事故方言图归一化后 parse PASS；归一化幂等；标准源（各形状 flowchart/subgraph/sequenceDiagram/stateDiagram）零改动仍可解析；流式半截不被改坏。`bunx tsc --noEmit` 0 错。
+- **Next**: 定位重构这版待提 PR；可选第二道防线——平台生成 mermaid 的 prompt 加「label 含特殊符号必须引号包裹」约定，从源头降低方言浓度。（2026-08-31，修 slash command 后上下文失忆：turn 识别漏斗 + lineage 降级丢历史双 bug）
 - **触发**: 画布节点上执行 `/writecraft 写一篇飞书云文档` 后追问「开始吧」，模型只收到裸字符串、彻底失忆。两 bug 叠加：① slash command 轮在 jsonl 解析里整轮消失（包装行 `<command-message>` 被 `isCommandNoise` 滤、skill 正文被 `isMeta` 闸滤）→ `backfillNativeTurnUuid` 永远配不上 → `cli_turn_uuid` 恒 NULL；② 该点分叉触发安全降级（sid=null 起 fresh session），route 折好 DB 历史传 `req.history`，但 `claude.ts` 三元写死 `mode==="project"` 就走 `buildProjectPrompt` 只发当轮问题——历史被 provider 丢弃。
 - **修法**:
   1. `cli-jsonl.ts`: 新增 `commandTurnStartIds`（上下文判据——包装行文本分不出 `/clear` 和 `/writecraft`，看父链图：往下穿过 system/attachment 走到 isMeta 技能正文或 assistant = 真提问；走到普通 user（stdout/下一轮）断路；isMeta 证据须过噪声闸——真语料实测 `/clear` 隔 system 挂 isMeta `<local-command-caveat>` 行会穿透）+ `slashCommandParts/Question`（还原键入原文 `/name args`，使 backfill 的 `includes` 匹配成立）；`makeTurnOwnership` 暴露 `isStrictStart`，import 收集 starts 改用它（防两侧判据再分家）。
