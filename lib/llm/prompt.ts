@@ -29,5 +29,17 @@ export function buildPrompt(
   return parts.join("\n");
 }
 
+// 历史是否住在将被 resume/fork 的 CLI session 里。true → provider 只发当轮问题
+// （buildProjectPrompt）；false → 必须 buildPrompt 折叠 req.history。
+// 关键场景：lineage 降级（cli_turn_uuid 缺失 / 前缀截取失败）时 route 置
+// claudeSessionId=null 起 fresh session 并折好 DB 历史 —— 没有这道判定，
+// project/B-fork 会把历史整个丢掉、模型只收到裸问题（slash command 失忆事故）。
+export function historyLivesInCliSession(req: {
+  claudeSessionId?: string | null;
+  history: ChatMessage[];
+}): boolean {
+  return Boolean(req.claudeSessionId) || req.history.length === 0;
+}
+
 export const DEFAULT_SYSTEM_PROMPT =
   "你是一个简洁、有耐心的助教，回答用户的任何问题。用 markdown 格式（含代码块、列表、加粗等），代码块标注语言。直接给答案，不要客套。不调用任何工具。";

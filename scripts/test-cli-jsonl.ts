@@ -22,10 +22,12 @@ import {
   looseTurnStart,
   makeTurnOwnership,
   readJsonlLines,
+  slashCommandQuestion,
   terminalAssistantLine,
   userText,
 } from "@/lib/server/cli-jsonl";
 import { parseCliSessionJsonl } from "@/lib/server/cli-import";
+import { historyLivesInCliSession } from "@/lib/llm/prompt";
 
 let failures = 0;
 function check(label: string, ok: boolean, got?: unknown) {
@@ -299,6 +301,144 @@ function writeFixture(entries: CliRawEntry[]): string {
   const rawLines = readJsonlLines(p)!;
   const tail1 = terminalAssistantLine(rawLines, q1);
   check("Turn 1 截前缀 tail 正确指向 Compact 后的 aFinal", tail1?.entry.uuid === aFinal, tail1?.entry.uuid);
+}
+
+// ── 4b. slash command 轮：skill 命令是真 turn，本地命令仍是噪声 ─────────────
+// 事故（2026-08-31）：用户在节点上执行 /writecraft，包装行被 isCommandNoise 滤掉、
+// skill 正文被 isMeta 闸滤掉 → 整轮 turn 漏解析 → backfillNativeTurnUuid 永远
+// 配不上 cli_turn_uuid → 下一问降级 fresh session。判据只能看图不能看文本：
+// /clear 和 /writecraft 的包装行长得一模一样。
+{
+  section("slash command 轮次识别");
+
+  // skill 型（实测形态，2.1.207）：包装行 → isMeta 技能正文 → assistant。
+  const cmd = uid("q");
+  const skillMeta = uid("m");
+  const sa1 = uid("a");
+  const sa2 = uid("a");
+  const nextQ = uid("q");
+  const na = uid("a");
+  const skillEntries = [
+    user(
+      cmd,
+      null,
+      "<command-message>writecraft</command-message>\n<command-name>/writecraft</command-name>\n<command-args>写一篇飞书云文档</command-args>",
+    ),
+    user(skillMeta, cmd, "Base directory for this skill: /Users/x/.claude/skills/writecraft\n\n# writecraft…", {
+      isMeta: true,
+    }),
+    assistant(sa1, skillMeta, "好的，先对齐五轴坐标"),
+    assistant(sa2, sa1, "成稿如下：飞书云文档……"),
+    // 追问轮：验证 parent 链上挂得回 skill 命令 turn。
+    user(nextQ, sa2, "开始吧"),
+    assistant(na, nextQ, "开始。"),
+  ];
+  const p = writeFixture(skillEntries);
+  const { resolveOwner } = makeTurnOwnership(indexByUuid(skillEntries));
+  check("skill 命令的回复归命令 turn", resolveOwner(sa2) === cmd, resolveOwner(sa2));
+
+  const parsed = parseCliSessionJsonl(p);
+  const cmdTurn = parsed?.turns.find((t) => t.id === cmd);
+  check("import 解析出 skill 命令 turn（uuid 可回填）", Boolean(cmdTurn));
+  check(
+    "question 还原成键入原文（backfill includes 匹配成立）",
+    cmdTurn?.question === "/writecraft 写一篇飞书云文档",
+    cmdTurn?.question,
+  );
+  check(
+    "question.includes(节点原文) —— backfillNativeTurnUuid 的实际判据",
+    Boolean(cmdTurn?.question.includes("/writecraft 写一篇飞书云文档")),
+  );
+  check("回复文本落在命令 turn 上", Boolean(cmdTurn?.response.includes("成稿如下")));
+  const nextTurn = parsed?.turns.find((t) => t.id === nextQ);
+  check("追问轮 parentId 指向命令 turn（树不断链）", nextTurn?.parentId === cmd, nextTurn?.parentId);
+
+  const rawLines = readJsonlLines(p)!;
+  const tail = terminalAssistantLine(rawLines, cmd);
+  check("fork 能在命令 turn 上找到 tail（import↔fork 同判据）", tail?.entry.uuid === sa2, tail?.entry.uuid);
+
+  // 本地命令（/clear /model …）：包装行 → <local-command-stdout> / system，无
+  // assistant 产出 —— 仍是噪声，不许长出空壳节点。
+  const q1 = uid("q");
+  const a1 = uid("a");
+  const clearCmd = uid("q");
+  const sysNode = uid("s");
+  const q2 = uid("q");
+  const a2 = uid("a");
+  const modelCmd = uid("q");
+  const stdout = uid("u");
+  const localEntries: CliRawEntry[] = [
+    user(q1, null, "先聊两句"),
+    assistant(a1, q1, "好。"),
+    user(
+      clearCmd,
+      a1,
+      "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>",
+    ),
+    { type: "system", uuid: sysNode, parentUuid: clearCmd, message: { role: "system", content: [] } },
+    user(q2, sysNode, "清完了，新话题"),
+    assistant(a2, q2, "新话题收到。"),
+    user(
+      modelCmd,
+      a2,
+      "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>",
+    ),
+    user(stdout, modelCmd, "<local-command-stdout>Set model to Opus</local-command-stdout>"),
+  ];
+  const lp = writeFixture(localEntries);
+  const lparsed = parseCliSessionJsonl(lp);
+  check(
+    "本地命令不长成 turn（/clear /model 仍是噪声）",
+    Boolean(lparsed && lparsed.turns.every((t) => t.id !== clearCmd && t.id !== modelCmd)),
+    lparsed?.turns.map((t) => t.id),
+  );
+  check("本地命令穿插不影响真 turn 数", lparsed?.turns.length === 2, lparsed?.turns.length);
+
+  // 真语料形态（eb68c287）：/clear → system → system → isMeta 的
+  // <local-command-caveat> user。isMeta 证据必须过噪声闸，否则 /clear 复活成空 turn。
+  const cq = uid("q");
+  const ca = uid("a");
+  const clr = uid("q");
+  const sys1 = uid("s");
+  const sys2 = uid("s");
+  const caveat = uid("u");
+  const caveatEntries: CliRawEntry[] = [
+    user(cq, null, "随便聊聊"),
+    assistant(ca, cq, "好。"),
+    user(clr, ca, "<command-name>/clear</command-name>\n<command-message>clear</command-message>"),
+    { type: "system", uuid: sys1, parentUuid: clr, message: { role: "system", content: [] } },
+    { type: "system", uuid: sys2, parentUuid: sys1, message: { role: "system", content: [] } },
+    user(caveat, sys2, "<local-command-caveat>Caveat: The messages below were generated by…</local-command-caveat>", {
+      isMeta: true,
+    }),
+  ];
+  const cvp = writeFixture(caveatEntries);
+  const cvParsed = parseCliSessionJsonl(cvp);
+  check(
+    "/clear 隔 system 挂 isMeta caveat 仍是噪声（真语料回归）",
+    Boolean(cvParsed && cvParsed.turns.every((t) => t.id !== clr)),
+    cvParsed?.turns.map((t) => t.id),
+  );
+
+  // slashCommandQuestion 的还原语义。
+  check(
+    "无参命令还原为 /name",
+    slashCommandQuestion("<command-message>fenjue</command-message>\n<command-name>/fenjue</command-name>") ===
+      "/fenjue",
+  );
+  check("普通文本不还原", slashCommandQuestion("帮我看下这个报错") === null);
+}
+
+// ── 4c. lineage 降级时的 prompt 折叠判定（claude.ts / codex.ts 共用闸）──────
+{
+  section("historyLivesInCliSession（降级 fresh session 必须折叠历史）");
+  const h = [{ role: "user" as const, content: "q1" }, { role: "assistant" as const, content: "a1" }];
+  check("有 resume id → 历史住 CLI session", historyLivesInCliSession({ claudeSessionId: "sid", history: h }));
+  check("fresh 且无历史（root 首轮）→ 不折叠", historyLivesInCliSession({ claudeSessionId: null, history: [] }));
+  check(
+    "fresh 且有历史（lineage 降级）→ 必须折叠",
+    !historyLivesInCliSession({ claudeSessionId: null, history: h }),
+  );
 }
 
 // ── 5. import ↔ fork 边界一致（真语料全扫）─────────────────────────────────

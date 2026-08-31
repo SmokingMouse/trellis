@@ -2,7 +2,7 @@
 // login check / --ephemeral / item dedup / usage input-cached / --image / systemPrompt
 // inline 全在 SDK。prompt 构造 + mode 映射留在 trellis。详见 lib/llm/sdk-adapter.ts。
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
-import { buildPrompt } from "./prompt";
+import { buildPrompt, historyLivesInCliSession } from "./prompt";
 import { CodexBackend } from "@smokingmouse/agent";
 import type { RunOptions } from "@smokingmouse/agent";
 import { listSkills } from "@/lib/server/skills";
@@ -20,8 +20,9 @@ export function makeCodexProvider(
   const backend = new CodexBackend();
   return {
     async *stream(req: StreamRequest): AsyncGenerator<StreamEvent> {
+      // 与 claude.ts 同一道闸：lineage 降级起 fresh session 时回退折叠 DB 历史。
       const prompt =
-        mode === "project"
+        mode === "project" && historyLivesInCliSession(req)
           ? buildProjectPrompt(req.question, req.parentAnchor)
           : buildPrompt(req.history, req.question, req.parentAnchor);
       // Enhanced chat points the workspace at the scratch dir (via

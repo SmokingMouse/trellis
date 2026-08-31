@@ -13,9 +13,9 @@ import {
   type CliRawEntry,
   type CliUsage,
   indexByUuid,
-  isTurnStart,
   makeTurnOwnership,
   ms,
+  slashCommandQuestion,
   userText,
 } from "./cli-jsonl";
 
@@ -134,7 +134,8 @@ export function parseCliSessionJsonl(
   // 理由与两级归属（严格 → 宽松兜底）的取舍都记在 ./cli-jsonl；cli-fork 截前缀
   // 时走的是同一份 makeTurnOwnership，两边的 turn 边界因此恒等。
   const byUuid = indexByUuid(all);
-  const { resolveOwner, fallbackStartIds } = makeTurnOwnership(byUuid);
+  const { resolveOwner, fallbackStartIds, isStrictStart } =
+    makeTurnOwnership(byUuid);
 
   // 全局 tool_result 索引：tool_use_id → { 输出文本, is_error, stderr }。
   const resultById = new Map<
@@ -177,7 +178,7 @@ export function parseCliSessionJsonl(
   while (claimed !== fallbackStartIds.size) {
     claimed = fallbackStartIds.size;
     starts = entries.filter(
-      (e) => isTurnStart(e) || fallbackStartIds.has(e.uuid as string),
+      (e) => isStrictStart(e) || fallbackStartIds.has(e.uuid as string),
     );
     for (const s of starts) if (s.parentUuid) resolveOwner(s.parentUuid);
   }
@@ -253,11 +254,15 @@ export function parseCliSessionJsonl(
     const durationMs = endMs > startMs ? endMs - startMs : 0;
 
     const parentTurn = start.parentUuid ? resolveOwner(start.parentUuid) : null;
+    // slash command 轮的 question 还原成用户键入原文（"/writecraft 写一篇…"）——
+    // 原始文本是 <command-message> 等标签包装，既不适合展示，也让
+    // backfillNativeTurnUuid 的 includes 匹配永远落空。
+    const rawQuestion = userText(start) ?? "";
     turns.push({
       id,
       parentId: parentTurn,
       siblingIndex: 0, // 下面按 parent 分组回填
-      question: userText(start) ?? "",
+      question: slashCommandQuestion(rawQuestion) ?? rawQuestion,
       response: textParts.join("\n\n"),
       // 偏移换算：前 finalPartIdx 个 part + 它们之后那个 "\n\n" 分隔。
       finalStart:
