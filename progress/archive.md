@@ -4,6 +4,33 @@
 
 ## Session Log
 
+### Session 127（2026-08-28，飞书机器人 Agent-first 与本机凭证自动发现一键接入：免复制 App ID/Secret 直连绑定）
+- **触发**: 用户反馈「现在的飞书机器人不是很好用，他应该是绑定在 Agent 上的，不应该是只是绑定现成的，而是可以支持新建然后自然绑定，参考 happyclaw 的逻辑」→「飞书机器人应该是有个页面，可以一键创建/绑定的」→「我希望的一键接入是不需要复制 appid 和 secret 的，你可以参考下 happyclaw 的方式，纳入进来」。
+- **根因 & 机制剖析（本机凭证自动发现 + Agent-first 绑定）**:
+  1. 本机开发环境通常已存在 `~/.feishu-cli/`（`config.yaml` / `sm-config.yaml` 等）、`~/.lark-cli/` 或 `FEISHU_APP_ID/SECRET` 环境变量，强迫用户手动打开开放平台复制 App ID 和 App Secret 是巨大摩擦；
+  2. happyclaw 本地运行与技能链天然共享 `~/.feishu-cli/` 与环境变量，无需手动输入凭证；
+  3. 此前飞书机器人仅在 `/settings/bots` 孤立配置，Agent 设置页对机器人渠道无感知，且缺少直接绑定已有机器人的捷径。
+- **Done**:
+  1. `lib/server/lark/discover.ts` & 路由 `GET /api/lark-bots/discover` + `POST /api/lark-bots/import-local`:
+     - **本机凭证自动发现**：自动扫描 `~/.feishu-cli/*.yaml`、`~/.lark-cli/config.json`、`~/.agent-gateway.env`、`~/.trellis/shared/.env.local` 与 `process.env`，去重解析出可用 App ID 与 Secret；
+     - **免复制一键直连 (`importLocalLarkBot`)**：后端直读本机凭证并调飞书 API 自动验活（获取应用真实名与 bot open_id），一键完成 `lark_bots` 登记与 Agent 绑定，**前端全程无需接触或输入 Secret**。
+  2. `app/settings/bots/page.tsx`:
+     - **官方 Launcher 一键创建模板直达**：在指南与操作区增加 `⚡ 飞书一键创建 (Launcher) ↗`（`https://open.feishu.cn/page/launcher?from=backend_oneclick`）与 `Lark 国际版 ↗` 直达链接，用户可一键自动拉起预配好的机器人应用创建向导；
+     - **顶层本机发现卡片区**：自动呈现「✨ 检测到本机已配置的飞书应用（免复制 App ID / Secret）」，列出在线状态、来源路径与绑定状态，提供 `⚡ 一键接入并连接`；
+     - **向导式一键接入**：提供开放平台接入指南 + Agent 绑定模式切换（选择已有 vs 就地新建 Agent）；
+     - **已绑定人设直达**：选定 Agent 后展示当前人设名与 `查看 / 编辑人设 ↗` 快捷深链；
+     - **URL 查询参数支持**：支持 `?new=1&agentId=xxx`（从 Agent 页新建 bot 预选）和 `?id=xxx`（直达编辑）。
+  3. `app/settings/agents/page.tsx`:
+     - **渠道绑定面板（飞书机器人）**：Agent 编辑器专属「💬 飞书机器人接入」卡片，集成 Launcher 一键创建链接，实时展示该 Agent 绑定的飞书应用（App ID、连接/异常徽标、工作目录、最近连接时间），支持一键 `解绑` 与 `配置 ↗` 跳转；
+     - **本机发现应用一键直连绑定**：面板直接列出本机已发现但未绑定此 Agent 的飞书应用，点击 **`⚡ 一键接入`** 即可**0 复制粘贴、0 手动输入**原子绑定到当前 Agent；
+     - **左侧列表飞书标识**：Agent 列表中对已绑定飞书机器人的项渲染 `💬 机器人` 状态角标。
+  4. `lib/server/agents.ts`:
+     - `deleteAgent` 增加级联解绑：删除 Agent 时自动将 `lark_bots` 与 `tasks` 的 `agent_id` 置为 `NULL`，防止悬空引用。
+  5. `scripts/test-lark-bot.ts`:
+     - 增加 Agent 删除级联解绑飞书机器人与任务的断言验证，以及 `discoverLocalLarkCredentials` 扫描有效性断言（18 → 25 断言）。
+- **验证**: `bun --conditions react-server scripts/test-lark-bot.ts` 25 项断言全绿；`agent-browser` 交互走查（本机应用自动发现、免复制一键直连、Agent 侧一键直连绑定、双向解绑）全部实测通过；`bun --bun next build` 编译、路由生成与类型检查全部 0 错通过。
+- **Next**: 合并至 main 后随其他 S12x 成果一起 `make deploy` 部署上线。
+
 ### Session 126（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
 - **触发**: 用户「我想支持多租户模式，可以把我这个平台开放出去；对文件系统做隔离」→ plan mode 三路探索 + 用户拍板（小圈子邀请制 / 租户自带凭证可共享 / 每租户一容器 / Mac mini 本机）→「全部实现，用 fenjue 调度」。
 - **架构决策**（[ADR](decisions/2026-08-28-multi-tenancy-instance-isolation.md)）: **实例级隔离**——每租户一个 Docker 容器跑完整 trellis 实例，宿主薄网关做认证+路由+cookie 翻译，**trellis 本体零改动**。否掉单实例多租户改造（10 表+73 仓储函数+52 route+2 条全局 SSE 广播全要加 owner，漏一处即泄露，且防不住 CLI 的 Bash）；所有路径根都是 `os.homedir()`，容器 HOME 即天然隔离。
