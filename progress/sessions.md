@@ -14,7 +14,7 @@
   ① `tenantctl readAllRecords` 枚举 tenants/ 撞 host 记录格式校验直接炸——host-admin.json 一落地，自助注册 provision 必挂；修：无 container 字段 = 网关 host 路由记录，跳过（判定与 `gateway/tenants.ts` 对齐）。
   ② endpoint 注入对空/不存在的 endpoints.yaml 必炸 `providers must be a map`——parse 空串兜底 `"{}"` 产 flow map 根，yaml 库 `doc.set` 塞裸 JS 对象过不了 `isMap`；修：空文档解析 + `createNode` 包装；selftest test20 补空文件注入/撤销断言（此前替身 mock 不走真 yaml 路径，漏此分支）。
 - **验证**: 全链 curl/docker exec 逐步实测；selftest 全绿；lint 基线对比零新增（存量 21 不背账）。
-- **Next**: ① 多租户入口 = `http://127.0.0.1:3200`（gw 凭证在 host-admin.env；直连 3088 走 trellis /login 用 PASS）；② 公网接入仍待拍板（caddy + 域名 + secure cookie + 真浏览器过全链 WS/SSE）；③ 下次 `make deploy` 收敛 release 的 sha 记录（7928b89 已文件级同步，运行体一致）；④ S126 Next 的 memos/stirling 改绑 127.0.0.1 仍未动。
+- **Next**: ① 多租户入口 = `http://127.0.0.1:3200`（gw 凭证在 host-admin.env；直连 3088 走 trellis /login 用 PASS）；② 公网接入仍待拍板（caddy + 域名 + secure cookie + 真浏览器过全链 WS/SSE）；③ ~~make deploy 收敛~~（✅ 次日已部 89013fb=release 20260831T033318，deploy verify 感知认证闸 on，网关 kickstart 后全链 200）；④ S126 Next 的 memos/stirling 改绑 127.0.0.1 仍未动。
 
 ### Session 129（2026-08-28~29，trellis-admin 平台原生化：caller context 注入 + 内置技能默认挂载 + trellisctl 自我感知；PR #28 已合）
 - **触发**: 用户「让 trellis-admin 成为平台内置技能，像 herdr 一样感知整个平台（树/树链/tab），能动态增加树、节点」。盘点后真缺口不在分发（`builtinSkillsRoot` 多根解析早已在）：**平台内会话的自我感知**（spawn 的 CLI 不知道自己是谁，全仓 grep TRELLIS_ 零命中）与**默认可用**（技能只能靠自定义 agent 显式绑）。
