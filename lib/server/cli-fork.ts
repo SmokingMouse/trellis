@@ -280,7 +280,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // done 后回填该 native isolated 节点的 turn uuid（run-bus 钩子，best-effort）。
 // jsonl 落盘略滞后于 done 事件（与 reconcileAttachedTurn 同时序）→ 轮询 ≤8×300ms。
 // 防错配闸：在逆序（最新优先）轮次中寻找 question 包含节点 question 的 turn
-// （project prompt = 原文或 anchor 包裹原文，contains 恒成立；skill 命令轮会被解析器滤成噪音则匹配不上）——
+// （project prompt = 原文或 anchor 包裹原文，contains 恒成立；slash command 轮的
+// question 已由解析器还原成键入原文 "/name args"，同样恒成立）——
 // 匹配不上就放弃：错误的 uuid 会让分叉切错位置；缺失只是降级 fresh+DB 历史折叠，严格更安全。
 export async function backfillNativeTurnUuid(nodeId: string): Promise<void> {
   const db = getDB();

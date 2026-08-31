@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S4 契约C接线完成（S130），多租户网关+宿主+真容器端到端上线，入口 3200；余公网接入待拍板；cpa codex 故障在查（failures.md）。
+S131 修掉 slash command 后画布失忆双 bug（turn 识别+降级折叠），待画布活体验证；多租户本机已上线（入口 3200），公网接入待拍板；cpa codex 故障在查（failures.md）。
 
 ## Goals
 

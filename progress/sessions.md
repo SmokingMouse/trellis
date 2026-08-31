@@ -1,6 +1,15 @@
 # Session Log
 
-最近 5 条，倒序（Session 130 / 129 / 128 / 127 / 126）。更早的见 `archive.md`。
+最近 5 条，倒序（Session 131 / 130 / 129 / 128 / 127）。更早的见 `archive.md`。
+
+### Session 131（2026-08-31，修 slash command 后上下文失忆：turn 识别漏斗 + lineage 降级丢历史双 bug）
+- **触发**: 画布节点上执行 `/writecraft 写一篇飞书云文档` 后追问「开始吧」，模型只收到裸字符串、彻底失忆。两 bug 叠加：① slash command 轮在 jsonl 解析里整轮消失（包装行 `<command-message>` 被 `isCommandNoise` 滤、skill 正文被 `isMeta` 闸滤）→ `backfillNativeTurnUuid` 永远配不上 → `cli_turn_uuid` 恒 NULL；② 该点分叉触发安全降级（sid=null 起 fresh session），route 折好 DB 历史传 `req.history`，但 `claude.ts` 三元写死 `mode==="project"` 就走 `buildProjectPrompt` 只发当轮问题——历史被 provider 丢弃。
+- **修法**:
+  1. `cli-jsonl.ts`: 新增 `commandTurnStartIds`（上下文判据——包装行文本分不出 `/clear` 和 `/writecraft`，看父链图：往下穿过 system/attachment 走到 isMeta 技能正文或 assistant = 真提问；走到普通 user（stdout/下一轮）断路；isMeta 证据须过噪声闸——真语料实测 `/clear` 隔 system 挂 isMeta `<local-command-caveat>` 行会穿透）+ `slashCommandParts/Question`（还原键入原文 `/name args`，使 backfill 的 `includes` 匹配成立）；`makeTurnOwnership` 暴露 `isStrictStart`，import 收集 starts 改用它（防两侧判据再分家）。
+  2. `cli-import.ts`: starts 过滤用 `isStrictStart`；command 轮 question 用 `slashCommandQuestion` 归一化。
+  3. `prompt.ts` 新增 `historyLivesInCliSession`（有 resume id 或无历史 = 历史住 CLI session）；`claude.ts`（project + chat B-fork）与 `codex.ts`（project）共用：fresh + 有历史 → 回退 `buildPrompt` 折叠。
+- **验证**: `scripts/test-cli-jsonl.ts` 新增 4b/4c 两节 17 断言（skill 命令成 turn/本地命令仍噪声/caveat 回归/question 归一化/fork tail 一致/折叠判定）全绿；真语料全扫 449 jsonl / 1192 turn import↔fork 一致仍零漂移；实弹重放 `/fenjue`、`/skill-creator 我想创建…` 会话——turn 解析出、question 精确还原、tail OK，`/clear` 幽灵 turn 消失；`bun --bun run build` 编译+tsc 全过（globals.css 两条 `::highlight` 警告为存量）。
+- **Next**: 活体验证——画布上重放事故场景（节点执行 skill 命令 → 追问），确认 `cli_turn_uuid` 回填、追问走线性 resume 不再降级。
 
 ### Session 130（2026-08-30，S4 契约C接线联调：宿主入网关 + 真容器端到端全绿，多租户体系正式上线）
 - **触发**: 用户看 `/settings/shares` 报「未启用多租户网关服务 (HTTP 404)」问为啥 → 诊断：S128 只交付了代码，网关未部署、宿主未入网关（正是 S128 Next 挂着的"契约C待拍板"）→ 用户拍板「开始吧」。另发现 prod 已在当日 13:55 部到 47e13aa（"S121-S129 待 make deploy"过时）。
@@ -63,14 +72,3 @@
 - **验证**: `bun --conditions react-server scripts/test-lark-bot.ts` 25 项断言全绿；`agent-browser` 交互走查（本机应用自动发现、免复制一键直连、Agent 侧一键直连绑定、双向解绑）全部实测通过；`bun --bun next build` 编译、路由生成与类型检查全部 0 错通过。
 - **Next**: 合并至 main 后随其他 S12x 成果一起 `make deploy` 部署上线。
 
-### Session 126（2026-08-28，S4 多租户第一期落地：实例级隔离 + 租户网关，焚决四坐席并行交付）
-- **触发**: 用户「我想支持多租户模式，可以把我这个平台开放出去；对文件系统做隔离」→ plan mode 三路探索 + 用户拍板（小圈子邀请制 / 租户自带凭证可共享 / 每租户一容器 / Mac mini 本机）→「全部实现，用 fenjue 调度」。
-- **架构决策**（[ADR](decisions/2026-08-28-multi-tenancy-instance-isolation.md)）: **实例级隔离**——每租户一个 Docker 容器跑完整 trellis 实例，宿主薄网关做认证+路由+cookie 翻译，**trellis 本体零改动**。否掉单实例多租户改造（10 表+73 仓储函数+52 route+2 条全局 SSE 广播全要加 owner，漏一处即泄露，且防不住 CLI 的 Bash）；所有路径根都是 `os.homedir()`，容器 HOME 即天然隔离。
-- **Done**（焚决四单全部 settle pass + accepted，全新代码集中 `tenancy/`）:
-  1. `fj-mt-spike-54c5`（gemini scout）: 网络前提实测——宿主 clash TUN **透明覆盖** Docker VM 出站（容器直连 anthropic/npm/claude.ai 全通，运行期零代理）；备用 `host.docker.internal:7897` 可达；bookworm 无 ttyd 包→GitHub aarch64 1.7.7；claude/codex 容器内秒装、OAuth URL 正常生成。
-  2. `fj-mt-image-681e`（codex）: `tenancy/image/Dockerfile`（node:22-bookworm-slim 多阶段，build 期 HOME=/opt 满足 turbopack root，应用 /opt/trellis，node 用户原位重命名 tenant）+ `entrypoint.sh`（幂等骨架）+ `tenantctl.ts`（build/add/start/stop/restart/rm/status/upgrade/port；docker run 承重面: --init/per-tenant network/127.0.0.1 端口/named volume/--stop-timeout 35/资源限额）。D1-D7 settle 独立复跑全绿（build→起容 auth:on→身份→**Mock provider 全链路 CHAT_OK**→重启持久→upgrade 保数据→purge 零残留）。
-  3. `fj-mt-gateway-0042`（codex）: `tenancy/gateway/`（gateway/db/auth/tenants/proxy-util/pages/selftest）+ launchd 模板（NumberOfFiles 4096）。argon2id+sha256 session、邀请认领、限速、cookie 翻译（删 gw cookie/剥走私 trellis_auth/注入租户 token）、继承 server.ts 五坑（Host 改写/剥三头/idleTimeout 0/signal+duplex/redirect manual）、Bun 原生 WS 逐帧。selftest 12 项 settle 全绿。
-  4. `fj-mt-m3-3073`（gemini）: tenantctl 增补 `creds-share --claude-token|--revoke`（setup-token 经 CLAUDE_CODE_OAUTH_TOKEN env 注入+重建，绝不拷 credentials.json）与 `backup`（volume tar 归档）。D1-D4 settle 全绿。
-  5. Supervisor 收尾: **真容器 × 网关联调通过**（邀请认领 200→cookie 翻译→真实例 /api/sessions 200→mock 对话 SSE created/done 全链路）；selftest 补 120s watchdog；`tenancy/README.md`（架构/威胁模型/运维手册）。
-- **验证**: 四单 settle 全部独立复跑（不采信坐席自述）——spike D1/D2、image 九条 verify（完整容器生命周期重放）、gateway selftest 12 项+独立启动+plist、M3 四条；merge 后 main 上 selftest 全绿；真容器×网关端到端 curl 联调全绿。
-- **Next**: ① 公网接入待房主拍板（caddy 站点块+域名，见 tenancy/README.md）；② 宿主 memos/stirling 建议改绑 127.0.0.1（容器可经 host.docker.internal 触达）；③ 第一位真实朋友上车时做真人端到端（真 claude login+Web 终端）；④ S121+S122 一起 `make deploy`（tenancy/ 不影响单人版运行时，零风险合部）。

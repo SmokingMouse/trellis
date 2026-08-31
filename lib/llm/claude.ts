@@ -3,7 +3,7 @@
 // 解析 / 真流式 delta / vision / tool 配对 / endpoints.yaml 模型解析全在 SDK。
 // 详见 lib/llm/sdk-adapter.ts。
 import type { LLMProvider, Mode, StreamEvent, StreamRequest } from "./types";
-import { buildPrompt } from "./prompt";
+import { buildPrompt, historyLivesInCliSession } from "./prompt";
 import { ClaudeBackend } from "@smokingmouse/agent";
 import { platformPackDir } from "@/lib/server/platform-pack";
 import {
@@ -29,8 +29,15 @@ export function makeClaudeProvider(
       // (req.forkSession) — both send only the current question, history lives
       // in the resumed/forked session as cache-hit message blocks. Folded-string
       // buildPrompt is the fallback: chat with B-fork off (window mode回退).
+      //
+      // 例外：lineage 降级。cli_turn_uuid 缺失 / 前缀截取失败时，route 把
+      // claudeSessionId 置 null（fresh session，无 --resume）并折叠好 DB 历史传进
+      // req.history —— 此时「上下文住在 CLI session 里」的前提不成立，仍走
+      // buildProjectPrompt 等于把历史整个丢掉、模型只收到裸问题（slash command
+      // 失忆事故，2026-08-31）。fresh + 有历史 → 必须回退 buildPrompt 折叠。
       const prompt =
-        mode === "project" || (mode === "chat" && req.forkSession)
+        (mode === "project" || (mode === "chat" && req.forkSession)) &&
+        historyLivesInCliSession(req)
           ? buildProjectPrompt(req.question, req.parentAnchor)
           : buildPrompt(req.history, req.question, req.parentAnchor);
       // chat (enhanced AND pure B-fork) spawns in CHAT_SCRATCH, so ensure it.

@@ -100,6 +100,10 @@ export function isToolResultEntry(e: CliRawEntry): boolean {
 }
 
 // CLI 注入的命令/系统行不是真用户提问 —— 过滤掉。
+// 注意：slash command 的包装行（<command-message>/<command-name>）也在这里被挡，
+// 但它**可能**是真提问（用户键入 /skill 那一下）—— 单看这一行分不出 /clear 和
+// /writecraft，得看它在父链图里长出了什么。那步上下文判定在 commandTurnStartIds，
+// 由 makeTurnOwnership 叠加在本判据之上。
 export function isCommandNoise(text: string): boolean {
   const t = text.trimStart();
   return (
@@ -110,6 +114,36 @@ export function isCommandNoise(text: string): boolean {
     t.startsWith("<bash-stdout>") ||
     t.startsWith("Caveat:")
   );
+}
+
+// ── slash command 包装行 ────────────────────────────────────────────────────
+// 用户键入 `/writecraft 写一篇…` 时 CLI 记录的 user entry 长这样（skill 型实测
+// 2.1.207；本地命令 /clear、/model 是 <command-name> 前置的变体，字段相同）：
+//   <command-message>writecraft</command-message>
+//   <command-name>/writecraft</command-name>
+//   <command-args>写一篇…</command-args>
+
+export function slashCommandParts(
+  text: string,
+): { name: string; args: string } | null {
+  const t = text.trimStart();
+  if (!t.startsWith("<command-message>") && !t.startsWith("<command-name>")) {
+    return null;
+  }
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(t)?.[1]?.trim();
+  if (!name) return null;
+  const args =
+    /<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1]?.trim() ?? "";
+  return { name, args };
+}
+
+// 包装行还原成用户实际键入的样子（"/writecraft 写一篇…"）。非包装行返回 null。
+// backfillNativeTurnUuid 靠 question.includes(节点原文) 匹配 turn —— 不还原的话
+// 原文（斜杠命令 + 空格 + 参数）在带标签的原始文本里不是连续子串，永远配不上。
+export function slashCommandQuestion(text: string): string | null {
+  const parts = slashCommandParts(text);
+  if (!parts) return null;
+  return parts.args ? `${parts.name} ${parts.args}` : parts.name;
 }
 
 // 一个 turn 由「真·用户提问」开启。判定的难点全在于：CLI 会往对话流里塞一堆
@@ -223,11 +257,73 @@ export function makeOwnerResolver(
   };
 }
 
+// slash command 包装行何时是 turn-start：文本自身分不出（/clear 和 /writecraft
+// 长得一模一样），要看它在图里长出了什么——
+//   skill/自定义命令：包装行 → isMeta user（技能正文）→ assistant   —— 真提问
+//   本地命令：包装行 → <local-command-stdout> user 或 type:"system"  —— 噪声
+// 漏认 skill 型的后果是整轮 turn 消失：import 无节点、backfillNativeTurnUuid
+// 永远配不上 cli_turn_uuid、该点分叉被迫降级 fresh session（slash command
+// 失忆事故，2026-08-31）。误认本地命令的后果是树里多空壳节点。所以判据取
+// 「往下能走到 isMeta 展开正文或 assistant 回复」：走到普通 user（stdout /
+// 下一轮真提问）即断路——那条支线不是本命令的展开。
+export function commandTurnStartIds(
+  byUuid: Map<string, CliRawEntry>,
+): Set<string> {
+  const childrenOf = new Map<string, CliRawEntry[]>();
+  for (const e of byUuid.values()) {
+    if (typeof e.parentUuid !== "string") continue;
+    (
+      childrenOf.get(e.parentUuid) ??
+      childrenOf.set(e.parentUuid, []).get(e.parentUuid)!
+    ).push(e);
+  }
+
+  const out = new Set<string>();
+  for (const e of byUuid.values()) {
+    if (e.type !== "user" || typeof e.uuid !== "string") continue;
+    if (e.isSidechain === true || isToolResultEntry(e)) continue;
+    const text = userText(e);
+    if (!text || !slashCommandParts(text)) continue;
+
+    // 展开正文可能隔着 attachment / system 行 —— 穿过非对话节点往下找证据。
+    const queue = [...(childrenOf.get(e.uuid) ?? [])];
+    const seen = new Set<string>();
+    while (queue.length) {
+      const c = queue.shift()!;
+      if (typeof c.uuid === "string") {
+        if (seen.has(c.uuid)) continue;
+        seen.add(c.uuid);
+      }
+      if (c.type === "assistant" && c.isSidechain !== true) {
+        out.add(e.uuid);
+        break;
+      }
+      if (c.type === "user") {
+        // isMeta 展开正文 = 真提问证据；其余 user（stdout / 下一轮提问）断路。
+        // 噪声闸不可省：/clear 之后 CLI 会隔着 system 节点挂一条 isMeta 的
+        // <local-command-caveat> user 行（真语料 eb68c287 实测），不挡会把
+        // 本地命令误认成 turn。
+        const ct = userText(c);
+        if (c.isMeta === true && ct?.trim() && !isCommandNoise(ct)) {
+          out.add(e.uuid);
+          break;
+        }
+        continue;
+      }
+      if (typeof c.uuid === "string") queue.push(...(childrenOf.get(c.uuid) ?? []));
+    }
+  }
+  return out;
+}
+
 export type TurnOwnership = {
   // 严格优先、宽松兜底的归属解析。
   resolveOwner: (uuid: string) => string | null;
   // 被宽松判据认领出来的兜底起点（import 侧要把它们一并组装成节点）。
   fallbackStartIds: Set<string>;
+  // 本次归属实际使用的严格判据（isTurnStart + slash command 上下文闸）。
+  // import 收集 turn-start 必须用它而不是裸 isTurnStart，否则两边又分家。
+  isStrictStart: (e: CliRawEntry) => boolean;
 };
 
 // 兜底承载：`claude --continue` / fork 出来的 jsonl，开头可能压根没有真用户
@@ -241,7 +337,11 @@ export type TurnOwnership = {
 export function makeTurnOwnership(
   byUuid: Map<string, CliRawEntry>,
 ): TurnOwnership {
-  const strictOwner = makeOwnerResolver(byUuid, isTurnStart);
+  const commandStarts = commandTurnStartIds(byUuid);
+  const isStrictStart = (e: CliRawEntry): boolean =>
+    isTurnStart(e) ||
+    (typeof e.uuid === "string" && commandStarts.has(e.uuid));
+  const strictOwner = makeOwnerResolver(byUuid, isStrictStart);
   const looseOwner = makeOwnerResolver(byUuid, looseTurnStart);
   const fallbackStartIds = new Set<string>();
   function resolveOwner(uuid: string): string | null {
@@ -251,7 +351,7 @@ export function makeTurnOwnership(
     if (loose) fallbackStartIds.add(loose);
     return loose;
   }
-  return { resolveOwner, fallbackStartIds };
+  return { resolveOwner, fallbackStartIds, isStrictStart };
 }
 
 // ── 带行号的整文件读取（截前缀用）──────────────────────────────────────────
