@@ -19,7 +19,7 @@ S131 修掉 slash command 后画布失忆双 bug（turn 识别+降级折叠）�
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S129–125） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions.md` 最近 5 条 log（S132–128） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

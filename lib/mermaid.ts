@@ -45,6 +45,83 @@ export function isMermaidCode(code: string, lang?: string): boolean {
   return false;
 }
 
+// --- LLM 产出兼容层 ---------------------------------------------------------
+// 大模型生成的 flowchart 常在节点 label 里裸写 [] {} () | 等符号（如
+// `A{在 [L_i ... L_{i+k}] 中?}`），mermaid 会把它们解析成图形定义符号导致
+// parse error。以下修复只在原文 parse 失败时启用：把含风险字符的 label 包进
+// 双引号（引号内除 `"` 外任意字符合法），对已合法的图零影响。
+
+// 节点形状定界符，长的在前保证最长匹配（`([` 必须先于 `(` 判断）
+const NODE_SHAPES: Array<[string, string]> = [
+  ["((", "))"],
+  ["([", "])"],
+  ["[[", "]]"],
+  ["[(", ")]"],
+  ["{{", "}}"],
+  ["[/", "/]"],
+  ["[\\", "\\]"],
+  ["[", "]"],
+  ["(", ")"],
+  ["{", "}"],
+  [">", "]"],
+];
+
+const RISKY_LABEL_CHARS = /[[\]{}()|"]/;
+
+function quoteLabel(label: string): string {
+  return `"${label.replace(/"/g, "#quot;")}"`;
+}
+
+// 一段最多含一个节点定义（段以边操作符切开），用贪婪的 lastIndexOf 找闭合符，
+// 这样 label 内部的同类括号（`[L_i ... L_{i+k}]`）不会被误认为提前闭合。
+function repairSegment(seg: string): string {
+  const m = seg.match(/^(\s*)([A-Za-z0-9_.:-]+)([\s\S]*?)(\s*)$/);
+  if (!m) return seg;
+  const [, lead, id, rest, tail] = m;
+  for (const [open, close] of NODE_SHAPES) {
+    if (!rest.startsWith(open)) continue;
+    const end = rest.lastIndexOf(close);
+    if (end < open.length) return seg; // 未闭合（可能仍在流式输出中），不动
+    const label = rest.slice(open.length, end);
+    const after = rest.slice(end + close.length);
+    const trimmed = label.trim();
+    if (/^"[\s\S]*"$/.test(trimmed)) return seg; // 已加引号
+    if (!RISKY_LABEL_CHARS.test(label)) return seg;
+    return `${lead}${id}${open}${quoteLabel(label)}${close}${after}${tail}`;
+  }
+  return seg;
+}
+
+const SKIP_LINE =
+  /^\s*(flowchart\b|graph\b|subgraph\b|end\b|classDef\b|class\b|style\b|linkStyle\b|click\b|direction\b|%%)/;
+// 边操作符：--> --- ==> === -.-> --x --o 及并联 &；捕获组让分隔符保留在结果里
+const EDGE_SPLIT =
+  /(<?-{2,3}>?|<?={2,3}>?|-\.+->?|--\s?[xo](?=\s|$)|[xo]--|&|\|[^|]*\|)/;
+
+function repairFlowchartLine(line: string): string {
+  if (SKIP_LINE.test(line)) return line;
+  // 先处理边 label：|text| 内含风险字符时加引号
+  const withEdgeLabels = line.replace(/\|([^|"]+)\|/g, (whole, inner: string) =>
+    RISKY_LABEL_CHARS.test(inner) ? `|${quoteLabel(inner)}|` : whole,
+  );
+  return withEdgeLabels.split(EDGE_SPLIT).map(repairSegment).join("");
+}
+
+/**
+ * Best-effort repair for LLM-generated flowchart/graph source whose node or
+ * edge labels contain unquoted special characters. Returns the input untouched
+ * for non-flowchart diagrams.
+ */
+export function repairMermaidSource(code: string): string {
+  const firstMeaningful =
+    code
+      .split("\n")
+      .find((l) => l.trim() && !l.trim().startsWith("%%"))
+      ?.trim() ?? "";
+  if (!/^(flowchart|graph)\s/i.test(firstMeaningful)) return code;
+  return code.split("\n").map(repairFlowchartLine).join("\n");
+}
+
 /**
  * Lazily loads and initializes the Mermaid library in client-side environment.
  */
@@ -84,17 +161,31 @@ export async function renderMermaidToSvg(
     const mermaid = await getMermaid(isDark);
     const id = `mermaid-svg-${Date.now().toString(36)}-${++renderCounter}`;
 
-    // Validate syntax first
+    // Validate syntax first; on failure, try the auto-repaired source once
+    let source = trimmed;
     try {
-      await mermaid.parse(trimmed, { suppressErrors: false });
+      await mermaid.parse(source, { suppressErrors: false });
     } catch (parseErr: unknown) {
-      return {
-        svg: null,
-        error: (parseErr as Error)?.message || "Mermaid 语法未完成或有误",
-      };
+      const repaired = repairMermaidSource(trimmed);
+      let recovered = false;
+      if (repaired !== trimmed) {
+        try {
+          await mermaid.parse(repaired, { suppressErrors: false });
+          source = repaired;
+          recovered = true;
+        } catch {
+          // fall through to original error
+        }
+      }
+      if (!recovered) {
+        return {
+          svg: null,
+          error: (parseErr as Error)?.message || "Mermaid 语法未完成或有误",
+        };
+      }
     }
 
-    const { svg } = await mermaid.render(id, trimmed);
+    const { svg } = await mermaid.render(id, source);
     return { svg, error: null };
   } catch (err: unknown) {
     return {
