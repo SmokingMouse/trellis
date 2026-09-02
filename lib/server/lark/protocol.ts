@@ -22,6 +22,12 @@ export type LarkMessageEvent = {
     message_type?: string;
     content?: string;
     mentions?: LarkMention[];
+    /** 消息在话题内时飞书会带；话题即树的关键字段（S134）。 */
+    thread_id?: string;
+    /** 回复链根消息 id。 */
+    root_id?: string;
+    /** 被引用（回复）的那条消息 id。 */
+    parent_id?: string;
   };
 };
 
@@ -35,6 +41,11 @@ export type ParsedIncoming =
       text: string | null;
       unsupportedType: string | null;
       senderOpenId: string | null;
+      /** 是否 @ 到机器人。群聊触发门控挪到了 im/policy.ts，这里只报事实。 */
+      mentionedBot: boolean;
+      threadId: string | null;
+      rootId: string | null;
+      parentId: string | null;
     };
 
 /** 飞书 text 消息本质是 JSON 字符串；markdown 原样保留，客户端至少能完整阅读。 */
@@ -70,7 +81,11 @@ function stripBotMention(
   return next.replace(/\s+/g, " ").trim();
 }
 
-/** 先挡自身消息，再做群 @ 门控；bot open_id 缺失时群聊严格 fail-closed。 */
+/**
+ * 先挡自身消息；bot open_id 缺失时群聊严格 fail-closed（既剥不掉 mention 也判不了
+ * 触发）。「群里要不要理这条消息」不在这里决定 —— 那是 im/policy.ts 的事，这里只把
+ * 事实（@ 了没有、在哪个话题、引用了谁）如实归一化。
+ */
 export function parseIncomingEvent(
   event: LarkMessageEvent,
   botOpenId: string | null,
@@ -88,22 +103,27 @@ export function parseIncomingEvent(
   }
 
   const chatType: LarkChatType = message.chat_type === "group" ? "group" : "p2p";
-  if (chatType === "group") {
-    if (!botOpenId) return { kind: "ignore", messageId, reason: "bot_open_id_missing" };
-    if (!isBotMentioned(botOpenId, message.mentions)) {
-      return { kind: "ignore", messageId, reason: "not_mentioned" };
-    }
+  if (chatType === "group" && !botOpenId) {
+    return { kind: "ignore", messageId, reason: "bot_open_id_missing" };
   }
+  const mentionedBot = chatType === "group" && isBotMentioned(botOpenId, message.mentions);
+  const base = {
+    messageId,
+    chatId: message.chat_id,
+    chatType,
+    senderOpenId,
+    mentionedBot,
+    threadId: message.thread_id || null,
+    rootId: message.root_id || null,
+    parentId: message.parent_id || null,
+  };
 
   if (message.message_type !== "text") {
     return {
       kind: "message",
-      messageId,
-      chatId: message.chat_id,
-      chatType,
+      ...base,
       text: null,
       unsupportedType: message.message_type ?? "unknown",
-      senderOpenId,
     };
   }
 
@@ -118,15 +138,7 @@ export function parseIncomingEvent(
     text = stripBotMention(text, botOpenId, message.mentions);
   }
   if (!text.trim()) return { kind: "ignore", messageId, reason: "empty_text" };
-  return {
-    kind: "message",
-    messageId,
-    chatId: message.chat_id,
-    chatType,
-    text,
-    unsupportedType: null,
-    senderOpenId,
-  };
+  return { kind: "message", ...base, text, unsupportedType: null };
 }
 
 export type DesiredConnection = { id: string; fingerprint: string };
@@ -149,9 +161,11 @@ export function diffLarkConnections(
   return { connect, disconnect };
 }
 
+type LarkDb = Pick<Database, "prepare">;
+
 /** 只有唯一约束冲突代表飞书重投；磁盘/锁/schema 错误必须原样抛出。 */
 export function claimLarkInboxIn(
-  db: Pick<Database, "prepare">,
+  db: LarkDb,
   messageId: string,
   botId: string,
 ): boolean {
@@ -169,3 +183,97 @@ export function claimLarkInboxIn(
     throw error;
   }
 }
+
+// ── S134：话题 → 树、机器人出站消息 → 节点。纯 DB 助手，store.ts 包一层 getDB()。 ──
+
+export function recordLarkOutboxIn(
+  db: LarkDb,
+  row: {
+    messageId: string;
+    botId: string;
+    chatId: string;
+    nodeId: string;
+    threadId: string | null;
+    now: number;
+  },
+): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO lark_outbox (message_id, bot_id, chat_id, node_id, thread_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(row.messageId, row.botId, row.chatId, row.nodeId, row.threadId, row.now);
+}
+
+/** 机器人发过的回复优先，其次用户发过且已落节点的消息；两边都不认识返回 null。 */
+export function nodeOfLarkMessageIn(db: LarkDb, botId: string, messageId: string): string | null {
+  const out = db
+    .prepare("SELECT node_id FROM lark_outbox WHERE message_id = ? AND bot_id = ?")
+    .get(messageId, botId) as { node_id: string | null } | undefined;
+  if (out?.node_id) return out.node_id;
+  const inbox = db
+    .prepare("SELECT node_id FROM lark_inbox WHERE message_id = ? AND bot_id = ?")
+    .get(messageId, botId) as { node_id: string | null } | undefined;
+  return inbox?.node_id ?? null;
+}
+
+export function upsertLarkThreadIn(
+  db: LarkDb,
+  row: {
+    botId: string;
+    chatId: string;
+    threadId: string;
+    sessionId: string;
+    rootNodeId: string;
+    lastNodeId: string;
+    now: number;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO lark_threads
+       (id, bot_id, chat_id, thread_id, session_id, root_node_id, last_node_id, created_at, last_message_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(bot_id, thread_id) DO UPDATE SET
+       last_node_id = excluded.last_node_id,
+       last_message_at = excluded.last_message_at`,
+  ).run(
+    crypto.randomUUID(),
+    row.botId,
+    row.chatId,
+    row.threadId,
+    row.sessionId,
+    row.rootNodeId,
+    row.lastNodeId,
+    row.now,
+    row.now,
+  );
+}
+
+export function larkThreadTailIn(db: LarkDb, botId: string, threadId: string): string | null {
+  const row = db
+    .prepare("SELECT last_node_id FROM lark_threads WHERE bot_id = ? AND thread_id = ?")
+    .get(botId, threadId) as { last_node_id: string | null } | undefined;
+  return row?.last_node_id ?? null;
+}
+
+/** 测试与迁移共用的建表语句，避免两处 schema 各写各的。 */
+export const LARK_THREAD_TABLES_SQL = `
+  CREATE TABLE IF NOT EXISTS lark_threads (
+    id TEXT PRIMARY KEY,
+    bot_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    root_node_id TEXT NOT NULL,
+    last_node_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_message_at INTEGER NOT NULL,
+    UNIQUE(bot_id, thread_id)
+  );
+  CREATE TABLE IF NOT EXISTS lark_outbox (
+    message_id TEXT PRIMARY KEY,
+    bot_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    thread_id TEXT,
+    created_at INTEGER NOT NULL
+  );
+`;

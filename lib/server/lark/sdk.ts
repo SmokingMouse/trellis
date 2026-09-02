@@ -46,22 +46,37 @@ export async function addLarkAck(client: LarkSdkClient, messageId: string): Prom
   assertApiSuccess("添加飞书确认表情失败", response);
 }
 
-/** 优先锚定入站消息；reply 不可用时才降级到 chat_id 顶层消息。 */
+/** quote = 引用回复；thread = 话题回复（reply_in_thread）；plain = 平铺发到 chat。 */
+export type LarkSendMode = "quote" | "thread" | "plain";
+
+/** 发出去的那条消息的身份 —— outbox 靠 messageId 把「引用机器人回答」映射回节点，话题靠 threadId 映射到树。 */
+export type LarkSentMessage = { messageId: string | null; threadId: string | null };
+
+type SentData = { message_id?: string; thread_id?: string } | undefined;
+
+function sentFrom(response: unknown): LarkSentMessage {
+  const data = (response as { data?: SentData } | null)?.data;
+  return { messageId: data?.message_id ?? null, threadId: data?.thread_id ?? null };
+}
+
+/** 优先锚定入站消息（quote / thread）；reply 不可用时才降级到 chat_id 顶层消息。 */
 export async function sendLarkText(args: {
   client: LarkSdkClient;
   chatId: string;
   replyToMessageId?: string | null;
   markdown: string;
-}): Promise<void> {
+  mode?: LarkSendMode;
+}): Promise<LarkSentMessage> {
   const content = markdownToLarkText(args.markdown);
-  if (args.replyToMessageId) {
+  const mode = args.mode ?? "quote";
+  if (mode !== "plain" && args.replyToMessageId) {
     try {
       const response = await args.client.im.v1.message.reply({
         path: { message_id: args.replyToMessageId },
-        data: { msg_type: "text", content },
+        data: { msg_type: "text", content, reply_in_thread: mode === "thread" },
       });
       assertApiSuccess("回复飞书消息失败", response);
-      return;
+      return sentFrom(response);
     } catch (error) {
       console.warn("[lark] reply 失败，降级为 chat_id create", error);
     }
@@ -71,6 +86,7 @@ export async function sendLarkText(args: {
     data: { receive_id: args.chatId, msg_type: "text", content },
   });
   assertApiSuccess("发送飞书消息失败", response);
+  return sentFrom(response);
 }
 
 export async function resolveLarkChatTitle(

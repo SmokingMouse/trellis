@@ -22,7 +22,8 @@ export async function POST(req: Request) {
     return Response.json({ bot: createLarkBot(obj as unknown as LarkBotInput) }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const userError = message.includes("不能为空") || message.includes("UNIQUE");
+    const userError =
+      message.includes("不能为空") || message.includes("UNIQUE") || message.includes("取值无效");
     return Response.json(
       { error: message.includes("UNIQUE") ? "app_id 已登记" : message },
       { status: userError ? 400 : 500 },

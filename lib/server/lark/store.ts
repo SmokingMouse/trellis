@@ -1,7 +1,25 @@
 import "server-only";
-import type { LarkBot, LarkBotInput, LarkChat, LarkChatType, LarkInboxStatus } from "@/lib/lark-types";
+import {
+  LARK_ACK_MODES,
+  LARK_GROUP_TRIGGERS,
+  LARK_POLICY_DEFAULTS,
+  LARK_REPLY_MODES,
+  LARK_SESSION_POLICIES,
+  type LarkBot,
+  type LarkBotInput,
+  type LarkBotPolicy,
+  type LarkChat,
+  type LarkChatType,
+  type LarkInboxStatus,
+} from "@/lib/lark-types";
 import { getDB } from "@/lib/server/sqlite";
-import { claimLarkInboxIn } from "./protocol";
+import {
+  claimLarkInboxIn,
+  larkThreadTailIn,
+  nodeOfLarkMessageIn,
+  recordLarkOutboxIn,
+  upsertLarkThreadIn,
+} from "./protocol";
 
 export type LarkBotRecord = Omit<LarkBot, "hasSecret" | "chats"> & {
   appSecret: string;
@@ -21,6 +39,11 @@ type BotRow = {
   last_error: string | null;
   created_at: number;
   updated_at: number;
+  group_trigger: string | null;
+  trigger_prefix: string | null;
+  reply_mode: string | null;
+  session_policy: string | null;
+  ack_mode: string | null;
 };
 
 type ChatRow = {
@@ -36,7 +59,32 @@ type ChatRow = {
 };
 
 const BOT_COLUMNS = `id, name, app_id, app_secret, agent_id, workspace_path, enabled,
-  bot_open_id, bot_name, last_connected_at, last_error, created_at, updated_at`;
+  bot_open_id, bot_name, last_connected_at, last_error, created_at, updated_at,
+  group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode`;
+
+/** 读侧宽容：库里出现未知值（手改 / 老版本回滚）退回默认，而不是让整个机器人列表炸掉。 */
+function asEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback;
+}
+
+/** 写侧严格：API 传来不认识的档位直接拒，错误文案含「取值无效」让 route 判成 400。 */
+function requireEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
+  if (typeof value === "string" && (allowed as readonly string[]).includes(value)) return value as T;
+  throw new Error(`${field} 取值无效：${String(value)}（可选 ${allowed.join(" / ")}）`);
+}
+
+function rowToPolicy(row: BotRow): LarkBotPolicy {
+  const d = LARK_POLICY_DEFAULTS;
+  return {
+    groupTrigger: asEnum(row.group_trigger, LARK_GROUP_TRIGGERS, d.groupTrigger),
+    triggerPrefix: row.trigger_prefix?.trim() || null,
+    sessionPolicy: asEnum(row.session_policy, LARK_SESSION_POLICIES, d.sessionPolicy),
+    replyMode: asEnum(row.reply_mode, LARK_REPLY_MODES, d.replyMode),
+    ackMode: asEnum(row.ack_mode, LARK_ACK_MODES, d.ackMode),
+  };
+}
 
 function rowToBot(row: BotRow): LarkBotRecord {
   return {
@@ -53,6 +101,7 @@ function rowToBot(row: BotRow): LarkBotRecord {
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...rowToPolicy(row),
   };
 }
 
@@ -122,10 +171,27 @@ export function createLarkBot(input: LarkBotInput): LarkBot {
   const appSecret = requiredText(input.appSecret ?? "", "app_secret");
   const id = crypto.randomUUID();
   const now = Date.now();
+  const d = LARK_POLICY_DEFAULTS;
+  const policy: LarkBotPolicy = {
+    groupTrigger: input.groupTrigger === undefined
+      ? d.groupTrigger
+      : requireEnum(input.groupTrigger, LARK_GROUP_TRIGGERS, "groupTrigger"),
+    triggerPrefix: input.triggerPrefix?.trim() || null,
+    sessionPolicy: input.sessionPolicy === undefined
+      ? d.sessionPolicy
+      : requireEnum(input.sessionPolicy, LARK_SESSION_POLICIES, "sessionPolicy"),
+    replyMode: input.replyMode === undefined
+      ? d.replyMode
+      : requireEnum(input.replyMode, LARK_REPLY_MODES, "replyMode"),
+    ackMode: input.ackMode === undefined
+      ? d.ackMode
+      : requireEnum(input.ackMode, LARK_ACK_MODES, "ackMode"),
+  };
   getDB().prepare(
     `INSERT INTO lark_bots
-      (id, name, app_id, app_secret, agent_id, workspace_path, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, app_id, app_secret, agent_id, workspace_path, enabled, created_at, updated_at,
+       group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     name,
@@ -136,6 +202,11 @@ export function createLarkBot(input: LarkBotInput): LarkBot {
     input.enabled === false ? 0 : 1,
     now,
     now,
+    policy.groupTrigger,
+    policy.triggerPrefix,
+    policy.replyMode,
+    policy.sessionPolicy,
+    policy.ackMode,
   );
   return getLarkBot(id)!;
 }
@@ -155,6 +226,20 @@ export function updateLarkBot(id: string, patch: Partial<LarkBotInput>): LarkBot
   if (patch.agentId !== undefined) put("agent_id", patch.agentId?.trim() || null);
   if (patch.workspacePath !== undefined) put("workspace_path", patch.workspacePath?.trim() || null);
   if (patch.enabled !== undefined) put("enabled", patch.enabled ? 1 : 0);
+  // S134 四旋钮：undefined = 不改；给了就必须是合法档位。
+  if (patch.groupTrigger !== undefined) {
+    put("group_trigger", requireEnum(patch.groupTrigger, LARK_GROUP_TRIGGERS, "groupTrigger"));
+  }
+  if (patch.triggerPrefix !== undefined) put("trigger_prefix", patch.triggerPrefix?.trim() || null);
+  if (patch.sessionPolicy !== undefined) {
+    put("session_policy", requireEnum(patch.sessionPolicy, LARK_SESSION_POLICIES, "sessionPolicy"));
+  }
+  if (patch.replyMode !== undefined) {
+    put("reply_mode", requireEnum(patch.replyMode, LARK_REPLY_MODES, "replyMode"));
+  }
+  if (patch.ackMode !== undefined) {
+    put("ack_mode", requireEnum(patch.ackMode, LARK_ACK_MODES, "ackMode"));
+  }
   if (sets.length === 0) return getLarkBot(id);
   put("updated_at", Date.now());
   values.push(id);
@@ -266,4 +351,37 @@ export function updateLarkInbox(
 ): void {
   getDB().prepare("UPDATE lark_inbox SET status = ?, node_id = COALESCE(?, node_id) WHERE message_id = ?")
     .run(status, nodeId ?? null, messageId);
+}
+
+// ── S134：话题 → 树、机器人出站消息 → 节点（im/policy 的三个查表回调用这些） ──
+
+export function recordLarkOutbox(row: {
+  messageId: string;
+  botId: string;
+  chatId: string;
+  nodeId: string;
+  threadId: string | null;
+  now: number;
+}): void {
+  recordLarkOutboxIn(getDB(), row);
+}
+
+export function nodeOfLarkMessage(botId: string, messageId: string): string | null {
+  return nodeOfLarkMessageIn(getDB(), botId, messageId);
+}
+
+export function upsertLarkThread(row: {
+  botId: string;
+  chatId: string;
+  threadId: string;
+  sessionId: string;
+  rootNodeId: string;
+  lastNodeId: string;
+  now: number;
+}): void {
+  upsertLarkThreadIn(getDB(), row);
+}
+
+export function larkThreadTail(botId: string, threadId: string): string | null {
+  return larkThreadTailIn(getDB(), botId, threadId);
 }

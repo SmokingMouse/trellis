@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import type { LarkBot, LarkBotInput } from "@/lib/lark-types";
+import { LARK_POLICY_DEFAULTS, type LarkAckMode, type LarkGroupTrigger, type LarkReplyMode, type LarkSessionPolicy, type LarkBot, type LarkBotInput } from "@/lib/lark-types";
 
 type AgentOption = { id: string; name: string; slug: string };
 type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
@@ -11,6 +11,12 @@ type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
   agentId: string | null;
   workspacePath: string;
   enabled: boolean;
+  // S134 群聊行为四旋钮（spec: progress/im-entry-layer.md）
+  groupTrigger: LarkGroupTrigger;
+  triggerPrefix: string;
+  sessionPolicy: LarkSessionPolicy;
+  replyMode: LarkReplyMode;
+  ackMode: LarkAckMode;
 };
 
 type DiscoveredBot = {
@@ -35,6 +41,11 @@ const EMPTY: Draft = {
   agentId: null,
   workspacePath: "",
   enabled: true,
+  groupTrigger: LARK_POLICY_DEFAULTS.groupTrigger,
+  triggerPrefix: "",
+  sessionPolicy: LARK_POLICY_DEFAULTS.sessionPolicy,
+  replyMode: LARK_POLICY_DEFAULTS.replyMode,
+  ackMode: LARK_POLICY_DEFAULTS.ackMode,
 };
 
 const FEISHU_LAUNCHER_URL = "https://open.feishu.cn/page/launcher?from=backend_oneclick";
@@ -133,6 +144,11 @@ export default function LarkBotsSettingsPage() {
           agentId: bot.agentId,
           workspacePath: bot.workspacePath ?? "",
           enabled: bot.enabled,
+          groupTrigger: bot.groupTrigger ?? LARK_POLICY_DEFAULTS.groupTrigger,
+          triggerPrefix: bot.triggerPrefix ?? "",
+          sessionPolicy: bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
+          replyMode: bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
+          ackMode: bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
         });
       }
     }
@@ -149,6 +165,11 @@ export default function LarkBotsSettingsPage() {
       agentId: bot.agentId,
       workspacePath: bot.workspacePath ?? "",
       enabled: bot.enabled,
+      groupTrigger: bot.groupTrigger ?? LARK_POLICY_DEFAULTS.groupTrigger,
+      triggerPrefix: bot.triggerPrefix ?? "",
+      sessionPolicy: bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
+      replyMode: bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
+      ackMode: bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
     });
     setMessage(null);
     setError(null);
@@ -201,6 +222,11 @@ export default function LarkBotsSettingsPage() {
         agentId: data.bot.agentId,
         workspacePath: data.bot.workspacePath ?? "",
         enabled: data.bot.enabled,
+        groupTrigger: data.bot.groupTrigger ?? LARK_POLICY_DEFAULTS.groupTrigger,
+        triggerPrefix: data.bot.triggerPrefix ?? "",
+        sessionPolicy: data.bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
+        replyMode: data.bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
+        ackMode: data.bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
       });
 
       const agentName = agents.find((a) => a.id === data.bot.agentId)?.name || "默认助手";
@@ -286,6 +312,11 @@ export default function LarkBotsSettingsPage() {
         agentId: botRes.bot.agentId,
         workspacePath: botRes.bot.workspacePath ?? "",
         enabled: botRes.bot.enabled,
+        groupTrigger: botRes.bot.groupTrigger ?? LARK_POLICY_DEFAULTS.groupTrigger,
+        triggerPrefix: botRes.bot.triggerPrefix ?? "",
+        sessionPolicy: botRes.bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
+        replyMode: botRes.bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
+        ackMode: botRes.bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
       });
       setMessage(`🎉 飞书机器人接入成功！${testMessage}。服务端长连接将在 15 秒内就绪。`);
       await refresh(true);
@@ -309,6 +340,11 @@ export default function LarkBotsSettingsPage() {
         agentId: draft.agentId,
         workspacePath: draft.workspacePath || null,
         enabled: draft.enabled,
+        groupTrigger: draft.groupTrigger,
+        triggerPrefix: draft.triggerPrefix.trim() || null,
+        sessionPolicy: draft.sessionPolicy,
+        replyMode: draft.replyMode,
+        ackMode: draft.ackMode,
       };
       const data = await request(
         selectedId ? `/api/lark-bots/${selectedId}` : "/api/lark-bots",
@@ -708,6 +744,47 @@ export default function LarkBotsSettingsPage() {
                   <span className="block text-label text-ink-faint">保存或修改凭证后无需重启 Trellis；后台每 15 秒自动对账并保持长连接。</span>
                 </span>
               </label>
+            </section>
+
+            {/* 4. 群聊行为（S134 IM 入口层四旋钮，spec: progress/im-entry-layer.md） */}
+            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+              <div className="text-ui font-semibold">4. 群聊行为</div>
+              <div className="text-label text-ink-faint">私聊固定：全部消息、引用回复、线性上下文。下面四项只影响群。</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="触发" hint="群里什么消息算对机器人说的。它开的话题里的追问、引用它回答的消息，不论哪档都算。">
+                  <select className={INPUT} value={draft.groupTrigger} onChange={(e) => setDraft({ ...draft, groupTrigger: e.target.value as LarkGroupTrigger })}>
+                    <option value="mention">仅 @ 它时</option>
+                    <option value="prefix">消息以前缀开头</option>
+                    <option value="all">群里所有消息（慎用，每条都跑一次）</option>
+                  </select>
+                  {draft.groupTrigger === "prefix" && (
+                    <input className={`${INPUT} mt-2 font-mono`} value={draft.triggerPrefix} onChange={(e) => setDraft({ ...draft, triggerPrefix: e.target.value })} placeholder="/ask" />
+                  )}
+                </Field>
+                <Field label="上下文" hint="按话题：每个话题一棵树，互不串味；整群一条链：旧行为，谁 @ 都接在同一条链尾。">
+                  <select className={INPUT} value={draft.sessionPolicy} onChange={(e) => setDraft({ ...draft, sessionPolicy: e.target.value as LarkSessionPolicy })}>
+                    <option value="thread">按话题（每个话题一棵树）</option>
+                    <option value="chat">整群一条链</option>
+                  </select>
+                </Field>
+                <Field label="回复形式" hint="话题回复把对话收进话题；引用回复平铺在群里带引用；平铺发送不引用原消息。">
+                  <select className={INPUT} value={draft.replyMode} onChange={(e) => setDraft({ ...draft, replyMode: e.target.value as LarkReplyMode })}>
+                    <option value="thread">话题回复</option>
+                    <option value="quote">引用回复</option>
+                    <option value="plain">平铺发送</option>
+                  </select>
+                </Field>
+                <Field label="收到确认" hint="收到消息先回一个 OnIt 表情再开始跑。">
+                  <select className={INPUT} value={draft.ackMode} onChange={(e) => setDraft({ ...draft, ackMode: e.target.value as LarkAckMode })}>
+                    <option value="reaction">表情确认</option>
+                    <option value="none">不确认</option>
+                  </select>
+                </Field>
+              </div>
+              {draft.sessionPolicy === "thread" && draft.replyMode !== "thread" && (
+                <div className="text-label text-ink-muted">上下文按话题、回复却不进话题：飞书不会给后续消息 thread_id，追问只能靠引用回复归树。建议回复形式也选「话题回复」。</div>
+              )}
+              <div className="text-label text-ink-faint">消息里写 <code>@agent-slug</code> 可让另一个 Agent 单轮作答，与画布 @ 同语义：只看最近几轮、不改主线人设。</div>
             </section>
 
             {/* 连接状态与会话明细（编辑模式） */}
