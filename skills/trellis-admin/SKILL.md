@@ -167,6 +167,8 @@ bun .../trellisctl.ts triggers add <taskId> '{"kind":"cron","config":{"expr":"0 
 
 ## Known Failure Modes
 
+- **认证闸开着时一切写操作 401，但 `health` 明明说「token: 已拿到」**：`health` 打的 `/__gate/health` 免认证，「已拿到」只表示读到了字符串、不表示有效。真值是 launchd plist 注入给 prod 的 `TRELLIS_AUTH_TOKEN`，`~/.trellis/shared/.env.local` 必须与之一致（轮换时两处一起改）。另一层：**Bun 会自动加载 cwd 下的 `.env.local`**——在 trellis 仓库目录跑本脚本，仓库那份 dev token 会注入 env、压过 shared 真源。判据：`cd /tmp && bun <绝对路径>/trellisctl.ts ps` 通过而仓库目录不通过。规避：仓库目录下用 `bun --env-file=/dev/null <脚本> …`，或显式 `TRELLIS_AUTH_TOKEN=… trellisctl …`。
+
 - **`ask --wait` 超时 / 中途断开后以为消息丢了，又重发一遍**：run 与 HTTP 解耦，断开只是不看了，run 还在服务端跑、结果照落库。重发 = 同一个问题跑两遍、花两遍钱。规避：超时后 `node get <nodeId>` 看状态，`wait <nodeId>` 接着守——`created` 回显里的 nodeId 就是为这一刻打出来的。
 
 - **`node get` / `node read` 对着确实存在的节点报 404 not_found**：`GET /api/nodes/[id]` 是 S118 才加的服务端 route，打到旧版本实例上就是 404。判据：`sessions get <sessionId>` 里明明看得到这个节点。修法：部署包含该 route 的版本；其余命令不受影响（走的都是老 API）。
