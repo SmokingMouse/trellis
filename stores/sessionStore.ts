@@ -683,6 +683,11 @@ type Actions = {
     matchText: string;
     matchKind: "question" | "response" | "reference";
   }) => Promise<void>;
+  // S133：侧栏「最近」分组的跨会话落点 —— 切到 sessionId（走 previewSession，
+  // tab / 未读角标 / SSE 重连全部同款）后把 nodeId 设为锚点：线性视图沿它重算
+  // 链并滚过去，画布平移到它。已在该会话时只换锚点不重载（重载会把节点位置
+  // 归零，见 previewSession 的注释）。
+  openNodeInSession: (sessionId: string, nodeId: string) => Promise<void>;
   clearScrollAnchor: () => void;
   // Remove a single done toast (timer expiry or user dismiss/click).
   dismissDoneToast: (nodeId: string) => void;
@@ -1826,6 +1831,18 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       viewMode: "linear",
       pendingScrollAnchor: { nodeId, kind: "search", matchText, matchKind },
     });
+  },
+
+  openNodeInSession: async (sessionId, nodeId) => {
+    if (get().session?.id !== sessionId) {
+      await get().previewSession(sessionId);
+      // 载入期间用户又点了别处（loadSeq 竞态，旧 load 被丢弃）—— 目标会话
+      // 没落成就别把锚点设到另一个会话的节点上。
+      if (get().session?.id !== sessionId) return;
+    }
+    // 节点已被删而最近分组还没刷新：留在会话里，不设失效锚点。
+    if (!get().nodes[nodeId]) return;
+    get().setActiveNode(nodeId);
   },
 
   clearScrollAnchor: () => set({ pendingScrollAnchor: null }),

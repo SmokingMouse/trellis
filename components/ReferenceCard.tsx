@@ -9,6 +9,7 @@ import {
 import { useSessionStore } from "@/stores/sessionStore";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { refIcon, refSourceLabel } from "@/lib/ref-icon";
+import { formatRelativeTime } from "@/lib/relative-time";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
 
@@ -221,11 +222,3 @@ function Spinner() {
 // so streaming-state re-renders only fire when this card's progress text
 // changes — not when other refs in the session also stream.
 export const ReferenceCard = memo(ReferenceCardImpl);
-
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
-}

@@ -14,10 +14,14 @@ import {
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { formatRelativeTimeShort } from "@/lib/relative-time";
+import { RECENT_CHAINS_SHOWN } from "@/lib/recent";
 import {
   HOME_CLUSTER_KEY,
   SCRATCH_CLUSTER_KEY,
   type ProjectSummary,
+  type RecentChain,
+  type RecentSession,
   type WorkspaceSummary,
   type Session,
   type SidebarTask,
@@ -80,6 +84,8 @@ export function SessionSidebar() {
   const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
   const setDraftMode = useSessionStore((s) => s.setDraftMode);
   const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
+  const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
+  const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const [attachOpen, setAttachOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
     id: string;
@@ -110,6 +116,16 @@ export function SessionSidebar() {
   // 是 kind='task' 的会话对象（喂 SidebarRow；也含任务已删的存量孤儿会话）。
   const [tasks, setTasks] = useState<SidebarTask[]>([]);
   const [taskSessions, setTaskSessions] = useState<Session[]>([]);
+  // S133：「最近」分组 —— 最近活动的会话，粒度到链（根→叶子 lineage）。走
+  // 独立一路 /api/recent（递归 CTE），不并进 /api/sessions 的热路径；归组 /
+  // 截断规则见 lib/recent.ts。
+  const [recent, setRecent] = useState<RecentSession[]>([]);
+  // 点开了「还有 N 条链」的会话 id。刻意不持久化：那是一次性的「再看两眼」，
+  // 不是偏好。
+  const [recentExpanded, setRecentExpanded] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [recentNonce, setRecentNonce] = useState(0);
   // 惰性初值直接读 localStorage（store 里 loadSidebarOpen 同款），不走 effect。
   // 不会 hydration 不匹配：projects 初值是 []、靠 fetch 填，首屏一个分组行都不
   // 渲染，折叠状态在 fetch 回来之前根本不可见。
@@ -188,6 +204,30 @@ export function SessionSidebar() {
     };
   }, [activeId, sessionsRevision]);
 
+  // S133：最近分组的刷新触发 —— 切会话 / 列表变更（与主列表同）之外，还看
+  // 「哪些会话在跑」的集合变化（一轮开始 / 结束都会改链尾与活动时间；中央
+  // /api/runs 轮询免费提供，不另起 interval —— 集合每 tick 都是新 Set，所以
+  // 折成字符串比内容）和窗口聚焦（在别的 tab / CLI 里读写过的会话，切回来
+  // 就该浮上来）。
+  const runningKey = useMemo(
+    () => [...runningIds].sort().join(","),
+    [runningIds],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/recent")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setRecent(data.sessions ?? []);
+      })
+      .catch(() => {
+        /* 保留上一份 —— 最近分组是导航捷径，拉不到就沿用旧的 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId, sessionsRevision, runningKey, recentNonce]);
+
   // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
   //
   // 不并进 /api/sessions 是刻意的 —— 那条在流式期间是 ~1.6 次/秒的热循环，
@@ -223,8 +263,12 @@ export function SessionSidebar() {
 
   // 切回浏览器时刷一次 —— git 状态几乎总是在**别处**（终端里）被改变的，
   // 而「从终端切回来」正是它可能已经变了的那一刻。比定时轮询精准且省。
+  // S133：最近分组同一时机刷新 —— 活动可能刚在 CLI / 别的 tab 里发生。
   useEffect(() => {
-    const onFocus = () => setGitNonce((n) => n + 1);
+    const onFocus = () => {
+      setGitNonce((n) => n + 1);
+      setRecentNonce((n) => n + 1);
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -429,6 +473,88 @@ export function SessionSidebar() {
         />
         {!isCollapsed && (
           <IndentGuide level={0}>{list.map((s) => renderRow(s, 1))}</IndentGuide>
+        )}
+      </div>
+    );
+  };
+
+  // S133：「最近」分组。会话行复用 SidebarRow（预览 / 固定 / 运行态 / 未读全部
+  // 同款），下面挂链行：一条链 = 根→叶子 lineage，点链跨会话直接落到链尾 ——
+  // 上次问到哪就回到哪。多树会话的链行带树名前缀；单树会话的树名就是会话
+  // 标题的另一种说法，不重复。默认每会话只露前几条链，其余点开。
+  const renderRecentGroup = () => {
+    if (recent.length === 0) return null;
+    const isCollapsed = collapsed.has("__recent");
+    const sessionById = new Map(
+      [...sessions, ...taskSessions].map((s) => [s.id, s]),
+    );
+    const toggleExpanded = (id: string) =>
+      setRecentExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    return (
+      <div className="mb-3">
+        <GroupRow
+          level={0}
+          collapsed={isCollapsed}
+          label="🕘 最近"
+          title={`最近 · ${recent.length} 个会话\n按最后活动（写过或读过）排序；每个会话下列出最近的几条链，点链直接落到链尾`}
+          badge={isCollapsed ? String(recent.length) : null}
+          onToggle={() => toggleCollapsed("__recent")}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>
+            {recent.map((r) => {
+              // 主列表里的会话对象优先（origin / cliProvider 等角标齐全）；两路
+              // fetch 有先后，落空时用最近分组自带的骨架顶一下。
+              const s = sessionById.get(r.id) ?? recentAsSession(r);
+              const expanded = recentExpanded.has(r.id);
+              const shown = expanded
+                ? r.chains
+                : r.chains.slice(0, RECENT_CHAINS_SHOWN);
+              const folded = r.chains.length - shown.length;
+              return (
+                <div key={r.id}>
+                  {renderRow(s, 1)}
+                  {shown.map((c) => (
+                    <ChainRow
+                      key={c.tipId}
+                      chain={c}
+                      showTree={r.treeCount > 1}
+                      active={r.id === activeId && c.tipId === activeNodeId}
+                      onOpen={() => {
+                        setEditingId(null);
+                        // 抽屉是覆盖层；同会话内换链 activeId 不变，那个
+                        // effect 不会替我们收。
+                        setMobileNavOpen(false);
+                        void openNodeInSession(r.id, c.tipId).catch(() => {
+                          /* 会话已被删等：下次刷新这行自然消失 */
+                        });
+                      }}
+                    />
+                  ))}
+                  {(folded > 0 || r.moreChains > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded(r.id)}
+                      style={{ paddingLeft: PAD(2) + 14, height: 22 }}
+                      className="mx-1 flex items-center text-nano text-ink-faint hover:text-ink"
+                      title={
+                        r.moreChains > 0
+                          ? `另有 ${r.moreChains} 条更早的链没列出 —— 进会话后在树面板里找`
+                          : undefined
+                      }
+                    >
+                      {expanded ? "收起" : `还有 ${folded + r.moreChains} 条链`}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </IndentGuide>
         )}
       </div>
     );
@@ -717,6 +843,8 @@ export function SessionSidebar() {
           </div>
         ) : (
           <>
+            {/* S133：最近活动的会话，粒度到链 —— 放最上面，它是「接着干」的入口。 */}
+            {renderRecentGroup()}
             {renderProjects()}
             {renderGroup("__chat", "Chat", chat)}
             {/* S117：定时任务的固定分组 —— 每个任务的常驻会话在这里可点可看，
@@ -1264,6 +1392,91 @@ function SidebarRow({
         </div>
       )}
     </div>
+  );
+}
+
+// 最近分组自带的会话骨架 → Session（主列表还没回来时顶一下）。只填 SidebarRow
+// 会读的字段；origin / cliProvider 缺省即无角标，主列表到位后自然补齐。
+function recentAsSession(r: RecentSession): Session {
+  return {
+    id: r.id,
+    title: r.title,
+    rootNodeId: "",
+    createdAt: r.activityAt,
+    updatedAt: r.activityAt,
+    mode: r.mode,
+    workspacePath: r.workspacePath,
+    systemPrompt: null,
+    archived: false,
+    model: null,
+  };
+}
+
+// S133：最近分组的链行，挂在会话行下一级：「↳ [树名 › ]链尾标签 · 时间」。
+// 状态只编码链尾，紧急度降序：等输入 🙋 > 生成中 > 出错 > 未读点 —— 与树
+// 面板树行的 rollup 同一套读法，看惯了那边的这边不用再学。
+function ChainRow({
+  chain,
+  showTree,
+  active,
+  onOpen,
+}: {
+  chain: RecentChain;
+  showTree: boolean;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  const time = formatRelativeTimeShort(chain.activityAt);
+  // 单节点树的链尾就是根：树名 = 链尾标签，前缀只会把同一句话说两遍。
+  const withTree = showTree && chain.tipId !== chain.rootId;
+  const statusNote =
+    chain.status === "waiting"
+      ? " · 等你回答"
+      : chain.status === "streaming"
+        ? " · 生成中"
+        : chain.status === "error"
+          ? " · 出错"
+          : chain.status === "unread"
+            ? " · 未读"
+            : "";
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      style={{ paddingLeft: PAD(2), height: ROW_H }}
+      // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
+      // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
+      className={`mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
+        active
+          ? "bg-surface-muted text-ink font-medium"
+          : "text-ink-muted hover:bg-surface-muted"
+      }`}
+      title={`${withTree ? `${chain.treeLabel} › ` : ""}${chain.label}\n${chain.depth} 轮${statusNote} · ${time}\n点击落到这条链的链尾`}
+    >
+      <span aria-hidden className="shrink-0 text-nano text-ink-faint">
+        ↳
+      </span>
+      {chain.status === "waiting" ? (
+        <span className="shrink-0 text-[10px] animate-pulse" aria-label="等你回答">
+          🙋
+        </span>
+      ) : chain.status === "streaming" ? (
+        <Dots />
+      ) : chain.status === "error" ? (
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger" aria-label="出错" />
+      ) : chain.status === "unread" ? (
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-unread" aria-label="未读" />
+      ) : null}
+      <span className="flex-1 min-w-0 truncate text-ui">
+        {withTree && (
+          <span className="text-ink-faint">{chain.treeLabel} › </span>
+        )}
+        {chain.label}
+      </span>
+      <span className="shrink-0 text-nano tabular-nums text-ink-faint">
+        {time}
+      </span>
+    </button>
   );
 }
 
