@@ -14,6 +14,7 @@ import {
 } from "@/lib/lark-types";
 import { getDB } from "@/lib/server/sqlite";
 import {
+  backfillLarkThreadFromOutboxIn,
   claimLarkInboxIn,
   larkThreadTailIn,
   nodeOfLarkMessageIn,
@@ -384,4 +385,14 @@ export function upsertLarkThread(row: {
 
 export function larkThreadTail(botId: string, threadId: string): string | null {
   return larkThreadTailIn(getDB(), botId, threadId);
+}
+
+export function backfillLarkThreadFromOutbox(row: {
+  botId: string;
+  chatId: string;
+  threadId: string;
+  rootMessageId: string;
+  now: number;
+}): { sessionId: string; rootNodeId: string; lastNodeId: string } | null {
+  return backfillLarkThreadFromOutboxIn(getDB(), row);
 }

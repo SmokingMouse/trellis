@@ -254,6 +254,56 @@ export function larkThreadTailIn(db: LarkDb, botId: string, threadId: string): s
   return row?.last_node_id ?? null;
 }
 
+/**
+ * 飞书给机器人顶层推送开的新话题，第一次入站时 lark_threads 尚无记录。由 root_id
+ * 反查 outbox，再沿节点父链找到树根并登记；不是本机器人出站消息则严格不回填。
+ */
+export function backfillLarkThreadFromOutboxIn(
+  db: LarkDb,
+  row: {
+    botId: string;
+    chatId: string;
+    threadId: string;
+    rootMessageId: string;
+    now: number;
+  },
+): { sessionId: string; rootNodeId: string; lastNodeId: string } | null {
+  const out = db
+    .prepare(
+      "SELECT node_id FROM lark_outbox WHERE message_id = ? AND bot_id = ? AND chat_id = ?",
+    )
+    .get(row.rootMessageId, row.botId, row.chatId) as { node_id: string } | undefined;
+  if (!out?.node_id) return null;
+
+  let current = out.node_id;
+  let sessionId: string | null = null;
+  let rootNodeId: string | null = null;
+  for (let i = 0; i < 1_000; i++) {
+    const node = db
+      .prepare("SELECT session_id, parent_id FROM nodes WHERE id = ?")
+      .get(current) as { session_id: string; parent_id: string | null } | undefined;
+    if (!node) return null;
+    sessionId = node.session_id;
+    if (node.parent_id === null) {
+      rootNodeId = current;
+      break;
+    }
+    current = node.parent_id;
+  }
+  if (!sessionId || !rootNodeId) return null;
+
+  upsertLarkThreadIn(db, {
+    botId: row.botId,
+    chatId: row.chatId,
+    threadId: row.threadId,
+    sessionId,
+    rootNodeId,
+    lastNodeId: out.node_id,
+    now: row.now,
+  });
+  return { sessionId, rootNodeId, lastNodeId: out.node_id };
+}
+
 /** 测试与迁移共用的建表语句，避免两处 schema 各写各的。 */
 export const LARK_THREAD_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS lark_threads (

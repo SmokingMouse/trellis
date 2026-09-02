@@ -17,13 +17,10 @@ import {
 import {
   buildHistoryForNode,
   createBranchNode,
-  createRootInSession,
-  createSessionWithRoot,
   finalizeNode,
   getNode,
   getParentResumeId,
   getRootResumeIdForNode,
-  getSession,
   setNodeAgent,
 } from "@/lib/server/repo";
 import { startRun } from "@/lib/server/run-bus";
@@ -38,8 +35,10 @@ import {
   type LarkSendMode,
   type LarkSentMessage,
 } from "./sdk";
+import { createRootInLarkChat } from "./session";
 import {
   advanceLarkChat,
+  backfillLarkThreadFromOutbox,
   bindLarkChatSession,
   claimLarkInbox,
   ensureLarkChat,
@@ -129,6 +128,30 @@ function toInbound(message: ParsedMessage, text: string): ImInbound {
   };
 }
 
+/** 新话题的首条入站先补登记，随后 policy 只需照常查 threadTail。 */
+function backfillTaskPushThread(bot: LarkBotRecord, message: ParsedMessage): void {
+  if (
+    message.chatType !== "group" ||
+    !message.threadId ||
+    !message.rootId ||
+    larkThreadTail(bot.id, message.threadId)
+  ) {
+    return;
+  }
+  const filled = backfillLarkThreadFromOutbox({
+    botId: bot.id,
+    chatId: message.chatId,
+    threadId: message.threadId,
+    rootMessageId: message.rootId,
+    now: Date.now(),
+  });
+  if (filled) {
+    console.info(
+      `[lark] thread backfilled bot=${bot.id} thread=${message.threadId} root=${filled.rootNodeId}`,
+    );
+  }
+}
+
 /** WS 回调只做去重、门控和入队，不能把 3 秒飞书事件 ACK 窗口耗在 agent run 上。 */
 export function acceptLarkEvent(
   botId: string,
@@ -151,6 +174,7 @@ export function acceptLarkEvent(
     updateLarkInbox(parsed.messageId, "ignored");
     return;
   }
+  backfillTaskPushThread(bot, parsed);
   let queued: QueuedMessage;
   if (parsed.text === null) {
     // 非文本：私聊或被 @ 才回「暂只支持文本」，群里别人发的图片一律不理。
@@ -203,7 +227,6 @@ function createTurn(args: {
   const { bot, message } = args;
   const chat = ensureLarkChat(bot.id, message.chatId, message.chatType, args.title, args.now);
   const mode = bot.workspacePath ? "project" : "chat";
-  const liveSession = chat.sessionId ? getSession(chat.sessionId) : null;
   const target = resolveTarget(toInbound(message, args.question), bot, lookupsFor(bot, message.chatId));
 
   if (target.kind === "branch") {
@@ -224,45 +247,19 @@ function createTurn(args: {
     // 目标节点已被删：退化成该 chat 会话里的新树，而不是丢消息。
   }
 
-  const nodeId = crypto.randomUUID();
-  if (liveSession) {
-    createRootInSession({
-      sessionId: liveSession.id,
-      nodeId,
-      question: args.question,
-      now: args.now,
-      attachments: [],
-    });
-    return {
-      chatRowId: chat.id,
-      sessionId: liveSession.id,
-      nodeId,
-      mode,
-      target: target.kind === "root" ? target : { kind: "root", via: "chat" },
-    };
-  }
-
-  const sessionId = crypto.randomUUID();
-  createSessionWithRoot({
-    sessionId,
-    nodeId,
-    title: `💬 ${args.title}`,
+  const root = createRootInLarkChat({
+    bot,
+    chatId: message.chatId,
+    chatType: message.chatType,
+    title: args.title,
     question: args.question,
     now: args.now,
-    mode,
-    workspacePath: bot.workspacePath,
-    systemPrompt: null,
-    model: DEFAULT_PROVIDER,
-    agentId: bot.agentId,
-    attachments: [],
   });
-  getDB().prepare("UPDATE sessions SET kind = 'lark' WHERE id = ?").run(sessionId);
-  bindLarkChatSession(chat.id, sessionId);
   return {
-    chatRowId: chat.id,
-    sessionId,
-    nodeId,
-    mode,
+    chatRowId: root.chatRowId,
+    sessionId: root.sessionId,
+    nodeId: root.nodeId,
+    mode: root.mode,
     target: target.kind === "root" ? target : { kind: "root", via: "chat" },
   };
 }

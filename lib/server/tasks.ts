@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs";
 import { SQLiteError } from "bun:sqlite";
 import { getDB } from "./sqlite";
-import { createSessionWithRoot, createRootInSession, setNodeAgent } from "./repo";
+import { createSessionWithRoot, createRootInSession, getNode, setNodeAgent } from "./repo";
 import { resolveEnabledAgent } from "./agents";
 import { resolveAgentSpawn } from "./agent-pack";
 import { startRun, abortRun } from "./run-bus";
@@ -12,6 +12,15 @@ import { sessionCwd } from "@/lib/paths";
 import { publishTaskEvent } from "./task-events";
 import { notify } from "./notify";
 import { createWatchPool, type WatchPool } from "./fs-watch-pool";
+import { createRootInLarkChat } from "./lark/session";
+import { getLarkBotRecord, getLarkChat } from "./lark/store";
+import { pushTaskRunToLark } from "./lark/push";
+import {
+  LarkTaskBindingError,
+  resolveLarkTaskBinding,
+  type LarkTaskBindingInput,
+} from "./lark/task-target";
+import { taskLarkPushContent, taskRunStatusText } from "./lark/task-push-policy";
 
 // S88: 自动化任务的执行层。
 //
@@ -45,6 +54,8 @@ export type Task = {
   providerId: string | null;
   enabled: boolean;
   homeSessionId: string | null;
+  larkBotId: string | null;
+  larkChatId: string | null;
   timeoutMs: number;
   overlapPolicy: string;
   notifyOn: "never" | "error" | "always";
@@ -85,7 +96,7 @@ export type TaskRun = {
 };
 
 const TASK_COLS = `id, name, agent_id, prompt, workspace_path, context_mode, model, provider_id,
-       enabled, home_session_id, timeout_ms, overlap_policy, notify_on,
+       enabled, home_session_id, lark_bot_id, lark_chat_id, timeout_ms, overlap_policy, notify_on,
        max_budget_usd, created_at, updated_at`;
 
 type TaskRow = {
@@ -93,7 +104,8 @@ type TaskRow = {
   workspace_path: string | null; context_mode: string;
   /** 旧列，留一个版本兜底后再删。真源是 provider_id。 */
   model: string | null; provider_id: string | null;
-  enabled: number; home_session_id: string | null; timeout_ms: number;
+  enabled: number; home_session_id: string | null;
+  lark_bot_id: string | null; lark_chat_id: string | null; timeout_ms: number;
   overlap_policy: string; notify_on: string; max_budget_usd: number | null;
   created_at: number; updated_at: number;
 };
@@ -105,6 +117,7 @@ function rowToTask(r: TaskRow): Task {
     // 读时兜底：迁移前建的行只有旧列。
     providerId: r.provider_id ?? r.model,
     enabled: r.enabled === 1, homeSessionId: r.home_session_id,
+    larkBotId: r.lark_bot_id, larkChatId: r.lark_chat_id,
     timeoutMs: r.timeout_ms, overlapPolicy: r.overlap_policy,
     notifyOn: (r.notify_on as Task["notifyOn"]) ?? "error",
     maxBudgetUsd: r.max_budget_usd,
@@ -131,7 +144,7 @@ export function getTask(id: string): Task | null {
   return r ? rowToTask(r) : null;
 }
 
-export type TaskInput = {
+export type TaskInput = LarkTaskBindingInput & {
   name: string;
   prompt: string;
   agentId?: string | null;
@@ -147,20 +160,34 @@ export type TaskInput = {
   maxBudgetUsd?: number | null;
 };
 
+function checkedLarkBinding(input: LarkTaskBindingInput) {
+  return resolveLarkTaskBinding(input, (botId, chatId) => {
+    const bot = getLarkBotRecord(botId);
+    if (!bot) return "bot_missing";
+    if (!bot.enabled) return "bot_disabled";
+    return getLarkChat(botId, chatId) ? "ok" : "chat_missing";
+  });
+}
+
+export { LarkTaskBindingError };
+
 export function createTask(input: TaskInput): Task {
   const id = crypto.randomUUID();
   const now = Date.now();
+  const binding = checkedLarkBinding(input) ?? { larkBotId: null, larkChatId: null };
   getDB()
     .prepare(
       `INSERT INTO tasks (id, name, agent_id, prompt, workspace_path, context_mode,
-                          provider_id, enabled, timeout_ms, overlap_policy, notify_on,
+                          provider_id, enabled, lark_bot_id, lark_chat_id,
+                          timeout_ms, overlap_policy, notify_on,
                           max_budget_usd, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id, input.name, input.agentId ?? null, input.prompt,
       input.workspacePath ?? null, input.contextMode ?? "project",
       input.providerId ?? null, input.enabled === false ? 0 : 1,
+      binding.larkBotId, binding.larkChatId,
       input.timeoutMs ?? 1_800_000, input.overlapPolicy ?? "skip", input.notifyOn ?? "error",
       input.maxBudgetUsd ?? null, now, now,
     );
@@ -169,6 +196,7 @@ export function createTask(input: TaskInput): Task {
 
 export function updateTask(id: string, patch: Partial<TaskInput>): Task | null {
   if (!getTask(id)) return null;
+  const binding = checkedLarkBinding(patch);
   const sets: string[] = [];
   const vals: unknown[] = [];
   const put = (c: string, v: unknown) => { sets.push(`${c} = ?`); vals.push(v); };
@@ -180,6 +208,10 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Task | null {
   // 只写新列；旧 model 列不再更新（读时兜底仍在）。
   if (patch.providerId !== undefined) put("provider_id", patch.providerId);
   if (patch.enabled !== undefined) put("enabled", patch.enabled ? 1 : 0);
+  if (binding) {
+    put("lark_bot_id", binding.larkBotId);
+    put("lark_chat_id", binding.larkChatId);
+  }
   if (patch.timeoutMs !== undefined) put("timeout_ms", patch.timeoutMs);
   if (patch.overlapPolicy !== undefined) put("overlap_policy", patch.overlapPolicy);
   if (patch.notifyOn !== undefined) put("notify_on", patch.notifyOn);
@@ -384,8 +416,8 @@ function hasActiveRunForTask(taskId: string): boolean {
   );
 }
 
-/** 懒创建任务的常驻会话。第一次跑时建，之后复用。 */
-function ensureTaskSession(task: Task, question: string, now: number): {
+/** 未绑定飞书或绑定当前不可用时，严格保留原来的 home 会话行为。 */
+function ensureHomeTaskSession(task: Task, question: string, now: number): {
   sessionId: string;
   nodeId: string;
 } {
@@ -424,6 +456,45 @@ function ensureTaskSession(task: Task, question: string, now: number): {
   getDB().prepare("UPDATE sessions SET kind = 'task' WHERE id = ?").run(sessionId);
   getDB().prepare("UPDATE tasks SET home_session_id = ? WHERE id = ?").run(sessionId, task.id);
   return { sessionId, nodeId };
+}
+
+/** 绑定飞书时在 chat 的 kind='lark' 会话中新建独立根；每次 run 都是一棵新树。 */
+function ensureTaskSession(task: Task, question: string, now: number, runId: string): {
+  sessionId: string;
+  nodeId: string;
+} {
+  if (task.larkBotId && task.larkChatId) {
+    const bot = getLarkBotRecord(task.larkBotId);
+    const chat = getLarkChat(task.larkBotId, task.larkChatId);
+    if (bot?.enabled && chat) {
+      const root = createRootInLarkChat({
+        bot,
+        chatId: chat.chatId,
+        chatType: chat.chatType,
+        title: chat.title || `飞书${chat.chatType === "group" ? "群" : "私聊"} ${chat.chatId.slice(-6)}`,
+        question,
+        now,
+      });
+      return { sessionId: root.sessionId, nodeId: root.nodeId };
+    }
+    const reason = !bot
+      ? "绑定的飞书机器人不存在"
+      : !bot.enabled
+        ? "绑定的飞书机器人已停用"
+        : "绑定的飞书 chat 不存在或不属于该机器人";
+    console.warn(
+      `[lark] task ${task.id} binding unavailable; fallback to home session: ${reason}` +
+        ` bot=${task.larkBotId} chat=${task.larkChatId}`,
+    );
+    void notify({
+      kind: "task_run_error",
+      title: `任务「${task.name}」飞书落点不可用，已回退到任务会话`,
+      body: reason,
+      taskId: task.id,
+      runId,
+    });
+  }
+  return ensureHomeTaskSession(task, question, now);
 }
 
 /** 超时 timer 句柄。进程内即可 —— 进程没了 run 也没了，boot reap 会收尸。 */
@@ -500,6 +571,22 @@ function failRun(task: Task, runId: string, message: string): StartTaskRunResult
       runId,
     });
     getDB().prepare("UPDATE task_runs SET notified_at = ? WHERE id = ?").run(now, runId);
+    if (task.larkBotId && task.larkChatId) {
+      const markdown = taskLarkPushContent({
+        taskName: task.name,
+        status: "error",
+        notifyOn: task.notifyOn,
+        response: "",
+        errorMessage: message,
+      });
+      void pushTaskRunToLark({
+        botId: task.larkBotId,
+        chatId: task.larkChatId,
+        sessionId: null,
+        nodeId: null,
+        markdown: markdown!,
+      }).catch((error) => console.error("[lark] task push crashed", error));
+    }
   }
   return { ok: false, reason: message, runId };
 }
@@ -522,7 +609,7 @@ export function launch(task: Task, runId: string): StartTaskRunResult {
     return failRun(task, runId, `工作目录不存在：${task.workspacePath}`);
   }
 
-  const { sessionId, nodeId } = ensureTaskSession(task, question, now);
+  const { sessionId, nodeId } = ensureTaskSession(task, question, now, runId);
 
   const providerId = isProviderId(task.providerId) ? task.providerId : DEFAULT_PROVIDER;
   const family = providerFamily(providerId);
@@ -615,7 +702,7 @@ export function finishTaskRun(
   }
   const run = getRun(runId);
   // 超时是我们自己 abort 出来的 error，语义上和「跑挂了」不同，单独记一档。
-  const status: TaskRunStatus =
+  const status: "done" | "timeout" | "error" =
     r.status === "done"
       ? "done"
       : r.errorMessage === "aborted" && run?.status === "running"
@@ -637,13 +724,38 @@ export function finishTaskRun(
   if (task && want) {
     void notify({
       kind: status === "done" ? "task_run_done" : "task_run_error",
-      title: `任务「${task.name}」${status === "done" ? "完成" : status === "timeout" ? "超时" : "失败"}`,
+      title: `任务「${task.name}」${taskRunStatusText(status)}`,
       body: r.errorMessage ?? "",
       link: run?.sessionId ? `/?session=${run.sessionId}&node=${run.nodeId}` : undefined,
       taskId: task.id,
       runId,
     });
     getDB().prepare("UPDATE task_runs SET notified_at = ? WHERE id = ?").run(Date.now(), runId);
+  }
+
+  // 飞书落点本身就是成功产出的目的，不受 notify_on 控制；失败/超时则沿用 notify_on。
+  if (task?.larkBotId && task.larkChatId && run) {
+    const response = run.nodeId ? getNode(run.nodeId)?.response ?? "" : "";
+    const markdown = taskLarkPushContent({
+      taskName: task.name,
+      status,
+      notifyOn: task.notifyOn,
+      response,
+      errorMessage: r.errorMessage,
+    });
+    if (markdown === null) {
+      if (status === "done") {
+        console.warn(`[lark] task ${task.id} done with empty response; push skipped`);
+      }
+    } else {
+      void pushTaskRunToLark({
+        botId: task.larkBotId,
+        chatId: task.larkChatId,
+        sessionId: run.sessionId,
+        nodeId: run.nodeId,
+        markdown,
+      }).catch((error) => console.error("[lark] task push crashed", error));
+    }
   }
 }
 
