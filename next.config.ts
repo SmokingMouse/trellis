@@ -35,7 +35,19 @@ const nextConfig: NextConfig = {
   // external so it runs from real node_modules.
   // @smokingmouse/agent 是 server-only Node 包(spawn child_process),external 它从 node_modules
   // 直接运行(dist 编译产物),不进 bundler。@smokingmouse/llm 同理(读 fs)。
-  serverExternalPackages: ["@openai/codex-sdk", "@openai/codex", "@smokingmouse/agent", "@smokingmouse/llm"],
+  // S134：@larksuiteoapi/node-sdk 及其依赖 ws 也必须 external。Turbopack 默认把它们内联进
+  // server chunk，而 Bun 只对**按名字** require("ws") 做原生 WebSocket 替换 —— 内联的真 ws 走
+  // node http upgrade 路径，在 Bun 下握手直接 `Unexpected server response: 101`，飞书长连接
+  // 永远连不上且 SDK 不回调（prod 只见 "[ws] ws connect failed"）。external 之后运行时按名解析
+  // 到 Bun 的 ws 实现，launchd 下实测 0.4s onReady。scripts/test-lark-bot.ts 有守卫断言。
+  serverExternalPackages: [
+    "@openai/codex-sdk",
+    "@openai/codex",
+    "@smokingmouse/agent",
+    "@smokingmouse/llm",
+    "@larksuiteoapi/node-sdk",
+    "ws",
+  ],
   // S89: 管理台改成 tab 壳之后的两条路由兼容。放在 next.config 而不是留一张 redirect 页 ——
   // 这里在文件系统路由之前生效，不用为了转发而渲染一个 React 树，也就不会有「先闪一下空页
   // 再跳走」。

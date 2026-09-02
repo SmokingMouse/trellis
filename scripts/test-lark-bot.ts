@@ -180,4 +180,14 @@ if (discovered.length > 0) {
   ok(typeof first.source === "string" && first.source.length > 0, "扫描结果包含来源路径");
 }
 
+// S134 bundle 守卫：飞书 SDK 与 ws 必须留在 serverExternalPackages。Turbopack 内联的真 ws 在
+// Bun 下握手失败（Unexpected server response: 101），且 SDK 不回调 —— 症状是「已保存、无错误、
+// 就是没反应」，靠这条断言挡住回归。
+import fs from "node:fs";
+import path from "node:path";
+const nextConfigText = fs.readFileSync(path.join(process.cwd(), "next.config.ts"), "utf8");
+const externalsBlock = nextConfigText.match(/serverExternalPackages:\s*\[([^\]]*)\]/)?.[1] ?? "";
+ok(externalsBlock.includes("\"@larksuiteoapi/node-sdk\""), "next.config serverExternalPackages 含 @larksuiteoapi/node-sdk（Bun 下 ws 握手守卫）");
+ok(externalsBlock.includes("\"ws\""), "next.config serverExternalPackages 含 ws（Bun 按名替换原生 WebSocket）");
+
 console.log(`PASS ${passed} lark assertions`);

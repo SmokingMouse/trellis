@@ -10,6 +10,9 @@ import {
 } from "./store";
 
 const RECONCILE_INTERVAL_MS = 15_000;
+const HANDSHAKE_TIMEOUT_MS = 15_000;
+// 握手超时 + 一点余量：正常路径 onReady 在 1s 内到（S134 实测 0.4–0.6s）。
+const READY_TIMEOUT_MS = HANDSHAKE_TIMEOUT_MS + 5_000;
 
 type ActiveConnection = {
   fingerprint: string;
@@ -46,6 +49,14 @@ async function connect(bot: LarkBotRecord): Promise<void> {
       acceptLarkEvent(bot.id, client, event);
     },
   });
+  // S134 就绪门：SDK 的 `start()` 在拿到 ws 地址后就 resolve（state=connecting），
+  // 底层 socket 握手失败时只 logger.error("ws connect failed")，onError / onReconnecting
+  // 一个都不回调 —— 于是 last_error 为空、last_connected_at 为空、日志零 [lark] 行，
+  // 界面上「已保存、无错误、就是没反应」。唯一可靠的判据是等 onReady，等不到就算失败。
+  let markReady: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
   // SDK 运行时接受/默认 SelfBuild，但 1.73 的 WS 构造类型漏了 appType；交集类型
   // 保留显式契约，同时不退回 any。
   const wsOptions: ConstructorParameters<typeof lark.WSClient>[0] & { appType: lark.AppType } = {
@@ -53,11 +64,14 @@ async function connect(bot: LarkBotRecord): Promise<void> {
     appSecret: bot.appSecret,
     appType: lark.AppType.SelfBuild,
     loggerLevel: lark.LoggerLevel.info,
-    handshakeTimeoutMs: 15_000,
-    onReady: () => setLarkBotConnection(bot.id, {
-      connectedAt: Date.now(),
-      error: identityError,
-    }),
+    handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
+    onReady: () => {
+      markReady();
+      setLarkBotConnection(bot.id, {
+        connectedAt: Date.now(),
+        error: identityError,
+      });
+    },
     onReconnected: () => setLarkBotConnection(bot.id, {
       connectedAt: Date.now(),
       error: identityError,
@@ -73,6 +87,19 @@ async function connect(bot: LarkBotRecord): Promise<void> {
     if (state === "idle" || state === "failed") {
       throw new Error(`飞书长连接未启动（state=${state}），请检查 app_id`);
     }
+    const isReady = await Promise.race([
+      ready.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), READY_TIMEOUT_MS).unref?.()),
+    ]);
+    if (!isReady) {
+      throw new Error(
+        `飞书长连接 ${READY_TIMEOUT_MS / 1000}s 内未就绪（state=${wsClient.getConnectionStatus().state}）。` +
+          "SDK 握手失败不回调，只能超时判定。常见原因：① `ws` 被打进 server bundle，Bun 下握手报 " +
+          "`Unexpected server response: 101`（next.config serverExternalPackages 必须含 " +
+          "@larksuiteoapi/node-sdk 与 ws）；② 开放平台「事件与回调 → 订阅方式」未选长连接。",
+      );
+    }
+    console.info(`[lark] bot ${bot.id} 长连接就绪 app=${bot.appId}`);
   } catch (error) {
     ACTIVE.delete(bot.id);
     wsClient.close({ force: true });
