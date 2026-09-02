@@ -833,6 +833,15 @@ function migrate(db: Database) {
     db.exec("UPDATE tasks SET provider_id = model WHERE provider_id IS NULL");
   }
 
+  // 定时任务可选飞书落点。二元组的完整性与 chat 归属由 tasks service 校验；这里继续
+  // 遵守 migrate() 的加法式 DDL，避免旧库升级需要重建 tasks。
+  for (const column of ["lark_bot_id", "lark_chat_id"] as const) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = ?")
+      .get(column);
+    if (!has) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} TEXT`);
+  }
+
   // Stage 16: FTS5 cross-session full-text search. Single virtual table
   // covers question / response / reference / note text. trigram tokenizer
   // is the FTS5-builtin pick for mixed CJK + ASCII: 3-char sliding window

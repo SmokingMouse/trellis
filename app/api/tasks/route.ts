@@ -1,4 +1,11 @@
-import { listTasks, createTask, listTriggers, listRuns, type TaskInput } from "@/lib/server/tasks";
+import {
+  LarkTaskBindingError,
+  listTasks,
+  createTask,
+  listTriggers,
+  listRuns,
+  type TaskInput,
+} from "@/lib/server/tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,5 +37,12 @@ export async function POST(req: Request) {
   if (o.contextMode === "project" && !o.workspacePath) {
     return Response.json({ error: "project 模式必须给 workspacePath" }, { status: 400 });
   }
-  return Response.json({ task: createTask(o as unknown as TaskInput) }, { status: 201 });
+  try {
+    return Response.json({ task: createTask(o as unknown as TaskInput) }, { status: 201 });
+  } catch (error) {
+    if (error instanceof LarkTaskBindingError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 }

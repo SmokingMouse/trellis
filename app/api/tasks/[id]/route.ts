@@ -1,4 +1,11 @@
-import { getTask, updateTask, deleteTask, listTriggers, type TaskInput } from "@/lib/server/tasks";
+import {
+  LarkTaskBindingError,
+  getTask,
+  updateTask,
+  deleteTask,
+  listTriggers,
+  type TaskInput,
+} from "@/lib/server/tasks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +25,15 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
-  const task = updateTask(id, (body ?? {}) as Partial<TaskInput>);
+  let task;
+  try {
+    task = updateTask(id, (body ?? {}) as Partial<TaskInput>);
+  } catch (error) {
+    if (error instanceof LarkTaskBindingError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   if (!task) return Response.json({ error: "not found" }, { status: 404 });
   return Response.json({ task });
 }
