@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-S131 修掉 slash command 后画布失忆双 bug（turn 识别+降级折叠），待画布活体验证；多租户本机已上线（入口 3200），公网接入待拍板；cpa codex 故障在查（failures.md）。
+飞书链路已通（ws 内联根因修掉，私聊实测回包），IM 入口层四旋钮与话题即树已上线待群内四步验收；侧栏最近分组同批上线；路线重锚（先 dogfood 还是先公网）仍待拍板。
 
 ## Goals
 
@@ -19,8 +19,10 @@ S131 修掉 slash command 后画布失忆双 bug（turn 识别+降级折叠）�
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `sessions.md` 最近 5 条 log（S132–128） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `backlog.md` 需求侧摩擦队列（项目级扩展，不在全局协议内；定活前读，open ≤10 条）
+- `sessions/` 一条一文件、按文件名倒序读最近 5 个（最新 S134；本日两条 S133 撞号并存（文件名为键）；`0000-legacy.md` = S132–128 存量） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
+- `im-entry-layer.md` IM 入口层 spec（飞书四旋钮 / 话题即树 / @slug）
 - 其余 `*.md` 为按需读取的 feature spec
