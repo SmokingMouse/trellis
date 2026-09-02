@@ -1,4 +1,5 @@
 import "server-only";
+import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
 import os from "node:os";
 import path from "node:path";
@@ -798,6 +799,23 @@ function migrate(db: Database) {
       node_id TEXT
     );
   `);
+
+  // S134 IM 入口层（spec: progress/im-entry-layer.md）：四旋钮进 lark_bots（加列不改列），
+  // 话题 → 树、机器人出站消息 → 节点两张映射表。建表语句与测试共用 LARK_THREAD_TABLES_SQL。
+  const larkPolicyColumns: Array<[string, string]> = [
+    ["group_trigger", "TEXT NOT NULL DEFAULT 'mention'"],
+    ["trigger_prefix", "TEXT"],
+    ["reply_mode", "TEXT NOT NULL DEFAULT 'thread'"],
+    ["session_policy", "TEXT NOT NULL DEFAULT 'thread'"],
+    ["ack_mode", "TEXT NOT NULL DEFAULT 'reaction'"],
+  ];
+  for (const [column, ddl] of larkPolicyColumns) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('lark_bots') WHERE name = ?")
+      .get(column);
+    if (!has) db.exec(`ALTER TABLE lark_bots ADD COLUMN ${column} ${ddl}`);
+  }
+  db.exec(LARK_THREAD_TABLES_SQL);
 
   // S89: `tasks.model` 这一列名不副实 —— 它存的一直是 **providerId**
   // （`lib/server/tasks.ts` 里 `isProviderId(task.model) ? task.model : DEFAULT_PROVIDER`），

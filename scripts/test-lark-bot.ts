@@ -54,7 +54,7 @@ equal(missingOpenId, { kind: "ignore", messageId: "om_1", reason: "bot_open_id_m
 const notMentioned = parseIncomingEvent(event({
   message: { ...event().message!, chat_type: "group", mentions: [] },
 }), "ou_bot");
-equal(notMentioned, { kind: "ignore", messageId: "om_1", reason: "not_mentioned" }, "群聊未 @bot 时忽略");
+ok(notMentioned.kind === "message" && notMentioned.mentionedBot === false, "群聊未 @bot：协议层只标 mentionedBot=false，门控在 im/policy");
 
 const mentioned = parseIncomingEvent(event({
   message: {
@@ -64,7 +64,7 @@ const mentioned = parseIncomingEvent(event({
     mentions: [{ key: "@_user_1", name: "助手", id: { open_id: "ou_bot" } }],
   },
 }), "ou_bot");
-ok(mentioned.kind === "message" && mentioned.text === "帮我总结", "群 @bot 触发并剥离可信 mention token");
+ok(mentioned.kind === "message" && mentioned.text === "帮我总结" && mentioned.mentionedBot, "群 @bot 标 mentionedBot 并剥离可信 mention token");
 
 const ownMessage = parseIncomingEvent(event({
   sender: { sender_type: "app", sender_id: { open_id: "ou_bot" } },
@@ -179,6 +179,82 @@ if (discovered.length > 0) {
   ok(first.appSecret.length > 0, "扫描到的 App Secret 非空");
   ok(typeof first.source === "string" && first.source.length > 0, "扫描结果包含来源路径");
 }
+
+// ── S134 IM 入口层：策略纯函数 + 协议 thread 字段 + 话题/出站映射 ──
+import {
+  extractAgentSlug,
+  resolveAddress,
+  resolveTarget,
+  type ImInbound,
+  type ImLookups,
+} from "@/lib/server/im/policy";
+import { LARK_POLICY_DEFAULTS } from "@/lib/lark-types";
+import {
+  LARK_THREAD_TABLES_SQL,
+  larkThreadTailIn,
+  nodeOfLarkMessageIn,
+  recordLarkOutboxIn,
+  upsertLarkThreadIn,
+} from "@/lib/server/lark/protocol";
+
+const P = LARK_POLICY_DEFAULTS;
+const noLookups: ImLookups = { nodeOfMessage: () => null, threadTail: () => null, chatTail: () => null };
+const inbound = (o: Partial<ImInbound> = {}): ImInbound => ({
+  chatType: "group", text: "问题", mentionedBot: false, threadId: null, rootId: null, parentId: null, ...o,
+});
+const threadLookups: ImLookups = { ...noLookups, threadTail: (t) => (t === "omt_1" ? "node_tail" : null) };
+const quoteLookups: ImLookups = { ...noLookups, nodeOfMessage: (m) => (m === "om_bot_reply" ? "node_reply" : null) };
+
+// addressed
+equal(resolveAddress(inbound({ chatType: "p2p" }), P, noLookups).reason, "p2p", "私聊恒 addressed");
+equal(resolveAddress(inbound(), P, noLookups).addressed, false, "群里未 @ 且非延续 → 不理");
+equal(resolveAddress(inbound({ mentionedBot: true }), P, noLookups).reason, "mention", "群 @ → mention");
+equal(resolveAddress(inbound(), { ...P, groupTrigger: "all" }, noLookups).reason, "all", "all 档群消息全收");
+const prefixed = resolveAddress(inbound({ text: "/ask 帮我看" }), { ...P, groupTrigger: "prefix", triggerPrefix: "/ask" }, noLookups);
+ok(prefixed.addressed && prefixed.reason === "prefix" && prefixed.text === "帮我看", "prefix 档命中前缀并剥掉");
+equal(resolveAddress(inbound({ text: "闲聊" }), { ...P, groupTrigger: "prefix", triggerPrefix: "/ask" }, noLookups).addressed, false, "prefix 档不带前缀不理");
+equal(resolveAddress(inbound({ mentionedBot: true }), { ...P, groupTrigger: "prefix", triggerPrefix: "/ask" }, noLookups).reason, "mention", "prefix 档显式 @ 仍算");
+equal(resolveAddress(inbound({ threadId: "omt_1" }), P, threadLookups).reason, "thread", "机器人话题内追问不 @ 也算");
+equal(resolveAddress(inbound({ parentId: "om_bot_reply", rootId: "om_root" }), P, quoteLookups).reason, "quote", "引用机器人回答不 @ 也算");
+
+// target
+equal(resolveTarget(inbound({ mentionedBot: true }), P, noLookups), { kind: "root", via: "thread" }, "群 thread 策略：顶层 @ = 新树");
+equal(resolveTarget(inbound({ mentionedBot: true }), { ...P, sessionPolicy: "chat" }, noLookups), { kind: "root", via: "chat" }, "群 chat 策略首条 = 新树");
+equal(resolveTarget(inbound({ mentionedBot: true }), { ...P, sessionPolicy: "chat" }, { ...noLookups, chatTail: () => "tail" }), { kind: "branch", parentId: "tail", via: "chain" }, "群 chat 策略接链尾");
+equal(resolveTarget(inbound({ chatType: "p2p" }), P, { ...noLookups, chatTail: () => "tail" }), { kind: "branch", parentId: "tail", via: "chain" }, "私聊恒线性，不受 thread 策略影响");
+equal(resolveTarget(inbound({ threadId: "omt_1" }), P, threadLookups), { kind: "branch", parentId: "node_tail", via: "thread" }, "话题内追问接话题叶子");
+equal(resolveTarget(inbound({ parentId: "om_bot_reply", rootId: "om_root", threadId: "omt_1" }), P, { ...threadLookups, nodeOfMessage: quoteLookups.nodeOfMessage }), { kind: "branch", parentId: "node_reply", via: "quote" }, "话题内引用具体回答 → 该节点下分支，优先于叶子");
+equal(resolveTarget(inbound({ parentId: "om_root", rootId: "om_root", threadId: "omt_1" }), P, { ...threadLookups, nodeOfMessage: (m) => (m === "om_root" ? "node_root" : null) }), { kind: "branch", parentId: "node_tail", via: "thread" }, "话题内平铺发言（parent=root）接叶子而非根");
+equal(resolveTarget(inbound({ rootId: "om_root", threadId: "omt_unknown" }), P, { ...noLookups, nodeOfMessage: (m) => (m === "om_root" ? "node_root" : null) }), { kind: "branch", parentId: "node_root", via: "thread" }, "话题未登记但根消息已知 → 接根节点");
+
+// @slug 外援
+const known = (s: string) => s === "reviewer";
+equal(extractAgentSlug("@reviewer 看看这段", known), { slug: "reviewer", text: "看看这段" }, "@slug 命中已知 agent 并剥离");
+equal(extractAgentSlug("问 @someone 一下", known), { slug: null, text: "问 @someone 一下" }, "未知 slug 不吃");
+equal(extractAgentSlug("@reviewer", known), { slug: "reviewer", text: "@reviewer" }, "只剩 slug 时保留原文当问题");
+
+// 协议层 thread 字段
+const threaded = parseIncomingEvent(event({
+  message: { ...event().message!, chat_type: "group", thread_id: "omt_9", root_id: "om_r", parent_id: "om_p", mentions: [] },
+}), "ou_bot");
+ok(threaded.kind === "message" && !threaded.mentionedBot && threaded.threadId === "omt_9" && threaded.rootId === "om_r" && threaded.parentId === "om_p", "协议层如实归一化 thread/root/parent 与 @ 事实");
+
+// 映射表
+const mapDb = new Database(":memory:");
+mapDb.exec("CREATE TABLE lark_inbox (message_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, status TEXT NOT NULL, node_id TEXT)");
+mapDb.exec(LARK_THREAD_TABLES_SQL);
+recordLarkOutboxIn(mapDb, { messageId: "om_out", botId: "b", chatId: "c", nodeId: "n1", threadId: "t1", now: 1 });
+equal(nodeOfLarkMessageIn(mapDb, "b", "om_out"), "n1", "出站消息映射到节点");
+equal(nodeOfLarkMessageIn(mapDb, "other", "om_out"), null, "别的 bot 查不到");
+mapDb.prepare("INSERT INTO lark_inbox (message_id, bot_id, status, node_id) VALUES ('om_in','b','done','n0')").run();
+mapDb.prepare("INSERT INTO lark_inbox (message_id, bot_id, status) VALUES ('om_now','b','processing')").run();
+equal(nodeOfLarkMessageIn(mapDb, "b", "om_in"), "n0", "用户消息（已落节点）映射到节点");
+equal(nodeOfLarkMessageIn(mapDb, "b", "om_now"), null, "处理中尚无节点的消息不算");
+upsertLarkThreadIn(mapDb, { botId: "b", chatId: "c", threadId: "t1", sessionId: "s", rootNodeId: "n1", lastNodeId: "n1", now: 1 });
+upsertLarkThreadIn(mapDb, { botId: "b", chatId: "c", threadId: "t1", sessionId: "s", rootNodeId: "nX", lastNodeId: "n2", now: 2 });
+equal(larkThreadTailIn(mapDb, "b", "t1"), "n2", "话题 upsert 推进叶子");
+equal((mapDb.prepare("SELECT root_node_id r FROM lark_threads WHERE thread_id = 't1'").get() as { r: string }).r, "n1", "话题根节点不被后续 upsert 覆盖");
+equal(larkThreadTailIn(mapDb, "b", "t9"), null, "未登记话题返回 null");
 
 // S134 bundle 守卫：飞书 SDK 与 ws 必须留在 serverExternalPackages。Turbopack 内联的真 ws 在
 // Bun 下握手失败（Unexpected server response: 101），且 SDK 不回调 —— 症状是「已保存、无错误、
