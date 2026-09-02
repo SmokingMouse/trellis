@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-飞书链路已通（ws 内联根因修掉，私聊实测回包），IM 入口层四旋钮与话题即树已上线待群内四步验收；侧栏最近分组同批上线；路线重锚（先 dogfood 还是先公网）仍待拍板。
+定时任务飞书落点已合并上线（PR #38，release 8ff5084），待真群验收与配置 TRELLIS_PUBLIC_URL；IM 入口层群内四步验收待做；路线重锚（先 dogfood 还是先公网）仍待拍板。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（项目级扩展，不在全局协议内；定活前读，open ≤10 条）
-- `sessions/` 一条一文件、按文件名倒序读最近 5 个（最新 S134；本日两条 S133 撞号并存（文件名为键）；`0000-legacy.md` = S132–128 存量） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、按文件名倒序读最近 5 个（最新 S136；本日两条 S133 撞号并存（文件名为键）；`0000-legacy.md` = S132–128 存量） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
