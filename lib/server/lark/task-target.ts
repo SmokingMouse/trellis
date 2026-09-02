@@ -11,7 +11,7 @@ export type LarkTaskBinding = {
 export type LarkTaskTargetLookup = (
   botId: string,
   chatId: string,
-) => "ok" | "bot_missing" | "chat_missing";
+) => "ok" | "bot_missing" | "bot_disabled" | "chat_missing";
 
 export class LarkTaskBindingError extends Error {}
 
@@ -46,6 +46,7 @@ export function resolveLarkTaskBinding(
 
   const target = lookup(botId, chatId);
   if (target === "bot_missing") throw new LarkTaskBindingError("飞书机器人不存在");
+  if (target === "bot_disabled") throw new LarkTaskBindingError("飞书机器人已停用");
   if (target === "chat_missing") {
     throw new LarkTaskBindingError("飞书 chat 不存在，或不属于所选机器人");
   }

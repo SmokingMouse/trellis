@@ -198,6 +198,7 @@ import {
   upsertLarkThreadIn,
 } from "@/lib/server/lark/protocol";
 import { pushTaskRunToLark, taskLarkMarkdown } from "@/lib/server/lark/push";
+import { taskLarkPushContent } from "@/lib/server/lark/task-push-policy";
 import {
   LarkTaskBindingError,
   resolveLarkTaskBinding,
@@ -268,6 +269,7 @@ let pushedMode = "";
 let privateTail = "";
 const pushDeps = {
   enabled: () => true,
+  publicUrl: () => null,
   getBot: () => ({ appId: "cli_mock", appSecret: "secret_mock", enabled: true }),
   getChat: (_botId: string, chatId: string) => ({
     id: chatId === "oc_private" ? "chat_private" : "chat_group",
@@ -295,6 +297,7 @@ const pushed = await pushTaskRunToLark({
 equal(pushed, { status: "sent", messageId: "om_task_push" }, "任务推送成功返回 message_id");
 equal(pushRows, [{ messageId: "om_task_push", nodeId: "n_task" }], "任务推送成功后登记 outbox");
 equal(pushedMode, "plain", "群任务推送使用 plain 顶层消息");
+equal(privateTail, "", "群任务推送不推进 chatTail");
 
 await pushTaskRunToLark({
   botId: "b",
@@ -304,6 +307,60 @@ await pushTaskRunToLark({
   markdown: "私聊 OK",
 }, pushDeps);
 equal(privateTail, "n_private", "私聊任务落点推进既有 p2p 链尾");
+
+const rowsBeforeFailure = pushRows.length;
+const tailBeforeFailure = privateTail;
+const failedPush = await pushTaskRunToLark({
+  botId: "b",
+  chatId: "oc_private",
+  sessionId: "s_task",
+  nodeId: "n_failed",
+  markdown: "发送会失败",
+}, {
+  ...pushDeps,
+  sendText: async () => {
+    throw new Error("mock send failed");
+  },
+});
+ok(failedPush.status === "error", "sendText 抛错时 push helper 不上抛并返回 error");
+equal(pushRows.length, rowsBeforeFailure, "sendText 抛错不登记 outbox");
+equal(privateTail, tailBeforeFailure, "sendText 抛错不推进链尾");
+
+const missingIdPush = await pushTaskRunToLark({
+  botId: "b",
+  chatId: "oc_group",
+  sessionId: "s_task",
+  nodeId: "n_missing_id",
+  markdown: "无 message id",
+}, {
+  ...pushDeps,
+  sendText: async () => ({ messageId: null, threadId: null }),
+});
+equal(missingIdPush, { status: "error", reason: "missing message_id" }, "messageId 为空返回 error");
+equal(pushRows.length, rowsBeforeFailure, "messageId 为空不登记 outbox");
+
+const nullNodePush = await pushTaskRunToLark({
+  botId: "b",
+  chatId: "oc_group",
+  sessionId: null,
+  nodeId: null,
+  markdown: "启动失败",
+}, pushDeps);
+ok(nullNodePush.status === "sent" && pushRows.length === rowsBeforeFailure, "nodeId=null 可发送但不登记 outbox");
+
+const lookupCrash = await pushTaskRunToLark({
+  botId: "b",
+  chatId: "oc_group",
+  sessionId: "s_task",
+  nodeId: "n_lookup_crash",
+  markdown: "查库失败",
+}, {
+  ...pushDeps,
+  getBot: () => {
+    throw new Error("mock db locked");
+  },
+});
+ok(lookupCrash.status === "error", "enabled/getBot/getChat 查库异常也不 reject");
 
 let drySent = false;
 const dryResult = await pushTaskRunToLark({
@@ -321,8 +378,56 @@ const dryResult = await pushTaskRunToLark({
   },
 });
 ok(dryResult.status === "skipped" && !drySent, "TRELLIS_LARK=off 只 dry-run 且不调用 client");
-const linkedLong = taskLarkMarkdown("甲".repeat(4_500), "/?session=s&node=n");
-ok(linkedLong.length <= 4_000 && linkedLong.includes("/?session=s&node=n"), "任务超长正文截断后保留画布深链");
+const linkedLong = taskLarkMarkdown(
+  "甲".repeat(4_500),
+  "/?session=s&node=n",
+  "https://trellis.example///",
+);
+ok(
+  linkedLong.length <= 4_000 && linkedLong.includes("https://trellis.example/?session=s&node=n"),
+  "TRELLIS_PUBLIC_URL 去尾斜杠后生成绝对画布深链",
+);
+const unlinkedLong = taskLarkMarkdown("甲".repeat(4_500), "/?session=s&node=n", null);
+ok(
+  unlinkedLong.includes("完整内容见 Trellis 画布") && !unlinkedLong.includes("/?session="),
+  "未配置 TRELLIS_PUBLIC_URL 时不输出相对路径",
+);
+
+equal(
+  taskLarkPushContent({
+    taskName: "日报", status: "error", notifyOn: "error", response: "", errorMessage: "boom",
+  }),
+  "任务「日报」失败：boom",
+  "失败推送 notify_on=error 时发送",
+);
+equal(
+  taskLarkPushContent({
+    taskName: "日报", status: "error", notifyOn: "always", response: "", errorMessage: "boom",
+  }),
+  "任务「日报」失败：boom",
+  "失败推送 notify_on=always 时发送",
+);
+equal(
+  taskLarkPushContent({
+    taskName: "日报", status: "error", notifyOn: "never", response: "", errorMessage: "boom",
+  }),
+  null,
+  "失败推送 notify_on=never 时不发送",
+);
+equal(
+  taskLarkPushContent({
+    taskName: "日报", status: "timeout", notifyOn: "error", response: "", errorMessage: "aborted",
+  }),
+  "任务「日报」超时",
+  "超时文案不暴露 aborted",
+);
+equal(
+  taskLarkPushContent({
+    taskName: "日报", status: "done", notifyOn: "always", response: "  ", errorMessage: null,
+  }),
+  null,
+  "成功但回答为空时不推送",
+);
 
 const taskThreadDb = new Database(":memory:");
 taskThreadDb.exec(`
@@ -369,6 +474,16 @@ try {
   halfRejected = error instanceof LarkTaskBindingError;
 }
 ok(halfRejected, "绑定校验拒绝只提交 bot 或 chat 一半");
+let disabledBotRejected = false;
+try {
+  resolveLarkTaskBinding(
+    { larkBotId: "bot_disabled", larkChatId: "chat_1" },
+    () => "bot_disabled",
+  );
+} catch (error) {
+  disabledBotRejected = error instanceof LarkTaskBindingError;
+}
+ok(disabledBotRejected, "绑定校验拒绝已停用机器人");
 
 // S134 bundle 守卫：飞书 SDK 与 ws 必须留在 serverExternalPackages。Turbopack 内联的真 ws 在
 // Bun 下握手失败（Unexpected server response: 101），且 SDK 不回调 —— 症状是「已保存、无错误、

@@ -64,6 +64,7 @@ type LarkTarget = {
   chatId: string;
   chatType: "p2p" | "group";
   title: string | null;
+  workspacePath: string | null;
 };
 
 const CRON_PRESETS: { label: string; expr: string }[] = [
@@ -115,7 +116,7 @@ export default function TasksPage() {
       .then(async (d) => {
         const bots = (d.bots ?? []).filter((bot: { enabled?: boolean }) => bot.enabled);
         const groups = await Promise.all(
-          bots.map(async (bot: { id: string; name: string }) => {
+          bots.map(async (bot: { id: string; name: string; workspacePath: string | null }) => {
             const response = await fetch(`/api/lark-bots/${bot.id}/chats`);
             if (!response.ok) return [];
             const payload = await response.json();
@@ -129,6 +130,7 @@ export default function TasksPage() {
               chatId: chat.chatId,
               chatType: chat.chatType,
               title: chat.title,
+              workspacePath: bot.workspacePath,
             }));
           }),
         );
@@ -157,6 +159,10 @@ export default function TasksPage() {
   }, [selectedId, loadRuns]);
 
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
+  const selectedLarkTarget = larkTargets.find(
+    (target) =>
+      target.botId === editing?.larkBotId && target.chatId === editing?.larkChatId,
+  ) ?? null;
 
   const runNow = async (id: string) => {
     setMsg(null);
@@ -378,47 +384,53 @@ export default function TasksPage() {
                 </label>
               </div>
 
-              <label className="text-ui flex flex-wrap items-center gap-2">
-                飞书落点
-                <select
-                  className={`${SELECT} min-w-[18rem]`}
-                  value={
-                    editing.larkBotId && editing.larkChatId
-                      ? JSON.stringify([editing.larkBotId, editing.larkChatId])
-                      : ""
-                  }
-                  onChange={(e) => {
-                    if (!e.target.value) {
-                      setEditing({ ...editing, larkBotId: null, larkChatId: null });
-                      return;
+              <div>
+                <label className="text-ui flex flex-wrap items-center gap-2">
+                  飞书落点
+                  <select
+                    className={`${SELECT} min-w-[18rem]`}
+                    value={
+                      editing.larkBotId && editing.larkChatId
+                        ? JSON.stringify([editing.larkBotId, editing.larkChatId])
+                        : ""
                     }
-                    const [larkBotId, larkChatId] = JSON.parse(e.target.value) as [string, string];
-                    setEditing({ ...editing, larkBotId, larkChatId });
-                  }}
-                >
-                  <option value="">不落飞书</option>
-                  {editing.larkBotId && editing.larkChatId && !larkTargets.some(
-                    (target) =>
-                      target.botId === editing.larkBotId && target.chatId === editing.larkChatId,
-                  ) && (
-                    <option value={JSON.stringify([editing.larkBotId, editing.larkChatId])} disabled>
-                      当前落点不可用（可改为其它落点）
-                    </option>
-                  )}
-                  {larkTargets.map((target) => (
-                    <option
-                      key={`${target.botId}:${target.chatId}`}
-                      value={JSON.stringify([target.botId, target.chatId])}
-                    >
-                      {target.botName} · {target.title || target.chatId}（
-                      {target.chatType === "group" ? "群聊" : "私聊"}）
-                    </option>
-                  ))}
-                </select>
-                <span className="text-label text-ink-faint">
-                  每次运行会在该 chat 的飞书会话中新建一棵树，并把结果推送过去。
-                </span>
-              </label>
+                    onChange={(e) => {
+                      if (!e.target.value) {
+                        setEditing({ ...editing, larkBotId: null, larkChatId: null });
+                        return;
+                      }
+                      const [larkBotId, larkChatId] = JSON.parse(e.target.value) as [string, string];
+                      setEditing({ ...editing, larkBotId, larkChatId });
+                    }}
+                  >
+                    <option value="">不落飞书</option>
+                    {editing.larkBotId && editing.larkChatId && !larkTargets.some(
+                      (target) =>
+                        target.botId === editing.larkBotId && target.chatId === editing.larkChatId,
+                    ) && (
+                      <option value={JSON.stringify([editing.larkBotId, editing.larkChatId])} disabled>
+                        当前落点不可用（可改为其它落点）
+                      </option>
+                    )}
+                    {larkTargets.map((target) => (
+                      <option
+                        key={`${target.botId}:${target.chatId}`}
+                        value={JSON.stringify([target.botId, target.chatId])}
+                      >
+                        {target.botName} · {target.title || target.chatId}（
+                        {target.chatType === "group" ? "群聊" : "私聊"}）
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-label text-ink-faint">
+                    每次运行会在该 chat 的飞书会话中新建一棵树，并把结果推送过去。
+                  </span>
+                </label>
+                <div className="text-label text-ink-faint mt-1">
+                  追问将在该机器人的工作目录中执行：
+                  {selectedLarkTarget?.workspacePath || "未设置"}
+                </div>
+              </div>
 
               {/* S89 补齐的四项。它们服务端一直生效、此前只能由 API 改 —— 而其中三项是
                   **闸门**（超时 / 并发 / 成本），无人值守的任务恰恰最需要它们可见可调。 */}

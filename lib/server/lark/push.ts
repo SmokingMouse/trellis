@@ -26,6 +26,7 @@ type PushChat = {
 
 export type TaskLarkPushDeps = {
   enabled: () => boolean;
+  publicUrl: () => string | null | undefined;
   getBot: (id: string) => PushBot | null;
   getChat: (botId: string, chatId: string) => PushChat | null;
   createClient: (appId: string, appSecret: string) => LarkSdkClient;
@@ -41,6 +42,7 @@ export type TaskLarkPushDeps = {
 
 const DEFAULT_DEPS: TaskLarkPushDeps = {
   enabled: () => process.env.TRELLIS_LARK !== "off",
+  publicUrl: () => process.env.TRELLIS_PUBLIC_URL,
   getBot: getLarkBotRecord,
   getChat: getLarkChat,
   createClient: createLarkClient,
@@ -54,11 +56,18 @@ export type TaskLarkPushResult =
   | { status: "skipped"; reason: string }
   | { status: "error"; reason: string };
 
-/** 任务正文专用截断：保留确切画布深链，而不是只有泛化的「见 Trellis」。 */
-export function taskLarkMarkdown(markdown: string, link: string): string {
+/** 任务正文专用截断：有公开地址才输出可用绝对深链，否则不泄露无意义的相对路径。 */
+export function taskLarkMarkdown(
+  markdown: string,
+  link: string,
+  publicUrl: string | null | undefined = process.env.TRELLIS_PUBLIC_URL,
+): string {
   const text = markdown.trim() || "（Agent 未返回文本）";
   if (text.length <= LARK_TEXT_LIMIT) return text;
-  const note = `\n\n…（内容已截断，完整内容见 Trellis：${link}）`;
+  const base = publicUrl?.trim().replace(/\/+$/, "");
+  const note = base
+    ? `\n\n…（内容已截断，完整内容见 Trellis：${base}${link}）`
+    : "\n\n…（内容已截断，完整内容见 Trellis 画布）";
   return `${text.slice(0, Math.max(0, LARK_TEXT_LIMIT - note.length))}${note}`;
 }
 
@@ -76,32 +85,32 @@ export async function pushTaskRunToLark(
   },
   deps: TaskLarkPushDeps = DEFAULT_DEPS,
 ): Promise<TaskLarkPushResult> {
-  if (!deps.enabled()) {
-    console.info(
-      `[lark] dry-run push bot=${args.botId} chat=${args.chatId} node=${args.nodeId ?? "-"}`,
-    );
-    return { status: "skipped", reason: "TRELLIS_LARK=off" };
-  }
-
-  const bot = deps.getBot(args.botId);
-  if (!bot?.enabled) {
-    console.warn(`[lark] task push skipped: bot missing or disabled bot=${args.botId}`);
-    return { status: "skipped", reason: "bot missing or disabled" };
-  }
-  const chat = deps.getChat(args.botId, args.chatId);
-  if (!chat) {
-    console.warn(`[lark] task push skipped: chat missing bot=${args.botId} chat=${args.chatId}`);
-    return { status: "skipped", reason: "chat missing" };
-  }
-
   try {
+    if (!deps.enabled()) {
+      console.info(
+        `[lark] dry-run push bot=${args.botId} chat=${args.chatId} node=${args.nodeId ?? "-"}`,
+      );
+      return { status: "skipped", reason: "TRELLIS_LARK=off" };
+    }
+
+    const bot = deps.getBot(args.botId);
+    if (!bot?.enabled) {
+      console.warn(`[lark] task push skipped: bot missing or disabled bot=${args.botId}`);
+      return { status: "skipped", reason: "bot missing or disabled" };
+    }
+    const chat = deps.getChat(args.botId, args.chatId);
+    if (!chat) {
+      console.warn(`[lark] task push skipped: chat missing bot=${args.botId} chat=${args.chatId}`);
+      return { status: "skipped", reason: "chat missing" };
+    }
+
     const link = args.sessionId && args.nodeId
       ? `/?session=${args.sessionId}&node=${args.nodeId}`
       : "/";
     const sent = await deps.sendText({
       client: deps.createClient(bot.appId, bot.appSecret),
       chatId: args.chatId,
-      markdown: taskLarkMarkdown(args.markdown, link),
+      markdown: taskLarkMarkdown(args.markdown, link, deps.publicUrl()),
       // 任务消息没有可引用的入站锚点；群聊必须顶层发送以成为话题根，私聊同样用
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",
