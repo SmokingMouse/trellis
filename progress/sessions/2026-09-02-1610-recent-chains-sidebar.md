@@ -1,0 +1,12 @@
+### Session 133（2026-09-02，侧栏「🕘 最近」分组：最近会话粒度到树链，点链直落链尾；worktree `green-field-46d3`，待 commit/PR）
+- **触发**: 用户「想新增一个功能，能有一块区域展示最近 session，粒度最好是到树链级」。盘点：侧栏（SessionSidebar）只到会话粒度；树 / 链只在会话内部的 TreePanel 有（`lib/tree-panel.ts`：森林 → 树 → 当前链 = lineage）。真库 51 会话 49 单树、182 条链，所以价值主要在**落回链尾**（上次问到哪），其次才是多树会话里分树。
+- **方案**: 侧栏顶部新分组「🕘 最近」= 最近活动的会话（≤5），每会话下挂链行（默认露 3 条、最多下发 8 条、其余「还有 N 条链」点开）。链 = 根→叶子 lineage，由叶子 tipId 唯一标识；活动时间 = 链上 max(createdAt, readAt)（写过 / 读过都算，与树面板热度同口径）。会话行复用 SidebarRow（预览 / 固定 / 运行态 / 未读同款），链行「↳ [树名 › ]链尾标签 · 相对时间」，多树会话才带树名前缀、单节点树不重复；状态点等输入 🙋 > 生成中 > 出错 > 未读。点链 → 新 store 动作 `openNodeInSession`（previewSession 后 setActiveNode 到链尾；线性视图滚到该轮、画布平移）。
+- **Done**:
+  1. `lib/server/repo.ts` `listRecentChains`（递归 CTE：从可见根出发 —— 未归档 user/lark 会话、未雪藏树 —— 沿 parent_id 累计活动时间，无子即叶子；任务会话照 listSessions 排除）+ `countVisibleTrees`；真库只读实测 182 叶子 4ms。
+  2. `lib/recent.ts` 纯数据层（归组 / 截断 / 打标签 / 状态 rollup，常量 RECENT_*）+ `lib/recent.test.ts`；`app/api/recent/route.ts`（独立端点，不并进 /api/sessions 热路径）；`lib/types.ts` 加 RecentSession / RecentChain。
+  3. `lib/relative-time.ts` 相对时间唯一真源（ReferenceCard / RelatedHints 原各手写一份，已收拢）+ 侧栏用的紧凑写法 `formatRelativeTimeShort`；`lib/relative-time.test.ts`。
+  4. `stores/sessionStore.ts` `openNodeInSession`；`components/SessionSidebar.tsx` 分组渲染 + ChainRow + 刷新触发（切会话 / sessionsRevision / 运行集合变化折成字符串比 / 窗口聚焦）。
+- **验证**: `bunx tsc --noEmit` 0 错；`bun test` 52/52（新增 8）；eslint 变更文件仅剩 SidebarRow 存量 `set-state-in-effect`（HEAD 同款，基线）；`bun --bun run build` 过、路由表含 `/api/recent`。活体：隔离实例（HOME 指向真库副本 + `TRELLIS_LARK=off` + 副本里关 tasks/bots，`next start -p 3457`）headless 浏览器截图 —— 分组渲染、链行截断 + 时间靠右、点 harness 的「提交推送」链跨会话落到 #15、树面板同步高亮。实弹揪出一处：`<button>` 的 display:flex 不撑满、宽按内容算 → 长标签把时间挤出侧栏、Playwright 几何点击落空（按钮中心 x=238 > aside 右缘 210），已显式给宽。
+- **坑**: worktree 无 node_modules 时 `bunx tsc` 会临时装 tsc 报几百个假错（`@types/react` 找不到 key 之类），先 `bun install --frozen-lockfile`；`next dev`（Turbopack）在 HOME 覆盖下报 `Invalid distDirRoot`，隔离验证走 `next start`；本机 curl 走代理，打本地端口要 `--noproxy '*'`。
+- **并行注记**: 开分支后 main 已并入 PR #34（lark ws 修复 + `sessions.md` → `sessions/0000-legacy.md` 迁移），本分支 ff 到 2554225 后再提交；主 checkout 里另有一个 leader takeover 会话正改 README / facts / backlog，本分支按并行 worktree 规则不碰这些共享文件，README 指针区「`sessions.md` 最近 5 条」改指 `sessions/` 留给那边收尾。
+- **Next**: ① 用户拍板「提交 PR 并合并」→ 走 PR（分支 `worktree/green-field-46d3`）；② 合并后 prod 尚未部署（`make deploy` 带 smoke + 自动回滚，时机待用户）；③ 可选：链行 hover 浮出 S61 同款预览卡、首屏空态（无会话时）也放一份最近列表。

@@ -370,6 +370,44 @@ export type SidebarTask = {
   enabled: boolean;
 };
 
+// S133：侧栏「最近」分组的骨架（GET /api/recent）。粒度到链：一条链 = 根→叶子
+// 的 lineage（线性视图展示的那种），由叶子 tipId 唯一标识；点链落到链尾。
+// 纯数据层（归组 / 截断 / 打标签）在 lib/recent.ts，SQL 真源在 repo.listRecentChains。
+export type RecentChainStatus =
+  | "streaming"
+  | "waiting"
+  | "unread"
+  | "error"
+  | "done";
+
+export type RecentChain = {
+  tipId: string;
+  rootId: string;
+  /** 链尾标签（topicLabel 优先，否则问题前缀） */
+  label: string;
+  /** 所在树的标签（根节点同规则）—— 多树会话里链行前缀它 */
+  treeLabel: string;
+  /** 链长：根→尾的节点数 */
+  depth: number;
+  /** 链上 max(createdAt, readAt) */
+  activityAt: number;
+  status: RecentChainStatus;
+};
+
+export type RecentSession = {
+  id: string;
+  title: string;
+  mode: string;
+  workspacePath: string | null;
+  /** = chains[0].activityAt（会话按它排序） */
+  activityAt: number;
+  /** 会话内未雪藏的树数；>1 时链行带树名前缀 */
+  treeCount: number;
+  chains: RecentChain[];
+  /** 超出服务端每会话上限、没下发的链数 */
+  moreChains: number;
+};
+
 // Notebook entry: a quoted excerpt the user captured from a node while
 // reading. Stays per-session (cascades when the session is deleted).
 // sourceNodeId carries the originating node so the UI can navigate back

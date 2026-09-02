@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { formatRelativeTime } from "@/lib/relative-time";
 
 // 体验 A：发问时相似检测的旁路提示条（挂在首屏 QuestionInput 输入卡下方）。
 // ⌘P 搜索是 pull 式 —— 得先想起来「我可能聊过」；这条是 push 式：正要新开
@@ -118,18 +119,10 @@ export function RelatedHints({ query }: { query: string }) {
             dangerouslySetInnerHTML={{ __html: h.snippet }}
           />
           <span className="text-label text-ink-faint shrink-0">
-            {timeAgo(h.sessionUpdatedAt)}
+            {formatRelativeTime(h.sessionUpdatedAt)}
           </span>
         </button>
       ))}
     </div>
   );
-}
-
-function timeAgo(ts: number): string {
-  const d = Date.now() - ts;
-  if (d < 60_000) return "刚刚";
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)} 分钟前`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)} 小时前`;
-  return `${Math.floor(d / 86_400_000)} 天前`;
 }

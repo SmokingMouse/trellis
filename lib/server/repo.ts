@@ -8,6 +8,7 @@ import { codexRolloutExists, deleteCodexRollout } from "./codex-fork";
 import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
+import type { RecentChainRow } from "@/lib/recent";
 import type {
   NodeKind,
   NodeAttachment,
@@ -2271,4 +2272,116 @@ export function reapInterruptedStreams(): number {
     )
     .run();
   return result.changes;
+}
+
+// ── S133 最近链（侧栏「最近」分组）────────────────────────────────────
+//
+// 每条链（根→叶子 lineage）一行，按链上 max(created_at, read_at) 降序。递归
+// CTE 从**可见根**出发（未归档的 user/lark 会话、未雪藏的树 —— 与 listSessions
+// 和树面板同口径），沿 parent_id 下钻、逐级累计活动时间；没有子节点的即叶子
+// = 链尾。任务会话（kind='task'）照 listSessions 排除：它们在侧栏有自己的组。
+//
+// 归组 / 截断 / 打标签在 lib/recent.ts（纯函数，可测）；这里只负责取行。
+export function listRecentChains(limit = 200): RecentChainRow[] {
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `WITH RECURSIVE chain(id, root_id, depth, activity) AS (
+         SELECT n.id, n.id, 1, max(n.created_at, coalesce(n.read_at, 0))
+           FROM nodes n JOIN sessions s ON s.id = n.session_id
+          WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
+            AND s.archived = 0 AND s.kind IN ('user', 'lark')
+         UNION ALL
+         SELECT n.id, c.root_id, c.depth + 1,
+                max(c.activity, n.created_at, coalesce(n.read_at, 0))
+           FROM nodes n JOIN chain c ON n.parent_id = c.id
+       )
+       SELECT c.id AS tip_id, c.root_id, c.depth, c.activity,
+              t.session_id, t.question AS tip_question,
+              t.topic_label AS tip_topic_label, t.status AS tip_status,
+              t.kind AS tip_kind, t.ref_meta_json AS tip_ref_meta_json,
+              t.read_at AS tip_read_at,
+              (t.pending_interaction_json IS NOT NULL) AS tip_waiting,
+              r.question AS root_question, r.topic_label AS root_topic_label,
+              r.kind AS root_kind, r.ref_meta_json AS root_ref_meta_json,
+              s.title AS session_title, s.context_mode AS session_mode,
+              s.workspace_path AS session_workspace_path
+         FROM chain c
+         JOIN nodes t ON t.id = c.id
+         JOIN nodes r ON r.id = c.root_id
+         JOIN sessions s ON s.id = t.session_id
+        WHERE NOT EXISTS (SELECT 1 FROM nodes k WHERE k.parent_id = c.id)
+        ORDER BY c.activity DESC, c.id
+        LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    tip_id: string;
+    root_id: string;
+    depth: number;
+    activity: number;
+    session_id: string;
+    tip_question: string;
+    tip_topic_label: string | null;
+    tip_status: string;
+    tip_kind: string | null;
+    tip_ref_meta_json: string | null;
+    tip_read_at: number | null;
+    tip_waiting: number;
+    root_question: string;
+    root_topic_label: string | null;
+    root_kind: string | null;
+    root_ref_meta_json: string | null;
+    session_title: string;
+    session_mode: string | null;
+    session_workspace_path: string | null;
+  }>;
+  return rows.map((r) => ({
+    sessionId: r.session_id,
+    sessionTitle: r.session_title,
+    sessionMode: r.session_mode ?? "chat",
+    sessionWorkspacePath: r.session_workspace_path,
+    tipId: r.tip_id,
+    rootId: r.root_id,
+    depth: r.depth,
+    activityAt: r.activity,
+    tipQuestion: r.tip_question,
+    tipTopicLabel: r.tip_topic_label,
+    tipStatus: r.tip_status,
+    tipKind: r.tip_kind ?? "qa",
+    tipRefTitle: refTitleOf(r.tip_ref_meta_json),
+    tipReadAt: r.tip_read_at,
+    tipWaiting: r.tip_waiting === 1,
+    rootQuestion: r.root_question,
+    rootTopicLabel: r.root_topic_label,
+    rootKind: r.root_kind ?? "qa",
+    rootRefTitle: refTitleOf(r.root_ref_meta_json),
+  }));
+}
+
+// 会话内未雪藏的树数 —— 最近分组据此决定链行要不要带树名前缀（单树会话
+// 的树名就是会话标题的另一种说法，前缀是噪音）。
+export function countVisibleTrees(sessionIds: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (sessionIds.length === 0) return out;
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `SELECT session_id, COUNT(*) AS n FROM nodes
+        WHERE parent_id IS NULL AND hidden_at IS NULL
+          AND session_id IN (${sessionIds.map(() => "?").join(",")})
+        GROUP BY session_id`,
+    )
+    .all(...sessionIds) as Array<{ session_id: string; n: number }>;
+  for (const r of rows) out.set(r.session_id, r.n);
+  return out;
+}
+
+function refTitleOf(metaJson: string | null): string | null {
+  if (!metaJson) return null;
+  try {
+    const meta = JSON.parse(metaJson) as ReferenceMeta;
+    return typeof meta?.title === "string" && meta.title ? meta.title : null;
+  } catch {
+    return null;
+  }
 }
