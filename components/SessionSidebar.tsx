@@ -535,6 +535,10 @@ export function SessionSidebar() {
                 orderedChains,
                 runningNodeIds,
                 waitingNodeIds,
+                {
+                  running: isRunning(r.id),
+                  unread: unreadIds.has(r.id),
+                },
               );
               const shown = expanded
                 ? orderedChains

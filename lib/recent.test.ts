@@ -4,6 +4,7 @@ import {
   deriveRecentChainStatus,
   groupRecentChains,
   nodeLabel,
+  orderRecentChains,
   recentSessionStatus,
   type RecentChainRow,
 } from "./recent";
@@ -22,8 +23,9 @@ function row(over: Partial<RecentChainRow> & { tipId: string }): RecentChainRow 
     tipTopicLabel: null,
     tipKind: "qa",
     tipRefTitle: null,
-    hasError: false,
-    hasUnread: false,
+    tipStatus: "done",
+    tipReadAt: 1,
+    tipWaiting: false,
     rootQuestion: "根问题",
     rootTopicLabel: "树名",
     rootKind: "qa",
@@ -56,10 +58,22 @@ describe("nodeLabel", () => {
 });
 
 describe("chainStatus", () => {
-  it("uses the whole-lineage terminal baseline: error > unread > done", () => {
-    expect(chainStatus({ hasError: true, hasUnread: true })).toBe("error");
-    expect(chainStatus({ hasError: false, hasUnread: true })).toBe("unread");
-    expect(chainStatus({ hasError: false, hasUnread: false })).toBe("done");
+  it("uses the tip baseline: waiting > streaming > error > unread > done", () => {
+    expect(
+      chainStatus({ tipStatus: "streaming", tipReadAt: null, tipWaiting: true }),
+    ).toBe("waiting");
+    expect(
+      chainStatus({ tipStatus: "streaming", tipReadAt: null, tipWaiting: false }),
+    ).toBe("streaming");
+    expect(
+      chainStatus({ tipStatus: "error", tipReadAt: null, tipWaiting: false }),
+    ).toBe("error");
+    expect(
+      chainStatus({ tipStatus: "done", tipReadAt: null, tipWaiting: false }),
+    ).toBe("unread");
+    expect(
+      chainStatus({ tipStatus: "done", tipReadAt: 1, tipWaiting: false }),
+    ).toBe("done");
   });
 });
 
@@ -95,7 +109,7 @@ describe("recent live status", () => {
   it("aggregates a session with waiting > streaming > error > unread > done", () => {
     const [session] = groupRecentChains(
       [
-        row({ tipId: "error", nodeIds: ["root", "error"], hasError: true }),
+        row({ tipId: "error", nodeIds: ["root", "error"], tipStatus: "error" }),
         row({ tipId: "run", nodeIds: ["root", "run"] }),
         row({ tipId: "wait", nodeIds: ["root", "wait"] }),
       ],
@@ -130,6 +144,62 @@ describe("recent live status", () => {
     );
     expect(session.chains.map((chain) => chain.tipId)).toEqual(["active-old"]);
     expect(session.moreChains).toBe(1);
+  });
+
+  it("preserves activity order when no lineage has a live run", () => {
+    const chains = [
+      row({ tipId: "new", activityAt: 30 }),
+      row({ tipId: "unread", activityAt: 20, tipReadAt: null }),
+      row({ tipId: "error", activityAt: 10, tipStatus: "error" }),
+    ].map((item) => groupRecentChains([item], new Map())[0].chains[0]);
+    expect(orderRecentChains(chains, new Set(), new Set()).map((c) => c.tipId)).toEqual([
+      "new",
+      "unread",
+      "error",
+    ]);
+  });
+
+  it("ignores a middle-node error when the read tip is done", () => {
+    const [session] = groupRecentChains(
+      [row({ tipId: "tip", nodeIds: ["middle-error", "tip"] })],
+      new Map(),
+    );
+    expect(deriveRecentChainStatus(session.chains[0], new Set(), new Set())).toBe(
+      "done",
+    );
+  });
+
+  it("ignores a middle-node unread state when the tip is already read", () => {
+    const [session] = groupRecentChains(
+      [row({ tipId: "tip", nodeIds: ["middle-unread", "tip"], tipReadAt: 9 })],
+      new Map(),
+    );
+    expect(deriveRecentChainStatus(session.chains[0], new Set(), new Set())).toBe(
+      "done",
+    );
+  });
+
+  it("keeps the session streaming when its active node is outside recent chains", () => {
+    const [session] = groupRecentChains(
+      [row({ tipId: "visible", nodeIds: ["root", "visible"] })],
+      new Map(),
+    );
+    expect(
+      recentSessionStatus(session.chains, new Set(["not-in-recent"]), new Set(), {
+        running: true,
+        unread: false,
+      }),
+    ).toBe("streaming");
+  });
+
+  it("keeps a streaming tip lit before the live node poll arrives", () => {
+    const [session] = groupRecentChains(
+      [row({ tipId: "tip", tipStatus: "streaming" })],
+      new Map(),
+    );
+    expect(deriveRecentChainStatus(session.chains[0], new Set(), new Set())).toBe(
+      "streaming",
+    );
   });
 });
 
@@ -171,7 +241,7 @@ describe("groupRecentChains", () => {
 
   it("carries labels, tree labels and status onto each chain", () => {
     const [s] = groupRecentChains(
-      [row({ tipId: "t", tipTopicLabel: "尾巴", hasUnread: true, depth: 4 })],
+      [row({ tipId: "t", tipTopicLabel: "尾巴", tipReadAt: null, depth: 4 })],
       new Map(),
     );
     expect(s.chains[0]).toMatchObject({

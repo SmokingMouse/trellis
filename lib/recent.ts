@@ -36,8 +36,9 @@ export type RecentChainRow = {
   tipTopicLabel: string | null;
   tipKind: string;
   tipRefTitle: string | null;
-  hasError: boolean;
-  hasUnread: boolean;
+  tipStatus: string;
+  tipReadAt: number | null;
+  tipWaiting: boolean;
   rootQuestion: string;
   rootTopicLabel: string | null;
   rootKind: string;
@@ -66,12 +67,14 @@ export function nodeLabel(
   return q.length > max ? `${q.slice(0, max - 1)}…` : q || "（空）";
 }
 
-/** DB 基线只保留终态；生成中 / 等输入由 /api/runs 的内存态实时覆盖。 */
+/** DB 基线只看链尾：等输入 > 生成中 > 出错 > 未读 > 普通。 */
 export function chainStatus(
-  row: Pick<RecentChainRow, "hasError" | "hasUnread">,
+  row: Pick<RecentChainRow, "tipStatus" | "tipReadAt" | "tipWaiting">,
 ): RecentChainStatus {
-  if (row.hasError) return "error";
-  if (row.hasUnread) return "unread";
+  if (row.tipWaiting) return "waiting";
+  if (row.tipStatus === "streaming") return "streaming";
+  if (row.tipStatus === "error") return "error";
+  if (row.tipStatus === "done" && row.tipReadAt == null) return "unread";
   return "done";
 }
 
@@ -94,13 +97,25 @@ export function deriveRecentChainStatus(
   return chain.status;
 }
 
-/** 会话行只做链状态聚合，沿用同一优先级。 */
+/**
+ * 会话行 = 链聚合与原 session 位图的较高优先级。
+ * sessionRunning 包含轮询集合与当前会话本地 activeRunning，确保最近链截断或
+ * 尚未拉到新 lineage 时，会话行不会比改造前更暗。
+ */
 export function recentSessionStatus(
   chains: readonly RecentChain[],
   runningNodeIds: ReadonlySet<string>,
   waitingNodeIds: ReadonlySet<string>,
+  sessionState: { running: boolean; unread: boolean } = {
+    running: false,
+    unread: false,
+  },
 ): RecentChainStatus {
-  let best: RecentChainStatus = "done";
+  let best: RecentChainStatus = sessionState.running
+    ? "streaming"
+    : sessionState.unread
+      ? "unread"
+      : "done";
   for (const chain of chains) {
     const status = deriveRecentChainStatus(
       chain,
@@ -112,7 +127,7 @@ export function recentSessionStatus(
   return best;
 }
 
-/** 高优先级链提到可见区；同状态仍保持原来的活动时间顺序。 */
+/** 只提升实时活跃链；error / unread 等 DB 基线不改变活动时间顺序。 */
 export function orderRecentChains(
   chains: readonly RecentChain[],
   runningNodeIds: ReadonlySet<string>,
@@ -122,10 +137,11 @@ export function orderRecentChains(
     .map((chain, index) => ({
       chain,
       index,
-      priority:
-        STATUS_PRIORITY[
-          deriveRecentChainStatus(chain, runningNodeIds, waitingNodeIds)
-        ],
+      priority: chain.nodeIds.some((id) => waitingNodeIds.has(id))
+        ? 2
+        : chain.nodeIds.some((id) => runningNodeIds.has(id))
+          ? 1
+          : 0,
     }))
     .sort((a, b) => b.priority - a.priority || a.index - b.index)
     .map(({ chain }) => chain);

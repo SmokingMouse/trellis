@@ -14,15 +14,15 @@ const POLL_MS = 1500;
 // read runningSessionIds / unreadSessionIds straight off the store; nobody
 // else runs an interval.
 //
-// Keep polling while hidden: recent-chain status must not depend on focus or
-// the active conversation. Browsers may coalesce background timers, but the
-// app itself never gates this source on document visibility.
+// Paused while the document is hidden (no point polling an invisible bar)
+// and refetched immediately on re-show so badges are fresh on return.
 export function useRunPolling() {
   const ingest = useSessionStore((s) => s.ingestRunningSessions);
 
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
+      if (document.hidden) return;
       fetch("/api/runs")
         .then((r) => r.json())
         .then((data) => {
@@ -50,9 +50,14 @@ export function useRunPolling() {
     };
     poll();
     const id = window.setInterval(poll, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [ingest]);
 }
