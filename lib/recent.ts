@@ -29,13 +29,14 @@ export type RecentChainRow = {
   sessionWorkspacePath: string | null;
   tipId: string;
   rootId: string;
+  nodeIds: string[];
   depth: number;
   activityAt: number;
   tipQuestion: string;
   tipTopicLabel: string | null;
-  tipStatus: string;
   tipKind: string;
   tipRefTitle: string | null;
+  tipStatus: string;
   tipReadAt: number | null;
   tipWaiting: boolean;
   rootQuestion: string;
@@ -66,22 +67,91 @@ export function nodeLabel(
   return q.length > max ? `${q.slice(0, max - 1)}…` : q || "（空）";
 }
 
-/** 链尾状态 rollup：等输入 > 生成中 > 出错 > 未读 > 普通（紧急度降序）。 */
+/** DB 基线只看链尾：等输入 > 生成中 > 出错 > 未读 > 普通。 */
 export function chainStatus(
   row: Pick<RecentChainRow, "tipStatus" | "tipReadAt" | "tipWaiting">,
 ): RecentChainStatus {
   if (row.tipWaiting) return "waiting";
   if (row.tipStatus === "streaming") return "streaming";
   if (row.tipStatus === "error") return "error";
-  // 与 tree-panel.isUnreadNode 同口径：done 且从未 readAt。
   if (row.tipStatus === "done" && row.tipReadAt == null) return "unread";
   return "done";
+}
+
+const STATUS_PRIORITY: Record<RecentChainStatus, number> = {
+  done: 0,
+  unread: 1,
+  error: 2,
+  streaming: 3,
+  waiting: 4,
+};
+
+/** 整条 lineage 的实时态：等输入 > 生成中 > DB 的 error / unread / done。 */
+export function deriveRecentChainStatus(
+  chain: Pick<RecentChain, "nodeIds" | "status">,
+  runningNodeIds: ReadonlySet<string>,
+  waitingNodeIds: ReadonlySet<string>,
+): RecentChainStatus {
+  if (chain.nodeIds.some((id) => waitingNodeIds.has(id))) return "waiting";
+  if (chain.nodeIds.some((id) => runningNodeIds.has(id))) return "streaming";
+  return chain.status;
+}
+
+/**
+ * 会话行 = 链聚合与原 session 位图的较高优先级。
+ * sessionRunning 包含轮询集合与当前会话本地 activeRunning，确保最近链截断或
+ * 尚未拉到新 lineage 时，会话行不会比改造前更暗。
+ */
+export function recentSessionStatus(
+  chains: readonly RecentChain[],
+  runningNodeIds: ReadonlySet<string>,
+  waitingNodeIds: ReadonlySet<string>,
+  sessionState: { running: boolean; unread: boolean } = {
+    running: false,
+    unread: false,
+  },
+): RecentChainStatus {
+  let best: RecentChainStatus = sessionState.running
+    ? "streaming"
+    : sessionState.unread
+      ? "unread"
+      : "done";
+  for (const chain of chains) {
+    const status = deriveRecentChainStatus(
+      chain,
+      runningNodeIds,
+      waitingNodeIds,
+    );
+    if (STATUS_PRIORITY[status] > STATUS_PRIORITY[best]) best = status;
+  }
+  return best;
+}
+
+/** 只提升实时活跃链；error / unread 等 DB 基线不改变活动时间顺序。 */
+export function orderRecentChains(
+  chains: readonly RecentChain[],
+  runningNodeIds: ReadonlySet<string>,
+  waitingNodeIds: ReadonlySet<string>,
+): RecentChain[] {
+  return chains
+    .map((chain, index) => ({
+      chain,
+      index,
+      priority: chain.nodeIds.some((id) => waitingNodeIds.has(id))
+        ? 2
+        : chain.nodeIds.some((id) => runningNodeIds.has(id))
+          ? 1
+          : 0,
+    }))
+    .sort((a, b) => b.priority - a.priority || a.index - b.index)
+    .map(({ chain }) => chain);
 }
 
 export function rowToChain(row: RecentChainRow): RecentChain {
   return {
     tipId: row.tipId,
     rootId: row.rootId,
+    nodeIds: row.nodeIds,
     label: nodeLabel({
       question: row.tipQuestion,
       topicLabel: row.tipTopicLabel,
@@ -108,32 +178,54 @@ export function rowToChain(row: RecentChainRow): RecentChain {
 export function groupRecentChains(
   rows: RecentChainRow[],
   treeCounts: ReadonlyMap<string, number>,
-  opts?: { sessions?: number; chainsPerSession?: number },
+  opts?: {
+    sessions?: number;
+    chainsPerSession?: number;
+    runningNodeIds?: ReadonlySet<string>;
+    waitingNodeIds?: ReadonlySet<string>;
+  },
 ): RecentSession[] {
   const maxSessions = opts?.sessions ?? RECENT_SESSION_LIMIT;
   const maxChains = opts?.chainsPerSession ?? RECENT_CHAINS_PER_SESSION;
-  const bySession = new Map<string, RecentSession>();
+  const bySession = new Map<
+    string,
+    {
+      session: Omit<RecentSession, "chains" | "moreChains">;
+      rows: RecentChainRow[];
+    }
+  >();
   for (const row of rows) {
-    let s = bySession.get(row.sessionId);
-    if (!s) {
+    let entry = bySession.get(row.sessionId);
+    if (!entry) {
       if (bySession.size >= maxSessions) continue;
-      s = {
-        id: row.sessionId,
-        title: row.sessionTitle,
-        mode: row.sessionMode,
-        workspacePath: row.sessionWorkspacePath,
-        activityAt: row.activityAt,
-        treeCount: treeCounts.get(row.sessionId) ?? 1,
-        chains: [],
-        moreChains: 0,
+      entry = {
+        session: {
+          id: row.sessionId,
+          title: row.sessionTitle,
+          mode: row.sessionMode,
+          workspacePath: row.sessionWorkspacePath,
+          activityAt: row.activityAt,
+          treeCount: treeCounts.get(row.sessionId) ?? 1,
+        },
+        rows: [],
       };
-      bySession.set(row.sessionId, s);
+      bySession.set(row.sessionId, entry);
     }
-    if (s.chains.length >= maxChains) {
-      s.moreChains++;
-      continue;
-    }
-    s.chains.push(rowToChain(row));
+    entry.rows.push(row);
   }
-  return [...bySession.values()];
+
+  const runningNodeIds = opts?.runningNodeIds ?? new Set<string>();
+  const waitingNodeIds = opts?.waitingNodeIds ?? new Set<string>();
+  return [...bySession.values()].map(({ session, rows: sessionRows }) => {
+    const allChains = orderRecentChains(
+      sessionRows.map(rowToChain),
+      runningNodeIds,
+      waitingNodeIds,
+    );
+    return {
+      ...session,
+      chains: allChains.slice(0, maxChains),
+      moreChains: Math.max(0, allChains.length - maxChains),
+    };
+  });
 }

@@ -5,17 +5,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // GET /api/runs
-// Wave 1 / A2: report which sessions currently have at least one node
-// streaming, so the tab bar can render a live "busy" pulse. run-bus owns
-// the authoritative per-node RUNS map (already multi-session); we map each
-// active nodeId → its sessionId via a cheap indexed lookup and dedup.
-// Polled ~every 3s by SessionTabs; kept a thin shell like /api/search.
+// Session ids stay for the existing tabs/sidebar consumers. Node refs preserve
+// the chain-level identity and split waiting from generating for RecentChain.
 export async function GET() {
   const runs = getActiveRuns();
   const sessionIds = new Set<string>();
-  for (const { nodeId } of runs) {
+  const runningNodes: Array<{ nodeId: string; sessionId: string }> = [];
+  const waitingNodes: Array<{ nodeId: string; sessionId: string }> = [];
+  for (const { nodeId, waiting } of runs) {
     const node = getNode(nodeId);
-    if (node) sessionIds.add(node.sessionId);
+    if (!node) continue;
+    sessionIds.add(node.sessionId);
+    const ref = { nodeId, sessionId: node.sessionId };
+    if (waiting) waitingNodes.push(ref);
+    else runningNodes.push(ref);
   }
-  return Response.json({ runningSessionIds: [...sessionIds] });
+  return Response.json({
+    runningSessionIds: [...sessionIds],
+    runningNodes,
+    waitingNodes,
+  });
 }

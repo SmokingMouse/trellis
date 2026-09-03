@@ -1,4 +1,5 @@
 import { countVisibleTrees, listRecentChains } from "@/lib/server/repo";
+import { getActiveRuns } from "@/lib/server/run-bus";
 import {
   RECENT_CHAINS_PER_SESSION,
   RECENT_ROW_SCAN,
@@ -31,6 +32,13 @@ export async function GET(req: Request) {
     20,
   );
   const rows = listRecentChains(RECENT_ROW_SCAN);
+  const activeRuns = getActiveRuns();
+  const runningNodeIds = new Set(
+    activeRuns.filter((run) => !run.waiting).map((run) => run.nodeId),
+  );
+  const waitingNodeIds = new Set(
+    activeRuns.filter((run) => run.waiting).map((run) => run.nodeId),
+  );
   const treeCounts = countVisibleTrees([
     ...new Set(rows.map((r) => r.sessionId)),
   ]);
@@ -38,6 +46,8 @@ export async function GET(req: Request) {
     sessions: groupRecentChains(rows, treeCounts, {
       sessions,
       chainsPerSession: chains,
+      runningNodeIds,
+      waitingNodeIds,
     }),
   });
 }

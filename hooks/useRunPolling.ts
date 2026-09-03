@@ -27,7 +27,21 @@ export function useRunPolling() {
         .then((r) => r.json())
         .then((data) => {
           if (!cancelled) {
-            ingest(new Set<string>(data.runningSessionIds ?? []));
+            const runningNodes = Array.isArray(data.runningNodes)
+              ? data.runningNodes
+              : [];
+            const waitingNodes = Array.isArray(data.waitingNodes)
+              ? data.waitingNodes
+              : [];
+            ingest(
+              new Set<string>(data.runningSessionIds ?? []),
+              new Set<string>(
+                runningNodes.map((run: { nodeId: string }) => run.nodeId),
+              ),
+              new Set<string>(
+                waitingNodes.map((run: { nodeId: string }) => run.nodeId),
+              ),
+            );
           }
         })
         .catch(() => {

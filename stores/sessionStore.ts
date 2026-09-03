@@ -534,6 +534,10 @@ type State = {
   // Shared from the central poll so SessionTabs + SessionSidebar don't each
   // run their own interval. Drives the blue running pulse.
   runningSessionIds: Set<string>;
+  // Same poll, kept at node granularity for the Recent chain rows. Waiting is
+  // exclusive from running here; the UI applies waiting > running priority.
+  runningNodeIds: Set<string>;
+  waitingNodeIds: Set<string>;
   // Left explorer sidebar open/closed (desktop). Persisted to localStorage.
   sidebarOpen: boolean;
   // Mobile session-list drawer (the sidebar is hidden on mobile; this overlays
@@ -560,7 +564,11 @@ type Actions = {
   // Central run-poll diff: feed the latest set of running session ids; the
   // store computes the "finished while away" unread diff against the prior
   // snapshot. Called by useRunPolling only.
-  ingestRunningSessions: (ids: Set<string>) => void;
+  ingestRunningSessions: (
+    ids: Set<string>,
+    runningNodeIds: Set<string>,
+    waitingNodeIds: Set<string>,
+  ) => void;
   setSidebarOpen: (open: boolean) => void;
   setMobileNavOpen: (open: boolean) => void;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -835,6 +843,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   pinnedSessionIds: loadPinned(),
   unreadSessionIds: new Set(),
   runningSessionIds: new Set(),
+  runningNodeIds: new Set(),
+  waitingNodeIds: new Set(),
   sidebarOpen: loadSidebarOpen(),
   mobileNavOpen: false,
 
@@ -1006,7 +1016,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     void get().loadSession(neighbor);
   },
 
-  ingestRunningSessions: (ids) => {
+  ingestRunningSessions: (ids, runningNodeIds, waitingNodeIds) => {
     set((s) => {
       const prev = s.runningSessionIds;
       // Diff: any id that *was* running last tick but isn't now, and isn't
@@ -1028,6 +1038,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }
       return {
         runningSessionIds: ids,
+        runningNodeIds,
+        waitingNodeIds,
         ...(unreadChanged ? { unreadSessionIds: unread } : {}),
       };
     });

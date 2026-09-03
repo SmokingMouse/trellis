@@ -383,6 +383,8 @@ export type RecentChainStatus =
 export type RecentChain = {
   tipId: string;
   rootId: string;
+  /** 根→链尾的完整节点 id；实时状态按它与 /api/runs 的节点集合求交。 */
+  nodeIds: string[];
   /** 链尾标签（topicLabel 优先，否则问题前缀） */
   label: string;
   /** 所在树的标签（根节点同规则）—— 多树会话里链行前缀它 */
@@ -399,7 +401,7 @@ export type RecentSession = {
   title: string;
   mode: string;
   workspacePath: string | null;
-  /** = chains[0].activityAt（会话按它排序） */
+  /** 会话内最大的链活动时间（会话仍按它排序） */
   activityAt: number;
   /** 会话内未雪藏的树数；>1 时链行带树名前缀 */
   treeCount: number;
