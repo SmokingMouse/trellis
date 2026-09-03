@@ -15,7 +15,12 @@ import {
 } from "@/lib/workbench-layout";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
-import { RECENT_CHAINS_SHOWN } from "@/lib/recent";
+import {
+  RECENT_CHAINS_SHOWN,
+  deriveRecentChainStatus,
+  orderRecentChains,
+  recentSessionStatus,
+} from "@/lib/recent";
 import {
   HOME_CLUSTER_KEY,
   SCRATCH_CLUSTER_KEY,
@@ -78,6 +83,8 @@ export function SessionSidebar() {
   const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const runningIds = useSessionStore((s) => s.runningSessionIds);
+  const runningNodeIds = useSessionStore((s) => s.runningNodeIds);
+  const waitingNodeIds = useSessionStore((s) => s.waitingNodeIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
   const unarchiveSession = useSessionStore((s) => s.unarchiveSession);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
@@ -205,13 +212,15 @@ export function SessionSidebar() {
   }, [activeId, sessionsRevision]);
 
   // S133：最近分组的刷新触发 —— 切会话 / 列表变更（与主列表同）之外，还看
-  // 「哪些会话在跑」的集合变化（一轮开始 / 结束都会改链尾与活动时间；中央
-  // /api/runs 轮询免费提供，不另起 interval —— 集合每 tick 都是新 Set，所以
-  // 折成字符串比内容）和窗口聚焦（在别的 tab / CLI 里读写过的会话，切回来
-  // 就该浮上来）。
-  const runningKey = useMemo(
-    () => [...runningIds].sort().join(","),
-    [runningIds],
+  // node 级 key 能分辨「同会话 A 刚结束、B 接着运行」与 waiting 状态切换；
+  // session 级集合在这两种情况下都不变。集合每 tick 都是新 Set，折成内容 key。
+  const recentRunKey = useMemo(
+    () =>
+      [
+        ...[...waitingNodeIds].sort().map((id) => `w:${id}`),
+        ...[...runningNodeIds].sort().map((id) => `r:${id}`),
+      ].join(","),
+    [runningNodeIds, waitingNodeIds],
   );
   useEffect(() => {
     let cancelled = false;
@@ -226,7 +235,7 @@ export function SessionSidebar() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, sessionsRevision, runningKey, recentNonce]);
+  }, [activeId, sessionsRevision, recentRunKey, recentNonce]);
 
   // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
   //
@@ -426,7 +435,11 @@ export function SessionSidebar() {
 
   // 单行渲染。indent 让它能在 Chat（平铺）与 Project→Workspace（缩两级）
   // 两种上下文里复用同一个组件，缩进不进 SidebarRow 内部。
-  const renderRow = (s: Session, indent = 0) => (
+  const renderRow = (
+    s: Session,
+    indent = 0,
+    status?: RecentChain["status"],
+  ) => (
     <SidebarRow
       key={s.id}
       session={s}
@@ -435,6 +448,7 @@ export function SessionSidebar() {
       preview={s.id === previewId}
       running={isRunning(s.id)}
       unread={unreadIds.has(s.id)}
+      status={status}
       live={liveSessionIds.has(s.id)}
       editing={editingId === s.id}
       onPreview={() => previewSession(s.id)}
@@ -512,17 +526,32 @@ export function SessionSidebar() {
               // fetch 有先后，落空时用最近分组自带的骨架顶一下。
               const s = sessionById.get(r.id) ?? recentAsSession(r);
               const expanded = recentExpanded.has(r.id);
+              const orderedChains = orderRecentChains(
+                r.chains,
+                runningNodeIds,
+                waitingNodeIds,
+              );
+              const status = recentSessionStatus(
+                orderedChains,
+                runningNodeIds,
+                waitingNodeIds,
+              );
               const shown = expanded
-                ? r.chains
-                : r.chains.slice(0, RECENT_CHAINS_SHOWN);
-              const folded = r.chains.length - shown.length;
+                ? orderedChains
+                : orderedChains.slice(0, RECENT_CHAINS_SHOWN);
+              const folded = orderedChains.length - shown.length;
               return (
                 <div key={r.id}>
-                  {renderRow(s, 1)}
+                  {renderRow(s, 1, status)}
                   {shown.map((c) => (
                     <ChainRow
                       key={c.tipId}
                       chain={c}
+                      status={deriveRecentChainStatus(
+                        c,
+                        runningNodeIds,
+                        waitingNodeIds,
+                      )}
                       showTree={r.treeCount > 1}
                       active={r.id === activeId && c.tipId === activeNodeId}
                       onOpen={() => {
@@ -1214,6 +1243,7 @@ function SidebarRow({
   preview,
   running,
   unread,
+  status,
   live,
   editing,
   onPreview,
@@ -1231,6 +1261,8 @@ function SidebarRow({
   preview: boolean;
   running: boolean;
   unread: boolean;
+  /** 最近分组传入整会话链聚合；其他分组缺省时维持原 running/unread 语义。 */
+  status?: RecentChain["status"];
   live: boolean;
   editing: boolean;
   onPreview: () => void;
@@ -1244,6 +1276,18 @@ function SidebarRow({
   const style = modeStyle(session.mode);
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(session.title);
+  const indicatorStatus =
+    status ?? (running ? "streaming" : unread ? "unread" : "done");
+  const statusTitle =
+    indicatorStatus === "waiting"
+      ? "等你回答"
+      : indicatorStatus === "streaming"
+        ? "生成中…"
+        : indicatorStatus === "error"
+          ? "出错"
+          : indicatorStatus === "unread"
+            ? "完成·未读"
+            : "";
 
   useEffect(() => {
     if (editing) {
@@ -1260,32 +1304,46 @@ function SidebarRow({
     <div
       style={{ paddingLeft: PAD(indent), height: ROW_H }}
       className={`group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
-        running
+        indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
             "bg-accent-muted text-accent-ink font-medium"
-          : unread
-            ? // Finished-unread tint (unread hue), loud but static.
-              "bg-unread-muted text-unread-ink font-medium"
-            : active
-              ? `${style.activeBg} ${style.text} font-medium`
-              : "text-ink-muted hover:bg-surface-muted"
+          : indicatorStatus === "error"
+            ? "bg-danger-muted text-danger-ink font-medium"
+            : indicatorStatus === "unread"
+              ? // Finished-unread tint (unread hue), loud but static.
+                "bg-unread-muted text-unread-ink font-medium"
+              : active
+                ? `${style.activeBg} ${style.text} font-medium`
+                : "text-ink-muted hover:bg-surface-muted"
       }`}
       onClick={editing ? undefined : onPreview}
       onDoubleClick={editing ? undefined : onPin}
-      title={`${style.label} · ${session.title}${running ? "\n生成中…" : unread ? "\n完成·未读" : ""}\n单击预览 · 双击固定`}
+      title={`${style.label} · ${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击固定`}
     >
       {/* Left accent bar for the running row (solid accent; the spinner +
           「生成中」 carry the motion). */}
-      {running && (
+      {(indicatorStatus === "waiting" || indicatorStatus === "streaming") && (
         <span
           className="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"
           aria-hidden
         />
       )}
       {/* Leading indicator: spinner while running, else the mode color dot. */}
-      {running ? (
+      {indicatorStatus === "waiting" ? (
+        <span
+          className="shrink-0 text-[10px] animate-pulse"
+          aria-label="等你回答"
+        >
+          🙋
+        </span>
+      ) : indicatorStatus === "streaming" ? (
         <Dots />
+      ) : indicatorStatus === "error" ? (
+        <span
+          className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger"
+          aria-label="出错"
+        />
       ) : (
         // 6px + 半透明，而非原来 8px 满色：一栏几十行、每行一个饱和色点，
         // 点会盖过标题成为最强视觉元素，把层次压平。它只编码 mode（二值），
@@ -1348,16 +1406,17 @@ function SidebarRow({
       )}
 
       {/* Running label — the sidebar row is wide enough to spell it out. */}
-      {running && !editing && (
-        <span className="shrink-0 text-nano font-medium text-accent-ink group-hover:hidden">
-          生成中
-        </span>
-      )}
+      {(indicatorStatus === "waiting" || indicatorStatus === "streaming") &&
+        !editing && (
+          <span className="shrink-0 text-nano font-medium text-accent-ink group-hover:hidden">
+            {indicatorStatus === "waiting" ? "等你回答" : "生成中"}
+          </span>
+        )}
 
       {/* R3: finished-while-away unread — louder than the old small dot:
           unread-hue 「✓ 新」 pill. Distinct from the accent running state;
           hidden once running again or while hovering (actions take over). */}
-      {unread && !running && !editing && (
+      {indicatorStatus === "unread" && !editing && (
         <span
           className="shrink-0 inline-flex items-center gap-0.5 pl-1 pr-1.5 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line group-hover:hidden"
           title="完成·未读"
@@ -1413,15 +1472,17 @@ function recentAsSession(r: RecentSession): Session {
 }
 
 // S133：最近分组的链行，挂在会话行下一级：「↳ [树名 › ]链尾标签 · 时间」。
-// 状态只编码链尾，紧急度降序：等输入 🙋 > 生成中 > 出错 > 未读点 —— 与树
-// 面板树行的 rollup 同一套读法，看惯了那边的这边不用再学。
+// 状态编码整条 lineage，紧急度降序：等输入 🙋 > 生成中 > 出错 > 未读点 ——
+// 与树面板树行的 rollup 同一套读法，看惯了那边的这边不用再学。
 function ChainRow({
   chain,
+  status,
   showTree,
   active,
   onOpen,
 }: {
   chain: RecentChain;
+  status: RecentChain["status"];
   showTree: boolean;
   active: boolean;
   onOpen: () => void;
@@ -1430,13 +1491,13 @@ function ChainRow({
   // 单节点树的链尾就是根：树名 = 链尾标签，前缀只会把同一句话说两遍。
   const withTree = showTree && chain.tipId !== chain.rootId;
   const statusNote =
-    chain.status === "waiting"
+    status === "waiting"
       ? " · 等你回答"
-      : chain.status === "streaming"
+      : status === "streaming"
         ? " · 生成中"
-        : chain.status === "error"
+        : status === "error"
           ? " · 出错"
-          : chain.status === "unread"
+          : status === "unread"
             ? " · 未读"
             : "";
   return (
@@ -1456,15 +1517,15 @@ function ChainRow({
       <span aria-hidden className="shrink-0 text-nano text-ink-faint">
         ↳
       </span>
-      {chain.status === "waiting" ? (
+      {status === "waiting" ? (
         <span className="shrink-0 text-[10px] animate-pulse" aria-label="等你回答">
           🙋
         </span>
-      ) : chain.status === "streaming" ? (
+      ) : status === "streaming" ? (
         <Dots />
-      ) : chain.status === "error" ? (
+      ) : status === "error" ? (
         <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger" aria-label="出错" />
-      ) : chain.status === "unread" ? (
+      ) : status === "unread" ? (
         <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-unread" aria-label="未读" />
       ) : null}
       <span className="flex-1 min-w-0 truncate text-ui">

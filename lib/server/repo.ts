@@ -2286,22 +2286,29 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
   const db = getDB();
   const rows = db
     .prepare(
-      `WITH RECURSIVE chain(id, root_id, depth, activity) AS (
-         SELECT n.id, n.id, 1, max(n.created_at, coalesce(n.read_at, 0))
+      `WITH RECURSIVE chain(
+         id, root_id, depth, activity, node_ids, has_error, has_unread
+       ) AS (
+         SELECT n.id, n.id, 1, max(n.created_at, coalesce(n.read_at, 0)),
+                n.id,
+                (n.status = 'error'),
+                (n.status = 'done' AND n.read_at IS NULL)
            FROM nodes n JOIN sessions s ON s.id = n.session_id
           WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
             AND s.archived = 0 AND s.kind IN ('user', 'lark')
          UNION ALL
          SELECT n.id, c.root_id, c.depth + 1,
-                max(c.activity, n.created_at, coalesce(n.read_at, 0))
+                max(c.activity, n.created_at, coalesce(n.read_at, 0)),
+                c.node_ids || char(31) || n.id,
+                max(c.has_error, n.status = 'error'),
+                max(c.has_unread, n.status = 'done' AND n.read_at IS NULL)
            FROM nodes n JOIN chain c ON n.parent_id = c.id
        )
-       SELECT c.id AS tip_id, c.root_id, c.depth, c.activity,
+       SELECT c.id AS tip_id, c.root_id, c.node_ids, c.depth, c.activity,
+              c.has_error, c.has_unread,
               t.session_id, t.question AS tip_question,
-              t.topic_label AS tip_topic_label, t.status AS tip_status,
+              t.topic_label AS tip_topic_label,
               t.kind AS tip_kind, t.ref_meta_json AS tip_ref_meta_json,
-              t.read_at AS tip_read_at,
-              (t.pending_interaction_json IS NOT NULL) AS tip_waiting,
               r.question AS root_question, r.topic_label AS root_topic_label,
               r.kind AS root_kind, r.ref_meta_json AS root_ref_meta_json,
               s.title AS session_title, s.context_mode AS session_mode,
@@ -2317,16 +2324,16 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
     .all(limit) as Array<{
     tip_id: string;
     root_id: string;
+    node_ids: string;
     depth: number;
     activity: number;
+    has_error: number;
+    has_unread: number;
     session_id: string;
     tip_question: string;
     tip_topic_label: string | null;
-    tip_status: string;
     tip_kind: string | null;
     tip_ref_meta_json: string | null;
-    tip_read_at: number | null;
-    tip_waiting: number;
     root_question: string;
     root_topic_label: string | null;
     root_kind: string | null;
@@ -2342,15 +2349,15 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
     sessionWorkspacePath: r.session_workspace_path,
     tipId: r.tip_id,
     rootId: r.root_id,
+    nodeIds: r.node_ids.split("\x1f"),
     depth: r.depth,
     activityAt: r.activity,
     tipQuestion: r.tip_question,
     tipTopicLabel: r.tip_topic_label,
-    tipStatus: r.tip_status,
     tipKind: r.tip_kind ?? "qa",
     tipRefTitle: refTitleOf(r.tip_ref_meta_json),
-    tipReadAt: r.tip_read_at,
-    tipWaiting: r.tip_waiting === 1,
+    hasError: r.has_error === 1,
+    hasUnread: r.has_unread === 1,
     rootQuestion: r.root_question,
     rootTopicLabel: r.root_topic_label,
     rootKind: r.root_kind ?? "qa",

@@ -1010,16 +1010,22 @@ export function hasLiveRun(nodeId: string): boolean {
   return !!s && s.status === "streaming";
 }
 
-// Wave 1 / A2: read-only snapshot of every node that currently has an
-// active (streaming) run. GET /api/runs maps each nodeId → sessionId so
-// the tab bar can show a "this pane is busy" pulse. Pure read — does not
-// touch RunState lifecycle. Only "streaming" runs are reported; finished
-// ones (in the 30s cleanup grace window) are not active.
-export function getActiveRuns(): { nodeId: string; status: string }[] {
-  const out: { nodeId: string; status: string }[] = [];
+// Read-only snapshot of every live node run. pendingInteraction distinguishes
+// "waiting" from actively generating without exposing the interaction payload.
+// Finished runs in the cleanup grace window are intentionally excluded.
+export function getActiveRuns(): {
+  nodeId: string;
+  status: "streaming";
+  waiting: boolean;
+}[] {
+  const out: { nodeId: string; status: "streaming"; waiting: boolean }[] = [];
   for (const [nodeId, state] of RUNS) {
     if (state.status === "streaming") {
-      out.push({ nodeId, status: state.status });
+      out.push({
+        nodeId,
+        status: state.status,
+        waiting: state.pendingInteraction !== null,
+      });
     }
   }
   return out;
