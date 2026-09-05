@@ -250,11 +250,14 @@ wait_for_fixture_node
 echo "== mobile 390x844: session drawer =="
 ab click 'button[aria-label="会话列表"]'
 wait_for_js "session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
+ab click '[role="dialog"] [data-mobile-target="drawer-advanced"]'
+wait_for_js "drawer advanced actions" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-attach]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
     ['drawer new session', '[role="dialog"] [data-mobile-target="drawer-new-session"]'],
     ['drawer close', '[role="dialog"] [data-mobile-target="drawer-close"]'],
+    ['drawer advanced', '[role="dialog"] [data-mobile-target="drawer-advanced"]'],
     ['drawer attach', '[role="dialog"] [data-mobile-target="drawer-attach"]'],
     ['drawer session rows', '[role="dialog"] [data-mobile-target="session-row"]', true],
     ['drawer chain rows', '[role="dialog"] [data-mobile-target="session-chain-row"]', true],

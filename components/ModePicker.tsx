@@ -93,11 +93,14 @@ export function ModePicker() {
   };
 
   return (
-    <div className="inline-flex flex-wrap items-center gap-2">
+    <div
+      data-mobile-target="new-session-mode-config"
+      className="inline-flex flex-wrap items-center gap-2 max-md:w-full max-md:flex-col max-md:items-stretch"
+    >
       <div
         role="radiogroup"
         aria-label="Context mode"
-        className="inline-flex h-7 rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
+        className="inline-flex h-7 max-md:h-11 max-md:w-full rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
       >
         {OPTIONS.map((opt) => {
           const active = mode === opt.id;
@@ -113,18 +116,19 @@ export function ModePicker() {
           return (
             <button
               key={opt.id}
+              type="button"
               role="radio"
               aria-checked={active}
               title={opt.title}
               onClick={() => handleSelect(opt.id)}
-              className={`px-2 text-label font-medium transition-colors inline-flex items-center gap-1.5 border-l border-line-strong first:border-l-0 ${
+              className={`px-2 max-md:flex-1 max-md:justify-center text-label font-medium transition-colors inline-flex items-center gap-1.5 border-l border-line-strong first:border-l-0 ${
                 active
                   ? activeColor
                   : "text-ink-muted hover:bg-surface-muted"
               }`}
             >
               <Icon />
-              <span className="hidden sm:inline">{opt.label}</span>
+              <span>{opt.label}</span>
             </button>
           );
         })}
@@ -135,7 +139,7 @@ export function ModePicker() {
           value={workspacePath}
           onChange={setWorkspacePath}
           required
-          className="max-w-[10rem]"
+          className="max-w-[10rem] max-md:max-w-none max-md:w-full"
           open={pickerOpen}
           onOpenChange={setPickerOpen}
         />
@@ -143,9 +147,10 @@ export function ModePicker() {
 
       {showApproval && (
         <button
+          type="button"
           onClick={() => setRequireApproval(!requireApproval)}
           title={approval.title}
-          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
+          className={`inline-flex items-center gap-1.5 h-7 max-md:min-h-11 max-md:w-full max-md:justify-center px-2 rounded-md border text-label font-medium transition-colors ${
             requireApproval
               ? "border-accent-line bg-accent-muted text-accent-ink"
               : "border-line-strong bg-surface text-ink-faint hover:bg-surface-muted"

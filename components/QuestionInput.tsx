@@ -13,7 +13,15 @@ import { providerFamily } from "@/lib/llm";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { RelatedHints } from "./RelatedHints";
 import { SketchModal } from "./SketchModal";
+import { ModelPicker } from "./ModelPicker";
 import { Button } from "@/components/ui/Button";
+import { Drawer } from "@/components/ui/Drawer";
+import { IconButton } from "@/components/ui/IconButton";
+import {
+  setDesktopModeOverride,
+  useIsMobile,
+} from "@/hooks/useIsMobile";
+import { middleEllipsisPath } from "@/lib/run-config";
 import {
   useAttachmentUploads,
   MAX_ATTACHMENTS,
@@ -54,6 +62,7 @@ export function QuestionInput() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [zoneOpen, setZoneOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
+  const [moreSettingsOpen, setMoreSettingsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [skills, setSkills] = useState<{ name: string; description: string }[]>(
     [],
@@ -92,6 +101,15 @@ export function QuestionInput() {
   const skillProvider = family === "codex" ? "codex" : "claude";
   const skillPrefix = family === "codex" ? "$" : "/";
   const providerCatalog = useSessionStore((s) => s.providerCatalog);
+  const isMobile = useIsMobile();
+  const currentProvider =
+    providerCatalog.find((candidate) => candidate.id === provider) ??
+    providerCatalog[0];
+  const modeSummary = draftMode === "chat" ? "Chat" : "Project";
+  const modelSummary = currentProvider?.shortLabel ?? provider;
+  const workspaceSummary = draftWorkspacePath
+    ? middleEllipsisPath(draftWorkspacePath)
+    : "未选工作区";
   // Transient note when a command no-ops (e.g. /clear with no session) or
   // /model echoes its usage. Cleared on the next keystroke.
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
@@ -253,41 +271,68 @@ export function QuestionInput() {
       style={{ paddingLeft: "var(--trellis-sb, 0px)" }}
     >
       <div className="w-full max-w-2xl">
-        <div className="flex items-center gap-3 mb-8 justify-center">
+        <div className="flex items-center gap-3 mb-8 max-md:mb-3 justify-center">
           {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
           <h1 className="text-2xl font-semibold tracking-tight">Trellis</h1>
         </div>
-        <p className="text-center text-ink-muted mb-6 text-sm">
+        <p className="text-center text-ink-muted mb-6 max-md:mb-3 text-sm">
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
-        <div className="mb-3 flex justify-center">
-          <ModePicker />
-        </div>
+        {isMobile === null ? (
+          <div className="mb-3 h-11" aria-hidden />
+        ) : isMobile ? (
+          <button
+            type="button"
+            data-mobile-target="new-session-config-summary"
+            onClick={() => setMoreSettingsOpen(true)}
+            className="mb-3 w-full min-h-11 min-w-0 rounded-md border border-line bg-surface px-3 text-left text-ui text-ink-muted flex items-center gap-2 hover:border-line-strong"
+            title={`${modeSummary} · ${modelSummary}${draftMode === "project" ? ` · ${draftWorkspacePath ?? "未选工作区"}` : ""}`}
+          >
+            <span className="shrink-0 font-medium text-ink">{modeSummary}</span>
+            <span aria-hidden className="text-ink-faint">·</span>
+            <span className="min-w-0 truncate">{modelSummary}</span>
+            {draftMode === "project" && (
+              <>
+                <span aria-hidden className="text-ink-faint">·</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-label">
+                  {workspaceSummary}
+                </span>
+              </>
+            )}
+            <span className="ml-auto shrink-0 text-accent-ink">设置 ›</span>
+          </button>
+        ) : (
+          <div className="mb-3 flex justify-center">
+            <ModePicker />
+          </div>
+        )}
         {/* S89: Agent 选择两个 mode 都出现。原来整块被 `draftMode === "chat"` 关着，
             但服务端 chat/route.ts 对 agentId 的钳制条件只有「claude 家族」、**不看 mode**
             —— 即 project 会话完全支持 agent，只是界面上没有入口，只能靠 @提及。
             AgentPicker 内部仍然只在 chat 时露出自定义 system prompt 的 textarea
             （project 的人设来自 CLAUDE.md，服务端会把 systemPrompt 钳成 null）。
             增强模式是 chat 专属，留在下面的条件块里。 */}
-        <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
-          <AgentPicker />
-          {draftMode === "chat" && (
-            <button
-              type="button"
-              onClick={() => setChatEnhanced(!chatEnhanced)}
-              title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-              className={`px-3 py-1.5 rounded-full border text-ui inline-flex items-center gap-1.5 transition-colors ${
-                chatEnhanced
-                  ? /* boost 复用 warn hue */ "bg-warn-muted border-warn-line text-warn-ink"
-                  : "border-line text-ink-muted hover:border-line-strong"
-              }`}
-            >
-              <span aria-hidden>⚡</span>
-              <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
-            </button>
-          )}
-        </div>
+        {isMobile === false && (
+          <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
+            <AgentPicker />
+            {draftMode === "chat" && (
+              <button
+                type="button"
+                onClick={() => setChatEnhanced(!chatEnhanced)}
+                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
+                className={`px-3 py-1.5 rounded-full border text-ui inline-flex items-center gap-1.5 transition-colors ${
+                  chatEnhanced
+                    ? /* boost 复用 warn hue */ "bg-warn-muted border-warn-line text-warn-ink"
+                    : "border-line text-ink-muted hover:border-line-strong"
+                }`}
+              >
+                <span aria-hidden>⚡</span>
+                <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
+              </button>
+            )}
+          </div>
+        )}
         <div
           className={`bg-surface border rounded-card shadow-raise overflow-hidden transition-colors ${
             dragOver
@@ -317,6 +362,7 @@ export function QuestionInput() {
           )}
           <textarea
             ref={ref}
+            data-mobile-target="new-session-input"
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -333,6 +379,47 @@ export function QuestionInput() {
             className="w-full px-5 py-4 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint"
             disabled={busy}
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={att.accept}
+            multiple
+            onChange={att.handlePicked}
+            className="hidden"
+          />
+          {isMobile === null ? (
+            <div className="h-[61px] border-t border-line-faint" aria-hidden />
+          ) : isMobile ? (
+            <div className="border-t border-line-faint px-3 py-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                data-mobile-target="new-session-attach"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || att.atLimit}
+                title={
+                  att.atLimit
+                    ? `已到 ${MAX_ATTACHMENTS} 个上限`
+                    : "添加图片 / 文件（粘贴 / 拖拽 / 点击选）"
+                }
+                className="h-11 min-w-11 px-3 rounded-md text-sm text-ink-muted hover:text-ink-strong hover:bg-surface-muted disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+              >
+                <span aria-hidden>📎</span>
+                <span>附件</span>
+              </button>
+              <Button
+                variant="primary"
+                data-mobile-target="new-session-start"
+                className="h-11 flex-1"
+                onClick={submit}
+                disabled={submitDisabled}
+                title={
+                  needsWorkspace ? "Project 模式需要先选择工作区" : undefined
+                }
+              >
+                {submitLabel}
+              </Button>
+            </div>
+          ) : (
           <div className="border-t border-line-faint px-4 py-2 flex items-center justify-between gap-3">
             <div className="text-xs text-ink-faint flex-1 min-w-0">
               <button
@@ -361,14 +448,6 @@ export function QuestionInput() {
                 <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
               </button>
             </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={att.accept}
-              multiple
-              onChange={att.handlePicked}
-              className="hidden"
-            />
             <button
               type="button"
               onClick={() => setZoneOpen(true)}
@@ -418,7 +497,31 @@ export function QuestionInput() {
               {submitLabel}
             </Button>
           </div>
+          )}
         </div>
+        {isMobile && (
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              data-mobile-target="new-session-more-settings"
+              onClick={() => setMoreSettingsOpen(true)}
+              className="min-h-11 flex-1 rounded-md border border-line bg-surface text-ui text-ink-muted hover:border-line-strong hover:text-ink"
+            >
+              更多设置
+            </button>
+            <button
+              type="button"
+              data-mobile-target="new-session-desktop-mode"
+              onClick={() => {
+                setDesktopModeOverride(true);
+                window.location.reload();
+              }}
+              className="min-h-11 px-3 text-ui text-accent-ink underline underline-offset-2"
+            >
+              转桌面版
+            </button>
+          </div>
+        )}
         {cmdNotice && (
           <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-lg px-3 py-2">
             {cmdNotice}
@@ -496,7 +599,7 @@ export function QuestionInput() {
             ))}
           </div>
         )}
-        {draftMode === "chat" && !q.trim() && (
+        {isMobile === false && draftMode === "chat" && !q.trim() && (
           <div className="mt-4 flex flex-wrap gap-2 justify-center">
             {(isFeynman ? FEYNMAN_STARTERS : SUGGESTED_PROMPTS).map((s) => (
               <button
@@ -513,12 +616,12 @@ export function QuestionInput() {
             ))}
           </div>
         )}
-        <div className="mt-5 flex items-center gap-3 justify-center text-xs">
+        {isMobile === false && <div className="mt-5 flex items-center gap-3 justify-center text-xs">
           <div className="h-px flex-1 max-w-[80px] bg-line" />
           <span className="text-ink-faint">或</span>
           <div className="h-px flex-1 max-w-[80px] bg-line" />
-        </div>
-        <div className="mt-3 flex justify-center">
+        </div>}
+        {isMobile === false && <div className="mt-3 flex justify-center">
           <button
             onClick={() => setPickerOpen(true)}
             className="px-4 py-2 rounded-md text-sm border border-warn-line bg-warn-muted/60 text-warn-ink hover:bg-warn-muted active:scale-95 transition-colors flex items-center gap-2"
@@ -526,11 +629,124 @@ export function QuestionInput() {
             <span aria-hidden>📄</span>
             <span>从背景材料开始（粘贴 / URL）</span>
           </button>
-        </div>
-        <div className="text-center text-xs text-ink-faint mt-4">
+        </div>}
+        {isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
           模型在右上角切换 · 默认 Claude Sonnet
-        </div>
+        </div>}
       </div>
+      {isMobile && moreSettingsOpen && (
+        <Drawer open onClose={() => setMoreSettingsOpen(false)}>
+          <div className="shrink-0 px-4 py-2 border-b border-line-faint flex items-center justify-between">
+            <div>
+              <div className="text-reading font-semibold text-ink-strong">更多设置</div>
+              <div className="text-label text-ink-faint">创建前可调整，当前默认值已保留</div>
+            </div>
+            <IconButton label="关闭更多设置" onClick={() => setMoreSettingsOpen(false)}>
+              ✕
+            </IconButton>
+          </div>
+          <div
+            data-mobile-target="new-session-settings-sheet"
+            className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 [&_button]:min-h-11"
+          >
+            <section>
+              <h2 className="text-label font-medium text-ink-faint mb-2">模式与工作区</h2>
+              <ModePicker />
+            </section>
+            <section>
+              <h2 className="text-label font-medium text-ink-faint mb-2">模型</h2>
+              <ModelPicker />
+            </section>
+            <section>
+              <h2 className="text-label font-medium text-ink-faint mb-2">Agent</h2>
+              <div className="flex justify-center">
+                <AgentPicker />
+              </div>
+            </section>
+            {draftMode === "chat" && (
+              <button
+                type="button"
+                data-mobile-target="new-session-enhanced"
+                onClick={() => setChatEnhanced(!chatEnhanced)}
+                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
+                className={`w-full px-3 rounded-md border text-ui inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  chatEnhanced
+                    ? "bg-warn-muted border-warn-line text-warn-ink"
+                    : "border-line text-ink-muted hover:border-line-strong"
+                }`}
+              >
+                <span aria-hidden>⚡</span>
+                <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
+              </button>
+            )}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                data-mobile-target="new-session-send-key"
+                onClick={() => setSendKey(sendKey === "enter" ? "mod-enter" : "enter")}
+                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+              >
+                快捷键 · {sendHint(sendKey)}
+              </button>
+              <button
+                type="button"
+                data-mobile-target="new-session-history-depth"
+                onClick={() => setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)}
+                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+              >
+                历史深度 · {historyDepth === 0 ? "上下文全发" : `${historyDepth} 层`}
+              </button>
+              <button
+                type="button"
+                data-mobile-target="new-session-focus-writing"
+                onClick={() => setZoneOpen(true)}
+                disabled={busy}
+                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+              >
+                ⛶ 专注写作
+              </button>
+              <button
+                type="button"
+                data-mobile-target="new-session-sketch"
+                onClick={() => setSketchOpen(true)}
+                disabled={busy || att.atLimit}
+                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+              >
+                ✏️ 草图
+              </button>
+            </div>
+            <section>
+              <h2 className="text-label font-medium text-ink-faint mb-2">起步模板</h2>
+              <div className="flex flex-col gap-2">
+                {(isFeynman ? FEYNMAN_STARTERS : SUGGESTED_PROMPTS).map((starter) => (
+                  <button
+                    key={starter}
+                    type="button"
+                    onClick={() => {
+                      setQ(starter);
+                      setMoreSettingsOpen(false);
+                      ref.current?.focus();
+                    }}
+                    className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                  >
+                    {starter}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreSettingsOpen(false);
+                    setPickerOpen(true);
+                  }}
+                  className="rounded-md border border-warn-line bg-warn-muted/60 px-3 text-left text-ui text-warn-ink"
+                >
+                  📄 从背景材料开始（粘贴 / URL）
+                </button>
+              </div>
+            </section>
+          </div>
+        </Drawer>
+      )}
       {pickerOpen && (
         <ReferencePicker onClose={() => setPickerOpen(false)} />
       )}

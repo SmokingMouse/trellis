@@ -167,3 +167,16 @@ export function basename(p: string): string {
   const idx = stripped.lastIndexOf("/");
   return idx === -1 ? stripped : stripped.slice(idx + 1);
 }
+
+/**
+ * 窄屏仍要能辨认路径的头尾：头部说明来自哪里，尾部说明具体工作区。
+ * 单纯 CSS ellipsis 只留下头部，会把最有辨识度的目录名裁掉。
+ */
+export function middleEllipsisPath(p: string, max = 34): string {
+  if (p.length <= max) return p;
+  if (max < 5) return p.slice(0, max);
+  const remaining = max - 1;
+  const head = Math.ceil(remaining / 2);
+  const tail = Math.floor(remaining / 2);
+  return `${p.slice(0, head)}…${p.slice(-tail)}`;
+}

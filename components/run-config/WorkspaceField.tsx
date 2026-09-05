@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { WorkspacePicker } from "@/components/WorkspacePicker";
-import { basename } from "@/lib/run-config";
+import { basename, middleEllipsisPath } from "@/lib/run-config";
 
 // S89: 「选一个工作目录」这个控件。新会话（ModePicker）和任务定义（/settings/tasks）
 // 共用同一份。
@@ -47,21 +47,25 @@ export function WorkspaceField({
     <>
       <button
         type="button"
+        data-mobile-target="workspace-select"
         onClick={() => setOpen(true)}
         // title 给完整路径 —— 按钮上只显示最后一段，但用户需要能确认到底是哪个目录。
         title={value ?? "请选择工作区目录"}
         // min-w-0 是给里面那个 truncate 用的 —— flex item 默认 min-width:auto，
         // 不给 0 的话长路径会把按钮撑破而不是省略。宽度完全由 className 决定
         // （chip 传 max-w-*，表单传 w-full）。
-        className={`inline-flex min-w-0 items-center gap-1.5 h-7 px-2 rounded-md border text-label font-medium transition-colors ${
+        className={`inline-flex min-w-0 items-center gap-1.5 h-7 max-md:min-h-11 px-2 rounded-md border text-label font-medium transition-colors ${
           missing
             ? "border-danger-line bg-danger-muted text-danger-ink animate-pulse"
             : "border-line-strong bg-surface text-ink hover:bg-surface-muted"
         } ${className}`}
       >
         <span aria-hidden>📁</span>
-        <span className="truncate font-mono">
+        <span className="hidden md:inline truncate font-mono">
           {value ? basename(value) : placeholder}
+        </span>
+        <span className="md:hidden min-w-0 truncate font-mono">
+          {value ? middleEllipsisPath(value) : placeholder}
         </span>
       </button>
 
