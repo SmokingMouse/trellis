@@ -58,11 +58,21 @@ cleanup() {
       kill $port_pids >/dev/null 2>&1
     fi
   fi
+  rm -rf "$LOCK_DIR"
   exit "$status"
 }
 
 trap cleanup EXIT INT TERM
 cd "$ROOT_DIR"
+
+LOCK_DIR=/tmp/trellis-mobile-verify.lock
+lock_wait=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  lock_wait=$((lock_wait + 1))
+  if [ "$lock_wait" -ge 180 ]; then echo "FAIL: mobile-verify lock wait timeout (held by $(cat "$LOCK_DIR/owner" 2>/dev/null))"; exit 1; fi
+  sleep 5
+done
+echo "$$ $(date +%H:%M:%S) $(basename "$0")" > "$LOCK_DIR/owner"
 
 command -v bun >/dev/null || fail "bun 不可用"
 command -v sqlite3 >/dev/null || fail "sqlite3 不可用"
