@@ -135,7 +135,12 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       <>
         <header
           data-mobile-header
+          data-safe-area="header"
           className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1"
+          style={{
+            height: "calc(3rem + var(--safe-top))",
+            paddingTop: "var(--safe-top)",
+          }}
         >
           <IconButton
             label="会话列表"

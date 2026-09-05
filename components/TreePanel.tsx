@@ -95,6 +95,7 @@ export function TreePanel() {
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
   const mobileSessionRef = useRef(sessionId);
 
   useEffect(() => {
@@ -104,6 +105,7 @@ export function TreePanel() {
 
   useEffect(() => {
     if (!isMobile || !mobileOpen) return;
+    mobileCloseRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setMobileOpen(false);
@@ -928,7 +930,10 @@ export function TreePanel() {
       }
       style={
         isMobile
-          ? undefined
+          ? {
+              paddingTop: "var(--safe-top)",
+              paddingBottom: "var(--safe-bottom)",
+            }
           : {
               bottom:
                 "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
@@ -959,6 +964,7 @@ export function TreePanel() {
           </button>
           {sessionId && (
             <button
+              ref={mobileCloseRef}
               type="button"
               data-mobile-target="new-tree-open"
               onClick={() => setComposeRootOpen(true)}

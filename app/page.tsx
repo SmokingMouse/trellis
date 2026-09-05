@@ -104,7 +104,7 @@ export default function Home() {
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
-        <div className="fixed top-12 md:top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
+        <div className="fixed top-[var(--trellis-header-h)] md:top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
           ⚠️ 本地存储不可用：{hydrateError}。可以继续问答，但刷新会丢失历史。
         </div>
       )}

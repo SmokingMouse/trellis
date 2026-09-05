@@ -37,6 +37,7 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  --trellis-header-h: calc(3rem + var(--safe-top));
 
   /* 中性族 —— stone */
   --surface-canvas: oklch(98.5% 0.001 106.423); /* stone-50 */

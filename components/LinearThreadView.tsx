@@ -427,7 +427,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     // floating mid-screen instead of docked at the bottom.
     <div
       data-safe-area="linear-thread"
-      className="fixed inset-0 pt-[calc(3rem+var(--safe-top))] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
+      className="fixed inset-0 pt-[var(--trellis-header-h)] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
       // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
       // 发布，与 --trellis-sb 同一套模式（一个变量、多个消费者）；面板关闭时
       // 是 0px，等于没这回事。

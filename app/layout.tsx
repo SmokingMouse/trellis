@@ -16,12 +16,15 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  maximumScale: 5,
   viewportFit: "cover",
-  themeColor: "#fafaf9",
-  // Browser pinch-zoom is disabled so React Flow can own the gesture.
-  // The canvas zoom replaces accessibility zoom for this app.
-  userScalable: false,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fafaf9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1115" },
+  ],
+  // Keep document zoom accessible; the React Flow surface owns gestures
+  // locally via touch-action instead of disabling zoom for the whole app.
+  userScalable: true,
 };
 
 // Pre-hydration theme application. Runs before React touches the DOM so
