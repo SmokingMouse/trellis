@@ -79,17 +79,17 @@ function Row({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="py-2.5 flex items-center gap-3">
+    <div className="py-2.5 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
       <div className="min-w-0 flex-1">
         <div className="text-ui">{item.label}</div>
         <div className="text-label text-ink-faint">在这改：{item.where}</div>
       </div>
-      <div className="shrink-0">
+      <div className="shrink-0 max-md:w-full">
         {!ready ? (
           <span className="text-label text-ink-faint">…</span>
         ) : item.kind === "enum" ? (
           <select
-            className="px-2 py-1 rounded-field border border-line bg-surface-muted text-ui text-ink outline-none"
+            className="px-2 py-1 max-md:w-full rounded-field border border-line bg-surface-muted text-ui text-ink outline-none"
             value={raw ?? item.fallback}
             onChange={(e) => onChange(e.target.value)}
           >
@@ -112,7 +112,7 @@ function Row({
           // 且它们要连带做一致性钳制（切 chat 清 workspace、选 agent 清 systemPrompt），
           // 这里单独写一个值只会造出不自洽的草稿。
           <span
-            className="text-label text-ink-faint font-mono truncate max-w-[16rem] inline-block align-bottom"
+            className="text-label text-ink-faint font-mono truncate max-w-[16rem] max-md:max-w-full inline-block align-bottom"
             title={raw ?? "未设置"}
           >
             {raw ?? "未设置"}

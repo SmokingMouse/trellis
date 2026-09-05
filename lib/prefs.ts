@@ -96,7 +96,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.sendKey,
     label: "发送快捷键",
-    where: "输入框左下角脚注（点一下就切）",
+    where: "新会话「更多设置」/ 会话输入框脚注",
     group: "输入",
     kind: "enum",
     fallback: "mod-enter",
@@ -108,7 +108,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.historyDepth,
     label: "上下文历史深度",
-    where: "输入框左下角 📚 脚注",
+    where: "新会话「更多设置」/ 会话输入框 📚 脚注",
     group: "输入",
     kind: "enum",
     fallback: "0",
@@ -123,7 +123,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.chatEnhanced,
     label: "chat 增强模式",
-    where: "Header 的 ⚡ 按钮（仅 chat 会话可见）",
+    where: "新会话「更多设置」（仅 chat 可见）",
     group: "输入",
     kind: "bool",
     fallback: false,
@@ -173,10 +173,10 @@ export const PREF_ITEMS: PrefItem[] = [
   // —— 下一次开会话时那三个 picker 才是真正的入口，且它们要连带做一致性钳制
   // （chat 清 workspace、选 agent 清 systemPrompt）。
   { key: PREF_KEYS.provider, label: "默认模型", where: "Header 模型下拉", group: "新会话默认", kind: "readonly" },
-  { key: PREF_KEYS.mode, label: "默认上下文模式", where: "新会话首屏的 Chat / Project", group: "新会话默认", kind: "readonly" },
-  { key: PREF_KEYS.workspace, label: "默认工作区", where: "新会话首屏的 📁", group: "新会话默认", kind: "readonly" },
-  { key: PREF_KEYS.agentId, label: "默认 Agent", where: "新会话首屏的 🎭", group: "新会话默认", kind: "readonly" },
-  { key: PREF_KEYS.requireApproval, label: "默认审批开关", where: "新会话首屏的 YOLO / 需确认", group: "新会话默认", kind: "readonly" },
+  { key: PREF_KEYS.mode, label: "默认上下文模式", where: "新会话摘要 /「更多设置」", group: "新会话默认", kind: "readonly" },
+  { key: PREF_KEYS.workspace, label: "默认工作区", where: "新会话摘要 /「更多设置」", group: "新会话默认", kind: "readonly" },
+  { key: PREF_KEYS.agentId, label: "默认 Agent", where: "新会话「更多设置」", group: "新会话默认", kind: "readonly" },
+  { key: PREF_KEYS.requireApproval, label: "默认审批开关", where: "新会话「更多设置」", group: "新会话默认", kind: "readonly" },
 ];
 
 // ── 读写（只给镜像清单用；各组件保持自己的 state 逻辑不变）──────────────────

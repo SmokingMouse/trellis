@@ -94,6 +94,7 @@ export function SessionSidebar() {
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
     id: string;
     name?: string;
@@ -431,6 +432,7 @@ export function SessionSidebar() {
   const onNew = () => {
     newConversation();
     setEditingId(null);
+    setMobileNavOpen(false);
   };
 
   // 单行渲染。indent 让它能在 Chat（平铺）与 Project→Workspace（缩两级）
@@ -866,11 +868,36 @@ export function SessionSidebar() {
         onClick={() => setAttachOpen(true)}
         data-mobile-target="drawer-attach"
         title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
-        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 max-md:min-h-11 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
+        className="hidden md:inline-flex shrink-0 mx-2 mt-1.5 items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         <span aria-hidden>⇄</span>
         Attach CLI 会话
       </button>
+
+      <div className="md:hidden shrink-0 mx-2 mt-1.5">
+        <button
+          type="button"
+          data-mobile-target="drawer-advanced"
+          aria-expanded={mobileAdvancedOpen}
+          onClick={() => setMobileAdvancedOpen((open) => !open)}
+          className="w-full min-h-11 px-3 rounded-md text-label text-ink-faint flex items-center justify-between hover:bg-surface-muted"
+        >
+          <span>高级操作</span>
+          <span aria-hidden>{mobileAdvancedOpen ? "▾" : "▸"}</span>
+        </button>
+        {mobileAdvancedOpen && (
+          <button
+            type="button"
+            onClick={() => setAttachOpen(true)}
+            data-mobile-target="drawer-attach"
+            title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
+            className="mt-1 w-full min-h-11 inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
+          >
+            <span aria-hidden>⇄</span>
+            Attach CLI 会话
+          </button>
+        )}
+      </div>
 
       <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 && tasks.length === 0 && taskSessions.length === 0 ? (

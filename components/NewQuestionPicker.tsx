@@ -53,20 +53,26 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal onClose={onClose}>
-      <div className="px-5 py-4 border-b border-line-faint flex items-center justify-between">
-        <div>
+    <Modal
+      onClose={onClose}
+      panelClassName="max-md:max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1rem)] max-md:flex max-md:flex-col"
+    >
+      <div className="shrink-0 px-5 py-4 max-md:py-3 border-b border-line-faint flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="text-reading font-semibold text-ink-strong flex items-center gap-2">
-            新话题
+            新树
             <Pill tone="danger">🧹 清空上下文</Pill>
           </div>
           <div className="text-ui text-ink-muted mt-0.5">
-            起一条全新上下文的根问答，模型不再记得现有节点（等价 CLI 的{" "}
+            在当前会话中开启一棵独立的新树，模型不再记得现有节点（等价 CLI 的{" "}
             <code className="px-1 rounded bg-surface-muted text-label">
               /clear
             </code>
             ）。
             {isProject && " Project 模式下还会同时开启全新的 Claude 会话记忆。"}
+            <span className="block mt-1 text-ink-faint">
+              不会创建新会话；侧栏的「新会话」才会建立新的会话容器。
+            </span>
           </div>
         </div>
         <IconButton
@@ -78,7 +84,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
         </IconButton>
       </div>
 
-      <div className="px-5 py-4">
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 max-md:py-3">
         {att.pending.length > 0 && (
           <div className="mb-3">
             <AttachmentPreview pending={att.pending} onRemove={att.remove} />
@@ -95,9 +101,9 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
               submit();
             }
           }}
-          placeholder="想问点什么？例如：这个 session 之外的另一个角度…（可粘贴图片）"
+          placeholder="为这棵新树输入第一个问题…（可粘贴图片）"
           rows={6}
-          className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink text-sm outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
+          className="w-full px-3 py-2 max-md:h-24 rounded-field border border-line-strong bg-surface text-ink text-sm outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
           disabled={busy}
         />
         <div className="text-label text-ink-faint mt-1">
@@ -113,7 +119,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
         )}
       </div>
 
-      <div className="px-5 py-3 border-t border-line-faint flex justify-end gap-2">
+      <div className="shrink-0 px-5 py-3 border-t border-line-faint flex justify-end gap-2">
         <Button
           variant="ghost"
           data-mobile-target="new-tree-cancel"

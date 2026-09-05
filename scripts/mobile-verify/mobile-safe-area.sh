@@ -314,7 +314,17 @@ agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-mob
 
 agent-browser --session "$SESSION" click 'button[aria-label="会话列表"]'
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
-agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-attach"]'
+agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-advanced"]'
+agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-attach]'))"
+agent-browser --session "$SESSION" eval --stdin <<'OPEN_ATTACH_EOF'
+(() => {
+  const attach = [...document.querySelectorAll('[role="dialog"] [data-mobile-target="drawer-attach"]')]
+    .find((element) => element.offsetParent !== null);
+  if (!attach) throw new Error('可见的 Attach CLI 入口未出现');
+  attach.click();
+  return true;
+})()
+OPEN_ATTACH_EOF
 agent-browser --session "$SESSION" wait 'input[placeholder*="搜索标题"]'
 assert_visible_text_fields_at_least_16 "会话 drawer 的 Attach CLI 输入"
 agent-browser --session "$SESSION" press Escape
