@@ -188,7 +188,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           data-safe-area="header"
           className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1"
           style={{
-            height: "calc(3rem + var(--safe-top))",
+            height: "var(--trellis-header-h)",
             paddingTop: "var(--safe-top)",
           }}
         >
@@ -272,7 +272,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       data-safe-area="header"
       className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3"
       style={{
-        height: "calc(3rem + var(--safe-top))",
+        height: "var(--trellis-header-h)",
         paddingTop: "var(--safe-top)",
       }}
     >

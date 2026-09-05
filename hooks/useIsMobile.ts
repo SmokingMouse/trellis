@@ -57,7 +57,9 @@ export function useIsMobile(
 // CSS still follows the real viewport, so layout offsets and narrow-mode
 // escape hatches must use these rather than the semantic useIsMobile().
 function useViewportMedia(query: string): boolean {
-  const [matches, setMatches] = useState(false);
+  const [matches, setMatches] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(query).matches,
+  );
   useEffect(() => {
     const mq = window.matchMedia(query);
     const update = () => setMatches(mq.matches);

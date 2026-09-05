@@ -178,7 +178,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             }}
             placeholder="进一步追问…（可粘贴图片 / 文件）"
             rows={2}
-            className="w-full px-3 py-2 bg-transparent text-ink-strong outline-none resize-none text-sm placeholder:text-ink-faint"
+            className="w-full px-3 py-2 bg-transparent text-ink-strong outline-none resize-none text-sm max-md:text-[16px] placeholder:text-ink-faint"
           />
           <input
             ref={fileInputRef}

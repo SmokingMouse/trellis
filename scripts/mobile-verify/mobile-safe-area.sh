@@ -73,6 +73,10 @@ grep -qF 'var(--safe-top)' components/Header.tsx || fail "Header 未消费 --saf
 grep -qF 'var(--safe-bottom)' components/LinearThreadView.tsx || fail "Linear Composer 未消费 --safe-bottom"
 grep -qF 'var(--safe-bottom)' components/ui/Drawer.tsx || fail "bottom sheet 未消费 --safe-bottom"
 grep -qF 'var(--safe-top)' components/ui/Modal.tsx || fail "modal 壳未消费 safe-area 变量"
+for mobile_input_file in components/Composer.tsx components/BranchPopover.tsx components/NewQuestionPicker.tsx app/login/page.tsx components/SearchModal.tsx components/InteractionForm.tsx; do
+  grep -qF 'max-md:text-[16px]' "$mobile_input_file" || fail "$mobile_input_file 缺少手机输入字号守闸"
+done
+[[ "$(grep -cF 'max-md:text-[16px]' components/InteractionForm.tsx | tr -d ' ')" -ge 3 ]] || fail "InteractionForm 输入字号覆盖不完整"
 
 LEGACY_VIEWPORT_PATTERN='100''vh|min-h-''screen|h-''screen'
 LEGACY_MATCHES="$(find app components lib hooks public server.ts tenancy -type f \( -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -nHE "$LEGACY_VIEWPORT_PATTERN" {} + 2>/dev/null || true)"
@@ -178,6 +182,14 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   const headerPaddingTop = getComputedStyle(header).paddingTop;
   const threadPaddingTop = getComputedStyle(thread).paddingTop;
   const composerPaddingBottom = getComputedStyle(composer).paddingBottom;
+  const visibleFields = [...document.querySelectorAll('input,textarea')].filter((field) => {
+    const rect = field.getBoundingClientRect();
+    const style = getComputedStyle(field);
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  const fieldSizes = visibleFields.map((field) => ({ tag: field.tagName, placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
+  assert(fieldSizes.length > 0, '手机首屏没有可见输入框');
+  assert(fieldSizes.every((field) => field.fontSize >= 16), `手机输入字号不足 16px: ${JSON.stringify(fieldSizes)}`);
   assert(near(headerRect.top, 0) && near(headerRect.height, 95), `Header 几何异常: ${headerRect.top}/${headerRect.height}`);
   assert(headerPaddingTop === '47px', `Header paddingTop=${headerPaddingTop}`);
   assert(threadPaddingTop === '95px', `thread paddingTop=${threadPaddingTop}`);
@@ -189,10 +201,47 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
     viewport: { width: innerWidth, height: innerHeight },
     header: { top: headerRect.top, height: headerRect.height },
     composer: { top: composerRect.top, bottom: composerRect.bottom, paddingBottom: composerPaddingBottom },
+    fieldSizes,
   };
 })()
 MOBILE_EOF
 agent-browser --session "$SESSION" screenshot "$OUT/390x844-safe-area.png"
+
+echo "== iOS focus zoom guard: expanded branch popover =="
+agent-browser --session "$SESSION" scrollintoview '[data-chat-node-id="6ec8616f-6418-4954-8474-aa94d6c7cf4c"] p'
+agent-browser --session "$SESSION" eval --stdin <<'BRANCH_OPEN_EOF'
+(() => {
+  const paragraph = document.querySelector('[data-chat-node-id="6ec8616f-6418-4954-8474-aa94d6c7cf4c"] p');
+  const text = paragraph?.firstChild;
+  if (!text?.textContent) throw new Error('branch fixture paragraph missing');
+  const range = document.createRange();
+  range.setStart(text, 0);
+  range.setEnd(text, Math.min(12, text.textContent.length));
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.dispatchEvent(new Event('selectionchange'));
+  return range.toString();
+})()
+BRANCH_OPEN_EOF
+agent-browser --session "$SESSION" wait '[data-mobile-target="branch-open"]'
+agent-browser --session "$SESSION" eval "document.querySelector('[data-mobile-target=branch-open]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))"
+agent-browser --session "$SESSION" wait 'textarea[placeholder^="进一步追问"]'
+agent-browser --session "$SESSION" eval --stdin <<'BRANCH_FONT_EOF'
+(() => {
+  const fields = [...document.querySelectorAll('input,textarea')].filter((field) => {
+    const rect = field.getBoundingClientRect();
+    const style = getComputedStyle(field);
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  const sizes = fields.map((field) => ({ placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
+  if (!sizes.some((field) => field.placeholder?.startsWith('进一步追问'))) throw new Error(`追问输入框未出现: ${JSON.stringify(sizes)}`);
+  if (!sizes.every((field) => field.fontSize >= 16)) throw new Error(`追问态输入字号不足 16px: ${JSON.stringify(sizes)}`);
+  return sizes;
+})()
+BRANCH_FONT_EOF
+agent-browser --session "$SESSION" click '[data-mobile-target="branch-cancel"]'
+agent-browser --session "$SESSION" wait --fn "!document.querySelector('textarea[placeholder^=\"进一步追问\"]')"
 
 echo "== Drawer / Modal safe-bottom geometry =="
 agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
@@ -233,8 +282,16 @@ agent-browser --session "$SESSION" eval --stdin <<'MODAL_EOF'
   });
   assert(buttons.length > 0, '新树 Modal 没有可测按钮');
   const bottom = Math.max(...buttons.map((button) => button.getBoundingClientRect().bottom));
+  const fields = [...document.querySelectorAll('input,textarea')].filter((field) => {
+    const rect = field.getBoundingClientRect();
+    const style = getComputedStyle(field);
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  const fieldSizes = fields.map((field) => ({ placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
   assert(bottom <= innerHeight - 34, `Modal bottom button=${bottom}, safeBoundary=${innerHeight - 34}`);
-  return { bottom, safeBoundary: innerHeight - 34 };
+  assert(fieldSizes.some((field) => field.placeholder?.startsWith('想问点什么')), `新树输入框未出现: ${JSON.stringify(fieldSizes)}`);
+  assert(fieldSizes.every((field) => field.fontSize >= 16), `新树 Modal 输入字号不足 16px: ${JSON.stringify(fieldSizes)}`);
+  return { bottom, safeBoundary: innerHeight - 34, fieldSizes };
 })()
 MODAL_EOF
 agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-close"]'

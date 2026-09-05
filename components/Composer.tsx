@@ -263,7 +263,7 @@ export function Composer({
           rows={1}
           disabled={!targetNode}
           placeholder={placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`}
-          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-line-strong bg-surface text-body text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50"
+          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-line-strong bg-surface text-body max-md:text-[16px] text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50"
         />
         <input
           ref={fileInputRef}

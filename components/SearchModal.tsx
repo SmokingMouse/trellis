@@ -218,7 +218,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
             placeholder="搜索所有对话、笔记、参考材料…"
-            className="flex-1 bg-transparent outline-none text-body text-ink-strong placeholder:text-ink-faint"
+            className="flex-1 bg-transparent outline-none text-body max-md:text-[16px] text-ink-strong placeholder:text-ink-faint"
           />
           <kbd className="text-nano px-1.5 py-0.5 rounded bg-surface-muted text-ink-muted shrink-0">
             Esc

@@ -300,7 +300,7 @@ function AskUserQuestionForm({
                   placeholder="输入你的回答……"
                   disabled={submitting}
                   rows={2}
-                  className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
+                  className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui max-md:text-[16px] text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
                 />
               )}
             </div>
@@ -429,7 +429,7 @@ function PermissionForm({
               placeholder="拒绝理由（可选）— 会传给模型，让它换个做法"
               disabled={submitting !== null}
               rows={2}
-              className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
+              className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui max-md:text-[16px] text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
             />
           )}
           <div className="flex flex-wrap items-center gap-2.5">
@@ -549,7 +549,7 @@ function ExitPlanModeForm({
               placeholder="拒绝理由（可选）— 会传给模型，让它调整计划"
               disabled={submitting !== null}
               rows={3}
-              className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
+              className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ui max-md:text-[16px] text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-line/60 resize-y"
             />
           )}
           <div className="flex items-center gap-3">
