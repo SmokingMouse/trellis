@@ -26,6 +26,8 @@ export function Composer({
   onSubmitted,
   onEscape,
   focusToken,
+  mobileCompact = false,
+  onMobileExpandedChange,
 }: {
   // The node a submit branches from (thread tip in linear view, the active
   // node on canvas). null → composer renders disabled.
@@ -39,9 +41,14 @@ export function Composer({
   onEscape?: () => void;
   // Bump to pull focus into the textarea (e.g. after arming a branch chip).
   focusToken?: number | null;
+  // Linear reading view only: phones start as a one-line rail and reveal the
+  // attachment/sketch surface after focus. Canvas keeps its existing shape.
+  mobileCompact?: boolean;
+  onMobileExpandedChange?: (expanded: boolean) => void;
 }) {
   const [text, setText] = useState("");
   const [sketchOpen, setSketchOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const abortStream = useSessionStore((s) => s.abortStream);
   const sendKey = useSessionStore((s) => s.sendKey);
@@ -49,6 +56,7 @@ export function Composer({
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
   // Before the server's `created` event lands, the streaming card is a local
@@ -163,11 +171,42 @@ export function Composer({
       ref.current.style.height = "auto";
       ref.current.style.height = `${Math.min(ref.current.scrollHeight, 160)}px`;
     }
-  }, [text]);
+  }, [text, mobileCompact, mobileExpanded]);
 
   useEffect(() => {
-    if (focusToken != null) ref.current?.focus();
-  }, [focusToken]);
+    onMobileExpandedChange?.(mobileCompact && mobileExpanded);
+  }, [mobileCompact, mobileExpanded, onMobileExpandedChange]);
+
+  useEffect(() => {
+    if (focusToken == null) return;
+    const id = window.requestAnimationFrame(() => {
+      if (mobileCompact) setMobileExpanded(true);
+      ref.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [focusToken, mobileCompact]);
+
+  const expandMobile = () => {
+    if (mobileCompact) setMobileExpanded(true);
+  };
+
+  const collapseMobileIfEmpty = () => {
+    if (!mobileCompact) return;
+    window.requestAnimationFrame(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      if (
+        text.trim() ||
+        att.pending.length > 0 ||
+        att.doneAttachments.length > 0 ||
+        att.notice ||
+        cmdNotice ||
+        sketchOpen
+      ) {
+        return;
+      }
+      setMobileExpanded(false);
+    });
+  };
 
   const submit = () => {
     const trimmed = text.trim();
@@ -195,7 +234,11 @@ export function Composer({
 
   if (isStreaming && targetNode) {
     return (
-      <div className="py-3">
+      <div
+        data-mobile-composer
+        data-composer-state="stopping"
+        className="py-3 max-md:py-1"
+      >
         <StopButton
           onClick={() => abortStream(targetNode.id)}
           disabled={isPending}
@@ -208,8 +251,16 @@ export function Composer({
     );
   }
 
+  const compact = mobileCompact && !mobileExpanded;
+
   return (
-    <div className="relative py-3">
+    <div
+      ref={rootRef}
+      data-mobile-composer
+      data-composer-state={compact ? "compact" : "expanded"}
+      className={`relative ${compact ? "py-1" : "py-3 max-md:py-2"}`}
+      onBlur={collapseMobileIfEmpty}
+    >
       {(matchedCommands.length > 0 ||
         matchedSkills.length > 0 ||
         matchedAgents.length > 0) && (
@@ -241,6 +292,7 @@ export function Composer({
       )}
       <div className="flex items-end gap-2">
         <textarea
+          data-composer-input
           ref={ref}
           value={text}
           onChange={(e) => {
@@ -260,10 +312,15 @@ export function Composer({
             }
           }}
           onPaste={att.handlePaste}
+          onFocus={expandMobile}
           rows={1}
           disabled={!targetNode}
-          placeholder={placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`}
-          className="flex-1 min-h-[44px] max-h-[160px] resize-none px-4 py-3 rounded-2xl border border-line-strong bg-surface text-body max-md:text-[16px] text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50"
+          placeholder={compact ? "追问…" : (placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`)}
+          className={`min-w-0 flex-1 resize-none rounded-2xl border border-line-strong bg-surface text-body text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50 ${
+            compact
+              ? "h-[44px] min-h-[44px] max-h-[44px] px-3 py-2.5"
+              : "min-h-[44px] max-h-[160px] px-4 py-3 max-md:min-h-[72px]"
+          }`}
         />
         <input
           ref={fileInputRef}
@@ -273,31 +330,35 @@ export function Composer({
           onChange={att.handlePicked}
           className="hidden"
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={!targetNode || att.atLimit}
-          title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
-          aria-label="添加附件"
-        >
-          <span aria-hidden>📎</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSketchOpen(true)}
-          disabled={!targetNode || att.atLimit}
-          title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
-          aria-label="画个草图"
-        >
-          <span aria-hidden>✏️</span>
-        </button>
-        {sketchOpen && (
-          <SketchModal
-            onClose={() => setSketchOpen(false)}
-            onExport={(blob) => att.startUpload(blob, "sketch.png")}
-          />
+        {!compact && (
+          <>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!targetNode || att.atLimit}
+              title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+              className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
+              aria-label="添加附件"
+            >
+              <span aria-hidden>📎</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSketchOpen(true)}
+              disabled={!targetNode || att.atLimit}
+              title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
+              className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
+              aria-label="画个草图"
+            >
+              <span aria-hidden>✏️</span>
+            </button>
+            {sketchOpen && (
+              <SketchModal
+                onClose={() => setSketchOpen(false)}
+                onExport={(blob) => att.startUpload(blob, "sketch.png")}
+              />
+            )}
+          </>
         )}
         <button
           onClick={submit}

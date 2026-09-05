@@ -1052,7 +1052,8 @@ html, body {
 }
 
 /* iOS Safari auto-zooms focused text controls below 16px. Keep this rule
-   unlayered so it outranks Tailwind's layered text utilities on phones. */
+   unlayered so it outranks Tailwind's layered text utilities on phones;
+   组件侧无需再加 max-md:text-[16px] 类。 */
 @media (max-width: 767.98px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea,

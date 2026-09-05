@@ -58,11 +58,21 @@ cleanup() {
       kill $port_pids >/dev/null 2>&1
     fi
   fi
+  rm -rf "$LOCK_DIR"
   exit "$status"
 }
 
 trap cleanup EXIT INT TERM
 cd "$ROOT_DIR"
+
+LOCK_DIR=/tmp/trellis-mobile-verify.lock
+lock_wait=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  lock_wait=$((lock_wait + 1))
+  if [ "$lock_wait" -ge 180 ]; then echo "FAIL: mobile-verify lock wait timeout (held by $(cat "$LOCK_DIR/owner" 2>/dev/null))"; exit 1; fi
+  sleep 5
+done
+echo "$$ $(date +%H:%M:%S) $(basename "$0")" > "$LOCK_DIR/owner"
 
 command -v bun >/dev/null || fail "bun 不可用"
 command -v sqlite3 >/dev/null || fail "sqlite3 不可用"
@@ -173,7 +183,7 @@ agent-browser --session "$SESSION" set viewport 390 844
 agent-browser --session "$SESSION" open "$BASE/"
 agent-browser --session "$SESSION" storage local clear
 agent-browser --session "$SESSION" open "$URL"
-agent-browser --session "$SESSION" wait 'textarea[placeholder*="继续对话"]'
+agent-browser --session "$SESSION" wait 'textarea[data-composer-input]'
 
 agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
 (() => {
@@ -315,7 +325,7 @@ agent-browser --session "$SESSION" wait 'textarea[placeholder^="例如："]'
 assert_visible_text_fields_at_least_16 "会话 drawer → 新会话首屏"
 
 agent-browser --session "$SESSION" open "$URL"
-agent-browser --session "$SESSION" wait 'textarea[placeholder*="继续对话"]'
+agent-browser --session "$SESSION" wait 'textarea[data-composer-input]'
 agent-browser --session "$SESSION" eval --stdin <<'RESTORE_SAFE_EOF'
 (() => {
   const root = document.documentElement;
@@ -350,7 +360,7 @@ CLOSE_EDIT_EOF
 agent-browser --session "$SESSION" wait --fn "![...document.querySelectorAll('textarea')].some((field) => field.offsetParent !== null && !field.getAttribute('placeholder'))"
 
 agent-browser --session "$SESSION" set viewport 390 480
-agent-browser --session "$SESSION" fill 'textarea[placeholder*="继续对话"]' 'verify only — do not send'
+agent-browser --session "$SESSION" fill 'textarea[data-composer-input]' 'verify only — do not send'
 agent-browser --session "$SESSION" eval --stdin <<'KEYBOARD_EOF'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -373,7 +383,7 @@ agent-browser --session "$SESSION" screenshot "$OUT/390x480-safe-area.png"
 sqlite3 "$DB" "DELETE FROM notes WHERE id='mv-safe-note';"
 agent-browser --session "$SESSION" set viewport 1280 800
 agent-browser --session "$SESSION" open "$URL"
-agent-browser --session "$SESSION" wait 'textarea[placeholder*="继续对话"]'
+agent-browser --session "$SESSION" wait 'textarea[data-composer-input]'
 agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
