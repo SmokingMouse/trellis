@@ -97,7 +97,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           }}
           placeholder="想问点什么？例如：这个 session 之外的另一个角度…（可粘贴图片）"
           rows={6}
-          className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink text-sm max-md:text-[16px] outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
+          className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink text-sm outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
           disabled={busy}
         />
         <div className="text-label text-ink-faint mt-1">

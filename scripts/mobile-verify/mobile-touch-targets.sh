@@ -53,12 +53,22 @@ cleanup() {
   if [ -n "$SERVER_PID" ]; then
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
+  rm -rf "$LOCK_DIR"
   exit "$cleanup_status"
 }
 trap cleanup 0
 trap 'exit 129' 1
 trap 'exit 130' 2
 trap 'exit 143' 15
+
+LOCK_DIR=/tmp/trellis-mobile-verify.lock
+lock_wait=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  lock_wait=$((lock_wait + 1))
+  if [ "$lock_wait" -ge 180 ]; then echo "FAIL: mobile-verify lock wait timeout (held by $(cat "$LOCK_DIR/owner" 2>/dev/null))"; exit 1; fi
+  sleep 5
+done
+echo "$$ $(date +%H:%M:%S) $(basename "$0")" > "$LOCK_DIR/owner"
 
 ab() {
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
@@ -105,6 +115,16 @@ JS
     echo "FAIL: authentication was lost after navigation"
     print_page_diagnostics
     return 1
+  fi
+}
+
+reauth_if_needed() {
+  if ab eval "location.pathname === '/login'" 2>/dev/null | grep -q '^true$'; then
+    echo "↻ authentication expired; signing in again"
+    ab wait '#pw'
+    ab fill '#pw' "$AUTH_PASS"
+    ab click 'button[type="submit"]'
+    ab wait --fn "location.pathname !== '/login'"
   fi
 }
 
@@ -294,9 +314,8 @@ ab eval --stdin <<'JS'
     ['mark read toggle', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-read-toggle"]'],
     ['branch from node', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-branch"]'],
     ['delete node', '[data-thread-node-id="mv-touch-permission"] [data-mobile-target="node-delete"]'],
-    ['response regenerate', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-regenerate"]'],
-    ['response card image', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-card-image"]'],
-    ['response copy full', '[data-thread-node-id="mv-touch-done"] button[aria-label="复制全文"]'],
+    ['response copy full', '[data-thread-node-id="mv-touch-done"] [data-mobile-response-actions] button[aria-label="复制全文"]'],
+    ['response more', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-more"]'],
   ];
   const results = specs.map(([name, selector]) => {
     const el = document.querySelector(selector);
@@ -310,6 +329,25 @@ ab eval --stdin <<'JS'
   return JSON.stringify(results, null, 2);
 })()
 JS
+ab click '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-more"]'
+wait_for_js "mobile response overflow" "Boolean(document.querySelector('[data-mobile-response-menu]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const specs = [
+    ['response regenerate', '[data-mobile-response-menu] [data-mobile-target="response-regenerate"]'],
+    ['response card image', '[data-mobile-response-menu] [data-mobile-target="response-card-image"]'],
+  ];
+  return JSON.stringify(specs.map(([name, selector]) => {
+    const el = document.querySelector(selector);
+    if (!el) throw new Error(`${name}: missing ${selector}`);
+    const r = el.getBoundingClientRect();
+    if (r.width < 44 || r.height < 44) throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} < 44x44`);
+    return { name, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+  }), null, 2);
+})()
+JS
+ab click '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-more"]'
+wait_for_js "mobile response overflow closed" "!document.querySelector('[data-mobile-response-menu]')"
 ab screenshot "$OUT/mobile-permission.png" >/dev/null
 
 echo "== mobile 390x844: BranchPopover collapsed =="
@@ -333,7 +371,7 @@ ab eval --stdin <<'JS'
 (() => {
   const specs = [
     ['branch selection open', '[data-mobile-target="branch-open"]'],
-    ['branch save note', '[data-mobile-target="branch-note"]'],
+    ['branch more', '[data-mobile-target="branch-more"]'],
   ];
   const results = specs.map(([name, selector]) => {
     const el = document.querySelector(selector);
@@ -345,6 +383,19 @@ ab eval --stdin <<'JS'
   return JSON.stringify(results, null, 2);
 })()
 JS
+ab click '[data-mobile-target="branch-more"]'
+wait_for_js "branch secondary menu" "Boolean(document.querySelector('[data-mobile-branch-menu] [data-mobile-target=branch-note]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const el = document.querySelector('[data-mobile-branch-menu] [data-mobile-target="branch-note"]');
+  if (!el) throw new Error('branch note missing from secondary menu');
+  const r = el.getBoundingClientRect();
+  if (r.width < 44 || r.height < 44) throw new Error(`branch note: ${r.width.toFixed(2)}x${r.height.toFixed(2)} < 44x44`);
+  return { width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+})()
+JS
+ab click '[data-mobile-target="branch-more"]'
+wait_for_js "branch secondary menu closed" "!document.querySelector('[data-mobile-branch-menu]')"
 ab eval --stdin <<'JS'
 (() => {
   const el = document.querySelector('[data-mobile-target="branch-open"]');
@@ -410,12 +461,13 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab screenshot "$OUT/mobile-new-tree.png" >/dev/null
-ab click '[data-mobile-target="new-tree-close"]'
+ab eval 'document.querySelector("[data-mobile-target=new-tree-close]")?.click(); true'
 wait_for_js "new tree modal closed" "!document.querySelector('[data-mobile-target=new-tree-start]')"
-ab click '[data-mobile-target="tree-sheet-close"]'
+ab eval 'document.querySelector("[data-mobile-target=tree-sheet-close]")?.click(); true'
 wait_for_js "mobile tree sheet closed" "!document.querySelector('[data-mobile-tree-sheet]')"
 
 ab open "$BASE/?session=mv-touch-ask-session&node=mv-touch-ask"
+reauth_if_needed
 ab wait '[data-mobile-target="ask-option"]'
 echo "== mobile 390x844: Ask card =="
 ab eval --stdin <<'JS'
@@ -448,6 +500,7 @@ JS
 
 ab set viewport 1280 800 1
 ab open "$BASE/?session=mv-touch-permission-session&node=mv-touch-permission"
+reauth_if_needed
 wait_for_js "desktop app shell" "Boolean(document.querySelector('header'))"
 ab eval --stdin <<'JS'
 (() => {
@@ -583,6 +636,7 @@ JS
 ab click '[data-mobile-target="new-tree-close"]'
 
 ab open "$BASE/?session=mv-touch-ask-session&node=mv-touch-ask"
+reauth_if_needed
 wait_for_js "desktop ask app shell" "Boolean(document.querySelector('header'))"
 ab eval --stdin <<'JS'
 (() => {

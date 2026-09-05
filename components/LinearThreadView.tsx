@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
@@ -75,10 +75,25 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // viewport to the bottom on new content; flips off when the user scrolls
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const composerScrollReadyRef = useRef(false);
+  const [composerExpanded, setComposerExpanded] = useState(false);
+  const [composerHidden, setComposerHidden] = useState(false);
+  const [waitingJumpId, setWaitingJumpId] = useState<string | null>(null);
 
   useEffect(() => {
     setOpenBranches(new Set());
     setBranchFrom(null);
+    setComposerExpanded(false);
+    setComposerHidden(false);
+    setWaitingJumpId(null);
+    lastScrollTopRef.current = 0;
+    composerScrollReadyRef.current = false;
+    const readyTimer = window.setTimeout(() => {
+      lastScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
+      composerScrollReadyRef.current = true;
+    }, 400);
+    return () => window.clearTimeout(readyTimer);
   }, [session?.id]);
 
   const threadData = useMemo(() => {
@@ -121,6 +136,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     return { anchorId: anchor.id, thread, branchesByNode };
   }, [activeNodeId, nodes, session?.rootNodeId]);
 
+  const waitingNodes = useMemo(
+    () => Object.values(nodes).filter((node) => node.pendingInteraction).sort(nodeSort),
+    [nodes],
+  );
+
   const tipNode =
     threadData.thread.length > 0
       ? threadData.thread[threadData.thread.length - 1]
@@ -134,6 +154,15 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   useEffect(() => {
     if (branchFrom && !nodes[branchFrom.id]) setBranchFrom(null);
   }, [branchFrom, nodes]);
+
+  useEffect(() => {
+    if (!waitingJumpId || !roundRefs.current.has(waitingJumpId)) return;
+    const id = requestAnimationFrame(() => {
+      roundRefs.current.get(waitingJumpId)?.scrollIntoView({ block: "start" });
+      setWaitingJumpId(null);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [waitingJumpId, threadData.anchorId]);
 
   // Restore the persisted reading position when landing on a session (tab
   // switch / reload / canvas→linear). The anchor alone can't do this: it
@@ -248,6 +277,18 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     followRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
 
+    const delta = el.scrollTop - lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
+    if (isMobile && composerScrollReadyRef.current) {
+      const forceVisible =
+        waitingNodes.length > 0 || Boolean(tipStreamingId) || composerExpanded;
+      if (forceVisible || followRef.current || delta < -8) {
+        setComposerHidden(false);
+      } else if (delta > 8) {
+        setComposerHidden(true);
+      }
+    }
+
     const sid = session?.id;
     if (!sid) return;
     if (recordTimerRef.current !== null) {
@@ -277,6 +318,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       if (picked) setReadingPosition(sid, picked);
     }, 200);
   };
+
+  const onComposerExpandedChange = useCallback((expanded: boolean) => {
+    setComposerExpanded(expanded);
+    if (expanded) setComposerHidden(false);
+  }, []);
 
   // Read tracking: a card counts as read once it stays sufficiently visible
   // in the scroll viewport for 1s — ≥50% of the card showing, or (for cards
@@ -419,6 +465,12 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const mode = modeStyle(session.mode);
   // Header/cards/composer share one width class so they stay column-aligned.
   const widthClass = THREAD_WIDTH_CLASS[threadWidth];
+  const composerIsHidden =
+    isMobile &&
+    composerHidden &&
+    waitingNodes.length === 0 &&
+    !tipStreamingId &&
+    !composerExpanded;
 
   return (
     // #3: viewport-bound flex column — header and composer are fixed rails,
@@ -482,13 +534,30 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         </div>
       </div>
 
+      {isMobile && waitingNodes.length > 0 && (
+        <button
+          type="button"
+          data-mobile-waiting-banner
+          onClick={() => {
+            const target = waitingNodes[0];
+            setWaitingJumpId(target.id);
+            setActiveNode(target.id);
+          }}
+          className="z-20 flex min-h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden />
+          有 {waitingNodes.length} 项等你处理
+          <span aria-hidden>↓</span>
+        </button>
+      )}
+
       <div
         ref={scrollRef}
         onScroll={onScroll}
         data-thread-scroll
         className="flex-1 overflow-y-auto"
       >
-        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 space-y-4`}>
+        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
             暂无节点
@@ -719,7 +788,10 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
 
       <div
         data-safe-area="linear-composer"
-        className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur"
+        data-composer-hidden={composerIsHidden ? "true" : "false"}
+        className={`shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 ${
+          composerIsHidden ? "max-md:translate-y-full max-md:pointer-events-none" : "translate-y-0"
+        }`}
         style={{ paddingBottom: "var(--safe-bottom)" }}
       >
         <div className={`${widthClass} mx-auto px-4`}>
@@ -740,6 +812,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           )}
           <Composer
             targetNode={branchFromNode ?? tipNode}
+            mobileCompact={isMobile}
+            onMobileExpandedChange={onComposerExpandedChange}
             placeholder={
               branchFromNode
                 ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`

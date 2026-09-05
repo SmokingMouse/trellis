@@ -72,7 +72,7 @@ export default function LoginPage() {
               if (error) setError(null);
             }}
             placeholder="输入密码以继续"
-            className={`w-full h-11 px-3.5 rounded-field bg-surface-canvas border text-reading max-md:text-[16px] outline-none transition-colors ${
+            className={`w-full h-11 px-3.5 rounded-field bg-surface-canvas border text-reading outline-none transition-colors ${
               error
                 ? "border-danger focus:border-danger"
                 : "border-line-strong focus:border-accent"

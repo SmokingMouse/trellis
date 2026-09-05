@@ -65,12 +65,22 @@ cleanup() {
     fi
     sleep 1
   done
+  rm -rf "$LOCK_DIR"
   exit "$cleanup_status"
 }
 trap cleanup 0
 trap 'exit 129' 1
 trap 'exit 130' 2
 trap 'exit 143' 15
+
+LOCK_DIR=/tmp/trellis-mobile-verify.lock
+lock_wait=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  lock_wait=$((lock_wait + 1))
+  if [ "$lock_wait" -ge 180 ]; then echo "FAIL: mobile-verify lock wait timeout (held by $(cat "$LOCK_DIR/owner" 2>/dev/null))"; exit 1; fi
+  sleep 5
+done
+echo "$$ $(date +%H:%M:%S) $(basename "$0")" > "$LOCK_DIR/owner"
 
 print_page_diagnostics() {
   ab eval --stdin <<'JS' || true
@@ -215,7 +225,7 @@ wait_for_js "authenticated home" "location.pathname !== '/login'"
 assert_not_login
 
 ab open "$URL"
-wait_for_js "fixture linear composer" "Boolean(document.querySelector('textarea[placeholder*=\"继续对话\"]'))"
+wait_for_js "fixture linear composer" "Boolean(document.querySelector('textarea[data-composer-input]'))"
 assert_not_login
 
 echo "== M1: 390x844 slim Header =="
@@ -265,7 +275,7 @@ ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   assert(!document.querySelector('[data-mobile-tree-sheet]'), 'TreePanel mounted over 390x480 linear view');
-  const textarea = document.querySelector('textarea[placeholder*="继续对话"]');
+  const textarea = document.querySelector('textarea[data-composer-input]');
   assert(textarea, 'composer textarea missing');
   const rect = textarea.getBoundingClientRect();
   assert(rect.bottom <= innerHeight, `composer outside viewport: ${rect.bottom}/${innerHeight}`);
@@ -287,7 +297,7 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab click 'button[aria-label="关闭思维树"]'
-wait_for_js "TreePanel closed to linear" "!document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('textarea[placeholder*=\"继续对话\"]'))"
+wait_for_js "TreePanel closed to linear" "!document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('textarea[data-composer-input]'))"
 
 echo "== M11: overflow canvas entry performs delayed fitView =="
 ab click 'button[aria-label="更多功能"]'
@@ -311,7 +321,7 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab click 'button[title="切换到线性 thread"]'
-wait_for_js "linear view restored" "Boolean(document.querySelector('textarea[placeholder*=\"继续对话\"]'))"
+wait_for_js "linear view restored" "Boolean(document.querySelector('textarea[data-composer-input]'))"
 
 echo "== desktop-mode marker and visible restore entry =="
 ab eval 'localStorage.setItem("trellis-desktop-mode", "1"); "desktop marker set"'
