@@ -144,7 +144,7 @@ if build_is_stale .next/BUILD_ID || grep -R -F "$VERIFY_LITERAL" .next/static/ch
   echo "== ordinary build: required =="
   (
     unset TRELLIS_DIST_DIR
-    export NEXT_PUBLIC_TRELLIS_VERIFY=0
+    unset NEXT_PUBLIC_TRELLIS_VERIFY
     bun --bun run build
   )
 else
