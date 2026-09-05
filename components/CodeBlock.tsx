@@ -156,6 +156,7 @@ export function CodeBlock({
           <span className="md-codeblock-lang">{lang || "code"}</span>
           <button
             type="button"
+            data-mobile-target="code-copy"
             onClick={copy}
             className="md-codeblock-copy nodrag"
             aria-label="复制代码"

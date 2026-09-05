@@ -132,6 +132,7 @@ function RegenerateVariantButton({
   return (
     <Button
       type="button"
+      data-mobile-target="response-regenerate"
       variant="secondary"
       size="sm"
       onClick={(e) => {
@@ -460,7 +461,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
                 <CopyButton
                   text={node.response}
                   label="复制全文"
-                  className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+                  className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
                 />
               </div>
             </div>

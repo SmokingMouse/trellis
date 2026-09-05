@@ -553,12 +553,13 @@ export function LinearThreadView() {
                     {node.status === "done" && (
                       <button
                         type="button"
+                        data-mobile-target="node-read-toggle"
                         onClick={() =>
                           node.readAt
                             ? void markNodeUnread(node.id)
                             : void markNodeRead(node.id)
                         }
-                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
                           node.readAt
                             ? "text-ink-faint hover:bg-unread-muted hover:text-unread-ink"
                             : "text-ink-faint hover:bg-surface-muted hover:text-ink"
@@ -608,13 +609,14 @@ export function LinearThreadView() {
                     {canBranch && (
                       <button
                         type="button"
+                        data-mobile-target="node-branch"
                         onClick={() =>
                           setBranchFrom((prev) => ({
                             id: node.id,
                             n: (prev?.n ?? 0) + 1,
                           }))
                         }
-                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
                           isBranchTarget
                             ? "text-accent bg-accent-muted"
                             : "text-ink-faint hover:bg-accent-muted hover:text-accent"
@@ -643,8 +645,9 @@ export function LinearThreadView() {
                     {canDelete && (
                       <button
                         type="button"
+                        data-mobile-target="node-delete"
                         onClick={() => confirmDelete(node.id)}
-                        className="px-1.5 py-1 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
+                        className="px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
                         title="删除节点（含子树）"
                         aria-label="删除节点"
                       >

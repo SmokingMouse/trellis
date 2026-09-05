@@ -841,6 +841,7 @@ export function SessionSidebar() {
         <Button
           variant="primary"
           size="sm"
+          data-mobile-target="drawer-new-session"
           onClick={onNew}
           title="新会话：开一棵全新树（与「🧹 新话题」不同——后者在当前会话内清空上下文）"
           className="flex-1 h-8"
@@ -850,6 +851,7 @@ export function SessionSidebar() {
         </Button>
         <IconButton
           label="收起"
+          data-mobile-target="drawer-close"
           onClick={onClose}
           className="w-7 h-8"
         >
@@ -862,8 +864,9 @@ export function SessionSidebar() {
       {/* CLI 同步：attach 本机 Claude Code / Codex 会话（双向）。 */}
       <button
         onClick={() => setAttachOpen(true)}
+        data-mobile-target="drawer-attach"
         title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
-        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
+        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 max-md:min-h-11 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         <span aria-hidden>⇄</span>
         Attach CLI 会话
@@ -1306,8 +1309,9 @@ function SidebarRow({
 
   return (
     <div
-      style={{ paddingLeft: PAD(indent), height: ROW_H }}
-      className={`group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+      style={{ paddingLeft: PAD(indent) }}
+      data-mobile-target="session-row"
+      className={`group relative mx-1 h-[26px] max-md:h-11 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -1507,11 +1511,12 @@ function ChainRow({
   return (
     <button
       type="button"
+      data-mobile-target="session-chain-row"
       onClick={onOpen}
-      style={{ paddingLeft: PAD(2), height: ROW_H }}
+      style={{ paddingLeft: PAD(2) }}
       // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
       // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
-      className={`mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
+      className={`mx-1 h-[26px] max-md:h-11 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
         active
           ? "bg-surface-muted text-ink font-medium"
           : "text-ink-muted hover:bg-surface-muted"

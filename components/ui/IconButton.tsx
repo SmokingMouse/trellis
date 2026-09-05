@@ -34,7 +34,7 @@ export function IconButton({
     <button
       aria-label={label}
       title={label}
-      className={`shrink-0 inline-flex items-center justify-center rounded-md transition-colors ${SIZE[size]} ${TONE[tone]} ${className}`}
+      className={`shrink-0 inline-flex items-center justify-center rounded-md max-md:min-h-11 max-md:min-w-11 transition-colors ${SIZE[size]} ${TONE[tone]} ${className}`}
       {...rest}
     >
       {children}

@@ -69,7 +69,11 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
             {isProject && " Project 模式下还会同时开启全新的 Claude 会话记忆。"}
           </div>
         </div>
-        <IconButton label="关闭" onClick={onClose}>
+        <IconButton
+          label="关闭"
+          data-mobile-target="new-tree-close"
+          onClick={onClose}
+        >
           ✕
         </IconButton>
       </div>
@@ -110,11 +114,16 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="px-5 py-3 border-t border-line-faint flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>
+        <Button
+          variant="ghost"
+          data-mobile-target="new-tree-cancel"
+          onClick={onClose}
+        >
           取消
         </Button>
         <Button
           variant="primary"
+          data-mobile-target="new-tree-start"
           onClick={submit}
           disabled={!q.trim() || busy || att.hasUploading}
         >
