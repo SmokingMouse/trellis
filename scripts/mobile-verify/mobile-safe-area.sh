@@ -43,38 +43,67 @@ command -v bun >/dev/null || fail "bun 不可用"
 command -v sqlite3 >/dev/null || fail "sqlite3 不可用"
 command -v agent-browser >/dev/null || fail "agent-browser 不可用"
 command -v lsof >/dev/null || fail "lsof 不可用"
+command -v curl >/dev/null || fail "curl 不可用"
+command -v grep >/dev/null || fail "grep 不可用"
+command -v find >/dev/null || fail "find 不可用"
+
+# Named sessions persist across invocations; never inherit a stale page/storage.
+agent-browser --session "$SESSION" close >/dev/null 2>&1 || true
 
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "端口 $PORT 已被占用"
 fi
 
-rg -q 'viewportFit: "cover"' app/layout.tsx || fail "缺少 viewportFit: cover"
-rg -q 'themeColor: "#fafaf9"' app/layout.tsx || fail "缺少 theme-color viewport 配置"
-rg -q 'userScalable: false' app/layout.tsx || fail "user-scalable 基线被改动"
+grep -qF 'viewportFit: "cover"' app/layout.tsx || fail "缺少 viewportFit: cover"
+grep -qF 'themeColor: "#fafaf9"' app/layout.tsx || fail "缺少 theme-color viewport 配置"
+grep -qF 'userScalable: false' app/layout.tsx || fail "user-scalable 基线被改动"
 
 MANIFEST_THEME="$(bun -e 'console.log(JSON.parse(await Bun.file("public/manifest.json").text()).theme_color)')"
 [[ "$MANIFEST_THEME" == "#fafaf9" ]] || fail "layout 与 manifest theme_color 不一致"
 
-SAFE_ENV_FILES="$(rg -l 'env[(]safe-area-inset-' app components --glob '*.{css,ts,tsx}' || true)"
+SAFE_ENV_FILES="$(find app components -type f \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -lF 'env(safe-area-inset-' {} + 2>/dev/null || true)"
 [[ "$SAFE_ENV_FILES" == "app/globals.css" ]] || fail "safe-area env() 必须只定义在 app/globals.css"
-SAFE_ENV_COUNT="$(rg -o 'env[(]safe-area-inset-' app/globals.css | wc -l | tr -d ' ')"
+SAFE_ENV_COUNT="$(grep -cF 'env(safe-area-inset-' app/globals.css | tr -d ' ')"
 [[ "$SAFE_ENV_COUNT" == 4 ]] || fail "四个 safe-area env() 变量未完整定义"
 
-rg -q -- 'var[(]--safe-top[)]' components/Header.tsx || fail "Header 未消费 --safe-top"
-rg -q -- 'var[(]--safe-bottom[)]' components/LinearThreadView.tsx || fail "Linear Composer 未消费 --safe-bottom"
-rg -q -- 'var[(]--safe-bottom[)]' components/ui/Drawer.tsx || fail "bottom sheet 未消费 --safe-bottom"
-rg -q -- 'var[(]--safe-top[)]' components/ui/Modal.tsx || fail "modal 壳未消费 safe-area 变量"
+grep -qF 'var(--safe-top)' components/Header.tsx || fail "Header 未消费 --safe-top"
+grep -qF 'var(--safe-bottom)' components/LinearThreadView.tsx || fail "Linear Composer 未消费 --safe-bottom"
+grep -qF 'var(--safe-bottom)' components/ui/Drawer.tsx || fail "bottom sheet 未消费 --safe-bottom"
+grep -qF 'var(--safe-top)' components/ui/Modal.tsx || fail "modal 壳未消费 safe-area 变量"
 
-LEGACY_VIEWPORT_PATTERN='100''vh|\b(min-)?h-''screen\b'
-if rg -n "$LEGACY_VIEWPORT_PATTERN" app components lib hooks public server.ts tenancy --glob '*.{css,html,json,ts,tsx}'; then
+LEGACY_VIEWPORT_PATTERN='100''vh|min-h-''screen|h-''screen'
+LEGACY_MATCHES="$(find app components lib hooks public server.ts tenancy -type f \( -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -nHE "$LEGACY_VIEWPORT_PATTERN" {} + 2>/dev/null || true)"
+if [[ -n "$LEGACY_MATCHES" ]]; then
+  echo "$LEGACY_MATCHES" >&2
   fail "仍有 legacy viewport height 残留"
 fi
 
-if rg -n 'serviceWorker|service-worker|navigator[.]serviceWorker' app components public --glob '*.{css,html,json,js,ts,tsx}'; then
+SERVICE_WORKER_MATCHES="$(find app components public -type f \( -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.js' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -nHE 'serviceWorker|service-worker|navigator[.]serviceWorker' {} + 2>/dev/null || true)"
+if [[ -n "$SERVICE_WORKER_MATCHES" ]]; then
+  echo "$SERVICE_WORKER_MATCHES" >&2
   fail "本改动不得加入 service worker"
 fi
 
-bun --bun run build
+NEEDS_BUILD=0
+BUILD_STAMP=.next/BUILD_ID
+if [[ ! -f "$BUILD_STAMP" ]]; then
+  NEEDS_BUILD=1
+elif [[ -n "$(find app components lib hooks public tenancy -type f -newer "$BUILD_STAMP" -print -quit)" ]]; then
+  NEEDS_BUILD=1
+else
+  for build_input in server.ts next.config.ts package.json bun.lock tsconfig.json postcss.config.mjs; do
+    if [[ -e "$build_input" && "$build_input" -nt "$BUILD_STAMP" ]]; then
+      NEEDS_BUILD=1
+      break
+    fi
+  done
+fi
+
+if [[ "$NEEDS_BUILD" == 1 ]]; then
+  bun --bun run build
+else
+  echo "mobile-safe-area: 复用已更新的 .next build"
+fi
 
 mkdir -p "$H/.trellis" "$OUT"
 sqlite3 ~/.trellis/data.db ".backup $DB"
@@ -121,9 +150,10 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   const themeColors = [...document.querySelectorAll('meta[name="theme-color"]')];
 
   assert(viewport.includes('viewport-fit=cover'), `viewport meta: ${viewport}`);
-  assert(themeColors.length > 0, 'theme-color meta 缺失');
-  assert(themeColors.some((meta) => meta.content === '#fafaf9'), 'theme-color 与 manifest 不一致');
-  assert(getComputedStyle(root).getPropertyValue('--safe-bottom').trim() !== '', '--safe-bottom 不可读');
+  assert(themeColors.length > 0, `theme-color meta count=${themeColors.length}`);
+  assert(themeColors.some((meta) => meta.content === '#fafaf9'), `theme-color=${themeColors.map((meta) => meta.content).join(',')}`);
+  const initialSafeBottom = getComputedStyle(root).getPropertyValue('--safe-bottom').trim();
+  assert(initialSafeBottom !== '', `--safe-bottom=${JSON.stringify(initialSafeBottom)}`);
 
   root.style.setProperty('--safe-top', '47px');
   root.style.setProperty('--safe-bottom', '34px');
@@ -139,17 +169,20 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   const headerRect = header.getBoundingClientRect();
   const composerRect = composer.getBoundingClientRect();
   const textareaRect = textarea.getBoundingClientRect();
+  const headerPaddingTop = getComputedStyle(header).paddingTop;
+  const threadPaddingTop = getComputedStyle(thread).paddingTop;
+  const composerPaddingBottom = getComputedStyle(composer).paddingBottom;
   assert(near(headerRect.top, 0) && near(headerRect.height, 95), `Header 几何异常: ${headerRect.top}/${headerRect.height}`);
-  assert(getComputedStyle(header).paddingTop === '47px', 'Header 未消费 --safe-top');
-  assert(getComputedStyle(thread).paddingTop === '95px', 'thread 顶部未避让 Header safe-area');
-  assert(getComputedStyle(composer).paddingBottom === '34px', 'Composer 未消费 --safe-bottom');
-  assert(composerRect.top >= headerRect.bottom && near(composerRect.bottom, innerHeight), 'Composer 顶底裁切');
-  assert(textareaRect.bottom <= innerHeight - 34, 'Composer 控件侵入底部安全区');
+  assert(headerPaddingTop === '47px', `Header paddingTop=${headerPaddingTop}`);
+  assert(threadPaddingTop === '95px', `thread paddingTop=${threadPaddingTop}`);
+  assert(composerPaddingBottom === '34px', `Composer paddingBottom=${composerPaddingBottom}`);
+  assert(composerRect.top >= headerRect.bottom && near(composerRect.bottom, innerHeight), `Composer rect=${JSON.stringify({ top: composerRect.top, bottom: composerRect.bottom, headerBottom: headerRect.bottom, innerHeight })}`);
+  assert(textareaRect.bottom <= innerHeight - 34, `textarea bottom=${textareaRect.bottom}, safeBoundary=${innerHeight - 34}`);
 
   return {
     viewport: { width: innerWidth, height: innerHeight },
     header: { top: headerRect.top, height: headerRect.height },
-    composer: { top: composerRect.top, bottom: composerRect.bottom, paddingBottom: getComputedStyle(composer).paddingBottom },
+    composer: { top: composerRect.top, bottom: composerRect.bottom, paddingBottom: composerPaddingBottom },
   };
 })()
 MOBILE_EOF
@@ -168,9 +201,9 @@ agent-browser --session "$SESSION" eval --stdin <<'KEYBOARD_EOF'
   const headerRect = header.getBoundingClientRect();
   const composerRect = composer.getBoundingClientRect();
   const textareaRect = textarea.getBoundingClientRect();
-  assert(near(headerRect.top, 0) && headerRect.bottom <= innerHeight, '键盘态 Header 裁切');
-  assert(composerRect.top >= headerRect.bottom && near(composerRect.bottom, innerHeight), '键盘态 Composer 裁切');
-  assert(textareaRect.bottom <= innerHeight - 34, '键盘态控件侵入底部安全区');
+  assert(near(headerRect.top, 0) && headerRect.bottom <= innerHeight, `键盘态 Header rect=${JSON.stringify({ top: headerRect.top, bottom: headerRect.bottom, innerHeight })}`);
+  assert(composerRect.top >= headerRect.bottom && near(composerRect.bottom, innerHeight), `键盘态 Composer rect=${JSON.stringify({ top: composerRect.top, bottom: composerRect.bottom, headerBottom: headerRect.bottom, innerHeight })}`);
+  assert(textareaRect.bottom <= innerHeight - 34, `键盘态 textarea bottom=${textareaRect.bottom}, safeBoundary=${innerHeight - 34}`);
   return { viewport: { width: innerWidth, height: innerHeight }, headerBottom: headerRect.bottom, composer: { top: composerRect.top, bottom: composerRect.bottom } };
 })()
 KEYBOARD_EOF
