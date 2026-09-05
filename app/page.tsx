@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { LinearThreadView } from "@/components/LinearThreadView";
+import { TreePanel } from "@/components/TreePanel";
 import { NewQuestionPicker } from "@/components/NewQuestionPicker";
 import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
@@ -109,6 +110,7 @@ export default function Home() {
       )}
       {!session && <QuestionInput />}
       {session && viewMode === "linear" && <LinearThreadView />}
+      {session && viewMode === "linear" && <TreePanel />}
       {session && viewMode === "canvas" && (
         <>
           <Canvas

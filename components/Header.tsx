@@ -8,6 +8,12 @@ import { ThemeMenu } from "./ThemeMenu";
 import { Popover } from "@/components/ui/Popover";
 import { IconButton } from "@/components/ui/IconButton";
 import { Button } from "@/components/ui/Button";
+import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
+import {
+  desktopModeOverrideEnabled,
+  setDesktopModeOverride,
+  useIsMobile,
+} from "@/hooks/useIsMobile";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import { ctxTokensOf, findLineageCtxTurn } from "@/lib/context-usage";
@@ -31,6 +37,7 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
 }
 
 export function Header() {
+  const isMobile = useIsMobile();
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -104,6 +111,7 @@ export function Header() {
   // in the claude CLI / @smokingmouse/agent SDK, confirmed by spike). Below 50% the
   // badge stays a plain non-interactive readout to avoid nagging.
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
+  const [mobileOverflowOpen, setMobileOverflowOpen] = useState(false);
   const ctxActionable = ctx != null && ctx.percent >= 50;
 
   const [gwMe, setGwMe] = useState<{ role?: string } | null>(null);
@@ -122,23 +130,78 @@ export function Header() {
     };
   }, []);
 
+  if (isMobile === null) return null;
+
+  if (isMobile) {
+    const title = session?.title.trim() || "新会话";
+    return (
+      <>
+        <header
+          data-mobile-header
+          className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1"
+        >
+          <IconButton
+            label="会话列表"
+            data-mobile-target="header-session-drawer"
+            onClick={() => setMobileNavOpen(true)}
+            className="h-11 w-11 p-0"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </IconButton>
+          <div className="min-w-0 flex-1 px-1 text-center">
+            <span
+              className="block truncate text-sm font-medium text-ink-strong"
+              title={title}
+            >
+              {title}
+            </span>
+          </div>
+          <IconButton
+            label="更多功能"
+            data-mobile-target="header-overflow"
+            aria-expanded={mobileOverflowOpen}
+            onClick={() => setMobileOverflowOpen(true)}
+            className="h-11 w-11 p-0 text-xl tracking-widest"
+          >
+            <span aria-hidden>…</span>
+          </IconButton>
+        </header>
+        <MobileOverflowMenu
+          open={mobileOverflowOpen}
+          onClose={() => setMobileOverflowOpen(false)}
+          showAdmin={gwMe?.role === "admin"}
+        />
+      </>
+    );
+  }
+
+  const narrowDesktopOverride =
+    desktopModeOverrideEnabled() &&
+    window.matchMedia("(max-width: 767px)").matches;
+
   return (
     <header className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
       <div className="flex items-center gap-2 shrink-0">
         {/* Mobile-only: open the session-list drawer. The left sidebar is
             hidden on phones, so this is the only way to see / switch between
             sessions there. */}
-        <IconButton
-          label="会话列表"
-          onClick={() => setMobileNavOpen(true)}
-          className="md:hidden -ml-1"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </IconButton>
+        {!narrowDesktopOverride && (
+          <IconButton
+            label="会话列表"
+            onClick={() => setMobileNavOpen(true)}
+            className="md:hidden -ml-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </IconButton>
+        )}
         {/* 品牌渐变固定色（不随主题换肤）：#6366f1 → #d946ef → #fbbf24 */}
         <div className="w-6 h-6 rounded bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
         <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>
@@ -174,28 +237,30 @@ export function Header() {
           <>
             {/* 树形分支 icon——与左侧会话列表 ☰ 明确区分（移动端两个
                 同形三横线曾并列 Header 两端，易混）。 */}
-            <IconButton
-              label="思维树"
-              onClick={() => setOutlineOpen(true)}
-              className="md:hidden px-2 py-1"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
+            {!narrowDesktopOverride && (
+              <IconButton
+                label="思维树"
+                onClick={() => setOutlineOpen(true)}
+                className="md:hidden px-2 py-1"
               >
-                <path d="M6 3v12" />
-                <circle cx="18" cy="6" r="3" />
-                <circle cx="6" cy="18" r="3" />
-                <path d="M18 9a9 9 0 0 1-9 9" />
-              </svg>
-            </IconButton>
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M6 3v12" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M18 9a9 9 0 0 1-9 9" />
+                </svg>
+              </IconButton>
+            )}
             {session.mode === "chat" && (
               <button
                 onClick={() => setChatEnhanced(!chatEnhanced)}
@@ -377,6 +442,21 @@ export function Header() {
               🛡️
             </span>
           </a>
+        )}
+        {narrowDesktopOverride && (
+          <button
+            type="button"
+            data-mobile-target="restore-mobile-mode"
+            title="回手机版"
+            aria-label="回手机版"
+            onClick={() => {
+              setDesktopModeOverride(false);
+              window.location.reload();
+            }}
+            className="fixed right-1 top-1 z-50 flex h-10 items-center rounded-md border border-line bg-surface px-3 text-sm font-medium text-ink shadow-raise hover:bg-surface-muted"
+          >
+            回手机版
+          </button>
         )}
         {/* 设置是整页而不是 popover：版本、落后的 commit、部署进度、失败日志，
             没有一样塞得进一个下拉。用 <a> 而不是 <Link> —— 从画布跳走时让浏览器

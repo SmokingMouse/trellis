@@ -8,8 +8,9 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
-import { useMemo, useEffect, useState, useCallback } from "react";
+import { useMemo, useEffect, useState, useCallback, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { isEditableTarget } from "@/lib/shortcuts";
 import { ChatNode, type ChildAnchor } from "./ChatNode";
 import { ReferenceCard } from "./ReferenceCard";
@@ -44,6 +45,7 @@ export function Canvas({ onNodeFocus }: { onNodeFocus?: () => void } = {}) {
 // LoD threshold. Active-node focus now preserves the user's current zoom.)
 
 function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
+  const isMobile = useIsMobile();
   const nodeMap = useSessionStore((s) => s.nodes);
   const setNodePosition = useSessionStore((s) => s.setNodePosition);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -51,6 +53,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   const collapsedNodeIds = useSessionStore((s) => s.collapsedNodeIds);
   const sessionId = useSessionStore((s) => s.session?.id);
   const { setCenter, getViewport, fitView } = useReactFlow();
+  const mobileFitScheduled = useRef(false);
 
   // Folded subtrees and hidden trees disappear from the canvas:
   // - Collapsed roots stay visible (their "+N" badge invites re-expansion),
@@ -214,6 +217,20 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
     // this layout reset.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, fitView, setCenter, getViewport]);
+
+  // M11: entering the canvas on a phone starts from a readable overview.
+  // Wait until the first measured Dagre pass (60ms above) has painted, then
+  // fit exactly once for this Canvas mount. Returning from linear remounts
+  // Canvas and schedules a fresh fit; desktop keeps its existing landing.
+  useEffect(() => {
+    if (!isMobile || mobileFitScheduled.current) return;
+    const timer = window.setTimeout(() => {
+      if (mobileFitScheduled.current) return;
+      mobileFitScheduled.current = true;
+      fitView({ padding: 0.15, duration: 400 });
+    }, 240);
+    return () => window.clearTimeout(timer);
+  }, [isMobile, fitView]);
 
   // F key → fit to overview. Skip when typing in inputs.
   useEffect(() => {
@@ -387,6 +404,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
+        data-canvas-surface
         className={`w-screen h-screen pt-12 md:pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
           layoutReady ? " canvas-layout-ready" : ""
         }`}

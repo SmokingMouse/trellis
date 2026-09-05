@@ -489,6 +489,9 @@ type State = {
   // permanent left rail (md:block); mobile (which defaults to fullscreen,
   // hiding the rail) opens it as a full-height drawer via a Header button.
   outlineOpen: boolean;
+  // M2: full-screen TreePanel sheet on phones. Closed by default so the
+  // navigator is not mounted over the linear reading/composer surface.
+  mobileTreePanelOpen: boolean;
   // B3: visibility of the "新话题（清空上下文）" composer (NewQuestionPicker).
   // Lifted into the store so both the canvas FAB and the Header context-
   // pressure prompt (the /compact degradation entry) can open the same modal.
@@ -712,6 +715,7 @@ type Actions = {
   closeFilePreview: () => void;
   setWorkspaceFilesOpen: (open: boolean) => void;
   setOutlineOpen: (open: boolean) => void;
+  setMobileTreePanelOpen: (open: boolean) => void;
   setComposeRootOpen: (open: boolean) => void;
   setHistoryDepth: (n: number) => void;
   setChatEnhanced: (v: boolean) => void;
@@ -833,6 +837,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   filePreview: null,
   workspaceFilesOpen: false,
   outlineOpen: false,
+  mobileTreePanelOpen: false,
   composeRootOpen: false,
   collapsedNodeIds: new Set(),
   lastEditedNodeId: null,
@@ -933,6 +938,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       readingPosition: null,
       treeVisits: {},
       unreadHolds: {},
+      mobileTreePanelOpen: false,
       // Wave 4: dropping to the composer screen is a "no tab is active"
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
@@ -1932,6 +1938,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   closeFilePreview: () => set({ filePreview: null }),
   setWorkspaceFilesOpen: (open) => set({ workspaceFilesOpen: open }),
   setOutlineOpen: (open) => set({ outlineOpen: open }),
+  setMobileTreePanelOpen: (open) => set({ mobileTreePanelOpen: open }),
   setComposeRootOpen: (open) => set({ composeRootOpen: open }),
 
   deleteNode: async (nodeId) => {

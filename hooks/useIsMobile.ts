@@ -1,6 +1,28 @@
 "use client";
 import { useEffect, useState } from "react";
 
+export const DESKTOP_MODE_OVERRIDE_KEY = "trellis-desktop-mode";
+
+export function desktopModeOverrideEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(DESKTOP_MODE_OVERRIDE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setDesktopModeOverride(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (enabled) window.localStorage.setItem(DESKTOP_MODE_OVERRIDE_KEY, "1");
+    else window.localStorage.removeItem(DESKTOP_MODE_OVERRIDE_KEY);
+  } catch {
+    // Storage can be unavailable in private browsing. The caller still
+    // reloads; without a durable marker the app safely stays in mobile mode.
+  }
+}
+
 // Returns null until first effect runs to avoid SSR/hydration mismatch.
 // Consumers should treat null as "not yet known" and render a neutral state.
 //
@@ -16,10 +38,15 @@ export function useIsMobile(
   const [matches, setMatches] = useState<boolean | null>(null);
   useEffect(() => {
     const mq = window.matchMedia(query);
-    const update = () => setMatches(mq.matches);
+    const update = () =>
+      setMatches(desktopModeOverrideEnabled() ? false : mq.matches);
     update();
     mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    window.addEventListener("storage", update);
+    return () => {
+      mq.removeEventListener("change", update);
+      window.removeEventListener("storage", update);
+    };
   }, [query]);
   return matches;
 }
