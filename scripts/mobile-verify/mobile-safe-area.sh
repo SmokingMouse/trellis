@@ -17,6 +17,31 @@ fail() {
   exit 1
 }
 
+assert_visible_text_fields_at_least_16() {
+  local state="$1"
+  echo "== iOS focus zoom guard: $state =="
+  agent-browser --session "$SESSION" eval --stdin <<'FIELD_SIZES_EOF'
+(() => {
+  const fields = [...document.querySelectorAll('input,textarea,select')].filter((field) => {
+    const rect = field.getBoundingClientRect();
+    const style = getComputedStyle(field);
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+  });
+  const fieldSizes = fields.map((field) => ({
+    tag: field.tagName,
+    placeholder: field.getAttribute('placeholder'),
+    ariaLabel: field.getAttribute('aria-label'),
+    fontSize: parseFloat(getComputedStyle(field).fontSize),
+  }));
+  if (fieldSizes.length === 0) throw new Error('当前状态没有可见文本字段');
+  if (!fieldSizes.every((field) => field.fontSize >= 16)) {
+    throw new Error(`手机输入字号不足 16px: ${JSON.stringify(fieldSizes)}`);
+  }
+  return fieldSizes;
+})()
+FIELD_SIZES_EOF
+}
+
 cleanup() {
   local status=$?
   local port_pids=""
@@ -73,10 +98,11 @@ grep -qF 'var(--safe-top)' components/Header.tsx || fail "Header 未消费 --saf
 grep -qF 'var(--safe-bottom)' components/LinearThreadView.tsx || fail "Linear Composer 未消费 --safe-bottom"
 grep -qF 'var(--safe-bottom)' components/ui/Drawer.tsx || fail "bottom sheet 未消费 --safe-bottom"
 grep -qF 'var(--safe-top)' components/ui/Modal.tsx || fail "modal 壳未消费 safe-area 变量"
-for mobile_input_file in components/Composer.tsx components/BranchPopover.tsx components/NewQuestionPicker.tsx app/login/page.tsx components/SearchModal.tsx components/InteractionForm.tsx; do
-  grep -qF 'max-md:text-[16px]' "$mobile_input_file" || fail "$mobile_input_file 缺少手机输入字号守闸"
-done
-[[ "$(grep -cF 'max-md:text-[16px]' components/InteractionForm.tsx | tr -d ' ')" -ge 3 ]] || fail "InteractionForm 输入字号覆盖不完整"
+grep -qF '@media (max-width: 767.98px)' app/globals.css || fail "缺少手机文本字段全局字号断点"
+grep -qF 'input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"])' app/globals.css || fail "手机字号规则未覆盖文本 input"
+grep -qF 'textarea,' app/globals.css || fail "手机字号规则未覆盖 textarea"
+grep -qF 'select {' app/globals.css || fail "手机字号规则未覆盖 select"
+bun scripts/mobile-verify/mobile-input-font-scan.ts || fail "存在可逃逸全局字号守闸的显式小字号覆盖"
 
 LEGACY_VIEWPORT_PATTERN='100''vh|min-h-''screen|h-''screen'
 LEGACY_MATCHES="$(find app components lib hooks public server.ts tenancy -type f \( -name '*.css' -o -name '*.html' -o -name '*.json' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -nHE "$LEGACY_VIEWPORT_PATTERN" {} + 2>/dev/null || true)"
@@ -182,14 +208,6 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   const headerPaddingTop = getComputedStyle(header).paddingTop;
   const threadPaddingTop = getComputedStyle(thread).paddingTop;
   const composerPaddingBottom = getComputedStyle(composer).paddingBottom;
-  const visibleFields = [...document.querySelectorAll('input,textarea')].filter((field) => {
-    const rect = field.getBoundingClientRect();
-    const style = getComputedStyle(field);
-    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
-  });
-  const fieldSizes = visibleFields.map((field) => ({ tag: field.tagName, placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
-  assert(fieldSizes.length > 0, '手机首屏没有可见输入框');
-  assert(fieldSizes.every((field) => field.fontSize >= 16), `手机输入字号不足 16px: ${JSON.stringify(fieldSizes)}`);
   assert(near(headerRect.top, 0) && near(headerRect.height, 95), `Header 几何异常: ${headerRect.top}/${headerRect.height}`);
   assert(headerPaddingTop === '47px', `Header paddingTop=${headerPaddingTop}`);
   assert(threadPaddingTop === '95px', `thread paddingTop=${threadPaddingTop}`);
@@ -201,10 +219,10 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
     viewport: { width: innerWidth, height: innerHeight },
     header: { top: headerRect.top, height: headerRect.height },
     composer: { top: composerRect.top, bottom: composerRect.bottom, paddingBottom: composerPaddingBottom },
-    fieldSizes,
   };
 })()
 MOBILE_EOF
+assert_visible_text_fields_at_least_16 "390x844 线性首屏通扫"
 agent-browser --session "$SESSION" screenshot "$OUT/390x844-safe-area.png"
 
 echo "== iOS focus zoom guard: expanded branch popover =="
@@ -227,19 +245,7 @@ BRANCH_OPEN_EOF
 agent-browser --session "$SESSION" wait '[data-mobile-target="branch-open"]'
 agent-browser --session "$SESSION" eval "document.querySelector('[data-mobile-target=branch-open]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))"
 agent-browser --session "$SESSION" wait 'textarea[placeholder^="进一步追问"]'
-agent-browser --session "$SESSION" eval --stdin <<'BRANCH_FONT_EOF'
-(() => {
-  const fields = [...document.querySelectorAll('input,textarea')].filter((field) => {
-    const rect = field.getBoundingClientRect();
-    const style = getComputedStyle(field);
-    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
-  });
-  const sizes = fields.map((field) => ({ placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
-  if (!sizes.some((field) => field.placeholder?.startsWith('进一步追问'))) throw new Error(`追问输入框未出现: ${JSON.stringify(sizes)}`);
-  if (!sizes.every((field) => field.fontSize >= 16)) throw new Error(`追问态输入字号不足 16px: ${JSON.stringify(sizes)}`);
-  return sizes;
-})()
-BRANCH_FONT_EOF
+assert_visible_text_fields_at_least_16 "展开追问 popover"
 agent-browser --session "$SESSION" click '[data-mobile-target="branch-cancel"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('textarea[placeholder^=\"进一步追问\"]')"
 
@@ -282,20 +288,66 @@ agent-browser --session "$SESSION" eval --stdin <<'MODAL_EOF'
   });
   assert(buttons.length > 0, '新树 Modal 没有可测按钮');
   const bottom = Math.max(...buttons.map((button) => button.getBoundingClientRect().bottom));
-  const fields = [...document.querySelectorAll('input,textarea')].filter((field) => {
-    const rect = field.getBoundingClientRect();
-    const style = getComputedStyle(field);
-    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
-  });
-  const fieldSizes = fields.map((field) => ({ placeholder: field.getAttribute('placeholder'), fontSize: parseFloat(getComputedStyle(field).fontSize) }));
   assert(bottom <= innerHeight - 34, `Modal bottom button=${bottom}, safeBoundary=${innerHeight - 34}`);
-  assert(fieldSizes.some((field) => field.placeholder?.startsWith('想问点什么')), `新树输入框未出现: ${JSON.stringify(fieldSizes)}`);
-  assert(fieldSizes.every((field) => field.fontSize >= 16), `新树 Modal 输入字号不足 16px: ${JSON.stringify(fieldSizes)}`);
-  return { bottom, safeBoundary: innerHeight - 34, fieldSizes };
+  return { bottom, safeBoundary: innerHeight - 34 };
 })()
 MODAL_EOF
+assert_visible_text_fields_at_least_16 "新树 modal"
 agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-close"]'
+agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-safe-area=modal-shell]')"
+
+agent-browser --session "$SESSION" click 'button[aria-label="过滤跳转"]'
+agent-browser --session "$SESSION" wait 'input[aria-label="过滤节点"]'
+assert_visible_text_fields_at_least_16 "思维树过滤输入"
 agent-browser --session "$SESSION" click '[data-mobile-target="tree-sheet-close"]'
+agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-mobile-tree-sheet]')"
+
+agent-browser --session "$SESSION" click 'button[aria-label="会话列表"]'
+agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
+agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-attach"]'
+agent-browser --session "$SESSION" wait 'input[placeholder*="搜索标题"]'
+assert_visible_text_fields_at_least_16 "会话 drawer 的 Attach CLI 输入"
+agent-browser --session "$SESSION" press Escape
+agent-browser --session "$SESSION" wait --fn "!document.querySelector('input[placeholder*=搜索标题]')"
+
+agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-new-session"]'
+agent-browser --session "$SESSION" wait 'textarea[placeholder^="例如："]'
+assert_visible_text_fields_at_least_16 "会话 drawer → 新会话首屏"
+
+agent-browser --session "$SESSION" open "$URL"
+agent-browser --session "$SESSION" wait 'textarea[placeholder*="继续对话"]'
+agent-browser --session "$SESSION" eval --stdin <<'RESTORE_SAFE_EOF'
+(() => {
+  const root = document.documentElement;
+  root.style.setProperty('--safe-top', '47px');
+  root.style.setProperty('--safe-bottom', '34px');
+  root.style.setProperty('--safe-left', '0px');
+  root.style.setProperty('--safe-right', '0px');
+})()
+RESTORE_SAFE_EOF
+agent-browser --session "$SESSION" eval --stdin <<'OPEN_EDIT_EOF'
+(() => {
+  const edit = [...document.querySelectorAll('button[aria-label="编辑问题"]')]
+    .find((button) => {
+      const rect = button.getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    });
+  if (!edit) throw new Error('没有可见的编辑问题按钮');
+  edit.click();
+})()
+OPEN_EDIT_EOF
+agent-browser --session "$SESSION" wait --fn "[...document.querySelectorAll('textarea')].some((field) => field.offsetParent !== null && !field.getAttribute('placeholder'))"
+assert_visible_text_fields_at_least_16 "线性卡片编辑问题"
+agent-browser --session "$SESSION" eval --stdin <<'CLOSE_EDIT_EOF'
+(() => {
+  const cancel = [...document.querySelectorAll('button')]
+    .find((button) => button.offsetParent !== null && button.textContent?.trim() === '取消');
+  if (!cancel) throw new Error('编辑问题取消按钮未出现');
+  cancel.click();
+})()
+CLOSE_EDIT_EOF
+agent-browser --session "$SESSION" wait --fn "![...document.querySelectorAll('textarea')].some((field) => field.offsetParent !== null && !field.getAttribute('placeholder'))"
 
 agent-browser --session "$SESSION" set viewport 390 480
 agent-browser --session "$SESSION" fill 'textarea[placeholder*="继续对话"]' 'verify only — do not send'
@@ -333,11 +385,14 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
 
   const header = document.querySelector('[data-safe-area="header"]');
   const composer = document.querySelector('[data-safe-area="linear-composer"]');
-  assert(header && composer, '桌面对照节点缺失');
+  const composerTextarea = composer?.querySelector('textarea');
+  assert(header && composer && composerTextarea, '桌面对照节点缺失');
   const hr = header.getBoundingClientRect();
   const cr = composer.getBoundingClientRect();
+  const desktopComposerFontSize = parseFloat(getComputedStyle(composerTextarea).fontSize);
   assert(near(hr.top, 0) && near(hr.width, 1280) && near(hr.height, 48), `Header 偏离改前基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
   assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800), `Composer 偏离改前基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
+  assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;
   const label = (el) => el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent?.trim().replace(/\s+/g, '').slice(0, 60);
@@ -368,7 +423,7 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
     assert(near(rect.width, 44) && near(rect.height, 44), `Composer 按钮尺寸变化: ${label(button)} ${rect.width}x${rect.height}`);
   });
 
-  return { safe, header: { width: hr.width, height: hr.height }, composer: { left: cr.left, top: cr.top, width: cr.width, height: cr.height }, headerButtons: expectedHeader.map(([name]) => name), composerButtons: expectedComposer };
+  return { safe, header: { width: hr.width, height: hr.height }, composer: { left: cr.left, top: cr.top, width: cr.width, height: cr.height, fontSize: desktopComposerFontSize }, headerButtons: expectedHeader.map(([name]) => name), composerButtons: expectedComposer };
 })()
 DESKTOP_EOF
 agent-browser --session "$SESSION" screenshot "$OUT/1280x800-desktop.png"

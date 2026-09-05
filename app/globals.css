@@ -1050,3 +1050,13 @@ html, body {
   .trellis-run-bar::after { width: 100%; opacity: 0.7; }
   .trellis-dots > span { opacity: 0.8; transform: none; }
 }
+
+/* iOS Safari auto-zooms focused text controls below 16px. Keep this rule
+   unlayered so it outranks Tailwind's layered text utilities on phones. */
+@media (max-width: 767.98px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
