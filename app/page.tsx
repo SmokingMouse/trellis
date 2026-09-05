@@ -108,7 +108,7 @@ export default function Home() {
           ⚠️ 本地存储不可用：{hydrateError}。可以继续问答，但刷新会丢失历史。
         </div>
       )}
-      {!session && <QuestionInput />}
+      {!session && <QuestionInput isMobile={isMobile} />}
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}

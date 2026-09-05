@@ -17,10 +17,7 @@ import { ModelPicker } from "./ModelPicker";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { IconButton } from "@/components/ui/IconButton";
-import {
-  setDesktopModeOverride,
-  useIsMobile,
-} from "@/hooks/useIsMobile";
+import { setDesktopModeOverride } from "@/hooks/useIsMobile";
 import { middleEllipsisPath } from "@/lib/run-config";
 import {
   useAttachmentUploads,
@@ -56,7 +53,7 @@ const suggestionRowClass = (isActive: boolean) =>
     isActive ? "bg-surface-muted" : "hover:bg-surface-muted"
   }`;
 
-export function QuestionInput() {
+export function QuestionInput({ isMobile }: { isMobile: boolean }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -101,7 +98,6 @@ export function QuestionInput() {
   const skillProvider = family === "codex" ? "codex" : "claude";
   const skillPrefix = family === "codex" ? "$" : "/";
   const providerCatalog = useSessionStore((s) => s.providerCatalog);
-  const isMobile = useIsMobile();
   const currentProvider =
     providerCatalog.find((candidate) => candidate.id === provider) ??
     providerCatalog[0];
@@ -279,9 +275,7 @@ export function QuestionInput() {
         <p className="text-center text-ink-muted mb-6 max-md:mb-3 text-sm">
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
-        {isMobile === null ? (
-          <div className="mb-3 h-11" aria-hidden />
-        ) : isMobile ? (
+        {isMobile ? (
           <button
             type="button"
             data-mobile-target="new-session-config-summary"
@@ -387,9 +381,7 @@ export function QuestionInput() {
             onChange={att.handlePicked}
             className="hidden"
           />
-          {isMobile === null ? (
-            <div className="h-[61px] border-t border-line-faint" aria-hidden />
-          ) : isMobile ? (
+          {isMobile ? (
             <div className="border-t border-line-faint px-3 py-2 flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -647,7 +639,7 @@ export function QuestionInput() {
           </div>
           <div
             data-mobile-target="new-session-settings-sheet"
-            className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 [&_button]:min-h-11"
+            className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4"
           >
             <section>
               <h2 className="text-label font-medium text-ink-faint mb-2">模式与工作区</h2>
@@ -669,7 +661,7 @@ export function QuestionInput() {
                 data-mobile-target="new-session-enhanced"
                 onClick={() => setChatEnhanced(!chatEnhanced)}
                 title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-                className={`w-full px-3 rounded-md border text-ui inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`w-full min-h-11 px-3 rounded-md border text-ui inline-flex items-center justify-center gap-1.5 transition-colors ${
                   chatEnhanced
                     ? "bg-warn-muted border-warn-line text-warn-ink"
                     : "border-line text-ink-muted hover:border-line-strong"
@@ -684,7 +676,7 @@ export function QuestionInput() {
                 type="button"
                 data-mobile-target="new-session-send-key"
                 onClick={() => setSendKey(sendKey === "enter" ? "mod-enter" : "enter")}
-                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
               >
                 快捷键 · {sendHint(sendKey)}
               </button>
@@ -692,7 +684,7 @@ export function QuestionInput() {
                 type="button"
                 data-mobile-target="new-session-history-depth"
                 onClick={() => setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)}
-                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
               >
                 历史深度 · {historyDepth === 0 ? "上下文全发" : `${historyDepth} 层`}
               </button>
@@ -701,7 +693,7 @@ export function QuestionInput() {
                 data-mobile-target="new-session-focus-writing"
                 onClick={() => setZoneOpen(true)}
                 disabled={busy}
-                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
               >
                 ⛶ 专注写作
               </button>
@@ -710,7 +702,7 @@ export function QuestionInput() {
                 data-mobile-target="new-session-sketch"
                 onClick={() => setSketchOpen(true)}
                 disabled={busy || att.atLimit}
-                className="rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
               >
                 ✏️ 草图
               </button>
@@ -727,7 +719,7 @@ export function QuestionInput() {
                       setMoreSettingsOpen(false);
                       ref.current?.focus();
                     }}
-                    className="rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                    className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
                   >
                     {starter}
                   </button>
@@ -738,7 +730,7 @@ export function QuestionInput() {
                     setMoreSettingsOpen(false);
                     setPickerOpen(true);
                   }}
-                  className="rounded-md border border-warn-line bg-warn-muted/60 px-3 text-left text-ui text-warn-ink"
+                  className="min-h-11 rounded-md border border-warn-line bg-warn-muted/60 px-3 text-left text-ui text-warn-ink"
                 >
                   📄 从背景材料开始（粘贴 / URL）
                 </button>

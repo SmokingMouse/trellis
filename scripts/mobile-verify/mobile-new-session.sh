@@ -284,12 +284,27 @@ ab click '[data-mobile-target="new-session-more-settings"]'
 wait_for_js "more settings sheet" "Boolean(document.querySelector('[data-mobile-target=new-session-settings-sheet]'))"
 ab eval --stdin <<'JS'
 (() => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
   const sheet = document.querySelector('[data-mobile-target="new-session-settings-sheet"]');
   const text = sheet.innerText;
   for (const expected of ['增强模式', '历史深度', '专注写作', '快捷键', '草图', '起步模板', '用类比讲清楚 TCP 和 UDP 的区别', '从背景材料开始']) {
     if (!text.includes(expected)) throw new Error(`more settings missing ${expected}`);
   }
-  return text.slice(0, 500);
+  const section = (title) => [...sheet.querySelectorAll('section')]
+    .find((candidate) => candidate.querySelector('h2')?.textContent?.trim() === title);
+  const pickerButtons = [
+    ['ModePicker', section('模式与工作区')?.querySelector('button[role="radio"]'), 42],
+    ['ModelPicker', section('模型')?.querySelector('button'), 24],
+    ['AgentPicker', section('Agent')?.querySelector('button'), 32.75],
+  ].map(([name, button, expectedHeight]) => {
+    assert(button, `${name} button missing`);
+    const rect = button.getBoundingClientRect();
+    const minHeight = getComputedStyle(button).minHeight;
+    assert(minHeight !== '44px', `${name} inherited the sheet-wide 44px minimum`);
+    assert(Math.abs(rect.height - expectedHeight) <= 0.25, `${name} height=${rect.height}`);
+    return { name, width: rect.width, height: rect.height, minHeight };
+  });
+  return { copy: text.slice(0, 500), pickerButtons };
 })()
 JS
 ab screenshot "$OUT/390x480-more-settings.png"
@@ -321,13 +336,19 @@ for viewport_height in 844 480; do
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   const root = document.documentElement;
   const mode = document.querySelector('[data-mobile-target="new-session-mode-config"]');
+  const radioGroup = mode.querySelector('[role="radiogroup"]');
   const controls = [...mode.querySelectorAll('button')].filter((element) => element.offsetParent !== null);
   assert(root.scrollWidth === innerWidth, `document overflow ${root.scrollWidth}/${innerWidth}`);
   assert(mode.getBoundingClientRect().right <= innerWidth, `mode area overflow ${JSON.stringify(mode.getBoundingClientRect().toJSON())}`);
+  assert(radioGroup.getBoundingClientRect().height === 44, `mode radio group height=${radioGroup.getBoundingClientRect().height}`);
   for (const control of controls) {
     const rect = control.getBoundingClientRect();
     assert(rect.left >= 0 && rect.right <= innerWidth, `mode control overflow ${JSON.stringify(rect.toJSON())}`);
-    assert(rect.width >= 44 && rect.height >= 44, `mode control too small ${rect.width}x${rect.height}`);
+    if (control.getAttribute('role') === 'radio') {
+      assert(Math.abs(rect.height - 42) <= 0.25, `mode radio native height changed ${rect.height}`);
+    } else {
+      assert(rect.width >= 44 && rect.height >= 44, `mode control too small ${rect.width}x${rect.height}`);
+    }
   }
   const visibleControls = [...document.querySelectorAll('button,a,input,textarea,select')].filter((element) => {
     const rect = element.getBoundingClientRect();
@@ -350,7 +371,7 @@ ab click 'button[aria-label="关闭更多设置"]'
 
 echo "== 390x480: new-tree modal copy and keyboard-safe layout =="
 ab open "$BASE/?session=mv-new-session-fixture&node=mv-new-session-root"
-wait_for_js "fixture composer" "Boolean(document.querySelector('textarea[placeholder*=\"继续对话\"]'))"
+wait_for_js "fixture composer" "Boolean(document.querySelector('[data-composer-state=compact] [data-composer-input]'))"
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "mobile overflow" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
 ab click '[data-mobile-target="overflow-tree"]'

@@ -330,18 +330,18 @@ export function Composer({
           onChange={att.handlePicked}
           className="hidden"
         />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!targetNode || att.atLimit}
+          title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
+          aria-label="添加附件"
+        >
+          <span aria-hidden>📎</span>
+        </button>
         {!compact && (
           <>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!targetNode || att.atLimit}
-              title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
-              className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
-              aria-label="添加附件"
-            >
-              <span aria-hidden>📎</span>
-            </button>
             <button
               type="button"
               onClick={() => setSketchOpen(true)}
@@ -352,13 +352,13 @@ export function Composer({
             >
               <span aria-hidden>✏️</span>
             </button>
-            {sketchOpen && (
-              <SketchModal
-                onClose={() => setSketchOpen(false)}
-                onExport={(blob) => att.startUpload(blob, "sketch.png")}
-              />
-            )}
           </>
+        )}
+        {sketchOpen && (
+          <SketchModal
+            onClose={() => setSketchOpen(false)}
+            onExport={(blob) => att.startUpload(blob, "sketch.png")}
+          />
         )}
         <button
           onClick={submit}
