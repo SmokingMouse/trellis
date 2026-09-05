@@ -10,9 +10,8 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Button } from "@/components/ui/Button";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
 import {
-  desktopModeOverrideEnabled,
   setDesktopModeOverride,
-  useIsMobile,
+  useIsNarrowViewport,
 } from "@/hooks/useIsMobile";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
@@ -36,8 +35,8 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
   return null;
 }
 
-export function Header() {
-  const isMobile = useIsMobile();
+export function Header({ isMobile }: { isMobile: boolean }) {
+  const isNarrowViewport = useIsNarrowViewport();
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -130,8 +129,6 @@ export function Header() {
     };
   }, []);
 
-  if (isMobile === null) return null;
-
   if (isMobile) {
     const title = session?.title.trim() || "新会话";
     return (
@@ -179,9 +176,7 @@ export function Header() {
     );
   }
 
-  const narrowDesktopOverride =
-    desktopModeOverrideEnabled() &&
-    window.matchMedia("(max-width: 767px)").matches;
+  const narrowDesktopOverride = isNarrowViewport;
 
   return (
     <header
@@ -196,19 +191,18 @@ export function Header() {
         {/* Mobile-only: open the session-list drawer. The left sidebar is
             hidden on phones, so this is the only way to see / switch between
             sessions there. */}
-        {!narrowDesktopOverride && (
-          <IconButton
-            label="会话列表"
-            onClick={() => setMobileNavOpen(true)}
-            className="md:hidden -ml-1"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </IconButton>
-        )}
+        <IconButton
+          label="会话列表"
+          data-mobile-target="header-session-drawer"
+          onClick={() => setMobileNavOpen(true)}
+          className="md:hidden -ml-1"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </IconButton>
         {/* 品牌渐变固定色（不随主题换肤）：#6366f1 → #d946ef → #fbbf24 */}
         <div className="w-6 h-6 rounded bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
         <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>

@@ -13,7 +13,7 @@ import {
   loadSidebarWidth,
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsDesktopViewport } from "@/hooks/useIsMobile";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
 import {
   RECENT_CHAINS_SHOWN,
@@ -139,14 +139,14 @@ export function SessionSidebar() {
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
   const [width, setWidth] = useState<number>(loadSidebarWidth);
   const [resizing, setResizing] = useState(false);
-  const isMobile = useIsMobile();
+  const isDesktopViewport = useIsDesktopViewport();
 
   // 侧栏自己拥有宽度，就由它来发布 --trellis-sb（原先在 page.tsx 里按常量发，
   // 宽度一旦可拖拽，两处就会打架）。所有消费者读的仍是同一个变量，不用改。
   useEffect(() => {
-    const offset = !isMobile && sidebarOpen ? width : 0;
+    const offset = isDesktopViewport && sidebarOpen ? width : 0;
     document.documentElement.style.setProperty("--trellis-sb", `${offset}px`);
-  }, [isMobile, sidebarOpen, width]);
+  }, [isDesktopViewport, sidebarOpen, width]);
 
   useEffect(() => {
     if (!resizing) return;

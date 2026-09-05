@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 
 export const DESKTOP_MODE_OVERRIDE_KEY = "trellis-desktop-mode";
+export const MOBILE_VIEWPORT_QUERY = "(max-width: 767.98px)";
+export const DESKTOP_VIEWPORT_QUERY = "(min-width: 768px)";
 
 export function desktopModeOverrideEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -33,7 +35,7 @@ export function setDesktopModeOverride(enabled: boolean): void {
 // （W0 截图实锤）。宽度之外的能力差异（触控手势等）如需判定，另用
 // `(pointer: coarse)` 单独查询，不再混进布局断点。
 export function useIsMobile(
-  query = "(max-width: 767px)",
+  query = MOBILE_VIEWPORT_QUERY,
 ): boolean | null {
   const [matches, setMatches] = useState<boolean | null>(null);
   useEffect(() => {
@@ -49,4 +51,27 @@ export function useIsMobile(
     };
   }, [query]);
   return matches;
+}
+
+// Physical viewport queries deliberately ignore the desktop-mode override.
+// CSS still follows the real viewport, so layout offsets and narrow-mode
+// escape hatches must use these rather than the semantic useIsMobile().
+function useViewportMedia(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const update = () => setMatches(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, [query]);
+  return matches;
+}
+
+export function useIsNarrowViewport(): boolean {
+  return useViewportMedia(MOBILE_VIEWPORT_QUERY);
+}
+
+export function useIsDesktopViewport(): boolean {
+  return useViewportMedia(DESKTOP_VIEWPORT_QUERY);
 }

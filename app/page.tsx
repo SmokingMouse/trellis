@@ -100,7 +100,7 @@ export default function Home() {
 
   return (
     <>
-      <Header />
+      <Header isMobile={isMobile} />
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
@@ -109,7 +109,9 @@ export default function Home() {
         </div>
       )}
       {!session && <QuestionInput />}
-      {session && viewMode === "linear" && <LinearThreadView />}
+      {session && viewMode === "linear" && (
+        <LinearThreadView isMobile={isMobile} />
+      )}
       {session && viewMode === "linear" && <TreePanel />}
       {session && viewMode === "canvas" && (
         <>

@@ -18,7 +18,6 @@ import {
   type SelectionInfo,
 } from "@/hooks/useSelectionWithin";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
@@ -48,8 +47,7 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;
 
-export function LinearThreadView() {
-  const isMobile = useIsMobile();
+export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -472,7 +470,7 @@ export function LinearThreadView() {
               </button>
             ))}
           </div>
-          {isMobile === false && (
+          {!isMobile && (
             <button
               type="button"
               onClick={() => setViewMode("canvas")}
