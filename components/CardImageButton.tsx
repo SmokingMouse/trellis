@@ -78,13 +78,14 @@ export function CardImageButton({
     <>
       <button
         type="button"
+        data-mobile-target="response-card-image"
         onClick={(e) => {
           e.stopPropagation();
           void run();
         }}
         disabled={phase === "rendering"}
         title="把这条问答渲染成一张卡片图片"
-        className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors disabled:opacity-50"
+        className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors disabled:opacity-50"
       >
         {label}
       </button>

@@ -912,8 +912,9 @@ export function TreePanel() {
           {sessionId && (
             <button
               type="button"
+              data-mobile-target="new-tree-open"
               onClick={() => setComposeRootOpen(true)}
-              className="shrink-0 px-2 py-2 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
+              className="shrink-0 px-2 py-2 max-md:min-h-11 max-md:min-w-11 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
               title="新树：保留当前 session，只清空上下文（等价 /clear）"
             >
               ＋ 新树

@@ -744,6 +744,15 @@ html, body {
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
 }
+@media (max-width: 767px) {
+  .md-body .md-codeblock-copy {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
 
 /* B5 (a11y): visible keyboard-focus ring. Pointer clicks don't trigger
    :focus-visible, so this only shows during keyboard navigation — no visual

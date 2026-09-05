@@ -196,24 +196,27 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
           <div className="border-t border-line-faint px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
             <button
               type="button"
+              data-mobile-target="branch-attach"
               onClick={() => fileInputRef.current?.click()}
               disabled={att.atLimit}
               title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : "添加图片 / 文件"}
-              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 mr-auto"
+              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1 mr-auto"
             >
               <span aria-hidden>📎</span>
             </button>
             <button
+              data-mobile-target="branch-cancel"
               onClick={onClose}
-              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong"
+              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong"
             >
               取消
             </button>
             <button
+              data-mobile-target="branch-submit"
               onClick={submit}
               disabled={!q.trim() || hasUploading}
               title={hasUploading ? "等待附件上传…" : undefined}
-              className="px-2.5 py-0.5 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
+              className="px-2.5 py-0.5 max-md:min-h-11 max-md:min-w-11 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
             >
               {hasUploading ? "上传中…" : "提问"}
             </button>
@@ -222,11 +225,12 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
       ) : (
         <div className="flex items-center gap-1.5">
           <button
+            data-mobile-target="branch-open"
             onPointerDown={(e) => {
               e.preventDefault();
               onExpand();
             }}
-            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 hover:bg-accent-strong flex items-center gap-2 ring-1 ring-accent-strong"
+            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 max-md:min-h-11 max-md:min-w-11 hover:bg-accent-strong flex items-center justify-center gap-2 ring-1 ring-accent-strong"
           >
             <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
               ⌘K
@@ -234,6 +238,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             针对此处提问
           </button>
           <button
+            data-mobile-target="branch-note"
             onPointerDown={(e) => {
               e.preventDefault();
               captureNote();
@@ -242,7 +247,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             title="摘到笔记 (⌘D)"
             aria-label="摘到笔记"
             /* 笔记 UI 归一 positive（amber→emerald 有意视觉变化）；positive 无 -strong 档，hover 用 opacity 近似 */
-            className="bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 ring-1 ring-positive-line"
+            className="bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 max-md:min-h-11 max-md:min-w-11 hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5 ring-1 ring-positive-line"
           >
             <svg
               width="13"

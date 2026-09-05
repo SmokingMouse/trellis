@@ -42,10 +42,10 @@ export function CopyButton({
       onClick={copy}
       title={title}
       aria-label="复制全文"
-      className={
+      className={`max-md:min-h-11 max-md:min-w-11 ${
         className ??
         "nodrag px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
-      }
+      }`}
     >
       {failed ? "✗ 复制失败" : copied ? copiedLabel : label}
     </button>
