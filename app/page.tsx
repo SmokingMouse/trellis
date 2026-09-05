@@ -91,7 +91,7 @@ export default function Home() {
 
   if (!hydrated || isMobile === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-ink-faint text-sm">
+      <div className="min-h-dvh flex items-center justify-center text-ink-faint text-sm">
         加载中…
       </div>
     );

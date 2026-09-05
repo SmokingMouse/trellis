@@ -427,7 +427,8 @@ export function LinearThreadView() {
     // a screen of content the composer sat right under the last card,
     // floating mid-screen instead of docked at the bottom.
     <div
-      className="fixed inset-0 pt-12 md:pt-[5.25rem] flex flex-col bg-surface-canvas"
+      data-safe-area="linear-thread"
+      className="fixed inset-0 pt-[calc(3rem+var(--safe-top))] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
       // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
       // 发布，与 --trellis-sb 同一套模式（一个变量、多个消费者）；面板关闭时
       // 是 0px，等于没这回事。
@@ -712,7 +713,11 @@ export function LinearThreadView() {
         </main>
       </div>
 
-      <div className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
+      <div
+        data-safe-area="linear-composer"
+        className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur"
+        style={{ paddingBottom: "var(--safe-bottom)" }}
+      >
         <div className={`${widthClass} mx-auto px-4`}>
           {branchFromNode && (
             <TargetChip

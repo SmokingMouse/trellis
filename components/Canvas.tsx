@@ -387,7 +387,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
   return (
     <>
       <div
-        className={`w-screen h-screen pt-12 md:pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
+        className={`w-screen h-dvh pt-12 md:pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
         // Wave 4: shift the canvas right of the explorer sidebar (var set in

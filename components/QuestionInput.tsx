@@ -247,7 +247,7 @@ export function QuestionInput() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center px-6"
+      className="min-h-dvh flex flex-col items-center justify-center px-6"
       // Wave 4: keep the composer centered within the editor area (right of
       // the explorer sidebar). var from page.tsx; 0 on mobile / collapsed.
       style={{ paddingLeft: "var(--trellis-sb, 0px)" }}

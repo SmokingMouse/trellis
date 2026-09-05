@@ -39,7 +39,14 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-scrim/50 flex items-center justify-center px-4 ui-enter-fade"
+      data-safe-area="modal-shell"
+      className="fixed inset-0 z-50 bg-scrim/50 flex items-center justify-center ui-enter-fade"
+      style={{
+        paddingTop: "var(--safe-top)",
+        paddingBottom: "var(--safe-bottom)",
+        paddingLeft: "calc(1rem + var(--safe-left))",
+        paddingRight: "calc(1rem + var(--safe-right))",
+      }}
       onClick={onClose}
     >
       <div
