@@ -192,7 +192,8 @@ INSERT INTO nodes
 VALUES
   ('mv-followup-reading','mv-followup-reading-session',NULL,NULL,'验证手机阅读与追问闭环','placeholder','done',0,1893456100000,NULL,NULL),
   ('mv-followup-wait-root','mv-followup-wait-session',NULL,NULL,'先阅读，再处理审批','等待项横幅应当把人带到待审批卡片。','done',0,1893456200000,NULL,NULL),
-  ('mv-followup-permission','mv-followup-wait-session','mv-followup-wait-root',NULL,'运行安全的 fixture 命令','','done',0,1893456202000,NULL,'{"toolUseId":"mv-followup-tool","toolName":"Bash","input":{"command":"echo mobile-followup-fixture","description":"只用于手机审批布局验收"}}');
+  ('mv-followup-permission','mv-followup-wait-session','mv-followup-wait-root',NULL,'运行安全的 fixture 命令','','done',0,1893456202000,NULL,'{"toolUseId":"mv-followup-tool","toolName":"Bash","input":{"command":"echo mobile-followup-fixture","description":"只用于手机审批布局验收"}}'),
+  ('mv-followup-permission-2','mv-followup-wait-session','mv-followup-wait-root',NULL,'检查第二个等待项','','done',1,1893456203000,NULL,'{"toolUseId":"mv-followup-tool-2","toolName":"Bash","input":{"command":"echo mobile-followup-fixture-2","description":"用于等待横幅轮转验收"}}');
 
 UPDATE nodes
 SET response = (
@@ -239,7 +240,7 @@ ab eval --stdin <<'JS'
   const visibleLabels = [...composer.querySelectorAll('button')]
     .filter((button) => button.getBoundingClientRect().width > 0)
     .map((button) => button.getAttribute('aria-label'));
-  assert(JSON.stringify(visibleLabels) === JSON.stringify(['发送']), `compact buttons=${JSON.stringify(visibleLabels)}`);
+  assert(JSON.stringify(visibleLabels) === JSON.stringify(['添加附件', '发送']), `compact buttons=${JSON.stringify(visibleLabels)}`);
   return { state: composer.dataset.composerState, height: rect.height, railBottom: rail.getBoundingClientRect().bottom };
 })()
 JS
@@ -253,7 +254,15 @@ ab eval --stdin <<'JS'
   return { top: scroll.scrollTop, max: scroll.scrollHeight - scroll.clientHeight };
 })()
 JS
-wait_for_js "compact Composer hidden after downward scroll" "document.querySelector('[data-safe-area=\"linear-composer\"]')?.getBoundingClientRect().top >= innerHeight - 0.5"
+wait_for_js "compact Composer hidden after downward scroll" "(() => {
+  const rail = document.querySelector('[data-safe-area=\"linear-composer\"]');
+  if (rail?.getBoundingClientRect().top >= innerHeight - 0.5) return true;
+  const scroll = document.querySelector('[data-thread-scroll]');
+  if (!scroll) return false;
+  scroll.scrollTop = Math.min(scroll.scrollTop + 24, scroll.scrollHeight - scroll.clientHeight);
+  scroll.dispatchEvent(new Event('scroll'));
+  return false;
+})()"
 
 ab eval --stdin <<'JS'
 (() => {
@@ -304,6 +313,47 @@ ab eval --stdin <<'JS'
   return { viewport: innerHeight, send: { top: rect.top, bottom: rect.bottom } };
 })()
 JS
+
+echo "== mobile streaming stop remains reachable while scrolling =="
+ab click '[data-composer-input]'
+ab eval --stdin <<'JS'
+(() => {
+  const input = document.querySelector('[data-composer-input]');
+  if (!(input instanceof HTMLTextAreaElement)) throw new Error('Composer textarea missing');
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('native textarea value setter missing');
+  setter.call(input, '');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  input.blur();
+  return input.value;
+})()
+JS
+wait_for_js "keyboard fixture text cleared" "document.querySelector('[data-composer-input]')?.value === ''"
+wait_for_js "Composer reset before streaming stub" "document.querySelector('[data-mobile-composer]')?.dataset.composerState === 'compact'"
+ab eval 'sessionStorage.setItem("trellis-mobile-verify-streaming", "mv-followup-reading"); window.dispatchEvent(new CustomEvent("trellis:mobile-verify-streaming", { detail: "mv-followup-reading" })); true'
+wait_for_js "test-gated streaming Composer" "Boolean(document.querySelector('[data-composer-state=stopping] button[aria-label=\"停止生成\"]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
+  const composer = document.querySelector('[data-composer-state="stopping"]');
+  const rail = document.querySelector('[data-safe-area="linear-composer"]');
+  const stop = composer?.querySelector('button[aria-label="停止生成"]');
+  const scroll = document.querySelector('[data-thread-scroll]');
+  assert(composer && rail && stop && scroll, 'streaming stop fixture missing');
+  const rect = stop.getBoundingClientRect();
+  assert(rect.width >= 44 && rect.height >= 44, `stop target=${rect.width}x${rect.height}`);
+  assert(rect.bottom <= innerHeight, `stop bottom=${rect.bottom}, viewport=${innerHeight}`);
+  assert(rail.dataset.composerHidden === 'false', `streaming Composer hidden=${rail.dataset.composerHidden}`);
+  assert(scroll.scrollHeight - scroll.clientHeight >= 600, 'streaming fixture cannot scroll 600px');
+  scroll.scrollTop = 600;
+  scroll.dispatchEvent(new Event('scroll'));
+  return { state: composer.dataset.composerState, stop: rect.toJSON(), scrollTop: scroll.scrollTop };
+})()
+JS
+wait_for_js "streaming Composer remains visible after 600px downward scroll" "document.querySelector('[data-safe-area=\"linear-composer\"]')?.dataset.composerHidden === 'false'"
+ab eval 'window.dispatchEvent(new CustomEvent("trellis:mobile-verify-streaming", { detail: null })); sessionStorage.removeItem("trellis-mobile-verify-streaming"); true'
+wait_for_js "reading fixture restored after streaming stub" "Boolean(document.querySelector('[data-composer-state=compact] [data-composer-input]'))"
 
 echo "== mobile selection followup bottom sheet =="
 ab set viewport 390 844
@@ -373,7 +423,8 @@ ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   const banner = document.querySelector('[data-mobile-waiting-banner]');
-  assert(banner?.textContent.includes('有 1 项等你处理'), `banner=${banner?.textContent}`);
+  assert(banner?.textContent.includes('有 2 项等你处理'), `banner=${banner?.textContent}`);
+  assert(banner?.textContent.includes('跳到下一项'), `banner action copy=${banner?.textContent}`);
   const rect = banner.getBoundingClientRect();
   assert(rect.height >= 44, `banner height=${rect.height}`);
   return { text: banner.textContent.trim(), height: rect.height };
@@ -382,6 +433,9 @@ JS
 ab click '[data-mobile-waiting-banner]'
 wait_for_js "approval node selected" "Boolean(document.querySelector('[data-thread-node-id=mv-followup-permission] [data-mobile-interaction]'))"
 wait_for_js "approval card in viewport" "(() => { const r=document.querySelector('[data-thread-node-id=mv-followup-permission] [data-mobile-interaction]')?.getBoundingClientRect(); return Boolean(r && r.top >= 0 && r.top < innerHeight && r.bottom > 0); })()"
+ab click '[data-mobile-waiting-banner]'
+wait_for_js "waiting banner rotates to second item" "Boolean(document.querySelector('[data-thread-node-id=mv-followup-permission-2] [data-mobile-interaction]'))"
+wait_for_js "second approval card in viewport" "(() => { const r=document.querySelector('[data-thread-node-id=mv-followup-permission-2] [data-mobile-interaction]')?.getBoundingClientRect(); return Boolean(r && r.top >= 0 && r.top < innerHeight && r.bottom > 0); })()"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };

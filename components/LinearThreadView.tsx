@@ -46,6 +46,8 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
 // How close to the bottom (px) still counts as "following" — scrolling
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;
+const MOBILE_VERIFY_STREAMING_EVENT = "trellis:mobile-verify-streaming";
+const MOBILE_VERIFY_STREAMING_SESSION_KEY = "trellis-mobile-verify-streaming";
 
 export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const session = useSessionStore((s) => s.session);
@@ -80,6 +82,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerHidden, setComposerHidden] = useState(false);
   const [waitingJumpId, setWaitingJumpId] = useState<string | null>(null);
+  const lastWaitingJumpIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setOpenBranches(new Set());
@@ -87,6 +90,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     setComposerExpanded(false);
     setComposerHidden(false);
     setWaitingJumpId(null);
+    lastWaitingJumpIdRef.current = null;
     lastScrollTopRef.current = 0;
     composerScrollReadyRef.current = false;
     const readyTimer = window.setTimeout(() => {
@@ -95,6 +99,66 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     }, 400);
     return () => window.clearTimeout(readyTimer);
   }, [session?.id]);
+
+  // Browser verification only: a loopback page plus a matching sessionStorage
+  // nonce may dispatch this private event to flip one loaded node to streaming.
+  // Normal product input cannot enter this path; cleanup restores persisted state.
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined") return;
+    if (window.location.hostname !== "127.0.0.1" && window.location.hostname !== "localhost") return;
+    let injectedId: string | null = null;
+    let previousStatus: ChatNode["status"] | null = null;
+
+    const restore = () => {
+      if (!injectedId || !previousStatus) return;
+      useSessionStore.setState((state) => {
+        const node = state.nodes[injectedId!];
+        if (!node || node.status !== "streaming") return state;
+        return {
+          nodes: {
+            ...state.nodes,
+            [injectedId!]: { ...node, status: previousStatus! },
+          },
+        };
+      });
+      injectedId = null;
+      previousStatus = null;
+    };
+
+    const inject = (event: Event) => {
+      const requestedId = (event as CustomEvent<unknown>).detail;
+      if (requestedId === null) {
+        restore();
+        return;
+      }
+      if (
+        typeof requestedId !== "string" ||
+        window.sessionStorage.getItem(MOBILE_VERIFY_STREAMING_SESSION_KEY) !== requestedId
+      ) {
+        return;
+      }
+      restore();
+      useSessionStore.setState((state) => {
+        const node = state.nodes[requestedId];
+        if (!node || node.sessionId !== state.session?.id) return state;
+        injectedId = requestedId;
+        previousStatus = node.status;
+        return {
+          nodes: {
+            ...state.nodes,
+            [requestedId]: { ...node, status: "streaming" },
+          },
+        };
+      });
+    };
+
+    window.addEventListener(MOBILE_VERIFY_STREAMING_EVENT, inject);
+
+    return () => {
+      window.removeEventListener(MOBILE_VERIFY_STREAMING_EVENT, inject);
+      restore();
+    };
+  }, [isMobile, session?.id]);
 
   const threadData = useMemo(() => {
     const anchor =
@@ -539,14 +603,18 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           type="button"
           data-mobile-waiting-banner
           onClick={() => {
-            const target = waitingNodes[0];
+            const previousIndex = waitingNodes.findIndex(
+              (node) => node.id === lastWaitingJumpIdRef.current,
+            );
+            const target = waitingNodes[(previousIndex + 1) % waitingNodes.length];
+            lastWaitingJumpIdRef.current = target.id;
             setWaitingJumpId(target.id);
             setActiveNode(target.id);
           }}
           className="z-20 flex min-h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink"
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden />
-          有 {waitingNodes.length} 项等你处理
+          有 {waitingNodes.length} 项等你处理，点击跳到下一项
           <span aria-hidden>↓</span>
         </button>
       )}
