@@ -6,6 +6,7 @@ import { ExportMenu } from "./ExportMenu";
 import { ModeBadge } from "./ModeBadge";
 import { ThemeMenu } from "./ThemeMenu";
 import { Popover } from "@/components/ui/Popover";
+import { Modal } from "@/components/ui/Modal";
 import { IconButton } from "@/components/ui/IconButton";
 import { Button } from "@/components/ui/Button";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
@@ -33,6 +34,55 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
     cur = nodes[cur.parentId];
   }
   return null;
+}
+
+function ContextUsageDetails({
+  rootLabel,
+  tokens,
+  percent,
+  contextWindow,
+  actionable,
+  onStartFresh,
+}: {
+  rootLabel: string;
+  tokens: number;
+  percent: number;
+  contextWindow: number;
+  actionable: boolean;
+  onStartFresh: () => void;
+}) {
+  return (
+    <>
+      <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
+        🧠 上下文占用 {percent.toFixed(1)}%
+      </div>
+      <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
+        当前 root「{rootLabel}」的 Claude 会话已用 {formatTokens(tokens)} /{" "}
+        {formatTokens(contextWindow)} tokens。占用越高，模型越慢、缓存越难增长。
+      </div>
+      {actionable ? (
+        <>
+          <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
+            claude CLI 的{" "}
+            <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
+            在这里暂无原生支持。可改为开一条「新话题」——全新上下文的根问答，等价{" "}
+            <code className="px-1 rounded bg-surface-muted">/clear</code>。
+          </div>
+          <Button
+            variant="primary"
+            className="mt-2.5 w-full"
+            onClick={onStartFresh}
+          >
+            🧹 开新话题（清空上下文）
+          </Button>
+        </>
+      ) : (
+        <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
+          占用尚低，无需处理。≥50% 时这里会提供「🧹 开新话题」一键清空上下文。
+        </div>
+      )}
+    </>
+  );
 }
 
 export function Header({ isMobile }: { isMobile: boolean }) {
@@ -176,7 +226,41 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           open={mobileOverflowOpen}
           onClose={() => setMobileOverflowOpen(false)}
           showAdmin={gwMe?.role === "admin"}
+          contextUsage={ctx ? { percent: ctx.percent } : null}
+          onOpenContext={() => {
+            setMobileOverflowOpen(false);
+            setCtxPopoverOpen(true);
+          }}
         />
+        {ctx && ctxPopoverOpen && (
+          <Modal onClose={() => setCtxPopoverOpen(false)}>
+            <section
+              data-context-usage-dialog
+              aria-label="上下文占用详情"
+              className="p-4"
+            >
+              <div className="mb-2 flex justify-end">
+                <IconButton
+                  label="关闭上下文占用详情"
+                  onClick={() => setCtxPopoverOpen(false)}
+                >
+                  ×
+                </IconButton>
+              </div>
+              <ContextUsageDetails
+                rootLabel={ctx.rootLabel}
+                tokens={ctx.tokens}
+                percent={ctx.percent}
+                contextWindow={contextWindow}
+                actionable={ctxActionable}
+                onStartFresh={() => {
+                  setCtxPopoverOpen(false);
+                  setComposeRootOpen(true);
+                }}
+              />
+            </section>
+          </Modal>
+        )}
       </>
     );
   }
@@ -329,39 +413,17 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                     </button>
                   }
                 >
-                  <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
-                    🧠 上下文占用 {ctx.percent.toFixed(1)}%
-                  </div>
-                  <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
-                    当前 root「{ctx.rootLabel}」的 Claude 会话已用{" "}
-                    {formatTokens(ctx.tokens)} / {formatTokens(contextWindow)} tokens。
-                    占用越高，模型越慢、缓存越难增长。
-                  </div>
-                  {ctxActionable ? (
-                    <>
-                      <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
-                        claude CLI 的 <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
-                        在这里暂无原生支持。可改为开一条「新话题」——
-                        全新上下文的根问答，等价{" "}
-                        <code className="px-1 rounded bg-surface-muted">/clear</code>。
-                      </div>
-                      <Button
-                        variant="primary"
-                        className="mt-2.5 w-full"
-                        onClick={() => {
-                          setCtxPopoverOpen(false);
-                          setComposeRootOpen(true);
-                        }}
-                      >
-                        🧹 开新话题（清空上下文）
-                      </Button>
-                    </>
-                  ) : (
-                    <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
-                      占用尚低，无需处理。≥50% 时这里会提供「🧹 开新话题」
-                      一键清空上下文。
-                    </div>
-                  )}
+                  <ContextUsageDetails
+                    rootLabel={ctx.rootLabel}
+                    tokens={ctx.tokens}
+                    percent={ctx.percent}
+                    contextWindow={contextWindow}
+                    actionable={ctxActionable}
+                    onStartFresh={() => {
+                      setCtxPopoverOpen(false);
+                      setComposeRootOpen(true);
+                    }}
+                  />
                 </Popover>
               </>
             )}

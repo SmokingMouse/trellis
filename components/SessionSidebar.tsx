@@ -629,8 +629,8 @@ export function SessionSidebar() {
               return (
                 <div
                   key={t.id}
-                  style={{ paddingLeft: PAD(1), height: ROW_H }}
-                  className={`mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
+                  style={{ paddingLeft: PAD(1) }}
+                  className={`${ROW_HEIGHT_CLASS} mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
                     t.enabled ? "" : "opacity-50"
                   }`}
                   title={`${t.name}\n还没有执行记录 —— 第一次执行时会在这里长出会话（设置 → 任务 里可手动 ▶）`}
@@ -917,8 +917,8 @@ export function SessionSidebar() {
                 archived.map((s) => (
                   <div
                     key={s.id}
-                    style={{ paddingLeft: PAD(0), height: ROW_H }}
-                    className="group mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-muted hover:bg-surface-muted"
+                    style={{ paddingLeft: PAD(0) }}
+                    className={`${ROW_HEIGHT_CLASS} group mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-muted hover:bg-surface-muted`}
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full shrink-0 opacity-50 ${modeStyle(s.mode).dot}`}
@@ -1053,7 +1053,8 @@ function isFlat(p: ProjectSummary): boolean {
 //
 // 行一律通栏 pill（mx-1 + 圆角），只有内容缩进 —— 这样 hover / 选中高亮不会
 // 随层级越缩越窄，长标题也不会在深层被挤没。
-const ROW_H = 26; // 三级统一行高；原先 group 24 / session 28 又是一处倒挂
+// 三级统一行高；原先 group 24 / session 28 又是一处倒挂。
+const ROW_HEIGHT_CLASS = "h-[26px] max-md:h-11";
 const PAD = (level: number) => 6 + level * 12; // 内容缩进：6 / 18 / 30
 const CHEVRON_MID = (level: number) => 4 /* mx-1 */ + PAD(level) + 5;
 
@@ -1166,10 +1167,9 @@ function GroupRow({
 }) {
   return (
     <div
-      className={`group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
+      className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
         toggleable ? "hover:bg-surface-muted" : ""
       } ${muted ? "opacity-75" : ""}`}
-      style={{ height: ROW_H }}
     >
       <button
         onClick={toggleable ? onToggle : undefined}
@@ -1311,7 +1311,7 @@ function SidebarRow({
     <div
       style={{ paddingLeft: PAD(indent) }}
       data-mobile-target="session-row"
-      className={`group relative mx-1 h-[26px] max-md:h-11 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+      className={`${ROW_HEIGHT_CLASS} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -1516,7 +1516,7 @@ function ChainRow({
       style={{ paddingLeft: PAD(2) }}
       // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
       // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
-      className={`mx-1 h-[26px] max-md:h-11 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
+      className={`${ROW_HEIGHT_CLASS} mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
         active
           ? "bg-surface-muted text-ink font-medium"
           : "text-ink-muted hover:bg-surface-muted"

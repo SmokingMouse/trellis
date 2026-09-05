@@ -23,10 +23,14 @@ type MobileOverflowMenuProps = {
   open: boolean;
   onClose: () => void;
   showAdmin: boolean;
+  contextUsage: { percent: number } | null;
+  onOpenContext: () => void;
 };
 
 const rowClass =
   "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink hover:bg-surface-muted transition-colors";
+const statusRowClass =
+  "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink-muted";
 
 function MenuButton({
   target,
@@ -89,6 +93,8 @@ export function MobileOverflowMenu({
   open,
   onClose,
   showAdmin,
+  contextUsage,
+  onOpenContext,
 }: MobileOverflowMenuProps) {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
@@ -240,7 +246,7 @@ export function MobileOverflowMenu({
               )}
               <div
                 data-mobile-target="overflow-mode"
-                className={`${rowClass} text-ink-muted`}
+                className={statusRowClass}
                 role="status"
               >
                 <span className="w-5 shrink-0 text-center text-base" aria-hidden>
@@ -254,6 +260,16 @@ export function MobileOverflowMenu({
                     : ""}
                 </span>
               </div>
+              {contextUsage && (
+                <MenuButton
+                  target="overflow-context"
+                  icon="🧠"
+                  detail={`${contextUsage.percent < 10 ? contextUsage.percent.toFixed(1) : Math.round(contextUsage.percent)}%`}
+                  onClick={() => act(onOpenContext)}
+                >
+                  上下文占用
+                </MenuButton>
+              )}
             </>
           )}
 
