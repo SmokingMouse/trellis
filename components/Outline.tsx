@@ -190,7 +190,7 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
   // falls back to 0 so the rail sits at its original left-3 = 12px).
   return (
     <aside
-      className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100vh-108px)] overflow-y-auto"
+      className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100dvh-108px)] overflow-y-auto"
       style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
     >
       {body}

@@ -17,6 +17,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: "cover",
+  themeColor: "#fafaf9",
   // Browser pinch-zoom is disabled so React Flow can own the gesture.
   // The canvas zoom replaces accessibility zoom for this app.
   userScalable: false,

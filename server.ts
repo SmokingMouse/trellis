@@ -316,7 +316,7 @@ function maintenancePage(detailed: boolean): Response {
 <meta http-equiv="refresh" content="5">
 <style>
 :root{color-scheme:dark light}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1115;color:#e6e8ec;
+body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#0f1115;color:#e6e8ec;
      font:15px/1.6 ui-sans-serif,-apple-system,"PingFang SC",system-ui,sans-serif}
 main{max-width:760px;padding:32px}
 h1{font-size:20px;margin:0 0 4px}

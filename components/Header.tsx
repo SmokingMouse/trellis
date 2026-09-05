@@ -123,7 +123,14 @@ export function Header() {
   }, []);
 
   return (
-    <header className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3">
+    <header
+      data-safe-area="header"
+      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3"
+      style={{
+        height: "calc(3rem + var(--safe-top))",
+        paddingTop: "var(--safe-top)",
+      }}
+    >
       <div className="flex items-center gap-2 shrink-0">
         {/* Mobile-only: open the session-list drawer. The left sidebar is
             hidden on phones, so this is the only way to see / switch between
