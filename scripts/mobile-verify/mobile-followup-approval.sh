@@ -119,32 +119,59 @@ if curl --noproxy '*' -sS --connect-timeout 1 --max-time 1 "$BASE/" >/dev/null 2
   exit 1
 fi
 
-NEED_BUILD=0
-BUILD_STAMP=.next/BUILD_ID
-if [ ! -f "$BUILD_STAMP" ]; then
-  NEED_BUILD=1
-else
+VERIFY_DIST=.next-mobile-followup-verify
+VERIFY_LITERAL=trellis-mobile-verify-streaming
+
+build_is_stale() {
+  build_stamp=$1
+  if [ ! -f "$build_stamp" ]; then
+    return 0
+  fi
   for source_dir in app components hooks lib stores public; do
-    if [ -d "$source_dir" ] && find "$source_dir" -type f -newer "$BUILD_STAMP" -print | grep -q .; then
-      NEED_BUILD=1
-      break
+    if [ -d "$source_dir" ] && find "$source_dir" -type f -newer "$build_stamp" -print | grep -q .; then
+      return 0
     fi
   done
-  if [ "$NEED_BUILD" -eq 0 ]; then
-    for source_file in package.json bun.lock next.config.ts postcss.config.mjs tsconfig.json server.ts instrumentation.ts proxy.ts; do
-      if [ -f "$source_file" ] && find "$source_file" -newer "$BUILD_STAMP" -print | grep -q .; then
-        NEED_BUILD=1
-        break
-      fi
-    done
-  fi
+  for source_file in package.json bun.lock next.config.ts postcss.config.mjs tsconfig.json server.ts instrumentation.ts proxy.ts; do
+    if [ -f "$source_file" ] && find "$source_file" -newer "$build_stamp" -print | grep -q .; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if build_is_stale .next/BUILD_ID || grep -R -F "$VERIFY_LITERAL" .next/static/chunks >/dev/null 2>&1; then
+  echo "== ordinary build: required =="
+  (
+    unset TRELLIS_DIST_DIR
+    export NEXT_PUBLIC_TRELLIS_VERIFY=0
+    bun --bun run build
+  )
+else
+  echo "== ordinary build: current .next reused =="
 fi
 
-if [ "$NEED_BUILD" -eq 1 ]; then
-  echo "== build: required =="
-  bun --bun run build
+echo "== ordinary build excludes streaming verification stub =="
+if grep -R -F "$VERIFY_LITERAL" .next/static/chunks >/dev/null 2>&1; then
+  echo "FAIL: ordinary client build contains $VERIFY_LITERAL" >&2
+  exit 1
+fi
+echo "✓ ordinary client build excludes streaming verification stub"
+
+if build_is_stale "$VERIFY_DIST/BUILD_ID" || ! grep -R -F "$VERIFY_LITERAL" "$VERIFY_DIST/static/chunks" >/dev/null 2>&1; then
+  echo "== verification build: required =="
+  (
+    export TRELLIS_DIST_DIR="$VERIFY_DIST"
+    export NEXT_PUBLIC_TRELLIS_VERIFY=1
+    bun --bun run build
+  )
 else
-  echo "== build: current .next reused =="
+  echo "== verification build: current $VERIFY_DIST reused =="
+fi
+
+if ! grep -R -F "$VERIFY_LITERAL" "$VERIFY_DIST/static/chunks" >/dev/null 2>&1; then
+  echo "FAIL: verification client build is missing $VERIFY_LITERAL" >&2
+  exit 1
 fi
 
 mkdir -p "$H/.trellis" "$OUT"
@@ -158,6 +185,8 @@ sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_s
   export TRELLIS_LARK=off
   export TRELLIS_AUTH_PASS="$AUTH_PASS"
   export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
+  export TRELLIS_DIST_DIR="$VERIFY_DIST"
+  export NEXT_PUBLIC_TRELLIS_VERIFY=1
   exec bun --bun run start -- -p "$PORT"
 ) >"$H/server.log" 2>&1 &
 SERVER_PID=$!
