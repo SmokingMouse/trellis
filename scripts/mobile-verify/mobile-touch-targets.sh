@@ -13,54 +13,120 @@ SESSION=mv-mobile-touch-targets
 OUT="$H/out"
 SERVER_PID=
 
-if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "FAIL: port $PORT is already in use"
-  exit 1
-fi
+for tool in bun agent-browser sqlite3 curl; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "FAIL: missing required tool: $tool"
+    exit 1
+  fi
+done
+
+close_browser_session() {
+  close_try=0
+  while [ "$close_try" -lt 5 ]; do
+    if AGENT_BROWSER_SESSION="$SESSION" agent-browser close >/dev/null 2>&1; then
+      return 0
+    fi
+    close_try=$((close_try + 1))
+    sleep 1
+  done
+  echo "WARN: could not close agent-browser session $SESSION after 5 attempts" >&2
+  return 0
+}
 
 cleanup() {
-  AGENT_BROWSER_SESSION="$SESSION" agent-browser close >/dev/null 2>&1 || true
-  if [ -n "$SERVER_PID" ]; then
+  cleanup_status=$?
+  trap - 0
+  close_browser_session
+  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
+    stop_try=0
+    while kill -0 "$SERVER_PID" >/dev/null 2>&1 && [ "$stop_try" -lt 10 ]; do
+      stop_try=$((stop_try + 1))
+      sleep 1
+    done
+    if kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+      kill -9 "$SERVER_PID" >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ -n "$SERVER_PID" ]; then
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
-  pids=$(lsof -tiTCP:$PORT -sTCP:LISTEN 2>/dev/null || true)
-  for pid in $pids; do
-    kill "$pid" >/dev/null 2>&1 || true
-  done
+  exit "$cleanup_status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup 0
+trap 'exit 129' 1
+trap 'exit 130' 2
+trap 'exit 143' 15
 
 ab() {
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
-echo "== build =="
-bun --bun run build
+# Always dispose a stale named session before touching the app instance. This
+# also makes a clean-shell rerun independent of browser daemon state left by a
+# previous interrupted verification.
+close_browser_session
+
+if curl --noproxy '*' -sS --connect-timeout 1 --max-time 1 "$BASE/" >/dev/null 2>&1; then
+  echo "FAIL: port $PORT is already serving HTTP"
+  exit 1
+fi
+
+NEED_BUILD=0
+BUILD_STAMP=.next/BUILD_ID
+if [ ! -f "$BUILD_STAMP" ]; then
+  NEED_BUILD=1
+else
+  for source_dir in app components hooks lib stores public; do
+    if [ -d "$source_dir" ] && find "$source_dir" -type f -newer "$BUILD_STAMP" -print | grep -q .; then
+      NEED_BUILD=1
+      break
+    fi
+  done
+  if [ "$NEED_BUILD" -eq 0 ]; then
+    for source_file in package.json bun.lock next.config.ts postcss.config.mjs tsconfig.json server.ts instrumentation.ts proxy.ts; do
+      if [ -f "$source_file" ] && find "$source_file" -newer "$BUILD_STAMP" -print | grep -q .; then
+        NEED_BUILD=1
+        break
+      fi
+    done
+  fi
+fi
+
+if [ "$NEED_BUILD" -eq 1 ]; then
+  echo "== build: required =="
+  bun --bun run build
+else
+  echo "== build: current .next reused =="
+fi
 
 mkdir -p "$H/.trellis" "$OUT"
 rm -f "$DB" "$DB-shm" "$DB-wal"
 sqlite3 "$SOURCE_DB" ".backup $DB"
 sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_secret='invalid';"
 
-HOME="$H" TRELLIS_DB_PATH="$DB" TRELLIS_LARK=off \
-  bun --bun run start -- -p "$PORT" >"$H/server.log" 2>&1 &
+(
+  export HOME="$H"
+  export TRELLIS_DB_PATH="$DB"
+  export TRELLIS_LARK=off
+  exec bun --bun run start -- -p "$PORT"
+) >"$H/server.log" 2>&1 &
 SERVER_PID=$!
 
 i=0
-until curl --noproxy '*' -fsS "$BASE/__gate/health" | grep -q '"next":"ready"'; do
+until curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$BASE/__gate/health" 2>/dev/null | grep -q '"next":"ready"'; do
   if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     echo "FAIL: isolated Trellis exited during startup"
-    tail -80 "$H/server.log"
+    tail -n 80 "$H/server.log"
     exit 1
   fi
   i=$((i + 1))
-  if [ "$i" -ge 120 ]; then
+  if [ "$i" -ge 60 ]; then
     echo "FAIL: isolated Trellis did not become ready"
-    tail -80 "$H/server.log"
+    tail -n 80 "$H/server.log"
     exit 1
   fi
-  sleep 0.25
+  sleep 1
 done
 
 # Startup migration deliberately resolves orphaned streaming nodes. Inject the
@@ -88,7 +154,6 @@ console.log(touchTarget);
   ('mv-touch-ask','mv-touch-ask-session',NULL,NULL,'Choose a verification mode','','done',0,1893456001000,NULL,'{"toolUseId":"mv-ask-tool","toolName":"AskUserQuestion","input":{"questions":[{"header":"Touch","question":"Which target should be verified?","options":[{"label":"Core controls"},{"label":"All controls"}],"multiSelect":false}]}}');
 SQL
 
-ab close >/dev/null 2>&1 || true
 ab set device "iPhone 15"
 ab set viewport 390 844
 ab open "$BASE/?session=mv-touch-permission-session&node=mv-touch-permission"
