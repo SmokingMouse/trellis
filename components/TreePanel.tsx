@@ -5,6 +5,7 @@ import { buildNodeIndex } from "@/lib/node-index";
 import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
 import { layoutNodes } from "@/lib/layout";
 import { refIcon } from "@/lib/ref-icon";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   buildTreeEntries,
   childrenIndex,
@@ -58,6 +59,7 @@ function nodeRowLabel(n: ChatNode, max = 30): string {
 }
 
 export function TreePanel() {
+  const isMobile = useIsMobile();
   const sessionId = useSessionStore((s) => s.session?.id);
   const nodesMap = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -76,6 +78,9 @@ export function TreePanel() {
   const view = useSessionStore((s) => s.treePanelView);
   const switchView = useSessionStore((s) => s.setTreePanelView);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const mobileOpen = useSessionStore((s) => s.mobileTreePanelOpen);
+  const setMobileOpen = useSessionStore((s) => s.setMobileTreePanelOpen);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
@@ -90,6 +95,25 @@ export function TreePanel() {
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileSessionRef = useRef(sessionId);
+
+  useEffect(() => {
+    if (mobileSessionRef.current !== sessionId) setMobileOpen(false);
+    mobileSessionRef.current = sessionId;
+  }, [sessionId, setMobileOpen]);
+
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+    mobileCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMobileOpen(false);
+      setViewMode("linear");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isMobile, mobileOpen, setMobileOpen, setViewMode]);
 
   const entries = useMemo(
     () => buildTreeEntries(nodesMap, treeVisits),
@@ -881,6 +905,13 @@ export function TreePanel() {
   );
 };
 
+  if (isMobile === null || (isMobile && !mobileOpen)) return null;
+
+  const closeMobileSheet = () => {
+    setMobileOpen(false);
+    setViewMode("linear");
+  };
+
   return (
     // 右下角是一条堆栈，终端在最底层（把手 / 浮层 / 底部分栏三态高度都由
     // TerminalPanel 发布成 --trellis-term-stack），树面板踩着它往上排。
@@ -888,12 +919,34 @@ export function TreePanel() {
     // clamp 的上界是硬保证：终端被拖到 720px 高时也不许把树面板顶出视口，
     // 宁可被盖住（拖矮就回来），也不能让控件够不着。
     <div
-      className="fixed right-3 z-40 text-xs transition-[bottom] duration-150"
-      style={{
-        bottom: "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
-      }}
+      data-mobile-tree-sheet={isMobile ? "open" : undefined}
+      role={isMobile ? "dialog" : undefined}
+      aria-modal={isMobile ? true : undefined}
+      aria-label={isMobile ? "思维树" : undefined}
+      className={
+        isMobile
+          ? "fixed inset-0 z-50 text-xs"
+          : "fixed right-3 z-40 text-xs transition-[bottom] duration-150"
+      }
+      style={
+        isMobile
+          ? {
+              paddingTop: "var(--safe-top)",
+              paddingBottom: "var(--safe-bottom)",
+            }
+          : {
+              bottom:
+                "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
+            }
+      }
     >
-      <div className="rounded-card border border-line/80 bg-surface/95 shadow-pop backdrop-blur">
+      <div
+        className={
+          isMobile
+            ? "flex h-full flex-col bg-surface"
+            : "rounded-card border border-line/80 bg-surface/95 shadow-pop backdrop-blur"
+        }
+      >
         <div className="flex items-center">
           <button
             type="button"
@@ -912,8 +965,9 @@ export function TreePanel() {
           {sessionId && (
             <button
               type="button"
+              data-mobile-target="new-tree-open"
               onClick={() => setComposeRootOpen(true)}
-              className="shrink-0 px-2 py-2 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
+              className="shrink-0 px-2 py-2 max-md:min-h-11 max-md:min-w-11 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
               title="新树：保留当前 session，只清空上下文（等价 /clear）"
             >
               ＋ 新树
@@ -975,10 +1029,29 @@ export function TreePanel() {
               </svg>
             </button>
           )}
+          {isMobile && (
+            <button
+              ref={mobileCloseRef}
+              type="button"
+              data-mobile-target="tree-sheet-close"
+              onClick={closeMobileSheet}
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-xl text-ink-muted hover:bg-surface-muted"
+              title="关闭思维树"
+              aria-label="关闭思维树"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         {!collapsed && (
-          <div className="relative w-72 border-t border-line-faint">
+          <div
+            className={
+              isMobile
+                ? "relative min-h-0 w-full flex-1 border-t border-line-faint"
+                : "relative w-72 border-t border-line-faint"
+            }
+          >
             {filter !== null && (
               <div className="px-2 pt-2">
                 <input
@@ -998,7 +1071,11 @@ export function TreePanel() {
 
             <div
               ref={bodyRef}
-              className="p-1.5 max-h-[min(420px,55vh)] overflow-y-auto overscroll-contain"
+              className={
+                isMobile
+                  ? "h-full overflow-y-auto overscroll-contain p-1.5"
+                  : "p-1.5 max-h-[min(420px,55vh)] overflow-y-auto overscroll-contain"
+              }
               onScroll={() => setHover(null)}
             >
               {filter !== null && filter.trim() ? (
@@ -1095,7 +1172,7 @@ export function TreePanel() {
               )}
             </div>
 
-            {hoverNode && hover && (
+            {!isMobile && hoverNode && hover && (
               <div
                 className={`pointer-events-none absolute right-full mr-2 ${PREVIEW_W} rounded-card border border-line bg-surface shadow-pop px-3 py-2.5 text-left`}
                 style={{ top: hover.top, transform: "translateY(-50%)" }}

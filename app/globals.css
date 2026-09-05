@@ -32,6 +32,13 @@
 :root {
   color-scheme: light;
 
+  /* Standalone viewport insets: env() lives here; components consume vars. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --trellis-header-h: calc(3rem + var(--safe-top));
+
   /* 中性族 —— stone */
   --surface-canvas: oklch(98.5% 0.001 106.423); /* stone-50 */
   --surface: #fff;
@@ -744,6 +751,15 @@ html, body {
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
 }
+@media (max-width: 767px) {
+  .md-body .md-codeblock-copy {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
 
 /* B5 (a11y): visible keyboard-focus ring. Pointer clicks don't trigger
    :focus-visible, so this only shows during keyboard navigation — no visual
@@ -1033,4 +1049,15 @@ html, body {
   .trellis-dots > span { animation: none; }
   .trellis-run-bar::after { width: 100%; opacity: 0.7; }
   .trellis-dots > span { opacity: 0.8; transform: none; }
+}
+
+/* iOS Safari auto-zooms focused text controls below 16px. Keep this rule
+   unlayered so it outranks Tailwind's layered text utilities on phones;
+   组件侧无需再加 max-md:text-[16px] 类。 */
+@media (max-width: 767.98px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }

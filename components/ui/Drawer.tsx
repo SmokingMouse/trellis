@@ -37,6 +37,7 @@ export function Drawer({
         }`}
       />
       <div
+        data-safe-area="bottom-sheet"
         className={`absolute bg-surface shadow-overlay flex flex-col overflow-hidden transition-transform duration-200
           inset-x-0 bottom-0 h-[60vh] rounded-t-2xl
           sm:inset-x-auto sm:right-2 sm:top-14 sm:bottom-2 ${widthClassName} sm:h-auto sm:rounded-overlay
@@ -45,6 +46,11 @@ export function Drawer({
               ? "translate-y-0 sm:translate-x-0"
               : "translate-y-full sm:translate-y-0 sm:translate-x-[calc(100%+0.5rem)]"
           }`}
+        style={{
+          paddingBottom: "var(--safe-bottom)",
+          paddingLeft: "var(--safe-left)",
+          paddingRight: "var(--safe-right)",
+        }}
       >
         {children}
       </div>

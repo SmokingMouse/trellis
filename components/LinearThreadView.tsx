@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
@@ -18,11 +18,11 @@ import {
   type SelectionInfo,
 } from "@/hooks/useSelectionWithin";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import { useVerifyStreamingStub } from "@/hooks/useVerifyStreamingStub";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
-import { TreePanel } from "./TreePanel";
 import { TurnCard } from "./TurnCard";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
@@ -48,7 +48,7 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;
 
-export function LinearThreadView() {
+export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -76,10 +76,28 @@ export function LinearThreadView() {
   // viewport to the bottom on new content; flips off when the user scrolls
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const composerScrollReadyRef = useRef(false);
+  const [composerExpanded, setComposerExpanded] = useState(false);
+  const [composerHidden, setComposerHidden] = useState(false);
+  const [waitingJumpId, setWaitingJumpId] = useState<string | null>(null);
+  const lastWaitingJumpIdRef = useRef<string | null>(null);
+  useVerifyStreamingStub(isMobile, session?.id);
 
   useEffect(() => {
     setOpenBranches(new Set());
     setBranchFrom(null);
+    setComposerExpanded(false);
+    setComposerHidden(false);
+    setWaitingJumpId(null);
+    lastWaitingJumpIdRef.current = null;
+    lastScrollTopRef.current = 0;
+    composerScrollReadyRef.current = false;
+    const readyTimer = window.setTimeout(() => {
+      lastScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
+      composerScrollReadyRef.current = true;
+    }, 400);
+    return () => window.clearTimeout(readyTimer);
   }, [session?.id]);
 
   const threadData = useMemo(() => {
@@ -122,6 +140,11 @@ export function LinearThreadView() {
     return { anchorId: anchor.id, thread, branchesByNode };
   }, [activeNodeId, nodes, session?.rootNodeId]);
 
+  const waitingNodes = useMemo(
+    () => Object.values(nodes).filter((node) => node.pendingInteraction).sort(nodeSort),
+    [nodes],
+  );
+
   const tipNode =
     threadData.thread.length > 0
       ? threadData.thread[threadData.thread.length - 1]
@@ -135,6 +158,15 @@ export function LinearThreadView() {
   useEffect(() => {
     if (branchFrom && !nodes[branchFrom.id]) setBranchFrom(null);
   }, [branchFrom, nodes]);
+
+  useEffect(() => {
+    if (!waitingJumpId || !roundRefs.current.has(waitingJumpId)) return;
+    const id = requestAnimationFrame(() => {
+      roundRefs.current.get(waitingJumpId)?.scrollIntoView({ block: "start" });
+      setWaitingJumpId(null);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [waitingJumpId, threadData.anchorId]);
 
   // Restore the persisted reading position when landing on a session (tab
   // switch / reload / canvas→linear). The anchor alone can't do this: it
@@ -249,6 +281,18 @@ export function LinearThreadView() {
     followRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
 
+    const delta = el.scrollTop - lastScrollTopRef.current;
+    lastScrollTopRef.current = el.scrollTop;
+    if (isMobile && composerScrollReadyRef.current) {
+      const forceVisible =
+        waitingNodes.length > 0 || Boolean(tipStreamingId) || composerExpanded;
+      if (forceVisible || followRef.current || delta < -8) {
+        setComposerHidden(false);
+      } else if (delta > 8) {
+        setComposerHidden(true);
+      }
+    }
+
     const sid = session?.id;
     if (!sid) return;
     if (recordTimerRef.current !== null) {
@@ -278,6 +322,11 @@ export function LinearThreadView() {
       if (picked) setReadingPosition(sid, picked);
     }, 200);
   };
+
+  const onComposerExpandedChange = useCallback((expanded: boolean) => {
+    setComposerExpanded(expanded);
+    if (expanded) setComposerHidden(false);
+  }, []);
 
   // Read tracking: a card counts as read once it stays sufficiently visible
   // in the scroll viewport for 1s — ≥50% of the card showing, or (for cards
@@ -420,6 +469,12 @@ export function LinearThreadView() {
   const mode = modeStyle(session.mode);
   // Header/cards/composer share one width class so they stay column-aligned.
   const widthClass = THREAD_WIDTH_CLASS[threadWidth];
+  const composerIsHidden =
+    isMobile &&
+    composerHidden &&
+    waitingNodes.length === 0 &&
+    !tipStreamingId &&
+    !composerExpanded;
 
   return (
     // #3: viewport-bound flex column — header and composer are fixed rails,
@@ -427,7 +482,8 @@ export function LinearThreadView() {
     // a screen of content the composer sat right under the last card,
     // floating mid-screen instead of docked at the bottom.
     <div
-      className="fixed inset-0 pt-12 md:pt-[5.25rem] flex flex-col bg-surface-canvas"
+      data-safe-area="linear-thread"
+      className="fixed inset-0 pt-[var(--trellis-header-h)] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
       // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
       // 发布，与 --trellis-sb 同一套模式（一个变量、多个消费者）；面板关闭时
       // 是 0px，等于没这回事。
@@ -470,15 +526,38 @@ export function LinearThreadView() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setViewMode("canvas")}
-            className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
-          >
-            🗺 画布
-          </button>
+          {!isMobile && (
+            <button
+              type="button"
+              onClick={() => setViewMode("canvas")}
+              className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
+            >
+              🗺 画布
+            </button>
+          )}
         </div>
       </div>
+
+      {isMobile && waitingNodes.length > 0 && (
+        <button
+          type="button"
+          data-mobile-waiting-banner
+          onClick={() => {
+            const previousIndex = waitingNodes.findIndex(
+              (node) => node.id === lastWaitingJumpIdRef.current,
+            );
+            const target = waitingNodes[(previousIndex + 1) % waitingNodes.length];
+            lastWaitingJumpIdRef.current = target.id;
+            setWaitingJumpId(target.id);
+            setActiveNode(target.id);
+          }}
+          className="z-20 flex min-h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden />
+          有 {waitingNodes.length} 项等你处理，点击跳到下一项
+          <span aria-hidden>↓</span>
+        </button>
+      )}
 
       <div
         ref={scrollRef}
@@ -486,7 +565,7 @@ export function LinearThreadView() {
         data-thread-scroll
         className="flex-1 overflow-y-auto"
       >
-        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 space-y-4`}>
+        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
             暂无节点
@@ -552,12 +631,13 @@ export function LinearThreadView() {
                     {node.status === "done" && (
                       <button
                         type="button"
+                        data-mobile-target="node-read-toggle"
                         onClick={() =>
                           node.readAt
                             ? void markNodeUnread(node.id)
                             : void markNodeRead(node.id)
                         }
-                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
                           node.readAt
                             ? "text-ink-faint hover:bg-unread-muted hover:text-unread-ink"
                             : "text-ink-faint hover:bg-surface-muted hover:text-ink"
@@ -607,13 +687,14 @@ export function LinearThreadView() {
                     {canBranch && (
                       <button
                         type="button"
+                        data-mobile-target="node-branch"
                         onClick={() =>
                           setBranchFrom((prev) => ({
                             id: node.id,
                             n: (prev?.n ?? 0) + 1,
                           }))
                         }
-                        className={`px-1.5 py-1 rounded-md transition-colors ${
+                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
                           isBranchTarget
                             ? "text-accent bg-accent-muted"
                             : "text-ink-faint hover:bg-accent-muted hover:text-accent"
@@ -642,8 +723,9 @@ export function LinearThreadView() {
                     {canDelete && (
                       <button
                         type="button"
+                        data-mobile-target="node-delete"
                         onClick={() => confirmDelete(node.id)}
-                        className="px-1.5 py-1 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
+                        className="px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
                         title="删除节点（含子树）"
                         aria-label="删除节点"
                       >
@@ -712,7 +794,14 @@ export function LinearThreadView() {
         </main>
       </div>
 
-      <div className="shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur">
+      <div
+        data-safe-area="linear-composer"
+        data-composer-hidden={composerIsHidden ? "true" : "false"}
+        className={`shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 ${
+          composerIsHidden ? "max-md:translate-y-full max-md:pointer-events-none" : "translate-y-0"
+        }`}
+        style={{ paddingBottom: "var(--safe-bottom)" }}
+      >
         <div className={`${widthClass} mx-auto px-4`}>
           {branchFromNode && (
             <TargetChip
@@ -731,6 +820,8 @@ export function LinearThreadView() {
           )}
           <Composer
             targetNode={branchFromNode ?? tipNode}
+            mobileCompact={isMobile}
+            onMobileExpandedChange={onComposerExpandedChange}
             placeholder={
               branchFromNode
                 ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`
@@ -756,7 +847,6 @@ export function LinearThreadView() {
           }}
         />
       )}
-      <TreePanel />
     </div>
   );
 }

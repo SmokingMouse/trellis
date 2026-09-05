@@ -132,6 +132,7 @@ function RegenerateVariantButton({
   return (
     <Button
       type="button"
+      data-mobile-target="response-regenerate"
       variant="secondary"
       size="sm"
       onClick={(e) => {
@@ -143,6 +144,68 @@ function RegenerateVariantButton({
     >
       ↻ 再答一版
     </Button>
+  );
+}
+
+function MobileResponseActions({
+  node,
+}: {
+  node: ChatNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={menuRef}
+      data-mobile-response-actions
+      className="relative ml-auto flex items-center gap-2 md:hidden"
+    >
+      <CopyButton
+        text={node.response}
+        label="复制全文"
+        className="nodrag min-h-11 min-w-11 rounded border border-line px-2.5 py-1 text-ui text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink-strong"
+      />
+      <button
+        type="button"
+        data-mobile-target="response-more"
+        aria-label="更多回答操作"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-11 min-w-11 items-center justify-center rounded border border-line bg-surface text-lg text-ink-muted"
+      >
+        <span aria-hidden>…</span>
+      </button>
+      {open && (
+        <div
+          data-mobile-response-menu
+          className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-lg border border-line bg-surface p-2 shadow-pop"
+        >
+          <CliResumeButton nodeId={node.id} />
+          <RegenerateVariantButton nodeId={node.id} question={node.question} />
+          <CardImageButton
+            title={node.topicLabel ?? node.question}
+            content={finalResponseText(node)}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -449,7 +512,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
                 toolCalls={node.toolCalls}
                 isStreaming={false}
               />
-              <div className="flex items-center gap-2 ml-auto">
+              <div className="hidden items-center gap-2 ml-auto md:flex">
                 <CliResumeButton nodeId={node.id} />
                 <RegenerateVariantButton nodeId={node.id} question={node.question} />
                 <CardImageButton
@@ -460,9 +523,10 @@ function ResponseBody({ node }: { node: ChatNode }) {
                 <CopyButton
                   text={node.response}
                   label="复制全文"
-                  className="nodrag px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+                  className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
                 />
               </div>
+              <MobileResponseActions node={node} />
             </div>
             <GeneratedFilesBar node={node} />
           </>

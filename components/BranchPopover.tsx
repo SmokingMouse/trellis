@@ -7,6 +7,7 @@ import {
   useAttachmentUploads,
   MAX_ATTACHMENTS,
 } from "@/hooks/useAttachmentUploads";
+import { useIsNarrowViewport } from "@/hooks/useIsMobile";
 
 type Props = {
   selection: SelectionInfo;
@@ -18,12 +19,14 @@ type Props = {
 export function BranchPopover({ selection, expanded, onExpand, onClose }: Props) {
   const [q, setQ] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamBranch = useSessionStore((s) => s.streamBranch);
   const addNote = useSessionStore((s) => s.addNote);
   const session = useSessionStore((s) => s.session);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const isNarrowViewport = useIsNarrowViewport();
   // Same tool-capability gate as the chat route: project (and
   // enhanced chat) can take any whitelisted file; pure chat can't.
   const att = useAttachmentUploads(
@@ -53,6 +56,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        setMobileMoreOpen(false);
         onExpand();
       } else if ((e.key === "d" || e.key === "D") && (e.metaKey || e.ctrlKey)) {
         // Browser default is "bookmark this page" — preventDefault first.
@@ -125,11 +129,19 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
   const popoverHeight = expanded ? 130 + pendingHeight : 38;
   const top = Math.max(8, selection.rect.top - popoverHeight - 8);
   const left = selection.rect.left + selection.rect.width / 2;
+  const positionStyle = isNarrowViewport
+    ? {
+        right: 8,
+        bottom: "calc(var(--safe-bottom) + 8px)",
+        left: 8,
+      }
+    : { top, left, transform: "translateX(-50%)" };
 
   return (
     <div
+      data-branch-popover
       className="fixed z-50 max-w-[calc(100vw-16px)]"
-      style={{ top, left, transform: "translateX(-50%)" }}
+      style={positionStyle}
       // Collapsed: swallow mousedown so clicking the ⌘K / note buttons keeps
       // the document text selection alive (the buttons act on it). Expanded:
       // the selection is already snapshotted into `selection.text`, and this
@@ -196,37 +208,42 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
           <div className="border-t border-line-faint px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
             <button
               type="button"
+              data-mobile-target="branch-attach"
               onClick={() => fileInputRef.current?.click()}
               disabled={att.atLimit}
               title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : "添加图片 / 文件"}
-              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 mr-auto"
+              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1 mr-auto"
             >
               <span aria-hidden>📎</span>
             </button>
             <button
+              data-mobile-target="branch-cancel"
               onClick={onClose}
-              className="px-2 py-0.5 text-ink-muted hover:text-ink-strong"
+              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong"
             >
               取消
             </button>
             <button
+              data-mobile-target="branch-submit"
               onClick={submit}
               disabled={!q.trim() || hasUploading}
               title={hasUploading ? "等待附件上传…" : undefined}
-              className="px-2.5 py-0.5 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
+              className="px-2.5 py-0.5 max-md:min-h-11 max-md:min-w-11 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
             >
               {hasUploading ? "上传中…" : "提问"}
             </button>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5">
+        <div className="relative flex items-center justify-center gap-1.5 md:justify-start">
           <button
+            data-mobile-target="branch-open"
             onPointerDown={(e) => {
               e.preventDefault();
+              setMobileMoreOpen(false);
               onExpand();
             }}
-            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 hover:bg-accent-strong flex items-center gap-2 ring-1 ring-accent-strong"
+            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 max-md:min-h-11 max-md:min-w-11 hover:bg-accent-strong flex items-center justify-center gap-2 ring-1 ring-accent-strong"
           >
             <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
               ⌘K
@@ -234,6 +251,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             针对此处提问
           </button>
           <button
+            data-mobile-target="branch-note"
             onPointerDown={(e) => {
               e.preventDefault();
               captureNote();
@@ -242,7 +260,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             title="摘到笔记 (⌘D)"
             aria-label="摘到笔记"
             /* 笔记 UI 归一 positive（amber→emerald 有意视觉变化）；positive 无 -strong 档，hover 用 opacity 近似 */
-            className="bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 ring-1 ring-positive-line"
+            className="hidden md:flex bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 hover:opacity-90 disabled:opacity-50 items-center justify-center gap-1.5 ring-1 ring-positive-line"
           >
             <svg
               width="13"
@@ -257,6 +275,39 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
               ⌘D
             </kbd>
           </button>
+          <button
+            type="button"
+            data-mobile-target="branch-more"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              setMobileMoreOpen((open) => !open);
+            }}
+            aria-label="更多选区操作"
+            aria-expanded={mobileMoreOpen}
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-lg text-ink-muted shadow-pop md:hidden"
+          >
+            <span aria-hidden>…</span>
+          </button>
+          {mobileMoreOpen && (
+            <div
+              data-mobile-branch-menu
+              className="absolute bottom-full right-0 mb-2 min-w-40 overflow-hidden rounded-lg border border-line bg-surface p-1 shadow-pop md:hidden"
+            >
+              <button
+                type="button"
+                data-mobile-target="branch-note"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  void captureNote();
+                }}
+                disabled={savingNote}
+                className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-ink hover:bg-surface-muted disabled:opacity-50"
+              >
+                <span aria-hidden>📌</span>
+                摘到笔记
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

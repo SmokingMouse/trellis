@@ -13,7 +13,7 @@ import {
   loadSidebarWidth,
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsDesktopViewport } from "@/hooks/useIsMobile";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
 import {
   RECENT_CHAINS_SHOWN,
@@ -94,6 +94,7 @@ export function SessionSidebar() {
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
     id: string;
     name?: string;
@@ -139,14 +140,14 @@ export function SessionSidebar() {
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
   const [width, setWidth] = useState<number>(loadSidebarWidth);
   const [resizing, setResizing] = useState(false);
-  const isMobile = useIsMobile();
+  const isDesktopViewport = useIsDesktopViewport();
 
   // 侧栏自己拥有宽度，就由它来发布 --trellis-sb（原先在 page.tsx 里按常量发，
   // 宽度一旦可拖拽，两处就会打架）。所有消费者读的仍是同一个变量，不用改。
   useEffect(() => {
-    const offset = !isMobile && sidebarOpen ? width : 0;
+    const offset = isDesktopViewport && sidebarOpen ? width : 0;
     document.documentElement.style.setProperty("--trellis-sb", `${offset}px`);
-  }, [isMobile, sidebarOpen, width]);
+  }, [isDesktopViewport, sidebarOpen, width]);
 
   useEffect(() => {
     if (!resizing) return;
@@ -431,6 +432,7 @@ export function SessionSidebar() {
   const onNew = () => {
     newConversation();
     setEditingId(null);
+    setMobileNavOpen(false);
   };
 
   // 单行渲染。indent 让它能在 Chat（平铺）与 Project→Workspace（缩两级）
@@ -629,8 +631,8 @@ export function SessionSidebar() {
               return (
                 <div
                   key={t.id}
-                  style={{ paddingLeft: PAD(1), height: ROW_H }}
-                  className={`mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
+                  style={{ paddingLeft: PAD(1) }}
+                  className={`${ROW_HEIGHT_CLASS} mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
                     t.enabled ? "" : "opacity-50"
                   }`}
                   title={`${t.name}\n还没有执行记录 —— 第一次执行时会在这里长出会话（设置 → 任务 里可手动 ▶）`}
@@ -841,6 +843,7 @@ export function SessionSidebar() {
         <Button
           variant="primary"
           size="sm"
+          data-mobile-target="drawer-new-session"
           onClick={onNew}
           title="新会话：开一棵全新树（与「🧹 新话题」不同——后者在当前会话内清空上下文）"
           className="flex-1 h-8"
@@ -850,6 +853,7 @@ export function SessionSidebar() {
         </Button>
         <IconButton
           label="收起"
+          data-mobile-target="drawer-close"
           onClick={onClose}
           className="w-7 h-8"
         >
@@ -862,12 +866,38 @@ export function SessionSidebar() {
       {/* CLI 同步：attach 本机 Claude Code / Codex 会话（双向）。 */}
       <button
         onClick={() => setAttachOpen(true)}
+        data-mobile-target="drawer-attach"
         title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
-        className="shrink-0 mx-2 mt-1.5 inline-flex items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
+        className="hidden md:inline-flex shrink-0 mx-2 mt-1.5 items-center justify-center gap-1.5 h-7 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
       >
         <span aria-hidden>⇄</span>
         Attach CLI 会话
       </button>
+
+      <div className="md:hidden shrink-0 mx-2 mt-1.5">
+        <button
+          type="button"
+          data-mobile-target="drawer-advanced"
+          aria-expanded={mobileAdvancedOpen}
+          onClick={() => setMobileAdvancedOpen((open) => !open)}
+          className="w-full min-h-11 px-3 rounded-md text-label text-ink-faint flex items-center justify-between hover:bg-surface-muted"
+        >
+          <span>高级操作</span>
+          <span aria-hidden>{mobileAdvancedOpen ? "▾" : "▸"}</span>
+        </button>
+        {mobileAdvancedOpen && (
+          <button
+            type="button"
+            onClick={() => setAttachOpen(true)}
+            data-mobile-target="drawer-attach"
+            title="把本机 Claude Code / Codex CLI 会话 attach 进来（双向同步）"
+            className="mt-1 w-full min-h-11 inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-line-strong text-label text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
+          >
+            <span aria-hidden>⇄</span>
+            Attach CLI 会话
+          </button>
+        )}
+      </div>
 
       <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 && tasks.length === 0 && taskSessions.length === 0 ? (
@@ -914,8 +944,8 @@ export function SessionSidebar() {
                 archived.map((s) => (
                   <div
                     key={s.id}
-                    style={{ paddingLeft: PAD(0), height: ROW_H }}
-                    className="group mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-muted hover:bg-surface-muted"
+                    style={{ paddingLeft: PAD(0) }}
+                    className={`${ROW_HEIGHT_CLASS} group mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-muted hover:bg-surface-muted`}
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full shrink-0 opacity-50 ${modeStyle(s.mode).dot}`}
@@ -1050,7 +1080,8 @@ function isFlat(p: ProjectSummary): boolean {
 //
 // 行一律通栏 pill（mx-1 + 圆角），只有内容缩进 —— 这样 hover / 选中高亮不会
 // 随层级越缩越窄，长标题也不会在深层被挤没。
-const ROW_H = 26; // 三级统一行高；原先 group 24 / session 28 又是一处倒挂
+// 三级统一行高；原先 group 24 / session 28 又是一处倒挂。
+const ROW_HEIGHT_CLASS = "h-[26px] max-md:h-11";
 const PAD = (level: number) => 6 + level * 12; // 内容缩进：6 / 18 / 30
 const CHEVRON_MID = (level: number) => 4 /* mx-1 */ + PAD(level) + 5;
 
@@ -1163,10 +1194,9 @@ function GroupRow({
 }) {
   return (
     <div
-      className={`group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
+      className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
         toggleable ? "hover:bg-surface-muted" : ""
       } ${muted ? "opacity-75" : ""}`}
-      style={{ height: ROW_H }}
     >
       <button
         onClick={toggleable ? onToggle : undefined}
@@ -1306,8 +1336,9 @@ function SidebarRow({
 
   return (
     <div
-      style={{ paddingLeft: PAD(indent), height: ROW_H }}
-      className={`group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+      style={{ paddingLeft: PAD(indent) }}
+      data-mobile-target="session-row"
+      className={`${ROW_HEIGHT_CLASS} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -1507,11 +1538,12 @@ function ChainRow({
   return (
     <button
       type="button"
+      data-mobile-target="session-chain-row"
       onClick={onOpen}
-      style={{ paddingLeft: PAD(2), height: ROW_H }}
+      style={{ paddingLeft: PAD(2) }}
       // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
       // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
-      className={`mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
+      className={`${ROW_HEIGHT_CLASS} mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
         active
           ? "bg-surface-muted text-ink font-medium"
           : "text-ink-muted hover:bg-surface-muted"
