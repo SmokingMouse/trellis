@@ -18,11 +18,11 @@ import {
   type SelectionInfo,
 } from "@/hooks/useSelectionWithin";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
-import { TreePanel } from "./TreePanel";
 import { TurnCard } from "./TurnCard";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
@@ -49,6 +49,7 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
 const FOLLOW_SLACK_PX = 120;
 
 export function LinearThreadView() {
+  const isMobile = useIsMobile();
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -471,13 +472,15 @@ export function LinearThreadView() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setViewMode("canvas")}
-            className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
-          >
-            🗺 画布
-          </button>
+          {isMobile === false && (
+            <button
+              type="button"
+              onClick={() => setViewMode("canvas")}
+              className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
+            >
+              🗺 画布
+            </button>
+          )}
         </div>
       </div>
 
@@ -764,7 +767,6 @@ export function LinearThreadView() {
           }}
         />
       )}
-      <TreePanel />
     </div>
   );
 }
