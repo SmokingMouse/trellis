@@ -100,7 +100,7 @@ export function ModePicker() {
       <div
         role="radiogroup"
         aria-label="Context mode"
-        className="inline-flex h-7 max-md:h-11 max-md:w-full rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
+        className="inline-flex h-7 max-md:h-12 max-md:w-full rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
       >
         {OPTIONS.map((opt) => {
           const active = mode === opt.id;

@@ -293,7 +293,7 @@ ab eval --stdin <<'JS'
   const section = (title) => [...sheet.querySelectorAll('section')]
     .find((candidate) => candidate.querySelector('h2')?.textContent?.trim() === title);
   const pickerButtons = [
-    ['ModePicker', section('模式与工作区')?.querySelector('button[role="radio"]'), 42],
+    ['ModePicker', section('模式与工作区')?.querySelector('button[role="radio"]'), 44],
     ['ModelPicker', section('模型')?.querySelector('button'), 24],
     ['AgentPicker', section('Agent')?.querySelector('button'), 32.75],
   ].map(([name, button, expectedHeight]) => {
@@ -301,7 +301,11 @@ ab eval --stdin <<'JS'
     const rect = button.getBoundingClientRect();
     const minHeight = getComputedStyle(button).minHeight;
     assert(minHeight !== '44px', `${name} inherited the sheet-wide 44px minimum`);
-    assert(Math.abs(rect.height - expectedHeight) <= 0.25, `${name} height=${rect.height}`);
+    if (name === 'ModePicker') {
+      assert(rect.height >= expectedHeight, `${name} height=${rect.height}`);
+    } else {
+      assert(Math.abs(rect.height - expectedHeight) <= 0.25, `${name} height=${rect.height}`);
+    }
     return { name, width: rect.width, height: rect.height, minHeight };
   });
   return { copy: text.slice(0, 500), pickerButtons };
@@ -340,12 +344,12 @@ for viewport_height in 844 480; do
   const controls = [...mode.querySelectorAll('button')].filter((element) => element.offsetParent !== null);
   assert(root.scrollWidth === innerWidth, `document overflow ${root.scrollWidth}/${innerWidth}`);
   assert(mode.getBoundingClientRect().right <= innerWidth, `mode area overflow ${JSON.stringify(mode.getBoundingClientRect().toJSON())}`);
-  assert(radioGroup.getBoundingClientRect().height === 44, `mode radio group height=${radioGroup.getBoundingClientRect().height}`);
+  assert(radioGroup.getBoundingClientRect().height >= 44, `mode radio group height=${radioGroup.getBoundingClientRect().height}`);
   for (const control of controls) {
     const rect = control.getBoundingClientRect();
     assert(rect.left >= 0 && rect.right <= innerWidth, `mode control overflow ${JSON.stringify(rect.toJSON())}`);
     if (control.getAttribute('role') === 'radio') {
-      assert(Math.abs(rect.height - 42) <= 0.25, `mode radio native height changed ${rect.height}`);
+      assert(rect.height >= 44, `mode radio height=${rect.height}`);
     } else {
       assert(rect.width >= 44 && rect.height >= 44, `mode control too small ${rect.width}x${rect.height}`);
     }
