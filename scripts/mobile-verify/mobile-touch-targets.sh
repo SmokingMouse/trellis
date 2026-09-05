@@ -11,6 +11,8 @@ DB="$H/.trellis/data.db"
 SOURCE_DB="$HOME/.trellis/data.db"
 SESSION=mv-mobile-touch-targets
 OUT="$H/out"
+AUTH_PASS=mv-mobile-touch-targets-pass
+AUTH_TOKEN=mv-mobile-touch-targets-token
 SERVER_PID=
 
 for tool in bun agent-browser sqlite3 curl; do
@@ -62,6 +64,48 @@ ab() {
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
+print_page_diagnostics() {
+  ab eval --stdin <<'JS' || true
+(() => {
+  const body = (document.body?.innerText || document.body?.textContent || '').slice(0, 300);
+  return `location.href=${location.href}\ndocument.title=${document.title}\nbody[0:300]=${body}`;
+})()
+JS
+}
+
+assert_not_login() {
+  if ! ab eval --stdin <<'JS'
+(() => {
+  if (location.pathname === '/login') {
+    throw new Error(`unexpected login page: ${location.href}`);
+  }
+  return `authenticated path: ${location.pathname}`;
+})()
+JS
+  then
+    echo "FAIL: authentication was lost after navigation"
+    print_page_diagnostics
+    return 1
+  fi
+}
+
+wait_for_fixture_node() {
+  fixture_started=$(date +%s)
+  while :; do
+    if ab eval 'Boolean(document.querySelector("[data-thread-node-id=mv-touch-done]"))' 2>/dev/null | grep -q true; then
+      echo "✓ fixture node ready"
+      return 0
+    fi
+    fixture_now=$(date +%s)
+    if [ $((fixture_now - fixture_started)) -ge 90 ]; then
+      echo "FAIL: fixture node [data-thread-node-id=\"mv-touch-done\"] did not appear within 90s"
+      print_page_diagnostics
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 # Always dispose a stale named session before touching the app instance. This
 # also makes a clean-shell rerun independent of browser daemon state left by a
 # previous interrupted verification.
@@ -109,6 +153,8 @@ sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_s
   export HOME="$H"
   export TRELLIS_DB_PATH="$DB"
   export TRELLIS_LARK=off
+  export TRELLIS_AUTH_PASS="$AUTH_PASS"
+  export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
   exec bun --bun run start -- -p "$PORT"
 ) >"$H/server.log" 2>&1 &
 SERVER_PID=$!
@@ -156,6 +202,15 @@ SQL
 
 ab set device "iPhone 15"
 ab set viewport 390 844
+ab cookies clear
+ab open "$BASE/login"
+ab wait '#pw'
+ab eval 'localStorage.clear(); sessionStorage.clear(); "browser state cleared"'
+ab fill '#pw' "$AUTH_PASS"
+ab click 'button[type="submit"]'
+ab wait --fn "location.pathname !== '/login'"
+assert_not_login
+
 ab open "$BASE/?session=mv-touch-permission-session&node=mv-touch-permission"
 ab wait 500
 ab eval --stdin <<'JS'
@@ -170,7 +225,8 @@ ab eval --stdin <<'JS'
   return 'mobile fixture ready';
 })()
 JS
-ab wait '[data-thread-node-id="mv-touch-done"]'
+assert_not_login
+wait_for_fixture_node
 
 echo "== mobile 390x844: session drawer =="
 ab click 'button[aria-label="会话列表"]'
@@ -369,7 +425,8 @@ ab eval --stdin <<'JS'
   return 'desktop fixture ready';
 })()
 JS
-ab wait '[data-thread-node-id="mv-touch-done"]'
+assert_not_login
+wait_for_fixture_node
 ab scrollintoview '[data-thread-node-id="mv-touch-done"]'
 ab wait 400
 
