@@ -55,11 +55,14 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 grep -qF 'viewportFit: "cover"' app/layout.tsx || fail "缺少 viewportFit: cover"
-grep -qF 'themeColor: "#fafaf9"' app/layout.tsx || fail "缺少 theme-color viewport 配置"
-grep -qF 'userScalable: false' app/layout.tsx || fail "user-scalable 基线被改动"
+grep -qF 'maximumScale: 5' app/layout.tsx || fail "maximum-scale 未放宽到 5"
+grep -qF 'userScalable: true' app/layout.tsx || fail "系统缩放未开放"
+grep -qF '{ media: "(prefers-color-scheme: light)", color: "#fafaf9" }' app/layout.tsx || fail "缺少浅色 theme-color"
+grep -qF '{ media: "(prefers-color-scheme: dark)", color: "#0f1115" }' app/layout.tsx || fail "缺少深色 theme-color"
+grep -qF 'touchAction: "none"' components/Canvas.tsx || fail "画布表面未局部接管触摸手势"
 
 MANIFEST_THEME="$(bun -e 'console.log(JSON.parse(await Bun.file("public/manifest.json").text()).theme_color)')"
-[[ "$MANIFEST_THEME" == "#fafaf9" ]] || fail "layout 与 manifest theme_color 不一致"
+[[ "$MANIFEST_THEME" == "#fafaf9" ]] || fail "manifest theme_color 未与 layout 浅色值对齐"
 
 SAFE_ENV_FILES="$(find app components -type f \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -lF 'env(safe-area-inset-' {} + 2>/dev/null || true)"
 [[ "$SAFE_ENV_FILES" == "app/globals.css" ]] || fail "safe-area env() 必须只定义在 app/globals.css"
@@ -113,6 +116,7 @@ SID=36b126d3-83a5-4cd8-9669-2cfdc209747f
 NID=6ec8616f-6418-4954-8474-aa94d6c7cf4c
 FIXTURE_COUNT="$(sqlite3 "$DB" "SELECT count(*) FROM sessions s JOIN nodes n ON n.session_id=s.id WHERE s.id='$SID' AND n.id='$NID';")"
 [[ "$FIXTURE_COUNT" == 1 ]] || fail "桌面基线 fixture 不存在：$SID / $NID"
+sqlite3 "$DB" "INSERT OR REPLACE INTO notes (id,session_id,source_node_id,quoted_text,created_at) VALUES ('mv-safe-note','$SID','$NID','safe-area geometry fixture',1893456000000);"
 
 TRELLIS_AUTH_PASS= TRELLIS_AUTH_TOKEN= HOME="$H" TRELLIS_DB_PATH="$DB" TRELLIS_LARK=off \
   bun --bun run start -- -p "$PORT" >"$LOG" 2>&1 &
@@ -150,8 +154,10 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   const themeColors = [...document.querySelectorAll('meta[name="theme-color"]')];
 
   assert(viewport.includes('viewport-fit=cover'), `viewport meta: ${viewport}`);
-  assert(themeColors.length > 0, `theme-color meta count=${themeColors.length}`);
-  assert(themeColors.some((meta) => meta.content === '#fafaf9'), `theme-color=${themeColors.map((meta) => meta.content).join(',')}`);
+  assert(viewport.includes('maximum-scale=5'), `viewport maximum-scale: ${viewport}`);
+  assert(viewport.includes('user-scalable=yes'), `viewport user-scalable: ${viewport}`);
+  assert(themeColors.some((meta) => meta.media === '(prefers-color-scheme: light)' && meta.content === '#fafaf9'), `light theme-color=${themeColors.map((meta) => `${meta.media}:${meta.content}`).join(',')}`);
+  assert(themeColors.some((meta) => meta.media === '(prefers-color-scheme: dark)' && meta.content === '#0f1115'), `dark theme-color=${themeColors.map((meta) => `${meta.media}:${meta.content}`).join(',')}`);
   const initialSafeBottom = getComputedStyle(root).getPropertyValue('--safe-bottom').trim();
   assert(initialSafeBottom !== '', `--safe-bottom=${JSON.stringify(initialSafeBottom)}`);
 
@@ -188,6 +194,52 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
 MOBILE_EOF
 agent-browser --session "$SESSION" screenshot "$OUT/390x844-safe-area.png"
 
+echo "== Drawer / Modal safe-bottom geometry =="
+agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+agent-browser --session "$SESSION" click '[data-mobile-target="overflow-notes"]'
+agent-browser --session "$SESSION" wait --fn "[...document.querySelectorAll('[data-safe-area=bottom-sheet]')].some((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false' && sheet.textContent.includes('笔记'))"
+agent-browser --session "$SESSION" eval --stdin <<'DRAWER_EOF'
+(() => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
+  const sheet = [...document.querySelectorAll('[data-safe-area="bottom-sheet"]')]
+    .find((candidate) => candidate.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false' && candidate.textContent.includes('笔记'));
+  const buttons = [...sheet.querySelectorAll('button')].filter((button) => {
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  assert(buttons.length > 0, '笔记 Drawer 没有可测按钮');
+  const bottom = Math.max(...buttons.map((button) => button.getBoundingClientRect().bottom));
+  assert(bottom <= innerHeight - 34, `Drawer bottom button=${bottom}, safeBoundary=${innerHeight - 34}`);
+  return { bottom, safeBoundary: innerHeight - 34 };
+})()
+DRAWER_EOF
+agent-browser --session "$SESSION" eval "[...document.querySelectorAll('[data-safe-area=bottom-sheet]')].find((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false' && sheet.textContent.includes('笔记')).querySelector('button[aria-label=关闭]').click()"
+agent-browser --session "$SESSION" wait --fn "![...document.querySelectorAll('[data-safe-area=bottom-sheet]')].some((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false')"
+
+agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+agent-browser --session "$SESSION" click '[data-mobile-target="overflow-tree"]'
+agent-browser --session "$SESSION" wait '[data-mobile-target="new-tree-open"]'
+agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-open"]'
+agent-browser --session "$SESSION" wait '[data-mobile-target="new-tree-start"]'
+agent-browser --session "$SESSION" eval --stdin <<'MODAL_EOF'
+(() => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
+  const modal = document.querySelector('[data-safe-area="modal-shell"]');
+  const buttons = [...modal.querySelectorAll('button')].filter((button) => {
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  assert(buttons.length > 0, '新树 Modal 没有可测按钮');
+  const bottom = Math.max(...buttons.map((button) => button.getBoundingClientRect().bottom));
+  assert(bottom <= innerHeight - 34, `Modal bottom button=${bottom}, safeBoundary=${innerHeight - 34}`);
+  return { bottom, safeBoundary: innerHeight - 34 };
+})()
+MODAL_EOF
+agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-close"]'
+agent-browser --session "$SESSION" click '[data-mobile-target="tree-sheet-close"]'
+
 agent-browser --session "$SESSION" set viewport 390 480
 agent-browser --session "$SESSION" fill 'textarea[placeholder*="继续对话"]' 'verify only — do not send'
 agent-browser --session "$SESSION" eval --stdin <<'KEYBOARD_EOF'
@@ -209,6 +261,7 @@ agent-browser --session "$SESSION" eval --stdin <<'KEYBOARD_EOF'
 KEYBOARD_EOF
 agent-browser --session "$SESSION" screenshot "$OUT/390x480-safe-area.png"
 
+sqlite3 "$DB" "DELETE FROM notes WHERE id='mv-safe-note';"
 agent-browser --session "$SESSION" set viewport 1280 800
 agent-browser --session "$SESSION" open "$URL"
 agent-browser --session "$SESSION" wait 'textarea[placeholder*="继续对话"]'

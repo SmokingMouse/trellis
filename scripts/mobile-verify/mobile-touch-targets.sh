@@ -73,6 +73,25 @@ print_page_diagnostics() {
 JS
 }
 
+wait_for_js() {
+  wait_label=$1
+  wait_expression=$2
+  wait_started=$(date +%s)
+  while :; do
+    if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      echo "✓ $wait_label"
+      return 0
+    fi
+    wait_now=$(date +%s)
+    if [ $((wait_now - wait_started)) -ge 90 ]; then
+      echo "FAIL: timed out waiting for $wait_label"
+      print_page_diagnostics
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 assert_not_login() {
   if ! ab eval --stdin <<'JS'
 (() => {
@@ -212,7 +231,7 @@ ab wait --fn "location.pathname !== '/login'"
 assert_not_login
 
 ab open "$BASE/?session=mv-touch-permission-session&node=mv-touch-permission"
-ab wait 500
+wait_for_js "mobile app shell" "Boolean(document.querySelector('header'))"
 ab eval --stdin <<'JS'
 (() => {
   localStorage.clear();
@@ -230,7 +249,7 @@ wait_for_fixture_node
 
 echo "== mobile 390x844: session drawer =="
 ab click 'button[aria-label="会话列表"]'
-ab wait 100
+wait_for_js "session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -260,10 +279,10 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab click '[role="dialog"] [data-mobile-target="drawer-close"]'
-ab wait 100
+wait_for_js "session drawer closed" "!document.querySelector('[role=dialog] [data-mobile-target=drawer-close]')"
 
 ab scrollintoview '[data-thread-node-id="mv-touch-done"]'
-ab wait 400
+wait_for_js "answer actions visible" "Boolean(document.querySelector('[data-thread-node-id=mv-touch-done] [data-mobile-target=node-branch]'))"
 echo "== mobile 390x844: approval, code, answer actions =="
 ab eval --stdin <<'JS'
 (() => {
@@ -278,7 +297,6 @@ ab eval --stdin <<'JS'
     ['response regenerate', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-regenerate"]'],
     ['response card image', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-card-image"]'],
     ['response copy full', '[data-thread-node-id="mv-touch-done"] button[aria-label="复制全文"]'],
-    ['new tree entry', '[data-mobile-target="new-tree-open"]'],
   ];
   const results = specs.map(([name, selector]) => {
     const el = document.querySelector(selector);
@@ -310,7 +328,7 @@ ab eval --stdin <<'JS'
   return range.toString();
 })()
 JS
-ab wait 100
+wait_for_js "branch selection actions" "Boolean(document.querySelector('[data-mobile-target=branch-open]')) && Boolean(document.querySelector('[data-mobile-target=branch-note]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -335,7 +353,7 @@ ab eval --stdin <<'JS'
   return 'expanded';
 })()
 JS
-ab wait 100
+wait_for_js "branch footer" "Boolean(document.querySelector('[data-mobile-target=branch-submit]'))"
 echo "== mobile 390x844: BranchPopover footer =="
 ab eval --stdin <<'JS'
 (() => {
@@ -356,11 +374,24 @@ ab eval --stdin <<'JS'
 JS
 ab screenshot "$OUT/mobile-branch-expanded.png" >/dev/null
 ab press Escape
-ab wait 100
+wait_for_js "branch popover closed" "!document.querySelector('[data-mobile-target=branch-open]')"
 
-echo "== mobile 390x844: new tree modal =="
+echo "== mobile 390x844: overflow -> tree sheet -> new tree modal =="
+ab click 'button[aria-label="更多功能"]'
+wait_for_js "mobile overflow" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+ab click '[data-mobile-target="overflow-tree"]'
+wait_for_js "mobile tree sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open] [data-mobile-target=new-tree-open]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const el = document.querySelector('[data-mobile-tree-sheet="open"] [data-mobile-target="new-tree-open"]');
+  if (!el) throw new Error('new tree entry missing after overflow -> tree');
+  const r = el.getBoundingClientRect();
+  if (r.width < 44 || r.height < 44) throw new Error(`new tree entry: ${r.width.toFixed(2)}x${r.height.toFixed(2)} < 44x44`);
+  return { width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+})()
+JS
 ab click '[data-mobile-target="new-tree-open"]'
-ab wait 100
+wait_for_js "new tree modal" "Boolean(document.querySelector('[data-mobile-target=new-tree-start]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -380,6 +411,9 @@ ab eval --stdin <<'JS'
 JS
 ab screenshot "$OUT/mobile-new-tree.png" >/dev/null
 ab click '[data-mobile-target="new-tree-close"]'
+wait_for_js "new tree modal closed" "!document.querySelector('[data-mobile-target=new-tree-start]')"
+ab click '[data-mobile-target="tree-sheet-close"]'
+wait_for_js "mobile tree sheet closed" "!document.querySelector('[data-mobile-tree-sheet]')"
 
 ab open "$BASE/?session=mv-touch-ask-session&node=mv-touch-ask"
 ab wait '[data-mobile-target="ask-option"]'
@@ -414,7 +448,7 @@ JS
 
 ab set viewport 1280 800 1
 ab open "$BASE/?session=mv-touch-permission-session&node=mv-touch-permission"
-ab wait 400
+wait_for_js "desktop app shell" "Boolean(document.querySelector('header'))"
 ab eval --stdin <<'JS'
 (() => {
   localStorage.setItem('trellis-view:mv-touch-permission-session', JSON.stringify({
@@ -428,7 +462,7 @@ JS
 assert_not_login
 wait_for_fixture_node
 ab scrollintoview '[data-thread-node-id="mv-touch-done"]'
-ab wait 400
+wait_for_js "desktop answer actions visible" "Boolean(document.querySelector('[data-thread-node-id=mv-touch-done] [data-mobile-target=node-branch]'))"
 
 echo "== desktop 1280x800: unchanged baseline =="
 ab eval --stdin <<'JS'
@@ -481,7 +515,7 @@ ab eval --stdin <<'JS'
   return range.toString();
 })()
 JS
-ab wait 100
+wait_for_js "desktop branch selection actions" "Boolean(document.querySelector('[data-mobile-target=branch-open]')) && Boolean(document.querySelector('[data-mobile-target=branch-note]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -506,7 +540,7 @@ ab eval --stdin <<'JS'
   return 'expanded';
 })()
 JS
-ab wait 100
+wait_for_js "desktop branch footer" "Boolean(document.querySelector('[data-mobile-target=branch-submit]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -525,10 +559,10 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab press Escape
-ab wait 100
+wait_for_js "desktop branch popover closed" "!document.querySelector('[data-mobile-target=branch-open]')"
 
 ab click '[data-mobile-target="new-tree-open"]'
-ab wait 100
+wait_for_js "desktop new tree modal" "Boolean(document.querySelector('[data-mobile-target=new-tree-start]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -549,7 +583,7 @@ JS
 ab click '[data-mobile-target="new-tree-close"]'
 
 ab open "$BASE/?session=mv-touch-ask-session&node=mv-touch-ask"
-ab wait 400
+wait_for_js "desktop ask app shell" "Boolean(document.querySelector('header'))"
 ab eval --stdin <<'JS'
 (() => {
   localStorage.setItem('trellis-view:mv-touch-ask-session', JSON.stringify({

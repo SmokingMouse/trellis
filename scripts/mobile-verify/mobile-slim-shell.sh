@@ -282,6 +282,7 @@ ab eval --stdin <<'JS'
   const sheet = document.querySelector('[data-mobile-tree-sheet="open"]');
   const rect = sheet.getBoundingClientRect();
   assert(rect.left === 0 && rect.top === 0 && rect.width === innerWidth && rect.height === innerHeight, `TreePanel rect=${JSON.stringify(rect.toJSON())}`);
+  assert(document.activeElement?.getAttribute('data-mobile-target') === 'tree-sheet-close', `TreePanel initial focus=${document.activeElement?.getAttribute('data-mobile-target')}`);
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 })()
 JS
@@ -322,15 +323,44 @@ ab eval --stdin <<'JS'
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   assert(!document.querySelector('[data-mobile-header]'), 'slim header remained after desktop override');
   assert(localStorage.getItem('trellis-desktop-mode') === '1', 'desktop marker missing after reload');
+  const linear = document.querySelector('[data-safe-area="linear-thread"]');
+  const linearRect = linear.getBoundingClientRect();
+  assert(linearRect.left === 0 && linearRect.width >= 382, `forced desktop linear rect=${JSON.stringify(linearRect.toJSON())}`);
+  const hamburger = document.querySelector('[data-mobile-target="header-session-drawer"]');
+  const hamburgerRect = hamburger.getBoundingClientRect();
+  assert(hamburger.offsetParent !== null && hamburgerRect.width >= 44 && hamburgerRect.height >= 44, `forced desktop hamburger=${JSON.stringify(hamburgerRect.toJSON())}`);
   const restore = document.querySelector('[data-mobile-target="restore-mobile-mode"]');
   const rect = restore.getBoundingClientRect();
   assert(rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight, `restore entry offscreen: ${JSON.stringify(rect.toJSON())}`);
-  return { marker: '1', restore: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } };
+  return { marker: '1', linear: { left: linearRect.left, width: linearRect.width }, hamburger: { width: hamburgerRect.width, height: hamburgerRect.height }, restore: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } };
+})()
+JS
+ab click '[data-mobile-target="header-session-drawer"]'
+wait_for_js "forced desktop session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const close = document.querySelector('[role=dialog] [data-mobile-target="drawer-close"]');
+  if (!close) throw new Error('forced desktop session drawer missing');
+  const rect = close.closest('[role=dialog]').getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) throw new Error(`forced desktop session drawer rect=${JSON.stringify(rect.toJSON())}`);
+  return { width: rect.width, height: rect.height };
+})()
+JS
+ab click '[role=dialog] [data-mobile-target="drawer-close"]'
+
+echo "== clearing marker restores the mobile shell at 390x844 =="
+ab eval 'localStorage.removeItem("trellis-desktop-mode"); "desktop marker cleared"'
+ab reload
+wait_for_js "mobile shell restored" "Boolean(document.querySelector('[data-mobile-header]')) && !document.querySelector('[data-mobile-target=\"restore-mobile-mode\"]')"
+ab eval --stdin <<'JS'
+(() => {
+  if (localStorage.getItem('trellis-desktop-mode') !== null) throw new Error('desktop marker still present');
+  const header = document.querySelector('[data-mobile-header]');
+  return { restored: true, headerWidth: header.getBoundingClientRect().width };
 })()
 JS
 
 echo "== 1280x800 desktop zero-regression baseline =="
-ab eval 'localStorage.removeItem("trellis-desktop-mode"); "desktop marker cleared"'
 ab set viewport 1280 800
 ab reload
 wait_for_js "normal desktop Header" "Boolean(document.querySelector('header button[aria-label=\"搜索\"]'))"

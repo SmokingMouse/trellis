@@ -964,7 +964,6 @@ export function TreePanel() {
           </button>
           {sessionId && (
             <button
-              ref={mobileCloseRef}
               type="button"
               data-mobile-target="new-tree-open"
               onClick={() => setComposeRootOpen(true)}
@@ -1032,6 +1031,7 @@ export function TreePanel() {
           )}
           {isMobile && (
             <button
+              ref={mobileCloseRef}
               type="button"
               data-mobile-target="tree-sheet-close"
               onClick={closeMobileSheet}
