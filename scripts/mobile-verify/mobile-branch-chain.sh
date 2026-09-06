@@ -405,12 +405,29 @@ EDIT_ID=$(wait_for_db_node "$EDIT_Q")
 assert_mobile_landing "$EDIT_ID" "anchored edit new sibling active"
 [ -n "$(sqlite3 "$DB" "SELECT parent_anchor_text FROM nodes WHERE id='$EDIT_ID';")" ] || fail "anchored edit lost parent_anchor_text"
 
-echo "== 3. mobile new tree closes TreePanel before picker and after submit =="
+echo "== 3a. cancelling mobile new tree stays linear with TreePanel closed =="
 open_mobile_overflow
 ab click '[data-mobile-target="overflow-tree"]'
 wait_for_js "mobile TreePanel open" "Boolean(document.querySelector('[data-mobile-tree-sheet=open] [data-mobile-target=new-tree-open]'))"
 ab click '[data-mobile-target="new-tree-open"]'
 wait_for_js "new-tree picker without stale TreePanel" "Boolean(document.querySelector('[data-mobile-target=new-tree-start]')) && !document.querySelector('[data-mobile-tree-sheet]')"
+ab click '[data-mobile-target="new-tree-cancel"]'
+wait_for_js "new-tree cancel returns to linear with TreePanel closed" "(() => {
+  const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null');
+  return !document.querySelector('[data-mobile-target=new-tree-start]')
+    && !document.querySelector('[data-mobile-tree-sheet]')
+    && saved?.viewMode === 'linear'
+    && Boolean(document.querySelector('[data-thread-header]'))
+    && !document.querySelector('[data-canvas-surface]');
+})()"
+assert_mobile_landing "$EDIT_ID" "new-tree cancel preserves the active linear chain"
+
+echo "== 3b. mobile new tree closes TreePanel before picker and after submit =="
+open_mobile_overflow
+ab click '[data-mobile-target="overflow-tree"]'
+wait_for_js "mobile TreePanel reopened" "Boolean(document.querySelector('[data-mobile-tree-sheet=open] [data-mobile-target=new-tree-open]'))"
+ab click '[data-mobile-target="new-tree-open"]'
+wait_for_js "reopened new-tree picker without stale TreePanel" "Boolean(document.querySelector('[data-mobile-target=new-tree-start]')) && !document.querySelector('[data-mobile-tree-sheet]')"
 TREE_Q=手机新树关闭面板验收
 ab fill 'textarea[placeholder^="为这棵新树"]' "$TREE_Q"
 ab click '[data-mobile-target="new-tree-start"]'
@@ -460,17 +477,49 @@ wait_for_js "canvas clears hidden header state" "Boolean(document.querySelector(
 ab eval '(() => { const button=[...document.querySelectorAll("button")].find((element) => element.title === "切换到线性 thread"); if (!button) throw new Error("linear return button missing"); button.click(); return true; })()' >/dev/null
 wait_for_js "linear remount chrome visible" "Boolean(document.querySelector('[data-thread-header]')) && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false' && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
-echo "== 7. desktop Recent stays in canvas and desktop header stays at top =="
+echo "== 7a. desktop anchored edit focuses the re-asked sibling =="
 ab set viewport 1280 800
 wait_for_js "desktop linear fixture" "innerWidth === 1280 && !document.querySelector('[data-mobile-header]') && Boolean(document.querySelector('[data-thread-header]'))"
-ab eval '(() => { const button=[...document.querySelectorAll("[data-thread-header] button")].find((element) => element.textContent?.includes("画布")); if (!button) throw new Error("desktop canvas button missing"); button.click(); return true; })()' >/dev/null
-wait_for_js "desktop canvas selected" "Boolean(document.querySelector('[data-canvas-surface]'))"
 if ! ab eval "Boolean([...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0))" | grep -q '^true$'; then
   ab click 'button[aria-label="展开侧栏"]'
 fi
 wait_for_js "desktop sidebar visible" "Boolean([...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0))"
 click_recent_chain "预置锚点分支"
-wait_for_js "desktop Recent preserves canvas semantics" "new URL(location.href).searchParams.get('node') === '$ANCHORED_ID' && Boolean(document.querySelector('[data-canvas-surface]'))"
+wait_for_js "desktop anchored chain selected" "new URL(location.href).searchParams.get('node') === '$ANCHORED_ID' && Boolean(document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"]')) && !document.querySelector('[data-canvas-surface]')"
+ab eval "(() => {
+  const button=document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"] [aria-label=\"编辑问题\"]');
+  if (!button) throw new Error('desktop edit button missing');
+  button.click();
+  return true;
+})()" >/dev/null
+wait_for_js "desktop anchored edit input" "Boolean(document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"] textarea'))"
+DESKTOP_EDIT_Q=桌面锚点节点重问聚焦验收
+ab fill "[data-thread-node-id=\"$ANCHORED_ID\"] textarea" "$DESKTOP_EDIT_Q"
+ab eval "(() => {
+  const card = document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"]');
+  const button = [...card.querySelectorAll('button')].find((element) => element.textContent?.includes('重问'));
+  if (!button) throw new Error('desktop re-ask button missing');
+  button.click();
+  return true;
+})()" >/dev/null
+DESKTOP_EDIT_ID=$(wait_for_db_node "$DESKTOP_EDIT_Q")
+wait_for_js "desktop edit new sibling active" "(() => {
+  const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null');
+  return innerWidth === 1280
+    && saved?.activeNodeId === '$DESKTOP_EDIT_ID'
+    && saved?.viewMode === 'linear'
+    && new URL(location.href).searchParams.get('node') === '$DESKTOP_EDIT_ID'
+    && Boolean(document.querySelector('[data-thread-node-id=\"$DESKTOP_EDIT_ID\"]'))
+    && !document.querySelector('[data-mobile-header]')
+    && !document.querySelector('[data-canvas-surface]');
+})()"
+[ -n "$(sqlite3 "$DB" "SELECT parent_anchor_text FROM nodes WHERE id='$DESKTOP_EDIT_ID';")" ] || fail "desktop anchored edit lost parent_anchor_text"
+
+echo "== 7b. desktop Recent stays in canvas and desktop header stays at top =="
+ab eval '(() => { const button=[...document.querySelectorAll("[data-thread-header] button")].find((element) => element.textContent?.includes("画布")); if (!button) throw new Error("desktop canvas button missing"); button.click(); return true; })()' >/dev/null
+wait_for_js "desktop canvas selected" "Boolean(document.querySelector('[data-canvas-surface]'))"
+click_recent_chain "第二棵树长文"
+wait_for_js "desktop Recent preserves canvas semantics" "new URL(location.href).searchParams.get('node') === '$ROOT2_ID' && Boolean(document.querySelector('[data-canvas-surface]'))"
 ab eval --stdin <<'JS'
 (() => {
   const header = document.querySelector('header');
@@ -497,4 +546,9 @@ wait_for_js "cross-session Recent target" "(() => {
     && !document.querySelector('[data-canvas-surface]');
 })()"
 
-echo "PASS: mobile branch focus, new-tree sheet lifecycle, Recent chain mode, URL sync, H-3, and desktop baseline"
+echo "== 8. new-session screen clears the previous deep-link query =="
+open_mobile_drawer
+ab click '[role="dialog"] [data-mobile-target="drawer-new-session"]'
+wait_for_js "new-session screen clears session and node query" "Boolean(document.querySelector('[data-mobile-target=new-session-input]')) && !new URL(location.href).searchParams.has('session') && !new URL(location.href).searchParams.has('node')"
+
+echo "PASS: mobile and desktop branch focus, new-tree Cancel lifecycle, Recent chain mode, URL sync, H-3, and desktop baseline"
