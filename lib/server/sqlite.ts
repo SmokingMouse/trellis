@@ -318,6 +318,18 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE nodes ADD COLUMN read_at INTEGER");
   }
 
+  // Card-level “read later” marker. This is deliberately independent from
+  // read_at: opening a saved card does not clear it, and marking a card read
+  // does not remove the bookmark.
+  const hasBookmarkedAt = db
+    .prepare(
+      "SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'bookmarked_at'",
+    )
+    .get();
+  if (!hasBookmarkedAt) {
+    db.exec("ALTER TABLE nodes ADD COLUMN bookmarked_at INTEGER");
+  }
+
   // Idempotent: split out cache token tracking so the UI can distinguish
   // net cost (input + output) from cache leverage (cache_read, often
   // dominant in cli-multi). Existing token_input / token_output columns

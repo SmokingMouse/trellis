@@ -32,6 +32,7 @@ import { TurnStatsMeta } from "./TurnStatsMeta";
 import { Button } from "./ui/Button";
 import { Dots } from "./ui/Dots";
 import { StopButton } from "./ui/StopButton";
+import { BookmarkButton } from "./BookmarkButton";
 
 // 流式期间只做最小 rehype：rehypeRaw 跳过（半行 HTML 标签既浪费又可能抛错），
 // rehypeHighlight 也跳过——它会在每一帧对**整段** response 重跑语法高亮，
@@ -197,6 +198,11 @@ function MobileResponseActions({
           data-mobile-response-menu
           className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-lg border border-line bg-surface p-2 shadow-pop"
         >
+          <BookmarkButton
+            node={node}
+            mobileMenu
+            onToggle={() => setOpen(false)}
+          />
           <CliResumeButton nodeId={node.id} />
           <RegenerateVariantButton nodeId={node.id} question={node.question} />
           <CardImageButton

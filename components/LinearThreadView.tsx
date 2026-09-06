@@ -1,5 +1,13 @@
 "use client";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
@@ -18,12 +26,14 @@ import {
   type SelectionInfo,
 } from "@/hooks/useSelectionWithin";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import { useScrollHide } from "@/hooks/useScrollHide";
 import { useVerifyStreamingStub } from "@/hooks/useVerifyStreamingStub";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
 import { TurnCard } from "./TurnCard";
+import { BookmarkButton } from "./BookmarkButton";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -76,28 +86,22 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // viewport to the bottom on new content; flips off when the user scrolls
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
-  const lastScrollTopRef = useRef(0);
-  const composerScrollReadyRef = useRef(false);
   const [composerExpanded, setComposerExpanded] = useState(false);
-  const [composerHidden, setComposerHidden] = useState(false);
   const [waitingJumpId, setWaitingJumpId] = useState<string | null>(null);
   const lastWaitingJumpIdRef = useRef<string | null>(null);
+  const {
+    isHidden: scrollHidden,
+    reveal: revealScrollChrome,
+    updateFromScroll,
+  } = useScrollHide({ enabled: isMobile, resetKey: session?.id, scrollRef });
   useVerifyStreamingStub(isMobile, session?.id);
 
   useEffect(() => {
     setOpenBranches(new Set());
     setBranchFrom(null);
     setComposerExpanded(false);
-    setComposerHidden(false);
     setWaitingJumpId(null);
     lastWaitingJumpIdRef.current = null;
-    lastScrollTopRef.current = 0;
-    composerScrollReadyRef.current = false;
-    const readyTimer = window.setTimeout(() => {
-      lastScrollTopRef.current = scrollRef.current?.scrollTop ?? 0;
-      composerScrollReadyRef.current = true;
-    }, 400);
-    return () => window.clearTimeout(readyTimer);
   }, [session?.id]);
 
   const threadData = useMemo(() => {
@@ -281,17 +285,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     followRef.current =
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
 
-    const delta = el.scrollTop - lastScrollTopRef.current;
-    lastScrollTopRef.current = el.scrollTop;
-    if (isMobile && composerScrollReadyRef.current) {
-      const forceVisible =
-        waitingNodes.length > 0 || Boolean(tipStreamingId) || composerExpanded;
-      if (forceVisible || followRef.current || delta < -8) {
-        setComposerHidden(false);
-      } else if (delta > 8) {
-        setComposerHidden(true);
-      }
-    }
+    updateFromScroll(el.scrollTop, followRef.current);
 
     const sid = session?.id;
     if (!sid) return;
@@ -325,8 +319,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
 
   const onComposerExpandedChange = useCallback((expanded: boolean) => {
     setComposerExpanded(expanded);
-    if (expanded) setComposerHidden(false);
-  }, []);
+    if (expanded) revealScrollChrome();
+  }, [revealScrollChrome]);
 
   // Read tracking: a card counts as read once it stays sufficiently visible
   // in the scroll viewport for 1s — ≥50% of the card showing, or (for cards
@@ -471,10 +465,27 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const widthClass = THREAD_WIDTH_CLASS[threadWidth];
   const composerIsHidden =
     isMobile &&
-    composerHidden &&
+    scrollHidden &&
     waitingNodes.length === 0 &&
     !tipStreamingId &&
     !composerExpanded;
+  const mobileHeaderHidden = isMobile && scrollHidden;
+  const revealFromHiddenTitleArea = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (!mobileHeaderHidden) return;
+    const safeTop =
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--safe-top",
+        ),
+      ) || 0;
+    const titleHeight =
+      document
+        .querySelector<HTMLElement>("[data-thread-header]")
+        ?.getBoundingClientRect().height ?? 56;
+    if (event.clientY <= safeTop + titleHeight) revealScrollChrome();
+  };
 
   return (
     // #3: viewport-bound flex column — header and composer are fixed rails,
@@ -492,8 +503,19 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         bottom: "var(--trellis-term-h, 0px)",
       }}
     >
-      <div className="shrink-0 z-30 border-b border-line/80 bg-surface-canvas/90 backdrop-blur">
-        <div className={`${widthClass} mx-auto px-4 py-3 flex items-center gap-3`}>
+      <div
+        data-thread-header
+        data-thread-header-hidden={mobileHeaderHidden ? "true" : undefined}
+        aria-hidden={mobileHeaderHidden ? true : undefined}
+        inert={mobileHeaderHidden ? true : undefined}
+        className="shrink-0 z-30 max-md:h-14 border-b border-line/80 bg-surface-canvas/90 backdrop-blur transition-transform duration-200 motion-reduce:transition-none"
+        style={{
+          transform: mobileHeaderHidden
+            ? "translateY(calc(-100% - var(--trellis-header-h)))"
+            : undefined,
+        }}
+      >
+        <div className={`${widthClass} mx-auto px-4 py-3 max-md:h-full flex items-center gap-3`}>
           <div className="min-w-0 flex-1">
             <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
@@ -551,7 +573,12 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             setWaitingJumpId(target.id);
             setActiveNode(target.id);
           }}
-          className="z-20 flex min-h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink"
+          className="z-20 flex h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink transition-transform duration-200 motion-reduce:transition-none"
+          style={{
+            transform: mobileHeaderHidden
+              ? "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))"
+              : undefined,
+          }}
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden />
           有 {waitingNodes.length} 项等你处理，点击跳到下一项
@@ -562,8 +589,19 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        onClick={revealFromHiddenTitleArea}
         data-thread-scroll
         className="flex-1 overflow-y-auto"
+        style={
+          mobileHeaderHidden
+            ? {
+                marginBottom:
+                  "calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem)",
+                transform:
+                  "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))",
+              }
+            : undefined
+        }
       >
         <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
         {threadData.thread.length === 0 ? (
@@ -684,6 +722,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                         )}
                       </button>
                     )}
+                    {node.status === "done" && <BookmarkButton node={node} />}
                     {canBranch && (
                       <button
                         type="button"

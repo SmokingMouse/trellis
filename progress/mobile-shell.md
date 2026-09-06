@@ -73,6 +73,18 @@ Composer 紧凑态固定保留「追问…」占位、📎 附件与发送/停�
 由 linear 进入而重新 mount 后，等待首轮 60ms Dagre 测量完成，在 240ms 时
 只执行一次 `fitView({ padding: 0.15, duration: 400 })`。桌面不进入该 effect。
 
+## 三波滚动 chrome
+
+手机阅读向下滚动时收起 Header、标题条与紧凑 Composer；内容容器上移的同一
+layout frame 内反向补偿 `scrollTop`，因此阅读锚点不跳。顶部恢复带高度至少
+`max(var(--safe-top), 24px)`；点击恢复带或被隐藏标题条原占据的顶部阅读区域均
+恢复 chrome。桌面不进入该逻辑。
+
+## 后续 TODO
+
+- H-3：把 `useScrollHide` 的模块级隐藏状态收进页面级 state/context，避免未来
+  分屏或预览出现多实例互相影响；当前单实例结构不改变。
+
 ## 验收
 
 从 worktree 根执行：
