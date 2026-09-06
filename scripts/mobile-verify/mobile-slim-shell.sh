@@ -269,6 +269,20 @@ sleep 1
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset"'
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down"'
 wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  const header = document.querySelector('[data-mobile-header]');
+  const title = document.querySelector('[data-thread-header]');
+  const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
+  const shift = header.getBoundingClientRect().height + title.getBoundingClientRect().height - safe;
+  const expected = 300 - shift;
+  if (Math.abs(scroll.scrollTop - expected) > 2) {
+    throw new Error(`H-1 anchor compensation scrollTop=${scroll.scrollTop}, expected=${expected}, shift=${shift}`);
+  }
+  return { scrollTop: scroll.scrollTop, shift, expected };
+})()
+JS
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop -= 100; "scrolled up"'
 wait_for_js "header, title, and Composer restored after upward scroll" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); return !h?.hasAttribute('data-header-hidden') && h.getBoundingClientRect().top>=-0.8 && !t?.hasAttribute('data-thread-header-hidden') && t.getBoundingClientRect().top>=-0.8 && c?.dataset.composerHidden==='false'; })()"
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop += 100; "scrolled down again"'
@@ -277,8 +291,27 @@ ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scrolled
 wait_for_js "chrome restored at scroll top" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden') && document.querySelector('[data-safe-area=\"linear-composer\"]')?.dataset.composerHidden === 'false'"
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down for edge reveal"'
 wait_for_js "top-edge reveal target" "Boolean(document.querySelector('[data-header-reveal]'))"
+ab eval --stdin <<'JS'
+(() => {
+  const reveal = document.querySelector('[data-header-reveal]');
+  const rect = reveal.getBoundingClientRect();
+  if (rect.height < 24) throw new Error(`H-2 reveal height=${rect.height}`);
+  return { height: rect.height };
+})()
+JS
 ab click '[data-header-reveal]'
 wait_for_js "chrome restored from top edge" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop += 100; "scrolled down for title-area reveal"'
+wait_for_js "chrome hidden before title-area reveal" "document.querySelector('[data-mobile-header]')?.dataset.headerHidden === 'true'"
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
+  scroll.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: safe + 30 }));
+  return { clickY: safe + 30 };
+})()
+JS
+wait_for_js "chrome restored from hidden title area" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow bottom sheet" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"

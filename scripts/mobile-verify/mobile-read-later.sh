@@ -107,6 +107,11 @@ wait_for_js() {
   done
 }
 
+show_mobile_header() {
+  ab eval '(() => { const scroll = document.querySelector("[data-thread-scroll]"); if (scroll) scroll.scrollTop = 0; return true; })()' >/dev/null
+  wait_for_js "mobile header visible" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+}
+
 for required_tool in bun agent-browser sqlite3 curl grep find ps awk lsof; do
   command -v "$required_tool" >/dev/null 2>&1 || fail "missing required tool: $required_tool"
 done
@@ -203,6 +208,7 @@ ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-res
 wait_for_js "bookmark saved" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-bookmarked=\"true\"]'))"
 ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]')?.click(); true"
 wait_for_js "mobile cancel bookmark state" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-response-menu] [aria-label=\"取消稍后再读\"]'))"
+show_mobile_header
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow count one" "document.querySelector('[data-mobile-target=\"overflow-bookmarks\"]')?.textContent?.includes('稍后再读 (1)') === true"
 ab eval --stdin <<'JS'
@@ -215,6 +221,7 @@ ab eval --stdin <<'JS'
 JS
 ab click '[data-mobile-target="overflow-bookmarks"]'
 wait_for_js "read-later bottom sheet" "document.querySelector('[data-bookmarks-drawer]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+wait_for_js "bookmark drawer initial focus" "document.activeElement?.getAttribute('data-mobile-target') === 'bookmarks-close'"
 ab eval --stdin <<JS
 (() => {
   const row = document.querySelector('[data-bookmarks-drawer] [data-bookmark-node-id="$NID"]');
@@ -231,6 +238,7 @@ ab click "[data-bookmarks-drawer] [data-bookmark-node-id=\"$NID\"] > button:firs
 wait_for_js "bookmark deep link" "new URL(location.href).searchParams.get('node') === '$NID'"
 
 echo "== iPhone 15: read-done removes bookmark only =="
+show_mobile_header
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow still counts one" "document.querySelector('[data-mobile-target=\"overflow-bookmarks\"]')?.textContent?.includes('(1)') === true"
 ab click '[data-mobile-target="overflow-bookmarks"]'
@@ -241,6 +249,8 @@ wait_for_js "read-later sheet count zero" "document.querySelector('[data-bookmar
 READ_AFTER_DONE=$(sqlite3 "$DB" "SELECT coalesce(read_at,'NULL') FROM nodes WHERE id='$NID';")
 [ "$READ_AFTER_DONE" = "$READ_BEFORE_DONE" ] || fail "读完 action changed independent read_at: $READ_BEFORE_DONE -> $READ_AFTER_DONE"
 ab click '[data-mobile-target="bookmarks-close"]'
+wait_for_js "bookmark drawer returns focus" "document.activeElement?.getAttribute('data-mobile-target') === 'header-overflow'"
+show_mobile_header
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow count zero" "document.querySelector('[data-mobile-target=\"overflow-bookmarks\"]')?.textContent?.includes('(0)') === true"
 ab click '[data-mobile-target="overflow-close"]'
