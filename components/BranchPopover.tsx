@@ -116,8 +116,12 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     const text = q.trim();
     if (!text || hasUploading) return;
     const anchor = { selectedText: selection.text };
-    const opts =
-      doneAttachments.length > 0 ? { attachments: doneAttachments } : undefined;
+    const opts = {
+      ...(doneAttachments.length > 0
+        ? { attachments: doneAttachments }
+        : {}),
+      ...(isNarrowViewport ? { focusNew: true } : {}),
+    };
     window.getSelection()?.removeAllRanges();
     onClose();
     streamBranch(selection.nodeId, text, anchor, opts);
