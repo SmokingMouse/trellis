@@ -16,6 +16,7 @@ AUTH_PASS=mv-mobile-slim-shell-pass
 AUTH_TOKEN=mv-mobile-slim-shell-token
 SERVER_PID=
 URL="$BASE/?session=mv-slim-session&node=mv-slim-f"
+WAITING_URL="$BASE/?session=mv-slim-wait-session&node=mv-slim-wait"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -199,17 +200,32 @@ sqlite3 "$DB" <<'SQL'
 INSERT INTO sessions
   (id,title,root_node_id,created_at,updated_at,context_mode,workspace_path,archived,require_approval,kind,title_source)
 VALUES
-  ('mv-slim-session','手机精简壳验收会话标题很长用于验证截断','mv-slim-root',1893456000000,1893456007000,'project','/tmp/mobile-slim-workspace',0,0,'user','default');
+  ('mv-slim-session','手机精简壳验收会话标题很长用于验证截断','mv-slim-root',1893456000000,1893456007000,'project','/tmp/mobile-slim-workspace',0,0,'user','default'),
+  ('mv-slim-wait-session','手机等待横幅验收会话','mv-slim-wait-root',1893456010000,1893456012000,'project','/tmp/mobile-slim-workspace',0,1,'user','default');
 INSERT INTO nodes
-  (id,session_id,parent_id,question,response,status,sibling_index,created_at,read_at,topic_label)
+  (id,session_id,parent_id,question,response,status,sibling_index,created_at,read_at,topic_label,pending_interaction_json)
 VALUES
-  ('mv-slim-root','mv-slim-session',NULL,'手机首屏应该显示什么？','这是用于手机精简壳验收的根回答。正文必须保持可读，TreePanel 默认不得覆盖正文或输入框。','done',0,1893456000000,NULL,'手机首屏'),
-  ('mv-slim-a','mv-slim-session','mv-slim-root','如何收纳桌面能力？','搜索、思维树、画布、工作区文件、笔记、导出、模式、模型、主题、任务和设置都进入 overflow。','done',0,1893456001000,NULL,'能力收纳'),
-  ('mv-slim-b','mv-slim-session','mv-slim-a','TreePanel 怎么处理？','手机默认不挂载，打开后使用全屏 sheet，关闭回到线性阅读。','done',0,1893456002000,NULL,'树面板'),
-  ('mv-slim-c','mv-slim-session','mv-slim-b','如何转桌面版？','写入本地标记后刷新，由统一的 useIsMobile 判定桌面布局，并提供回手机版入口。','done',0,1893456003000,NULL,'桌面模式'),
-  ('mv-slim-d','mv-slim-session','mv-slim-a','画布如何落点？','进入手机画布后等待布局完成，再执行一次 fitView。','done',1,1893456004000,NULL,'画布落点'),
-  ('mv-slim-e','mv-slim-session','mv-slim-d','为什么延迟？','React Flow 需要先测量卡片并完成 Dagre 布局。','done',0,1893456005000,NULL,'测量'),
-  ('mv-slim-f','mv-slim-session','mv-slim-root','桌面会回归吗？','1280×800 下 Header 控件清单和尺寸保持不变。','done',1,1893456006000,NULL,'桌面零回归');
+  ('mv-slim-root','mv-slim-session',NULL,'手机首屏应该显示什么？','这是用于手机精简壳验收的根回答。正文必须保持可读，TreePanel 默认不得覆盖正文或输入框。','done',0,1893456000000,NULL,'手机首屏',NULL),
+  ('mv-slim-a','mv-slim-session','mv-slim-root','如何收纳桌面能力？','搜索、思维树、画布、工作区文件、笔记、导出、模式、模型、主题、任务和设置都进入 overflow。','done',0,1893456001000,NULL,'能力收纳',NULL),
+  ('mv-slim-b','mv-slim-session','mv-slim-a','TreePanel 怎么处理？','手机默认不挂载，打开后使用全屏 sheet，关闭回到线性阅读。','done',0,1893456002000,NULL,'树面板',NULL),
+  ('mv-slim-c','mv-slim-session','mv-slim-b','如何转桌面版？','写入本地标记后刷新，由统一的 useIsMobile 判定桌面布局，并提供回手机版入口。','done',0,1893456003000,NULL,'桌面模式',NULL),
+  ('mv-slim-d','mv-slim-session','mv-slim-a','画布如何落点？','进入手机画布后等待布局完成，再执行一次 fitView。','done',1,1893456004000,NULL,'画布落点',NULL),
+  ('mv-slim-e','mv-slim-session','mv-slim-d','为什么延迟？','React Flow 需要先测量卡片并完成 Dagre 布局。','done',0,1893456005000,NULL,'测量',NULL),
+  ('mv-slim-f','mv-slim-session','mv-slim-root','桌面会回归吗？','1280×800 下 Header 控件清单和尺寸保持不变。','done',1,1893456006000,NULL,'桌面零回归',NULL),
+  ('mv-slim-wait-root','mv-slim-wait-session',NULL,'滚动时等待横幅应该怎样？','等待横幅必须留在安全区顶部。','done',0,1893456010000,NULL,'等待横幅',NULL),
+  ('mv-slim-wait','mv-slim-wait-session','mv-slim-wait-root','确认 fixture 操作','','done',0,1893456011000,NULL,'等待确认','{"toolUseId":"mv-slim-tool","toolName":"Bash","input":{"command":"echo mobile-slim-fixture","description":"只用于手机等待横幅布局验收"}}');
+
+UPDATE nodes
+SET response = (
+  WITH RECURSIVE seq(n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM seq WHERE n < 60
+  )
+  SELECT group_concat('第 ' || n || ' 段：这是一段用于手机滚动方向与顶部栏收起验收的长回答文字。', char(10) || char(10))
+  FROM seq
+)
+WHERE id IN ('mv-slim-root', 'mv-slim-wait-root');
 SQL
 
 echo "== authenticate in a fresh iPhone 15 profile =="
@@ -247,6 +263,22 @@ ab eval --stdin <<'JS'
   return { width: header.clientWidth, scrollWidth: header.scrollWidth, buttons: labels };
 })()
 JS
+
+echo "== mobile reading chrome follows scroll direction =="
+sleep 1
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset"'
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down"'
+wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop -= 100; "scrolled up"'
+wait_for_js "header, title, and Composer restored after upward scroll" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); return !h?.hasAttribute('data-header-hidden') && h.getBoundingClientRect().top>=-0.8 && !t?.hasAttribute('data-thread-header-hidden') && t.getBoundingClientRect().top>=-0.8 && c?.dataset.composerHidden==='false'; })()"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop += 100; "scrolled down again"'
+wait_for_js "chrome hidden before top reset" "document.querySelector('[data-mobile-header]')?.dataset.headerHidden === 'true'"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scrolled to top"'
+wait_for_js "chrome restored at scroll top" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden') && document.querySelector('[data-safe-area=\"linear-composer\"]')?.dataset.composerHidden === 'false'"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down for edge reveal"'
+wait_for_js "top-edge reveal target" "Boolean(document.querySelector('[data-header-reveal]'))"
+ab click '[data-header-reveal]'
+wait_for_js "chrome restored from top edge" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow bottom sheet" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
@@ -370,9 +402,19 @@ ab eval --stdin <<'JS'
 })()
 JS
 
+echo "== waiting banner remains at the safe-area top =="
+ab open "$WAITING_URL"
+sleep 2
+wait_for_js "waiting fixture surface" "Boolean(document.querySelector('[data-mobile-waiting-banner]')) && Boolean(document.querySelector('textarea[data-composer-input]')) && Boolean(document.querySelector('[data-thread-scroll]'))"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "waiting fixture reset"'
+sleep 1
+wait_for_js "waiting fixture scroll surface stable" "Boolean(document.querySelector('[data-thread-scroll]'))"
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "waiting fixture scrolled"'
+wait_for_js "waiting banner visible while chrome hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); const b=document.querySelector('[data-mobile-waiting-banner]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); if (h?.dataset.headerHidden!=='true' || !b || c?.dataset.composerHidden!=='false') return false; const r=b.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; return r.top>=safe-0.8 && r.top<=safe+0.8 && r.bottom>safe; })()"
+
 echo "== 1280x800 desktop zero-regression baseline =="
 ab set viewport 1280 800
-ab reload
+ab open "$URL"
 wait_for_js "normal desktop Header" "Boolean(document.querySelector('header button[aria-label=\"搜索\"]'))"
 assert_not_login
 ab eval --stdin <<'JS'
@@ -383,7 +425,8 @@ ab eval --stdin <<'JS'
   const label = (element) => element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent?.trim().replace(/\s+/g, '').slice(0, 60);
   const header = document.querySelector('header');
   const headerRect = header.getBoundingClientRect();
-  assert(near(headerRect.width, 1280) && near(headerRect.height, 48), `desktop header rect=${JSON.stringify(headerRect.toJSON())}`);
+  assert(near(headerRect.top, 0) && near(headerRect.width, 1280) && near(headerRect.height, 48), `desktop header rect=${JSON.stringify(headerRect.toJSON())}`);
+  assert(!header.hasAttribute('data-header-hidden'), `desktop header hidden=${header.dataset.headerHidden}`);
   assert(header.scrollWidth === header.clientWidth, `desktop header overflow ${header.scrollWidth}/${header.clientWidth}`);
 
   const controls = [...header.querySelectorAll('button,a')].filter(visible);
