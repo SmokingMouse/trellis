@@ -14,6 +14,7 @@ import {
   BOOKMARK_QUESTION_LIMIT,
   BOOKMARK_RESPONSE_LIMIT,
   bookmarkSummary,
+  mergeBookmarkWindowIntoNodes,
 } from "@/lib/bookmarks";
 import {
   clearStreamPending,
@@ -479,6 +480,8 @@ type State = {
   // Cross-session card bookmarks. Unlike notes, this list is global and is
   // not cleared when the active session changes.
   bookmarks: Bookmark[];
+  // Server-side count is separate from the bounded bookmark row window.
+  bookmarksTotal: number;
   bookmarksOpen: boolean;
   // Whether the right-side NotesDrawer is open. UI-only — not persisted.
   notesOpen: boolean;
@@ -846,6 +849,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   abortRecovery: null,
   notes: [],
   bookmarks: [],
+  bookmarksTotal: 0,
   bookmarksOpen: false,
   notesOpen: false,
   searchOpen: false,
@@ -2143,20 +2147,18 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     try {
       const res = await fetchWithTimeout("/api/bookmarks", 5000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { bookmarks?: Bookmark[] };
+      const body = (await res.json()) as {
+        bookmarks?: Bookmark[];
+        total?: number;
+      };
       if (!Array.isArray(body.bookmarks)) return;
-      const saved = new Map(
-        body.bookmarks.map((bookmark) => [bookmark.nodeId, bookmark.bookmarkedAt]),
-      );
+      const bookmarks = body.bookmarks;
+      const total = typeof body.total === "number" && Number.isFinite(body.total)
+        ? Math.max(bookmarks.length, Math.trunc(body.total))
+        : bookmarks.length;
       set((s) => {
-        let nodes = s.nodes;
-        for (const [id, node] of Object.entries(s.nodes)) {
-          const bookmarkedAt = saved.get(id) ?? null;
-          if ((node.bookmarkedAt ?? null) === bookmarkedAt) continue;
-          if (nodes === s.nodes) nodes = { ...s.nodes };
-          nodes[id] = { ...node, bookmarkedAt };
-        }
-        return { bookmarks: body.bookmarks!, nodes };
+        const nodes = mergeBookmarkWindowIntoNodes(s.nodes, bookmarks);
+        return { bookmarks, bookmarksTotal: total, nodes };
       });
     } catch {
       // Keep the last-known navigation list; focus/session changes retry.
@@ -2172,7 +2174,9 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     if (on && (!node || !before.session)) return;
     const optimisticAt = on ? Date.now() : null;
     const previousBookmarks = before.bookmarks;
+    const previousTotal = before.bookmarksTotal;
     const previousNodeAt = node?.bookmarkedAt ?? null;
+    const countDelta = on === wasOn ? 0 : on ? 1 : -1;
     set((s) => {
       const nextNodes = s.nodes[nodeId]
         ? {
@@ -2199,7 +2203,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
               ...without,
             ]
           : without;
-      return { nodes: nextNodes, bookmarks: nextBookmarks };
+      return {
+        nodes: nextNodes,
+        bookmarks: nextBookmarks,
+        bookmarksTotal: Math.max(0, s.bookmarksTotal + countDelta),
+      };
     });
     try {
       const res = await fetch(`/api/nodes/${nodeId}`, {
@@ -2228,7 +2236,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
               [nodeId]: { ...cur, bookmarkedAt: previousNodeAt },
             }
           : s.nodes;
-        return { nodes, bookmarks: previousBookmarks };
+        return {
+          nodes,
+          bookmarks: previousBookmarks,
+          bookmarksTotal: previousTotal,
+        };
       });
     }
   },

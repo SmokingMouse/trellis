@@ -17,9 +17,9 @@
 ## 数据与 API
 
 - `nodes.bookmarked_at INTEGER NULL`：毫秒时间戳；`NULL` 表示未收藏。按 `lib/server/sqlite.ts` 现有幂等 `pragma_table_info` + `ALTER TABLE` 模式迁移。
-- repo：`setNodeBookmark(nodeId, on)` 返回持久化后的时间戳或 `null`；`listBookmarks({ limit })` 仅查询未归档会话，按 `bookmarked_at DESC`，返回 `nodeId`、`sessionId`、`sessionTitle`、`question`（纯文本摘要，最多 80 字）、`response`（去 Markdown 后最多 120 字）、`bookmarkedAt`、`readAt`、`status`。
+- repo：`setNodeBookmark(nodeId, on)` 返回持久化后的时间戳或 `null`；`listBookmarks({ limit })` 仅查询未归档会话中未雪藏的树（沿 `parent_id` 解析到树根，以根节点的 `hidden_at` 为准），按 `bookmarked_at DESC`，返回 `nodeId`、`sessionId`、`sessionTitle`、`question`（纯文本摘要，最多 80 字）、`response`（去 Markdown 后最多 120 字）、`bookmarkedAt`、`readAt`、`status`。
 - `PATCH /api/nodes/:id` 接受 `{ bookmarked: boolean }`，与既有节点更新字段并存；不存在的节点返回 404，非法 body 返回 400。
-- `GET /api/bookmarks?limit=` 返回 `{ bookmarks }`；limit 有安全默认值与上限。
+- `GET /api/bookmarks?limit=` 返回 `{ bookmarks, total }`；limit 有安全默认值与上限。`bookmarks` 是倒序窗口，`total` 是过滤归档会话与雪藏树后的完整计数；客户端只用窗口内条目同步已载入节点，窗口外节点的本地 `bookmarkedAt` 保持不动，计数始终使用 `total`。
 - `ChatNode` / API wire 类型携带 `bookmarkedAt`，保证会话载入即可渲染卡片状态。
 - repo 与 route 均补 `bun test`，覆盖幂等切换、倒序、归档过滤、摘要长度/去 Markdown、limit 与错误输入。
 
@@ -38,3 +38,7 @@
 - 1280×800：动作区书签按钮可见；收藏后侧栏出现「稍后再读 (1)」及一行；既有分组数量等于脚本修改前记录的基线；取消后分组消失。
 - 脚本不触发模型 run、不读写 `~/.trellis/data.db` 本体；已有 slim-shell、touch-targets、followup-approval 与新增 read-later 四条脚本串行连跑两遍。
 - `bunx tsc --noEmit` 与 `bun test` 全绿；端口 3471–3476 均释放且互斥锁目录不存在。
+
+## 后续 TODO
+
+- 增加超过 50 条收藏的端到端脚本 fixture，覆盖列表末尾“还有 N 条”与窗口翻页；本波先以 repo/API 总数单测和客户端窗口合并单测守住 R-2，不在浏览器脚本中批量制造 51 张卡片。

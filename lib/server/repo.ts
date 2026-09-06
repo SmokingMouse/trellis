@@ -854,15 +854,34 @@ export function setNodeBookmark(
   return bookmarkedAt;
 }
 
+const VISIBLE_BOOKMARK_ROOTS_CTE = `WITH RECURSIVE bookmark_roots(
+  node_id, current_id, parent_id, hidden_at, depth
+) AS (
+  SELECT n.id, n.id, n.parent_id, n.hidden_at, 0
+    FROM nodes n
+    JOIN sessions s ON s.id = n.session_id
+   WHERE n.bookmarked_at IS NOT NULL AND s.archived = 0
+  UNION ALL
+  SELECT r.node_id, parent.id, parent.parent_id, parent.hidden_at, r.depth + 1
+    FROM bookmark_roots r
+    JOIN nodes parent ON parent.id = r.parent_id
+   WHERE r.depth < 1000
+), visible_bookmarks AS (
+  SELECT node_id
+    FROM bookmark_roots
+   WHERE parent_id IS NULL AND hidden_at IS NULL
+)`;
+
 export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
   const limit = Math.min(100, Math.max(1, Math.trunc(opts.limit ?? 50)));
   const rows = getDB()
     .prepare(
-      `SELECT n.id AS node_id, n.session_id, s.title AS session_title,
+      `${VISIBLE_BOOKMARK_ROOTS_CTE}
+       SELECT n.id AS node_id, n.session_id, s.title AS session_title,
               n.question, n.response, n.bookmarked_at, n.read_at, n.status
          FROM nodes n
+         JOIN visible_bookmarks visible ON visible.node_id = n.id
          JOIN sessions s ON s.id = n.session_id
-        WHERE n.bookmarked_at IS NOT NULL AND s.archived = 0
         ORDER BY n.bookmarked_at DESC, n.id
         LIMIT ?`,
     )
@@ -886,6 +905,16 @@ export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
     readAt: row.read_at,
     status: row.status,
   }));
+}
+
+export function countBookmarks(): number {
+  const row = getDB()
+    .prepare(
+      `${VISIBLE_BOOKMARK_ROOTS_CTE}
+       SELECT COUNT(*) AS total FROM visible_bookmarks`,
+    )
+    .get() as { total: number };
+  return row.total;
 }
 
 // Walk the parent chain up to this node's tree root (parent_id IS NULL).

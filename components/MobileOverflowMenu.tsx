@@ -111,7 +111,7 @@ export function MobileOverflowMenu({
     (s) => s.setWorkspaceFilesOpen,
   );
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
-  const bookmarkCount = useSessionStore((s) => s.bookmarks.length);
+  const bookmarkCount = useSessionStore((s) => s.bookmarksTotal);
   const setBookmarksOpen = useSessionStore((s) => s.setBookmarksOpen);
   const { mode, palette, setMode, setPalette } = useTheme();
   const [exportOpen, setExportOpen] = useState(false);

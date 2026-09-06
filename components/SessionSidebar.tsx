@@ -95,6 +95,7 @@ export function SessionSidebar() {
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const bookmarks = useSessionStore((s) => s.bookmarks);
+  const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
   const refreshBookmarks = useSessionStore((s) => s.refreshBookmarks);
   const [attachOpen, setAttachOpen] = useState(false);
   const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
@@ -604,15 +605,15 @@ export function SessionSidebar() {
   };
 
   const renderBookmarksGroup = () => {
-    if (bookmarks.length === 0) return null;
+    if (bookmarksTotal === 0) return null;
     const isCollapsed = collapsed.has("__bookmarks");
     return (
       <div className="mb-3" data-read-later-group>
         <GroupRow
           level={0}
           collapsed={isCollapsed}
-          label={`🔖 稍后再读 (${bookmarks.length})`}
-          title={`稍后再读 · ${bookmarks.length} 张卡片`}
+          label={`🔖 稍后再读 (${bookmarksTotal})`}
+          title={`稍后再读 · ${bookmarksTotal} 张卡片`}
           badge={null}
           onToggle={() => toggleCollapsed("__bookmarks")}
         />

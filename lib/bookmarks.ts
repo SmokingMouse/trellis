@@ -1,5 +1,29 @@
+import type { Bookmark } from "@/lib/types";
+
 export const BOOKMARK_QUESTION_LIMIT = 80;
 export const BOOKMARK_RESPONSE_LIMIT = 120;
+
+// A bookmarks response is a bounded, newest-first window. Only nodes named
+// by that window are authoritative: an absent loaded node may simply be item
+// 51+, so its local bookmark mark must remain untouched.
+export function mergeBookmarkWindowIntoNodes<
+  T extends { bookmarkedAt?: number | null },
+>(
+  nodes: Record<string, T>,
+  bookmarks: Array<Pick<Bookmark, "nodeId" | "bookmarkedAt">>,
+): Record<string, T> {
+  let next = nodes;
+  for (const bookmark of bookmarks) {
+    const node = nodes[bookmark.nodeId];
+    if (!node || (node.bookmarkedAt ?? null) === bookmark.bookmarkedAt) continue;
+    if (next === nodes) next = { ...nodes };
+    next[bookmark.nodeId] = {
+      ...node,
+      bookmarkedAt: bookmark.bookmarkedAt,
+    };
+  }
+  return next;
+}
 
 // Bookmark rows are navigation aids, not another markdown renderer. Flatten
 // the common markdown constructs before truncating so the sidebar never shows

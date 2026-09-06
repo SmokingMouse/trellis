@@ -1,4 +1,4 @@
-import { listBookmarks } from "@/lib/server/repo";
+import { countBookmarks, listBookmarks } from "@/lib/server/repo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,5 +9,8 @@ export async function GET(req: Request) {
   const limit = Number.isFinite(parsed)
     ? Math.min(100, Math.max(1, parsed))
     : 50;
-  return Response.json({ bookmarks: listBookmarks({ limit }) });
+  return Response.json({
+    bookmarks: listBookmarks({ limit }),
+    total: countBookmarks(),
+  });
 }

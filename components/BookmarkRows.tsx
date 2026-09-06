@@ -6,6 +6,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
   const bookmarks = useSessionStore((s) => s.bookmarks);
+  const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const toggleBookmark = useSessionStore((s) => s.toggleBookmark);
@@ -62,6 +63,14 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
           </button>
         </div>
       ))}
+      {bookmarksTotal > bookmarks.length && (
+        <div
+          data-bookmark-remaining
+          className="min-h-11 px-3 flex items-center text-label text-ink-faint"
+        >
+          还有 {bookmarksTotal - bookmarks.length} 条
+        </div>
+      )}
     </div>
   );
 }
