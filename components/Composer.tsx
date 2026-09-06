@@ -230,6 +230,7 @@ export function Composer({
     const [mentionAgentSlug, question] = splitMention(trimmed);
     streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug });
     onSubmitted?.();
+    if (mobileCompact) setMobileExpanded(false);
   };
 
   if (isStreaming && targetNode) {

@@ -626,7 +626,11 @@ type Actions = {
     parentId: string,
     question: string,
     anchor: ParentAnchor | null,
-    opts?: { attachments?: NodeAttachment[]; mentionAgentSlug?: string | null },
+    opts?: {
+      attachments?: NodeAttachment[];
+      mentionAgentSlug?: string | null;
+      focusNew?: boolean;
+    },
   ) => Promise<void>;
   // Re-run an existing node in place: server keeps the same id, wipes the
   // response/usage/error, and re-streams against the original question +
@@ -1355,7 +1359,9 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // as a NEW sibling — the original Q&A is preserved, tree stays
     // append-only (no destructive in-place edit / downstream wipe).
     if (node.parentId) {
-      await get().streamBranch(node.parentId, q, node.parentAnchor ?? null);
+      await get().streamBranch(node.parentId, q, node.parentAnchor ?? null, {
+        focusNew: true,
+      });
     } else {
       await get().streamRoot(q, { attachToCurrentSession: true });
     }
@@ -1439,12 +1445,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   streamBranch: async (parentId, question, anchor, opts) => {
     const { provider, session } = get();
-    // For selection-anchored branches (anchor !== null), keep the user on the
-    // parent so they can keep reading; the new child streams in the
-    // background and is reachable via the inline <mark>. For plain
-    // followups (anchor === null), behave like before — auto-focus the new
-    // child so the user sees the response.
-    const focusNew = anchor === null;
+    // Anchor records quoted context; focusNew independently controls where
+    // the user lands. Callers that omit it preserve the desktop behavior:
+    // anchored branches stream in the background, plain branches open.
+    const focusNew = opts?.focusNew ?? (anchor === null);
     const attachments = opts?.attachments;
     // #6: optimistic placeholder — the card (question + "生成中" dots) pops
     // the moment the user submits; `created` swaps in the server node.
