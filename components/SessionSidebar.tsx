@@ -34,6 +34,7 @@ import {
 } from "@/lib/types";
 import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
+import { BookmarkRows } from "@/components/BookmarkRows";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
 // 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
@@ -93,6 +94,8 @@ export function SessionSidebar() {
   const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
+  const bookmarks = useSessionStore((s) => s.bookmarks);
+  const refreshBookmarks = useSessionStore((s) => s.refreshBookmarks);
   const [attachOpen, setAttachOpen] = useState(false);
   const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
@@ -238,6 +241,10 @@ export function SessionSidebar() {
     };
   }, [activeId, sessionsRevision, recentRunKey, recentNonce]);
 
+  useEffect(() => {
+    void refreshBookmarks();
+  }, [activeId, sessionsRevision, refreshBookmarks]);
+
   // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
   //
   // 不并进 /api/sessions 是刻意的 —— 那条在流式期间是 ~1.6 次/秒的热循环，
@@ -278,10 +285,11 @@ export function SessionSidebar() {
     const onFocus = () => {
       setGitNonce((n) => n + 1);
       setRecentNonce((n) => n + 1);
+      void refreshBookmarks();
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  }, [refreshBookmarks]);
 
   // Lazy-load archived rows only while the footer is open. Re-runs on any
   // mutation (sessionsRevision) so unarchiving instantly removes the row.
@@ -589,6 +597,28 @@ export function SessionSidebar() {
                 </div>
               );
             })}
+          </IndentGuide>
+        )}
+      </div>
+    );
+  };
+
+  const renderBookmarksGroup = () => {
+    if (bookmarks.length === 0) return null;
+    const isCollapsed = collapsed.has("__bookmarks");
+    return (
+      <div className="mb-3" data-read-later-group>
+        <GroupRow
+          level={0}
+          collapsed={isCollapsed}
+          label={`🔖 稍后再读 (${bookmarks.length})`}
+          title={`稍后再读 · ${bookmarks.length} 张卡片`}
+          badge={null}
+          onToggle={() => toggleCollapsed("__bookmarks")}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>
+            <BookmarkRows onNavigate={() => setMobileNavOpen(false)} />
           </IndentGuide>
         )}
       </div>
@@ -906,7 +936,8 @@ export function SessionSidebar() {
           </div>
         ) : (
           <>
-            {/* S133：最近活动的会话，粒度到链 —— 放最上面，它是「接着干」的入口。 */}
+            {renderBookmarksGroup()}
+            {/* S133：最近活动的会话，粒度到链。收藏有数据时位于它之上。 */}
             {renderRecentGroup()}
             {renderProjects()}
             {renderGroup("__chat", "Chat", chat)}
@@ -1194,6 +1225,7 @@ function GroupRow({
 }) {
   return (
     <div
+      data-sidebar-group
       className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
         toggleable ? "hover:bg-surface-muted" : ""
       } ${muted ? "opacity-75" : ""}`}

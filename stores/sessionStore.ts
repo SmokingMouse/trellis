@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Mode, ProviderId, ProviderInfo } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId, PROVIDERS } from "@/lib/llm";
 import type {
+  Bookmark,
   ChatNode,
   NodeAttachment,
   Note,
@@ -9,6 +10,11 @@ import type {
   Session,
   ToolCall,
 } from "@/lib/types";
+import {
+  BOOKMARK_QUESTION_LIMIT,
+  BOOKMARK_RESPONSE_LIMIT,
+  bookmarkSummary,
+} from "@/lib/bookmarks";
 import {
   clearStreamPending,
   emitStream,
@@ -470,6 +476,10 @@ type State = {
   // nodes from /api/sessions/[id], mutated optimistically by addNote /
   // deleteNote. Empty when no session loaded.
   notes: Note[];
+  // Cross-session card bookmarks. Unlike notes, this list is global and is
+  // not cleared when the active session changes.
+  bookmarks: Bookmark[];
+  bookmarksOpen: boolean;
   // Whether the right-side NotesDrawer is open. UI-only — not persisted.
   notesOpen: boolean;
   // Stage 16: cross-session search modal visibility. Lifted into store so
@@ -652,6 +662,9 @@ type Actions = {
   // 手动标回未读（卡片头 / 树面板行的 toggle）。乐观清 readAt + 设
   // unreadHolds 抑制视口自动回读，失败回滚。仅对已读的 done 节点生效。
   markNodeUnread: (nodeId: string) => Promise<void>;
+  refreshBookmarks: () => Promise<void>;
+  toggleBookmark: (nodeId: string, on?: boolean) => Promise<void>;
+  setBookmarksOpen: (open: boolean) => void;
   // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
   // 失败回滚。幂等。
   setTreeHidden: (nodeId: string, hidden: boolean) => Promise<void>;
@@ -832,6 +845,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   abortArm: null,
   abortRecovery: null,
   notes: [],
+  bookmarks: [],
+  bookmarksOpen: false,
   notesOpen: false,
   searchOpen: false,
   filePreview: null,
@@ -876,6 +891,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftRequireApproval: loadDraftRequireApproval(),
     });
     void get().fetchProviderCatalog();
+    void get().refreshBookmarks();
     try {
       let targetId = sessionId;
       if (!targetId) {
@@ -2122,6 +2138,102 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       });
     }
   },
+
+  refreshBookmarks: async () => {
+    try {
+      const res = await fetchWithTimeout("/api/bookmarks", 5000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { bookmarks?: Bookmark[] };
+      if (!Array.isArray(body.bookmarks)) return;
+      const saved = new Map(
+        body.bookmarks.map((bookmark) => [bookmark.nodeId, bookmark.bookmarkedAt]),
+      );
+      set((s) => {
+        let nodes = s.nodes;
+        for (const [id, node] of Object.entries(s.nodes)) {
+          const bookmarkedAt = saved.get(id) ?? null;
+          if ((node.bookmarkedAt ?? null) === bookmarkedAt) continue;
+          if (nodes === s.nodes) nodes = { ...s.nodes };
+          nodes[id] = { ...node, bookmarkedAt };
+        }
+        return { bookmarks: body.bookmarks!, nodes };
+      });
+    } catch {
+      // Keep the last-known navigation list; focus/session changes retry.
+    }
+  },
+
+  toggleBookmark: async (nodeId, requested) => {
+    const before = get();
+    const node = before.nodes[nodeId];
+    const listed = before.bookmarks.find((bookmark) => bookmark.nodeId === nodeId);
+    const wasOn = Boolean(node?.bookmarkedAt ?? listed?.bookmarkedAt);
+    const on = requested ?? !wasOn;
+    if (on && (!node || !before.session)) return;
+    const optimisticAt = on ? Date.now() : null;
+    const previousBookmarks = before.bookmarks;
+    const previousNodeAt = node?.bookmarkedAt ?? null;
+    set((s) => {
+      const nextNodes = s.nodes[nodeId]
+        ? {
+            ...s.nodes,
+            [nodeId]: { ...s.nodes[nodeId], bookmarkedAt: optimisticAt },
+          }
+        : s.nodes;
+      const without = s.bookmarks.filter(
+        (bookmark) => bookmark.nodeId !== nodeId,
+      );
+      const nextBookmarks =
+        on && node && before.session
+          ? [
+              {
+                nodeId,
+                sessionId: node.sessionId,
+                sessionTitle: before.session.title,
+                question: bookmarkSummary(node.question, BOOKMARK_QUESTION_LIMIT),
+                response: bookmarkSummary(node.response, BOOKMARK_RESPONSE_LIMIT),
+                bookmarkedAt: optimisticAt!,
+                readAt: node.readAt,
+                status: node.status,
+              },
+              ...without,
+            ]
+          : without;
+      return { nodes: nextNodes, bookmarks: nextBookmarks };
+    });
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookmarked: on }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { bookmarkedAt } = (await res.json()) as {
+        bookmarkedAt: number | null;
+      };
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        if (!cur) return s;
+        return {
+          nodes: { ...s.nodes, [nodeId]: { ...cur, bookmarkedAt } },
+        };
+      });
+      await get().refreshBookmarks();
+    } catch {
+      set((s) => {
+        const cur = s.nodes[nodeId];
+        const nodes = cur
+          ? {
+              ...s.nodes,
+              [nodeId]: { ...cur, bookmarkedAt: previousNodeAt },
+            }
+          : s.nodes;
+        return { nodes, bookmarks: previousBookmarks };
+      });
+    }
+  },
+
+  setBookmarksOpen: (open) => set({ bookmarksOpen: open }),
 
   setTreeHidden: async (nodeId, hidden) => {
     // 客户端同样走到根 —— 面板传的本来就是根 id，这里兜底非根调用。

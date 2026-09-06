@@ -24,6 +24,7 @@ import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
 import { TurnCard } from "./TurnCard";
+import { BookmarkButton } from "./BookmarkButton";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -684,6 +685,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                         )}
                       </button>
                     )}
+                    {node.status === "done" && <BookmarkButton node={node} />}
                     {canBranch && (
                       <button
                         type="button"

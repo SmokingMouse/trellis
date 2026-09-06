@@ -19,6 +19,7 @@ import { TerminalPanel } from "@/components/TerminalPanel";
 import { WorkspaceFilesDrawer } from "@/components/WorkspaceFilesDrawer";
 import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
+import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
@@ -147,6 +148,7 @@ export default function Home() {
       <WorkspaceFilesDrawer />
       <SearchModal />
       <FilePreview />
+      <BookmarksDrawer />
       <KeyboardHelp />
     </>
   );
