@@ -1,5 +1,13 @@
 "use client";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
@@ -462,6 +470,22 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     !tipStreamingId &&
     !composerExpanded;
   const mobileHeaderHidden = isMobile && scrollHidden;
+  const revealFromHiddenTitleArea = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (!mobileHeaderHidden) return;
+    const safeTop =
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--safe-top",
+        ),
+      ) || 0;
+    const titleHeight =
+      document
+        .querySelector<HTMLElement>("[data-thread-header]")
+        ?.getBoundingClientRect().height ?? 56;
+    if (event.clientY <= safeTop + titleHeight) revealScrollChrome();
+  };
 
   return (
     // #3: viewport-bound flex column — header and composer are fixed rails,
@@ -565,8 +589,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        onClick={revealFromHiddenTitleArea}
         data-thread-scroll
-        className="flex-1 overflow-y-auto transition-transform duration-200 motion-reduce:transition-none"
+        className="flex-1 overflow-y-auto"
         style={
           mobileHeaderHidden
             ? {

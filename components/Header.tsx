@@ -239,7 +239,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             aria-label="显示顶部栏"
             onClick={revealScrollChrome}
             className="fixed top-0 inset-x-0 z-50 border-0 bg-surface-canvas p-0"
-            style={{ height: "max(var(--safe-top), 8px)" }}
+            style={{ height: "max(var(--safe-top), 24px)" }}
           />
         )}
         <MobileOverflowMenu

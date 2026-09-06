@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useSyncExternalStore,
   type RefObject,
@@ -46,6 +47,45 @@ export function useScrollHide({
   const { isHidden, reveal } = useScrollHideState();
   const lastScrollTopRef = useRef(0);
   const readyRef = useRef(false);
+  const previousHiddenRef = useRef(false);
+  const chromeShiftRef = useRef(0);
+  const effectiveHidden = enabled && isHidden;
+
+  // The scroll viewport moves upward when both mobile chrome rows hide. Move
+  // scrollTop by the inverse amount in a layout effect so the same reading
+  // anchor remains at the same screen coordinate before the next paint.
+  useLayoutEffect(() => {
+    if (previousHiddenRef.current === effectiveHidden) return;
+    const el = scrollRef.current;
+    if (el) {
+      if (effectiveHidden) {
+        const rootStyle = getComputedStyle(document.documentElement);
+        const safeTop =
+          Number.parseFloat(rootStyle.getPropertyValue("--safe-top")) || 0;
+        const mobileHeaderHeight =
+          document
+            .querySelector<HTMLElement>("[data-mobile-header]")
+            ?.getBoundingClientRect().height ?? 0;
+        const threadHeaderHeight =
+          document
+            .querySelector<HTMLElement>("[data-thread-header]")
+            ?.getBoundingClientRect().height ?? 0;
+        chromeShiftRef.current = Math.max(
+          0,
+          mobileHeaderHeight + threadHeaderHeight - safeTop,
+        );
+        el.scrollTop = Math.max(0, el.scrollTop - chromeShiftRef.current);
+      } else {
+        const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.min(
+          maxScrollTop,
+          el.scrollTop + chromeShiftRef.current,
+        );
+      }
+      lastScrollTopRef.current = el.scrollTop;
+    }
+    previousHiddenRef.current = effectiveHidden;
+  }, [effectiveHidden, scrollRef]);
 
   useEffect(() => {
     setHidden(false);
@@ -78,5 +118,5 @@ export function useScrollHide({
     [enabled],
   );
 
-  return { isHidden: enabled && isHidden, reveal, updateFromScroll };
+  return { isHidden: effectiveHidden, reveal, updateFromScroll };
 }
