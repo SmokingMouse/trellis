@@ -9,7 +9,13 @@ import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import type { RecentChainRow } from "@/lib/recent";
+import {
+  BOOKMARK_QUESTION_LIMIT,
+  BOOKMARK_RESPONSE_LIMIT,
+  bookmarkSummary,
+} from "@/lib/bookmarks";
 import type {
+  Bookmark,
   NodeKind,
   NodeAttachment,
   RefSourceType,
@@ -89,6 +95,7 @@ export type ApiNode = {
   kind: NodeKind;
   reference: ReferencePayload | null;
   readAt: number | null;
+  bookmarkedAt: number | null;
   attachments: NodeAttachment[];
   toolCalls: ToolCall[];
   // A路②: non-null while a run paused on an interactive tool awaits the user.
@@ -129,6 +136,7 @@ type NodeRow = {
   ref_fetched_at: number | null;
   ref_meta_json: string | null;
   read_at: number | null;
+  bookmarked_at: number | null;
   attachments_json: string | null;
   tool_calls_json: string | null;
   pending_interaction_json: string | null;
@@ -142,7 +150,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        status, error_message, sibling_index, token_input, token_output,
        token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
-       ref_fetched_at, ref_meta_json, read_at, attachments_json, tool_calls_json,
+       ref_fetched_at, ref_meta_json, read_at, bookmarked_at, attachments_json, tool_calls_json,
        pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
@@ -256,6 +264,7 @@ function rowToNode(r: NodeRow): ApiNode {
     kind,
     reference,
     readAt: r.read_at,
+    bookmarkedAt: r.bookmarked_at,
     attachments,
     toolCalls,
     pendingInteraction,
@@ -828,6 +837,55 @@ export function markNodeUnread(nodeId: string): boolean {
   if (!existing) return false;
   db.prepare("UPDATE nodes SET read_at = NULL WHERE id = ?").run(nodeId);
   return true;
+}
+
+// Save/unsave exactly one card. Bookmarking and read state are orthogonal;
+// neither operation touches read_at. Callers that need to distinguish a
+// missing node from an off-state should check getNode first.
+export function setNodeBookmark(
+  nodeId: string,
+  on: boolean,
+  now = Date.now(),
+): number | null {
+  const bookmarkedAt = on ? now : null;
+  getDB()
+    .prepare("UPDATE nodes SET bookmarked_at = ? WHERE id = ?")
+    .run(bookmarkedAt, nodeId);
+  return bookmarkedAt;
+}
+
+export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
+  const limit = Math.min(100, Math.max(1, Math.trunc(opts.limit ?? 50)));
+  const rows = getDB()
+    .prepare(
+      `SELECT n.id AS node_id, n.session_id, s.title AS session_title,
+              n.question, n.response, n.bookmarked_at, n.read_at, n.status
+         FROM nodes n
+         JOIN sessions s ON s.id = n.session_id
+        WHERE n.bookmarked_at IS NOT NULL AND s.archived = 0
+        ORDER BY n.bookmarked_at DESC, n.id
+        LIMIT ?`,
+    )
+    .all(limit) as Array<{
+    node_id: string;
+    session_id: string;
+    session_title: string;
+    question: string;
+    response: string;
+    bookmarked_at: number;
+    read_at: number | null;
+    status: Bookmark["status"];
+  }>;
+  return rows.map((row) => ({
+    nodeId: row.node_id,
+    sessionId: row.session_id,
+    sessionTitle: row.session_title,
+    question: bookmarkSummary(row.question, BOOKMARK_QUESTION_LIMIT),
+    response: bookmarkSummary(row.response, BOOKMARK_RESPONSE_LIMIT),
+    bookmarkedAt: row.bookmarked_at,
+    readAt: row.read_at,
+    status: row.status,
+  }));
 }
 
 // Walk the parent chain up to this node's tree root (parent_id IS NULL).

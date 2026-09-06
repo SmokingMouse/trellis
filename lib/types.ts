@@ -227,6 +227,9 @@ export type ChatNode = {
   // null = unread; ms timestamp = first time the user kept the node
   // open >=1s. Drives the unread badge / "X 条未读" counter.
   readAt: number | null;
+  // Independent from readAt: null = not saved for later, timestamp = the
+  // moment the user bookmarked this one-question/one-answer card.
+  bookmarkedAt?: number | null;
   // Stage 15: optional image attachments belonging to this node's
   // question. Empty array (not null) when none — keeps consumer code
   // free of nullability checks.
@@ -264,6 +267,17 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
+};
+
+export type Bookmark = {
+  nodeId: string;
+  sessionId: string;
+  sessionTitle: string;
+  question: string;
+  response: string;
+  bookmarkedAt: number;
+  readAt: number | null;
+  status: NodeStatus;
 };
 
 // S1：侧栏三级分组的骨架，随 /api/sessions 一起下发（服务端真源在
