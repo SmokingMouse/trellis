@@ -1,6 +1,9 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { useSessionStore } from "@/stores/sessionStore";
+import { useEffect, useRef, useState } from "react";
+import {
+  isOptimisticNodeId,
+  useSessionStore,
+} from "@/stores/sessionStore";
 import { QuestionInput } from "@/components/QuestionInput";
 import { Canvas } from "@/components/Canvas";
 import { Header } from "@/components/Header";
@@ -66,18 +69,24 @@ export default function Home() {
   const previewDeepSession = useSessionStore((s) => s.previewSession);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const deepLinkedRef = useRef<string | null>(null);
+  const [deepLinkApplied, setDeepLinkApplied] = useState(false);
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") return;
     const q = new URLSearchParams(window.location.search);
     const deepSession = q.get("session");
     const deepNode = q.get("node");
-    if (!deepSession) return;
+    if (!deepSession) {
+      setDeepLinkApplied(true);
+      return;
+    }
     // 只跳一次 —— 用户在页面里点别的会话之后不该被 URL 拽回来。
     if (deepLinkedRef.current === deepSession) return;
     deepLinkedRef.current = deepSession;
-    void previewDeepSession(deepSession).then(() => {
-      if (deepNode) setActiveNode(deepNode);
-    });
+    void previewDeepSession(deepSession)
+      .then(() => {
+        if (deepNode) setActiveNode(deepNode);
+      })
+      .finally(() => setDeepLinkApplied(true));
   }, [hydrated, previewDeepSession, setActiveNode]);
 
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
@@ -87,6 +96,24 @@ export default function Home() {
   // every mode whenever the user arrives on a (different) session. They can
   // still switch to the canvas; we don't force them back.
   const sessionId = session?.id;
+  const activeNodeId = useSessionStore((s) => s.activeNodeId);
+
+  // F4: the URL is the reloadable form of the current reading position.
+  // Wait until the inbound deep link has finished loading before publishing
+  // store state, otherwise hydrate's previous session can overwrite the
+  // requested query while previewDeepSession is still in flight.
+  useEffect(() => {
+    if (!hydrated || !deepLinkApplied || !sessionId) return;
+    if (activeNodeId && isOptimisticNodeId(activeNodeId)) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("session", sessionId);
+    if (activeNodeId) url.searchParams.set("node", activeNodeId);
+    else url.searchParams.delete("node");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (next !== current) window.history.replaceState(window.history.state, "", next);
+  }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
+
   useEffect(() => {
     if (isMobile && sessionId) setViewMode("linear");
   }, [isMobile, sessionId, setViewMode]);

@@ -93,6 +93,7 @@ export function SessionSidebar() {
   const setDraftMode = useSessionStore((s) => s.setDraftMode);
   const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
+  const setViewMode = useSessionStore((s) => s.setViewMode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const bookmarks = useSessionStore((s) => s.bookmarks);
   const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
@@ -573,6 +574,7 @@ export function SessionSidebar() {
                         setEditingId(null);
                         // 抽屉是覆盖层；同会话内换链 activeId 不变，那个
                         // effect 不会替我们收。
+                        if (mobileNavOpen) setViewMode("linear");
                         setMobileNavOpen(false);
                         void openNodeInSession(r.id, c.tipId).catch(() => {
                           /* 会话已被删等：下次刷新这行自然消失 */
