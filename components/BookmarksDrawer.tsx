@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { BookmarkRows } from "@/components/BookmarkRows";
 import { Drawer } from "@/components/ui/Drawer";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -9,6 +10,27 @@ export function BookmarksDrawer() {
   const bookmarks = useSessionStore((s) => s.bookmarks);
   const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
   const setOpen = useSessionStore((s) => s.setBookmarksOpen);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    let frame = 0;
+    if (open && !wasOpenRef.current) {
+      wasOpenRef.current = true;
+      frame = requestAnimationFrame(() => closeRef.current?.focus());
+    } else if (!open && wasOpenRef.current) {
+      wasOpenRef.current = false;
+      frame = requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(
+            '[data-mobile-target="header-overflow"]',
+          )
+          ?.focus();
+      });
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
   return (
     <Drawer open={open} onClose={() => setOpen(false)}>
       <section
@@ -23,6 +45,7 @@ export function BookmarksDrawer() {
             稍后再读 ({bookmarksTotal})
           </h2>
           <button
+            ref={closeRef}
             type="button"
             data-mobile-target="bookmarks-close"
             className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted"

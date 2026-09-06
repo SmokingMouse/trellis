@@ -40,5 +40,8 @@ export function bookmarkSummary(source: string, limit: number): string {
     .replace(/[*_~`]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return Array.from(plain).slice(0, limit).join("");
+  const chars = Array.from(plain);
+  if (chars.length <= limit) return plain;
+  if (limit <= 0) return "";
+  return `${chars.slice(0, limit - 1).join("")}…`;
 }

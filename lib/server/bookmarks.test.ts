@@ -89,7 +89,9 @@ describe("read-later repository", () => {
     expect(repo.countBookmarks()).toBe(2);
     expect(rows[0]?.readAt).toBe(99);
     expect(Array.from(rows[1]?.question ?? "")).toHaveLength(80);
+    expect(rows[1]?.question.endsWith("…")).toBeTrue();
     expect(Array.from(rows[1]?.response ?? "").length).toBeLessThanOrEqual(120);
+    expect(rows[1]?.response.endsWith("…")).toBeTrue();
     expect(rows[1]?.response).not.toContain("**");
     expect(rows[1]?.response).not.toContain("https://");
   });

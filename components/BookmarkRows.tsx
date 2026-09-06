@@ -37,6 +37,7 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
             {bookmark.readAt == null && (
               <span
                 className="h-1.5 w-1.5 shrink-0 rounded-full bg-unread"
+                role="img"
                 aria-label="未读"
               />
             )}
