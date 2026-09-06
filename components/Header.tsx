@@ -14,6 +14,7 @@ import {
   setDesktopModeOverride,
   useIsNarrowViewport,
 } from "@/hooks/useIsMobile";
+import { useScrollHideState } from "@/hooks/useScrollHide";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import { ctxTokensOf, findLineageCtxTurn } from "@/lib/context-usage";
@@ -87,6 +88,8 @@ function ContextUsageDetails({
 
 export function Header({ isMobile }: { isMobile: boolean }) {
   const isNarrowViewport = useIsNarrowViewport();
+  const { isHidden: scrollHidden, reveal: revealScrollChrome } =
+    useScrollHideState();
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -181,15 +184,22 @@ export function Header({ isMobile }: { isMobile: boolean }) {
 
   if (isMobile) {
     const title = session?.title.trim() || "新会话";
+    const headerHidden = scrollHidden;
     return (
       <>
         <header
           data-mobile-header
           data-safe-area="header"
-          className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1"
+          data-header-hidden={headerHidden ? "true" : undefined}
+          aria-hidden={headerHidden ? true : undefined}
+          inert={headerHidden ? true : undefined}
+          className={`fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1 transition-transform duration-200 motion-reduce:transition-none ${
+            headerHidden ? "pointer-events-none" : ""
+          }`}
           style={{
             height: "var(--trellis-header-h)",
             paddingTop: "var(--safe-top)",
+            transform: headerHidden ? "translateY(-100%)" : undefined,
           }}
         >
           <IconButton
@@ -222,6 +232,16 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             <span aria-hidden>…</span>
           </IconButton>
         </header>
+        {headerHidden && (
+          <button
+            type="button"
+            data-header-reveal
+            aria-label="显示顶部栏"
+            onClick={revealScrollChrome}
+            className="fixed top-0 inset-x-0 z-50 border-0 bg-surface-canvas p-0"
+            style={{ height: "max(var(--safe-top), 8px)" }}
+          />
+        )}
         <MobileOverflowMenu
           open={mobileOverflowOpen}
           onClose={() => setMobileOverflowOpen(false)}
