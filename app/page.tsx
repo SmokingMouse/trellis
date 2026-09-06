@@ -103,12 +103,17 @@ export default function Home() {
   // store state, otherwise hydrate's previous session can overwrite the
   // requested query while previewDeepSession is still in flight.
   useEffect(() => {
-    if (!hydrated || !deepLinkApplied || !sessionId) return;
-    if (activeNodeId && isOptimisticNodeId(activeNodeId)) return;
+    if (!hydrated || !deepLinkApplied) return;
     const url = new URL(window.location.href);
-    url.searchParams.set("session", sessionId);
-    if (activeNodeId) url.searchParams.set("node", activeNodeId);
-    else url.searchParams.delete("node");
+    if (!sessionId) {
+      url.searchParams.delete("session");
+      url.searchParams.delete("node");
+    } else {
+      if (activeNodeId && isOptimisticNodeId(activeNodeId)) return;
+      url.searchParams.set("session", sessionId);
+      if (activeNodeId) url.searchParams.set("node", activeNodeId);
+      else url.searchParams.delete("node");
+    }
     const next = `${url.pathname}${url.search}${url.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) window.history.replaceState(window.history.state, "", next);

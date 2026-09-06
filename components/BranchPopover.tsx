@@ -7,7 +7,7 @@ import {
   useAttachmentUploads,
   MAX_ATTACHMENTS,
 } from "@/hooks/useAttachmentUploads";
-import { useIsNarrowViewport } from "@/hooks/useIsMobile";
+import { useIsMobile, useIsNarrowViewport } from "@/hooks/useIsMobile";
 
 type Props = {
   selection: SelectionInfo;
@@ -26,6 +26,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
   const addNote = useSessionStore((s) => s.addNote);
   const session = useSessionStore((s) => s.session);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
+  const isMobile = useIsMobile();
   const isNarrowViewport = useIsNarrowViewport();
   // Same tool-capability gate as the chat route: project (and
   // enhanced chat) can take any whitelisted file; pure chat can't.
@@ -120,7 +121,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
       ...(doneAttachments.length > 0
         ? { attachments: doneAttachments }
         : {}),
-      ...(isNarrowViewport ? { focusNew: true } : {}),
+      ...(isMobile ? { focusNew: true } : {}),
     };
     window.getSelection()?.removeAllRanges();
     onClose();
