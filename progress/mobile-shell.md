@@ -49,6 +49,17 @@ Composer 紧凑态固定保留「追问…」占位、📎 附件与发送/停�
 `LinearThreadView` 的 fixed stacking context；否则同为 `z-50` 时 Header 会
 截获右上角关闭按钮。
 
+手机从 TreePanel 点“＋ 新树”时先关闭树 sheet，再打开新树 picker；若在 picker
+点 Cancel，则落回线性阅读，已关闭的树 sheet 不恢复。这样取消不会把用户带回
+覆盖正文的中间层。
+
+## 分支落点
+
+- “编辑问题”重问是用户明确要求生成新兄弟的动作，桌面和手机都聚焦新兄弟；
+  旧桌面“留在原链”只是 anchor 与 focus 耦合的副产物，不作为设计保留。
+- 选区追问是否聚焦新分支使用 `useIsMobile()` 的产品语义判定；窄屏“转桌面版”
+  因而仍保留桌面落点，只由真实窄视口决定 popover 的几何布局。
+
 ## 转桌面版
 
 - localStorage key：`trellis-desktop-mode`，值 `1` 表示强制桌面。
