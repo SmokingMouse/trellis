@@ -111,6 +111,8 @@ export function MobileOverflowMenu({
     (s) => s.setWorkspaceFilesOpen,
   );
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
+  const bookmarkCount = useSessionStore((s) => s.bookmarks.length);
+  const setBookmarksOpen = useSessionStore((s) => s.setBookmarksOpen);
   const { mode, palette, setMode, setPalette } = useTheme();
   const [exportOpen, setExportOpen] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -176,6 +178,14 @@ export function MobileOverflowMenu({
             onClick={() => act(() => setSearchOpen(true))}
           >
             搜索
+          </MenuButton>
+
+          <MenuButton
+            target="overflow-bookmarks"
+            icon="🔖"
+            onClick={() => act(() => setBookmarksOpen(true))}
+          >
+            稍后再读 ({bookmarkCount})
           </MenuButton>
 
           {session && (

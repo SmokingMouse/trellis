@@ -1,4 +1,9 @@
-import { deleteNodeSubtree, getNode, setNodeTopicLabel } from "@/lib/server/repo";
+import {
+  deleteNodeSubtree,
+  getNode,
+  setNodeBookmark,
+  setNodeTopicLabel,
+} from "@/lib/server/repo";
 import {
   buildToolTree,
   countToolTree,
@@ -59,7 +64,20 @@ export async function PATCH(
     return Response.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  const { topicLabel } = body as { topicLabel?: unknown };
+  const { topicLabel, bookmarked } = body as {
+    topicLabel?: unknown;
+    bookmarked?: unknown;
+  };
+  if ("bookmarked" in body) {
+    if (typeof bookmarked !== "boolean") {
+      return Response.json({ error: "invalid_bookmarked" }, { status: 400 });
+    }
+    if (!getNode(id)) {
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }
+    const bookmarkedAt = setNodeBookmark(id, bookmarked);
+    return Response.json({ ok: true, bookmarkedAt });
+  }
   if (typeof topicLabel === "string") {
     const trimmed = topicLabel.trim();
     if (!trimmed) {
