@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { AgentClient, MockEngine, type MockScript } from "@smokingmouse/agent-server";
 import { runDaemon, resolveDaemonPaths, loadToken } from "@smokingmouse/agent-server/daemon";
+import { omitMidThreadFork } from "./as-capability-mock";
 
 mock.module("server-only", () => ({}));
 const home = mkdtempSync("/tmp/trellis-as-regression-");
@@ -26,6 +27,8 @@ const script: MockScript = async function* (turnId) {
   yield { type: "turnCompleted", turnId, status: "completed" };
 };
 const daemon = await runDaemon({ paths, graceMs: 0, logger: () => {}, serverOptions: { allowedRoots: [home], backends: ["claude"], engineFactory: () => { const engine = new MockEngine(script, "claude"); engines.push(engine); return engine; } } });
+const oldDaemon = process.argv[2] === "fork capability fallback";
+if (oldDaemon) omitMidThreadFork(daemon.server);
 const sid = randomUUID(), root = randomUUID();
 repo.createSessionWithRoot({ sessionId: sid, nodeId: root, title: "probe", question: "root question", now: Date.now(), model: "mock", mode: "project", workspacePath: home, bindingType: "thread" });
 function branch(parentId: string, question: string) {
@@ -89,15 +92,34 @@ try {
     assert.equal(repo.getNode(pending)!.status,"done");
     assert.equal(repo.getNode(pending)!.response,`answer ${run.turnId}`);
     assert.equal(engines.reduce((n,e)=>n+e.sent.length,0),3,"reconnect must not repeat engine input");
-  } else if (process.argv[2] === "P1-1 non-tip continuation") {
-    const earlier = branch(root, "earlier ordinary question");
-    await start(earlier);
-    assert.equal(repo.getNode(earlier)!.status, "done");
-    assert.notEqual(binding.getAsTurn(earlier)!.thread_id, binding.getAsTurn(root)!.thread_id);
-    const input = JSON.stringify(engines.at(-1)!.sent[0].input);
-    assert.ok(input.includes("root question"));
-    assert.ok(input.includes(repo.getNode(root)!.response));
-    assert.ok(!input.includes("second question"));
+  } else if (process.argv[2] === "P1-1 non-tip continuation" || oldDaemon) {
+    const original = binding.getAsTurn(root)!;
+    const source = daemon.server.log.snapshot(original.thread_id).items;
+    const boundaryIndex = source.findIndex(i=>i.id === original.last_item_id);
+    assert.ok(boundaryIndex >= 0);
+    const prefix = source.slice(0,boundaryIndex+1).map(i=>({type:i.type,payload:i.payload}));
+    for (const fork of [false,true]) {
+      const earlier = branch(root, `earlier question fork=${fork}`);
+      const run = await as.startProjectRun({nodeId:earlier,prompt:repo.getNode(earlier)!.question,attachments:[],fork});
+      await done(run);
+      assert.equal(repo.getNode(earlier)!.status, "done");
+      assert.notEqual(run.threadId,original.thread_id);
+      const input = JSON.stringify(engines.at(-1)!.sent[0].input);
+      const snapshot = daemon.server.log.snapshot(run.threadId);
+      if (oldDaemon) {
+        assert.equal(run.client.initializeResult?.capabilities.midThreadFork,undefined);
+        assert.equal(snapshot.thread.forkedFrom,undefined);
+        assert.ok(input.includes("root question"));
+        assert.ok(input.includes(repo.getNode(root)!.response));
+      } else {
+        assert.deepEqual(snapshot.thread.forkedFrom,{threadId:original.thread_id,itemId:original.last_item_id});
+        assert.deepEqual(snapshot.items.slice(0,prefix.length).map(i=>({type:i.type,payload:i.payload})),prefix);
+        assert.equal(snapshot.items.length,prefix.length+2);
+        assert.ok(!input.includes("root question"),"native fork must not re-seed input");
+      }
+      assert.ok(!input.includes("second question"));
+      assert.deepEqual(daemon.server.log.snapshot(original.thread_id).items,source,"source history unchanged");
+    }
   } else if (process.argv[2] === "P0-1 retry preserves answers") {
     const { POST } = await import("../../app/api/chat/route");
     const retryRequest = (nodeId:string) => POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({kind:"retry",nodeId,provider:"mock"})}));

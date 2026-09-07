@@ -131,6 +131,7 @@ FORK_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$FORK_NODE'")
 [ "$(db "SELECT status FROM nodes WHERE id='$FORK_NODE'")" = done ] || fail 'tip fork completion'
 [ "$(db "SELECT COUNT(*) FROM as_threads WHERE session_id='$SID'")" = 2 ] || fail 'fork session mapping'
 echo 'PASS: latest-node fork succeeds with a new thread binding'
+bun scripts/mobile-verify/as-project-fork-proof.ts "$FOURTH" "$FORK_NODE"
 post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$FORK_NODE\",\"question\":\"interrupt project\",\"provider\":\"mock\"}" > "$H/interrupt.sse" &
 REQUEST_PID=$!
 sleep 2
@@ -143,23 +144,26 @@ ab eval "(() => { const targets=[...document.querySelectorAll('[data-as-project]
 echo 'PASS: mobile 44px targets and no horizontal overflow'
 db "SELECT id,status,response FROM nodes WHERE session_id='$SID' ORDER BY id" > "$H/before-fork.txt"
 FORK_CODE=$(curl --noproxy '*' -s -o "$H/fork.json" -w '%{http_code}' -b trellis_auth=as-project-token -H 'Content-Type: application/json' -d "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"fork\":true,\"question\":\"early fork project\",\"provider\":\"mock\"}" "$BASE/api/chat")
-[ "$FORK_CODE" = 503 ] || fail "early-node fork must fail explicitly (HTTP $FORK_CODE)"
-grep -q '暂不支持从早期节点分叉' "$H/fork.json" || fail 'early fork explanation'
-FAILED_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
-db "SELECT id,status,response FROM nodes WHERE session_id='$SID' AND id!='$FAILED_NODE' ORDER BY id" > "$H/after-fork.txt"
+[ "$FORK_CODE" = 200 ] || fail "early-node fork must succeed (HTTP $FORK_CODE)"
+grep -q '"type":"done"' "$H/fork.json" || fail 'early fork completion'
+EARLY_FORK_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
+db "SELECT id,status,response FROM nodes WHERE session_id='$SID' AND id!='$EARLY_FORK_NODE' ORDER BY id" > "$H/after-fork.txt"
 cmp "$H/before-fork.txt" "$H/after-fork.txt" || fail 'early fork changed old nodes'
-[ "$(db "SELECT COUNT(*) FROM as_threads WHERE session_id='$SID'")" = 2 ] || fail 'early fork created a spurious thread'
+[ "$(db "SELECT COUNT(*) FROM as_threads WHERE session_id='$SID'")" = 3 ] || fail 'early fork thread mapping'
 [ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$FOURTH'")" = "$ORIGINAL_THREAD" ] || fail 'original binding changed'
-ab open "$BASE/?session=$SID&node=$FAILED_NODE"
-wait_js 'early-node fork error is visible and original session preserved' "document.body.innerText.includes('暂不支持从早期节点分叉') && document.body.innerText.includes('原会话未改变')"
-ab screenshot "$OUT/mobile-as-early-fork-error.png"
+bun scripts/mobile-verify/as-project-fork-proof.ts "$FIRST" "$EARLY_FORK_NODE"
+ab open "$BASE/?session=$SID&node=$EARLY_FORK_NODE"
+wait_js 'early-node fork controls visible' "Boolean(document.querySelector('[data-as-project=\"$EARLY_FORK_NODE\"]'))"
+ab screenshot "$OUT/mobile-as-early-fork.png"
 EARLY_CODE=$(curl --noproxy '*' -s -o "$H/early-question.sse" -w '%{http_code}' -b trellis_auth=as-project-token -H 'Content-Type: application/json' -d "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"question\":\"ordinary early question\",\"provider\":\"mock\"}" "$BASE/api/chat")
 [ "$EARLY_CODE" = 200 ] || fail 'P1-1 ordinary early question must succeed'
 EARLY_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
 [ "$(db "SELECT status FROM nodes WHERE id='$EARLY_NODE'")" = done ] || fail 'P1-1 ordinary early question left an error node'
 [ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")" != "$ORIGINAL_THREAD" ] || fail 'P1-1 early question reused later history'
 grep -q '"type":"done"' "$H/early-question.sse" || fail 'P1-1 early question completion'
-echo 'PASS: P1-1 ordinary early question returns 200 with a seeded new thread and no error node'
+bun scripts/mobile-verify/as-project-fork-proof.ts "$FIRST" "$EARLY_NODE"
+echo 'PASS: ordinary early continuation and explicit fork both return 200 with exact native history'
+bun scripts/mobile-verify/as-project-regression.ts 'fork capability fallback'
 RETRY_BEFORE=$(db "SELECT response FROM nodes WHERE id='$EARLY_NODE'")
 RETRY_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")
 touch "$H/pause-retry"
@@ -199,4 +203,4 @@ grep -q '"type":"done"' "$H/hard-off.sse" || fail 'P1-2 hard off completion'
 HARD_OFF_NODE=$(db "SELECT id FROM nodes WHERE question='hard off preserved input'")
 [ "$(db "SELECT COUNT(*) FROM as_turns WHERE node_id='$HARD_OFF_NODE'")" = 0 ] || fail 'P1-2 hard off created AS turn'
 echo 'PASS: P1-2 hard off falls back for an already bound session without losing input'
-echo 'PASS: AS project verification including tip-only fork contract'
+echo 'PASS: AS project verification including mid-thread fork and capability fallback'

@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { AgentClient } from "@smokingmouse/agent-server/client";
 import { NotificationSchemas, type NotificationMethod, type ServerNotification, type AttachResult, type Turn, type StartTurnParams, type StartThreadParams } from "@smokingmouse/agent-server/protocol";
-import { createProjectClient, withProjectLease, setProjectPermission } from "./as-client";
+import { createProjectClient, withProjectLease, setProjectPermission, supportsMidThreadFork } from "./as-client";
 import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding, removeAsTurn, pruneAsThreads } from "./session-binding";
 import { getDB } from "./sqlite";
 import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
@@ -273,32 +273,26 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
       let threadId: string;
       let seedHistory = !parent && !!parentId;
       if (parent) {
-        const latest = getDB().prepare("SELECT node_id FROM as_turns WHERE thread_id=? AND daemon_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(parent.thread_id, parent.daemon_id) as {node_id:string} | null;
-        if (!args.fork && latest?.node_id !== parent.node_id) {
-          // A normal question from an earlier node starts a new conversation
-          // seeded only from that node's ancestry, never from the live tip.
-          threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
-          seedHistory = true;
-        } else if (args.retry || args.fork) {
-          // 7913839 only forks the live thread tip. Never silently include later
-          // turns when the user selected an earlier node (or retries a past turn).
-          if (latest?.node_id !== parent.node_id) throw new Error("当前 Agent 服务仅支持从线程最新节点分叉，暂不支持从早期节点分叉；原会话未改变。");
-          if (!setup.initializeResult?.capabilities.fork) throw new Error("daemon does not support fork");
-          const snapshot = await setup.request("thread/attach", {threadId:parent.thread_id,sinceSeq:0});
-          const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
-          if (snapshot.thread.status.type === "running" || snapshot.queue.length || (last && last.turnId !== parent.turn_id)) {
-            if (!args.retry) throw new Error("线程已在其他客户端继续运行，请刷新后从线程最新节点分叉；原会话未改变。");
+        const snapshot = await setup.request("thread/attach", {threadId:parent.thread_id,sinceSeq:0});
+        const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
+        const needsFork = args.retry || args.fork || (last && last.turnId !== parent.turn_id)
+          || snapshot.queue.length || snapshot.thread.status.type === "running";
+        if (needsFork) {
+          if (supportsMidThreadFork(setup)) {
+            // Use the persisted Trellis node -> daemon item boundary, including
+            // when another client has extended the source beyond our last node.
+            const boundary = parent.last_item_id ?? snapshot.items.filter(i=>i.turnId === parent.turn_id && i.completedSeq).sort((a,b)=>b.seq-a.seq)[0]?.id;
+            if (!boundary) throw new Error("所选节点缺少 Agent 历史边界，请刷新后重试");
+            threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, fromItemId: boundary, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
+          } else {
+            // Older daemons cannot truncate history. Seed only the selected
+            // ancestry; never substitute an unbounded live-tip fork.
             threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
             seedHistory = true;
-          } else threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
+          }
         } else {
           threadId = parent.thread_id;
-          const snapshot = await setup.request("thread/attach", {threadId,sinceSeq:0});
-          const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
-          if ((last && last.turnId !== parent.turn_id) || snapshot.queue.length || snapshot.thread.status.type === "running") {
-            threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
-            seedHistory = true;
-          } else if (["closed", "systemError", "interrupted"].includes(snapshot.thread.status.type)) await setup.request("thread/resume", {threadId});
+          if (["closed", "systemError", "interrupted"].includes(snapshot.thread.status.type)) await setup.request("thread/resume", {threadId});
         }
       } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
       const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
