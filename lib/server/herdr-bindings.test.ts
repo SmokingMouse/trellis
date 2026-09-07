@@ -7,9 +7,8 @@ import path from "node:path";
 mock.module("server-only", () => ({}));
 
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-bindings-"));
-process.env.TRELLIS_DB_PATH = path.join(testHome, "trellis.db");
 
-const { ensureHerdrSchema, getDB } = await import("./sqlite");
+const { ensureHerdrSchema } = await import("./sqlite");
 const {
   claudeProjectSlug,
   getHerdrBinding,
@@ -18,7 +17,6 @@ const {
   reconcileHerdrSnapshot,
   resolveTranscriptPath,
 } = await import("./herdr-bindings");
-const { attachSession } = await import("./cli-sync-watcher");
 import type { HerdrPane } from "./herdr-types";
 
 afterAll(() => {
@@ -164,7 +162,7 @@ describe("Herdr transcript bindings", () => {
     db.close();
   });
 
-  test("Herdr auto-attach imports Claude as a read-only origin", () => {
+  test("Herdr auto-attach imports Claude as a read-only origin", async () => {
     const sessionId = "33333333-3333-4333-8333-333333333333";
     const cwd = "/tmp/herdr-readonly";
     const file = path.join(testHome, "attach", `${sessionId}.jsonl`);
@@ -197,10 +195,28 @@ describe("Herdr transcript bindings", () => {
         .map((entry) => JSON.stringify(entry))
         .join("\n") + "\n",
     );
-    attachSession(file, "claude", { origin: "herdr" });
-    const row = getDB()
-      .prepare("SELECT origin, source_jsonl_path FROM sessions WHERE id = ?")
-      .get(sessionId) as { origin: string; source_jsonl_path: string };
+    const dbPath = path.join(testHome, "attach-origin.db");
+    const script = `
+      const { attachSession } = await import(${JSON.stringify(path.resolve("lib/server/cli-sync-watcher.ts"))});
+      const { getDB } = await import(${JSON.stringify(path.resolve("lib/server/sqlite.ts"))});
+      attachSession(${JSON.stringify(file)}, "claude", { origin: "herdr" });
+      const row = getDB().prepare("SELECT origin, source_jsonl_path FROM sessions WHERE id = ?").get(${JSON.stringify(sessionId)});
+      process.stdout.write(JSON.stringify(row));
+      process.exit(0);
+    `;
+    const child = Bun.spawn(["bun", "--conditions", "react-server", "-e", script], {
+      cwd: process.cwd(),
+      env: { ...process.env, TRELLIS_DB_PATH: dbPath },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exitCode, stderr).toBe(0);
+    const row = JSON.parse(stdout) as { origin: string; source_jsonl_path: string };
     expect(row.origin).toBe("herdr");
     expect(row.source_jsonl_path).toBe(file);
   });

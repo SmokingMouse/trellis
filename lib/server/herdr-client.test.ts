@@ -174,6 +174,11 @@ describe("HerdrClient", () => {
     expect(server.requests.every((request) => typeof request.id === "string")).toBeTrue();
     expect(server.requests.every((request) => request.params !== undefined)).toBeTrue();
     expect(server.connections).toBe(server.requests.length);
+    const subscriptions = server.requests.find(
+      (request) => request.method === "events.subscribe",
+    )?.params.subscriptions as { type: string }[];
+    expect(subscriptions.some((item) => item.type === "pane.agent_status_changed")).toBeFalse();
+    expect(subscriptions.some((item) => item.type === "pane.output_matched")).toBeFalse();
   });
 
   test("subscribes before snapshot, discards replay, de-duplicates revisions and coalesces", async () => {
@@ -222,6 +227,27 @@ describe("HerdrClient", () => {
     expect(server.requests.filter((r) => r.method === "session.snapshot").length).toBeGreaterThan(
       before,
     );
+  });
+
+  test("resnapshots instead of applying an overflowing event queue", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    const client = clientFor(server, { queueLimit: 1, coalesceMs: 20 });
+    await client.start();
+    const before = server.requests.filter((r) => r.method === "session.snapshot").length;
+    server.emit({
+      event: "pane_updated",
+      data: { type: "pane_updated", pane: pane(6, "working") },
+    });
+    server.emit({
+      event: "pane_updated",
+      data: { type: "pane_updated", pane: pane(7, "done") },
+    });
+    await Bun.sleep(60);
+    expect(server.requests.filter((r) => r.method === "session.snapshot").length).toBeGreaterThan(
+      before,
+    );
+    expect(client.state.panes[0].revision).toBe(5);
   });
 
   test("protocol mismatch keeps reads but rejects writes", async () => {

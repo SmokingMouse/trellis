@@ -217,7 +217,14 @@ export function reconcileHerdrPane(
   const db = options.db ?? getDB();
   const now = options.now ?? Date.now();
   const agentKind = pane.agent ?? session.agent;
-  const transcriptPath = resolveTranscriptPath(pane, options.home);
+  const existing = getHerdrBinding(session.value, db);
+  const cachedPath = existing?.transcriptPath;
+  const transcriptPath =
+    cachedPath &&
+    fs.existsSync(cachedPath) &&
+    (!pane.cwd || transcriptCwd(agentKind, cachedPath) === pane.cwd)
+      ? cachedPath
+      : resolveTranscriptPath(pane, options.home);
   db.prepare(
     `INSERT INTO herdr_sessions
        (session_id, session_source, session_kind, agent_kind, pane_id,
@@ -236,7 +243,7 @@ export function reconcileHerdrPane(
        label = excluded.label,
        agent_name = excluded.agent_name,
        cwd = excluded.cwd,
-       transcript_path = COALESCE(excluded.transcript_path, herdr_sessions.transcript_path),
+       transcript_path = excluded.transcript_path,
        agent_status = excluded.agent_status,
        revision = excluded.revision,
        state_change_seq = excluded.state_change_seq,

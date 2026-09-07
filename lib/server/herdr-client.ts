@@ -134,6 +134,12 @@ function sameImportantPaneState(before: HerdrPane, after: HerdrPane): boolean {
   );
 }
 
+function shellArgument(value: string): string {
+  return /^[A-Za-z0-9-]+$/.test(value)
+    ? value
+    : `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 export class HerdrClient {
   readonly socketPath: string;
   readonly enabled: boolean;
@@ -329,8 +335,8 @@ export class HerdrClient {
     if (!paneId) throw new HerdrApiError("pane.split returned no pane", "bad_response");
     const command =
       agentKind === "codex"
-        ? `codex resume ${sessionId}`
-        : `claude --resume ${sessionId}`;
+        ? `codex resume ${shellArgument(sessionId)}`
+        : `claude --resume ${shellArgument(sessionId)}`;
     await this.request("pane.send_input", {
       pane_id: paneId,
       text: command,
@@ -646,6 +652,7 @@ export class HerdrClient {
 
   private eventDisconnected(error: unknown): void {
     if (this.stopped) return;
+    if (this.eventSocket === null && !this._available) return;
     this.eventSocket = null;
     this._realtime = false;
     this.baselineReady = false;
@@ -655,7 +662,7 @@ export class HerdrClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) return;
+    if (this.stopped || this.fatalTransport || this.reconnectTimer) return;
     const base = Math.min(5_000, 250 * 2 ** this.reconnectAttempt++);
     const jitter = 0.8 + this.random() * 0.4;
     this.reconnectTimer = setTimeout(() => {
@@ -669,9 +676,10 @@ export class HerdrClient {
     if (this.stopped || this.eventSocket) return;
     try {
       await this.probe(0);
-      await this.openSubscriptionAndSnapshot();
+      if (this._readOnly) await this.resync();
+      else await this.openSubscriptionAndSnapshot();
     } catch (error) {
-      this._lastError = error instanceof Error ? error.message : String(error);
+      this.markDown(error);
       this.scheduleReconnect();
     }
   }
