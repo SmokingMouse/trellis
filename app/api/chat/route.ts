@@ -229,6 +229,28 @@ export async function POST(req: Request) {
     return Response.json({ error: "empty question" }, { status: 400 });
   }
 
+  // Herdr-bound transcripts have a single driver: the terminal agent. They are
+  // mirrored into Trellis for reading only; regular chat must never resume or
+  // fork them behind Herdr's back.
+  const targetSession = (() => {
+    if (body.kind === "root" && body.sessionId) return getSession(body.sessionId);
+    if (body.kind === "branch" && body.parentNodeId) {
+      const parent = getNode(body.parentNodeId);
+      return parent ? getSession(parent.sessionId) : null;
+    }
+    if (body.kind === "retry" && body.nodeId) {
+      const node = getNode(body.nodeId);
+      return node ? getSession(node.sessionId) : null;
+    }
+    return null;
+  })();
+  if (targetSession?.origin === "herdr") {
+    return Response.json(
+      { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
+      { status: 409 },
+    );
+  }
+
   const providerId = isProviderId(body.provider)
     ? body.provider
     : DEFAULT_PROVIDER;

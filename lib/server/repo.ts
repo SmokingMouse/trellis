@@ -515,7 +515,7 @@ export function deleteSession(id: string): void {
   // FK graph — do it explicitly.
   ftsDeleteBySession(db, id);
   // cli-import 镜像的 jsonl 是用户的原始 CLI 历史，绝不能跟着删 —— 只清 DB 行。
-  if (meta && meta.origin !== "cli-import") {
+  if (meta && meta.origin !== "cli-import" && meta.origin !== "herdr") {
     const cwd = sessionCwd(meta.mode as Mode, meta.wp);
     for (const r of claudeIdRows) {
       try {

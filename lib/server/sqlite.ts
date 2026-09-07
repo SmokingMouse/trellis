@@ -76,6 +76,8 @@ function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS nodes_parent ON nodes(parent_id);
   `);
 
+  ensureHerdrSchema(db);
+
   // Idempotent column add for project mode: each trellis session may bind
   // to one claude CLI session id (null in chat).
   // Legacy: this column was authoritative pre-2026-05. After the per-root
@@ -980,6 +982,33 @@ function migrate(db: Database) {
       tx();
     }
   }
+}
+
+export function ensureHerdrSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS herdr_sessions (
+      session_id TEXT PRIMARY KEY,
+      session_source TEXT NOT NULL,
+      session_kind TEXT NOT NULL,
+      agent_kind TEXT NOT NULL,
+      pane_id TEXT NOT NULL,
+      terminal_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      tab_id TEXT NOT NULL,
+      label TEXT,
+      agent_name TEXT,
+      cwd TEXT,
+      transcript_path TEXT,
+      agent_status TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      state_change_seq INTEGER,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      alive INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS herdr_sessions_pane ON herdr_sessions(pane_id);
+    CREATE INDEX IF NOT EXISTS herdr_sessions_alive ON herdr_sessions(alive);
+  `);
 }
 
 // 把 lib/agent-presets.ts 的五个预设种进 agents 表。

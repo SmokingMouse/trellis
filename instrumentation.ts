@@ -33,6 +33,10 @@ export async function register() {
     "./lib/server/cli-sync-watcher"
   );
   startCliSyncWatcher();
+  // Herdr is an optional enhancement. Start its ping/subscription/snapshot loop
+  // in the background so a missing socket never delays the Trellis server.
+  const { getHerdrFleetService } = await import("./lib/server/herdr-fleet");
+  void getHerdrFleetService().ensureStarted();
   // S88：自定义 Agent 的 SDK 能力探测。放在调度器之前 —— SDK 版本不对时，多传的
   // RunOptions 字段会被 TS 的结构类型放过、被运行时**静默丢弃**：agent 完全不生效，
   // 但 spawn 正常、回答正常、零报错。这是整套里最难查的一类故障，必须在启动时喊。
