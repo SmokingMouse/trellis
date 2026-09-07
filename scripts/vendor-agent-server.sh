@@ -16,6 +16,7 @@ git -C "$SOURCE" archive "$COMMIT" | tar -x -C "$STAGE"
 )
 DEST="$ROOT/vendor/agent-server"
 mkdir -p "$DEST"
+cp "$STAGE/LICENSE" "$DEST/LICENSE"
 # This directory is exclusively generated; delete stale build outputs on refresh.
 rm -rf "$DEST/dist"
 AS_VENDOR_DIST="$STAGE/packages/agent-server/dist" AS_VENDOR_DEST="$DEST/dist" bun -e '

@@ -27,3 +27,11 @@ test("N1 vendor excludes unusable maps and dangling sourceMappingURL references"
     expect(readFileSync(join(dist, file), "utf8")).not.toContain("sourceMappingURL=");
   }
 });
+
+test("N2 vendor includes the complete upstream MIT license", () => {
+  const license = readFileSync(join(import.meta.dir, "../vendor/agent-server/LICENSE"), "utf8");
+  expect(license).toContain("MIT License");
+  expect(license).toContain("Permission is hereby granted, free of charge");
+  expect(license).toContain("THE SOFTWARE IS PROVIDED");
+  expect(license).toContain("Copyright");
+});
