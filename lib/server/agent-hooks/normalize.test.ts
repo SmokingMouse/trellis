@@ -156,6 +156,8 @@ describe("撤卡", () => {
       const after = feed([ev(event, { agent_id: "child", tool_name: "Bash", tool_use_id: "child-bash" })], waiting);
       expect(after.interactivePrompt).toEqual(waiting.interactivePrompt);
       expect(after.state).toBe("waiting");
+      const stopped = feed([ev("SubagentStop", { agent_id: "child", agent_type: "Explore" })], after);
+      expect(stopped.interactivePrompt).toEqual(waiting.interactivePrompt);
       expect(feed([ev(event, { agent_id: "parent", tool_name: "Bash", tool_use_id: "parent-bash" })], after).interactivePrompt).toBeNull();
     });
   }

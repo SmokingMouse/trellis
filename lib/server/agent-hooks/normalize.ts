@@ -227,7 +227,9 @@ export function applyHookEvent(
       if (next.subagents.length === 0 && next.stashed) {
         // 子工具完成会先进入 working；父卡仍在 stash 时也必须复位。
         // 父工具自己的完成事件会清 stash，避免把已答的父卡复活。
-        if (next.state === "waiting" ||
+        const currentOwner = next.interactivePrompt && typeof next.interactivePrompt === "object"
+          ? str((next.interactivePrompt as Record<string, unknown>).agent_id) : null;
+        if ((next.state === "waiting" && (!str(payload.agent_id) || currentOwner === str(payload.agent_id))) ||
             (next.stashed.interactivePrompt && next.interactivePrompt !== next.stashed.interactivePrompt)) {
           next.state = next.stashed.state;
           next.toolName = next.stashed.toolName;
