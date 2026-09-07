@@ -7,6 +7,7 @@ const modes = ["default", "acceptEdits", "plan", "dontAsk"];
 const labels: Record<string,string> = { default: "逐次确认", acceptEdits: "允许编辑", plan: "计划模式", dontAsk: "不询问", full: "绕过审批", bypassPermissions: "绕过审批" };
 export function AsProjectControls({ nodeId }: { nodeId: string }) {
   const threadBound = useSessionStore(s => s.session?.bindingType === "thread");
+  const nodeStatus = useSessionStore(s => s.nodes[nodeId]?.status);
   const [thread, setThread] = useState<{id:string; permission?:string} | null>(null);
   const [supported, setSupported] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -17,6 +18,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   useEffect(() => {
     if (!threadBound) return;
     let stopped = false, source: EventSource | undefined;
+    const pendingIds = new Set<string>();
     const key = `trellis-as-ui:${nodeId}`;
     let saved: {logs:string[]; resolved:string[]} = { logs: [], resolved: [] };
     try { saved = JSON.parse(sessionStorage.getItem(key) ?? JSON.stringify(saved)); } catch {}
@@ -34,7 +36,11 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         source = new EventSource(`/api/as/threads/${value.thread.id}/stream`);
         source.onmessage = event => {
           const data = JSON.parse(event.data) as ShadowEvent;
-          if (data.type === "snapshot") { setThread(data.snapshot.thread); return; }
+          if (data.type === "snapshot") {
+            setThread(data.snapshot.thread);
+            for (const request of data.snapshot.pendingRequests) if (request.params.turnId === value.turnId) pendingIds.add(request.params.requestId);
+            return;
+          }
           if (data.type !== "notification") return;
           const { method, params } = data.notification;
           if (method === "thread/permission/changed") setThread(t => t ? { ...t, permission: params.permission } : t);
@@ -42,7 +48,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
             saved.logs = [...saved.logs, `${params.subtype}: ${JSON.stringify(params.payload)}`].slice(-100);
             setLogs(saved.logs); remember();
           }
-          if (method === "serverRequest/resolved") {
+          if (method === "serverRequest/resolved" && pendingIds.has(params.requestId)) {
             saved.resolved = [...saved.resolved, `已由 ${params.decidedBy.label} 处理`].slice(-10);
             setResolved(saved.resolved); remember();
           }
@@ -53,6 +59,16 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
     const retry = setInterval(() => { if (!source) void open(); }, 2000);
     return () => { stopped = true; clearInterval(retry); source?.close(); };
   }, [nodeId, threadBound]);
+  // A decision can land between the metadata GET and EventSource attach.
+  // The terminal node transition reconciles its durable decision receipt.
+  useEffect(() => {
+    if (!threadBound || nodeStatus === "streaming") return;
+    let stopped = false;
+    void fetch(`/api/nodes/${nodeId}/as`).then(r => r.json()).then(value => {
+      if (!stopped && value.resolved?.length) setResolved(value.resolved);
+    }).catch(() => {});
+    return () => { stopped = true; };
+  }, [nodeId, nodeStatus, threadBound]);
   async function change(permission: string) {
     if (busy || !supported) return;
     setBusy(true); setError("");
