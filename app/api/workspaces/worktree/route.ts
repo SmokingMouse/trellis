@@ -4,6 +4,11 @@ import fs from "node:fs";
 import { getDB } from "@/lib/server/sqlite";
 import { ensureWorkspaceForPath } from "@/lib/server/workspaces";
 import { killWorkspaceTerminals } from "@/lib/server/terminals";
+import {
+  activeWorkspaceSessionCount,
+  pruneWorktreeMetadata,
+  resolveMainCheckoutPath,
+} from "@/lib/server/worktree-clean";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,21 +60,6 @@ function streamingCount(workspaceId: string): number {
       .prepare(
         `SELECT COUNT(*) AS n FROM nodes n JOIN sessions s ON s.id = n.session_id
          WHERE n.status = 'streaming' AND s.workspace_id = ?`,
-      )
-      .get(workspaceId) as { n: number } | undefined;
-    return row?.n ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
-/** 当前仍出现在侧栏里的会话；归档会话不阻止清理，也不计入风险提示。 */
-function activeSessionCount(workspaceId: string): number {
-  try {
-    const row = getDB()
-      .prepare(
-        `SELECT COUNT(*) AS n FROM sessions
-         WHERE archived = 0 AND workspace_id = ?`,
       )
       .get(workspaceId) as { n: number } | undefined;
     return row?.n ?? 0;
@@ -219,11 +209,14 @@ export async function DELETE(req: Request) {
   }
   const db = getDB();
   const ws = db
-    .prepare("SELECT path, kind, created_by FROM workspaces WHERE id = ?")
+    .prepare(
+      "SELECT project_id, path, kind, created_by FROM workspaces WHERE id = ?",
+    )
     .get(workspaceId) as
-    | { path: string; kind: string; created_by: string }
+    | { project_id: string; path: string; kind: string; created_by: string }
     | undefined;
   if (!ws) return Response.json({ error: "workspace not found" }, { status: 404 });
+  const pruneFrom = resolveMainCheckoutPath(db, ws.project_id, ws.path);
 
   // 会话不连坐删：workspace_id 是 ON DELETE SET NULL，那些 session 仍持有
   // workspace_path、仍能 resume，只是回到未归组。
@@ -242,6 +235,7 @@ export async function DELETE(req: Request) {
   if (!fs.existsSync(ws.path)) {
     killWorkspaceTerminals(workspaceId);
     dropRow();
+    if (pruneFrom) pruneWorktreeMetadata(pruneFrom);
     return Response.json({ ok: true, gone: true });
   }
 
@@ -262,7 +256,7 @@ export async function DELETE(req: Request) {
   }
 
   if (!force) {
-    const sessionCount = activeSessionCount(workspaceId);
+    const sessionCount = activeWorkspaceSessionCount(db, workspaceId);
     // force=0 一律**只预演、绝不执行**。删目录不可逆，而这个按钮在触屏上是
     // 常显的（见 SessionSidebar 的 pointer-coarse 分支），误触代价太大 ——
     // 「干净就直接删」实测下来就是点一下目录就没了，连问都不问。
@@ -309,5 +303,6 @@ export async function DELETE(req: Request) {
   }
   killWorkspaceTerminals(workspaceId);
   dropRow();
+  if (pruneFrom) pruneWorktreeMetadata(pruneFrom);
   return Response.json({ ok: true });
 }
