@@ -851,10 +851,16 @@ export class HerdrClient {
     }
 
     const workspace = data.workspace as HerdrWorkspace | undefined;
+    const workspaceId = workspace?.workspace_id ?? data.workspace_id;
+    const workspaceMetadataChanged = typeof workspaceId === "string" &&
+      (!this.workspaces.has(workspaceId) ||
+        (workspace && Object.hasOwn(workspace, "worktree") &&
+          JSON.stringify(workspace.worktree) !== JSON.stringify(this.workspaces.get(workspaceId)?.worktree)));
     // Worktree notifications can contain only IDs. Pull an authoritative snapshot
-    // on demand instead of guessing their workspace metadata or waiting 60s.
+    // for unknown workspaces or changed metadata. Known non-git workspaces omit
+    // the worktree key; that omission must not trigger an endless resnapshot.
     if (event.event.startsWith("worktree_") ||
-        ((event.event === "workspace_created" || event.event === "workspace_updated" || event.event === "workspace_metadata_updated") && workspace?.worktree === undefined)) {
+        ((event.event === "workspace_created" || event.event === "workspace_updated" || event.event === "workspace_metadata_updated") && workspaceMetadataChanged)) {
       this.needsResync = true;
     }
     const tab = data.tab as HerdrTab | undefined;

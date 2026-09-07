@@ -11,3 +11,9 @@
 - 最终验证：`bunx tsc --noEmit` exit 0；`bun test` 216 pass / 0 fail / 703 expect；`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-herdr.sh </dev/null` exit 0；同环境 `mobile-slim-shell.sh` exit 0。D5 exit 0：3471–3482 全空闲、验证锁释放、3490 原 PID 59510/监听子进程 59512 存活。
 - 证据：契约 `fj-hb-nest-fix-115b/out/` 的 tsc.log、bun-test.log、mobile-herdr.log、mobile-slim-shell.log、d5.log；首轮 E2E 主动终止（143），测试卡片结束事件修正后复跑通过。
 - Next：交主控独立验收；未 push，未操作 .next-user-verify 与 3490 进程。
+
+## N1 续修（fj-hb-nest-fix2-238c）
+
+- workspace 事件在写入本地 Map 前判断：未知 ID 或显式 worktree 值变化才按需快照；已知非 git 工作区省略该 key 不再触发快照。worktree_* 事件保持原逻辑。
+- 两条 N1 回归先在旧实现上失败；覆盖三类 workspace 事件各十次不重拉、未知 workspace、元数据添加/切换/清空及相同元数据不重拉。
+- Next：定向测试与契约 D1–D5 全量验证。

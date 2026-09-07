@@ -163,6 +163,54 @@ afterEach(() => {
 });
 
 describe("HerdrClient", () => {
+  test("N1 ten known non-git workspace updates do not request extra snapshots", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    const client = clientFor(server);
+    await client.start();
+    const initial = server.requests.filter(r => r.method === "session.snapshot").length;
+    for (const event of ["workspace_updated", "workspace_metadata_updated", "workspace_created"]) {
+      for (let i = 0; i < 10; i++) {
+        const workspace = { workspace_id: "w1", label: `${event}-${i}` };
+        server.snapshot.workspaces[0] = workspace;
+        server.emit({ event, data: { workspace } });
+        // Separate flushes: coalescing must not hide a snapshot storm.
+        await Bun.sleep(30);
+        expect(client.state.workspaces[0].label).toBe(workspace.label);
+        expect(server.requests.filter(r => r.method === "session.snapshot")).toHaveLength(initial);
+      }
+    }
+  });
+
+  test("N1 new workspaces and changed explicit worktree metadata still resync", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    const client = clientFor(server);
+    await client.start();
+    const count = () => server.requests.filter(r => r.method === "session.snapshot").length;
+    for (const [index, event] of ["workspace_created", "workspace_updated", "workspace_metadata_updated"].entries()) {
+      const workspace = { workspace_id: `new-${index}`, label: "New" };
+      server.snapshot.workspaces.push(workspace);
+      const before = count();
+      server.emit({ event, data: { workspace } });
+      await Bun.sleep(30);
+      expect(count()).toBe(before + 1);
+      expect(client.state.workspaces.some(w => w.workspace_id === workspace.workspace_id)).toBeTrue();
+    }
+    const worktree = { repo_root: "/repo", repo_name: "Repo", checkout_path: "/repo", is_linked_worktree: false };
+    for (const incoming of [worktree, { ...worktree, checkout_path: "/linked", is_linked_worktree: true }, null]) {
+      const workspace = { workspace_id: "w1", label: "Changed", worktree: incoming };
+      server.snapshot.workspaces[0] = workspace;
+      const before = count();
+      server.emit({ event: "workspace_updated", data: { workspace } });
+      await Bun.sleep(30);
+      expect(count()).toBe(before + 1);
+      expect(client.state.workspaces[0].worktree).toEqual(incoming);
+      server.emit({ event: "workspace_metadata_updated", data: { workspace: structuredClone(workspace) } });
+      await Bun.sleep(30);
+      expect(count()).toBe(before + 1);
+    }
+  });
   test("a close flushed during snapshot RTT cannot be resurrected by its stale response", async () => {
     const server = new FakeHerdr();
     servers.push(server);

@@ -199,12 +199,13 @@ describe("HerdrFleetService", () => {
     const h = createHarness();
     await h.service.ensureStarted();
     const worktree = { repo_root: fs.realpathSync(h.home), repo_name: "Repo", checkout_path: fs.realpathSync(h.home), is_linked_worktree: true };
+    h.snapshotWorkspaces.push({ workspace_id: "w2", label: "New", worktree });
     h.emit({ event: "workspace_created", data: { workspace: { workspace_id: "w2", label: "New", worktree } } });
     h.emit({ event: "tab_created", data: { tab: { tab_id: "t2", workspace_id: "w2" } } });
     h.emit({ event: "pane_created", data: { pane: { ...h.basePane, pane_id: "p2", workspace_id: "w2", tab_id: "t2" } } });
     await Bun.sleep(50);
     expect(h.service.fleet().workspaces.find(w => w.workspace_id === "w2")?.worktree).toMatchObject(worktree);
-    expect(h.requests.filter(r => r.method === "session.snapshot")).toHaveLength(1);
+    expect(h.requests.filter(r => r.method === "session.snapshot")).toHaveLength(2);
     for (const event of ["worktree_created", "worktree_opened", "worktree_removed"]) {
       h.snapshotWorkspaces[0].worktree = event === "worktree_removed" ? null : worktree;
       const before = h.requests.filter(r => r.method === "session.snapshot").length;
