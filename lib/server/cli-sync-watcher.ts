@@ -13,26 +13,58 @@ import {
   CODEX_SESSIONS_DIR,
   discoverLineage,
   isWithinCodexSessions,
-  parseCliTranscript,
-  type CliProvider,
   type DiscoveredLineage,
 } from "./cli-discover";
+import { parseCliTranscript, type CliProvider } from "./cli-transcript";
+import { findCodexRolloutPath } from "./codex-transcript-index";
 import { deleteSession } from "./repo";
 import { publishCliSessionUpdated } from "./cli-sync-events";
 
 // 当前 attached 会话的源 jsonl 绝对路径集合（每次实时查 DB，保持权威）。
 type AttachedPath = { sid: string; provider: CliProvider };
 
+type AttachedPathRow = {
+  sid: string;
+  provider: CliProvider;
+  cliSid: string;
+  isRoot: number;
+  p: string;
+};
+
+function currentAttachedPath(row: AttachedPathRow): string {
+  if (row.provider !== "codex" || fs.existsSync(row.p)) return row.p;
+  const found = findCodexRolloutPath(row.cliSid);
+  if (!found) return row.p;
+  const db = getDB();
+  db.prepare(
+    `UPDATE cli_lineages SET jsonl_path = ?
+     WHERE trellis_session_id = ? AND cli_session_id = ?`,
+  ).run(found, row.sid, row.cliSid);
+  if (row.isRoot === 1) {
+    db.prepare("UPDATE sessions SET source_jsonl_path = ? WHERE id = ?").run(
+      found,
+      row.sid,
+    );
+  }
+  return found;
+}
+
 function attachedPathMap(): Map<string, AttachedPath> {
   const db = getDB();
   const rows = db
     .prepare(
-      `SELECT trellis_session_id AS sid, provider_family AS provider, jsonl_path AS p
+      `SELECT trellis_session_id AS sid, provider_family AS provider,
+              cli_session_id AS cliSid, is_root AS isRoot, jsonl_path AS p
        FROM cli_lineages
        WHERE jsonl_path IS NOT NULL`,
     )
-    .all() as { sid: string; provider: CliProvider; p: string }[];
-  return new Map(rows.map((row) => [row.p, { sid: row.sid, provider: row.provider }]));
+    .all() as AttachedPathRow[];
+  return new Map(
+    rows.map((row) => [
+      currentAttachedPath(row),
+      { sid: row.sid, provider: row.provider },
+    ]),
+  );
 }
 
 function attachedSessions(): {
@@ -300,6 +332,8 @@ export function startCliSyncWatcher(): void {
   if (started) return;
   started = true;
   try {
+    // Heal moved Codex rollout paths before the startup re-import reads them.
+    attachedPathMap();
     // 启动时补一次全量重导（捕获进程不在时 CLI 侧的离线变更），再起 watch。
     for (const session of attachedSessions()) {
       try {
