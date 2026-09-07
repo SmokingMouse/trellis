@@ -6,4 +6,4 @@
 - P1-3：仅 running 轮询，idle 清除 timer；快照按 pending id 与 inProgress payload 长度抑制重复；投影无变化保留原对象。200KB 静态输出 10 秒复现已转单测，冗余快照字节为 0。
 - P2-2/P2-3/P2-6：错误与轮次状态可见；贴底跟随、上滑停止与回底按钮（控件交互不抢滚）；首个完整快照不计入实时背压，后续慢消费者限额保留。
 - 验证：tsc、完整 bun test、mobile-as-shadow、mobile-slim-shell 已通过。新增真实 Mock daemon SIGKILL/同 socket 重启、token 失效恢复、2MB 首帧等测试；手机增加错误/轮次与自动跟随断言。证据在新契约 out/result.md 及日志。
-- Next：等待主控对 D4 等价干净 clone 证据的确认；原带固定目录删除的命令被工具自动审批拒绝，scripts/verify-as-clean.ts 仅清理自己 mkdtemp 创建的 clone，install --ignore-scripts 与 build 均已 exit 0。确认前不发 result。
+- Next：按主控最新指令交付 result 待独立验收。D4 原带固定目录删除的命令被工具自动审批拒绝；fallback scripts/verify-as-clean.ts 已完成，仅清理自己 mkdtemp 创建的 clone，install --ignore-scripts 与 build 均 exit 0。交付明确保留原命令未执行的限制，不将等价验证冒充原命令通过。
