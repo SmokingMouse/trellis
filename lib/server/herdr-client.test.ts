@@ -249,6 +249,23 @@ describe("HerdrClient", () => {
     expect(client.state.panes[0].revision).toBe(5);
   });
 
+  test("does not resurrect a pane when update and close share one flush", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    const client = clientFor(server, { coalesceMs: 20 });
+    await client.start();
+    server.emit({
+      event: "pane_updated",
+      data: { type: "pane_updated", pane: pane(6, "working") },
+    });
+    server.emit({
+      event: "pane_closed",
+      data: { type: "pane_closed", pane_id: "w1:p1", workspace_id: "w1" },
+    });
+    await Bun.sleep(50);
+    expect(client.state.panes).toHaveLength(0);
+  });
+
   test("protocol mismatch keeps reads but rejects writes", async () => {
     const server = new FakeHerdr();
     server.protocol = 20;

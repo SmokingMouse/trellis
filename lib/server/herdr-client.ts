@@ -170,7 +170,7 @@ export class HerdrClient {
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private starting: Promise<void> | null = null;
-  private snapshotting: Promise<void> | null = null;
+  private snapshotting: Promise<boolean> | null = null;
   private stopped = false;
   private baselineReady = false;
   private needsResync = false;
@@ -561,7 +561,9 @@ export class HerdrClient {
     this.baselineReady = false;
     this.lineQueue = [];
     await this.openEventSocket();
-    await this.resync();
+    if (!(await this.resync())) {
+      throw new HerdrUnavailableError(this._lastError ?? "initial Herdr snapshot failed");
+    }
     this.baselineReady = true;
     this._realtime = true;
     this.reconnectAttempt = 0;
@@ -715,6 +717,10 @@ export class HerdrClient {
     const lines = this.lineQueue;
     this.lineQueue = [];
     const paneUpdates = new Map<string, { event: HerdrEvent; replay: boolean }>();
+    const flushPaneUpdates = () => {
+      for (const item of paneUpdates.values()) this.applyEvent(item.event, item.replay);
+      paneUpdates.clear();
+    };
     for (const item of lines) {
       let event: HerdrEvent;
       try {
@@ -733,10 +739,14 @@ export class HerdrClient {
           paneUpdates.set(pane.pane_id, { event, replay: item.replay });
         }
       } else {
+        // A close/create is an ordering barrier. Applying every coalesced update
+        // after the whole batch could resurrect a pane that closed later in the
+        // same 200ms window.
+        flushPaneUpdates();
         this.applyEvent(event, item.replay);
       }
     }
-    for (const item of paneUpdates.values()) this.applyEvent(item.event, item.replay);
+    flushPaneUpdates();
     if (this.needsResync) {
       this.needsResync = false;
       void this.resync();
@@ -786,8 +796,8 @@ export class HerdrClient {
     this.emit({ kind: "fleet" });
   }
 
-  private async resync(): Promise<void> {
-    if (this.stopped || !this._available) return;
+  private async resync(): Promise<boolean> {
+    if (this.stopped || !this._available) return false;
     if (this.snapshotting) return this.snapshotting;
     this.snapshotting = (async () => {
       try {
@@ -797,9 +807,11 @@ export class HerdrClient {
           2,
         );
         this.applySnapshot(result.snapshot);
+        return true;
       } catch (error) {
         if (error instanceof HerdrTransportError) this.markDown(error);
         else this._lastError = error instanceof Error ? error.message : String(error);
+        return false;
       }
     })().finally(() => {
       this.snapshotting = null;
