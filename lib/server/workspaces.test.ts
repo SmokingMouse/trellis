@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, setSystemTime, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   mkdtempSync,
@@ -176,20 +176,19 @@ describe("workspace realpath identity", () => {
     db.close();
   });
 
-  test("non-scan registration starts at created_at and UI use refreshes recency", () => {
+  test("only UI registration starts at created_at and UI use refreshes recency", () => {
     const db = projectTreeDb();
     const id = ensureWorkspaceForPath(unusedDir, "trellis", db);
     const discoveredId = ensureWorkspaceForPath(realDir, "discovered", db);
     expect(id).toBeString();
     expect(discoveredId).toBeString();
-    for (const workspaceId of [id!, discoveredId!]) {
-      const created = db
-        .prepare(
-          "SELECT created_at, last_used_at FROM workspaces WHERE id = ?",
-        )
-        .get(workspaceId) as { created_at: number; last_used_at: number };
-      expect(created.last_used_at).toBe(created.created_at);
-    }
+    const created = db
+      .prepare("SELECT created_at, last_used_at FROM workspaces WHERE id = ?")
+      .get(id!) as { created_at: number; last_used_at: number };
+    expect(created.last_used_at).toBe(created.created_at);
+    expect(
+      db.prepare("SELECT last_used_at FROM workspaces WHERE id = ?").get(discoveredId!),
+    ).toEqual({ last_used_at: null });
 
     db.prepare("UPDATE workspaces SET last_used_at = 1 WHERE id = ?").run(id!);
     touchWorkspace(id!, db);
@@ -198,6 +197,49 @@ describe("workspace realpath identity", () => {
       .get(id!) as { last_used_at: number };
     expect(touched.last_used_at).toBeGreaterThan(1);
     db.close();
+  });
+
+  test("backfill discoveries rank by session recency, not insertion order", () => {
+    const db = projectTreeDb();
+    try {
+      // Backfill discovers the newer-session path first, then inserts an older-session
+      // path later. Its insertion time must not override the sessions' true recency.
+      setSystemTime(30_000);
+      const newerId = ensureWorkspaceForPath(realDir, "discovered", db);
+      setSystemTime(40_000);
+      const olderId = ensureWorkspaceForPath(activeDir, "discovered", db);
+      setSystemTime(50_000);
+      const uiId = ensureWorkspaceForPath(unusedDir, "trellis", db);
+      expect(newerId).toBeString();
+      expect(olderId).toBeString();
+      expect(uiId).toBeString();
+
+      db.prepare("INSERT INTO sessions VALUES ('newer',?,20000,0,'user')").run(
+        newerId!,
+      );
+      db.prepare("INSERT INTO sessions VALUES ('older',?,10000,0,'user')").run(
+        olderId!,
+      );
+
+      expect(
+        db
+          .prepare(
+            "SELECT id, last_used_at FROM workspaces WHERE id IN (?, ?) ORDER BY id",
+          )
+          .all(newerId!, olderId!),
+      ).toEqual([
+        { id: newerId!, last_used_at: null },
+        { id: olderId!, last_used_at: null },
+      ].sort((a, b) => a.id.localeCompare(b.id)));
+      expect(listProjectTree(db)[0]?.workspaces.map((w) => w.id)).toEqual([
+        uiId!,
+        newerId!,
+        olderId!,
+      ]);
+    } finally {
+      setSystemTime();
+      db.close();
+    }
   });
 
   test("a UI-created worktree ranks first in the sidebar and recent picker", () => {

@@ -266,7 +266,7 @@ export function ensureWorkspaceForPath(
     cluster.gitBranch,
     createdBy,
     now,
-    createdBy === "worktree-scan" ? null : now,
+    createdBy === "trellis" ? now : null,
   );
   // 冲突时上面那个 uuid 没被写进去，必须回查真正落库的 id。
   const row = db
@@ -383,8 +383,8 @@ export function listProjectTree(db: Database = getDB()): ApiProject[] {
     byProject.set(w.project_id, list);
   }
 
-  // trellis/discovered 首次登记沿用 created_at，之后由 touchWorkspace 刷新；
-  // 只有被动扫描登记的 worktree-scan 是 NULL，不会冒充「最近用过」。
+  // 只有 trellis 主动新建的 workspace 首次登记沿用 created_at；discovered 的
+  // 活跃度来自 session.updated_at / touchWorkspace，worktree-scan 同样不伪造活跃度。
   const wsRecency = (w: ApiWorkspace) =>
     Math.max(recency.get(w.id) ?? 0, w.lastUsedAt ?? 0);
 
