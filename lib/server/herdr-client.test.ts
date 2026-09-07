@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -154,6 +154,38 @@ afterEach(() => {
 });
 
 describe("HerdrClient", () => {
+  test("Bun Unix errors distinguish permission denial and stop retrying (rv_err regression)", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    fs.chmodSync(server.socketPath, 0o000);
+    const client = clientFor(server, { healthIntervalMs: 10 });
+    const connects = spyOn(Bun, "connect");
+    try {
+      await client.start();
+      expect(client.state.available).toBeFalse();
+      expect(client.state.lastError).toContain("EACCES");
+      const attempts = connects.mock.calls.length;
+      expect(attempts).toBe(1);
+      await Bun.sleep(60);
+      expect(connects.mock.calls).toHaveLength(attempts);
+    } finally {
+      connects.mockRestore();
+      fs.chmodSync(server.socketPath, 0o600);
+    }
+  });
+
+  test("a non-socket is reported distinctly from a missing endpoint", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-nonsocket-"));
+    const file = path.join(dir, "not.sock");
+    fs.writeFileSync(file, "");
+    const client = new HerdrClient({ socketPath: file });
+    clients.push(client);
+    try {
+      await expect(client.request("ping")).rejects.toMatchObject({ code: "ENOTSOCK" });
+      await expect(new HerdrClient({ socketPath: path.join(dir, "missing.sock") }).request("ping")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test("resolves the documented three-level socket path", () => {
     expect(resolveHerdrSocketPath({ HERDR_SOCKET_PATH: "/tmp/direct.sock" })).toBe(
       "/tmp/direct.sock",

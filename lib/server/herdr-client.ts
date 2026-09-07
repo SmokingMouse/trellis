@@ -1,6 +1,7 @@
 import "server-only";
 import os from "node:os";
 import path from "node:path";
+import fs from "node:fs";
 import {
   HERDR_PROTOCOL,
   type HerdrAgent,
@@ -127,6 +128,25 @@ function transportCode(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const match = message.match(/\b(E[A-Z]+)\b/);
   return match?.[1] ?? "SOCKET_ERROR";
+}
+
+function connectionError(error: unknown, socketPath: string): HerdrTransportError {
+  if (error instanceof HerdrTransportError) return error;
+  let code = transportCode(error);
+  let message = error instanceof Error ? error.message : String(error);
+  // Bun collapses Unix connect failures to ENOENT. Filesystem syscalls retain
+  // the distinction between missing paths, non-sockets and permission denial.
+  if (code === "ENOENT") {
+    try {
+      const stat = fs.statSync(socketPath);
+      fs.accessSync(socketPath, fs.constants.W_OK);
+      if (!stat.isSocket()) { code = "ENOTSOCK"; message = "path is not a Unix socket"; }
+    } catch (cause) {
+      code = transportCode(cause);
+      message = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+  return new HerdrTransportError(`${code}: ${message}`, code);
 }
 
 function sameImportantPaneState(before: HerdrPane, after: HerdrPane): boolean {
@@ -430,7 +450,7 @@ export class HerdrClient {
     const code = transportCode(error);
     // An RPC deadline or malformed response says nothing about socket health.
     if (!["ENOENT", "ENOTSOCK", "ECONNREFUSED", "ECONNRESET", "EPIPE", "EACCES", "EPERM", "SOCKET_ERROR", "EOF"].includes(code)) return;
-    this.fatalTransport = code === "EACCES";
+    this.fatalTransport = code === "EACCES" || code === "EPERM";
     this._available = false;
     this._realtime = false;
     this.baselineReady = false;
@@ -514,15 +534,7 @@ export class HerdrClient {
         if (error) reject(error);
         else resolve(value as T);
       };
-      const failTransport = (error: unknown) =>
-        finish(
-          error instanceof HerdrTransportError
-            ? error
-            : new HerdrTransportError(
-                error instanceof Error ? error.message : String(error),
-                transportCode(error),
-              ),
-        );
+      const failTransport = (error: unknown) => finish(connectionError(error, this.socketPath));
       const timer = setTimeout(
         () => failTransport(new HerdrTransportError(`${method} timed out`, "ETIMEDOUT")),
         timeoutMs,
