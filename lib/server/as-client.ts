@@ -14,6 +14,12 @@ export interface ShadowOptions {
 export function shadowRetryDelay(attempt: number, base = 1000) {
   return Math.min(300000, base * 2 ** Math.min(attempt, 20));
 }
+function snapshotFingerprint(snapshot: AttachResult) {
+  return JSON.stringify([snapshot.thread.status.type, snapshot.nextSeq,
+    snapshot.pendingRequests.map(request => request.params.requestId).sort(),
+    snapshot.items.filter(item => item.status === "inProgress")
+      .map(item => [item.id, JSON.stringify(item.payload).length]).sort()]);
+}
 
 /** Trellis owns the only retry timer; the library only handles wire/RPC/cursors. */
 export class ShadowClient {
@@ -30,6 +36,8 @@ export class ShadowClient {
   private cursor = 0;
   private poll?: ReturnType<typeof setInterval>;
   private polling = false;
+  private running = false;
+  private fingerprint?: string;
   constructor(private readonly options: ShadowOptions = {}) {}
 
   onEvent(listener: (event: ShadowEvent) => void) {
@@ -65,7 +73,7 @@ export class ShadowClient {
   }
   private stopPoll() { clearInterval(this.poll); this.poll = undefined; this.polling = false; }
   private startPoll() {
-    if (this.poll || !this.threadId) return;
+    if (this.poll || !this.threadId || !this.running) return;
     this.poll = setInterval(() => {
       const client = this.client, threadId = this.threadId;
       if (this.polling || !threadId || client?.state !== "connected") return;
@@ -82,6 +90,7 @@ export class ShadowClient {
         this.client = undefined; // old callbacks cannot arm timers while replacing it
         old?.close();
         this.stopPoll();
+        this.fingerprint = undefined; // reconnect snapshots must always reconcile
         this.attachedClient = undefined;
         const paths = resolveDaemonPaths();
         const client = new AgentClient({ transport: "unix", path: this.options.socketPath ?? process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
@@ -106,12 +115,22 @@ export class ShadowClient {
           if (this.stopped || this.client !== client) return;
           this.lastSnapshot = snapshot;
           this.cursor = Math.max(this.cursor, snapshot.nextSeq - 1);
-          this.emit({ type: "snapshot", snapshot });
+          this.running = snapshot.thread.status.type === "running";
+          if (this.running) this.startPoll(); else this.stopPoll();
+          const fingerprint = snapshotFingerprint(snapshot);
+          if (fingerprint !== this.fingerprint) {
+            this.fingerprint = fingerprint;
+            this.emit({ type: "snapshot", snapshot });
+          }
         });
         for (const method of Object.keys(NotificationSchemas) as NotificationMethod[]) {
           client.onNotification(method, params => {
             if (this.stopped || this.client !== client || !("threadId" in params) || params.threadId !== this.threadId) return;
             if ("seq" in params) this.cursor = Math.max(this.cursor, params.seq);
+            if (method === "thread/status/changed" && "status" in params) {
+              this.running = params.status.type === "running";
+              if (this.running) this.startPoll(); else this.stopPoll();
+            }
             this.emit({ type: "notification", notification: { jsonrpc: "2.0", method, params } as ServerNotification });
           });
         }

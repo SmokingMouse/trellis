@@ -11,11 +11,17 @@ export const emptyThreadLog = (): ThreadLog => ({ items: {}, pending: [], cursor
 
 /** Snapshots/completions replace payloads; only live deltas append. */
 export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog {
-  if (event.type === "connection") return { ...log, state: event.state };
+  if (event.type === "connection") return log.state === event.state ? log : { ...log, state: event.state };
   if (event.type === "snapshot") {
-    const items = { ...log.items };
-    for (const item of event.snapshot.items) items[item.id] = item;
-    return { ...log, items, pending: event.snapshot.pendingRequests, cursor: Math.max(log.cursor, event.snapshot.nextSeq - 1) };
+    let items = log.items;
+    for (const item of event.snapshot.items) {
+      if (JSON.stringify(log.items[item.id]) === JSON.stringify(item)) continue;
+      if (items === log.items) items = { ...items };
+      items[item.id] = item;
+    }
+    const cursor = Math.max(log.cursor, event.snapshot.nextSeq - 1);
+    const pending = JSON.stringify(log.pending) === JSON.stringify(event.snapshot.pendingRequests) ? log.pending : event.snapshot.pendingRequests;
+    return items === log.items && pending === log.pending && cursor === log.cursor ? log : { ...log, items, pending, cursor };
   }
   const { method, params } = event.notification;
   if (method === "item/started" || method === "item/completed") {
@@ -23,11 +29,13 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
     return { ...log, items: { ...log.items, [params.item.id]: params.item }, cursor: params.seq };
   }
   if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
-    return { ...log, pending: log.pending.filter(request => request.params.requestId !== params.requestId) };
+    const pending = log.pending.filter(request => request.params.requestId !== params.requestId);
+    return pending.length === log.pending.length ? log : { ...log, pending };
   }
   if (!("itemId" in params)) return log;
   const item = log.items[params.itemId];
   if (!item || item.status !== "inProgress") return log;
+  if (("delta" in params && !params.delta) || ("chunk" in params && !params.chunk)) return log;
   let updated = item;
   if (method === "item/agentMessage/delta" && item.type === "agentMessage")
     updated = { ...item, payload: { ...item.payload, text: item.payload.text + params.delta } };
@@ -41,7 +49,7 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
     updated = { ...item, payload: { ...item.payload, changes: params.changes } };
   if (method === "item/subAgent/progress" && item.type === "subAgent")
     updated = { ...item, payload: { ...item.payload, phase: params.phase, progress: params.progress } };
-  return updated === item ? log : { ...log, items: { ...log.items, [item.id]: updated } };
+  return updated === item || JSON.stringify(updated) === JSON.stringify(item) ? log : { ...log, items: { ...log.items, [item.id]: updated } };
 }
 
 export function itemText(item: Item): string {

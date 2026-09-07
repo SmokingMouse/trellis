@@ -1,3 +1,3 @@
-export function isShadowEnabled(env: { TRELLIS_AS?: string; TRELLIS_AS_SOCKET?: string } = process.env) {
+export function isShadowEnabled(env: Record<string, string | undefined> = process.env) {
   return env.TRELLIS_AS === "on" || Boolean(env.TRELLIS_AS_SOCKET);
 }

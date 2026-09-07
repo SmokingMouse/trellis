@@ -18,4 +18,6 @@ test("partial snapshot replaces deltas; repeated snapshots and completion do not
   expect(Object.keys(log.items)).toEqual(["reply"]);
   expect(log.items.reply.payload).toEqual({ text: "one two three" });
   expect(log.cursor).toBe(4);
+  expect(applyShadowEvent(log, { type: "snapshot", snapshot: snapshot([completed], 5) })).toBe(log);
+  expect(applyShadowEvent(log, { type: "connection", state: log.state })).toBe(log);
 });

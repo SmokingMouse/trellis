@@ -123,3 +123,34 @@ test("P2-1 closed/unauthorized observer reloads token and reattaches without a p
   expect(rebuilt.options.reconnect).toBe(false);
   expect(rebuilt.state).toBe("connected");
 });
+
+test("P1-3 review 200KB/10s repro emits no redundant snapshots and idle stops polling", async () => {
+  const f = fixture(); await f.start();
+  const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token: loadToken(f.paths.tokenPath), reconnect: false });
+  cleanup.push(() => producer.close());
+  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: f.home });
+  const { turn } = await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "long command" }] });
+  f.engine.emit({ type: "itemStarted", turnId: turn.id, item: { id: "large", type: "commandExecution", payload: { command: "mock", cwd: f.home, aggregatedOutput: "x".repeat(200000) } } });
+  await until(() => producer.sinceSeq(thread.id) >= 3);
+  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
+  cleanup.push(() => observer.close());
+  let snapshots = 0, bytes = 0, idle = false;
+  observer.onEvent(event => {
+    if (event.type === "snapshot") { snapshots++; bytes += JSON.stringify(event).length; }
+    if (event.type === "notification" && event.notification.method === "thread/status/changed" && event.notification.params.status.type === "idle") idle = true;
+  });
+  await observer.attach(thread.id);
+  const firstBytes = bytes;
+  const client = await observer.connect();
+  let polls = 0;
+  client.onSnapshot(() => polls++);
+  await Bun.sleep(10100);
+  expect(polls).toBeGreaterThanOrEqual(4);
+  expect(snapshots).toBe(1);
+  expect(bytes - firstBytes).toBe(0);
+  f.engine.emit({ type: "turnCompleted", turnId: turn.id, status: "completed" });
+  await until(() => idle);
+  const idlePolls = polls;
+  await Bun.sleep(2200);
+  expect(polls).toBe(idlePolls);
+}, 15000);
