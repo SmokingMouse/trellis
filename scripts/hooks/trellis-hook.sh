@@ -29,6 +29,6 @@ printf '%s' "$payload" | curl -sS -X POST "http://127.0.0.1:${TRELLIS_HOOK_PORT}
   --connect-timeout 0.5 --max-time 1.5 \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -H "X-Trellis-Hook-Token: ${TRELLIS_HOOK_TOKEN}" \
-  --data-urlencode "paneKey=${TRELLIS_PANE_KEY}" \
+  --data-urlencode "paneKey=${TRELLIS_PANE_KEY:-${HERDR_PANE_ID:-}}" \
   --data-urlencode "payload@-" >/dev/null 2>&1 || true
 exit 0
