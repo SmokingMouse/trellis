@@ -299,7 +299,7 @@ JS
 ab screenshot "$OUT/desktop-herdr-sidebar.png"
 # P1-1: clear the waiting hook, then reverse urgency while retaining tree positions.
 curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
-  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"Bash","tool_input":{"command":"true"}}' >/dev/null
+  --data-urlencode 'payload={"hook_event_name":"PostToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion"}' >/dev/null
 ab eval --stdin <<'JS'
 (async () => {
   window.herdrTreeOrder = [...document.querySelectorAll('[data-herdr-repo], [data-herdr-worktree], [data-herdr-pane]')].map(e => e.dataset.herdrRepo || e.dataset.herdrWorktree || e.dataset.herdrPane);
