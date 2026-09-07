@@ -4,6 +4,11 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { getDB } from "./sqlite";
 import { CODEX_SESSIONS_DIR } from "./codex-paths";
+import {
+  findCodexRolloutPath,
+  forgetCodexRolloutPath,
+  rememberCodexRolloutPath,
+} from "./codex-transcript-index";
 
 // ── codex rollout（~/.codex/sessions）的 lineage/分叉引擎 ─────────────────────
 //
@@ -22,46 +27,7 @@ import { CODEX_SESSIONS_DIR } from "./codex-paths";
 
 const SESSIONS_ROOT = CODEX_SESSIONS_DIR;
 
-// sid → rollout 路径缓存。命中后仍 existsSync 验一次（文件可能被清）。
-const rolloutPathCache = new Map<string, string>();
-
-// claude 的 claudeSessionPath 可从 (sid, cwd) 确定性推导；codex 路径嵌着创建
-// 日期（YYYY/MM/DD/rollout-<ts>-<sid>.jsonl），只能扫盘。目录按日期组织，从新
-// 到旧扫、命中即停——常用 session 都在最近几天，实际开销一两个 readdir。
-export function findCodexRolloutPath(sid: string): string | null {
-  const cached = rolloutPathCache.get(sid);
-  if (cached) {
-    if (fs.existsSync(cached)) return cached;
-    rolloutPathCache.delete(sid);
-  }
-  const suffix = `-${sid}.jsonl`;
-  try {
-    const numericDesc = (a: string, b: string) => Number(b) - Number(a);
-    for (const y of fs.readdirSync(SESSIONS_ROOT).filter(isNumericDir).sort(numericDesc)) {
-      const yDir = path.join(SESSIONS_ROOT, y);
-      for (const m of fs.readdirSync(yDir).filter(isNumericDir).sort(numericDesc)) {
-        const mDir = path.join(yDir, m);
-        for (const d of fs.readdirSync(mDir).filter(isNumericDir).sort(numericDesc)) {
-          const dDir = path.join(mDir, d);
-          for (const f of fs.readdirSync(dDir)) {
-            if (f.startsWith("rollout-") && f.endsWith(suffix)) {
-              const full = path.join(dDir, f);
-              rolloutPathCache.set(sid, full);
-              return full;
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // ~/.codex/sessions 不存在（未装 codex / 未跑过）→ 视同找不到
-  }
-  return null;
-}
-
-function isNumericDir(name: string): boolean {
-  return /^\d+$/.test(name);
-}
+export { findCodexRolloutPath } from "./codex-transcript-index";
 
 // resume id 自愈闸：rollout 被手动清理/迁移后，把死 id 喂给 `codex exec resume`
 // 会硬失败——存在性检查失败就回落 fresh（与 claudeJsonlExists 同纪律）。
@@ -79,7 +45,7 @@ export function deleteCodexRollout(sid: string): void {
   } catch {
     // moved/deleted manually — best effort.
   }
-  rolloutPathCache.delete(sid);
+  forgetCodexRolloutPath(sid);
 }
 
 // ── rollout 解析 ─────────────────────────────────────────────────────────────
@@ -198,7 +164,7 @@ export function buildCodexPrefixRollout(
   } catch {
     return null;
   }
-  rolloutPathCache.set(newSid, rolloutPath);
+  rememberCodexRolloutPath(newSid, rolloutPath);
   return { newSid, rolloutPath };
 }
 
