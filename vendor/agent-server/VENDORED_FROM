@@ -1,0 +1,4 @@
+sm-toolkit commit 94b02551fe4b3b5013a1ef5a5d199f2e217fa2ea
+package packages/agent-server
+build bun tsc --build packages/agent-server
+agent runtime pinned to published 0.8.0 (Trellis baseline)

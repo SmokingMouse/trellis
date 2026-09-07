@@ -1,0 +1,38 @@
+{
+  "name": "@smokingmouse/agent-server",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol/index.d.ts",
+      "default": "./dist/protocol/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./transport": {
+      "types": "./dist/transport/index.d.ts",
+      "default": "./dist/transport/index.js"
+    },
+    "./daemon": {
+      "types": "./dist/daemon/index.d.ts",
+      "default": "./dist/daemon/index.js"
+    },
+    "./paths": {
+      "types": "./dist/daemon/paths.d.ts",
+      "default": "./dist/daemon/paths.js"
+    }
+  },
+  "dependencies": {
+    "@smokingmouse/agent": "0.8.0",
+    "zod": "^4.4.3"
+  }
+}
