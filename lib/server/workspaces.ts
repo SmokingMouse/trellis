@@ -168,6 +168,19 @@ export function mergeDuplicateWorkspacePaths(db: Database): {
   return { merged, normalized };
 }
 
+/** 清掉旧版扫描登记时伪造的「最近使用」时间；重复运行不会再命中。 */
+export function clearScanRegistrationRecency(db: Database): number {
+  const result = db
+    .prepare(
+      `UPDATE workspaces
+          SET last_used_at = NULL
+        WHERE created_by = 'worktree-scan'
+          AND last_used_at = created_at`,
+    )
+    .run();
+  return Number(result.changes ?? 0);
+}
+
 /**
  * 把一个绝对路径解析成 workspace（必要时连带建 project），返回 workspace id。
  *
@@ -253,7 +266,7 @@ export function ensureWorkspaceForPath(
     cluster.gitBranch,
     createdBy,
     now,
-    now,
+    null,
   );
   // 冲突时上面那个 uuid 没被写进去，必须回查真正落库的 id。
   const row = db
@@ -325,8 +338,7 @@ export function touchWorkspace(workspaceId: string): void {
  * 排序 = 项目/工作区都按「其下最近活跃的 session」降序，和现有侧栏的
  * `ORDER BY updated_at DESC` 语义一致。
  */
-export function listProjectTree(): ApiProject[] {
-  const db = getDB();
+export function listProjectTree(db: Database = getDB()): ApiProject[] {
   const projects = db
     .prepare("SELECT id, name, cluster_key, git_remote FROM projects")
     .all() as ProjectRow[];
@@ -368,6 +380,8 @@ export function listProjectTree(): ApiProject[] {
     byProject.set(w.project_id, list);
   }
 
+  // last_used_at 只有 touchWorkspace 会在运行期刷新；扫描登记的行是 NULL。
+  // 因而这个 max 只表达真实使用，不再让「刚被扫描到」冒充「最近用过」。
   const wsRecency = (w: ApiWorkspace) =>
     Math.max(recency.get(w.id) ?? 0, w.lastUsedAt ?? 0);
 
@@ -458,6 +472,7 @@ export function backfillWorkspaces(): {
   let worktrees = 0;
   try {
     mergeDuplicateWorkspacePaths(db);
+    clearScanRegistrationRecency(db);
     const rows = db
       .prepare(
         `SELECT DISTINCT workspace_path AS p FROM sessions

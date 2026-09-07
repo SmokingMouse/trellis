@@ -13,13 +13,21 @@ mock.module("server-only", () => ({}));
 const root = mkdtempSync("/tmp/trellis-workspaces-");
 const realDir = path.join(root, "real");
 const aliasDir = path.join(root, "alias");
+const activeDir = path.join(root, "active");
+const unusedDir = path.join(root, "unused");
 mkdirSync(realDir);
+mkdirSync(activeDir);
+mkdirSync(unusedDir);
 symlinkSync(realDir, aliasDir);
 
-const { canonicalWorkspacePath, mergeDuplicateWorkspacePaths } = await import(
-  "./workspaces"
-);
-const { mergeRecentWorkspaces } = await import(
+const {
+  canonicalWorkspacePath,
+  clearScanRegistrationRecency,
+  ensureWorkspaceForPath,
+  listProjectTree,
+  mergeDuplicateWorkspacePaths,
+} = await import("./workspaces");
+const { mergeRecentWorkspaces, sortRecentWorkspaces } = await import(
   "../../app/api/workspaces/recent/route"
 );
 
@@ -48,6 +56,40 @@ function migrationDb(): Database {
       workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL
     );
     INSERT INTO projects VALUES ('p');
+  `);
+  return db;
+}
+
+function projectTreeDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      cluster_key TEXT NOT NULL UNIQUE,
+      git_remote TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      git_branch TEXT,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      updated_at INTEGER NOT NULL,
+      archived INTEGER NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL DEFAULT 'user'
+    );
+    INSERT INTO projects VALUES ('p','repo','test:repo',NULL,1,1);
   `);
   return db;
 }
@@ -93,6 +135,42 @@ describe("workspace realpath identity", () => {
       lastUsedAt: 3,
       source: "both",
     });
+  });
+
+  test("scan registration writes no recency timestamp", () => {
+    const db = projectTreeDb();
+    const id = ensureWorkspaceForPath(unusedDir, "worktree-scan", db);
+    expect(id).toBeString();
+    expect(
+      db.prepare("SELECT last_used_at FROM workspaces WHERE id = ?").get(id!),
+    ).toEqual({ last_used_at: null });
+    db.close();
+  });
+
+  test("unused worktrees sort after workspaces with sessions in tree and picker", () => {
+    const db = projectTreeDb();
+    const insert = db.prepare(
+      `INSERT INTO workspaces
+       (id,project_id,name,path,kind,git_branch,created_by,created_at,last_used_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    );
+    insert.run("unused", "p", "unused", unusedDir, "worktree", "unused", "worktree-scan", 999, 999);
+    insert.run("active", "p", "active", activeDir, "worktree", "active", "discovered", 1, null);
+    db.prepare("INSERT INTO sessions VALUES ('s','active',10,0,'user')").run();
+
+    expect(clearScanRegistrationRecency(db)).toBe(1);
+    expect(clearScanRegistrationRecency(db)).toBe(0);
+    expect(listProjectTree(db)[0]?.workspaces.map((w) => w.id)).toEqual([
+      "active",
+      "unused",
+    ]);
+
+    const pickerRows = sortRecentWorkspaces([
+      { path: unusedDir, shortName: "unused", lastUsedAt: 0, source: "trellis" },
+      { path: activeDir, shortName: "active", lastUsedAt: 10, source: "trellis" },
+    ]);
+    expect(pickerRows.map((w) => w.shortName)).toEqual(["active", "unused"]);
+    db.close();
   });
 
   test("startup merge keeps the highest-permission row and rewires every session", () => {

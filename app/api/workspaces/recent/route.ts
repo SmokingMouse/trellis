@@ -27,16 +27,23 @@ export async function GET() {
   const claudeWorkspaces = readClaudeWorkspaces();
   const freshWorktrees = readWorktreesWithoutSessions();
 
-  const result = mergeRecentWorkspaces(
-    freshWorktrees,
-    trellisWorkspaces,
-    claudeWorkspaces,
+  const result = sortRecentWorkspaces(
+    mergeRecentWorkspaces(
+      freshWorktrees,
+      trellisWorkspaces,
+      claudeWorkspaces,
+    ),
   )
     .filter((w) => fs.existsSync(w.path))
-    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
     .slice(0, MAX_RESULTS);
 
   return Response.json({ workspaces: result });
+}
+
+export function sortRecentWorkspaces(
+  workspaces: RecentWorkspace[],
+): RecentWorkspace[] {
+  return [...workspaces].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
 }
 
 export function mergeRecentWorkspaces(
