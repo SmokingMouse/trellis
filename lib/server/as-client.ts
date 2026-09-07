@@ -104,7 +104,7 @@ export class ShadowClient {
         const client = new AgentClient({ transport: "unix", path: this.options.socketPath ?? process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
           token: this.options.token ?? loadToken(this.options.tokenPath ?? process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
           client: { name: "trellis-shadow", version: "0.1.0", kind: "web", label: "Trellis 只读" },
-          capabilities: { serverRequests: [], engineEvents: true, bashInput: true },
+          capabilities: { serverRequests: [], engineEvents: true, bashInput: true, pendingRequests: true },
           connectTimeoutMs: 1500, requestTimeoutMs: 5000, reconnect: false,
         });
         this.client = client;
@@ -138,7 +138,7 @@ export class ShadowClient {
               || (method === "error" && (!("threadId" in params) || !params.threadId));
             if (!relevant) return;
             if ("seq" in params) this.cursor = Math.max(this.cursor, params.seq);
-            if (method === "thread/status/changed" && "status" in params) {
+            if (method === "thread/status/changed" && "status" in params && typeof params.status === "object") {
               this.running = params.status.type === "running";
               if (this.running) this.startPoll(); else this.stopPoll();
             }
@@ -194,13 +194,17 @@ export function createProjectClient() {
   return new AgentClient({ transport: "unix", path: process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
     token: loadToken(process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
     client: { name: "trellis-project", version: "0.2.0", kind: "web", label: "Trellis 网页" },
-    capabilities: { engineEvents: true, bashInput: true, serverRequests: [
+    capabilities: { engineEvents: true, bashInput: true, pendingRequests: true, serverRequests: [
       "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
       "item/permissions/requestApproval", "item/tool/requestUserInput",
     ] },
     connectTimeoutMs: 1500, requestTimeoutMs: 5000,
     reconnect: { minDelayMs: 1000, maxDelayMs: 30000 },
   });
+}
+
+export function supportsMidThreadFork(client: AgentClient) {
+  return client.initializeResult?.capabilities.midThreadFork === true;
 }
 
 export async function withProjectLease<T>(client: AgentClient, threadId: string, action: () => Promise<T>): Promise<T> {

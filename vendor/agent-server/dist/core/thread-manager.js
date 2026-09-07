@@ -100,12 +100,18 @@ export class ThreadManager {
             return { thread: this.get(existing.id), deduplicated: true };
         }
         const thread = { id: `th_${crypto.randomUUID()}`, backend: params.backend, engineThreadId: internal?.fork ? null : internal?.resume ?? null, cwd: params.cwd ?? process.cwd(), status: { type: "spawning" }, createdAtMs: this.now(), ...(params.model ? { model: params.model } : {}), ...(params.meta ? { meta: params.meta } : {}), ...(params.clientThreadId ? { clientThreadId: params.clientThreadId } : {}) };
-        const options = { ...params, cwd: thread.cwd };
+        if (internal?.forkedFrom)
+            thread.forkedFrom = internal.forkedFrom;
+        const options = { ...params, cwd: thread.cwd, ...(internal?.seedHistory ? { seedHistory: internal.seedHistory } : {}), ...(internal?.fork ? { engineThreadId: internal.resume, forkSession: true, forkPoint: internal.forkPoint } : {}) };
         thread.permission = params.permission ?? "default";
-        this.log.insertThread(thread, request, options);
+        this.log.transaction(() => {
+            this.log.insertThread(thread, request, options);
+            if (internal?.prefix && internal.forkedFrom)
+                this.log.copyPrefix(internal.forkedFrom.threadId, thread.id, internal.prefix);
+        });
         onCreated?.(thread);
         this.log.publish({ jsonrpc: "2.0", method: "thread/started", params: { threadId: thread.id, thread } });
-        await this.open(thread, { ...options, threadId: thread.id, engineThreadId: internal?.resume, forkSession: internal?.fork });
+        await this.open(thread, { ...options, threadId: thread.id, engineThreadId: internal?.resume, forkSession: internal?.fork, forkPoint: internal?.forkPoint });
         return { thread: this.get(thread.id) };
     }
     open(thread, options) {
@@ -183,19 +189,33 @@ export class ThreadManager {
         thread.permission = options.permission ?? "default";
         delete thread.closedAtMs;
         this.log.saveThread(thread);
+        // Claude replay frames are only durably flushed by a subsequent turn. Before
+        // that, recreate the seeded process instead of resuming an incomplete file.
+        const reseed = thread.backend === "claude" && options.seedHistory !== undefined;
+        if (reseed && thread.engineThreadId) {
+            thread.engineThreadId = null;
+            this.log.saveThread(thread);
+        }
         this.setStatus(thread.id, { type: "spawning" });
-        await this.open(thread, { ...options, threadId: thread.id, engineThreadId: thread.engineThreadId ?? undefined });
+        await this.open(thread, { ...options, threadId: thread.id, ...(reseed ? { engineThreadId: undefined, forkSession: false } : thread.engineThreadId ? { engineThreadId: thread.engineThreadId, forkSession: false, forkPoint: undefined, seedHistory: undefined } : {}) });
         return { thread: this.get(thread.id), attached: false };
     }
     async fork(params, onCreated) {
         const source = this.get(params.threadId);
-        // TODO: fromItemId on Claude requires a prefix-jsonl transcript fork.
-        if (params.fromItemId !== undefined)
-            throw new ProtocolError(ErrorCode.unsupported_capability, "fork fromItemId requires prefix-jsonl support", { threadId: source.id });
-        if (source.backend !== "claude" || !source.engineThreadId)
-            throw new ProtocolError(ErrorCode.unsupported_capability, "native Claude fork needs an engine session id", { threadId: source.id });
+        if (source.backend !== "claude" && source.backend !== "codex")
+            throw new ProtocolError(ErrorCode.unsupported_capability, "fork requires Claude or Codex", { threadId: source.id });
+        const all = this.log.snapshot(source.id).items;
+        const index = params.fromItemId === undefined ? all.length - 1 : all.findIndex(item => item.id === params.fromItemId);
+        if (params.fromItemId !== undefined && index < 0)
+            throw new ProtocolError(ErrorCode.invalid_params, "fromItemId does not belong to the source thread", { threadId: source.id, itemId: params.fromItemId });
+        const prefix = all.slice(0, index + 1), itemId = prefix.at(-1)?.id ?? null;
+        const forkPoint = itemId ? this.log.forkPoint(source.id, itemId) : undefined;
+        // Unmapped and live boundaries must never silently inherit a later native suffix.
+        const unflushedSeed = source.backend === "claude" && this.log.options(source.id).seedHistory !== undefined;
+        const native = !unflushedSeed && !!source.engineThreadId && !!forkPoint;
         const { clientThreadId: _, ...options } = this.log.options(source.id);
-        return this.start({ ...options, clientThreadId: params.clientThreadId }, onCreated, { resume: source.engineThreadId, fork: true, request: params });
+        const { seedHistory: __, engineThreadId: ___, forkSession: ____, forkPoint: _____, ...clean } = options;
+        return this.start({ ...clean, clientThreadId: params.clientThreadId }, onCreated, { ...(native ? { resume: source.engineThreadId, fork: true, forkPoint } : { seedHistory: prefix }), prefix, forkedFrom: { threadId: source.id, itemId }, request: params });
     }
     metadata(threadId, engineThreadId) {
         const owner = this.engineThreads.get(engineThreadId);
@@ -277,10 +297,16 @@ export class ThreadManager {
             case "itemCompleted":
                 this.log.updateItem(threadId, event.item, true);
                 break;
-            case "turnCompleted":
+            case "turnCompleted": {
                 this.approvals?.expireThread(threadId, "turn_completed", turnId);
+                const { seedHistory: _, engineThreadId: __, forkSession: ___, forkPoint: ____, ...options } = this.log.options(threadId);
+                this.log.saveOptions(threadId, options);
                 this.queue(threadId).complete(turnId, event.status, event.usage, event.error);
+                const last = this.log.snapshot(threadId).items.filter(item => item.turnId === turnId).at(-1);
+                if (last && event.status === "completed" && event.forkPoint)
+                    this.log.saveForkPoint(threadId, last.id, event.forkPoint);
                 break;
+            }
             case "approval":
                 if (!this.approvals)
                     throw new ProtocolError(ErrorCode.internal, "ApprovalBroker is not configured");

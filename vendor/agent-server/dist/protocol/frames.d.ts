@@ -24,6 +24,7 @@ export declare const ErrorResponseSchema: z.ZodObject<{
             retryable: z.ZodBoolean;
             detail: z.ZodOptional<z.ZodJSONSchema>;
             stderr: z.ZodOptional<z.ZodString>;
+            reason: z.ZodOptional<z.ZodString>;
             raw: z.ZodOptional<z.ZodJSONSchema>;
             holder: z.ZodOptional<z.ZodObject<{
                 clientId: z.ZodString;
@@ -59,6 +60,7 @@ export declare const FrameSchema: z.ZodUnion<readonly [z.ZodObject<{
             retryable: z.ZodBoolean;
             detail: z.ZodOptional<z.ZodJSONSchema>;
             stderr: z.ZodOptional<z.ZodString>;
+            reason: z.ZodOptional<z.ZodString>;
             raw: z.ZodOptional<z.ZodJSONSchema>;
             holder: z.ZodOptional<z.ZodObject<{
                 clientId: z.ZodString;

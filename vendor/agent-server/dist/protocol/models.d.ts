@@ -77,6 +77,7 @@ export declare const ThreadStatusSchema: z.ZodObject<{
             retryable: z.ZodBoolean;
             detail: z.ZodOptional<z.ZodJSONSchema>;
             stderr: z.ZodOptional<z.ZodString>;
+            reason: z.ZodOptional<z.ZodString>;
             raw: z.ZodOptional<z.ZodJSONSchema>;
             holder: z.ZodOptional<z.ZodObject<{
                 clientId: z.ZodString;
@@ -112,6 +113,7 @@ export declare const ThreadSchema: z.ZodObject<{
                 retryable: z.ZodBoolean;
                 detail: z.ZodOptional<z.ZodJSONSchema>;
                 stderr: z.ZodOptional<z.ZodString>;
+                reason: z.ZodOptional<z.ZodString>;
                 raw: z.ZodOptional<z.ZodJSONSchema>;
                 holder: z.ZodOptional<z.ZodObject<{
                     clientId: z.ZodString;
@@ -134,6 +136,10 @@ export declare const ThreadSchema: z.ZodObject<{
         bypassPermissions: "bypassPermissions";
         dontAsk: "dontAsk";
     }>>;
+    forkedFrom: z.ZodOptional<z.ZodObject<{
+        threadId: z.ZodString;
+        itemId: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
     createdAtMs: z.ZodNumber;
     closedAtMs: z.ZodOptional<z.ZodNumber>;
     clientThreadId: z.ZodOptional<z.ZodString>;
@@ -174,6 +180,7 @@ export declare const TurnSchema: z.ZodObject<{
             retryable: z.ZodBoolean;
             detail: z.ZodOptional<z.ZodJSONSchema>;
             stderr: z.ZodOptional<z.ZodString>;
+            reason: z.ZodOptional<z.ZodString>;
             raw: z.ZodOptional<z.ZodJSONSchema>;
             holder: z.ZodOptional<z.ZodObject<{
                 clientId: z.ZodString;

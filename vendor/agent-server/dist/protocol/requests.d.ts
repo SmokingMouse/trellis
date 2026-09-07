@@ -1,4 +1,29 @@
 import { z } from "zod";
+export declare const PendingRequestStateSchema: z.ZodObject<{
+    threadId: z.ZodString;
+    turnId: z.ZodString;
+    requestId: z.ZodString;
+    itemId: z.ZodString;
+    kind: z.ZodEnum<{
+        commandExecution: "commandExecution";
+        fileChange: "fileChange";
+        permissions: "permissions";
+        userInput: "userInput";
+    }>;
+    status: z.ZodEnum<{
+        pending: "pending";
+        resolved: "resolved";
+        expired: "expired";
+    }>;
+    decidedBy: z.ZodNullable<z.ZodObject<{
+        clientId: z.ZodString;
+        label: z.ZodString;
+    }, z.core.$strip>>;
+    createdAtMs: z.ZodNumber;
+    updatedAtMs: z.ZodNumber;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export type PendingRequestState = z.infer<typeof PendingRequestStateSchema>;
 export declare const ApprovalDecisionSchema: z.ZodEnum<{
     abort: "abort";
     accept: "accept";
@@ -131,7 +156,7 @@ export declare const ServerRequestMethodSchema: z.ZodEnum<{
     "item/permissions/requestApproval": "item/permissions/requestApproval";
     "item/tool/requestUserInput": "item/tool/requestUserInput";
 }>;
-export declare const PendingServerRequestSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+export declare const PendingServerRequestSchema: z.ZodIntersection<z.ZodDiscriminatedUnion<[z.ZodObject<{
     method: z.ZodLiteral<"item/commandExecution/requestApproval">;
     params: z.ZodObject<{
         command: z.ZodString;
@@ -206,7 +231,32 @@ export declare const PendingServerRequestSchema: z.ZodDiscriminatedUnion<[z.ZodO
             raw: z.ZodJSONSchema;
         }, z.core.$strip>>;
     }, z.core.$strip>;
-}, z.core.$strip>], "method">;
+}, z.core.$strip>], "method">, z.ZodObject<{
+    state: z.ZodOptional<z.ZodObject<{
+        threadId: z.ZodString;
+        turnId: z.ZodString;
+        requestId: z.ZodString;
+        itemId: z.ZodString;
+        kind: z.ZodEnum<{
+            commandExecution: "commandExecution";
+            fileChange: "fileChange";
+            permissions: "permissions";
+            userInput: "userInput";
+        }>;
+        status: z.ZodEnum<{
+            pending: "pending";
+            resolved: "resolved";
+            expired: "expired";
+        }>;
+        decidedBy: z.ZodNullable<z.ZodObject<{
+            clientId: z.ZodString;
+            label: z.ZodString;
+        }, z.core.$strip>>;
+        createdAtMs: z.ZodNumber;
+        updatedAtMs: z.ZodNumber;
+        reason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>>;
 export type ServerRequestMethod = z.infer<typeof ServerRequestMethodSchema>;
 export type PendingServerRequest = z.infer<typeof PendingServerRequestSchema>;
 export type ServerRequestParams<M extends ServerRequestMethod> = z.infer<(typeof ServerRequestSchemas)[M]["params"]>;
@@ -214,3 +264,4 @@ export type ServerRequestResult<M extends ServerRequestMethod = ServerRequestMet
 export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
 export type GrantedPermissions = z.infer<typeof GrantedPermissionsSchema>;
 export type Answer = z.infer<typeof AnswerSchema>;
+export declare function pendingRequestState(request: PendingServerRequest, createdAtMs: number): PendingRequestState;

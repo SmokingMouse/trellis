@@ -1,4 +1,4 @@
-import { type MethodParams, type MethodResult, type RpcError, type StartThreadParams, type Thread, type ThreadStatus } from "../protocol/index.js";
+import { type Item, type MethodParams, type MethodResult, type RpcError, type StartThreadParams, type Thread, type ThreadStatus } from "../protocol/index.js";
 import type { EngineFactory, EngineSession } from "../engines/session.js";
 import { ItemLog } from "./item-log.js";
 import { TurnQueue } from "./turn-queue.js";
@@ -34,6 +34,10 @@ export declare class ThreadManager {
         resume?: string;
         fork?: boolean;
         request?: unknown;
+        prefix?: Item[];
+        forkedFrom?: Thread["forkedFrom"];
+        forkPoint?: string;
+        seedHistory?: Item[];
     }): Promise<MethodResult<"thread/start">>;
     private open;
     resume(params: MethodParams<"thread/resume">, onAttach?: (thread: Thread) => void): Promise<MethodResult<"thread/resume">>;

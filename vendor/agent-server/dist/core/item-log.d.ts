@@ -26,6 +26,10 @@ export declare class ItemLog {
     findEngine(engineId: string, backend?: string): Thread | undefined;
     options<T = MethodParams<"thread/start">>(id: string): T;
     saveOptions(id: string, options: unknown): void;
+    saveForkPoint(threadId: string, itemId: string, nativeId: string): void;
+    forkPoint(threadId: string, itemId: string): string | undefined;
+    /** Snapshot payloads and cursors; inherited turns get fresh globally unique IDs. */
+    copyPrefix(sourceId: string, targetId: string, items: Item[]): void;
     deduplicate<T extends Thread | Turn>(table: "threads" | "turns", key: string | undefined, request: unknown): T | undefined;
     insertThread(thread: Thread, request: unknown, options?: unknown): void;
     saveThread(thread: Thread): void;

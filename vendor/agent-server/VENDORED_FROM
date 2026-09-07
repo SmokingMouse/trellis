@@ -1,4 +1,4 @@
-sm-toolkit commit 7913839625f0f494743bb3a3db929a735534f33c
+sm-toolkit commit 12daba705eeb543b1c984c64d361efd7dedcc58d
 package packages/agent-server
 build bun tsc --build packages/agent-server
 workspace runtime versions pinned in package.json

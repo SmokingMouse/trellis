@@ -24,8 +24,8 @@ export const ResumeThreadParamsSchema = z.union([
 ]);
 export const MethodSchemas = {
     initialize: {
-        params: z.object({ protocolVersion: z.string(), token: z.string().optional(), client: z.object({ name: z.string(), version: z.string(), kind: z.string(), label: z.string() }), capabilities: z.object({ engineEvents: z.boolean().optional(), bashInput: z.boolean().optional(), serverRequests: z.array(ServerRequestMethodSchema).optional(), notifications: z.object({ optOut: z.array(z.string()) }).optional() }).optional() }),
-        result: z.object({ protocolVersion: z.literal("as/1"), server: z.object({ name: z.string(), version: z.string() }), clientId: IdSchema, capabilities: z.object({ backends: z.array(BackendSchema), steer: z.boolean(), fork: z.boolean(), leases: z.boolean(), externalProviders: z.boolean(), maxQueuedTurns: z.number().int().nonnegative(), engine: EngineCapabilitiesSchema.optional() }) }),
+        params: z.object({ protocolVersion: z.string(), token: z.string().optional(), client: z.object({ name: z.string(), version: z.string(), kind: z.string(), label: z.string() }), capabilities: z.object({ pendingRequests: z.boolean().optional(), engineEvents: z.boolean().optional(), bashInput: z.boolean().optional(), serverRequests: z.array(ServerRequestMethodSchema).optional(), notifications: z.object({ optOut: z.array(z.string()) }).optional() }).optional() }),
+        result: z.object({ protocolVersion: z.literal("as/1"), server: z.object({ name: z.string(), version: z.string() }), clientId: IdSchema, capabilities: z.object({ pendingRequests: z.boolean().optional(), midThreadFork: z.boolean().optional(), backends: z.array(BackendSchema), steer: z.boolean(), fork: z.boolean(), leases: z.boolean(), externalProviders: z.boolean(), maxQueuedTurns: z.number().int().nonnegative(), engine: EngineCapabilitiesSchema.optional() }) }),
     },
     "thread/start": { params: StartThreadParamsSchema, result: threadResult },
     "thread/engineControl": { params: z.strictObject({ threadId: IdSchema, subtype: z.string().min(1), params: JsonObjectSchema }), result: JsonObjectSchema },

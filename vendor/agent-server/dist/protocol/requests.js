@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { IdSchema, TimestampSchema, FileChangesSchema, JsonObjectSchema } from "./models.js";
+import { ClientIdentitySchema, IdSchema, TimestampSchema, FileChangesSchema, JsonObjectSchema } from "./models.js";
+export const PendingRequestStateSchema = z.object({
+    threadId: IdSchema, turnId: IdSchema, requestId: IdSchema, itemId: IdSchema,
+    kind: z.enum(["commandExecution", "fileChange", "permissions", "userInput"]),
+    status: z.enum(["pending", "resolved", "expired"]), decidedBy: ClientIdentitySchema.nullable(),
+    createdAtMs: TimestampSchema, updatedAtMs: TimestampSchema, reason: z.string().optional(),
+});
 export const ApprovalDecisionSchema = z.enum(["accept", "acceptForSession", "reject", "abort"]);
 // Permissions remain backend-specific JSON objects in AS v1.
 export const GrantedPermissionsSchema = JsonObjectSchema;
@@ -33,4 +39,9 @@ export const PendingServerRequestSchema = z.discriminatedUnion("method", [
     z.object({ method: z.literal("item/fileChange/requestApproval"), params: ServerRequestSchemas["item/fileChange/requestApproval"].params }),
     z.object({ method: z.literal("item/permissions/requestApproval"), params: ServerRequestSchemas["item/permissions/requestApproval"].params }),
     z.object({ method: z.literal("item/tool/requestUserInput"), params: ServerRequestSchemas["item/tool/requestUserInput"].params }),
-]);
+]).and(z.object({ state: PendingRequestStateSchema.optional() }));
+export function pendingRequestState(request, createdAtMs) {
+    const { threadId, turnId, requestId, itemId } = request.params;
+    const kinds = { "item/commandExecution/requestApproval": "commandExecution", "item/fileChange/requestApproval": "fileChange", "item/permissions/requestApproval": "permissions", "item/tool/requestUserInput": "userInput" };
+    return { threadId, turnId, requestId, itemId, kind: kinds[request.method], status: "pending", decidedBy: null, createdAtMs, updatedAtMs: createdAtMs };
+}

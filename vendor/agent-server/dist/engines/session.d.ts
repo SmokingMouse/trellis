@@ -66,6 +66,7 @@ export type EngineEvent = {
     status: "completed" | "interrupted" | "failed";
     usage?: Usage;
     error?: RpcError;
+    forkPoint?: string;
 } | {
     type: "approval";
     request: PendingServerRequest;
@@ -83,6 +84,8 @@ export interface SessionOptions extends StartThreadParams {
     threadId: string;
     engineThreadId?: string;
     forkSession?: boolean;
+    forkPoint?: string;
+    seedHistory?: Item[];
 }
 export interface EngineSession {
     readonly backend: Backend;

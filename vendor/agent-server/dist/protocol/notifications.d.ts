@@ -1,5 +1,29 @@
 import { z } from "zod";
 export declare const NotificationSchemas: {
+    readonly "thread/pendingRequests": z.ZodObject<{
+        threadId: z.ZodString;
+        turnId: z.ZodString;
+        requestId: z.ZodString;
+        itemId: z.ZodString;
+        kind: z.ZodEnum<{
+            commandExecution: "commandExecution";
+            fileChange: "fileChange";
+            permissions: "permissions";
+            userInput: "userInput";
+        }>;
+        status: z.ZodEnum<{
+            pending: "pending";
+            resolved: "resolved";
+            expired: "expired";
+        }>;
+        decidedBy: z.ZodNullable<z.ZodObject<{
+            clientId: z.ZodString;
+            label: z.ZodString;
+        }, z.core.$strip>>;
+        createdAtMs: z.ZodNumber;
+        updatedAtMs: z.ZodNumber;
+        reason: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
     readonly "thread/permission/changed": z.ZodObject<{
         threadId: z.ZodString;
         permission: z.ZodEnum<{
@@ -54,6 +78,7 @@ export declare const NotificationSchemas: {
                         retryable: z.ZodBoolean;
                         detail: z.ZodOptional<z.ZodJSONSchema>;
                         stderr: z.ZodOptional<z.ZodString>;
+                        reason: z.ZodOptional<z.ZodString>;
                         raw: z.ZodOptional<z.ZodJSONSchema>;
                         holder: z.ZodOptional<z.ZodObject<{
                             clientId: z.ZodString;
@@ -76,6 +101,10 @@ export declare const NotificationSchemas: {
                 bypassPermissions: "bypassPermissions";
                 dontAsk: "dontAsk";
             }>>;
+            forkedFrom: z.ZodOptional<z.ZodObject<{
+                threadId: z.ZodString;
+                itemId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strip>>;
             createdAtMs: z.ZodNumber;
             closedAtMs: z.ZodOptional<z.ZodNumber>;
             clientThreadId: z.ZodOptional<z.ZodString>;
@@ -102,6 +131,7 @@ export declare const NotificationSchemas: {
                     retryable: z.ZodBoolean;
                     detail: z.ZodOptional<z.ZodJSONSchema>;
                     stderr: z.ZodOptional<z.ZodString>;
+                    reason: z.ZodOptional<z.ZodString>;
                     raw: z.ZodOptional<z.ZodJSONSchema>;
                     holder: z.ZodOptional<z.ZodObject<{
                         clientId: z.ZodString;
@@ -183,6 +213,7 @@ export declare const NotificationSchemas: {
                     retryable: z.ZodBoolean;
                     detail: z.ZodOptional<z.ZodJSONSchema>;
                     stderr: z.ZodOptional<z.ZodString>;
+                    reason: z.ZodOptional<z.ZodString>;
                     raw: z.ZodOptional<z.ZodJSONSchema>;
                     holder: z.ZodOptional<z.ZodObject<{
                         clientId: z.ZodString;
@@ -231,6 +262,7 @@ export declare const NotificationSchemas: {
                     retryable: z.ZodBoolean;
                     detail: z.ZodOptional<z.ZodJSONSchema>;
                     stderr: z.ZodOptional<z.ZodString>;
+                    reason: z.ZodOptional<z.ZodString>;
                     raw: z.ZodOptional<z.ZodJSONSchema>;
                     holder: z.ZodOptional<z.ZodObject<{
                         clientId: z.ZodString;
@@ -920,6 +952,7 @@ export declare const NotificationSchemas: {
                 retryable: z.ZodBoolean;
                 detail: z.ZodOptional<z.ZodJSONSchema>;
                 stderr: z.ZodOptional<z.ZodString>;
+                reason: z.ZodOptional<z.ZodString>;
                 raw: z.ZodOptional<z.ZodJSONSchema>;
                 holder: z.ZodOptional<z.ZodObject<{
                     clientId: z.ZodString;
@@ -936,6 +969,7 @@ export declare const NotificationSchemas: {
 };
 export declare const NotificationMethodSchema: z.ZodEnum<{
     error: "error";
+    "thread/pendingRequests": "thread/pendingRequests";
     "thread/permission/changed": "thread/permission/changed";
     "thread/engineEvent": "thread/engineEvent";
     initialized: "initialized";

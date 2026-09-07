@@ -40,6 +40,8 @@ export declare class ClaudeEngine implements EngineSession {
     private sawThinkingDelta;
     private partials;
     private bash?;
+    private lastAssistantUuid?;
+    private seeding?;
     constructor(config?: ClaudeEngineOptions);
     spawn(options: SessionOptions): Promise<void>;
     attach(): Promise<void>;

@@ -13,6 +13,7 @@ export const ErrorCodeSchema = z.union(Object.values(ErrorCode).map(code => z.li
 export const ErrorDataSchema = z.object({
     threadId: z.string().optional(), turnId: z.string().optional(), itemId: z.string().optional(),
     retryable: z.boolean(), detail: z.json().optional(), stderr: z.string().optional(),
+    reason: z.string().optional(),
     raw: z.json().optional(), holder: z.object({ clientId: z.string(), label: z.string() }).optional(),
 });
 export const RpcErrorSchema = z.object({ code: ErrorCodeSchema, message: z.string(), data: ErrorDataSchema.optional() });

@@ -278,6 +278,8 @@ export class CodexEventMapper {
             if (!["completed", "interrupted", "failed"].includes(turn.status))
                 throw codexProtocolError("Invalid completed Codex turn", raw);
             const result = { type: "turnCompleted", turnId: this.turnId, status: turn.status, ...(this.turnUsage ? { usage: this.turnUsage } : {}), ...(turn.error ? { error: new ProtocolError(ErrorCode.engine_unavailable, codexString(turn.error.message, "turn error"), { raw: json(turn.error) }).toJSON() } : {}) };
+            if (typeof turn.id === "string")
+                result.forkPoint = turn.id;
             this.turnId = "";
             return [result];
         }

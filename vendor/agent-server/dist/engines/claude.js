@@ -4,6 +4,7 @@ import { EventType, resolveClaudeModel } from "@smokingmouse/agent";
 import { ClaudeEffortSchema, ErrorCode, PermissionSchema, ProtocolError } from "../protocol/index.js";
 import { AsyncQueue } from "./session.js";
 import { ClaudeEventMapper, jsonValue, mapPermissionDecision, mapPermissionRequest, record } from "./claude-mapper.js";
+import { historyMessages } from "./fork-history.js";
 // Local Claude Code 2.1.258 bin/claude.exe: print.ts d.request.subtype dispatch.
 // Default deny: auth, initialization, settings, remote plumbing and lifecycle controls
 // either need a native UI or would desynchronize the daemon's ownership/allowed_roots.
@@ -35,6 +36,8 @@ export function buildClaudeLaunch(options) {
         args.push("--resume", options.engineThreadId);
     if (options.forkSession && options.engineThreadId)
         args.push("--fork-session");
+    if (options.forkPoint && options.forkSession && options.engineThreadId)
+        args.push("--resume-session-at", options.forkPoint);
     if (options.systemPrompt)
         args.push("--system-prompt", options.systemPrompt);
     if (options.tools && options.tools !== "all")
@@ -96,6 +99,8 @@ export class ClaudeEngine {
     sawThinkingDelta = false;
     partials = new Map();
     bash;
+    lastAssistantUuid;
+    seeding;
     constructor(config = {}) {
         this.config = config;
     }
@@ -133,6 +138,21 @@ export class ClaudeEngine {
         });
         try {
             await this.control({ subtype: "initialize", hooks: {} });
+            for (const message of historyMessages(options.seedHistory ?? [])) {
+                const uuid = crypto.randomUUID();
+                if (message.role === "assistant") {
+                    this.write({ type: "assistant", uuid, session_id: "", parent_tool_use_id: null, message: { id: uuid, type: "message", role: "assistant", model: "history", content: [{ type: "text", text: message.text }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } });
+                }
+                else {
+                    // Local bundle: shouldQuery=false records the user without inference,
+                    // then emits a result. Wait for it before appending the assistant.
+                    await new Promise((resolve, reject) => {
+                        const timer = setTimeout(() => this.fail(new ProtocolError(ErrorCode.engine_unavailable, "Claude history seed timed out")), this.config.handshakeTimeoutMs ?? 15_000);
+                        this.seeding = { resolve, reject, timer };
+                        this.write({ type: "user", uuid, message: { role: "user", content: message.text }, shouldQuery: false, client_composed: true });
+                    });
+                }
+            }
         }
         catch (error) {
             this.fail(error instanceof ProtocolError ? error : new ProtocolError(ErrorCode.engine_unavailable, String(error), { stderr: this.stderr }));
@@ -211,6 +231,7 @@ export class ClaudeEngine {
             throw new ProtocolError(ErrorCode.unsupported_capability, "Changing endpoint requires a new Claude session");
     }
     async sendTurn(turnId, input, options) {
+        this.lastAssistantUuid = undefined;
         this.assertAlive();
         this.validateTurn(options);
         if (this.active)
@@ -268,6 +289,11 @@ export class ClaudeEngine {
             return;
         this.closed = true;
         this.rejectControls(new Error("Claude session closed"));
+        if (this.seeding) {
+            clearTimeout(this.seeding.timer);
+            this.seeding.reject(new Error("Claude session closed while seeding"));
+            this.seeding = undefined;
+        }
         const child = this.process;
         if (child && child.exitCode === null && child.signalCode === null) {
             await new Promise(resolve => {
@@ -303,16 +329,31 @@ export class ClaudeEngine {
         if (this.dead || this.closed)
             return;
         this.dead = true;
+        if (this.seeding) {
+            clearTimeout(this.seeding.timer);
+            this.seeding.reject(error);
+            this.seeding = undefined;
+        }
         this.rejectControls(error);
         this.events.push({ type: "exit", error: error.toJSON() });
         this.events.end();
         this.process?.kill("SIGKILL");
     }
     emit(event) { for (const mapped of this.mapper.map(event))
-        this.events.push(mapped); }
+        this.events.push(mapped.type === "turnCompleted" && this.lastAssistantUuid ? { ...mapped, forkPoint: this.lastAssistantUuid } : mapped); }
     /** Native frame parsing is separated from process creation for offline fixtures. */
     receive(raw) {
         const obj = record(raw), t = obj.type;
+        if (t === "result" && this.seeding) {
+            const pending = this.seeding;
+            clearTimeout(pending.timer);
+            this.seeding = undefined;
+            if (obj.is_error || (obj.usage?.output_tokens ?? 0) > 0)
+                pending.reject(new ProtocolError(ErrorCode.engine_protocol_error, "Claude history replay failed or unexpectedly queried the model"));
+            else
+                pending.resolve();
+            return;
+        }
         const emit = (type, data) => this.emit({ type, data, backend: "claude", sessionId: this.engineThreadId });
         if (t === "control_response") {
             const response = record(obj.response), pending = this.controls.get(String(response.request_id));
@@ -444,6 +485,7 @@ export class ClaudeEngine {
                 return;
             }
             const u = obj.message?.usage;
+            this.lastAssistantUuid = typeof obj.uuid === "string" && !(obj.message?.content ?? []).some((block) => block.type === "tool_use") ? obj.uuid : undefined;
             if (u)
                 this.context = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
             for (const block of obj.message?.content ?? []) {

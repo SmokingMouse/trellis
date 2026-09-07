@@ -25,6 +25,7 @@ class Connection {
     delivered = new Set();
     optOut = new Set();
     engineEvents = false;
+    pendingRequests = false;
     bashInput = false;
     label = "in-process";
     initialized = false;
@@ -115,6 +116,7 @@ class Connection {
         this.emit({ jsonrpc: "2.0", id, method: request.method, params: request.params });
     }
     notification(frame) { if (frame.method === "thread/engineEvent" && !this.engineEvents)
+        return; if (frame.method === "thread/pendingRequests" && !this.pendingRequests)
         return; if (!this.optOut.has(frame.method))
         this.emit(frame); }
     close() {
@@ -279,13 +281,14 @@ export class AgentServer {
                 connection.initializing = true;
                 connection.label = p.client.label;
                 connection.engineEvents = p.capabilities?.engineEvents === true;
+                connection.pendingRequests = p.capabilities?.pendingRequests === true;
                 connection.bashInput = p.capabilities?.bashInput === true;
                 for (const capability of p.capabilities?.serverRequests ?? [])
                     connection.serverRequests.add(capability);
                 for (const notification of p.capabilities?.notifications?.optOut ?? [])
                     connection.optOut.add(notification);
                 const claude = this.backends.includes("claude");
-                return { protocolVersion: "as/1", server: { name: "agent-server", version: "0.1.0" }, clientId: connection.clientId, capabilities: { backends: this.backends, steer: true, fork: claude, leases: true, externalProviders: false, maxQueuedTurns: this.threads.maxQueuedTurns, engine: { engineEvents: true, engineControl: claude, permissionSet: claude, effortSet: claude, subAgentText: claude, bashInput: claude, compact: claude } } };
+                return { protocolVersion: "as/1", server: { name: "agent-server", version: "0.1.0" }, clientId: connection.clientId, capabilities: { pendingRequests: true, midThreadFork: claude || this.backends.includes("codex"), backends: this.backends, steer: true, fork: claude || this.backends.includes("codex"), leases: true, externalProviders: false, maxQueuedTurns: this.threads.maxQueuedTurns, engine: { engineEvents: true, engineControl: claude, permissionSet: claude, effortSet: claude, subAgentText: claude, bashInput: claude, compact: claude } } };
             }
             case "thread/start": {
                 const p = params(method);
@@ -302,6 +305,8 @@ export class AgentServer {
             }
             case "thread/permission/set": {
                 const p = params(method);
+                if (this.threads.get(p.threadId).backend !== "claude")
+                    throw new ProtocolError(ErrorCode.backend_unsupported, "permission changes require Claude");
                 permissionInput(p.threadId, p.permission);
                 return this.threads.setPermission(p);
             }

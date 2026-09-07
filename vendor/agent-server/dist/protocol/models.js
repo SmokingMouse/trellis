@@ -26,6 +26,7 @@ export const ThreadSchema = z.object({
     id: IdSchema, backend: BackendSchema, engineThreadId: IdSchema.nullable(), status: ThreadStatusSchema,
     cwd: AbsolutePathSchema, model: z.string().optional(), title: z.string().optional(), meta: JsonObjectSchema.optional(),
     permission: PermissionSchema.optional(),
+    forkedFrom: z.object({ threadId: IdSchema, itemId: IdSchema.nullable() }).optional(),
     createdAtMs: TimestampSchema, closedAtMs: TimestampSchema.optional(), clientThreadId: IdSchema.optional(),
 });
 export const TurnSchema = z.object({

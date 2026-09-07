@@ -31,6 +31,7 @@ export declare const ErrorDataSchema: z.ZodObject<{
     retryable: z.ZodBoolean;
     detail: z.ZodOptional<z.ZodJSONSchema>;
     stderr: z.ZodOptional<z.ZodString>;
+    reason: z.ZodOptional<z.ZodString>;
     raw: z.ZodOptional<z.ZodJSONSchema>;
     holder: z.ZodOptional<z.ZodObject<{
         clientId: z.ZodString;
@@ -47,6 +48,7 @@ export declare const RpcErrorSchema: z.ZodObject<{
         retryable: z.ZodBoolean;
         detail: z.ZodOptional<z.ZodJSONSchema>;
         stderr: z.ZodOptional<z.ZodString>;
+        reason: z.ZodOptional<z.ZodString>;
         raw: z.ZodOptional<z.ZodJSONSchema>;
         holder: z.ZodOptional<z.ZodObject<{
             clientId: z.ZodString;

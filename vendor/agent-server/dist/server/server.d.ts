@@ -37,6 +37,7 @@ declare class Connection implements InProcessClient, ApprovalClient {
     readonly delivered: Set<string>;
     readonly optOut: Set<string>;
     engineEvents: boolean;
+    pendingRequests: boolean;
     bashInput: boolean;
     label: string;
     initialized: boolean;
