@@ -267,7 +267,7 @@ ab click 'button[type="submit"]'
 wait_for_js "authenticated home" "location.pathname !== '/login'"
 
 echo "== desktop Herdr fleet and interaction =="
-wait_for_js "two Herdr pane rows" "document.querySelectorAll('[data-herdr-pane]').length === 2"
+wait_for_js "three Herdr pane rows" "document.querySelectorAll('[data-herdr-pane]').length === 3"
 wait_for_js "waiting row is first" "document.querySelector('[data-herdr-pane]')?.getAttribute('data-herdr-status') === 'waiting'"
 ab eval --stdin <<'JS'
 (() => {
@@ -275,8 +275,19 @@ ab eval --stdin <<'JS'
   const group = document.querySelector('[data-herdr-group]');
   const rows = [...group.querySelectorAll('[data-herdr-pane]')];
   assert(group.innerText.includes('Herdr'), 'Herdr heading missing');
-  assert(group.innerText.includes('Fake Workspace'), 'workspace label missing');
-  assert(rows.length === 2, `pane rows=${rows.length}`);
+  const repo = group.querySelector('[data-herdr-repo]');
+  assert(group.querySelectorAll('[data-herdr-repo]').length === 1, 'repository grouping missing');
+  const worktrees = [...repo.querySelectorAll('[data-herdr-worktree]')];
+  assert(worktrees.length === 2, 'two checkouts must share a repository');
+  assert(worktrees.every(w => w.querySelectorAll('[data-herdr-pane]').length === 1), 'one pane per checkout');
+  assert(worktrees[0].querySelector('[data-sidebar-group]').innerText.includes('main'), 'main branch missing');
+  assert(worktrees[1].querySelector('[data-sidebar-group]').innerText.includes('feat/mobile'), 'linked branch missing');
+  assert(worktrees[0].querySelector('button').title.includes('Fake Workspace'), 'Herdr label missing from title');
+  assert(repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('2 待处理'), 'repository attention missing');
+  assert(worktrees.every(w => w.querySelector('[data-sidebar-group]').innerText.includes('1 待处理')), 'worktree attention missing');
+  const scratch = group.querySelector('[data-herdr-workspace="workspace-scratch"]');
+  assert(scratch && !scratch.closest('[data-herdr-repo]') && repo.nextElementSibling === scratch, 'non-git workspace must be flat at the end');
+  assert(rows.length === 3, `pane rows=${rows.length}`);
   assert(rows[0].dataset.herdrPane === 'pane-claude', `first pane=${rows[0].dataset.herdrPane}`);
   assert(rows[0].dataset.herdrStatus === 'waiting', `first status=${rows[0].dataset.herdrStatus}`);
   assert(rows[1].dataset.herdrStatus === 'blocked', `second status=${rows[1].dataset.herdrStatus}`);
@@ -286,6 +297,16 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab screenshot "$OUT/desktop-herdr-sidebar.png"
+ab click '[data-herdr-repo] > [data-sidebar-group] > button'
+wait_for_js "collapsed repository retains attention" "document.querySelector('[data-herdr-repo]')?.innerText.includes('2 待处理') && !document.querySelector('[data-herdr-worktree]')"
+ab screenshot "$OUT/desktop-herdr-collapsed.png"
+ab reload
+wait_for_js "repository collapse survives reload" "Boolean(document.querySelector('[data-herdr-repo] button[aria-expanded=false]')) && !document.querySelector('[data-herdr-worktree]')"
+ab click '[data-herdr-repo] > [data-sidebar-group] > button'
+wait_for_js "repository expands" "document.querySelectorAll('[data-herdr-worktree]').length === 2"
+ab click '[data-herdr-worktree]:first-child > [data-sidebar-group] > button'
+wait_for_js "worktree collapse retains attention" "!document.querySelector('[data-herdr-pane=\"pane-claude\"]') && document.querySelector('[data-herdr-worktree]')?.innerText.includes('1 待处理')"
+ab click '[data-herdr-worktree]:first-child > [data-sidebar-group] > button'
 ab click '[data-herdr-pane="pane-claude"]'
 wait_for_js "Herdr session badge" "Boolean(document.querySelector('[data-herdr-badge]'))"
 wait_for_js "AskUserQuestion card" "document.querySelector('[data-herdr-question]')?.textContent?.includes('请选择交付方案') === true"
@@ -361,7 +382,7 @@ if grep -F '"completed":"agent.wait"' "$FAKE_LOG" >/dev/null 2>&1; then
   fail 'agent.wait completed before immediate acknowledgement assertion'
 fi
 wait_for_js "event-driven Codex idle status" "document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'idle'"
-wait_for_log "subscription initial replay" '"replay":2'
+wait_for_log "subscription initial replay" '"replay":3'
 wait_for_log "pane_updated events" '"event":"pane_updated"'
 
 ab eval --stdin <<'JS'
@@ -448,7 +469,15 @@ ab eval --stdin <<'JS'
   const drawer = group?.closest('[role=dialog]');
   assert(drawer, 'mobile Herdr drawer missing');
   const rows = [...group.querySelectorAll('[data-herdr-pane]')];
-  assert(rows.length === 2, `mobile rows=${rows.length}`);
+  assert(rows.length === 3, `mobile rows=${rows.length}`);
+  const repo = group.querySelector('[data-herdr-repo]');
+  assert(repo?.querySelectorAll('[data-herdr-worktree]').length === 2, 'mobile nested worktrees missing');
+  assert(!group.querySelector('[data-herdr-workspace="workspace-scratch"]').closest('[data-herdr-repo]'), 'mobile scratch must be flat');
+  assert(repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('1 待处理'), 'mobile repository waiting count missing');
+  assert(repo.querySelector('[data-herdr-worktree] > [data-sidebar-group]').innerText.includes('1 待处理'), 'mobile worktree waiting count missing');
+  for (const button of group.querySelectorAll('[data-sidebar-group] > button')) {
+    assert(button.getBoundingClientRect().height >= 44, 'group touch target under 44px');
+  }
   assert(rows[0].dataset.herdrStatus === 'waiting', `mobile first=${rows[0].dataset.herdrStatus}`);
   for (const row of rows) {
     const rect = row.getBoundingClientRect();

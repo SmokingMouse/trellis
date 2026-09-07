@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 type RequestEnvelope = {
   id: string;
@@ -19,6 +20,7 @@ if (!socketPath || !requestLog || !fakeHome) {
 }
 
 const cwd = path.join(fakeHome, "workspace");
+const linkedCwd = path.join(fakeHome, "linked");
 const claudeSession = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const codexSession = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const claudeTranscript = path.join(
@@ -39,6 +41,11 @@ const codexTranscript = path.join(
 );
 
 fs.mkdirSync(cwd, { recursive: true });
+fs.mkdirSync(linkedCwd, { recursive: true });
+for (const [directory, branch] of [[cwd, "main"], [linkedCwd, "feat/mobile"]]) {
+  execFileSync("git", ["init", "-b", branch, directory], { stdio: "ignore" });
+  execFileSync("git", ["-C", directory, "-c", "user.name=Verify", "-c", "user.email=verify@example.invalid", "commit", "--allow-empty", "-m", "fixture"], { stdio: "ignore" });
+}
 fs.mkdirSync(path.dirname(claudeTranscript), { recursive: true });
 fs.mkdirSync(path.dirname(codexTranscript), { recursive: true });
 fs.writeFileSync(
@@ -79,11 +86,11 @@ fs.writeFileSync(
       id: codexSession,
       session_id: codexSession,
       timestamp: "2026-09-07T10:00:00.000Z",
-      cwd,
+      cwd: linkedCwd,
     }),
     codexLine("2026-09-07T10:00:01.000Z", "turn_context", {
       turn_id: "codex-turn-1",
-      cwd,
+      cwd: linkedCwd,
     }),
     codexLine("2026-09-07T10:00:02.000Z", "response_item", {
       type: "message",
@@ -134,8 +141,8 @@ const panes = [
   {
     pane_id: "pane-codex",
     terminal_id: "term-codex",
-    workspace_id: "workspace-fake",
-    tab_id: "tab-fake",
+    workspace_id: "workspace-linked",
+    tab_id: "tab-linked",
     focused: false,
     agent: "codex",
     agent_session: {
@@ -145,10 +152,16 @@ const panes = [
       value: codexSession,
     },
     agent_status: "blocked",
-    cwd,
+    cwd: linkedCwd,
     label: "Codex 构建",
     terminal_title: "codex",
     revision: 1,
+  },
+  {
+    pane_id: "pane-scratch", terminal_id: "term-scratch",
+    workspace_id: "workspace-scratch", tab_id: "tab-scratch",
+    focused: false, agent: "codex", agent_status: "idle",
+    cwd: fakeHome, label: "Scratch agent", terminal_title: "codex", revision: 1,
   },
 ];
 
@@ -189,9 +202,13 @@ function resultFor(request: RequestEnvelope): Record<string, unknown> {
           focused_tab_id: "tab-fake",
           focused_pane_id: "pane-claude",
           workspaces: [
-            { workspace_id: "workspace-fake", label: "Fake Workspace" },
+            { workspace_id: "workspace-fake", label: "Fake Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: cwd, is_linked_worktree: false } },
+            { workspace_id: "workspace-linked", label: "Linked Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: linkedCwd, is_linked_worktree: true } },
+            { workspace_id: "workspace-scratch", label: "Scratch Workspace" },
           ],
           tabs: [
+            { tab_id: "tab-linked", workspace_id: "workspace-linked", label: "Agent" },
+            { tab_id: "tab-scratch", workspace_id: "workspace-scratch", label: "Agent" },
             {
               tab_id: "tab-fake",
               workspace_id: "workspace-fake",
