@@ -34,3 +34,13 @@ test("N7 explicit off overrides socket and both API routes stay closed", async (
     if (socket === undefined) delete process.env.TRELLIS_AS_SOCKET; else process.env.TRELLIS_AS_SOCKET = socket;
   }
 });
+
+test("N6 deployment docs and env example cover all shadow settings with a disabled default", async () => {
+  const example = await Bun.file(new URL("../.env.example", import.meta.url)).text();
+  const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
+  for (const key of ["TRELLIS_AS", "TRELLIS_AS_SOCKET", "TRELLIS_AS_TOKEN_PATH"]) {
+    expect(example).toContain(key + "=");
+    expect(readme).toContain("`" + key + "`");
+  }
+  expect(isShadowEnabled({ TRELLIS_AS: example.match(/^TRELLIS_AS=(.*)$/m)![1] })).toBe(false);
+});

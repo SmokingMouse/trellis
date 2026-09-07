@@ -303,6 +303,8 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
    TRELLIS_AUTH_PASS=<登录密码>
    TRELLIS_AUTH_TOKEN=<随机长串，cookie 会话令牌>
    TRELLIS_REPO_DIR=<trellis 仓库 checkout 的绝对路径>
+   # 可选：agent-server 只读影子模式，配置说明见下
+   TRELLIS_AS=off
    ```
 
    前两个任一缺失 = 认证闸**静默关闭**。机器只在内网/Tailscale 里可以不配；挂公网隧道必须配——Trellis 能 spawn CLI 在宿主机执行任意代码，这道闸是唯一的门。`TRELLIS_REPO_DIR` 给应用内「检查更新/更新到最新」用（release 目录不是 git 仓库，部署脚本要回到 checkout 里跑）。
@@ -310,6 +312,20 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 5. **首次部署**：`make deploy FORCE=1`——此时服务工作目录还不是 `~/.trellis/current`（正是下一步要改的），preflight 会拦，首次明知故犯一次。
 6. **`make install-service`**：把服务定义的工作目录改到 `~/.trellis/current`（自动备份原文件并重载）。之后 `make deploy` 不再需要 FORCE，仓库目录退化为纯开发 checkout。
 7. **验证**：`make deploy-status`；`curl http://127.0.0.1:3088/__gate/health` 应给出 `next=ready` 且 `auth=on`。
+
+### agent-server 影子模式
+
+先独立启动 agent-server daemon，再在开发用 `.env.local` 或部署用 `~/.trellis/shared/.env.local` 配置下表变量并重启 Trellis。可参考仓库的 [.env.example](.env.example)。打开 `/console/threads` 查看只读日志；审批和执行仍在原客户端完成，既有 chat 链路不受影响。
+
+| 变量 | 含义与默认值 |
+|---|---|
+| `TRELLIS_AS` | 默认不启用；`on` 启用，`off` 是最高优先级硬关闸，即使已配置 socket 也禁用。未设置时，非空 `TRELLIS_AS_SOCKET` 会自动启用。 |
+| `TRELLIS_AS_SOCKET` | daemon Unix socket 的绝对路径。未设置时遵循 agent-server 路径规则：`AGENT_SERVER_SOCKET_PATH` 优先，其次绝对 `XDG_RUNTIME_DIR` 下的 `sm-toolkit/agent-server.sock`，其次绝对 `XDG_STATE_HOME` 下的同一路径，最后为 `$HOME/.sm-toolkit/agent-server.sock`。 |
+| `TRELLIS_AS_TOKEN_PATH` | 已运行 daemon 的 token 文件绝对路径，不是 token 内容。默认绝对 `XDG_STATE_HOME` 下的 `sm-toolkit/agent-server/token`，否则 `$HOME/.agent-server/token`。自定义 socket 不会自动改变 token 路径，两个配置需指向同一个 daemon。 |
+
+连接失败不会阻断 Trellis 启动；自动重连从 1 秒指数退避至 5 分钟，同一故障仅首次警告，恢复记录一次。列表刷新（`GET /api/as/threads`）可在退避期立即重试，同一观察者最短间隔 1 秒且并发合并。关闭时 AS API 返回 503。AS 页面与接口沿用 Trellis 现有鉴权闸；这些变量仅在服务端读取，不要使用 `NEXT_PUBLIC_` 前缀。
+
+### 常驻服务模板
 
 **launchd（macOS）**：存为 `~/Library/LaunchAgents/com.smokingmouse.trellis.plist`（label 可用 `TRELLIS_DEPLOY_LABEL` 换），`launchctl bootstrap gui/$(id -u) <plist路径>` 加载。把 `/Users/YOU` 全部换成真实家目录——plist 不展开 `~`：
 
