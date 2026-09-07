@@ -315,6 +315,8 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 
 ### agent-server 影子模式
 
+影子观察与 project 切流共用启用判定：`TRELLIS_AS=off` 优先级最高，即使设置了 socket 也关闭；否则 `TRELLIS_AS=on` 或设置 `TRELLIS_AS_SOCKET` 即启用。另设 `TRELLIS_AS_PROJECT=on` 才给新 project 会话打 thread 标记。只关 PROJECT 会停止新会话打标，已绑定会话继续使用 daemon；关 AS 则已绑定会话的新请求也带 notice 回退兼容模式，保留输入与祖先历史。pane 绑定仍由 herdr-bridge 接线。
+
 先独立启动 agent-server daemon，再在开发用 `.env.local` 或部署用 `~/.trellis/shared/.env.local` 配置下表变量并重启 Trellis。可参考仓库的 [.env.example](.env.example)。打开 `/console/threads` 查看只读日志；审批和执行仍在原客户端完成，既有 chat 链路不受影响。
 
 | 变量 | 含义与默认值 |

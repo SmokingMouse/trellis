@@ -78,6 +78,22 @@ try {
     fail = false;
     await start(root, true);
     assert.equal(repo.getNode(root)!.status, "done", "non-tip retry seeds a new thread");
+  } else if (process.argv[2] === "P1-2 hard off fallback") {
+    const before = engines.reduce((n,e) => n + e.sent.length, 0);
+    process.env.TRELLIS_AS = "off";
+    assert.equal(binding.resolveSessionBinding(sid).type, "fallback");
+    const { POST } = await import("../../app/api/chat/route");
+    const response = await POST(new Request("http://localhost/api/chat", { method:"POST", body:JSON.stringify({kind:"branch", parentNodeId:second, question:"hard-off input preserved", provider:"mock"}) }));
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.ok(text.includes('"type":"notice"'));
+    assert.ok(text.includes('"type":"done"'));
+    assert.equal(engines.reduce((n,e) => n + e.sent.length, 0), before, "hard-off must not start any AS turn");
+    const node = getDB().prepare("SELECT id,question,status,response FROM nodes WHERE parent_id=? ORDER BY created_at DESC LIMIT 1").get(second) as {id:string;question:string;status:string;response:string};
+    assert.equal(node.question, "hard-off input preserved");
+    assert.equal(node.status, "done");
+    assert.ok(node.response.length);
+    assert.ok(!binding.getAsTurn(node.id));
   } else throw new Error("unknown regression case");
   console.log(`PASS: ${process.argv[2]}`);
 } finally {

@@ -10,6 +10,7 @@ import { providerFamily } from "../llm/providers";
 import { emptyThreadLog, applyShadowEvent } from "../as-log";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "../as-project-events";
 import type { RunEvent, CatchupEvent } from "./run-bus";
+import { isShadowEnabled } from "../as-config";
 
 type Subscriber = { onEvent: (event: RunEvent | CatchupEvent) => void; onClose: () => void };
 const state = globalThis as typeof globalThis & { asProjectRuns?: Map<string, ProjectRun>; asProjectStarts?: Map<string, Promise<unknown>> };
@@ -210,6 +211,7 @@ export class ProjectRun {
 }
 
 export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; fork?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
+  if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
   const node = getNode(args.nodeId)!, session = getSession(node.sessionId)!;
   if (starts.has(session.id)) throw new Error("session request is starting; retry shortly");
   const job = (async () => {
@@ -280,6 +282,7 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
 }
 export class DaemonUnavailable extends Error {}
 export async function getProjectRun(nodeId: string) {
+  if (!isShadowEnabled()) return null;
   const existing = runs.get(nodeId); if (existing) return existing;
   const binding = getAsTurn(nodeId);
   if (!binding || getNode(nodeId)?.status !== "streaming") return null;
@@ -294,6 +297,7 @@ export function isThreadNode(nodeId: string) {
   return !!node && resolveSessionBinding(node.sessionId).type === "thread" && !!getAsTurn(nodeId);
 }
 export async function withNodeThread<T>(nodeId: string, action: (client: AgentClient, threadId: string) => Promise<T>) {
+  if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
   const binding = getAsTurn(nodeId);
   if (!binding || binding.daemon_id !== daemonIdentity()) throw new Error("node has no binding to this daemon");
   const client = createProjectClient();

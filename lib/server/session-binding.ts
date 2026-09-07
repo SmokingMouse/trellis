@@ -1,18 +1,20 @@
 import { getSession } from "./repo";
 import { getDB } from "./sqlite";
 import { resolveDaemonPaths } from "@smokingmouse/agent-server/paths";
+import { isShadowEnabled } from "../as-config";
 
 export type SessionBinding =
   | { type: "legacy" }
   | { type: "pane"; sessionId: string }
+  | { type: "fallback"; sessionId: string; reason: "disabled" }
   | { type: "thread"; sessionId: string; daemonId: string };
 
 /** pane is reserved for feat/herdr-bridge's herdr_sessions adapter. Never spawn for it. */
-export function parseSessionBinding(session: { id: string; bindingType?: string }, daemonId: string): SessionBinding {
+export function parseSessionBinding(session: { id: string; bindingType?: string }, daemonId: string, enabled = true): SessionBinding {
   switch (session.bindingType ?? "legacy") {
     case "legacy": return { type: "legacy" };
     case "pane": return { type: "pane", sessionId: session.id };
-    case "thread": return { type: "thread", sessionId: session.id, daemonId };
+    case "thread": return enabled ? { type: "thread", sessionId: session.id, daemonId } : { type: "fallback", sessionId: session.id, reason: "disabled" };
     default: throw new Error(`unknown session binding: ${session.bindingType}`);
   }
 }
@@ -20,10 +22,10 @@ export function daemonIdentity() { return process.env.TRELLIS_AS_SOCKET ?? resol
 export function resolveSessionBinding(sessionId: string) {
   const session = getSession(sessionId);
   if (!session) throw new Error("session not found");
-  return parseSessionBinding(session, daemonIdentity());
+  return parseSessionBinding(session, daemonIdentity(), isShadowEnabled());
 }
 export function newProjectBinding(mode: string, agentId?: string | null): "legacy" | "thread" {
-  return mode === "project" && !agentId && process.env.TRELLIS_AS === "on" && process.env.TRELLIS_AS_PROJECT === "on" ? "thread" : "legacy";
+  return mode === "project" && !agentId && isShadowEnabled() && process.env.TRELLIS_AS_PROJECT === "on" ? "thread" : "legacy";
 }
 export type AsTurn = {
   node_id: string; thread_id: string; daemon_id: string; turn_id: string | null;

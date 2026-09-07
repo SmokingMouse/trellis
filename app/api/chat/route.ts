@@ -482,8 +482,9 @@ export async function POST(req: Request) {
   let asFallback = false;
   const binding = resolveSessionBinding(trellisSessionId);
   if (binding.type === "pane") return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
-  if (binding.type === "thread" && !mentionActive && !resolvedAgentId) {
+  if ((binding.type === "thread" || binding.type === "fallback") && !mentionActive && !resolvedAgentId) {
     try {
+      if (binding.type === "fallback") throw new DaemonUnavailable("Agent 服务已关闭");
       const run = await startProjectRun({ nodeId, prompt: questionForLLM, attachments: providerAttachments,
         fork: body.kind === "branch" && (body.fork === true || !!body.parentAnchor),
         retry: body.kind === "retry", permission: permission?.success ? permission.data : undefined,
