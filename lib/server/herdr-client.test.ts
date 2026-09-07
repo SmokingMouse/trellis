@@ -50,6 +50,7 @@ class FakeHerdr {
   protocol = 19;
   snapshot = snapshot();
   waitDelayMs = 0;
+  private timers = new Set<ReturnType<typeof setTimeout>>();
   private subscribers = new Set<Bun.Socket<{ buffer: string }>>();
   private listener: Bun.UnixSocketListener<{ buffer: string }>;
 
@@ -100,7 +101,8 @@ class FakeHerdr {
             socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
           };
           if (request.method === "agent.wait" && this.waitDelayMs) {
-            setTimeout(send, this.waitDelayMs);
+            const timer = setTimeout(() => { this.timers.delete(timer); send(); }, this.waitDelayMs);
+            this.timers.add(timer);
           } else {
             send();
           }
@@ -122,6 +124,7 @@ class FakeHerdr {
   }
 
   close(): void {
+    for (const timer of this.timers) clearTimeout(timer);
     this.listener.stop(true);
     fs.rmSync(this.dir, { recursive: true, force: true });
   }
@@ -294,6 +297,7 @@ describe("HerdrClient", () => {
       client.enqueueInput("w1:p1", "first", 500),
       client.enqueueInput("w1:p1", "second", 500),
     ]);
+    await Bun.sleep(10);
     const methods = server.requests
       .filter((request) => ["pane.send_input", "agent.wait"].includes(request.method))
       .map((request) => `${request.method}:${request.params.text ?? ""}`);
@@ -303,6 +307,51 @@ describe("HerdrClient", () => {
       "pane.send_input:second",
       "agent.wait:",
     ]);
+  });
+
+  // Ported from review repro/rv_input_timeout.test.ts: production timeout,
+  // with a wait that actually exceeds five seconds and isolated socket fixtures.
+  test("acknowledges send immediately and queues behind a wait longer than five seconds", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    server.waitDelayMs = 5_200;
+    const client = clientFor(server, { requestTimeoutMs: undefined });
+    await client.start();
+    const started = performance.now();
+    await client.enqueueInput("w1:p1", "first");
+    expect(performance.now() - started).toBeLessThan(500);
+    const second = client.enqueueInput("w1:p1", "second");
+    await Bun.sleep(5_050);
+    expect(server.requests.filter(r => r.method === "pane.send_input")).toHaveLength(1);
+    expect(client.state.available).toBeTrue();
+    expect(client.state.realtime).toBeTrue();
+    await second;
+    expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["first", "second"]);
+  }, 10_000);
+
+  test("busy panes wait beyond the ordinary RPC deadline before delivering", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    server.snapshot.panes = [pane(5, "working")];
+    server.waitDelayMs = 100;
+    const client = clientFor(server, { requestTimeoutMs: 30 });
+    await client.start();
+    await client.enqueueInput("w1:p1", "queued", 500);
+    expect(server.requests.filter(r => ["pane.send_input", "agent.wait"].includes(r.method)).slice(0, 2).map(r => r.method)).toEqual(["agent.wait", "pane.send_input"]);
+    expect(client.state.available).toBeTrue();
+  });
+
+  test("an RPC deadline preserves fleet availability and the event connection", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    server.waitDelayMs = 100;
+    const client = clientFor(server);
+    await client.start();
+    await expect(client.request("agent.wait", { target: "w1:p1" }, 10)).rejects.toMatchObject({ code: "ETIMEDOUT" });
+    expect(client.state.available).toBeTrue();
+    expect(client.state.realtime).toBeTrue();
+    await client.request("ping");
+    expect(server.subscribeConnections).toBe(1);
   });
 
   test("fails subsequent calls quickly while Herdr is down", async () => {

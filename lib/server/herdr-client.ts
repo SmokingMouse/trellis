@@ -257,6 +257,7 @@ export class HerdrClient {
   async request<T = Record<string, unknown>>(
     method: string,
     params: Record<string, unknown> = {},
+    timeoutMs = this.requestTimeoutMs,
   ): Promise<T> {
     if (!this.enabled) throw new HerdrUnavailableError("Herdr is disabled");
     if (this._readOnly && !READ_METHODS.has(method)) {
@@ -268,7 +269,7 @@ export class HerdrClient {
       throw new HerdrUnavailableError();
     }
     try {
-      return await this.requestWithRetry<T>(method, params, method === "ping" ? 0 : 2);
+      return await this.requestWithRetry<T>(method, params, method === "ping" ? 0 : 2, timeoutMs);
     } catch (error) {
       if (error instanceof HerdrTransportError) this.markDown(error);
       throw error;
@@ -289,27 +290,30 @@ export class HerdrClient {
           target: paneId,
           until: ["idle", "done"],
           timeout_ms: timeoutMs,
-        });
+        }, timeoutMs + 5_000);
       }
       const sent = await this.request<Record<string, unknown>>("pane.send_input", {
         pane_id: paneId,
         text,
         keys: ["Enter"],
       });
-      await this.request("agent.wait", {
+      return sent;
+    });
+    // A successful send is the HTTP acknowledgement. Agent completion only
+    // gates the next queued input; pane events publish the resulting state.
+    const tail = run.then(() => this.request("agent.wait", {
         target: paneId,
         until: ["idle", "done", "blocked"],
         timeout_ms: timeoutMs,
-      });
-      return sent;
-    });
-    this.inputTails.set(paneId, run);
-    void run.then(
+      }, timeoutMs + 5_000));
+    this.inputTails.set(paneId, tail);
+    void tail.then(
       () => {
-        if (this.inputTails.get(paneId) === run) this.inputTails.delete(paneId);
+        if (this.inputTails.get(paneId) === tail) this.inputTails.delete(paneId);
       },
-      () => {
-        if (this.inputTails.get(paneId) === run) this.inputTails.delete(paneId);
+      (error) => {
+        if (this.inputTails.get(paneId) === tail) this.inputTails.delete(paneId);
+        if (!this.stopped) console.warn("[trellis] Herdr input queue wait failed", paneId, error);
       },
     );
     return run;
@@ -414,6 +418,8 @@ export class HerdrClient {
 
   private markDown(error: unknown): void {
     const code = transportCode(error);
+    // An RPC deadline or malformed response says nothing about socket health.
+    if (!["ENOENT", "ENOTSOCK", "ECONNREFUSED", "ECONNRESET", "EPIPE", "EACCES", "EPERM", "SOCKET_ERROR", "EOF"].includes(code)) return;
     this.fatalTransport = code === "EACCES";
     this._available = false;
     this._realtime = false;
@@ -448,13 +454,14 @@ export class HerdrClient {
     method: string,
     params: Record<string, unknown>,
     retries: number,
+    timeoutMs = this.requestTimeoutMs,
   ): Promise<T> {
     await this.acquire();
     try {
       let lastError: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-          return await this.requestOnce<T>(method, params);
+          return await this.requestOnce<T>(method, params, timeoutMs);
         } catch (error) {
           lastError = error;
           const code = transportCode(error);
@@ -478,6 +485,7 @@ export class HerdrClient {
   private requestOnce<T>(
     method: string,
     params: Record<string, unknown>,
+    timeoutMs = this.requestTimeoutMs,
   ): Promise<T> {
     const id = String(++this.requestId);
     return new Promise<T>((resolve, reject) => {
@@ -507,7 +515,7 @@ export class HerdrClient {
         );
       const timer = setTimeout(
         () => failTransport(new HerdrTransportError(`${method} timed out`, "ETIMEDOUT")),
-        this.requestTimeoutMs,
+        timeoutMs,
       );
       void Bun.connect({
         unix: this.socketPath,
