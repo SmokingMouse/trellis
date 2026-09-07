@@ -190,6 +190,7 @@ export type PendingInteraction = {
 };
 
 export type ChatNode = {
+  asNotice?: string;
   id: string;
   sessionId: string;
   parentId: string | null;

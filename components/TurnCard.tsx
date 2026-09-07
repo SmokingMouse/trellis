@@ -26,6 +26,7 @@ import { CopyButton } from "./CopyButton";
 import { EmptyResponseNotice } from "./EmptyResponseNotice";
 import { GeneratedFilesBar } from "./GeneratedFilesBar";
 import { InteractionForm } from "./InteractionForm";
+import { AsProjectControls } from "./AsProjectControls";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { ToolTimeline } from "./tools/ToolTimeline";
 import { TurnStatsMeta } from "./TurnStatsMeta";
@@ -98,6 +99,7 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
         stats={node.toolCallStats ?? null}
         live={node.status === "streaming"}
       />
+      <AsProjectControls nodeId={node.id} />
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
           imperative <mark> injection inside react-markdown's output diverges
           from React's virtual tree, so when the node prop changes in-place

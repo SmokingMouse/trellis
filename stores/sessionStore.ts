@@ -2850,7 +2850,8 @@ type StreamEvent =
       toolName: string;
       input: unknown;
     }
-  | { type: "interaction_resolved"; toolUseId: string };
+  | { type: "interaction_resolved"; toolUseId: string }
+  | { type: "notice"; message: string };
 
 // 流式期间的 node patch 合批：catchup / tool_call_start / tool_call_done /
 // tool_call_update 这类事件在一次 run 里能以每秒数个的速率轰过来，每个都
@@ -3100,6 +3101,9 @@ function handleStreamEvent(
       if (get().session?.id === event.sessionId) {
         void get().loadSession(event.sessionId);
       }
+    } else if (event.type === "notice" && currentNodeId) {
+      const id = currentNodeId;
+      useSessionStore.setState(s => ({ nodes: { ...s.nodes, [id]: { ...s.nodes[id], asNotice: event.message } } }));
     } else if (event.type === "catchup" && currentNodeId) {
       // Reconnect path: server-authoritative snapshot of where the run
       // is right now. Overwrite the response + toolCalls and reset the
