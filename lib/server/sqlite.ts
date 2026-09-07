@@ -85,6 +85,9 @@ function migrate(db: Database) {
   if (!db.prepare("SELECT 1 FROM pragma_table_info('as_turns') WHERE name='request_json'").get()) {
     db.exec("ALTER TABLE as_turns ADD COLUMN request_json TEXT");
   }
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('as_turns') WHERE name='resolved_json'").get()) {
+    db.exec("ALTER TABLE as_turns ADD COLUMN resolved_json TEXT");
+  }
 
   // Idempotent column add for project mode: each trellis session may bind
   // to one claude CLI session id (null in chat).

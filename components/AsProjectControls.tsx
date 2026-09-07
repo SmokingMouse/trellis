@@ -30,6 +30,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         if (!response.ok) { setError("Agent 服务暂不可达"); return; }
         if (!value.thread) return;
         setThread(value.thread); setSupported(value.permissionSet); setError("");
+        if (value.resolved?.length) { saved.resolved = value.resolved; setResolved(saved.resolved); remember(); }
         source = new EventSource(`/api/as/threads/${value.thread.id}/stream`);
         source.onmessage = event => {
           const data = JSON.parse(event.data) as ShadowEvent;

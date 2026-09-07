@@ -239,6 +239,10 @@ export async function POST(req: Request) {
   if (asOptions.effort !== undefined && (typeof asOptions.effort !== "string" || !["low","medium","high","xhigh","max"].includes(asOptions.effort))) {
     return Response.json({error:"invalid effort"}, {status:400});
   }
+  const existingSessionId = body.kind === "root" ? body.sessionId : getNode(body.kind === "branch" ? body.parentNodeId : body.nodeId)?.sessionId;
+  if (existingSessionId && getSession(existingSessionId)?.bindingType === "pane") {
+    return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
+  }
 
   const providerId = isProviderId(body.provider)
     ? body.provider

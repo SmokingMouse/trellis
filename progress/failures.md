@@ -2,9 +2,13 @@
 
 ## 待查
 
+- **AS project 任意节点分叉被 daemon 拒绝**（fj-trellis-step2-8442）：症状 `thread/fork{fromItemId}` 返回 -32008。假设：7913839 尚未实现 prefix fork；源码 `vendor/agent-server/dist/core/thread-manager.js:190` 明确无条件拒绝。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；当前其他断言通过、分叉 HTTP 503。已向主控申请上游修复，不能改 sm-toolkit。
+
 - **cpa 的 codex 上游间歇 `503 auth_unavailable (providers=codex)`，且当日内恶化为挂起**（S105 发现）。症状：`codex:gpt-5.5` 类注入模型（sm_endpoint / `CPA_API_KEY` bearer）多请求轮次约半数请求 503、codex 内部 5 次重试常耗尽 → turn failed；晚间进一步退化为请求挂起（probe 120s 超时无事件）。**已证伪**：本机 key 过期（curl 同 key 直打 `/v1/responses` 200）、SDK 注入参数错（单请求轮次曾成功 + S101/S102 同参数实测过）、0.7.0 代码回归（`transport:"exec"` 同注入同 503 模式）。**可证伪假设**：cpa（vultr-tokyo cliproxyapi）把 codex 形状流量路由到「codex」OAuth 池，该池凭证耗尽/过期；config.toml 的 cliproxyapi provider（同 key + `requires_openai_auth=true`）当时仍通，或因路由到不同池。**判定命令**：池恢复后跑 `node /tmp/codex-inject-probe.mjs d`（挂了随时可从 S105 session 记录重建）——稳定 completed = 池问题坐实；仍 503 而 config.toml 路径通 = 需比对 cpa 侧对两种 provider 配置的路由差异（`requires_openai_auth` / provider name）。修复大概率在 cpa 服务端（补 codex OAuth 池凭证），不在 trellis/SDK。
 
 ## 已结案
+
+- **AS 审批撤卡后处理者提示可能缺失** → `resolved`：新观察连接可能晚于 resolved 通知 attach；将处理者记录写入 as_turns.resolved_json，节点控制接口快照补发。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；第二次实测竞答提示通过（脚本最终仍因独立的分叉阻塞 exit 1）。
 
 - **主目录 `next dev` 起的实例前端永远停在「加载中…」，React 从不 hydrate**（S75 发现，S97 破案修复）→ `resolved`。**起作用的是**：`next.config.ts` 给 `allowedDevOrigins` 常驻加 `"127.0.0.1"`。根因链（三环，缺一不发病）：① 用 `http://127.0.0.1:<port>`（而非 localhost）访问 dev → ② Next 16 dev 的跨源防护只认启动 hostname，把带 `Origin: http://127.0.0.1` 的 **HMR WebSocket 握手静默掐断**——不回 HTTP 响应、server 不打日志、浏览器只见 1006（内部为 `net::ERR_INVALID_HTTP_RESPONSE`）→ ③ Next 16.2 dev 把 RSC/hydration 的 promise 与这条 WS 绑死（`app-index.js` 的 `await initialServerResponse` 永不 resolve，上游 vercel/next.js#91770），hydrateRoot 永不执行。于是 SSR HTML 完好、chunk 全 200、React runtime 全加载、flight 数据全消费、console 零报错——只差最后一步 commit。**S75 的 CSS parse 假设证伪**：注释掉 `::highlight(branch-source)` 后 parse error 清零、hydration 照挂（该规则无辜，已还原）。沿路另证伪：Cache-Control headers、bun vs node、Turbopack vs webpack、16.2.4 vs 16.2.6、浏览器扩展、shell/系统代理、headless vs headed——**极简两文件 repro 全部复现**，坐实与 trellis 代码无关。**判法（复发一条命令定性）**：`curl -H "Origin: http://127.0.0.1:<port>" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Key: x" -H "Sec-WebSocket-Version: 13" http://127.0.0.1:<port>/_next/webpack-hmr` 空响应 = 中招；换 `Origin: http://localhost:<port>` 得 101 = 同一根因。修后验证：127.0.0.1 访问 dev login，fiber 0→26、口令输入后按钮解禁。**方法论**：破案靠"从 hydrate() 源码找第一个 await → patch WebSocket 构造器观测 → Playwright 抓真实 net error → curl 复刻浏览器握手头二分"，前七个假设全是环境猜测、全灭；**对"静默无报错"故障，观测点要打在框架内部的等待链上，不是环境上**。
 

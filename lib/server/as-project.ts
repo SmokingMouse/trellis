@@ -5,7 +5,8 @@ import { NotificationSchemas, type NotificationMethod, type ServerNotification, 
 import { createProjectClient, withProjectLease, setProjectPermission } from "./as-client";
 import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding } from "./session-binding";
 import { getDB } from "./sqlite";
-import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent } from "./repo";
+import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel } from "./repo";
+import { providerFamily } from "../llm/providers";
 import { emptyThreadLog, applyShadowEvent } from "../as-log";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "../as-project-events";
 import type { RunEvent, CatchupEvent } from "./run-bus";
@@ -105,6 +106,7 @@ export class ProjectRun {
     if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") this.emit({ type: "thinking", text: params.delta });
     if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
       clearPendingInteraction(this.nodeId);
+      if (method === "serverRequest/resolved") getDB().prepare("UPDATE as_turns SET resolved_json=? WHERE node_id=?").run(JSON.stringify([`已由 ${params.decidedBy.label} 处理`]), this.nodeId);
       this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
     }
     this.project();
@@ -121,12 +123,34 @@ export class ProjectRun {
       tokenContext: u?.contextTokens, finalStart, durationMs: turn.durationMs, now: Date.now() });
     this.terminal = event;
     this.emit(event);
-    for (const sub of this.subscribers) sub.onClose();
-    this.subscribers.clear();
+    void this.settled(turn, response).finally(() => {
+      for (const sub of this.subscribers) sub.onClose();
+      this.subscribers.clear();
+    });
     clearInterval(this.poll);
     // Let the start RPC finish before closing the wire (a mock can finish synchronously).
     const cleanup = setTimeout(() => { this.client.close(); if (runs.get(this.nodeId) === this) runs.delete(this.nodeId); }, 1000);
     cleanup.unref?.();
+  }
+  private async settled(turn: Turn, response: string) {
+    const node = getNode(this.nodeId), session = node && getSession(node.sessionId);
+    if (!node || !session) return;
+    if (turn.status === "completed" && response.trim() && session.model !== "mock") {
+      const family = providerFamily(session.model ?? "claude-opus");
+      const { generateTopicLabel, generateSessionTitle } = await import("../llm/topic");
+      await Promise.allSettled([
+        generateTopicLabel(node.question, response, family).then(label => {
+          if (label) { setNodeTopicLabel(node.id, label); this.emit({type:"topic_label",nodeId:node.id,label}); }
+        }),
+        (async () => {
+          const ctx = getSessionTitleContext(session.id);
+          if (!ctx || ctx.origin !== "native" || ctx.titleSource === "user" || !(ctx.doneCount === 1 || ctx.doneCount > 1 && ctx.doneCount % 8 === 0) || !ctx.turns.length) return;
+          const title = await generateSessionTitle(ctx.turns, family);
+          if (title && applyAutoTitle(session.id,title)) this.emit({type:"session_title",sessionId:session.id,title});
+        })(),
+      ]);
+    }
+    try { const { onNodeSettled } = await import("./tasks"); onNodeSettled(node.id); } catch (error) { console.warn(`[trellis/as] settlement: ${error}`); }
   }
   catchup(): CatchupEvent {
     const n = getNode(this.nodeId)!;
@@ -176,10 +200,19 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
     } catch (error) { setup!?.close(); throw new DaemonUnavailable(String(error)); }
     try {
       const options = projectThreadOptions(session, { permission: args.permission, effort: args.effort });
+      if (args.retry && !args.permission) {
+        const previous = getAsTurn(node.id);
+        if (previous) {
+          if (previous.daemon_id !== daemonIdentity()) throw new Error("session daemon mapping changed");
+          options.permission = (await setup.request("thread/read", {threadId:previous.thread_id})).thread.permission;
+        }
+      }
       if (!setup.initializeResult?.capabilities.backends.includes(options.backend)) throw new Error("daemon backend unavailable");
       let parentId = node.parentId;
       let parent = parentId ? getAsTurn(parentId) : null;
-      while (parentId && !parent) { parentId = getNode(parentId)?.parentId ?? null; parent = parentId ? getAsTurn(parentId) : null; }
+      // @mention is intentionally ephemeral. A legacy fallback answer is not:
+      // seed a fresh thread with that history instead of silently omitting it.
+      while (parentId && !parent && getNode(parentId)?.agentScope === "mention") { parentId = getNode(parentId)?.parentId ?? null; parent = parentId ? getAsTurn(parentId) : null; }
       if (parent && parent.daemon_id !== daemonIdentity()) throw new Error("session daemon mapping changed");
       if (parent && getNode(parent.node_id)?.status === "streaming") throw new Error("parent turn is still running");
       let threadId: string;
@@ -189,10 +222,15 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
           if (!parent.last_item_id) throw new Error("parent turn has no completed fork coordinate");
           if (!setup.initializeResult?.capabilities.fork) throw new Error("daemon does not support fork");
           threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, fromItemId: parent.last_item_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
-        } else threadId = parent.thread_id;
+        } else {
+          threadId = parent.thread_id;
+          const { thread } = await setup.request("thread/read", {threadId});
+          if (["closed", "systemError", "interrupted"].includes(thread.status.type)) await setup.request("thread/resume", {threadId});
+        }
       } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
       bindAsThread(session.id, threadId);
-      const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
+      const recoveredHistory = !parent && parentId ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
+      const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: recoveredHistory ? `${recoveredHistory}\n\nuser: ${args.prompt}` : args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
       bindAsTurn(node.id, threadId, params.clientTurnId!);
       getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), node.id);
       const run = new ProjectRun(node.id, threadId, params);

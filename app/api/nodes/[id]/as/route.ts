@@ -2,6 +2,7 @@ import { getNode } from "@/lib/server/repo";
 import { getAsTurn, resolveSessionBinding } from "@/lib/server/session-binding";
 import { permissionProject, withNodeThread } from "@/lib/server/as-project";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
+import { getDB } from "@/lib/server/sqlite";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(_req: Request, ctx: { params: Promise<{id:string}> }) {
@@ -12,6 +13,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{id:string}> }) 
   if (binding.type !== "thread" || !turn) return Response.json({ binding: binding.type, thread: null });
   try { return Response.json(await withNodeThread(id, async (client, threadId) => ({
     binding: "thread", turnId: turn.turn_id, thread: (await client.request("thread/read", {threadId})).thread,
+    resolved: JSON.parse((getDB().prepare("SELECT resolved_json FROM as_turns WHERE node_id=?").get(id) as {resolved_json:string|null})?.resolved_json ?? "[]"),
     permissionSet: client.initializeResult?.capabilities.engine?.permissionSet === true,
   }))); } catch (error) { return Response.json({ error: String(error) }, {status:503}); }
 }
