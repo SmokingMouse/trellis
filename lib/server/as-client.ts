@@ -125,7 +125,10 @@ export class ShadowClient {
         });
         for (const method of Object.keys(NotificationSchemas) as NotificationMethod[]) {
           client.onNotification(method, params => {
-            if (this.stopped || this.client !== client || !("threadId" in params) || params.threadId !== this.threadId) return;
+            if (this.stopped || this.client !== client) return;
+            const relevant = ("threadId" in params && params.threadId === this.threadId)
+              || (method === "error" && (!("threadId" in params) || !params.threadId));
+            if (!relevant) return;
             if ("seq" in params) this.cursor = Math.max(this.cursor, params.seq);
             if (method === "thread/status/changed" && "status" in params) {
               this.running = params.status.type === "running";

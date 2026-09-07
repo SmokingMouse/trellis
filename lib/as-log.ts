@@ -1,4 +1,4 @@
-import type { Item, PendingServerRequest } from "@smokingmouse/agent-server/protocol";
+import type { Item, PendingServerRequest, Turn, NotificationParams } from "@smokingmouse/agent-server/protocol";
 import type { ShadowEvent } from "./as-shadow";
 
 export interface ThreadLog {
@@ -6,8 +6,10 @@ export interface ThreadLog {
   pending: PendingServerRequest[];
   cursor: number;
   state: string;
+  turns: Record<string, Turn>;
+  errors: NotificationParams<"error">[];
 }
-export const emptyThreadLog = (): ThreadLog => ({ items: {}, pending: [], cursor: 0, state: "connecting" });
+export const emptyThreadLog = (): ThreadLog => ({ items: {}, pending: [], cursor: 0, state: "connecting", turns: {}, errors: [] });
 
 /** Snapshots/completions replace payloads; only live deltas append. */
 export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog {
@@ -24,6 +26,14 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
     return items === log.items && pending === log.pending && cursor === log.cursor ? log : { ...log, items, pending, cursor };
   }
   const { method, params } = event.notification;
+  if (method === "error") {
+    if (log.errors.some(error => JSON.stringify(error) === JSON.stringify(params))) return log;
+    return { ...log, errors: [...log.errors, params] };
+  }
+  if (method === "turn/started" || method === "turn/completed") {
+    if (JSON.stringify(log.turns[params.turnId]) === JSON.stringify(params.turn)) return log;
+    return { ...log, turns: { ...log.turns, [params.turnId]: params.turn } };
+  }
   if (method === "item/started" || method === "item/completed") {
     if (params.seq <= log.cursor) return log;
     return { ...log, items: { ...log.items, [params.item.id]: params.item }, cursor: params.seq };

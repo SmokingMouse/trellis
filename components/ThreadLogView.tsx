@@ -40,6 +40,15 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
       </div>
       <button type="button" data-as-pause onClick={() => setPaused(value => !value)}>{paused ? "继续查看" : "暂停查看"}</button>
     </div>
+    {log.errors.map((error, index) => <aside className="as-approval" role="alert" data-as-error key={index}>
+      <strong>服务错误 · {error.error.code}</strong>
+      <p>{error.error.message}</p>
+      <small>{error.willRetry ? "服务将重试" : "请在原客户端检查"}</small>
+    </aside>)}
+    {Object.values(log.turns).sort((a, b) => a.ordinal - b.ordinal).map(turn => <p key={turn.id} data-as-turn={turn.id} data-turn-status={turn.status} className="as-turn-status">
+      第 {turn.ordinal} 轮 · {turn.status === "inProgress" ? "进行中" : turn.status === "completed" ? "已完成" : turn.status === "failed" ? "失败" : turn.status === "interrupted" ? "已中断" : turn.status}
+      {turn.error && ` · ${turn.error.message}`}
+    </p>)}
     {log.pending.map(request => <aside className="as-approval" key={request.params.requestId} data-as-approval>
       <strong>等待审批 · 只读</strong>
       <p>请在原客户端处理此请求。</p>
