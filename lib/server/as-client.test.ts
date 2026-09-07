@@ -16,7 +16,7 @@ async function until(predicate: () => boolean) {
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "as-shadow-test-"));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
-  const paths = resolveDaemonPaths({ HOME: home, AGENT_SERVER_SOCKET_PATH: join(home, "as.sock") });
+  const paths = resolveDaemonPaths({ NODE_ENV: "test", HOME: home, AGENT_SERVER_SOCKET_PATH: join(home, "as.sock") });
   const engine = new MockEngine(undefined, "codex");
   let daemon: RunningDaemon;
   const start = async () => {
