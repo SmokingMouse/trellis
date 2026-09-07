@@ -77,9 +77,10 @@ export function HerdrSidebarGroup({
                     type="button"
                     data-herdr-pane={pane.paneId}
                     data-herdr-status={pane.status}
+                    data-mobile-target="herdr-pane-row"
                     disabled={!sessionId}
                     onClick={() => sessionId && onOpenSession(sessionId)}
-                    className={`mx-1 flex h-[30px] max-md:h-11 w-[calc(100%-0.5rem)] items-center gap-2 rounded-md pl-5 pr-2 text-left transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                    className={`mx-1 flex h-[30px] max-md:h-11 w-[calc(100%-0.5rem)] touch-manipulation items-center gap-2 rounded-md pl-5 pr-2 text-left transition-colors disabled:cursor-wait disabled:opacity-60 ${
                       urgent
                         ? "bg-warn-muted font-medium text-warn-ink"
                         : active

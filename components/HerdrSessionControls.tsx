@@ -143,6 +143,7 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
         </span>
         <span
           data-herdr-delivery={state}
+          aria-live="polite"
           className={state === "error" ? "text-danger" : "text-positive"}
         >
           {state === "delivered"
@@ -155,6 +156,7 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
       <div className="flex items-end gap-2">
         <textarea
           data-herdr-input
+          data-mobile-target="herdr-input"
           value={text}
           onChange={(event) => {
             setText(event.target.value);
@@ -169,7 +171,7 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
           rows={1}
           disabled={state === "sending"}
           placeholder="发给 Herdr…（Enter 发送，Shift+Enter 换行）"
-          className="min-h-11 max-h-32 min-w-0 flex-1 resize-none rounded-2xl border border-line-strong bg-surface px-4 py-3 text-body text-ink-strong outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-line/50 disabled:opacity-60"
+          className="min-h-11 max-h-32 min-w-0 flex-1 touch-manipulation resize-none rounded-2xl border border-line-strong bg-surface px-4 py-3 text-body text-ink-strong outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent-line/50 disabled:opacity-60"
         />
         <button
           type="button"
@@ -177,7 +179,7 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
           data-herdr-send
           onClick={() => void submit()}
           disabled={!text.trim() || state === "sending"}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-ink-inverse shadow-raise disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-2xl bg-accent text-ink-inverse shadow-raise disabled:opacity-30"
           aria-label={state === "sending" ? "正在发送到 Herdr" : "发送到 Herdr"}
         >
           {state === "sending" ? "…" : "↑"}

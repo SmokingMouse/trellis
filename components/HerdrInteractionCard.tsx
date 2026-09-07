@@ -127,7 +127,8 @@ export function HerdrInteractionCard({
       <div
         data-herdr-card
         data-herdr-card-state="answered"
-        className={`${compact ? "mx-2 mb-2 px-3 py-2" : "px-4 py-3"} rounded-card border border-positive-line bg-positive-muted text-sm text-positive-ink`}
+        className={`${compact ? "mx-2 mb-2 px-3 py-2" : "px-4 py-3 max-md:px-3"} rounded-card border border-positive-line bg-positive-muted text-sm text-positive-ink`}
+        aria-live="polite"
       >
         ✓ 已回答，等待 Herdr 确认…
       </div>
@@ -141,7 +142,7 @@ export function HerdrInteractionCard({
     <div
       data-herdr-card
       data-herdr-card-kind={codexBlocked ? "terminal" : approvalPrompt ? "permission" : "question"}
-      className={`${compact ? "mx-2 mb-2 p-2.5" : "p-4"} rounded-card border-2 border-warn-line bg-warn-muted text-warn-ink shadow-raise`}
+      className={`${compact ? "mx-2 mb-2 p-2.5" : "p-4 max-md:p-3"} rounded-card border-2 border-warn-line bg-warn-muted text-warn-ink shadow-raise`}
     >
       <div className="flex items-center gap-2 text-sm font-semibold">
         <span aria-hidden>{codexBlocked ? "⌨" : approvalPrompt ? "🔐" : "🙋"}</span>
@@ -246,7 +247,7 @@ export function HerdrInteractionCard({
               ? "读屏暂不可用"
               : screen || "正在读取最近 40 行…"}
           </pre>
-          <div className="mt-2 grid grid-cols-6 gap-1.5">
+          <div className="mt-2 grid grid-cols-5 gap-1.5 sm:grid-cols-6">
             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
               (key) => (
                 <button
