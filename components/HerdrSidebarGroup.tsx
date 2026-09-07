@@ -105,12 +105,12 @@ export function HerdrSidebarGroup({
           {tree.repositories.map(repo => {
             const key = `herdr:repo:${repo.id}`;
             return <div key={key} data-herdr-repo={repo.id}>
-              <GroupRow level={0} label={repo.label} title={repo.id} badge={repo.attention ? `${repo.attention} 待处理` : null} collapsed={collapsed.has(key)} onToggle={() => onToggle(key)} />
+              <GroupRow level={0} label={repo.label} title={repo.id} badge={collapsed.has(key) && repo.attention ? `${repo.attention} 待处理` : null} collapsed={collapsed.has(key)} onToggle={() => onToggle(key)} />
               {!collapsed.has(key) && <div className="ml-[9px] border-l border-line">
                 {repo.worktrees.map(wt => {
                   const wtKey = `herdr:worktree:${wt.id}`;
                   return <div key={wtKey} data-herdr-worktree={wt.id}>
-                    <GroupRow level={0} label={wt.label} title={wt.title} badge={wt.attention ? `${wt.attention} 待处理` : null} collapsed={collapsed.has(wtKey)} onToggle={() => onToggle(wtKey)} />
+                    <GroupRow level={0} label={wt.label} title={wt.title} badge={collapsed.has(wtKey) && wt.attention ? `${wt.attention} 待处理` : null} collapsed={collapsed.has(wtKey)} onToggle={() => onToggle(wtKey)} />
                     {!collapsed.has(wtKey) && <div className="ml-[9px] border-l border-line">{renderPanes(wt.panes)}</div>}
                   </div>;
                 })}

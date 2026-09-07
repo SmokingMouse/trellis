@@ -20,7 +20,7 @@ FAKE_LOG="$H/fake-herdr.log"
 FAKE_STDOUT="$H/fake-herdr.stdout"
 SOCKET="$H/herdr.sock"
 OUT="$H/out"
-SESSION=mv-mobile-herdr
+SESSION=mv-mobile-herdr-$$
 AUTH_PASS=mv-mobile-herdr-pass
 AUTH_TOKEN=mv-mobile-herdr-token
 CLAUDE_SESSION=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
@@ -283,8 +283,8 @@ ab eval --stdin <<'JS'
   assert(worktrees[0].querySelector('[data-sidebar-group]').innerText.includes('main'), 'main branch missing');
   assert(worktrees[1].querySelector('[data-sidebar-group]').innerText.includes('feat/mobile'), 'linked branch missing');
   assert(worktrees[0].querySelector('button').title.includes('Fake Workspace'), 'Herdr label missing from title');
-  assert(repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('2 待处理'), 'repository attention missing');
-  assert(worktrees.every(w => w.querySelector('[data-sidebar-group]').innerText.includes('1 待处理')), 'worktree attention missing');
+  assert(!repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 expanded repository must hide attention');
+  assert(worktrees.every(w => !w.querySelector('[data-sidebar-group]').innerText.includes('待处理')), 'P2-2 expanded worktrees must hide attention');
   const scratch = group.querySelector('[data-herdr-workspace="workspace-scratch"]');
   assert(scratch && !scratch.closest('[data-herdr-repo]') && repo.nextElementSibling === scratch, 'non-git workspace must be flat at the end');
   assert(rows.length === 3, `pane rows=${rows.length}`);
@@ -473,8 +473,8 @@ ab eval --stdin <<'JS'
   const repo = group.querySelector('[data-herdr-repo]');
   assert(repo?.querySelectorAll('[data-herdr-worktree]').length === 2, 'mobile nested worktrees missing');
   assert(!group.querySelector('[data-herdr-workspace="workspace-scratch"]').closest('[data-herdr-repo]'), 'mobile scratch must be flat');
-  assert(repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('1 待处理'), 'mobile repository waiting count missing');
-  assert(repo.querySelector('[data-herdr-worktree] > [data-sidebar-group]').innerText.includes('1 待处理'), 'mobile worktree waiting count missing');
+  assert(!repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 mobile expanded repository must hide attention');
+  assert(!repo.querySelector('[data-herdr-worktree] > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 mobile expanded worktree must hide attention');
   for (const button of group.querySelectorAll('[data-sidebar-group] > button')) {
     assert(button.getBoundingClientRect().height >= 44, 'group touch target under 44px');
   }
