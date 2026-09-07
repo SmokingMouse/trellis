@@ -115,6 +115,16 @@ touch "$H/approve"
 wait_js 'live delta before completion' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。' && document.querySelector('[data-as-item=answer]')?.dataset.itemStatus === 'inProgress' && !document.querySelector('[data-as-approval]')"
 ab screenshot "$OUT/mobile-as-live.png"
 wait_js 'P2-3 initially follows live tail' "(() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
+position=$(ab eval "(() => { const r = document.querySelector('.as-shadow').getBoundingClientRect(); return [Math.floor(r.right - 24), Math.floor(r.bottom - 24)].join(' '); })()" | tr -d '"')
+set -- $position
+ab mouse move "$1" "$2"
+ab mouse down left
+ab mouse up left
+wait_js 'N9 bottom tap preserves automatic following' "document.querySelector('[data-as-log]')?.dataset.followTail === 'true' && !document.querySelector('[data-as-follow]')"
+ab eval "document.querySelector('.as-shadow').scrollTop -= 4; true"
+wait_js 'N9 real upward scroll stops following even near bottom' "document.querySelector('[data-as-log]')?.dataset.followTail === 'false'"
+ab click '[data-as-follow]'
+wait_js 'N9 return restores following after a small upward scroll' "document.querySelector('[data-as-log]')?.dataset.followTail === 'true'"
 ab eval "(() => { const main = document.querySelector('.as-shadow'); main.scrollTop -= 160; sessionStorage.setItem('as-scrolled-up', String(main.scrollTop)); return true; })()"
 wait_js 'P2-3 scrolling up disables following' "document.querySelector('[data-as-log]')?.dataset.followTail === 'false' && Boolean(document.querySelector('[data-as-follow]'))"
 touch "$H/tail"
