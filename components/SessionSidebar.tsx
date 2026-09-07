@@ -35,6 +35,7 @@ import {
 import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { BookmarkRows } from "@/components/BookmarkRows";
+import { HerdrSidebarGroup } from "@/components/HerdrSidebarGroup";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
 // 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
@@ -937,6 +938,15 @@ export function SessionSidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto py-1.5">
+        <HerdrSidebarGroup
+          activeSessionId={activeId}
+          onOpenSession={(sessionId) => {
+            setEditingId(null);
+            setViewMode("linear");
+            setMobileNavOpen(false);
+            void previewSession(sessionId);
+          }}
+        />
         {sessions.length === 0 && tasks.length === 0 && taskSessions.length === 0 ? (
           <div className="px-3 py-3 text-label text-ink-faint italic">
             还没有会话，点上面「新会话」开始
