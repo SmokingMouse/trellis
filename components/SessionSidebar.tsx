@@ -708,12 +708,15 @@ export function SessionSidebar() {
           label={w.name}
           // 有 session 才可折叠；空的没有子内容，给三角就是个骗人的开关。
           toggleable={list.length > 0}
-          tag={w.kind === "worktree" && !br ? "worktree" : null}
+          tag={w.kind === "worktree" && !br ? "detached" : null}
           git={g ?? null}
           muted={list.length === 0 || isReclaimable}
           title={`${w.path}${(() => {
             return [
               br ? `\n分支: ${br}` : "",
+              w.kind === "worktree" && !br
+                ? "\nDetached HEAD：当前 worktree 没有检出命名分支"
+                : "",
               g?.dirty ? `\n${g.dirty} 个文件有改动或未跟踪 (点击角标查看 Diff)` : "",
               g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以安全回收" : "",
             ].join("");
