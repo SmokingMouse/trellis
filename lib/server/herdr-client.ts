@@ -383,7 +383,7 @@ export class HerdrClient {
   private async startInner(): Promise<void> {
     console.info(`[trellis] Herdr socket: ${this.socketPath}`);
     try {
-      await this.probe(2);
+      await this.probe(0);
       if (this._readOnly) await this.resync();
       else await this.openSubscriptionAndSnapshot();
       this.installTimers();

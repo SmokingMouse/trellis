@@ -394,12 +394,33 @@ describe("HerdrClient", () => {
       healthIntervalMs: 60_000,
     });
     clients.push(client);
+    const boot = performance.now();
     await client.start();
+    expect(performance.now() - boot).toBeLessThan(200);
     const started = performance.now();
     await expect(client.request("session.snapshot")).rejects.toBeInstanceOf(
       HerdrUnavailableError,
     );
     expect(performance.now() - started).toBeLessThan(200);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("stale Unix sockets fail startup within 200ms (rv_degrade regression)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-stale-"));
+    const original = path.join(dir, "live.sock");
+    const stale = path.join(dir, "stale.sock");
+    const listener = Bun.listen({ unix: original, socket: { data() {} } });
+    fs.renameSync(original, stale);
+    listener.stop(true);
+    expect(fs.statSync(stale).isSocket()).toBeTrue();
+    const client = new HerdrClient({ socketPath: stale });
+    clients.push(client);
+    try {
+      const boot = performance.now();
+      await client.start();
+      expect(performance.now() - boot).toBeLessThan(200);
+      expect(client.state.available).toBeFalse();
+      await expect(client.request("pane.list")).rejects.toBeInstanceOf(HerdrUnavailableError);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
