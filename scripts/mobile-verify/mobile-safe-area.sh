@@ -306,6 +306,12 @@ assert_visible_text_fields_at_least_16 "新树 modal"
 agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-close"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-safe-area=modal-shell]')"
 
+# Cancelling the new-tree modal returns to the linear thread. Reopen the
+# mobile tree sheet before exercising its filter input.
+agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+agent-browser --session "$SESSION" click '[data-mobile-target="overflow-tree"]'
+agent-browser --session "$SESSION" wait '[data-mobile-tree-sheet="open"]'
 agent-browser --session "$SESSION" click 'button[aria-label="过滤跳转"]'
 agent-browser --session "$SESSION" wait 'input[aria-label="过滤节点"]'
 assert_visible_text_fields_at_least_16 "思维树过滤输入"

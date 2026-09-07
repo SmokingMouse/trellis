@@ -249,7 +249,6 @@ HOOK_TOKEN=$(sed -n 's/^TRELLIS_HOOK_TOKEN=//p' "$H/.trellis/hooks/endpoint.env"
 
 curl --noproxy '*' -fsS "$BASE/api/hooks/claude" \
   -H "x-trellis-hook-token: $HOOK_TOKEN" \
-  --data-urlencode 'paneKey=pane-claude' \
   --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion","tool_input":{"questions":[{"header":"发布策略","question":"请选择交付方案","options":[{"label":"快速方案","description":"优先速度"},{"label":"稳妥方案","description":"优先验证"}]}]}}' \
   >/dev/null
 
@@ -292,9 +291,36 @@ wait_for_log "option raw keys" '"keys":["2","Enter"]'
 wait_for_js "answered card state" "Boolean(document.querySelector('[data-herdr-card-state=answered]'))"
 
 ab fill 'textarea[data-herdr-input]' 'mobile-herdr-input-proof'
+ab eval --stdin <<'JS'
+(() => {
+  const original = window.fetch;
+  window.fetch = async (...args) => {
+    const started = performance.now();
+    const response = await original(...args);
+    if (String(args[0]).endsWith('/pane-claude/input')) {
+      window.herdrInputProof = { status: response.status, elapsed: performance.now() - started };
+    }
+    return response;
+  };
+  return true;
+})()
+JS
 ab click '[data-herdr-send]'
 wait_for_log "input with Enter" '"text":"mobile-herdr-input-proof","keys":["Enter"]'
 wait_for_js "Herdr delivery acknowledgement" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'delivered'"
+ab eval --stdin <<'JS'
+(() => {
+  const proof = window.herdrInputProof;
+  if (proof?.status !== 200 || proof.elapsed >= 3000) throw new Error(`send waited for agent: ${JSON.stringify(proof)}`);
+  return proof;
+})()
+JS
+if grep -F '"completed":"agent.wait"' "$FAKE_LOG" >/dev/null 2>&1; then
+  fail 'agent.wait completed before immediate acknowledgement assertion'
+fi
+wait_for_js "event-driven Codex idle status" "document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'idle'"
+wait_for_log "subscription initial replay" '"replay":2'
+wait_for_log "pane_updated events" '"event":"pane_updated"'
 
 echo "== iPhone drawer, header, cards and touch targets =="
 ab set device "iPhone 15"
@@ -348,6 +374,22 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab screenshot "$OUT/iphone-herdr-session.png"
+
+echo "== event-driven pane close =="
+ab eval --stdin <<'JS'
+(async () => {
+  const response = await fetch('/api/herdr/panes/pane-codex/keys', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: ['Escape'] }),
+  });
+  if (response.status !== 200) throw new Error(`keys HTTP ${response.status}`);
+  return true;
+})()
+JS
+wait_for_log "pane_closed event" '"event":"pane_closed"'
+ab click 'button[aria-label="会话列表"]'
+wait_for_js "closed pane removed by event" "Boolean(document.querySelector('[role=dialog] [data-herdr-group]')) && !document.querySelector('[data-herdr-pane=\"pane-codex\"]')"
+ab click '[role="dialog"] [data-herdr-pane="pane-claude"]'
+wait_for_js "return after close event" "!document.querySelector('[role=dialog] [data-herdr-group]')"
 
 echo "== fake Herdr down becomes read-only =="
 stop_pid "$FAKE_PID"

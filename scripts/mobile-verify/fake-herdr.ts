@@ -10,6 +10,8 @@ type RequestEnvelope = {
 const socketPath = process.env.HERDR_SOCKET_PATH ?? "";
 const requestLog = process.env.FAKE_HERDR_LOG ?? "";
 const fakeHome = process.env.FAKE_HERDR_HOME ?? "";
+const waitDelayMs = Number(process.env.FAKE_HERDR_WAIT_DELAY_MS ?? 6_500);
+if (!Number.isFinite(waitDelayMs) || waitDelayMs < 0) throw new Error("invalid FAKE_HERDR_WAIT_DELAY_MS");
 if (!socketPath || !requestLog || !fakeHome) {
   throw new Error(
     "HERDR_SOCKET_PATH, FAKE_HERDR_LOG and FAKE_HERDR_HOME are required",
@@ -151,6 +153,21 @@ const panes = [
 ];
 
 const subscribers = new Set<Bun.Socket<{ buffer: string }>>();
+const timers = new Set<ReturnType<typeof setTimeout>>();
+
+function emit(event: string, data: Record<string, unknown>) {
+  const line = JSON.stringify({ event, data: { type: event, ...data } }) + "\n";
+  fs.appendFileSync(requestLog, line);
+  for (const socket of subscribers) socket.write(line);
+}
+
+function updatePane(paneId: string, status: string) {
+  const pane = panes.find(pane => pane.pane_id === paneId);
+  if (!pane) return;
+  pane.agent_status = status;
+  pane.revision++;
+  emit("pane_updated", { pane });
+}
 
 function resultFor(request: RequestEnvelope): Record<string, unknown> {
   switch (request.method) {
@@ -193,14 +210,32 @@ function resultFor(request: RequestEnvelope): Record<string, unknown> {
     case "pane.read":
       return {
         type: "pane_read",
-        lines: Array.from(
+        read: {
+          pane_id: request.params.pane_id, workspace_id: "workspace-fake", tab_id: "tab-fake",
+          source: request.params.source, format: "text", revision: 1, truncated: false,
+          text: Array.from(
           { length: 48 },
           (_, index) =>
             `${String(index + 1).padStart(2, "0")} fake terminal line${
               index === 47 ? " — Select option 1-3 or press Esc" : ""
             }`,
-        ),
+          ).slice(-Number(request.params.lines ?? 80)).join("\n"),
+        },
       };
+    case "pane.send_input":
+      updatePane(String(request.params.pane_id), "working");
+      updatePane("pane-codex", "idle");
+      return { type: "ok" };
+    case "pane.send_keys":
+      if (request.params.pane_id === "pane-codex" && JSON.stringify(request.params.keys) === '["Escape"]') {
+        const index = panes.findIndex(pane => pane.pane_id === "pane-codex");
+        if (index >= 0) panes.splice(index, 1);
+        emit("pane_closed", { pane_id: "pane-codex", workspace_id: "workspace-fake", tab_id: "tab-fake" });
+      }
+      return { type: "ok" };
+    case "agent.wait":
+      updatePane(String(request.params.target), "idle");
+      return { type: "agent_info", agent: panes.find(pane => pane.pane_id === request.params.target) };
     case "pane.split":
       return {
         type: "pane_info",
@@ -238,6 +273,22 @@ const listener = Bun.listen({
               result: { type: "subscription_started" },
             })}\n`,
           );
+          // Herdr replays initial pane state after acknowledging subscription.
+          for (const pane of panes) {
+            for (const event of ["pane_created", "pane_updated"]) {
+              socket.write(JSON.stringify({ event, data: { type: event, pane } }) + "\n");
+            }
+          }
+          fs.appendFileSync(requestLog, JSON.stringify({ replay: panes.length }) + "\n");
+          return;
+        }
+        if (request.method === "agent.wait") {
+          const timer = setTimeout(() => {
+            timers.delete(timer);
+            fs.appendFileSync(requestLog, JSON.stringify({ completed: "agent.wait", id: request.id }) + "\n");
+            try { socket.end(JSON.stringify({ id: request.id, result: resultFor(request) }) + "\n"); } catch { /* client disconnected */ }
+          }, waitDelayMs);
+          timers.add(timer);
           return;
         }
         socket.end(
@@ -252,6 +303,7 @@ const listener = Bun.listen({
 });
 
 function stop() {
+  for (const timer of timers) clearTimeout(timer);
   for (const socket of subscribers) socket.end();
   listener.stop(true);
   fs.rmSync(socketPath, { force: true });
