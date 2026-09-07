@@ -59,6 +59,30 @@ function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS nodes_parent ON nodes(parent_id);
   `);
 
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'binding_type'").get()) {
+    db.exec("ALTER TABLE sessions ADD COLUMN binding_type TEXT NOT NULL DEFAULT 'legacy' CHECK(binding_type IN ('legacy','pane','thread'))");
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS as_threads (
+      thread_id TEXT NOT NULL,
+      daemon_id TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (daemon_id, thread_id)
+    );
+    CREATE INDEX IF NOT EXISTS as_threads_session ON as_threads(session_id);
+    CREATE TABLE IF NOT EXISTS as_turns (
+      node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL,
+      daemon_id TEXT NOT NULL,
+      turn_id TEXT,
+      client_turn_id TEXT NOT NULL,
+      last_item_id TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (daemon_id, thread_id) REFERENCES as_threads(daemon_id, thread_id)
+    );
+  `);
+
   // Idempotent column add for project mode: each trellis session may bind
   // to one claude CLI session id (null in chat).
   // Legacy: this column was authoritative pre-2026-05. After the per-root
@@ -892,7 +916,7 @@ function migrate(db: Database) {
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted',
             pending_interaction_json = NULL
-     WHERE status = 'streaming'`,
+     WHERE status = 'streaming' AND id NOT IN (SELECT node_id FROM as_turns)`,
   ).run();
 
   // ★ S88：上面那条的**对称件**，必须成对存在 —— 只做一个比都不做更危险。
