@@ -777,7 +777,7 @@ function migrate(db: Database) {
       WHERE trigger_id IS NOT NULL;
   `);
 
-  // 任务会话不该挤在用户的会话侧栏里。'user' | 'task' | 'lark'。
+  // 任务与 Herdr 镜像各有自己的分组。'user' | 'task' | 'lark' | 'herdr'。
   // 注意：这个 `kind` 与 `nodes.kind`（'qa' | 'reference'）**同名不同义**，
   // 两者没有任何关系，写查询时别把两张表的 kind 当同一个枚举（S89 记）。
   const hasSessionKind = db
@@ -786,6 +786,7 @@ function migrate(db: Database) {
   if (!hasSessionKind) {
     db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
   }
+  db.exec("UPDATE sessions SET kind = 'herdr' WHERE origin = 'herdr' AND kind <> 'herdr'");
 
   // 飞书是入口，Trellis 的 session/node 树仍是对话真源。bot 只保存连接与执行配置，
   // chat 只保存飞书会话到树链尾的映射，inbox 只承担消息去重；三者不复制回答正文。

@@ -11,7 +11,7 @@ process.env.TRELLIS_DB_PATH = path.join(dir, "test.db");
 const sqlite = await import("./sqlite");
 sqlite.resetDBForTests();
 const { attachSession, detachSession } = await import("./cli-sync-watcher");
-const { getSession } = await import("./repo");
+const { getSession, listSessions } = await import("./repo");
 const { hasAliveHerdrBinding, reconcileHerdrPane, markHerdrPaneClosed } = await import("./herdr-bindings");
 const chat = await import("../../app/api/chat/route");
 const resume = await import("../../app/api/nodes/[id]/cli-resume/route");
@@ -34,10 +34,17 @@ afterAll(() => {
 test("Herdr takes priority over both existing and subsequent CLI attaches", () => {
   attachSession(file);
   expect(getSession(sid)?.origin).toBe("cli-import");
+  expect(listSessions().some(session => session.id === sid)).toBeTrue();
   attachSession(file, "claude", { origin: "herdr" });
   expect(getSession(sid)?.origin).toBe("herdr");
+  expect(listSessions().some(session => session.id === sid)).toBeFalse();
   attachSession(file);
   expect(getSession(sid)?.origin).toBe("herdr");
+  expect((sqlite.getDB().prepare("SELECT kind FROM sessions WHERE id = ?").get(sid) as { kind: string }).kind).toBe("herdr");
+  // Older mirrored rows are reclassified when the database opens, too.
+  sqlite.getDB().prepare("UPDATE sessions SET kind = 'user' WHERE id = ?").run(sid);
+  sqlite.resetDBForTests();
+  expect(listSessions().some(session => session.id === sid)).toBeFalse();
 });
 
 test("alive bindings lock root, branch, retry, CLI resume and UI even with stale origin", async () => {

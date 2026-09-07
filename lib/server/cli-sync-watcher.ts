@@ -128,10 +128,11 @@ function seedLineage(
       `INSERT INTO sessions
          (id, title, root_node_id, created_at, updated_at, context_mode,
           workspace_path, workspace_id, model, origin, source_jsonl_path,
-          synced_uuid, cli_provider)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          synced_uuid, cli_provider, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          origin = CASE WHEN excluded.origin = 'herdr' THEN 'herdr' ELSE sessions.origin END,
+         kind = CASE WHEN excluded.origin = 'herdr' OR sessions.origin = 'herdr' THEN 'herdr' ELSE sessions.kind END,
          title = excluded.title,
          root_node_id = excluded.root_node_id,
          updated_at = excluded.updated_at,
@@ -155,6 +156,7 @@ function seedLineage(
       root.path,
       parsed.lastUuid,
       provider,
+      origin === "herdr" ? "herdr" : "user",
     );
 
     db.prepare("UPDATE cli_lineages SET is_root = 0 WHERE trellis_session_id = ?").run(

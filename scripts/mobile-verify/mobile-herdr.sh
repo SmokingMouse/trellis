@@ -239,6 +239,9 @@ while [ "$(sqlite3 "$DB" "SELECT count(*) FROM sessions WHERE origin='herdr';" 2
 done
 
 endpoint_try=0
+if [ "$(sqlite3 "$DB" "SELECT count(*) FROM sessions WHERE origin='herdr' AND kind<>'herdr';")" -ne 0 ]; then
+  fail 'Herdr mirrors leaked into the user session kind'
+fi
 while [ ! -f "$H/.trellis/hooks/endpoint.env" ]; do
   endpoint_try=$((endpoint_try + 1))
   [ "$endpoint_try" -lt 30 ] || fail "hook endpoint.env did not appear"
