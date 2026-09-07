@@ -306,6 +306,17 @@ wait_for_js "explicit answer submission" "Boolean(document.querySelector('[data-
 ab click '[data-thread-scroll] [data-herdr-submit-answers]'
 wait_for_js "multi-select submitted" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-card-state=answered]'))"
 
+curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","agent_id":"parent","tool_name":"AskUserQuestion","tool_use_id":"two-questions","tool_input":{"questions":[{"header":"Color","question":"Color: Red or Blue?","multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]},{"header":"Shape","question":"Shape: Circle or Square?","multiSelect":false,"options":[{"label":"Circle"},{"label":"Square"}]}]}}' >/dev/null
+wait_for_js "two-question first page" "document.querySelector('[data-thread-scroll] [data-herdr-question]')?.textContent?.includes('Color:') === true"
+ab eval "window.multiQuestionKeys = []; const originalKeysFetch = window.fetch; window.fetch = (...args) => { if (String(args[0]).endsWith('/keys')) window.multiQuestionKeys.push(JSON.parse(args[1].body).keys); return originalKeysFetch(...args); }; true"
+ab click '[data-thread-scroll] [data-herdr-option="2"]'
+wait_for_js "two-question second page" "document.querySelector('[data-thread-scroll] [data-herdr-question]')?.textContent?.includes('Shape:') === true"
+ab click '[data-thread-scroll] [data-herdr-option="1"]'
+wait_for_js "last digit opens Submit without submitting" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-submit-answers]')) && JSON.stringify(window.multiQuestionKeys) === '[[\"2\"],[\"1\"]]'"
+ab click '[data-thread-scroll] [data-herdr-submit-answers]'
+wait_for_js "two-question explicit Enter submits once" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-card-state=answered]')) && JSON.stringify(window.multiQuestionKeys) === '[[\"2\"],[\"1\"],[\"Enter\"]]'"
+
 for decision in allow deny; do
   curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
     --data-urlencode "payload={\"hook_event_name\":\"PermissionRequest\",\"session_id\":\"$CLAUDE_SESSION\",\"tool_name\":\"Bash\",\"tool_use_id\":\"permission-$decision\",\"summary\":\"permission-$decision\"}" >/dev/null

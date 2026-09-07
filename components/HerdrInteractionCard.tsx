@@ -154,7 +154,12 @@ export function HerdrInteractionCard({
   const needsReview = questions.length > 1 || questions.some(question => question.multiSelect === true);
 
   // Calibrated in our own Herdr pane with Claude Code 2.1.258 (Sonnet),
-  // 2026-09-07: single-select digit submits immediately. In a multi-select,
+  // 2026-09-07: a ONE-question single-select digit submits immediately.
+  // R5 calibration (fj-hb-fix2-505f, w1Y:pF): ONE AskUserQuestion with
+  // Color + Shape single-select questions; "2" advanced to Shape, "1"
+  // stopped at "Review your answers / Submit answers" (both answers shown).
+  // Only the subsequent Enter submitted. Thus questions.length > 1 needsReview.
+  // In a multi-select,
   // digits toggle; Enter toggles the highlighted item (it does NOT submit).
   // Herdr key "right" opens the Review tab, then Enter submits the answers.
   // Permission card: digit "1" alone allows; Escape cancels the tool and
