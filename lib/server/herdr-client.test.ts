@@ -50,6 +50,7 @@ class FakeHerdr {
   protocol = 19;
   snapshot = snapshot();
   waitDelayMs = 0;
+  snapshotDelayMs = 0;
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private subscribers = new Set<Bun.Socket<{ buffer: string }>>();
   private listener: Bun.UnixSocketListener<{ buffer: string }>;
@@ -82,6 +83,7 @@ class FakeHerdr {
             );
             return;
           }
+          const capturedSnapshot = structuredClone(this.snapshot);
           const send = () => {
             let result: Record<string, unknown>;
             if (request.method === "ping") {
@@ -92,7 +94,7 @@ class FakeHerdr {
                 capabilities: {},
               };
             } else if (request.method === "session.snapshot") {
-              result = { type: "session_snapshot", snapshot: this.snapshot };
+              result = { type: "session_snapshot", snapshot: capturedSnapshot };
             } else if (request.method === "pane.split") {
               result = { type: "pane_info", pane: pane(0) };
             } else {
@@ -100,8 +102,9 @@ class FakeHerdr {
             }
             socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
           };
-          if (request.method === "agent.wait" && this.waitDelayMs) {
-            const timer = setTimeout(() => { this.timers.delete(timer); send(); }, this.waitDelayMs);
+          const delay = request.method === "agent.wait" ? this.waitDelayMs : request.method === "session.snapshot" ? this.snapshotDelayMs : 0;
+          if (delay) {
+            const timer = setTimeout(() => { this.timers.delete(timer); send(); }, delay);
             this.timers.add(timer);
           } else {
             send();
@@ -154,6 +157,29 @@ afterEach(() => {
 });
 
 describe("HerdrClient", () => {
+  test("a close flushed during snapshot RTT cannot be resurrected by its stale response", async () => {
+    const server = new FakeHerdr();
+    servers.push(server);
+    const client = clientFor(server, { snapshotIntervalMs: 40 });
+    await client.start();
+    server.snapshotDelayMs = 90;
+    const deadline = Date.now() + 500;
+    while (server.requests.filter(r => r.method === "session.snapshot").length < 2 && Date.now() < deadline) await Bun.sleep(5);
+    expect(server.requests.filter(r => r.method === "session.snapshot").length).toBe(2);
+    server.emit({ event: "pane_closed", data: { type: "pane_closed", pane_id: "w1:p1" } });
+    server.snapshot.panes = [];
+    server.snapshot.agents = [];
+    await Bun.sleep(25);
+    expect(client.state.panes).toHaveLength(0);
+    const snapshots: number[] = [];
+    client.subscribe(change => { if (change.kind === "snapshot") snapshots.push(client.state.panes.length); });
+    await Bun.sleep(90);
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.every(count => count === 0)).toBeTrue();
+    expect(client.state.panes).toHaveLength(0);
+    expect(client.state.agents).toHaveLength(0);
+  });
+
   test("Bun Unix errors distinguish permission denial and stop retrying (rv_err regression)", async () => {
     const server = new FakeHerdr();
     servers.push(server);

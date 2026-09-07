@@ -191,6 +191,7 @@ export class HerdrClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private starting: Promise<void> | null = null;
   private snapshotting: Promise<boolean> | null = null;
+  private closedDuringSnapshot: Set<string> | null = null;
   private stopped = false;
   private baselineReady = false;
   private needsResync = false;
@@ -793,6 +794,7 @@ export class HerdrClient {
       const before = this.panes.get(pane.pane_id);
       if (before && pane.revision <= before.revision) return;
       if (replay && event.event === "pane_created" && !before) return;
+      if (event.event === "pane_created") this.closedDuringSnapshot?.delete(pane.pane_id);
       this.panes.set(pane.pane_id, pane);
       if (!before || !sameImportantPaneState(before, pane)) {
         this.bump();
@@ -803,6 +805,7 @@ export class HerdrClient {
     if (event.event === "pane_closed") {
       const paneId = data.pane_id;
       if (typeof paneId !== "string") return;
+      this.closedDuringSnapshot?.add(paneId);
       const existed = this.panes.delete(paneId);
       if (existed || !replay) {
         this.bump();
@@ -831,6 +834,8 @@ export class HerdrClient {
   private async resync(): Promise<boolean> {
     if (this.stopped || !this._available) return false;
     if (this.snapshotting) return this.snapshotting;
+    const closed = new Set<string>();
+    this.closedDuringSnapshot = closed;
     this.snapshotting = (async () => {
       try {
         const result = await this.requestWithRetry<HerdrSnapshotResult>(
@@ -838,7 +843,7 @@ export class HerdrClient {
           {},
           2,
         );
-        this.applySnapshot(result.snapshot);
+        this.applySnapshot(result.snapshot, closed);
         return true;
       } catch (error) {
         if (error instanceof HerdrTransportError) this.markDown(error);
@@ -847,11 +852,12 @@ export class HerdrClient {
       }
     })().finally(() => {
       this.snapshotting = null;
+      this.closedDuringSnapshot = null;
     });
     return this.snapshotting;
   }
 
-  private applySnapshot(snapshot: HerdrSnapshot): void {
+  private applySnapshot(snapshot: HerdrSnapshot, closed: ReadonlySet<string>): void {
     this.workspaces.clear();
     this.tabs.clear();
     this.panes.clear();
@@ -861,9 +867,11 @@ export class HerdrClient {
       this.workspaces.set(workspace.workspace_id, workspace);
     }
     for (const tab of snapshot.tabs) this.tabs.set(tab.tab_id, tab);
-    for (const pane of snapshot.panes) this.panes.set(pane.pane_id, pane);
+    // A close already applied while this RPC was in flight is newer than its
+    // captured snapshot. Filter before emitting to avoid reviving bindings too.
+    for (const pane of snapshot.panes) if (!closed.has(pane.pane_id)) this.panes.set(pane.pane_id, pane);
     for (const layout of snapshot.layouts) this.layouts.set(layout.tab_id, layout);
-    for (const agent of snapshot.agents) this.agents.set(agent.pane_id, agent);
+    for (const agent of snapshot.agents) if (!closed.has(agent.pane_id)) this.agents.set(agent.pane_id, agent);
     this._protocol = snapshot.protocol;
     this._version = snapshot.version;
     this._readOnly = snapshot.protocol !== HERDR_PROTOCOL;
