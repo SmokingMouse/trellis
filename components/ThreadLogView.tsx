@@ -15,6 +15,31 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
   const [log, setLog] = useState(emptyThreadLog);
   const current = useRef(log);
   const [paused, setPaused] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const following = useRef(true);
+  const [followTail, setFollowTail] = useState(true);
+  const scrollBottom = () => {
+    const container = section.current?.closest<HTMLElement>(".as-shadow");
+    if (container) container.scrollTop = container.scrollHeight;
+  };
+  useEffect(() => {
+    const container = section.current?.closest<HTMLElement>(".as-shadow");
+    if (!container) return;
+    let previousTop = container.scrollTop;
+    const onScroll = () => {
+      if (container.scrollTop < previousTop - 1) following.current = false;
+      if (container.scrollHeight - container.clientHeight - container.scrollTop <= 48) following.current = true;
+      previousTop = container.scrollTop;
+      setFollowTail(following.current);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    if (!following.current) return;
+    const frame = requestAnimationFrame(() => { if (following.current) scrollBottom(); });
+    return () => cancelAnimationFrame(frame);
+  }, [log]);
   useEffect(() => {
     if (paused) return;
     const source = new EventSource(`/api/as/threads/${encodeURIComponent(threadId)}/stream?sinceSeq=${current.current.cursor}`);
@@ -32,7 +57,7 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
   }, [threadId, paused]);
 
   const items = Object.values(log.items).sort((a, b) => a.seq - b.seq);
-  return <section className="as-log" aria-label="会话日志" data-as-log data-cursor={log.cursor}>
+  return <section ref={section} className="as-log" aria-label="会话日志" data-as-log data-cursor={log.cursor} data-follow-tail={followTail}>
     <div className="as-log-toolbar">
       <div><span className={`as-dot ${!paused && log.state === "connected" ? "as-online" : ""}`} />
         <span role="status">{paused ? "已暂停查看" : states[log.state] ?? log.state}</span>
@@ -61,5 +86,10 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
         <pre>{itemText(item)}</pre>
       </li>)}
     </ol>
+    {!followTail && <button type="button" className="as-follow" data-as-follow onClick={() => {
+      following.current = true;
+      setFollowTail(true);
+      scrollBottom();
+    }}>回到底部 ↓</button>}
   </section>;
 }

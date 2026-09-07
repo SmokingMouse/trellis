@@ -29,6 +29,8 @@
 .as-items [data-item-type=reasoning] pre { opacity: .7; }
 .as-approval { margin-top: 16px; padding: 16px; border: 1px solid #be9238; border-radius: 8px; background: #be92380c; font-size: 13px; }
 .as-approval p { margin: 8px 0; }
+.as-turn-status { font-size: 12px; margin: 12px 0; opacity: .7; }
+.as-shadow .as-follow { position: fixed; right: 24px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 20; background: var(--surface-canvas); border: 1px solid #168577; box-shadow: 0 2px 12px #0003; }
 .as-placeholder { text-align: center; padding: 90px 20px; }
 .as-placeholder > span { font-size: 44px; color: #168577; }
 .as-placeholder h2 { margin: 12px 0; font-size: 20px; }

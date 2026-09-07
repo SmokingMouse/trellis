@@ -28,8 +28,14 @@ const script: MockScript = async function* (turnId, _input, engine) {
   yield { type: "itemCompleted", turnId, item: { id: "command", type: "commandExecution", payload: { command: "printf shadow-proof", cwd: home, aggregatedOutput: "shadow-proof", exitCode: 0 } } };
   yield { type: "itemStarted", turnId, item: { id: "answer", type: "agentMessage", payload: { text: "" } } };
   yield { type: "itemDelta", turnId, itemId: "answer", kind: "text", text: "实时片段已到达。" };
+  await waitFile("tail");
+  const tail = "\n" + "长日志追加验证。\n".repeat(40);
+  yield { type: "itemDelta", turnId, itemId: "answer", kind: "text", text: tail };
+  await waitFile("tail2");
+  const tail2 = "再次追加并自动跟随。\n".repeat(10);
+  yield { type: "itemDelta", turnId, itemId: "answer", kind: "text", text: tail2 };
   await waitFile("finish");
-  yield { type: "itemCompleted", turnId, item: { id: "answer", type: "agentMessage", payload: { text: "实时片段已到达。离线片段完整补齐。" } } };
+  yield { type: "itemCompleted", turnId, item: { id: "answer", type: "agentMessage", payload: { text: "实时片段已到达。" + tail + tail2 + "离线片段完整补齐。" } } };
   const changes = [{ path: `${home}/${"long-path-".repeat(12)}proof.txt`, kind: "add" as const, diff: "+ shadow-proof\n+ resume-proof" }];
   yield { type: "itemStarted", turnId, item: { id: "file", type: "fileChange", payload: { changes, status: "inProgress" } } };
   yield { type: "itemCompleted", turnId, item: { id: "file", type: "fileChange", payload: { changes, status: "completed" } } };

@@ -2,7 +2,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-OUT=${AS_SHADOW_OUT:-/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-as-migrate-1-84a5/out}
+OUT=${AS_SHADOW_OUT:-/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-as-migrate-1-fix-31ae/out}
 LOCK_DIR=/tmp/trellis-mobile-verify.lock
 OWN_LOCK=0
 H=
@@ -112,15 +112,25 @@ ab screenshot "$OUT/mobile-as-approval.png"
 touch "$H/approve"
 wait_js 'live delta before completion' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。' && document.querySelector('[data-as-item=answer]')?.dataset.itemStatus === 'inProgress' && !document.querySelector('[data-as-approval]')"
 ab screenshot "$OUT/mobile-as-live.png"
+wait_js 'P2-3 initially follows live tail' "(() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
+ab eval "(() => { const main = document.querySelector('.as-shadow'); main.scrollTop -= 160; sessionStorage.setItem('as-scrolled-up', String(main.scrollTop)); return true; })()"
+wait_js 'P2-3 scrolling up disables following' "document.querySelector('[data-as-log]')?.dataset.followTail === 'false' && Boolean(document.querySelector('[data-as-follow]'))"
+touch "$H/tail"
+wait_js 'P2-3 new output respects reading position' "document.querySelector('[data-as-item=answer] pre')?.textContent.includes('长日志追加验证。') && Math.abs(document.querySelector('.as-shadow').scrollTop - Number(sessionStorage.getItem('as-scrolled-up'))) < 2"
+ab click '[data-as-follow]'
+wait_js 'P2-3 return button reaches tail' "document.querySelector('[data-as-log]')?.dataset.followTail === 'true' && (() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
+touch "$H/tail2"
+wait_js 'P2-3 continued output automatically follows' "document.querySelector('[data-as-item=answer] pre')?.textContent.includes('再次追加并自动跟随。') && (() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
+ab eval 'sessionStorage.setItem("as-paused-text", document.querySelector("[data-as-item=answer] pre").textContent); true'
 ab eval 'sessionStorage.setItem("as-before", document.querySelector("[data-as-log]").dataset.cursor); window.EventSource = class extends EventSource { constructor(url, options) { super(url, options); sessionStorage.setItem("as-resume-url", String(url)); } }; true'
 ab click '[data-as-pause]'
 wait_js 'SSE disconnected by viewer' "document.querySelector('[data-as-log]')?.textContent.includes('已暂停查看') === true"
 touch "$H/finish"
 wait_file "$H/expected.json"
 cp "$H/expected.json" "$OUT/as-expected.json"
-wait_js 'offline events have not leaked into paused view' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。' && !document.querySelector('[data-as-item=file]')"
+wait_js 'offline events have not leaked into paused view' "document.querySelector('[data-as-item=answer] pre')?.textContent === sessionStorage.getItem('as-paused-text') && !document.querySelector('[data-as-item=file]')"
 ab click '[data-as-pause]'
-wait_js 'sinceSeq recovers completion and new items' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。离线片段完整补齐。' && Boolean(document.querySelector('[data-as-item=file]'))"
+wait_js 'sinceSeq recovers completion and new items' "document.querySelector('[data-as-item=answer] pre')?.textContent.endsWith('离线片段完整补齐。') && Boolean(document.querySelector('[data-as-item=file]'))"
 EXPECTED=$(cat "$H/expected.json")
 ab eval --stdin <<JS > "$OUT/as-browser-proof.json"
 (() => {
