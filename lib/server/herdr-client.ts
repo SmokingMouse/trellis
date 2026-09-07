@@ -38,6 +38,9 @@ const STATIC_SUBSCRIPTIONS = [
   "workspace.reordered",
   "workspace.closed",
   "workspace.focused",
+  "worktree.created",
+  "worktree.opened",
+  "worktree.removed",
   "layout.updated",
 ].map((type) => ({ type }));
 
@@ -848,6 +851,12 @@ export class HerdrClient {
     }
 
     const workspace = data.workspace as HerdrWorkspace | undefined;
+    // Worktree notifications can contain only IDs. Pull an authoritative snapshot
+    // on demand instead of guessing their workspace metadata or waiting 60s.
+    if (event.event.startsWith("worktree_") ||
+        ((event.event === "workspace_created" || event.event === "workspace_updated" || event.event === "workspace_metadata_updated") && workspace?.worktree === undefined)) {
+      this.needsResync = true;
+    }
     const tab = data.tab as HerdrTab | undefined;
     const layout = data.layout as HerdrLayout | undefined;
     if (workspace?.workspace_id) this.workspaces.set(workspace.workspace_id, workspace);

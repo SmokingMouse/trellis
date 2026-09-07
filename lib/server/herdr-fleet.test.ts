@@ -151,6 +151,27 @@ function createHarness(waitDelayMs = 0) {
 }
 
 describe("HerdrFleetService", () => {
+  test("P1-2 workspace events group new checkouts immediately and worktree notifications fetch metadata", async () => {
+    const h = createHarness();
+    await h.service.ensureStarted();
+    const worktree = { repo_root: fs.realpathSync(h.home), repo_name: "Repo", checkout_path: fs.realpathSync(h.home), is_linked_worktree: true };
+    h.emit({ event: "workspace_created", data: { workspace: { workspace_id: "w2", label: "New", worktree } } });
+    h.emit({ event: "tab_created", data: { tab: { tab_id: "t2", workspace_id: "w2" } } });
+    h.emit({ event: "pane_created", data: { pane: { ...h.basePane, pane_id: "p2", workspace_id: "w2", tab_id: "t2" } } });
+    await Bun.sleep(50);
+    expect(h.service.fleet().workspaces.find(w => w.workspace_id === "w2")?.worktree).toMatchObject(worktree);
+    expect(h.requests.filter(r => r.method === "session.snapshot")).toHaveLength(1);
+    for (const event of ["worktree_created", "worktree_opened", "worktree_removed"]) {
+      h.snapshotWorkspaces[0].worktree = event === "worktree_removed" ? null : worktree;
+      const before = h.requests.filter(r => r.method === "session.snapshot").length;
+      h.emit({ event, data: { workspace_id: "w1" } });
+      await Bun.sleep(50);
+      expect(h.requests.filter(r => r.method === "session.snapshot")).toHaveLength(before + 1);
+      expect(h.service.fleet().workspaces[0].worktree).toEqual(event === "worktree_removed" ? null : expect.objectContaining(worktree));
+    }
+    const subscription = h.requests.find(r => r.method === "events.subscribe");
+    for (const type of ["worktree.created", "worktree.opened", "worktree.removed"]) expect(JSON.stringify(subscription?.params)).toContain(type);
+  });
   test("canonicalizes worktrees and caches branch metadata until the next snapshot", async () => {
     const h = createHarness();
     const repo = path.join(h.home, "repo");

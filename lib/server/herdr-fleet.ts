@@ -31,6 +31,7 @@ export class HerdrFleetService {
   private startPromise: Promise<void> | null = null;
   private bindingVersion = 0;
   private worktrees = new Map<string, HerdrWorktree>();
+  private worktreeSignature = "";
   private readonly attachedTranscriptKeys = new Set<string>();
   private readonly detach: () => void;
 
@@ -57,11 +58,18 @@ export class HerdrFleetService {
       } else if (change.kind === "pane-closed") {
         markHerdrPaneClosed(change.paneId, this.options.db);
         this.bindingVersion++;
+      } else if (change.kind === "fleet" && this.metadataSignature() !== this.worktreeSignature) {
+        this.reconcileWorktrees();
       }
     });
   }
 
+  private metadataSignature(): string {
+    return JSON.stringify(this.client.state.workspaces.map(w => [w.workspace_id, w.worktree]));
+  }
+
   private reconcileWorktrees(): void {
+    this.worktreeSignature = this.metadataSignature();
     const metadata = this.client.state.workspaces.filter(w => w.worktree?.repo_root && w.worktree.checkout_path);
     const next = new Map<string, HerdrWorktree>();
     if (metadata.length) {
@@ -92,7 +100,7 @@ export class HerdrFleetService {
         next.set(workspace.workspace_id, { ...wt, repo_root: root, repo_name: projectNames.get(root) || wt.repo_name, checkout_path: checkout, git_branch: resolved.get(checkout) });
       }
     }
-    // Replaced only by snapshots; pane events and fleet reads never invoke git.
+    // Workspace events refresh structure immediately; pane events do not resolve branches.
     this.worktrees = next;
   }
 
