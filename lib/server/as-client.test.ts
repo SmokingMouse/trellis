@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentClient, MockEngine } from "@smokingmouse/agent-server";
@@ -122,6 +122,11 @@ test("P2-1 closed/unauthorized observer reloads token and reattaches without a p
   expect(rebuilt).not.toBe(original);
   expect(rebuilt.options.reconnect).toBe(false);
   expect(rebuilt.state).toBe("connected");
+  let rebuiltPolls = 0;
+  rebuilt.onSnapshot(() => rebuiltPolls++);
+  await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "poll after rebuild" }] });
+  await Bun.sleep(2200);
+  expect(rebuiltPolls).toBeGreaterThan(0);
 });
 
 test("P1-3 review 200KB/10s repro emits no redundant snapshots and idle stops polling", async () => {
@@ -154,3 +159,50 @@ test("P1-3 review 200KB/10s repro emits no redundant snapshots and idle stops po
   await Bun.sleep(2200);
   expect(polls).toBe(idlePolls);
 }, 15000);
+
+test("P2-1 review daemon kill/restart repro reconciles persisted items on the same socket", async () => {
+  const home = mkdtempSync(join(tmpdir(), "as-restart-test-"));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  const paths = resolveDaemonPaths({ NODE_ENV: "test", HOME: home, AGENT_SERVER_SOCKET_PATH: join(home, "as.sock") });
+  const code = `
+    import { MockEngine } from "@smokingmouse/agent-server";
+    import { runDaemon } from "@smokingmouse/agent-server/daemon";
+    const daemon = await runDaemon({graceMs:0, logger:()=>{}, serverOptions:{
+      allowedRoots:[process.env.HOME], engineFactory:()=>new MockEngine(function*(turnId){
+        yield {type:"itemStarted",turnId,item:{id:"persisted",type:"agentMessage",payload:{text:"before-kill"}}};
+      },"codex")
+    }});
+    await Bun.write(process.env.AS_TEST_READY, "ready");
+    await daemon.closed;
+  `;
+  const start = async (label: string) => {
+    const ready = join(home, label);
+    const process = Bun.spawn(["bun", "-e", code], { cwd: join(import.meta.dir, "../.."),
+      env: { ...Bun.env, HOME: home, XDG_STATE_HOME: "", XDG_RUNTIME_DIR: "", AGENT_SERVER_SOCKET_PATH: paths.socketPath, AS_TEST_READY: ready },
+      stdout: "pipe", stderr: "pipe" });
+    cleanup.push(async () => { if (process.exitCode === null) process.kill(9); await process.exited; });
+    await until(() => existsSync(ready));
+    return process;
+  };
+  const first = await start("first-ready");
+  const producer = await AgentClient.connectUnix({ path: paths.socketPath, token: loadToken(paths.tokenPath), reconnect: false });
+  cleanup.push(() => producer.close());
+  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: home });
+  await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "persist" }] });
+  await until(() => producer.sinceSeq(thread.id) >= 3);
+  const observer = new ShadowClient({ socketPath: paths.socketPath, tokenPath: paths.tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
+  cleanup.push(() => observer.close());
+  const snapshots: AttachResult[] = [];
+  observer.onEvent(event => { if (event.type === "snapshot") snapshots.push(event.snapshot); });
+  await observer.attach(thread.id);
+  first.kill(9); await first.exited;
+  await start("second-ready");
+  await until(() => snapshots.length >= 2);
+  const client = await observer.connect();
+  const authoritative = await client.request("thread/attach", { threadId: thread.id, sinceSeq: 0 });
+  const merged = new Map(snapshots.flatMap(snapshot => snapshot.items.map(item => [item.id, item] as const)));
+  expect([...merged.values()]).toEqual(authoritative.items);
+  expect(authoritative.items.find(item => item.id === "persisted")?.payload).toEqual({ text: "before-kill" });
+  expect(client.sinceSeq(thread.id)).toBe(authoritative.nextSeq - 1);
+  expect(authoritative.nextSeq - 1).toBeGreaterThan(3);
+}, 8000);
