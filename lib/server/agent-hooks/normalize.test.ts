@@ -311,6 +311,16 @@ describe("transcript 尾扫", () => {
     expect(readLastAssistantMessage(p)).toBe("最后一条");
   });
 
+  test("a trailing sidechain answer cannot replace the parent session's last answer", () => {
+    const p = write("sidechain.jsonl", [
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: "parent answer" } }),
+      JSON.stringify({ type: "assistant", isSidechain: true, message: { role: "assistant", content: "child answer" } }),
+    ]);
+    expect(readLastAssistantMessage(p)).toBe("parent answer");
+    const onlyChild = write("only-child.jsonl", [JSON.stringify({ type: "assistant", isSidechain: true, message: { role: "assistant", content: "child answer" } })]);
+    expect(readLastAssistantMessage(onlyChild)).toBeNull();
+  });
+
   test("content 是纯字符串的形态也认", () => {
     const p = write("b.jsonl", [
       JSON.stringify({ type: "assistant", message: { role: "assistant", content: "纯串" } }),

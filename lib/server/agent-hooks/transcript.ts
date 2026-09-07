@@ -20,6 +20,7 @@ export function assistantTextFromLine(line: string): string | null {
   }
   if (!entry || typeof entry !== "object") return null;
   const e = entry as Record<string, unknown>;
+  if (e.isSidechain === true) return null;
   const message = (e.message ?? e) as Record<string, unknown>;
   const role = message.role ?? e.type;
   if (role !== "assistant") return null;
