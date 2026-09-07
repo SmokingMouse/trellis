@@ -20,10 +20,17 @@ const TOKEN = process.env.TRELLIS_AUTH_TOKEN;
 
 // Always reachable without a session: the login page itself, the login API,
 // and public/static assets the login page (and PWA shell) need.
+//
+// /api/hooks/claude is the one API exception. It carries its own bearer
+// (X-Trellis-Hook-Token, compared in constant time against
+// ~/.trellis/hooks/endpoint.env) because the caller is a `sh` hook fired by
+// Claude Code — it has no browser and therefore no cookie. Only the ingest
+// endpoint is opened; GET /api/hooks/state stays behind the cookie gate.
 function isPublicPath(pathname: string): boolean {
   return (
     pathname === "/login" ||
     pathname === "/api/login" ||
+    pathname === "/api/hooks/claude" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||

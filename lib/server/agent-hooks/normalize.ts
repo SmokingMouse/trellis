@@ -1,0 +1,228 @@
+// 事件 → 状态的归一化。纯函数：给上一条记录和一个 hook payload，算出新记录。
+// 不碰 DB、不碰进程状态，所以能被单测穷举。
+import { readLastAssistantMessage } from "./transcript";
+import type {
+  AgentHookRecord,
+  ApprovalPrompt,
+  ClaudeHookPayload,
+  HookState,
+} from "./types";
+
+/**
+ * AskUserQuestion 是**自动放行**工具 —— 它不会触发 PermissionRequest，
+ * 只有 PreToolUse。实测踩过的坑：只认 PermissionRequest 的话，agent 弹了选择
+ * 卡在那等着，看板这边显示的还是「working」。
+ */
+const ASK_USER_QUESTION = "AskUserQuestion";
+
+/** 到来即撤卡的事件：一轮交互已经收口，interactivePrompt 必须清掉。 */
+const DISMISS_EVENTS = new Set([
+  "PostToolUse",
+  "PostToolUseFailure",
+  "UserPromptSubmit",
+]);
+
+export type NormalizeOptions = {
+  paneKey?: string | null;
+  now?: number;
+  /** 注入点：单测用假的尾扫，生产用真的读文件。 */
+  tailScan?: (transcriptPath: string) => string | null;
+};
+
+function str(v: unknown): string | null {
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+function blank(sessionId: string, now: number): AgentHookRecord {
+  return {
+    sessionId,
+    agent: "claude",
+    state: "working",
+    prompt: null,
+    toolName: null,
+    toolInput: null,
+    interactivePrompt: null,
+    lastAssistantMessage: null,
+    transcriptPath: null,
+    cwd: null,
+    paneKey: null,
+    subagents: [],
+    stashed: null,
+    updatedAt: now,
+    stateStartedAt: now,
+  };
+}
+
+/** 子 agent 名：不同 CLI 版本键不一样，挨个试；都没有就给个占位（名单长度才是关键）。 */
+function subagentName(p: ClaudeHookPayload): string {
+  return (
+    str(p.subagent_name) ??
+    str(p.subagent_type) ??
+    str(p.agent_name) ??
+    str(p.agent_type) ??
+    "subagent"
+  );
+}
+
+/** 审批卡的一句话说明。payload 没给现成的就从 tool_input 里挑最有信息量的字段。 */
+export function approvalSummary(p: ClaudeHookPayload): string {
+  const given = str(p.summary) ?? str(p.message) ?? str(p.reason);
+  if (given) return given;
+  const input = p.tool_input;
+  if (input && typeof input === "object") {
+    const o = input as Record<string, unknown>;
+    for (const key of ["command", "file_path", "path", "url", "pattern", "description"]) {
+      const v = str(o[key]);
+      if (v) return v;
+    }
+  }
+  return str(p.tool_name) ?? "";
+}
+
+function toApproval(p: ClaudeHookPayload): ApprovalPrompt {
+  return {
+    approval: { tool: str(p.tool_name) ?? "", summary: approvalSummary(p) },
+  };
+}
+
+/**
+ * 应用一个 hook 事件。prev = null 表示这个 session 还没有记录。
+ * 返回 null = 这条 payload 没有 session_id，无从归属，丢弃。
+ */
+export function applyHookEvent(
+  prev: AgentHookRecord | null,
+  payload: ClaudeHookPayload,
+  opts: NormalizeOptions = {},
+): AgentHookRecord | null {
+  const sessionId = str(payload.session_id);
+  if (!sessionId) return null;
+
+  const now = opts.now ?? Date.now();
+  const tailScan = opts.tailScan ?? readLastAssistantMessage;
+  const event = str(payload.hook_event_name) ?? "";
+  const prevState: HookState | null = prev ? prev.state : null;
+
+  const next: AgentHookRecord = prev
+    ? { ...prev, subagents: [...prev.subagents] }
+    : blank(sessionId, now);
+
+  // 每个事件都带的公共字段。空值不覆盖已有的 —— PostToolUse 不带 cwd
+  // 不代表这个会话没有 cwd。
+  next.transcriptPath = str(payload.transcript_path) ?? next.transcriptPath;
+  next.cwd = str(payload.cwd) ?? next.cwd;
+  const paneKey = str(opts.paneKey);
+  if (paneKey) next.paneKey = paneKey;
+  next.updatedAt = now;
+
+  const setState = (s: HookState) => {
+    next.state = s;
+  };
+  const dismiss = () => {
+    next.interactivePrompt = null;
+  };
+  /** 转 waiting 前先把父会话的现场收起来 —— 只在子 agent 在跑时才需要复位。 */
+  const stashIfSubagent = () => {
+    if (next.subagents.length > 0 && !next.stashed && prev) {
+      next.stashed = {
+        state: prev.state,
+        toolName: prev.toolName,
+        toolInput: prev.toolInput,
+        interactivePrompt: prev.interactivePrompt,
+      };
+    }
+  };
+
+  switch (event) {
+    case "SessionStart": {
+      // 建记录。刚开的会话没在等人也没结束 —— 归 working（「活着」）。
+      setState("working");
+      dismiss();
+      break;
+    }
+    case "SessionEnd": {
+      setState("done");
+      dismiss();
+      break;
+    }
+    case "UserPromptSubmit": {
+      next.prompt = str(payload.prompt) ?? next.prompt;
+      next.toolName = null;
+      next.toolInput = null;
+      dismiss();
+      setState("working");
+      break;
+    }
+    case "PreToolUse": {
+      next.toolName = str(payload.tool_name);
+      next.toolInput = payload.tool_input ?? null;
+      if (next.toolName === ASK_USER_QUESTION) {
+        stashIfSubagent();
+        // 原样存 tool_input —— 前端要照着它渲染选项，任何"归一化"都是丢信息。
+        next.interactivePrompt = payload.tool_input ?? null;
+        setState("waiting");
+      } else {
+        dismiss();
+        setState("working");
+      }
+      break;
+    }
+    case "PermissionRequest": {
+      next.toolName = str(payload.tool_name) ?? next.toolName;
+      next.toolInput = payload.tool_input ?? next.toolInput;
+      stashIfSubagent();
+      next.interactivePrompt = toApproval(payload);
+      setState("waiting");
+      break;
+    }
+    case "PostToolUse":
+    case "PostToolUseFailure": {
+      next.toolName = str(payload.tool_name) ?? next.toolName;
+      dismiss();
+      setState("working");
+      break;
+    }
+    case "Stop":
+    case "StopFailure": {
+      dismiss();
+      next.toolName = null;
+      next.toolInput = null;
+      const direct = str(payload.last_assistant_message);
+      const scanned =
+        direct ?? (next.transcriptPath ? tailScan(next.transcriptPath) : null);
+      if (scanned) next.lastAssistantMessage = scanned;
+      setState("done");
+      break;
+    }
+    case "SubagentStart": {
+      next.subagents.push(subagentName(payload));
+      break;
+    }
+    case "SubagentStop": {
+      const name = subagentName(payload);
+      const at = next.subagents.lastIndexOf(name);
+      if (at >= 0) next.subagents.splice(at, 1);
+      else next.subagents.pop();
+      if (next.subagents.length === 0 && next.stashed) {
+        // 只有卡还挂着才复位 —— 期间要是已经正常撤过卡、状态往前走了，
+        // 拿旧快照盖回去等于把会话拨回过去。
+        if (next.state === "waiting") {
+          next.state = next.stashed.state;
+          next.toolName = next.stashed.toolName;
+          next.toolInput = next.stashed.toolInput;
+          next.interactivePrompt = next.stashed.interactivePrompt;
+        }
+        next.stashed = null;
+      }
+      break;
+    }
+    default:
+      // 不认识的事件只刷新 updatedAt / 公共字段，不动状态机。
+      break;
+  }
+
+  next.stateStartedAt =
+    prevState !== null && prevState === next.state
+      ? (prev as AgentHookRecord).stateStartedAt
+      : now;
+  return next;
+}

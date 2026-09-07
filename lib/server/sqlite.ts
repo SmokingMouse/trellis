@@ -1,4 +1,5 @@
 import "server-only";
+import { AGENT_HOOK_TABLES_SQL } from "@/lib/server/agent-hooks/types";
 import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
 import os from "node:os";
@@ -25,6 +26,22 @@ export function getDB(): Database {
   migrate(db);
   _db = db;
   return db;
+}
+
+/**
+ * 单测用的复位闸：丢掉当前进程持有的连接，下次 getDB() 按当下的 TRELLIS_DB_PATH
+ * 重开。`bun test` 一个进程跑完所有测试文件，而这个 singleton 是跨文件共享的 ——
+ * 谁先 getDB() 谁定死了 path，谁 close() 谁让后面的文件拿到一个已关闭的 handle
+ * （症状：RangeError: Cannot use a closed database）。用 DB 的测试文件在开头和
+ * afterAll 各调一次，就能互不干扰。
+ */
+export function resetDBForTests(): void {
+  try {
+    _db?.close();
+  } catch {
+    /* 已经关了 */
+  }
+  _db = null;
 }
 
 function migrate(db: Database) {
@@ -853,6 +870,12 @@ function migrate(db: Database) {
       .get(column);
     if (!has) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} TEXT`);
   }
+
+  // Claude Code hook 接收端（app/api/hooks/claude）：按 claude 的 session_id
+  // 一行，记「这个会话此刻在干嘛 / 卡在哪张卡上」。与 nodes 表刻意不建外键 ——
+  // hook 来自**任意**一个本机 claude（终端里手起的也算），绝大多数根本不是
+  // trellis 的会话；这张表是外部世界的投影，不是内部数据的延伸。
+  db.exec(AGENT_HOOK_TABLES_SQL);
 
   // Stage 16: FTS5 cross-session full-text search. Single virtual table
   // covers question / response / reference / note text. trigram tokenizer

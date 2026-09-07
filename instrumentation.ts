@@ -48,6 +48,17 @@ export async function register() {
   } catch {
     /* 探测失败不拦启动 */
   }
+  // Claude Code hook 的端点文件（~/.trellis/hooks/endpoint.env + 脚本副本）。
+  // 必须在这里写而不是在路由里懒写：hook 脚本是**外部**进程，它只能从这个文件
+  // 知道我们监听在哪个端口、口令是什么；服务没起来时它读不到文件就静默退出。
+  // TRELLIS_HOOKS=off 关闸（部署 smoke 用，同 TRELLIS_LARK）。
+  const { installHookEndpoint } = await import("./lib/server/agent-hooks/install");
+  const hookInstall = installHookEndpoint();
+  if (hookInstall.installed) {
+    console.log(`[trellis] agent hooks endpoint → ${hookInstall.endpoint} (port ${hookInstall.port})`);
+  } else if (hookInstall.reason !== "TRELLIS_HOOKS=off") {
+    console.warn(`[trellis] agent hooks endpoint 未写成：${hookInstall.reason}`);
+  }
   const { installDefaultChannels } = await import("./lib/server/notify");
   installDefaultChannels();
   const { startTaskScheduler } = await import("./lib/server/task-scheduler");
