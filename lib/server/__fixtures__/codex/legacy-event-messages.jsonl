@@ -1,0 +1,13 @@
+{"timestamp":"2026-08-22T03:00:00.000Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","session_id":"22222222-2222-4222-8222-222222222222","timestamp":"2026-08-22T03:00:00.000Z","cwd":"PROJECT_TWO","base_instructions":"REDACTED"}}
+{"timestamp":"2026-08-22T03:00:01.000Z","type":"turn_context","payload":{"turn_id":"turn-legacy-1","cwd":"PROJECT_TWO","model":"MODEL"}}
+{"timestamp":"2026-08-22T03:00:02.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-legacy-1"}}
+{"timestamp":"2026-08-22T03:00:02.100Z","type":"response_item","payload":{"type":"message","role":"user","id":"legacy-injected-1","content":[{"type":"input_text","text":"<system-reminder>REDACTED</system-reminder>"}],"internal_chat_message_metadata_passthrough":{"turn_id":"turn-legacy-1"}}}
+{"timestamp":"2026-08-22T03:00:03.000Z","type":"event_msg","payload":{"type":"user_message","turn_id":"turn-legacy-1","message":"USER_LEGACY"}}
+{"timestamp":"2026-08-22T03:00:04.000Z","type":"response_item","payload":{"type":"reasoning","id":"legacy-reasoning-1","summary":[],"encrypted_content":"REDACTED","internal_chat_message_metadata_passthrough":{"turn_id":"turn-legacy-1"}}}
+{"timestamp":"2026-08-22T03:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","id":"legacy-assistant-1","content":[],"internal_chat_message_metadata_passthrough":{"turn_id":"turn-legacy-1"}}}
+{"timestamp":"2026-08-22T03:00:06.000Z","type":"event_msg","payload":{"type":"agent_message","turn_id":"turn-legacy-1","message":"ANSWER_LEGACY"}}
+{"timestamp":"2026-08-22T03:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call","id":"custom-1","call_id":"call-custom-1","name":"fixture_custom","input":"{\"flag\":true}","internal_chat_message_metadata_passthrough":{"turn_id":"turn-legacy-1"}}}
+{"timestamp":"2026-08-22T03:00:08.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","id":"custom-output-1","call_id":"call-custom-1","output":"CUSTOM_OUTPUT","internal_chat_message_metadata_passthrough":{"turn_id":"turn-legacy-1"}}}
+{"timestamp":"2026-08-22T03:00:09.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":50,"cached_input_tokens":10,"output_tokens":5}}}}
+{"timestamp":"2026-08-22T03:00:10.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-legacy-1","duration_ms":7000,"last_agent_message":"ANSWER_LEGACY"}}
+not-json
