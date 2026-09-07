@@ -89,6 +89,99 @@ const ORIGIN_RANK: Record<string, number> = {
 };
 
 /**
+ * workspace 的持久身份是磁盘真实路径，而不是调用方传来的路径拼写。
+ *
+ * macOS 上 `/tmp` 与 `/private/tmp`、以及任意 symlink 都可能指向同一目录；
+ * realpath 收敛这些别名。目录已经消失时不能臆造身份，保留原串交给调用方
+ * 既有的「不存在」分支处理。
+ */
+export function canonicalWorkspacePath(absPath: string): string {
+  try {
+    return fs.realpathSync(absPath);
+  } catch {
+    return absPath;
+  }
+}
+
+/**
+ * 启动期存量迁移：把同一 realpath 的 workspace 合并，并统一成 canonical path。
+ *
+ * keeper 先按 created_by 权限序选最高者，同权限时优先保留已经挂会话的行；
+ * 所有会话先改指针再删重复行。函数不写迁移标记，重复运行自然是 no-op。
+ */
+export function mergeDuplicateWorkspacePaths(db: Database): {
+  merged: number;
+  normalized: number;
+} {
+  type MigrationRow = WorkspaceRow & { created_at: number; session_count: number };
+  const rows = db
+    .prepare(
+      `SELECT w.id, w.project_id, w.name, w.path, w.kind, w.git_branch,
+              w.created_by, w.last_used_at, w.created_at,
+              COUNT(s.id) AS session_count
+         FROM workspaces w
+         LEFT JOIN sessions s ON s.workspace_id = w.id
+        GROUP BY w.id`,
+    )
+    .all() as MigrationRow[];
+  const groups = new Map<string, MigrationRow[]>();
+  for (const row of rows) {
+    const canonical = canonicalWorkspacePath(row.path);
+    const group = groups.get(canonical) ?? [];
+    group.push(row);
+    groups.set(canonical, group);
+  }
+
+  let merged = 0;
+  let normalized = 0;
+  const migrate = db.transaction(() => {
+    for (const [canonical, group] of groups) {
+      group.sort((a, b) => {
+        const byOrigin =
+          (ORIGIN_RANK[b.created_by] ?? 0) - (ORIGIN_RANK[a.created_by] ?? 0);
+        if (byOrigin !== 0) return byOrigin;
+        const bySessions = Number(b.session_count > 0) - Number(a.session_count > 0);
+        if (bySessions !== 0) return bySessions;
+        const byCreated = a.created_at - b.created_at;
+        return byCreated !== 0 ? byCreated : a.id.localeCompare(b.id);
+      });
+      const keeper = group[0];
+      if (!keeper) continue;
+      for (const duplicate of group.slice(1)) {
+        db.prepare("UPDATE sessions SET workspace_id = ? WHERE workspace_id = ?").run(
+          keeper.id,
+          duplicate.id,
+        );
+        db.prepare("DELETE FROM workspaces WHERE id = ?").run(duplicate.id);
+        merged++;
+      }
+      if (keeper.path !== canonical) {
+        db.prepare("UPDATE workspaces SET path = ? WHERE id = ?").run(
+          canonical,
+          keeper.id,
+        );
+        normalized++;
+      }
+    }
+  });
+  migrate();
+  return { merged, normalized };
+}
+
+/** 清掉旧版扫描登记时伪造的「最近使用」时间；重复运行不会再命中。 */
+export function clearScanRegistrationRecency(db: Database): number {
+  const result = db
+    .prepare(
+      `UPDATE workspaces
+          SET last_used_at = NULL
+        WHERE created_by = 'worktree-scan'
+          AND last_used_at = created_at`,
+    )
+    .run();
+  return Number(result.changes ?? 0);
+}
+
+/**
  * 把一个绝对路径解析成 workspace（必要时连带建 project），返回 workspace id。
  *
  * 幂等：同一个 path 反复调用返回同一行。路径无法归类（不存在 / 不是目录）
@@ -110,6 +203,7 @@ export function ensureWorkspaceForPath(
   createdBy: WorkspaceOrigin = "discovered",
   db: Database = getDB(),
 ): string | null {
+  const canonicalPath = canonicalWorkspacePath(absPath);
   // 快路径：已登记过的目录直接返回，**一个 git 子进程都不 spawn**。
   // 这条路径必须便宜 —— cli-sync-watcher 每次 jsonl 变动都会走到这里
   // （流式期间每秒多次），在那里 spawn git 是不可接受的。
@@ -117,7 +211,7 @@ export function ensureWorkspaceForPath(
   // P2 加 git 状态角标时会带自己的轮询刷新。
   const existing = db
     .prepare("SELECT id, created_by FROM workspaces WHERE path = ?")
-    .get(absPath) as { id: string; created_by: string } | undefined;
+    .get(canonicalPath) as { id: string; created_by: string } | undefined;
   if (existing) {
     // 命中已有行时，把 created_by 往权限更大的方向提升（只升不降）。
     // 场景：CLI 里建的 worktree 先被扫描登记成 'worktree-scan'，用户删掉后
@@ -135,7 +229,7 @@ export function ensureWorkspaceForPath(
     return existing.id;
   }
 
-  const cluster = clusterPath(absPath);
+  const cluster = clusterPath(canonicalPath);
   // 目录不存在 / 归不了类 → 不为它建行，调用方留在未归组。
   if (!cluster) return null;
 
@@ -167,17 +261,17 @@ export function ensureWorkspaceForPath(
     uuid(),
     project.id,
     cluster.workspaceName,
-    absPath,
+    canonicalPath,
     cluster.kind,
     cluster.gitBranch,
     createdBy,
     now,
-    now,
+    createdBy === "trellis" ? now : null,
   );
   // 冲突时上面那个 uuid 没被写进去，必须回查真正落库的 id。
   const row = db
     .prepare("SELECT id FROM workspaces WHERE path = ?")
-    .get(absPath) as { id: string } | undefined;
+    .get(canonicalPath) as { id: string } | undefined;
   return row?.id ?? null;
 }
 
@@ -192,7 +286,9 @@ export function registerSiblingWorktrees(
   absPath: string,
   db: Database = getDB(),
 ): { added: number; pruned: number } {
-  const live = listSiblingWorktrees(absPath);
+  const live = Array.from(
+    new Set(listSiblingWorktrees(absPath).map(canonicalWorkspacePath)),
+  );
   let added = 0;
   for (const p of live) {
     const existed = db
@@ -220,15 +316,22 @@ export function registerSiblingWorktrees(
   for (const row of db
     .prepare("SELECT id, path FROM workspaces WHERE kind = 'worktree'")
     .all() as { id: string; path: string }[]) {
-    if (liveSet.has(row.path) || fs.existsSync(row.path)) continue;
+    if (
+      liveSet.has(canonicalWorkspacePath(row.path)) ||
+      fs.existsSync(row.path)
+    )
+      continue;
     db.prepare("DELETE FROM workspaces WHERE id = ?").run(row.id);
     pruned++;
   }
   return { added, pruned };
 }
 
-export function touchWorkspace(workspaceId: string): void {
-  getDB()
+export function touchWorkspace(
+  workspaceId: string,
+  db: Database = getDB(),
+): void {
+  db
     .prepare("UPDATE workspaces SET last_used_at = ? WHERE id = ?")
     .run(Date.now(), workspaceId);
 }
@@ -238,8 +341,7 @@ export function touchWorkspace(workspaceId: string): void {
  * 排序 = 项目/工作区都按「其下最近活跃的 session」降序，和现有侧栏的
  * `ORDER BY updated_at DESC` 语义一致。
  */
-export function listProjectTree(): ApiProject[] {
-  const db = getDB();
+export function listProjectTree(db: Database = getDB()): ApiProject[] {
   const projects = db
     .prepare("SELECT id, name, cluster_key, git_remote FROM projects")
     .all() as ProjectRow[];
@@ -281,6 +383,8 @@ export function listProjectTree(): ApiProject[] {
     byProject.set(w.project_id, list);
   }
 
+  // 只有 trellis 主动新建的 workspace 首次登记沿用 created_at；discovered 的
+  // 活跃度来自 session.updated_at / touchWorkspace，worktree-scan 同样不伪造活跃度。
   const wsRecency = (w: ApiWorkspace) =>
     Math.max(recency.get(w.id) ?? 0, w.lastUsedAt ?? 0);
 
@@ -370,6 +474,8 @@ export function backfillWorkspaces(): {
   let sessions = 0;
   let worktrees = 0;
   try {
+    mergeDuplicateWorkspacePaths(db);
+    clearScanRegistrationRecency(db);
     const rows = db
       .prepare(
         `SELECT DISTINCT workspace_path AS p FROM sessions

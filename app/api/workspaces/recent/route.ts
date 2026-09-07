@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { getDB } from "@/lib/server/sqlite";
+import { canonicalWorkspacePath } from "@/lib/server/workspaces";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,38 +27,63 @@ export async function GET() {
   const claudeWorkspaces = readClaudeWorkspaces();
   const freshWorktrees = readWorktreesWithoutSessions();
 
-  // Merge by canonical path. Trellis updated_at beats claude dir mtime
-  // (more meaningful "last used"). Source flag promotes to "both" on
-  // overlap.
+  const result = sortRecentWorkspaces(
+    mergeRecentWorkspaces(
+      freshWorktrees,
+      trellisWorkspaces,
+      claudeWorkspaces,
+    ),
+  )
+    .filter((w) => fs.existsSync(w.path))
+    .slice(0, MAX_RESULTS);
+
+  return Response.json({ workspaces: result });
+}
+
+export function sortRecentWorkspaces(
+  workspaces: RecentWorkspace[],
+): RecentWorkspace[] {
+  return [...workspaces].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+}
+
+export function mergeRecentWorkspaces(
+  freshWorktrees: RecentWorkspace[],
+  trellisWorkspaces: RecentWorkspace[],
+  claudeWorkspaces: RecentWorkspace[],
+): RecentWorkspace[] {
+  // 三路都按 canonical path 做同一个 upsert：时间永远取 max，来源取并集。
+  // 不能靠「后一路覆盖前一路」，因为同一路内部也会出现 /tmp 与
+  // /private/tmp 这种指向同一目录的拼写，SQL 返回顺序不保证新时间在后。
   const merged = new Map<string, RecentWorkspace>();
-  // 先铺零 session 的 worktree，再让真有 session 的两路盖上去 —— 它们的
-  // lastUsedAt 更有意义（真用过 vs 刚建出来）。
-  for (const w of freshWorktrees) {
-    merged.set(w.path, w);
-  }
-  for (const w of trellisWorkspaces) {
-    merged.set(w.path, w);
-  }
-  for (const w of claudeWorkspaces) {
+  const upsert = (raw: RecentWorkspace) => {
+    const w = canonicalRecentWorkspace(raw);
     const existing = merged.get(w.path);
     if (existing) {
       merged.set(w.path, {
         ...existing,
-        source: "both",
-        // Keep the larger timestamp.
+        source: existing.source === w.source ? existing.source : "both",
         lastUsedAt: Math.max(existing.lastUsedAt, w.lastUsedAt),
       });
     } else {
       merged.set(w.path, w);
     }
+  };
+  for (const source of [freshWorktrees, trellisWorkspaces, claudeWorkspaces]) {
+    for (const w of source) upsert(w);
   }
 
-  const result = Array.from(merged.values())
-    .filter((w) => fs.existsSync(w.path))
-    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-    .slice(0, MAX_RESULTS);
+  return Array.from(merged.values());
+}
 
-  return Response.json({ workspaces: result });
+export function canonicalRecentWorkspace(w: RecentWorkspace): RecentWorkspace {
+  const canonical = canonicalWorkspacePath(w.path);
+  const shortName = deriveShortName(canonical);
+  if (canonical === w.path && shortName === w.shortName) return w;
+  return {
+    ...w,
+    path: canonical,
+    shortName,
+  };
 }
 
 function readTrellisWorkspaces(): RecentWorkspace[] {

@@ -4,6 +4,12 @@ import { getDB } from "@/lib/server/sqlite";
 import { invalidatePathExists } from "@/lib/server/workspaces";
 import { invalidateGitStatus } from "@/lib/server/git-status";
 import { killWorkspaceTerminals } from "@/lib/server/terminals";
+import {
+  activeWorkspaceSessionCount,
+  isDefaultCleanCandidate,
+  pruneWorktreeMetadata,
+  resolveMainCheckoutPath,
+} from "@/lib/server/worktree-clean";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +46,7 @@ export type CleanItemPreview = {
   dirtyCount: number;
   ignoredCount: number;
   streaming: number;
+  sessionCount: number;
   canClean: boolean;
   reason?: string;
 };
@@ -61,12 +68,13 @@ export async function POST(req: Request) {
   const placeholders = workspaceIds.map(() => "?").join(",");
   const rows = db
     .prepare(
-      `SELECT id, name, path, kind, git_branch, created_by
+      `SELECT id, project_id, name, path, kind, git_branch, created_by
        FROM workspaces
        WHERE id IN (${placeholders})`,
     )
     .all(...workspaceIds) as Array<{
       id: string;
+      project_id: string;
       name: string;
       path: string;
       kind: string;
@@ -79,8 +87,15 @@ export async function POST(req: Request) {
   }
 
   const previews: CleanItemPreview[] = [];
+  const pruneFromById = new Map(
+    rows.map((ws) => [
+      ws.id,
+      resolveMainCheckoutPath(db, ws.project_id, ws.path),
+    ]),
+  );
   for (const ws of rows) {
     if (ws.kind !== "worktree") {
+      const sessionCount = activeWorkspaceSessionCount(db, ws.id);
       previews.push({
         id: ws.id,
         name: ws.name,
@@ -90,6 +105,7 @@ export async function POST(req: Request) {
         dirtyCount: 0,
         ignoredCount: 0,
         streaming: 0,
+        sessionCount,
         canClean: false,
         reason: "不是 worktree（主 checkout 不可删除）",
       });
@@ -97,6 +113,7 @@ export async function POST(req: Request) {
     }
 
     const streaming = streamingCount(ws.id);
+    const sessionCount = activeWorkspaceSessionCount(db, ws.id);
     const exists = fs.existsSync(ws.path);
     if (!exists) {
       previews.push({
@@ -108,6 +125,7 @@ export async function POST(req: Request) {
         dirtyCount: 0,
         ignoredCount: 0,
         streaming,
+        sessionCount,
         canClean: streaming === 0,
         reason: streaming > 0 ? "有生成中的会话" : "目录已不存在（将清理记录）",
       });
@@ -131,6 +149,7 @@ export async function POST(req: Request) {
       dirtyCount: dirty.length,
       ignoredCount: ignored.length,
       streaming,
+      sessionCount,
       canClean: streaming === 0,
       reason: streaming > 0 ? "有生成中的会话" : undefined,
     });
@@ -142,7 +161,7 @@ export async function POST(req: Request) {
       preview: true,
       items: previews,
       totalCount: previews.length,
-      cleanCount: previews.filter((p) => p.canClean && p.dirtyCount === 0 && p.ignoredCount === 0).length,
+      cleanCount: previews.filter(isDefaultCleanCandidate).length,
       dirtyCount: previews.filter((p) => p.dirtyCount > 0 || p.ignoredCount > 0).length,
     });
   }
@@ -150,7 +169,7 @@ export async function POST(req: Request) {
   // 阶段二：真删执行模式（force === true）
   let removedCount = 0;
   const errors: Array<{ id: string; name: string; error: string }> = [];
-  const parentPaths = new Set<string>();
+  const prunePaths = new Set<string>();
 
   for (const item of previews) {
     if (!item.canClean) {
@@ -164,6 +183,8 @@ export async function POST(req: Request) {
       invalidatePathExists(item.path);
       invalidateGitStatus(item.id);
       removedCount++;
+      const pruneFrom = pruneFromById.get(item.id);
+      if (pruneFrom) prunePaths.add(pruneFrom);
       continue;
     }
 
@@ -179,13 +200,14 @@ export async function POST(req: Request) {
     invalidatePathExists(item.path);
     invalidateGitStatus(item.id);
     removedCount++;
-    parentPaths.add(item.path);
+    const pruneFrom = pruneFromById.get(item.id);
+    if (pruneFrom) prunePaths.add(pruneFrom);
   }
 
-  // 对涉及的仓库执行一次 prune 清理元数据
-  for (const p of parentPaths) {
+  // 对涉及的仓库执行一次 prune；cwd 必须是仍存在的主 checkout。
+  for (const p of prunePaths) {
     try {
-      git(p, ["worktree", "prune"]);
+      pruneWorktreeMetadata(p);
     } catch {
       // 忽略 prune 异常
     }

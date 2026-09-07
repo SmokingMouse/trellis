@@ -415,6 +415,7 @@ export function SessionSidebar() {
     // 不进版本库、但删了很痛的东西 —— `git worktree remove` 不当它们是障碍，
     // 连目录一起删，而 git status 默认根本不列它们。
     const parts: string[] = [];
+    parts.push(`活跃会话：${r.sessionCount ?? 0} 个`);
     if (r.dirtyCount)
       parts.push(`未提交的改动（${r.dirtyCount} 项）：\n${r.dirty.join("\n")}`);
     if (r.ignoredCount)
@@ -707,12 +708,15 @@ export function SessionSidebar() {
           label={w.name}
           // 有 session 才可折叠；空的没有子内容，给三角就是个骗人的开关。
           toggleable={list.length > 0}
-          tag={w.kind === "worktree" && !br ? "worktree" : null}
+          tag={w.kind === "worktree" && !br ? "detached" : null}
           git={g ?? null}
           muted={list.length === 0 || isReclaimable}
           title={`${w.path}${(() => {
             return [
               br ? `\n分支: ${br}` : "",
+              w.kind === "worktree" && !br
+                ? "\nDetached HEAD：当前 worktree 没有检出命名分支"
+                : "",
               g?.dirty ? `\n${g.dirty} 个文件有改动或未跟踪 (点击角标查看 Diff)` : "",
               g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以安全回收" : "",
             ].join("");

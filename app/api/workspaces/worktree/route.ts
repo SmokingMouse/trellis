@@ -2,8 +2,13 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { getDB } from "@/lib/server/sqlite";
-import { ensureWorkspaceForPath } from "@/lib/server/workspaces";
+import { ensureWorkspaceForPath, touchWorkspace } from "@/lib/server/workspaces";
 import { killWorkspaceTerminals } from "@/lib/server/terminals";
+import {
+  activeWorkspaceSessionCount,
+  pruneWorktreeMetadata,
+  resolveMainCheckoutPath,
+} from "@/lib/server/worktree-clean";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -192,6 +197,7 @@ export async function POST(req: Request) {
 
   // created_by='trellis' —— 只有这一类才允许从 UI 删磁盘。
   const id = ensureWorkspaceForPath(target, "trellis", db);
+  if (id) touchWorkspace(id, db);
   return Response.json({ ok: true, workspaceId: id, path: target });
 }
 
@@ -204,11 +210,14 @@ export async function DELETE(req: Request) {
   }
   const db = getDB();
   const ws = db
-    .prepare("SELECT path, kind, created_by FROM workspaces WHERE id = ?")
+    .prepare(
+      "SELECT project_id, path, kind, created_by FROM workspaces WHERE id = ?",
+    )
     .get(workspaceId) as
-    | { path: string; kind: string; created_by: string }
+    | { project_id: string; path: string; kind: string; created_by: string }
     | undefined;
   if (!ws) return Response.json({ error: "workspace not found" }, { status: 404 });
+  const pruneFrom = resolveMainCheckoutPath(db, ws.project_id, ws.path);
 
   // 会话不连坐删：workspace_id 是 ON DELETE SET NULL，那些 session 仍持有
   // workspace_path、仍能 resume，只是回到未归组。
@@ -227,6 +236,7 @@ export async function DELETE(req: Request) {
   if (!fs.existsSync(ws.path)) {
     killWorkspaceTerminals(workspaceId);
     dropRow();
+    if (pruneFrom) pruneWorktreeMetadata(pruneFrom);
     return Response.json({ ok: true, gone: true });
   }
 
@@ -247,6 +257,7 @@ export async function DELETE(req: Request) {
   }
 
   if (!force) {
+    const sessionCount = activeWorkspaceSessionCount(db, workspaceId);
     // force=0 一律**只预演、绝不执行**。删目录不可逆，而这个按钮在触屏上是
     // 常显的（见 SessionSidebar 的 pointer-coarse 分支），误触代价太大 ——
     // 「干净就直接删」实测下来就是点一下目录就没了，连问都不问。
@@ -271,6 +282,7 @@ export async function DELETE(req: Request) {
         dirtyCount: dirty.length,
         ignored: ignored.map((l) => l.slice(3)).slice(0, 20),
         ignoredCount: ignored.length,
+        sessionCount,
       },
       { status: 409 },
     );
@@ -292,5 +304,6 @@ export async function DELETE(req: Request) {
   }
   killWorkspaceTerminals(workspaceId);
   dropRow();
+  if (pruneFrom) pruneWorktreeMetadata(pruneFrom);
   return Response.json({ ok: true });
 }
