@@ -31,11 +31,13 @@ export async function POST(
     const service = getHerdrFleetService();
     await service.ensureStarted();
     const result = await service.input(id, body.text);
-    return Response.json({ ok: true, result });
+    return Response.json({ ok: true, status: result.status, result }, { status: result.status === "queued" ? 202 : 200 });
   } catch (error) {
     const status =
       error instanceof HerdrUnavailableError
         ? 503
+        : error instanceof HerdrApiError && error.code === "queue_full"
+          ? 429
         : error instanceof HerdrApiError && error.code === "not_agent_pane"
           ? 403
         : error instanceof HerdrApiError && error.code === "pane_not_found"

@@ -2,6 +2,7 @@ import "server-only";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import type { HerdrInputDelivery } from "../herdr-input";
 import {
   HERDR_PROTOCOL,
   type HerdrAgent,
@@ -182,6 +183,17 @@ export class HerdrClient {
   private readonly layouts = new Map<string, HerdrLayout>();
   private readonly agents = new Map<string, HerdrAgent>();
   private readonly inputTails = new Map<string, Promise<unknown>>();
+  private readonly deliveries = new Map<string, HerdrInputDelivery>();
+
+  get inputDeliveries(): HerdrInputDelivery[] {
+    return [...this.deliveries.values()];
+  }
+
+  private publishDelivery(delivery: HerdrInputDelivery): void {
+    this.deliveries.set(delivery.inputId, delivery);
+    this.bump();
+    this.emit({ kind: "fleet" });
+  }
   private eventSocket: Bun.Socket<undefined> | null = null;
   private lineQueue: QueuedLine[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -301,10 +313,20 @@ export class HerdrClient {
     paneId: string,
     text: string,
     timeoutMs = 300_000,
-  ): Promise<Record<string, unknown>> {
-    this.requireAgentPane(paneId);
+  ): Promise<HerdrInputDelivery> {
+    const acceptedPane = this.requireAgentPane(paneId);
+    if (this._readOnly) throw new HerdrUnavailableError("Herdr is read-only");
+    // Retain bounded delivery receipts for reconnecting browsers, never evict
+    // an input that is still queued. Text stays only in the worker closure.
+    for (const [id, delivery] of this.deliveries) {
+      if (this.deliveries.size < 128) break;
+      if (delivery.status !== "queued") this.deliveries.delete(id);
+    }
+    if (this.deliveries.size >= 128) throw new HerdrApiError("input queue is full", "queue_full");
+    const receipt: HerdrInputDelivery = { inputId: crypto.randomUUID(), paneId, status: "queued" };
+    const queued = this.inputTails.has(paneId) || !["idle", "done"].includes(acceptedPane.agent_status);
     const previous = this.inputTails.get(paneId) ?? Promise.resolve();
-    const run = previous.catch(() => undefined).then(async () => {
+    const run = previous.then(async () => {
       const current = this.requireAgentPane(paneId);
       if (current.agent_status !== "idle" && current.agent_status !== "done") {
         await this.request("agent.wait", {
@@ -313,19 +335,29 @@ export class HerdrClient {
           timeout_ms: timeoutMs,
         }, timeoutMs + 5_000);
       }
-      this.requireAgentPane(paneId);
-      const sent = await this.request<Record<string, unknown>>("pane.send_input", {
+      const target = this.requireAgentPane(paneId);
+      if (this.stopped || target.terminal_id !== acceptedPane.terminal_id ||
+          JSON.stringify(target.agent_session) !== JSON.stringify(acceptedPane.agent_session)) {
+        throw new HerdrApiError("queued input target changed or stopped", "pane_changed");
+      }
+      await this.request<Record<string, unknown>>("pane.send_input", {
         pane_id: paneId,
         text,
         keys: ["Enter"],
       });
-      return sent;
+      const delivered: HerdrInputDelivery = { ...receipt, status: "delivered" };
+      this.publishDelivery(delivered);
+      return delivered;
     });
-    // A successful send is the HTTP acknowledgement. Agent completion only
-    // gates the next queued input; pane events publish the resulting state.
+    this.publishDelivery(receipt);
+    void run.catch((error) => {
+      this.publishDelivery({ ...receipt, status: "failed", error: error instanceof Error ? error.message : String(error) });
+    });
+    // Both idle waits belong to the background worker. A busy pane (or an
+    // existing queue) acknowledges acceptance immediately, without waiting.
     const tail = run.then(() => this.request("agent.wait", {
         target: paneId,
-        until: ["idle", "done", "blocked"],
+        until: ["idle", "done"],
         timeout_ms: timeoutMs,
       }, timeoutMs + 5_000));
     this.inputTails.set(paneId, tail);
@@ -338,7 +370,7 @@ export class HerdrClient {
         if (!this.stopped) console.warn("[trellis] Herdr input queue wait failed", paneId, error);
       },
     );
-    return run;
+    return queued ? receipt : run;
   }
 
   async sendKeys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {

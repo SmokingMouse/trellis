@@ -23,7 +23,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-function createHarness() {
+function createHarness(waitDelayMs = 0) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-fleet-"));
   const socketPath = path.join(home, "herdr.sock");
   const sessionId = "44444444-4444-4444-8444-444444444444";
@@ -108,7 +108,11 @@ function createHarness() {
             },
           };
         }
-        socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+        const send = () => socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+        if (request.method === "agent.wait" && waitDelayMs) {
+          const timer = setTimeout(send, waitDelayMs);
+          cleanups.push(() => clearTimeout(timer));
+        } else send();
       },
       close(socket) {
         subscribers.delete(socket);
@@ -145,6 +149,34 @@ function createHarness() {
 }
 
 describe("HerdrFleetService", () => {
+  test("R6 busy HTTP input immediately returns 202 and SSE reports background delivery", async () => {
+    const h = createHarness(400);
+    h.basePane.agent_status = "working";
+    const globals = globalThis as typeof globalThis & { __trellisHerdrFleet?: InstanceType<typeof HerdrFleetService> };
+    globals.__trellisHerdrFleet = h.service;
+    cleanups.push(() => { delete globals.__trellisHerdrFleet; });
+    const input = await import("../../app/api/herdr/panes/[id]/input/route");
+    const events = await import("../../app/api/herdr/events/route");
+    const stream = await events.GET(new Request("http://localhost/api/herdr/events"));
+    expect(stream.headers.get("content-type")).toBe("text/event-stream");
+    const reader = stream.body!.getReader();
+    try {
+      await reader.read(); // initial fleet
+      const started = performance.now();
+      const response = await input.POST(new Request("http://localhost/input", { method: "POST", body: JSON.stringify({ text: "queued while busy" }) }), { params: Promise.resolve({ id: "w1:p1" }) });
+      expect(response.status).toBe(202);
+      expect(performance.now() - started).toBeLessThan(150);
+      const body = await response.json();
+      expect(body).toMatchObject({ ok: true, status: "queued", result: { status: "queued" } });
+      expect(h.requests.filter(r => r.method === "pane.send_input")).toHaveLength(0);
+      const queued = new TextDecoder().decode((await reader.read()).value);
+      expect(queued).toContain(body.result.inputId);
+      expect(queued).toContain('"status":"queued"');
+      const delivered = new TextDecoder().decode((await reader.read()).value);
+      expect(delivered).toContain('"status":"delivered"');
+      expect(h.requests.filter(r => r.method === "pane.send_input")).toHaveLength(1);
+    } finally { await reader.cancel(); }
+  });
   test("builds workspace → tab → pane fleet and binds Claude once", async () => {
     const harness = createHarness();
     await harness.service.ensureStarted();

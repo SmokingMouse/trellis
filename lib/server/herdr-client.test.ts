@@ -355,7 +355,7 @@ describe("HerdrClient", () => {
       client.enqueueInput("w1:p1", "first", 500),
       client.enqueueInput("w1:p1", "second", 500),
     ]);
-    await Bun.sleep(10);
+    await Bun.sleep(80);
     const methods = server.requests
       .filter((request) => ["pane.send_input", "agent.wait"].includes(request.method))
       .map((request) => `${request.method}:${request.params.text ?? ""}`);
@@ -383,7 +383,8 @@ describe("HerdrClient", () => {
     expect(server.requests.filter(r => r.method === "pane.send_input")).toHaveLength(1);
     expect(client.state.available).toBeTrue();
     expect(client.state.realtime).toBeTrue();
-    await second;
+    expect((await second).status).toBe("queued");
+    await Bun.sleep(200);
     expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["first", "second"]);
   }, 10_000);
 
@@ -394,10 +395,36 @@ describe("HerdrClient", () => {
     server.waitDelayMs = 100;
     const client = clientFor(server, { requestTimeoutMs: 30 });
     await client.start();
-    await client.enqueueInput("w1:p1", "queued", 500);
+    const started = performance.now();
+    const receipt = await client.enqueueInput("w1:p1", "queued", 500);
+    expect(receipt.status).toBe("queued");
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(server.requests.filter(r => r.method === "pane.send_input")).toHaveLength(0);
+    await Bun.sleep(130);
+    expect(client.inputDeliveries.find(input => input.inputId === receipt.inputId)?.status).toBe("delivered");
     expect(server.requests.filter(r => ["pane.send_input", "agent.wait"].includes(r.method)).slice(0, 2).map(r => r.method)).toEqual(["agent.wait", "pane.send_input"]);
     expect(client.state.available).toBeTrue();
   });
+
+  for (const change of ["closed", "reused", "stopped"] as const) {
+    test(`R6 a queued input fails without sending when its target is ${change}`, async () => {
+      const server = new FakeHerdr();
+      servers.push(server);
+      server.snapshot.panes = [pane(5, "working")];
+      server.waitDelayMs = 100;
+      const client = clientFor(server);
+      await client.start();
+      const receipt = await client.enqueueInput("w1:p1", "must not leak", 500);
+      expect(receipt.status).toBe("queued");
+      await Bun.sleep(10);
+      if (change === "closed") server.emit({ event: "pane_closed", data: { type: "pane_closed", pane_id: "w1:p1" } });
+      if (change === "reused") server.emit({ event: "pane_updated", data: { type: "pane_updated", pane: { ...pane(6, "idle"), terminal_id: "new-terminal" } } });
+      if (change === "stopped") client.stop();
+      await Bun.sleep(130);
+      expect(client.inputDeliveries.find(input => input.inputId === receipt.inputId)?.status).toBe("failed");
+      expect(server.requests.filter(r => r.method === "pane.send_input")).toHaveLength(0);
+    });
+  }
 
   test("an RPC deadline preserves fleet availability and the event connection", async () => {
     const server = new FakeHerdr();

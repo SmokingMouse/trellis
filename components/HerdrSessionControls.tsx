@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
-import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
+import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
+import type { HerdrInputDelivery } from "@/lib/herdr-input";
 
 export function HerdrSessionBadge({
   pane,
@@ -97,11 +98,24 @@ export function HerdrOfflineBanner({
 }
 
 export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
+  const { fleet } = useHerdrFleet();
+  const [inputId, setInputId] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [state, setState] = useState<
-    "idle" | "sending" | "delivered" | "error"
+    "idle" | "sending" | "queued" | "delivered" | "error"
   >("idle");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const delivery = fleet?.inputDeliveries?.find(input => input.inputId === inputId && input.paneId === pane.paneId);
+  useEffect(() => {
+    if (delivery?.status === "delivered") setState("delivered");
+    if (delivery?.status === "failed") setState("error");
+  }, [delivery?.status]);
+  useEffect(() => {
+    setInputId(null);
+    setState("idle");
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, [pane.paneId]);
 
   useEffect(
     () => () => {
@@ -113,6 +127,8 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
   const submit = async () => {
     const outgoing = text.trim();
     if (!outgoing || state === "sending") return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setInputId(null);
     setState("sending");
     try {
       const response = await fetch(
@@ -124,10 +140,12 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
         },
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { result } = await response.json() as { result: HerdrInputDelivery };
       setText("");
-      setState("delivered");
+      setInputId(result.inputId);
+      setState(result.status === "queued" ? "queued" : "delivered");
       void refreshHerdrFleet();
-      timerRef.current = setTimeout(() => setState("idle"), 2_400);
+      if (result.status === "delivered") timerRef.current = setTimeout(() => setState("idle"), 2_400);
     } catch {
       setState("error");
     }
@@ -148,6 +166,8 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
         >
           {state === "delivered"
             ? "已送达 Herdr"
+            : state === "queued"
+              ? "已排队，空闲后自动发送"
             : state === "error"
               ? "发送失败，请重试"
               : ""}

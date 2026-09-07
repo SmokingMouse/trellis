@@ -187,6 +187,7 @@ rm -f "$DB" "$DB-shm" "$DB-wal" "$LOG" "$FAKE_LOG" "$FAKE_STDOUT" "$SOCKET"
   export HOME="$H"
   export FAKE_HERDR_HOME="$H"
   export FAKE_HERDR_LOG="$FAKE_LOG"
+  export FAKE_HERDR_WAIT_DELAY_MS=12000
   export HERDR_SOCKET_PATH="$SOCKET"
   exec bun scripts/mobile-verify/fake-herdr.ts
 ) >"$FAKE_STDOUT" 2>&1 &
@@ -362,6 +363,20 @@ fi
 wait_for_js "event-driven Codex idle status" "document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'idle'"
 wait_for_log "subscription initial replay" '"replay":2'
 wait_for_log "pane_updated events" '"event":"pane_updated"'
+
+ab fill 'textarea[data-herdr-input]' 'mobile-herdr-busy-proof'
+ab click '[data-herdr-send]'
+wait_for_js "busy input immediately queued" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'queued'"
+ab eval --stdin <<'JS'
+(() => {
+  const proof = window.herdrInputProof;
+  if (proof?.status !== 202 || proof.elapsed >= 1500) throw new Error(`busy input did not acknowledge queue: ${JSON.stringify(proof)}`);
+  if (!document.querySelector('[data-herdr-delivery]')?.textContent.includes('已排队')) throw new Error('queued label missing');
+  return proof;
+})()
+JS
+wait_for_log "background queue delivers busy input" '"text":"mobile-herdr-busy-proof","keys":["Enter"]'
+wait_for_js "queued input becomes delivered by event" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'delivered'"
 
 echo "== iPhone drawer, header, cards and touch targets =="
 ab set device "iPhone 15"

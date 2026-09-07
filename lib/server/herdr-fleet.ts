@@ -10,6 +10,7 @@ import {
 } from "./herdr-bindings";
 import { HerdrClient } from "./herdr-client";
 import type { HerdrPane } from "./herdr-types";
+import type { HerdrInputDelivery } from "../herdr-input";
 
 type FleetOptions = {
   db?: Database;
@@ -95,6 +96,7 @@ export class HerdrFleetService {
     lastError: string | null;
     workspaces: Record<string, unknown>[];
     sessions: ReturnType<typeof listHerdrBindings>;
+    inputDeliveries: HerdrInputDelivery[];
   } {
     const state = this.client.state;
     const workspaces = state.workspaces.map((workspace) => ({
@@ -130,6 +132,7 @@ export class HerdrFleetService {
       lastError: state.lastError,
       workspaces,
       sessions: listHerdrBindings(this.options.db),
+      inputDeliveries: this.client.inputDeliveries,
     };
   }
 
@@ -137,7 +140,7 @@ export class HerdrFleetService {
     return `W/"herdr-${this.client.state.generation}-${this.bindingVersion}"`;
   }
 
-  input(paneId: string, text: string): Promise<Record<string, unknown>> {
+  input(paneId: string, text: string): Promise<HerdrInputDelivery> {
     return this.client.enqueueInput(paneId, text);
   }
 

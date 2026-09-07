@@ -24,6 +24,8 @@ let etag: string | null = null;
 let hooksEtag: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let inFlight: Promise<void> | null = null;
+let events: EventSource | null = null;
+let eventVersion = 0;
 const listeners = new Set<(next: HerdrFleetSnapshot) => void>();
 
 function publish(next: HerdrFleetSnapshot): void {
@@ -34,6 +36,7 @@ function publish(next: HerdrFleetSnapshot): void {
 async function poll(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
+    const versionAtStart = eventVersion;
     try {
       const [fleetResponse, hooksResponse] = await Promise.all([
         fetch("/api/herdr/fleet", {
@@ -49,10 +52,10 @@ async function poll(): Promise<void> {
         throw new Error(`hook state HTTP ${hooksResponse.status}`);
       }
       const fleet =
-        fleetResponse.status === 304
+        fleetResponse.status === 304 || eventVersion !== versionAtStart
           ? snapshot.fleet
           : ((await fleetResponse.json()) as HerdrFleetResponse);
-      if (fleetResponse.status !== 304) {
+      if (fleetResponse.status !== 304 && eventVersion === versionAtStart) {
         etag = fleetResponse.headers.get("etag");
       }
       // Refresh the projection on a 304 too: waiting-hook TTLs can expire
@@ -61,7 +64,7 @@ async function poll(): Promise<void> {
         : ((await hooksResponse.json()) as { records?: HerdrHookRecord[] }).records ?? [];
       if (hooksResponse.status !== 304) hooksEtag = hooksResponse.headers.get("etag");
       publish({
-        fleet,
+        fleet: eventVersion === versionAtStart ? fleet : snapshot.fleet,
         hooks,
         loading: false,
         error: null,
@@ -83,6 +86,15 @@ function subscribe(listener: (next: HerdrFleetSnapshot) => void): () => void {
   listeners.add(listener);
   listener(snapshot);
   if (listeners.size === 1) {
+    events = new EventSource("/api/herdr/events");
+    events.onmessage = (event) => {
+      try {
+        const fleet = JSON.parse(event.data) as HerdrFleetResponse;
+        eventVersion++;
+        etag = null;
+        publish({ ...snapshot, fleet, loading: false, error: null });
+      } catch { /* polling recovers a malformed or interrupted event */ }
+    };
     void poll();
     timer = setInterval(() => void poll(), POLL_MS);
   }
@@ -91,6 +103,8 @@ function subscribe(listener: (next: HerdrFleetSnapshot) => void): () => void {
     if (listeners.size === 0 && timer) {
       clearInterval(timer);
       timer = null;
+      events?.close();
+      events = null;
     }
   };
 }

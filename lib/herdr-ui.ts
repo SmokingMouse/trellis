@@ -1,3 +1,5 @@
+import type { HerdrInputDelivery } from "./herdr-input";
+
 export type HerdrUiStatus =
   | "working"
   | "waiting"
@@ -70,6 +72,7 @@ export type HerdrFleetWorkspace = {
 };
 
 export type HerdrFleetResponse = {
+  inputDeliveries?: HerdrInputDelivery[];
   available: boolean;
   enabled: boolean;
   realtime: boolean;
