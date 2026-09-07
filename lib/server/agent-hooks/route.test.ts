@@ -110,7 +110,7 @@ describe("落库与读取", () => {
     expect(rec.paneKey).toBe("pane-1");
     expect(rec.cwd).toBe("/repo");
     expect(rec.prompt).toBe("跑一下测试");
-    expect(rec.interactivePrompt).toEqual({ questions: [{ question: "哪个？" }] });
+    expect(rec.interactivePrompt).toEqual({ questions: [{ question: "哪个？" }], tool_name: "AskUserQuestion" });
 
     // 撤卡后回 working —— JSON 列的 null 也要正确读回来
     await post({
@@ -135,6 +135,7 @@ describe("落库与读取", () => {
       session_id: sid,
       tool_name: "Bash",
       summary: "跑 rm",
+      agent_id: "child",
     });
     const waiting = store.getHookRecord(sid)!;
     expect(waiting.state).toBe("waiting");

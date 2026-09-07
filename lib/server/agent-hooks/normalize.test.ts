@@ -105,7 +105,7 @@ describe("卡片形状", () => {
     expect(rec.state).toBe("waiting");
     expect(rec.toolName).toBe("AskUserQuestion");
     // 原样 —— 前端要照着渲染选项，任何归一化都是丢信息
-    expect(rec.interactivePrompt).toEqual(toolInput);
+    expect(rec.interactivePrompt).toEqual({ ...toolInput, tool_name: "AskUserQuestion" });
   });
 
   test("PermissionRequest → waiting，interactivePrompt 是 approval 卡", () => {
@@ -118,6 +118,7 @@ describe("卡片形状", () => {
     ]);
     expect(rec.state).toBe("waiting");
     expect(rec.interactivePrompt).toEqual({
+      tool_name: "Bash",
       approval: { tool: "Bash", summary: "rm -rf /tmp/x" },
     });
   });
@@ -131,6 +132,7 @@ describe("卡片形状", () => {
       }),
     ]);
     expect(rec.interactivePrompt).toEqual({
+      tool_name: "Write",
       approval: { tool: "Write", summary: "写入 /etc/hosts" },
     });
   });
@@ -143,6 +145,32 @@ describe("卡片形状", () => {
 });
 
 describe("撤卡", () => {
+  test("background child tools and SubagentStop cannot dismiss the parent's question", () => {
+    const waiting = feed([
+      ev("SubagentStart", { agent_type: "Explore" }),
+      ev("PreToolUse", { tool_name: "AskUserQuestion", tool_use_id: "parent-question", tool_input: { questions: [] } }),
+    ]);
+    const after = feed([
+      ev("PreToolUse", { tool_name: "Read", tool_use_id: "child-read" }),
+      ev("PostToolUse", { tool_name: "Read", tool_use_id: "child-read" }),
+      ev("PostToolUseFailure", { tool_name: "AskUserQuestion", tool_use_id: "other-question" }),
+      ev("SubagentStop", { agent_type: "Explore" }),
+    ], waiting);
+    expect(after.state).toBe("waiting");
+    expect(after.interactivePrompt).toEqual(waiting.interactivePrompt);
+    expect(after.stashed).toBeNull();
+    const closed = feed([ev("PostToolUse", { tool_name: "AskUserQuestion", tool_use_id: "parent-question" })], after);
+    expect(closed.interactivePrompt).toBeNull();
+    expect(closed.state).toBe("working");
+  });
+
+  test("unrelated completion preserves an approval card", () => {
+    const waiting = feed([ev("PermissionRequest", { tool_name: "Bash", tool_use_id: "approval" })]);
+    const after = feed([ev("PostToolUse", { tool_name: "Read" })], waiting);
+    expect(after.interactivePrompt).toEqual(waiting.interactivePrompt);
+    expect(after.state).toBe("waiting");
+    expect(feed([ev("PostToolUseFailure", { tool_name: "Bash", tool_use_id: "approval" })], after).interactivePrompt).toBeNull();
+  });
   for (const dismiss of ["PostToolUse", "PostToolUseFailure", "UserPromptSubmit"]) {
     test(`${dismiss} 到来即撤卡`, () => {
       const rec = feed([
@@ -203,7 +231,7 @@ describe("子 agent 名单与父状态 stash/restore", () => {
 
     const waiting = applyHookEvent(
       started,
-      ev("PreToolUse", { tool_name: "AskUserQuestion", tool_input: { questions: [1] } }),
+      ev("PreToolUse", { tool_name: "AskUserQuestion", tool_input: { questions: [1] }, agent_id: "child" }),
     )!;
     expect(waiting.state).toBe("waiting");
     expect(waiting.stashed).toEqual({
@@ -227,7 +255,7 @@ describe("子 agent 名单与父状态 stash/restore", () => {
     rec = applyHookEvent(rec, ev("SubagentStart", { agent_type: "b" }))!;
     rec = applyHookEvent(
       rec,
-      ev("PermissionRequest", { tool_name: "Bash", summary: "跑测试" }),
+      ev("PermissionRequest", { tool_name: "Bash", summary: "跑测试", agent_id: "child" }),
     )!;
     expect(rec.state).toBe("waiting");
     rec = applyHookEvent(rec, ev("SubagentStop", { agent_type: "a" }))!;

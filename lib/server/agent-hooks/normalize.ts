@@ -15,13 +15,6 @@ import type {
  */
 const ASK_USER_QUESTION = "AskUserQuestion";
 
-/** 到来即撤卡的事件：一轮交互已经收口，interactivePrompt 必须清掉。 */
-const DISMISS_EVENTS = new Set([
-  "PostToolUse",
-  "PostToolUseFailure",
-  "UserPromptSubmit",
-]);
-
 export type NormalizeOptions = {
   paneKey?: string | null;
   now?: number;
@@ -85,6 +78,22 @@ function toApproval(p: ClaudeHookPayload): ApprovalPrompt {
   };
 }
 
+function promptWithOwner(prompt: unknown, payload: ClaudeHookPayload): Record<string, unknown> {
+  return {
+    ...(prompt && typeof prompt === "object" ? prompt : {}),
+    tool_name: str(payload.tool_name),
+    ...(str(payload.tool_use_id) ? { tool_use_id: payload.tool_use_id } : {}),
+  };
+}
+
+function closesPrompt(prompt: unknown, payload: ClaudeHookPayload): boolean {
+  if (!prompt || typeof prompt !== "object") return true;
+  const card = prompt as Record<string, unknown>;
+  const legacyTool = card.questions ? ASK_USER_QUESTION : (card.approval as ApprovalPrompt["approval"] | undefined)?.tool;
+  return (card.tool_name ?? legacyTool) === payload.tool_name &&
+    (!card.tool_use_id || card.tool_use_id === payload.tool_use_id);
+}
+
 /**
  * 应用一个 hook 事件。prev = null 表示这个 session 还没有记录。
  * 返回 null = 这条 payload 没有 session_id，无从归属，丢弃。
@@ -122,7 +131,9 @@ export function applyHookEvent(
   };
   /** 转 waiting 前先把父会话的现场收起来 —— 只在子 agent 在跑时才需要复位。 */
   const stashIfSubagent = () => {
-    if (next.subagents.length > 0 && !next.stashed && prev) {
+    // A running child does not imply that a prompt belongs to it. Keep the
+    // parent's card unless the hook explicitly identifies a child invocation.
+    if ((str(payload.agent_id) || str(payload.subagent_id)) && next.subagents.length > 0 && !next.stashed && prev) {
       next.stashed = {
         state: prev.state,
         toolName: prev.toolName,
@@ -157,10 +168,9 @@ export function applyHookEvent(
       next.toolInput = payload.tool_input ?? null;
       if (next.toolName === ASK_USER_QUESTION) {
         stashIfSubagent();
-        // 原样存 tool_input —— 前端要照着它渲染选项，任何"归一化"都是丢信息。
-        next.interactivePrompt = payload.tool_input ?? null;
+        next.interactivePrompt = promptWithOwner(payload.tool_input, payload);
         setState("waiting");
-      } else {
+      } else if (!next.interactivePrompt) {
         dismiss();
         setState("working");
       }
@@ -170,13 +180,14 @@ export function applyHookEvent(
       next.toolName = str(payload.tool_name) ?? next.toolName;
       next.toolInput = payload.tool_input ?? next.toolInput;
       stashIfSubagent();
-      next.interactivePrompt = toApproval(payload);
+      next.interactivePrompt = promptWithOwner(toApproval(payload), payload);
       setState("waiting");
       break;
     }
     case "PostToolUse":
     case "PostToolUseFailure": {
       next.toolName = str(payload.tool_name) ?? next.toolName;
+      if (!closesPrompt(next.interactivePrompt, payload)) break;
       dismiss();
       setState("working");
       break;
