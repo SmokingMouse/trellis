@@ -216,9 +216,15 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
       if (parent && parent.daemon_id !== daemonIdentity()) throw new Error("session daemon mapping changed");
       if (parent && getNode(parent.node_id)?.status === "streaming") throw new Error("parent turn is still running");
       let threadId: string;
+      let seedHistory = !parent && !!parentId;
       if (parent) {
         const latest = getDB().prepare("SELECT node_id FROM as_turns WHERE thread_id=? AND daemon_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(parent.thread_id, parent.daemon_id) as {node_id:string} | null;
-        if (args.retry || args.fork || latest?.node_id !== parent.node_id) {
+        if (!args.retry && !args.fork && latest?.node_id !== parent.node_id) {
+          // A normal question from an earlier node starts a new conversation
+          // seeded only from that node's ancestry, never from the live tip.
+          threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
+          seedHistory = true;
+        } else if (args.retry || args.fork) {
           // 7913839 only forks the live thread tip. Never silently include later
           // turns when the user selected an earlier node (or retries a past turn).
           if (args.retry || latest?.node_id !== parent.node_id) throw new Error("当前 Agent 服务仅支持从线程最新节点分叉，暂不支持从早期节点分叉；原会话未改变。");
@@ -236,7 +242,7 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
         }
       } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
       bindAsThread(session.id, threadId);
-      const recoveredHistory = !parent && parentId ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
+      const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
       const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: recoveredHistory ? `${recoveredHistory}\n\nuser: ${args.prompt}` : args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
       bindAsTurn(node.id, threadId, params.clientTurnId!);
       getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), node.id);

@@ -19,9 +19,10 @@ async function waitFile(file:string) {
 const script: MockScript = async function* (turnId,input,engine) {
   save();
   const prompt = input.filter(i=>i.type==="text").map(i=>i.text).join("\n");
+  const question = prompt.split("\n\nuser: ").at(-1)!;
   const answer = pickResponse(prompt,[],null);
   const id = `${turnId}-answer`;
-  if(prompt.includes("approval")) {
+  if(question.includes("approval")) {
     const toolId = `${turnId}-bash`;
     yield {type:"itemStarted",turnId,item:{id:toolId,type:"commandExecution",payload:{command:"echo project-proof",cwd:home}}};
     yield {approval:{method:"item/commandExecution/requestApproval",params:{requestId:`approval-${turnId}`,threadId:engine.options!.threadId,turnId,itemId:toolId,command:"echo project-proof",cwd:home,startedAtMs:Date.now()}}};
@@ -29,8 +30,8 @@ const script: MockScript = async function* (turnId,input,engine) {
   }
   yield {type:"itemStarted",turnId,item:{id,type:"agentMessage",payload:{text:""}}};
   yield {type:"itemDelta",turnId,itemId:id,kind:"text",text:answer.slice(0,20)};
-  if(prompt.includes("hold")) await waitFile("finish-first");
-  if(prompt.includes("interrupt")) { yield {waitMs:120000}; return; }
+  if(question.includes("hold")) await waitFile("finish-first");
+  if(question.includes("interrupt")) { yield {waitMs:120000}; return; }
   yield {type:"itemCompleted",turnId,item:{id,type:"agentMessage",payload:{text:answer}}};
   yield {type:"turnCompleted",turnId,status:"completed",usage:{usd:null,inputTokens:Math.ceil(prompt.length/4),outputTokens:Math.ceil(answer.length/4),cachedTokens:0,cacheCreation:0,estimated:true,contextTokens:null}};
 };

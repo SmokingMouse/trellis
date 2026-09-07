@@ -12,3 +12,4 @@
 - 主控裁决收窄分叉：显式 fork 从最新节点调用无 fromItemId 的 thread/fork；早期节点明确拒绝，保留旧节点数据与绑定。普通续聊继续复用 thread。
 - 同 thread 的节点控件共享 EventSource，避免长链重复订阅耗尽浏览器连接。复跑 D3 exit 0，包含 tip 新绑定、早期节点失败网页截图、旧数据比较与降级；D1/D2/D5 exit 0。最终报告和 proof.json 位于契约 out。
 - D4 验收返查：原 env -i 命令连续两次无干预独占复跑 exit 0；未改代码或删用例。首轮额外浏览器诊断后页面变为 about:blank，N9 超时 exit 1，该轮受诊断干扰，不能作为原验收失败的根因证据。启动前和收尾均无 project/shadow 脚本、测试锁或 3471–3482 监听；D5 exit 0。不将尚未定位的验收失败归因于锁冲突。
+- 新契约 fj-trellis-step2-fix-683f：P1-1 将非 tip 普通续聊与显式 fork 分开，普通续聊用祖先历史播种新线程；mobile 增加 HTTP 200、新绑定、节点 done 断言。Next：修复重试保留原答案、硬关闸与连接/租约问题，统一复跑验收。

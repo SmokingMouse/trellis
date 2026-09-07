@@ -153,6 +153,13 @@ cmp "$H/before-fork.txt" "$H/after-fork.txt" || fail 'early fork changed old nod
 ab open "$BASE/?session=$SID&node=$FAILED_NODE"
 wait_js 'early-node fork error is visible and original session preserved' "document.body.innerText.includes('暂不支持从早期节点分叉') && document.body.innerText.includes('原会话未改变')"
 ab screenshot "$OUT/mobile-as-early-fork-error.png"
+EARLY_CODE=$(curl --noproxy '*' -s -o "$H/early-question.sse" -w '%{http_code}' -b trellis_auth=as-project-token -H 'Content-Type: application/json' -d "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"question\":\"ordinary early question\",\"provider\":\"mock\"}" "$BASE/api/chat")
+[ "$EARLY_CODE" = 200 ] || fail 'P1-1 ordinary early question must succeed'
+EARLY_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
+[ "$(db "SELECT status FROM nodes WHERE id='$EARLY_NODE'")" = done ] || fail 'P1-1 ordinary early question left an error node'
+[ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")" != "$ORIGINAL_THREAD" ] || fail 'P1-1 early question reused later history'
+grep -q '"type":"done"' "$H/early-question.sse" || fail 'P1-1 early question completion'
+echo 'PASS: P1-1 ordinary early question returns 200 with a seeded new thread and no error node'
 kill "$DAEMON_PID"; wait "$DAEMON_PID" || true; DAEMON_PID=
 post /api/chat "{\"kind\":\"root\",\"question\":\"fallback project\",\"mode\":\"project\",\"workspacePath\":\"$H\",\"provider\":\"mock\"}" > "$H/fallback.sse"
 grep -q '"type":"notice"' "$H/fallback.sse" || fail 'fallback notice'
