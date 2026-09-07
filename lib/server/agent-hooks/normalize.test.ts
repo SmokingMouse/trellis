@@ -145,6 +145,20 @@ describe("卡片形状", () => {
 });
 
 describe("撤卡", () => {
+  // review2 rv2_dismiss: PermissionRequest has agent_id but no tool_use_id.
+  for (const event of ["PostToolUse", "PostToolUseFailure"]) {
+    test(`R3 ${event} from a child cannot close the parent's same-tool approval`, () => {
+      const waiting = feed([
+        ev("SubagentStart", { agent_id: "child", agent_type: "Explore" }),
+        ev("PermissionRequest", { agent_id: "parent", tool_name: "Bash", tool_input: { command: "printf parent" } }),
+      ]);
+      expect(waiting.interactivePrompt).toMatchObject({ agent_id: "parent" });
+      const after = feed([ev(event, { agent_id: "child", tool_name: "Bash", tool_use_id: "child-bash" })], waiting);
+      expect(after.interactivePrompt).toEqual(waiting.interactivePrompt);
+      expect(after.state).toBe("waiting");
+      expect(feed([ev(event, { agent_id: "parent", tool_name: "Bash", tool_use_id: "parent-bash" })], after).interactivePrompt).toBeNull();
+    });
+  }
   test("background child tools and SubagentStop cannot dismiss the parent's question", () => {
     const waiting = feed([
       ev("SubagentStart", { agent_type: "Explore" }),

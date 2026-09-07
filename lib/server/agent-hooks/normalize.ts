@@ -82,6 +82,7 @@ function promptWithOwner(prompt: unknown, payload: ClaudeHookPayload): Record<st
   return {
     ...(prompt && typeof prompt === "object" ? prompt : {}),
     tool_name: str(payload.tool_name),
+    ...(str(payload.agent_id) ? { agent_id: payload.agent_id } : {}),
     ...(str(payload.tool_use_id) ? { tool_use_id: payload.tool_use_id } : {}),
   };
 }
@@ -91,6 +92,7 @@ function closesPrompt(prompt: unknown, payload: ClaudeHookPayload): boolean {
   const card = prompt as Record<string, unknown>;
   const legacyTool = card.questions ? ASK_USER_QUESTION : (card.approval as ApprovalPrompt["approval"] | undefined)?.tool;
   return (card.tool_name ?? legacyTool) === payload.tool_name &&
+    str(card.agent_id) === str(payload.agent_id) &&
     (!card.tool_use_id || card.tool_use_id === payload.tool_use_id);
 }
 
