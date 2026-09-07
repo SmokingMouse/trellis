@@ -24,7 +24,7 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-function createHarness(waitDelayMs = 0) {
+function createHarness(waitDelayMs = 0, options: { resolveBranch?: (checkout: string) => Promise<string | null>; branchNow?: () => number } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-fleet-"));
   const socketPath = path.join(home, "herdr.sock");
   const sessionId = "44444444-4444-4444-8444-444444444444";
@@ -137,6 +137,7 @@ function createHarness(waitDelayMs = 0) {
     healthIntervalMs: 60_000,
   });
   const service = new HerdrFleetService(client, {
+    ...options,
     db,
     home,
     attachClaude: (file) => attached.push(file),
@@ -151,6 +152,49 @@ function createHarness(waitDelayMs = 0) {
 }
 
 describe("HerdrFleetService", () => {
+  test("P2-4 slow failed branch lookup never blocks events, deduplicates and retries only after failure TTL", async () => {
+    let now = 0;
+    let calls = 0;
+    let finish!: (branch: string | null) => void;
+    const h = createHarness(0, { branchNow: () => now, resolveBranch: () => {
+      calls++;
+      return new Promise(resolve => { finish = resolve; });
+    } });
+    const worktree = { repo_root: "/missing-repo/", repo_name: "Repo", checkout_path: "/missing-checkout///", is_linked_worktree: true };
+    h.snapshotWorkspaces[0].worktree = worktree;
+    h.snapshotWorkspaces.push({ workspace_id: "w2", worktree: { ...worktree, checkout_path: "/missing-checkout" } });
+    await h.service.ensureStarted();
+    const received: unknown[] = [];
+    h.service.subscribe(() => received.push(h.service.fleet().workspaces[0]?.worktree));
+    expect(calls).toBe(1);
+    expect(h.service.fleet().workspaces[0].worktree).toMatchObject({ repo_root: "/missing-repo", checkout_path: "/missing-checkout", git_branch: null });
+    h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 2, agent_status: "blocked" } } });
+    await Bun.sleep(40);
+    expect(h.service.fleet().sessions[0].agentStatus).toBe("blocked");
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(calls).toBe(1);
+    finish(null);
+    await Bun.sleep(10);
+    for (let i = 0; i < 3; i++) await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(calls).toBe(1);
+    now = 10_001;
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(calls).toBe(2);
+    const etag = h.service.etag();
+    finish("recovered");
+    await Bun.sleep(10);
+    expect(h.service.etag()).not.toBe(etag);
+    expect(received.at(-1)).toMatchObject({ git_branch: "recovered" });
+    // A late result from a removed workspace must not restore old metadata.
+    now = 70_002;
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(calls).toBe(3);
+    h.snapshotWorkspaces.splice(0);
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    finish("stale");
+    await Bun.sleep(10);
+    expect(h.service.fleet().workspaces).toEqual([]);
+  });
   test("P1-2 workspace events group new checkouts immediately and worktree notifications fetch metadata", async () => {
     const h = createHarness();
     await h.service.ensureStarted();
@@ -172,8 +216,9 @@ describe("HerdrFleetService", () => {
     const subscription = h.requests.find(r => r.method === "events.subscribe");
     for (const type of ["worktree.created", "worktree.opened", "worktree.removed"]) expect(JSON.stringify(subscription?.params)).toContain(type);
   });
-  test("canonicalizes worktrees and caches branch metadata until the next snapshot", async () => {
-    const h = createHarness();
+  test("P2-4 canonicalizes worktrees and refreshes successful branches after TTL", async () => {
+    let now = 0;
+    const h = createHarness(0, { branchNow: () => now });
     const repo = path.join(h.home, "repo");
     const alias = path.join(h.home, "alias");
     execFileSync("git", ["init", "-b", "main", repo], { stdio: "ignore" });
@@ -181,6 +226,7 @@ describe("HerdrFleetService", () => {
     fs.symlinkSync(repo, alias);
     h.snapshotWorkspaces[0].worktree = { repo_root: alias, repo_name: "Repo", checkout_path: alias, is_linked_worktree: false };
     await h.service.ensureStarted();
+    await Bun.sleep(50);
     const metadata = () => h.service.fleet().workspaces[0].worktree;
     expect(metadata()).toMatchObject({ repo_root: fs.realpathSync(repo), checkout_path: fs.realpathSync(repo), git_branch: "main" });
     const etag = h.service.etag();
@@ -190,6 +236,10 @@ describe("HerdrFleetService", () => {
     expect(h.service.etag()).not.toBe(etag);
     expect(metadata()).toMatchObject({ git_branch: "main" });
     await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(metadata()).toMatchObject({ git_branch: "main" });
+    now = 60_001;
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    await Bun.sleep(50);
     expect(metadata()).toMatchObject({ git_branch: "changed" });
     h.db.exec("CREATE TABLE projects (id TEXT, name TEXT); CREATE TABLE workspaces (path TEXT, git_branch TEXT, project_id TEXT)");
     h.db.query("INSERT INTO projects VALUES ('p', 'Custom project')").run();

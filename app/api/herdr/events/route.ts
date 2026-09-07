@@ -14,7 +14,7 @@ export async function GET(req: Request) {
       const publish = () => {
         if (!closed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(service.fleet())}\n\n`));
       };
-      const unsubscribe = service.client.subscribe(publish);
+      const unsubscribe = service.subscribe(publish);
       const heartbeat = setInterval(() => {
         if (!closed) controller.enqueue(encoder.encode(": heartbeat\n\n"));
       }, 15_000);

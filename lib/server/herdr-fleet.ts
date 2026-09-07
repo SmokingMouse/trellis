@@ -12,7 +12,7 @@ import { HerdrClient } from "./herdr-client";
 import type { HerdrPane } from "./herdr-types";
 import type { HerdrInputDelivery } from "../herdr-input";
 import { realpathSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { getDB } from "./sqlite";
 import type { HerdrWorktree } from "../herdr-ui";
 import { normalizeHerdrPath } from "../herdr-ui";
@@ -21,11 +21,25 @@ function canonicalPath(value: string): string {
   try { return realpathSync(value); } catch { return normalizeHerdrPath(value); }
 }
 
+function resolveGitBranch(checkout: string): Promise<string | null> {
+  return new Promise(resolve => {
+    execFile("git", ["-C", checkout, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 2000 }, (error, stdout) => {
+      const branch = error ? null : stdout.trim();
+      resolve(branch && branch !== "HEAD" ? branch : null);
+    });
+  });
+}
+
+export const HERDR_BRANCH_TTL_MS = 60_000;
+export const HERDR_BRANCH_FAILURE_TTL_MS = 10_000;
+
 type FleetOptions = {
   db?: Database;
   home?: string;
   attachClaude?: (transcriptPath: string) => void;
   attachTranscript?: (transcriptPath: string, agentKind: string) => void;
+  resolveBranch?: (checkout: string) => Promise<string | null>;
+  branchNow?: () => number;
 };
 
 export class HerdrFleetService {
@@ -33,6 +47,9 @@ export class HerdrFleetService {
   private bindingVersion = 0;
   private worktrees = new Map<string, HerdrWorktree>();
   private worktreeSignature = "";
+  private stopped = false;
+  private readonly listeners = new Set<() => void>();
+  private readonly branchCache = new Map<string, { branch: string | null; expiresAt: number; pending: boolean }>();
   private readonly attachedTranscriptKeys = new Set<string>();
   private readonly detach: () => void;
 
@@ -62,7 +79,38 @@ export class HerdrFleetService {
       } else if (change.kind === "fleet" && this.metadataSignature() !== this.worktreeSignature) {
         this.reconcileWorktrees();
       }
+      this.publish();
     });
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private publish(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private cachedBranch(checkout: string): string | null {
+    const now = this.options.branchNow ?? Date.now;
+    const previous = this.branchCache.get(checkout);
+    if (previous && (previous.pending || previous.expiresAt > now())) return previous.branch;
+    const entry = { branch: previous?.branch ?? null, expiresAt: 0, pending: true };
+    this.branchCache.set(checkout, entry);
+    // Start subprocesses after event dispatch. Cache in-flight requests as well
+    // as failures so duplicate workspaces and snapshots never multiply git calls.
+    void Promise.resolve().then(() => (this.options.resolveBranch ?? resolveGitBranch)(checkout))
+      .catch(() => null).then(branch => {
+        if (this.stopped || this.branchCache.get(checkout) !== entry) return;
+        entry.branch = branch && branch !== "HEAD" ? branch : null;
+        entry.pending = false;
+        entry.expiresAt = now() + (entry.branch ? HERDR_BRANCH_TTL_MS : HERDR_BRANCH_FAILURE_TTL_MS);
+        this.reconcileWorktrees();
+        this.bindingVersion++;
+        this.publish();
+      });
+    return entry.branch;
   }
 
   private metadataSignature(): string {
@@ -73,6 +121,7 @@ export class HerdrFleetService {
     this.worktreeSignature = this.metadataSignature();
     const metadata = this.client.state.workspaces.filter(w => w.worktree?.repo_root && w.worktree.checkout_path);
     const next = new Map<string, HerdrWorktree>();
+    const activeCheckouts = new Set<string>();
     if (metadata.length) {
       const db = this.options.db ?? getDB();
       const branches = new Map<string, string>();
@@ -86,23 +135,18 @@ export class HerdrFleetService {
           for (const row of names) projectNames.set(canonicalPath(row.path), row.name);
         }
       }
-      const resolved = new Map<string, string | null>();
       for (const workspace of metadata) {
         const wt = workspace.worktree!;
         const checkout = canonicalPath(wt.checkout_path);
-        if (!resolved.has(checkout)) {
-          let branch = branches.get(checkout) || null;
-          if (!branch) {
-            try { branch = execFileSync("git", ["-C", checkout, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null; } catch { /* missing checkout or git */ }
-          }
-          resolved.set(checkout, branch);
-        }
+        activeCheckouts.add(checkout);
+        const branch = branches.get(checkout) || this.cachedBranch(checkout);
         const root = canonicalPath(wt.repo_root);
-        next.set(workspace.workspace_id, { ...wt, repo_root: root, repo_name: projectNames.get(root) || wt.repo_name, checkout_path: checkout, git_branch: resolved.get(checkout) });
+        next.set(workspace.workspace_id, { ...wt, repo_root: root, repo_name: projectNames.get(root) || wt.repo_name, checkout_path: checkout, git_branch: branch });
       }
     }
     // Workspace events refresh structure immediately; pane events do not resolve branches.
     this.worktrees = next;
+    for (const checkout of this.branchCache.keys()) if (!activeCheckouts.has(checkout)) this.branchCache.delete(checkout);
   }
 
   private readonly attachTranscript = (
@@ -136,6 +180,9 @@ export class HerdrFleetService {
   }
 
   stop(): void {
+    this.stopped = true;
+    this.listeners.clear();
+    this.branchCache.clear();
     this.detach();
     this.client.stop();
   }
