@@ -15,7 +15,6 @@ import {
   createRootInSession,
   createBranchNode,
   buildHistoryForNode,
-  resetNodeForRetry,
   getNode,
   getNodeAttachments,
   getSession,
@@ -413,7 +412,7 @@ export async function POST(req: Request) {
         return Response.json({ error: "missing nodeId" }, { status: 400 });
       }
       if (getNode(body.nodeId)?.status === "streaming") return Response.json({error:"node is still running"}, {status:409});
-      const reset = resetNodeForRetry(body.nodeId);
+      const reset = getNode(body.nodeId);
       if (!reset) {
         return Response.json({ error: "node not found" }, { status: 404 });
       }
@@ -492,7 +491,7 @@ export async function POST(req: Request) {
       return projectSSE(req, run, createdEvent);
     } catch (error) {
       if (!(error instanceof DaemonUnavailable)) {
-        finalizeNode({nodeId, status:"error", errorMessage:String(error), tokenInput:0, tokenOutput:0, tokenCacheRead:0, tokenCacheCreation:0, now:Date.now()});
+        if (body.kind !== "retry") finalizeNode({nodeId, status:"error", errorMessage:String(error), tokenInput:0, tokenOutput:0, tokenCacheRead:0, tokenCacheCreation:0, now:Date.now()});
         return Response.json({ error: String(error) }, { status: 503 });
       }
       asFallback = true;
@@ -800,6 +799,7 @@ export async function POST(req: Request) {
   }
   startRun({
     nodeId,
+    retry: body.kind === "retry",
     // chat B-fork writes the forked id to THIS node (per-node); native isolated
     // project writes the fresh lineage head's id to THIS node (fork heads were
     // pre-written above, so claudeSessionId is set → undefined); legacy project

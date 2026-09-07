@@ -9,6 +9,8 @@ import {
   setNodeTopicLabel,
   setRootResumeIdForNode,
   setNodeResumeId,
+  resetNodeForRetry,
+  getNode,
 } from "./repo";
 import {
   persistPendingInteraction,
@@ -286,6 +288,7 @@ export type ProviderEvent =
 // responsibility is to subscribe() if it wants live events.
 export function startRun(args: {
   nodeId: string;
+  retry?: boolean;
   // Where session_init writes the freshly-spawned CLI session id:
   //   "root" — walk to root, store there (project: whole tree shares one id).
   //   "node" — store on this node itself (chat B-fork: each node owns its
@@ -356,8 +359,8 @@ export function startRun(args: {
     nodeId: args.nodeId,
     controller,
     status: "streaming",
-    committedText: "",
-    committedToolCalls: [],
+    committedText: args.retry ? getNode(args.nodeId)?.response ?? "" : "",
+    committedToolCalls: args.retry ? getNode(args.nodeId)?.toolCalls ?? [] : [],
     pendingAgentPatches: new Map(),
     committedThinking: "",
     finalStart: 0,
@@ -382,6 +385,17 @@ async function runLoop(
   state: RunState,
   args: Parameters<typeof startRun>[0],
 ): Promise<void> {
+  let retryWaitingForOutput = args.retry === true;
+  const commitRetry = () => {
+    if (!retryWaitingForOutput) return;
+    resetNodeForRetry(args.nodeId);
+    retryWaitingForOutput = false;
+    state.committedText = "";
+    state.committedToolCalls = [];
+    for (const sub of state.subscribers) {
+      try { sub.onEvent({ type: "catchup", response: "", status: "streaming", toolCalls: [], thinking: "", pendingInteraction: null }); } catch {}
+    }
+  };
   const startedAt = Date.now();
   let aggregated = "";
   let usage: {
@@ -469,6 +483,7 @@ async function runLoop(
     for await (const event of args.factory(state.controller.signal, {
       onCanUseTool,
     })) {
+      if ((event.type === "delta" && event.text.length > 0) || event.type === "tool_call_start") commitRetry();
       if (event.type === "delta") {
         // 段落边界消费：上一个结构性事件（thinking/工具）置了 pendingBreak，
         // 新正文落地前先补段落分隔 —— 作为一条普通 delta 走完整路径（commit +
@@ -689,7 +704,8 @@ async function runLoop(
     const durationMs = Math.max(0, Date.now() - startedAt);
 
     try {
-      finalizeNode({
+      if (stoppedWith === "done") commitRetry();
+      if (!retryWaitingForOutput) finalizeNode({
         nodeId: args.nodeId,
         status: stoppedWith,
         errorMessage,

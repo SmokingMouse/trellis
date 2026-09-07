@@ -5,7 +5,7 @@ import { NotificationSchemas, type NotificationMethod, type ServerNotification, 
 import { createProjectClient, withProjectLease, setProjectPermission } from "./as-client";
 import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding } from "./session-binding";
 import { getDB } from "./sqlite";
-import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel } from "./repo";
+import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
 import { providerFamily } from "../llm/providers";
 import { emptyThreadLog, applyShadowEvent } from "../as-log";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "../as-project-events";
@@ -26,8 +26,8 @@ export class ProjectRun {
   private polling = false;
   private closing = false;
   private toolVersions = new Map<string, string>();
-  constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams) {
-    this.turnId = getAsTurn(nodeId)?.turn_id ?? undefined;
+  constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false) {
+    this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
     this.client.onError(error => console.warn(`[trellis/as] ${nodeId}: ${error.message}`));
     for (const method of Object.keys(NotificationSchemas) as NotificationMethod[]) {
@@ -47,7 +47,7 @@ export class ProjectRun {
   }
   private items() { return Object.values(this.log.items).filter(i => i.turnId === this.turnId); }
   private project() {
-    if (!this.turnId) return;
+    if (!this.turnId || this.replacing) return;
     const items = this.items();
     const { response } = projectResponse(items);
     const node = getNode(this.nodeId);
@@ -114,6 +114,26 @@ export class ProjectRun {
   }
   private finish(turn: Turn) {
     if (this.terminal) return;
+    if (this.replacing) {
+      if (turn.status !== "completed") {
+        // The previous answer and its turn binding remain authoritative.
+        this.terminal = turnRunEvent(turn, 0);
+        this.emit(this.terminal);
+        for (const sub of this.subscribers) sub.onClose();
+        this.subscribers.clear();
+        this.close();
+        if (runs.get(this.nodeId) === this) runs.delete(this.nodeId);
+        return;
+      }
+      getDB().transaction(() => {
+        resetNodeForRetry(this.nodeId);
+        bindAsTurn(this.nodeId, this.threadId, this.params.clientTurnId!);
+        getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(this.params), this.nodeId);
+        this.replacing = false;
+        this.project();
+      })();
+      this.emit(this.catchup());
+    }
     this.project();
     const { response, finalStart } = projectResponse(this.items());
     if (getNode(this.nodeId)?.response.length !== response.length) console.warn(`[trellis/as] turn/completed projection drift ${this.nodeId}`);
@@ -167,7 +187,7 @@ export class ProjectRun {
     await this.client.request("thread/attach", { threadId: this.threadId, sinceSeq: 0 });
     const result = await this.client.request("turn/start", this.params);
     this.turnId = result.turn.id;
-    updateAsTurn(this.nodeId, result.turn.id);
+    if (!this.replacing) updateAsTurn(this.nodeId, result.turn.id);
     this.project();
     if (["completed", "interrupted", "failed", "cancelled"].includes(result.turn.status)) this.finish(result.turn);
     if (!this.terminal) {
@@ -208,7 +228,7 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
         }
       }
       if (!setup.initializeResult?.capabilities.backends.includes(options.backend)) throw new Error("daemon backend unavailable");
-      let parentId = node.parentId;
+      let parentId = args.retry ? node.id : node.parentId;
       let parent = parentId ? getAsTurn(parentId) : null;
       // @mention is intentionally ephemeral. A legacy fallback answer is not:
       // seed a fresh thread with that history instead of silently omitting it.
@@ -219,7 +239,7 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
       let seedHistory = !parent && !!parentId;
       if (parent) {
         const latest = getDB().prepare("SELECT node_id FROM as_turns WHERE thread_id=? AND daemon_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(parent.thread_id, parent.daemon_id) as {node_id:string} | null;
-        if (!args.retry && !args.fork && latest?.node_id !== parent.node_id) {
+        if (!args.fork && latest?.node_id !== parent.node_id) {
           // A normal question from an earlier node starts a new conversation
           // seeded only from that node's ancestry, never from the live tip.
           threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
@@ -227,14 +247,15 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
         } else if (args.retry || args.fork) {
           // 7913839 only forks the live thread tip. Never silently include later
           // turns when the user selected an earlier node (or retries a past turn).
-          if (args.retry || latest?.node_id !== parent.node_id) throw new Error("当前 Agent 服务仅支持从线程最新节点分叉，暂不支持从早期节点分叉；原会话未改变。");
+          if (latest?.node_id !== parent.node_id) throw new Error("当前 Agent 服务仅支持从线程最新节点分叉，暂不支持从早期节点分叉；原会话未改变。");
           if (!setup.initializeResult?.capabilities.fork) throw new Error("daemon does not support fork");
           const snapshot = await setup.request("thread/attach", {threadId:parent.thread_id,sinceSeq:0});
           const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
           if (snapshot.thread.status.type === "running" || snapshot.queue.length || (last && last.turnId !== parent.turn_id)) {
-            throw new Error("线程已在其他客户端继续运行，请刷新后从线程最新节点分叉；原会话未改变。");
-          }
-          threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
+            if (!args.retry) throw new Error("线程已在其他客户端继续运行，请刷新后从线程最新节点分叉；原会话未改变。");
+            threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
+            seedHistory = true;
+          } else threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
         } else {
           threadId = parent.thread_id;
           const { thread } = await setup.request("thread/read", {threadId});
@@ -244,9 +265,11 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
       bindAsThread(session.id, threadId);
       const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
       const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: recoveredHistory ? `${recoveredHistory}\n\nuser: ${args.prompt}` : args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
-      bindAsTurn(node.id, threadId, params.clientTurnId!);
-      getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), node.id);
-      const run = new ProjectRun(node.id, threadId, params);
+      if (!args.retry) {
+        bindAsTurn(node.id, threadId, params.clientTurnId!);
+        getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), node.id);
+      }
+      const run = new ProjectRun(node.id, threadId, params, args.retry);
       runs.set(node.id, run);
       try { await run.start(); } catch (error) { run.close(); runs.delete(node.id); throw error; }
       return run;

@@ -1498,9 +1498,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   retryNode: async (nodeId) => {
     const { provider } = get();
-    // Optimistically reset the local node so the UI flips back to the
-    // streaming state immediately. The server's "created" event will
-    // overwrite this with the canonical reset row.
+    // Keep the previous answer visible until the server commits a replacement.
     set((s) => {
       const n = s.nodes[nodeId];
       if (!n) return s;
@@ -1509,14 +1507,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...s.nodes,
           [nodeId]: {
             ...n,
-            response: "",
             status: "streaming",
             errorMessage: null,
-            tokenCount: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-            // Retry wipes the panel — server clears tool_calls_json
-            // in resetNodeForRetry; mirror locally so the UI doesn't
-            // briefly show stale entries during the network round-trip.
-            toolCalls: [],
             // A路②: server also clears pending_interaction_json on retry.
             pendingInteraction: null,
           },
@@ -1546,6 +1538,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       if (STREAM_CONTROLLERS.get(nodeId) === controller) {
         STREAM_CONTROLLERS.delete(nodeId);
       }
+      // Failed retries retain the canonical answer, usage and status.
+      try {
+        const response = await fetch(`/api/nodes/${nodeId}`);
+        if (response.ok) {
+          const { node } = await response.json();
+          if (node) set(s => ({ nodes: { ...s.nodes, [nodeId]: { ...s.nodes[nodeId], ...node, toolCalls: s.nodes[nodeId]?.toolCalls ?? [] } } }));
+        }
+      } catch { /* A later reload reconciles when offline. */ }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
