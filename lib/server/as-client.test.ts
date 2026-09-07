@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentClient, MockEngine } from "@smokingmouse/agent-server";
 import { runDaemon, resolveDaemonPaths, loadToken, type RunningDaemon } from "@smokingmouse/agent-server/daemon";
 import type { AttachResult } from "@smokingmouse/agent-server/protocol";
-import { ShadowClient } from "./as-client";
+import { ShadowClient, shadowRetryDelay } from "./as-client";
+import { isShadowEnabled } from "../as-config";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); });
@@ -62,7 +63,7 @@ test("socket loss reattaches with completed cursor and reconciles offline comple
   expect(recovered.items.map(item => item.id)).toEqual(["answer"]);
   expect(recovered.items[0].completedSeq).toBeGreaterThan(cursor);
   expect(recovered.items[0].payload).toEqual({ text: "offline complete" });
-  expect(client.sinceSeq(thread.id)).toBe(recovered.nextSeq - 1);
+  expect((await observer.connect()).sinceSeq(thread.id)).toBe(recovered.nextSeq - 1);
   const fresh = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
   cleanup.push(() => fresh.close());
   expect((await fresh.attach(thread.id, recovered.nextSeq - 1)).items).toEqual([]);
@@ -72,4 +73,53 @@ test("invalid cursors reject before connection", async () => {
   const observer = new ShadowClient();
   for (const cursor of [-1, 1.2, NaN, Infinity]) await expect(observer.attach("id", cursor)).rejects.toThrow("invalid sinceSeq");
   observer.close();
+});
+
+test("P1-2 observer is opt-in and backoff doubles from 1s to a 5 minute cap", () => {
+  expect(isShadowEnabled({})).toBe(false);
+  expect(isShadowEnabled({ TRELLIS_AS: "off" })).toBe(false);
+  expect(isShadowEnabled({ TRELLIS_AS: "on" })).toBe(true);
+  expect(isShadowEnabled({ TRELLIS_AS_SOCKET: "/tmp/test.sock" })).toBe(true);
+  expect([0, 1, 2, 8, 9, 30].map(n => shadowRetryDelay(n))).toEqual([1000, 2000, 4000, 256000, 300000, 300000]);
+});
+
+test("P1-2 missing daemon reports once during exponential retries and once on recovery", async () => {
+  const f = fixture(), warnings: string[] = [], recoveries: string[] = [];
+  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 20, warn: msg => warnings.push(msg), info: msg => recoveries.push(msg) });
+  cleanup.push(() => observer.close());
+  await expect(observer.connect()).rejects.toThrow();
+  await Bun.sleep(200); // 20, 40, 80ms retries, all the same outage
+  expect(warnings).toHaveLength(1);
+  await f.start();
+  await until(() => recoveries.length === 1);
+  expect(warnings).toHaveLength(1);
+  expect((await observer.listThreads()).threads).toEqual([]);
+  expect(recoveries).toHaveLength(1);
+});
+
+test("P2-1 closed/unauthorized observer reloads token and reattaches without a page refresh", async () => {
+  const f = fixture(); await f.start();
+  const token = loadToken(f.paths.tokenPath), tokenPath = join(f.home, "observer-token");
+  writeFileSync(tokenPath, token);
+  const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token, reconnect: false });
+  cleanup.push(() => producer.close());
+  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: f.home });
+  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
+  cleanup.push(() => observer.close());
+  let snapshots = 0, closed = 0;
+  observer.onEvent(event => {
+    if (event.type === "snapshot") snapshots++;
+    if (event.type === "connection" && event.state === "closed") closed++;
+  });
+  await observer.attach(thread.id);
+  const original = await observer.connect();
+  writeFileSync(tokenPath, "stale-token");
+  original.close();
+  await until(() => closed >= 2); // manual close, then server unauthorized
+  writeFileSync(tokenPath, token);
+  await until(() => snapshots >= 2);
+  const rebuilt = await observer.connect();
+  expect(rebuilt).not.toBe(original);
+  expect(rebuilt.options.reconnect).toBe(false);
+  expect(rebuilt.state).toBe("connected");
 });

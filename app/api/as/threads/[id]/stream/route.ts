@@ -1,4 +1,5 @@
 import { ShadowClient } from "@/lib/server/as-client";
+import { isShadowEnabled } from "@/lib/as-config";
 import type { ShadowEvent } from "@/lib/as-shadow";
 import { ErrorCode, ProtocolError } from "@smokingmouse/agent-server/protocol";
 
@@ -6,6 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!isShadowEnabled()) return Response.json({ error: "会话观察未启用" }, { status: 503 });
   const { id } = await context.params;
   // EventSource's Last-Event-ID takes precedence over its original URL cursor.
   const raw = request.headers.get("last-event-id") || new URL(request.url).searchParams.get("sinceSeq") || "0";
