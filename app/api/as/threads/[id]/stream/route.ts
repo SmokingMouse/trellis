@@ -1,5 +1,6 @@
 import { ShadowClient } from "@/lib/server/as-client";
 import { isShadowEnabled } from "@/lib/as-config";
+import { createShadowSseBuffer } from "@/lib/server/as-sse";
 import type { ShadowEvent } from "@/lib/as-shadow";
 import { ErrorCode, ProtocolError } from "@smokingmouse/agent-server/protocol";
 
@@ -15,8 +16,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return Response.json({ error: "sinceSeq 必须为非负安全整数" }, { status: 400 });
   }
   const observer = new ShadowClient();
-  const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array>;
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const close = () => {
@@ -25,21 +24,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     clearInterval(heartbeat);
     observer.close();
     request.signal.removeEventListener("abort", close);
-    try { controller?.close(); } catch { /* ReadableStream.cancel already closed it. */ }
+    buffer.close();
   };
-  const send = (data: string) => {
-    if (closed) return;
-    // A slow browser must not retain unbounded daemon output on the server.
-    if ((controller.desiredSize ?? 0) <= 0) { close(); return; }
-    controller.enqueue(encoder.encode(data));
-  };
-  const stream = new ReadableStream<Uint8Array>({
-    start(value) { controller = value; }, cancel() { close(); },
-  }, { highWaterMark: 1024 * 1024, size: chunk => chunk?.byteLength ?? 0 });
+  const buffer = createShadowSseBuffer(close);
+  const { stream, send } = buffer;
+  let initialSnapshot = true;
   observer.onEvent((event: ShadowEvent) => {
     const seq = event.type === "snapshot" ? event.snapshot.nextSeq - 1
       : event.type === "notification" && "seq" in event.notification.params ? event.notification.params.seq : undefined;
-    send(`${seq === undefined ? "" : `id: ${seq}\n`}data: ${JSON.stringify(event)}\n\n`);
+    const bootstrap = event.type === "snapshot" && initialSnapshot;
+    if (bootstrap) initialSnapshot = false;
+    send(`${seq === undefined ? "" : `id: ${seq}\n`}data: ${JSON.stringify(event)}\n\n`, bootstrap);
   });
   request.signal.addEventListener("abort", close, { once: true });
   if (request.signal.aborted) close();

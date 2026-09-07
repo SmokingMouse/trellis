@@ -9,7 +9,7 @@ const snapshot = (items: Item[], nextSeq: number): AttachResult => ({
 });
 
 test("P2-2 projects daemon errors and turn started/completed, deduplicating repeated frames", () => {
-  const error = { type: "notification" as const, notification: { jsonrpc: "2.0" as const, method: "error" as const, params: { threadId: "thread", error: { code: -32015, message: "engine protocol mismatch" }, willRetry: false } } };
+  const error = { type: "notification" as const, notification: { jsonrpc: "2.0" as const, method: "error" as const, params: { threadId: "thread", error: { code: -32015 as const, message: "engine protocol mismatch" }, willRetry: false } } };
   let log = applyShadowEvent(emptyThreadLog(), error);
   expect(log.errors[0].error.message).toBe("engine protocol mismatch");
   expect(applyShadowEvent(log, error)).toBe(log);
