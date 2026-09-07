@@ -123,6 +123,8 @@ touch "$H/tail2"
 wait_js 'P2-3 continued output automatically follows' "document.querySelector('[data-as-item=answer] pre')?.textContent.includes('再次追加并自动跟随。') && (() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
 ab eval 'sessionStorage.setItem("as-paused-text", document.querySelector("[data-as-item=answer] pre").textContent); true'
 ab eval 'sessionStorage.setItem("as-before", document.querySelector("[data-as-log]").dataset.cursor); window.EventSource = class extends EventSource { constructor(url, options) { super(url, options); sessionStorage.setItem("as-resume-url", String(url)); } }; true'
+ab eval "document.querySelector('[data-as-pause]').scrollIntoView({block:'center'}); true"
+wait_js 'viewer controls stop tail before interaction' "document.querySelector('[data-as-log]')?.dataset.followTail === 'false'"
 ab click '[data-as-pause]'
 wait_js 'SSE disconnected by viewer' "document.querySelector('[data-as-log]')?.textContent.includes('已暂停查看') === true"
 touch "$H/finish"

@@ -26,6 +26,7 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
     const container = section.current?.closest<HTMLElement>(".as-shadow");
     if (!container) return;
     let previousTop = container.scrollTop;
+    const stopFollowing = () => { following.current = false; setFollowTail(false); };
     const onScroll = () => {
       if (container.scrollTop < previousTop - 1) following.current = false;
       if (container.scrollHeight - container.clientHeight - container.scrollTop <= 48) following.current = true;
@@ -33,7 +34,11 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
       setFollowTail(following.current);
     };
     container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
+    container.addEventListener("pointerdown", stopFollowing, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("pointerdown", stopFollowing);
+    };
   }, []);
   useEffect(() => {
     if (!following.current) return;
