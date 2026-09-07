@@ -2,11 +2,12 @@
 
 ## 待查
 
-- **AS project 任意节点分叉被 daemon 拒绝**（fj-trellis-step2-8442）：症状 `thread/fork{fromItemId}` 返回 -32008。假设：7913839 尚未实现 prefix fork；源码 `vendor/agent-server/dist/core/thread-manager.js:190` 明确无条件拒绝。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；当前其他断言通过、分叉 HTTP 503。已向主控申请上游修复，不能改 sm-toolkit。
-
 - **cpa 的 codex 上游间歇 `503 auth_unavailable (providers=codex)`，且当日内恶化为挂起**（S105 发现）。症状：`codex:gpt-5.5` 类注入模型（sm_endpoint / `CPA_API_KEY` bearer）多请求轮次约半数请求 503、codex 内部 5 次重试常耗尽 → turn failed；晚间进一步退化为请求挂起（probe 120s 超时无事件）。**已证伪**：本机 key 过期（curl 同 key 直打 `/v1/responses` 200）、SDK 注入参数错（单请求轮次曾成功 + S101/S102 同参数实测过）、0.7.0 代码回归（`transport:"exec"` 同注入同 503 模式）。**可证伪假设**：cpa（vultr-tokyo cliproxyapi）把 codex 形状流量路由到「codex」OAuth 池，该池凭证耗尽/过期；config.toml 的 cliproxyapi provider（同 key + `requires_openai_auth=true`）当时仍通，或因路由到不同池。**判定命令**：池恢复后跑 `node /tmp/codex-inject-probe.mjs d`（挂了随时可从 S105 session 记录重建）——稳定 completed = 池问题坐实；仍 503 而 config.toml 路径通 = 需比对 cpa 侧对两种 provider 配置的路由差异（`requires_openai_auth` / provider name）。修复大概率在 cpa 服务端（补 codex OAuth 池凭证），不在 trellis/SDK。
 
 ## 已结案
+
+- **AS project 任意节点分叉阻塞验收** → 验收阻塞 `resolved`，协议缺口仍在上游 backlog：7913839 对 fromItemId 返回 -32008。主控裁决只验 tip 成功与早期节点明确拒绝，客户端不伪造历史分叉。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh` exit 0；旧节点数据及 thread 绑定不变。任意节点分叉仍依赖上游 prefix/fromItemId 实现。
+- **AS 长链页面导航挂起** → `resolved`：假设同 thread 的多个节点独立 EventSource 占满浏览器连接；改为按 thread 共享订阅，最后一个控件卸载后关闭。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；完整复跑 exit 0，早期节点错误页面导航与截图成功。
 
 - **AS 审批撤卡后处理者提示可能缺失** → `resolved`：决定可能发生在元数据 GET 与 EventSource attach 之间；将处理者记录写入 as_turns.resolved_json，并在节点结束时重读补发；按 requestId 限定提示，避免串到同 thread 的其他节点。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；最新实测双向竞答提示通过（最终仍因独立的分叉阻塞 exit 1）。
 

@@ -123,7 +123,15 @@ ab click '[data-mobile-target="permission-allow"]'
 wait_js 'web approval acknowledged' "sessionStorage.getItem('as-respond-status') === '200'"
 wait "$REQUEST_PID"; REQUEST_PID=
 COUNTS_FILE="$H/counts.json" bun -e 'const c=await Bun.file(process.env.COUNTS_FILE).json(); if(!c.peerEvents.some(e=>e.type==="resolved"&&e.decidedBy.label==="Trellis 网页"))throw Error("peer missed web decision"); console.log("PASS: leased web approval resolves on second client")'
-post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$FOURTH\",\"question\":\"interrupt project\",\"provider\":\"mock\"}" > "$H/interrupt.sse" &
+ORIGINAL_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$FOURTH'")
+post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$FOURTH\",\"fork\":true,\"question\":\"tip fork project\",\"provider\":\"mock\"}" > "$H/tip-fork.sse"
+FORK_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
+FORK_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$FORK_NODE'")
+[ -n "$FORK_THREAD" ] && [ "$FORK_THREAD" != "$ORIGINAL_THREAD" ] || fail 'tip fork must create a new thread binding'
+[ "$(db "SELECT status FROM nodes WHERE id='$FORK_NODE'")" = done ] || fail 'tip fork completion'
+[ "$(db "SELECT COUNT(*) FROM as_threads WHERE session_id='$SID'")" = 2 ] || fail 'fork session mapping'
+echo 'PASS: latest-node fork succeeds with a new thread binding'
+post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$FORK_NODE\",\"question\":\"interrupt project\",\"provider\":\"mock\"}" > "$H/interrupt.sse" &
 REQUEST_PID=$!
 sleep 2
 INTERRUPT=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
@@ -133,12 +141,21 @@ wait "$REQUEST_PID"; REQUEST_PID=
 echo 'PASS: turn/interrupt'
 ab eval "(() => { const targets=[...document.querySelectorAll('[data-as-project] select,[data-as-project] summary')]; if(!targets.length)throw Error('no controls'); for(const el of targets){ const r=el.getBoundingClientRect();if(r.width<44||r.height<44)throw Error('small target'); } if(document.documentElement.scrollWidth>innerWidth)throw Error('overflow'); return true; })()"
 echo 'PASS: mobile 44px targets and no horizontal overflow'
-# Retain failure evidence but finish independent checks before failing the contract.
-FORK_CODE=$(curl --noproxy '*' -s -o "$H/fork.json" -w '%{http_code}' -b trellis_auth=as-project-token -H 'Content-Type: application/json' -d "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"question\":\"fork project\",\"provider\":\"mock\"}" "$BASE/api/chat")
+db "SELECT id,status,response FROM nodes WHERE session_id='$SID' ORDER BY id" > "$H/before-fork.txt"
+FORK_CODE=$(curl --noproxy '*' -s -o "$H/fork.json" -w '%{http_code}' -b trellis_auth=as-project-token -H 'Content-Type: application/json' -d "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"fork\":true,\"question\":\"early fork project\",\"provider\":\"mock\"}" "$BASE/api/chat")
+[ "$FORK_CODE" = 503 ] || fail "early-node fork must fail explicitly (HTTP $FORK_CODE)"
+grep -q '暂不支持从早期节点分叉' "$H/fork.json" || fail 'early fork explanation'
+FAILED_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
+db "SELECT id,status,response FROM nodes WHERE session_id='$SID' AND id!='$FAILED_NODE' ORDER BY id" > "$H/after-fork.txt"
+cmp "$H/before-fork.txt" "$H/after-fork.txt" || fail 'early fork changed old nodes'
+[ "$(db "SELECT COUNT(*) FROM as_threads WHERE session_id='$SID'")" = 2 ] || fail 'early fork created a spurious thread'
+[ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$FOURTH'")" = "$ORIGINAL_THREAD" ] || fail 'original binding changed'
+ab open "$BASE/?session=$SID&node=$FAILED_NODE"
+wait_js 'early-node fork error is visible and original session preserved' "document.body.innerText.includes('暂不支持从早期节点分叉') && document.body.innerText.includes('原会话未改变')"
+ab screenshot "$OUT/mobile-as-early-fork-error.png"
 kill "$DAEMON_PID"; wait "$DAEMON_PID" || true; DAEMON_PID=
 post /api/chat "{\"kind\":\"root\",\"question\":\"fallback project\",\"mode\":\"project\",\"workspacePath\":\"$H\",\"provider\":\"mock\"}" > "$H/fallback.sse"
 grep -q '"type":"notice"' "$H/fallback.sse" || fail 'fallback notice'
 grep -q '"type":"done"' "$H/fallback.sse" || fail 'fallback completion'
 echo 'PASS: daemon unavailable falls back to legacy run with notice'
-[ "$FORK_CODE" = 200 ] || fail "thread/fork fromItemId unavailable (HTTP $FORK_CODE; see fork.json)"
-echo 'PASS: project fork'
+echo 'PASS: AS project verification including tip-only fork contract'

@@ -189,7 +189,7 @@ export class ProjectRun {
   close() { this.closing = true; clearInterval(this.poll); this.client.close(); }
 }
 
-export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
+export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; fork?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
   const node = getNode(args.nodeId)!, session = getSession(node.sessionId)!;
   if (starts.has(session.id)) throw new Error("session request is starting; retry shortly");
   const job = (async () => {
@@ -218,10 +218,17 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
       let threadId: string;
       if (parent) {
         const latest = getDB().prepare("SELECT node_id FROM as_turns WHERE thread_id=? AND daemon_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(parent.thread_id, parent.daemon_id) as {node_id:string} | null;
-        if (args.retry || latest?.node_id !== parent.node_id) {
-          if (!parent.last_item_id) throw new Error("parent turn has no completed fork coordinate");
+        if (args.retry || args.fork || latest?.node_id !== parent.node_id) {
+          // 7913839 only forks the live thread tip. Never silently include later
+          // turns when the user selected an earlier node (or retries a past turn).
+          if (args.retry || latest?.node_id !== parent.node_id) throw new Error("当前 Agent 服务仅支持从线程最新节点分叉，暂不支持从早期节点分叉；原会话未改变。");
           if (!setup.initializeResult?.capabilities.fork) throw new Error("daemon does not support fork");
-          threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, fromItemId: parent.last_item_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
+          const snapshot = await setup.request("thread/attach", {threadId:parent.thread_id,sinceSeq:0});
+          const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
+          if (snapshot.thread.status.type === "running" || snapshot.queue.length || (last && last.turnId !== parent.turn_id)) {
+            throw new Error("线程已在其他客户端继续运行，请刷新后从线程最新节点分叉；原会话未改变。");
+          }
+          threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
         } else {
           threadId = parent.thread_id;
           const { thread } = await setup.request("thread/read", {threadId});

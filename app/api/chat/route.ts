@@ -92,6 +92,7 @@ type ChatRequestRoot = {
 
 type ChatRequestBranch = {
   kind: "branch";
+  fork?: boolean;
   parentNodeId: string;
   question: string;
   parentAnchor?: { selectedText: string } | null;
@@ -485,6 +486,7 @@ export async function POST(req: Request) {
   if (binding.type === "thread" && !mentionActive && !resolvedAgentId) {
     try {
       const run = await startProjectRun({ nodeId, prompt: questionForLLM, attachments: providerAttachments,
+        fork: body.kind === "branch" && (body.fork === true || !!body.parentAnchor),
         retry: body.kind === "retry", permission: permission?.success ? permission.data : undefined,
         effort: typeof asOptions.effort === "string" ? asOptions.effort : process.env.TRELLIS_AS_EFFORT });
       return projectSSE(req, run, createdEvent);

@@ -5,6 +5,24 @@ import { useSessionStore } from "@/stores/sessionStore";
 
 const modes = ["default", "acceptEdits", "plan", "dontAsk"];
 const labels: Record<string,string> = { default: "逐次确认", acceptEdits: "允许编辑", plan: "计划模式", dontAsk: "不询问", full: "绕过审批", bypassPermissions: "绕过审批" };
+const observers = new Map<string, {source:EventSource; listeners:Set<(event:ShadowEvent)=>void>; snapshot?:ShadowEvent}>();
+function observeThread(threadId:string, listener:(event:ShadowEvent)=>void) {
+  let observer=observers.get(threadId);
+  if (!observer) {
+    observer={source:new EventSource(`/api/as/threads/${threadId}/stream`),listeners:new Set()};
+    observers.set(threadId,observer);
+    const active=observer;
+    active.source.onmessage=event=>{
+      const data=JSON.parse(event.data) as ShadowEvent;
+      if(data.type==="snapshot") active.snapshot=data;
+      for(const callback of active.listeners) callback(data);
+    };
+  }
+  observer.listeners.add(listener);
+  if(observer.snapshot) listener(observer.snapshot);
+  const active=observer;
+  return ()=>{active.listeners.delete(listener);if(!active.listeners.size){active.source.close();observers.delete(threadId);}};
+}
 export function AsProjectControls({ nodeId }: { nodeId: string }) {
   const threadBound = useSessionStore(s => s.session?.bindingType === "thread");
   const nodeStatus = useSessionStore(s => s.nodes[nodeId]?.status);
@@ -17,7 +35,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   const notice = useSessionStore(s => s.nodes[nodeId]?.asNotice);
   useEffect(() => {
     if (!threadBound) return;
-    let stopped = false, source: EventSource | undefined;
+    let stopped = false, opening = false, unsubscribe: (()=>void) | undefined;
     const pendingIds = new Set<string>();
     const key = `trellis-as-ui:${nodeId}`;
     let saved: {logs:string[]; resolved:string[]} = { logs: [], resolved: [] };
@@ -25,6 +43,8 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
     setLogs(saved.logs); setResolved(saved.resolved);
     const remember = () => { try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch {} };
     async function open() {
+      if(opening) return;
+      opening=true;
       try {
         const response = await fetch(`/api/nodes/${nodeId}/as`);
         const value = await response.json();
@@ -33,9 +53,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         if (!value.thread) return;
         setThread(value.thread); setSupported(value.permissionSet); setError("");
         if (value.resolved?.length) { saved.resolved = value.resolved; setResolved(saved.resolved); remember(); }
-        source = new EventSource(`/api/as/threads/${value.thread.id}/stream`);
-        source.onmessage = event => {
-          const data = JSON.parse(event.data) as ShadowEvent;
+        unsubscribe = observeThread(value.thread.id, data => {
           if (data.type === "snapshot") {
             setThread(data.snapshot.thread);
             for (const request of data.snapshot.pendingRequests) if (request.params.turnId === value.turnId) pendingIds.add(request.params.requestId);
@@ -52,12 +70,12 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
             saved.resolved = [...saved.resolved, `已由 ${params.decidedBy.label} 处理`].slice(-10);
             setResolved(saved.resolved); remember();
           }
-        };
-      } catch { if (!stopped) setError("Agent 服务暂不可达"); }
+        });
+      } catch { if (!stopped) setError("Agent 服务暂不可达"); } finally {opening=false;}
     }
     void open();
-    const retry = setInterval(() => { if (!source) void open(); }, 2000);
-    return () => { stopped = true; clearInterval(retry); source?.close(); };
+    const retry = setInterval(() => { if (!unsubscribe) void open(); }, 2000);
+    return () => { stopped = true; clearInterval(retry); unsubscribe?.(); };
   }, [nodeId, threadBound]);
   // A decision can land between the metadata GET and EventSource attach.
   // The terminal node transition reconciles its durable decision receipt.

@@ -630,6 +630,7 @@ type Actions = {
       attachments?: NodeAttachment[];
       mentionAgentSlug?: string | null;
       focusNew?: boolean;
+      fork?: boolean;
     },
   ) => Promise<void>;
   // Re-run an existing node in place: server keeps the same id, wipes the
@@ -1467,6 +1468,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       await runStream(
         {
           kind: "branch",
+          ...(opts?.fork ? { fork: true } : {}),
           parentNodeId: parentId,
           question,
           parentAnchor: anchor,
@@ -2744,6 +2746,7 @@ type ChatRequestBody =
     }
   | {
       kind: "branch";
+      fork?: boolean;
       parentNodeId: string;
       question: string;
       parentAnchor: ParentAnchor | null;

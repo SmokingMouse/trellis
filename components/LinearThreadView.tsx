@@ -859,6 +859,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           )}
           <Composer
             targetNode={branchFromNode ?? tipNode}
+            fork={!!branchFromNode}
             mobileCompact={isMobile}
             onMobileExpandedChange={onComposerExpandedChange}
             placeholder={
