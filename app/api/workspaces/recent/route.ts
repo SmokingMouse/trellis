@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { getDB } from "@/lib/server/sqlite";
+import { canonicalWorkspacePath } from "@/lib/server/workspaces";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,19 +27,40 @@ export async function GET() {
   const claudeWorkspaces = readClaudeWorkspaces();
   const freshWorktrees = readWorktreesWithoutSessions();
 
+  const result = mergeRecentWorkspaces(
+    freshWorktrees,
+    trellisWorkspaces,
+    claudeWorkspaces,
+  )
+    .filter((w) => fs.existsSync(w.path))
+    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+    .slice(0, MAX_RESULTS);
+
+  return Response.json({ workspaces: result });
+}
+
+export function mergeRecentWorkspaces(
+  freshWorktrees: RecentWorkspace[],
+  trellisWorkspaces: RecentWorkspace[],
+  claudeWorkspaces: RecentWorkspace[],
+): RecentWorkspace[] {
+
   // Merge by canonical path. Trellis updated_at beats claude dir mtime
   // (more meaningful "last used"). Source flag promotes to "both" on
   // overlap.
   const merged = new Map<string, RecentWorkspace>();
   // 先铺零 session 的 worktree，再让真有 session 的两路盖上去 —— 它们的
   // lastUsedAt 更有意义（真用过 vs 刚建出来）。
-  for (const w of freshWorktrees) {
+  for (const raw of freshWorktrees) {
+    const w = canonicalRecentWorkspace(raw);
     merged.set(w.path, w);
   }
-  for (const w of trellisWorkspaces) {
+  for (const raw of trellisWorkspaces) {
+    const w = canonicalRecentWorkspace(raw);
     merged.set(w.path, w);
   }
-  for (const w of claudeWorkspaces) {
+  for (const raw of claudeWorkspaces) {
+    const w = canonicalRecentWorkspace(raw);
     const existing = merged.get(w.path);
     if (existing) {
       merged.set(w.path, {
@@ -52,12 +74,17 @@ export async function GET() {
     }
   }
 
-  const result = Array.from(merged.values())
-    .filter((w) => fs.existsSync(w.path))
-    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-    .slice(0, MAX_RESULTS);
+  return Array.from(merged.values());
+}
 
-  return Response.json({ workspaces: result });
+export function canonicalRecentWorkspace(w: RecentWorkspace): RecentWorkspace {
+  const canonical = canonicalWorkspacePath(w.path);
+  if (canonical === w.path) return w;
+  return {
+    ...w,
+    path: canonical,
+    shortName: deriveShortName(canonical),
+  };
 }
 
 function readTrellisWorkspaces(): RecentWorkspace[] {
