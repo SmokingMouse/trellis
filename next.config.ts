@@ -12,7 +12,8 @@ const isDev = process.env.NODE_ENV !== "production";
 // ~/sdk sits outside the project dir, so root must be a common ancestor.
 // Harmless otherwise (long since proven in prod on this machine), so it
 // stays unconditional rather than link-detection-conditional.
-const projectRoot = os.homedir();
+// A clean clone can be outside HOME (CI and /tmp); root must contain the app.
+const projectRoot = process.cwd().startsWith(os.homedir() + "/") ? os.homedir() : process.cwd();
 
 // Allow tunneled dev (e.g. Cloudflare Tunnel, ngrok) to reach next dev.
 // Set TRELLIS_DEV_ORIGIN=your.host.example to whitelist a custom origin.
