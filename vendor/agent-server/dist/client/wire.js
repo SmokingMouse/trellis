@@ -83,4 +83,3 @@ export async function openWire(endpoint, onMessage, onClose, timeoutMs) {
         }).catch(finish);
     });
 }
-//# sourceMappingURL=wire.js.map

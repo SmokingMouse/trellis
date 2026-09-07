@@ -11,4 +11,3 @@ export interface DaemonPaths {
 export declare function resolveDaemonPaths(env?: NodeJS.ProcessEnv): DaemonPaths;
 export declare function ensureParent(path: string): void;
 export declare function loadToken(path: string, create?: boolean): string;
-//# sourceMappingURL=paths.d.ts.map

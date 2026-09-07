@@ -71,4 +71,3 @@ export async function daemonStop(paths) {
     }
     throw new Error(`agent-server did not stop within grace period; see ${paths.logPath}`);
 }
-//# sourceMappingURL=control.js.map

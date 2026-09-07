@@ -31,4 +31,3 @@ export function loadToken(path, create = false) {
     chmodSync(path, 0o600);
     return token;
 }
-//# sourceMappingURL=paths.js.map

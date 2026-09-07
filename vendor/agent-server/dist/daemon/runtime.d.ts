@@ -18,4 +18,3 @@ export interface RunningDaemon {
     shutdown(reason?: string): Promise<void>;
 }
 export declare function runDaemon(options?: DaemonOptions): Promise<RunningDaemon>;
-//# sourceMappingURL=runtime.d.ts.map

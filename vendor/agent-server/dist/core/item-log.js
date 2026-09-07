@@ -260,4 +260,3 @@ export class ItemLog {
     approval(id) { return this.db.query("SELECT * FROM approvals WHERE id=?").get(id); }
     close() { this.listeners.clear(); this.serverListeners.clear(); this.partial.clear(); this.db.close(); }
 }
-//# sourceMappingURL=item-log.js.map

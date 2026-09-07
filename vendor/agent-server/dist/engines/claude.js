@@ -348,4 +348,3 @@ export class ClaudeEngine {
         throw new ProtocolError(ErrorCode.engine_protocol_error, "Unknown Claude frame", { raw: JSON.stringify(raw).slice(0, 2000) });
     }
 }
-//# sourceMappingURL=claude.js.map

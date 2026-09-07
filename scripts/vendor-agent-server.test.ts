@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides or lifecycle repair", () => {
@@ -16,5 +16,14 @@ test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides o
   for (const target of Object.values(vendor.exports) as { types: string; default: string }[]) {
     expect(existsSync(join(root, "vendor/agent-server", target.types))).toBe(true);
     expect(existsSync(join(root, "vendor/agent-server", target.default))).toBe(true);
+  }
+});
+
+test("N1 vendor excludes unusable maps and dangling sourceMappingURL references", () => {
+  const dist = join(import.meta.dir, "../vendor/agent-server/dist");
+  const files = readdirSync(dist, { recursive: true }) as string[];
+  expect(files.some(file => file.endsWith(".map"))).toBe(false);
+  for (const file of files.filter(file => /\.(js|ts)$/.test(file))) {
+    expect(readFileSync(join(dist, file), "utf8")).not.toContain("sourceMappingURL=");
   }
 });

@@ -46,4 +46,3 @@ export const MethodSchemas = {
     "server/config/read": { params: empty, result: z.object({ allowed_roots: z.array(z.string()), maxQueuedTurns: z.number().int(), orphanTimeoutMs: z.number(), idleTimeoutMs: z.number() }) },
 };
 export const MethodSchema = z.enum(Object.keys(MethodSchemas));
-//# sourceMappingURL=methods.js.map

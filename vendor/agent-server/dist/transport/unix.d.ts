@@ -6,4 +6,3 @@ export interface UnixTransport {
 export declare function listenUnix(manager: ConnectionManager, options: {
     path: string;
 }): UnixTransport;
-//# sourceMappingURL=unix.d.ts.map

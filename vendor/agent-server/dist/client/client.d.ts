@@ -86,4 +86,3 @@ export declare class AgentClient {
 export declare const connectUnix: typeof AgentClient.connectUnix;
 export declare const connectWebSocket: typeof AgentClient.connectWebSocket;
 export {};
-//# sourceMappingURL=client.d.ts.map

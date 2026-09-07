@@ -61,4 +61,3 @@ export function listenWebSocket(manager, options = {}) {
             server.unref();
         } };
 }
-//# sourceMappingURL=websocket.js.map

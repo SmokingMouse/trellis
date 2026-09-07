@@ -52,4 +52,3 @@ export declare class ClaudeEngine implements EngineSession {
     /** Native frame parsing is separated from process creation for offline fixtures. */
     receive(raw: unknown): void;
 }
-//# sourceMappingURL=claude.d.ts.map

@@ -29,4 +29,3 @@ export const NotificationSchemas = {
     "server/shuttingDown": z.object({ reason: z.string(), graceMs: z.number().nonnegative() }),
 };
 export const NotificationMethodSchema = z.enum(Object.keys(NotificationSchemas));
-//# sourceMappingURL=notifications.js.map

@@ -22,4 +22,3 @@ export declare class UnixWriter {
     end(): void;
     dispose(): void;
 }
-//# sourceMappingURL=ndjson.d.ts.map

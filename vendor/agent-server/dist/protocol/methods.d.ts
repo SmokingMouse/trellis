@@ -1824,4 +1824,3 @@ export type MethodResult<M extends Method> = z.infer<(typeof MethodSchemas)[M]["
 export type StartThreadParams = z.infer<typeof StartThreadParamsSchema>;
 export type StartTurnParams = z.infer<typeof StartTurnParamsSchema>;
 export type AttachResult = z.infer<typeof AttachResultSchema>;
-//# sourceMappingURL=methods.d.ts.map

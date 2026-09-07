@@ -1,1 +1,0 @@
-{"version":3,"file":"unix.d.ts","sourceRoot":"","sources":["../../src/transport/unix.ts"],"names":[],"mappings":"AAEA,OAAO,EAAE,iBAAiB,EAA0B,MAAM,yBAAyB,CAAC;AAIpF,MAAM,WAAW,aAAa;IAAG,QAAQ,CAAC,IAAI,EAAE,MAAM,CAAC;IAAC,KAAK,IAAI,IAAI,CAAA;CAAE;AAEvE,wBAAgB,UAAU,CAAC,OAAO,EAAE,iBAAiB,EAAE,OAAO,EAAE;IAAE,IAAI,EAAE,MAAM,CAAA;CAAE,GAAG,aAAa,CAsC/F"}

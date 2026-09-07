@@ -43,4 +43,3 @@ export declare class ThreadManager {
     sweepIdle(): Promise<void>;
     shutdown(): Promise<void>;
 }
-//# sourceMappingURL=thread-manager.d.ts.map

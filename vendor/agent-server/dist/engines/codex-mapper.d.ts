@@ -27,4 +27,3 @@ export declare class CodexEventMapper {
 }
 export declare function mapCodexRequest(method: ServerRequestMethod, raw: unknown, threadId: string, turnId: string, requestId: string, item?: EngineItem): PendingServerRequest;
 export declare function mapCodexDecision(method: ServerRequestMethod, raw: ServerRequestResult): Record<string, unknown>;
-//# sourceMappingURL=codex-mapper.d.ts.map

@@ -192,4 +192,3 @@ export function mapPermissionDecision(req, decision) {
     }
     return Object.keys(decision.permissions).length ? { behavior: "allow", updatedInput: req.input } : { behavior: "deny", message: "No permissions granted" };
 }
-//# sourceMappingURL=claude-mapper.js.map

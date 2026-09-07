@@ -62,4 +62,3 @@ export declare class ProtocolError extends Error {
     toJSON(): RpcError;
 }
 export declare function rpcError(error: unknown): RpcError;
-//# sourceMappingURL=errors.d.ts.map

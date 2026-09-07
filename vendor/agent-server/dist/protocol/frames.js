@@ -6,4 +6,3 @@ export const ResponseSchema = z.strictObject({ jsonrpc: z.literal("2.0"), id: Rp
 export const ErrorResponseSchema = z.strictObject({ jsonrpc: z.literal("2.0"), id: RpcIdSchema.nullable(), error: RpcErrorSchema });
 export const NotificationSchema = z.strictObject({ jsonrpc: z.literal("2.0"), method: z.string(), params: z.json() });
 export const FrameSchema = z.union([RequestSchema, ResponseSchema, ErrorResponseSchema, NotificationSchema]);
-//# sourceMappingURL=frames.js.map

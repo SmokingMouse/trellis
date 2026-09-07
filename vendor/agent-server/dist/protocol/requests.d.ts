@@ -214,4 +214,3 @@ export type ServerRequestResult<M extends ServerRequestMethod = ServerRequestMet
 export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
 export type GrantedPermissions = z.infer<typeof GrantedPermissionsSchema>;
 export type Answer = z.infer<typeof AnswerSchema>;
-//# sourceMappingURL=requests.d.ts.map

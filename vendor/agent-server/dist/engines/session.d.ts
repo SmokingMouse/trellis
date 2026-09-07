@@ -98,4 +98,3 @@ export declare class AsyncQueue<T> implements AsyncIterableIterator<T> {
     next(): Promise<IteratorResult<T>>;
     [Symbol.asyncIterator](): AsyncIterableIterator<T>;
 }
-//# sourceMappingURL=session.d.ts.map

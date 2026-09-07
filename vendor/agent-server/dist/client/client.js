@@ -316,4 +316,3 @@ export class AgentClient {
 }
 export const connectUnix = AgentClient.connectUnix;
 export const connectWebSocket = AgentClient.connectWebSocket;
-//# sourceMappingURL=client.js.map

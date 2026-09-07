@@ -34,4 +34,3 @@ export const PendingServerRequestSchema = z.discriminatedUnion("method", [
     z.object({ method: z.literal("item/permissions/requestApproval"), params: ServerRequestSchemas["item/permissions/requestApproval"].params }),
     z.object({ method: z.literal("item/tool/requestUserInput"), params: ServerRequestSchemas["item/tool/requestUserInput"].params }),
 ]);
-//# sourceMappingURL=requests.js.map

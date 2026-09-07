@@ -56,4 +56,3 @@ export class ConnectionManager {
     close() { for (const connection of [...this.clients.values()])
         connection.close(); }
 }
-//# sourceMappingURL=connection-manager.js.map

@@ -81,4 +81,3 @@ export declare class AgentServer {
 }
 export { AgentServer as Server };
 export declare function connectInProcess(server: AgentServer): InProcessClient;
-//# sourceMappingURL=server.d.ts.map

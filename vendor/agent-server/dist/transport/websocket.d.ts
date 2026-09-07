@@ -9,4 +9,3 @@ export declare function listenWebSocket(manager: ConnectionManager, options?: {
     hostname?: string;
     allowedOrigins?: string[];
 }): WebSocketTransport;
-//# sourceMappingURL=websocket.d.ts.map

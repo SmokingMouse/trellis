@@ -77,4 +77,3 @@ export type Response = z.infer<typeof ResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 export type Notification = z.infer<typeof NotificationSchema>;
 export type Frame = z.infer<typeof FrameSchema>;
-//# sourceMappingURL=frames.d.ts.map

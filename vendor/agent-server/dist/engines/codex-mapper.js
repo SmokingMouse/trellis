@@ -315,4 +315,3 @@ export function mapCodexDecision(method, raw) {
         return { permissions: result.permissions, scope: result.scope === "thread" ? "session" : result.scope };
     return result;
 }
-//# sourceMappingURL=codex-mapper.js.map

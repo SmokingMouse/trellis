@@ -15,4 +15,3 @@ export declare function removePid(path: string, raw: string): void;
 export declare function claimPid(path: string, socketPath: string, graceMs: number): () => void;
 /** A stale inode may be removed only after a direct local connection is refused. */
 export declare function removeStaleSocket(path: string): Promise<void>;
-//# sourceMappingURL=process.d.ts.map

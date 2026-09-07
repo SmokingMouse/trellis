@@ -67,4 +67,3 @@ export const ItemSchema = z.discriminatedUnion("type", [
     item("userMessage"), item("agentMessage"), item("reasoning"), item("commandExecution"), item("fileChange"),
     item("toolCall"), item("mcpToolCall"), item("subAgent"), item("webSearch"), item("imageOutput"), item("plan"), item("contextCompaction"), item("error"),
 ]);
-//# sourceMappingURL=models.js.map

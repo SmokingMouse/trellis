@@ -61,4 +61,3 @@ export declare class ItemLog {
     approval(id: string): ApprovalRow | null;
     close(): void;
 }
-//# sourceMappingURL=item-log.d.ts.map

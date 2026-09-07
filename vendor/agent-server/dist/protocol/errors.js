@@ -33,4 +33,3 @@ export function rpcError(error) {
         return new ProtocolError(ErrorCode.invalid_params, "invalid params", { detail: JSON.parse(JSON.stringify(error.issues)) }).toJSON();
     return new ProtocolError(ErrorCode.internal, error instanceof Error ? error.message : String(error)).toJSON();
 }
-//# sourceMappingURL=errors.js.map

@@ -923,4 +923,3 @@ export type ServerNotification = {
         params: NotificationParams<M>;
     };
 }[NotificationMethod];
-//# sourceMappingURL=notifications.d.ts.map

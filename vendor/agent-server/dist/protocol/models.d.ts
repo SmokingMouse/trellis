@@ -611,4 +611,3 @@ export type Item = z.infer<typeof ItemSchema>;
 export type ItemType = z.infer<typeof ItemTypeSchema>;
 export type ClientIdentity = z.infer<typeof ClientIdentitySchema>;
 export type JsonObject = z.infer<typeof JsonObjectSchema>;
-//# sourceMappingURL=models.d.ts.map

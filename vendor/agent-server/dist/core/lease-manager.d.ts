@@ -10,4 +10,3 @@ export declare class LeaseManager {
     disconnect(clientId: string): void;
     clear(threadId: string): void;
 }
-//# sourceMappingURL=lease-manager.d.ts.map

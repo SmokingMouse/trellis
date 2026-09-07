@@ -24,4 +24,3 @@ export declare class ConnectionManager {
     disconnect(clientId: string): void;
     close(): void;
 }
-//# sourceMappingURL=connection-manager.d.ts.map

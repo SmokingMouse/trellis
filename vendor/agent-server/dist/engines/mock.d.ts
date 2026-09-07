@@ -38,4 +38,3 @@ export declare class MockEngine implements EngineSession {
     interrupt(turnId: string): Promise<void>;
     close(_reason: string): Promise<void>;
 }
-//# sourceMappingURL=mock.d.ts.map

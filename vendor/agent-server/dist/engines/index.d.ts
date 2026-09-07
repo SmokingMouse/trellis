@@ -4,4 +4,3 @@ export * from "./claude-mapper.js";
 export * from "./claude.js";
 export * from "./codex-mapper.js";
 export * from "./codex.js";
-//# sourceMappingURL=index.d.ts.map

@@ -30,4 +30,3 @@ export class LeaseManager {
             this.leases.delete(id); }
     clear(threadId) { this.leases.delete(threadId); }
 }
-//# sourceMappingURL=lease-manager.js.map

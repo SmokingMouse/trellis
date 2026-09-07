@@ -125,4 +125,3 @@ export class ApprovalBroker {
     close() { for (const id of [...this.waiting.keys()])
         this.expire(id, "server_closed"); }
 }
-//# sourceMappingURL=approval-broker.js.map

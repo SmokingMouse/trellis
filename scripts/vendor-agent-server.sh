@@ -18,7 +18,15 @@ DEST="$ROOT/vendor/agent-server"
 mkdir -p "$DEST"
 # This directory is exclusively generated; delete stale build outputs on refresh.
 rm -rf "$DEST/dist"
-cp -R "$STAGE/packages/agent-server/dist" "$DEST/dist"
+AS_VENDOR_DIST="$STAGE/packages/agent-server/dist" AS_VENDOR_DEST="$DEST/dist" bun -e '
+import { cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+cpSync(process.env.AS_VENDOR_DIST, process.env.AS_VENDOR_DEST, { recursive: true, filter: path => !path.endsWith(".map") });
+for (const file of readdirSync(process.env.AS_VENDOR_DEST, { recursive: true })) {
+  if (!/\.(js|ts)$/.test(file)) continue;
+  const path = `${process.env.AS_VENDOR_DEST}/${file}`;
+  writeFileSync(path, readFileSync(path, "utf8").replace(/^\/\/# sourceMappingURL=.*$/gm, ""));
+}
+'
 AS_VENDOR_SOURCE="$STAGE/packages/agent-server/package.json" AS_VENDOR_DEST="$DEST/package.json" bun -e '
 const source = await Bun.file(process.env.AS_VENDOR_SOURCE).json();
 const {name, version, type, license, main, types, exports} = source;

@@ -70,4 +70,3 @@ export async function main(args = process.argv.slice(2)) {
 }
 if (import.meta.main)
     process.exitCode = await main();
-//# sourceMappingURL=cli.js.map

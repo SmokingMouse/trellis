@@ -303,4 +303,3 @@ export class ThreadManager {
     async shutdown() { clearInterval(this.timer); for (const id of new Set([...this.live.keys(), ...this.opening.keys()]))
         await this.close(id, "server_shutdown"); }
 }
-//# sourceMappingURL=thread-manager.js.map

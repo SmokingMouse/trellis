@@ -74,4 +74,3 @@ export class UnixWriter {
     end() { this.ending = true; this.drain(); }
     dispose() { this.closed = true; this.queue = []; this.bytes = 0; }
 }
-//# sourceMappingURL=ndjson.js.map

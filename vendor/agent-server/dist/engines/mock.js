@@ -58,4 +58,3 @@ export class MockEngine {
     }
     async close(_reason) { this.closed = true; this.generation++; this.events.end(); }
 }
-//# sourceMappingURL=mock.js.map

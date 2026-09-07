@@ -35,4 +35,3 @@ export declare function mapPermissionDecision(req: ToolPermissionRequest, decisi
     updatedInput?: unknown;
     message?: string;
 };
-//# sourceMappingURL=claude-mapper.d.ts.map
