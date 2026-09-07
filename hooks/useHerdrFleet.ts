@@ -21,6 +21,7 @@ let snapshot: HerdrFleetSnapshot = {
   error: null,
 };
 let etag: string | null = null;
+let hooksEtag: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let inFlight: Promise<void> | null = null;
 const listeners = new Set<(next: HerdrFleetSnapshot) => void>();
@@ -39,12 +40,12 @@ async function poll(): Promise<void> {
           cache: "no-store",
           headers: etag ? { "If-None-Match": etag } : undefined,
         }),
-        fetch("/api/hooks/state", { cache: "no-store" }),
+        fetch("/api/hooks/state", { cache: "no-store", headers: hooksEtag ? { "If-None-Match": hooksEtag } : undefined }),
       ]);
       if (!fleetResponse.ok && fleetResponse.status !== 304) {
         throw new Error(`Herdr fleet HTTP ${fleetResponse.status}`);
       }
-      if (!hooksResponse.ok) {
+      if (!hooksResponse.ok && hooksResponse.status !== 304) {
         throw new Error(`hook state HTTP ${hooksResponse.status}`);
       }
       const fleet =
@@ -54,12 +55,14 @@ async function poll(): Promise<void> {
       if (fleetResponse.status !== 304) {
         etag = fleetResponse.headers.get("etag");
       }
-      const hookBody = (await hooksResponse.json()) as {
-        records?: HerdrHookRecord[];
-      };
+      // Refresh the projection on a 304 too: waiting-hook TTLs can expire
+      // even when neither server-side record nor fleet ETag changed.
+      const hooks = hooksResponse.status === 304 ? [...snapshot.hooks]
+        : ((await hooksResponse.json()) as { records?: HerdrHookRecord[] }).records ?? [];
+      if (hooksResponse.status !== 304) hooksEtag = hooksResponse.headers.get("etag");
       publish({
         fleet,
-        hooks: hookBody.records ?? [],
+        hooks,
         loading: false,
         error: null,
       });

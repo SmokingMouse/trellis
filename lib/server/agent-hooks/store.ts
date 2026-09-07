@@ -4,6 +4,33 @@ import { applyHookEvent, type NormalizeOptions } from "./normalize";
 import type { AgentHookRecord, ClaudeHookPayload, StashedState } from "./types";
 
 export const HOOK_RETENTION_MS = 24 * 60 * 60_000;
+export const HOOK_FIELD_MAX_BYTES = 32 * 1024;
+
+function boundedText(text: string | null, limit = HOOK_FIELD_MAX_BYTES): string | null {
+  if (text === null || Buffer.byteLength(text) <= limit) return text;
+  // Streaming decode drops an incomplete final UTF-8 codepoint.
+  return new TextDecoder().decode(Buffer.from(text).subarray(0, limit), { stream: true });
+}
+
+function boundedJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const json = JSON.stringify(value);
+  if (Buffer.byteLength(json) <= HOOK_FIELD_MAX_BYTES) return json;
+  // A JSON character can escape to six bytes. Leave room for the envelope.
+  return JSON.stringify({ truncated: true, preview: boundedText(json, Math.floor((HOOK_FIELD_MAX_BYTES - 64) / 6)) });
+}
+
+export type HookSummary = Pick<AgentHookRecord, "sessionId" | "state" | "toolName" | "interactivePrompt" | "paneKey" | "updatedAt">;
+
+export function listHookSummaries(): HookSummary[] {
+  pruneHookRecords();
+  const rows = getDB().prepare(`SELECT session_id, state, tool_name, interactive_prompt, pane_key, updated_at
+    FROM agent_hook_state ORDER BY updated_at DESC, session_id`).all() as Pick<Row, "session_id" | "state" | "tool_name" | "interactive_prompt" | "pane_key" | "updated_at">[];
+  return rows.map(row => ({
+    sessionId: row.session_id, state: row.state as AgentHookRecord["state"], toolName: row.tool_name,
+    interactivePrompt: parse<unknown>(row.interactive_prompt, null), paneKey: row.pane_key, updatedAt: row.updated_at,
+  }));
+}
 
 export function pruneHookRecords(now = Date.now()): number {
   return getDB().prepare("DELETE FROM agent_hook_state WHERE updated_at < ?").run(now - HOOK_RETENTION_MS).changes;
@@ -101,18 +128,18 @@ export function saveHookRecord(rec: AgentHookRecord): void {
       rec.state,
       rec.prompt,
       rec.toolName,
-      rec.toolInput === null || rec.toolInput === undefined
-        ? null
-        : JSON.stringify(rec.toolInput),
-      rec.interactivePrompt === null || rec.interactivePrompt === undefined
-        ? null
-        : JSON.stringify(rec.interactivePrompt),
-      rec.lastAssistantMessage,
+      boundedJson(rec.toolInput),
+      boundedJson(rec.interactivePrompt),
+      boundedText(rec.lastAssistantMessage),
       rec.transcriptPath,
       rec.cwd,
       rec.paneKey,
       JSON.stringify(rec.subagents),
-      rec.stashed ? JSON.stringify(rec.stashed) : null,
+      rec.stashed ? JSON.stringify({
+        ...rec.stashed,
+        toolInput: parse<unknown>(boundedJson(rec.stashed.toolInput), null),
+        interactivePrompt: parse<unknown>(boundedJson(rec.stashed.interactivePrompt), null),
+      }) : null,
       rec.updatedAt,
       rec.stateStartedAt,
     );

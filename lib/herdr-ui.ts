@@ -19,7 +19,7 @@ export function isHerdrSession(
 
 export type HerdrHookRecord = {
   sessionId: string;
-  agent: "claude";
+  agent?: "claude";
   state: "working" | "blocked" | "waiting" | "done";
   toolName: string | null;
   interactivePrompt: unknown;
