@@ -224,12 +224,12 @@ describe("HerdrFleetService", () => {
     h.snapshotPanes.push(
       { ...h.basePane, pane_id: "foreign", workspace_id: "w2", agent: null, agent_session: null },
       { ...h.basePane, pane_id: "idle", agent_status: "idle", agent_session: null },
-      { ...h.basePane, pane_id: "empty", agent: null, agent_session: null },
+      { ...h.basePane, pane_id: "empty", agent: null, agent_session: null, cwd: "/tmp/other-project" },
     );
     h.basePane.agent_status = "working";
     await h.service.ensureStarted();
     await h.service.reopen(h.sessionId);
-    expect(h.requests.find(r => r.method === "pane.split")?.params).toMatchObject({ target_pane_id: "empty", workspace_id: "w1", focus: false });
+    expect(h.requests.find(r => r.method === "pane.split")?.params).toMatchObject({ target_pane_id: "empty", workspace_id: "w1", cwd: "/tmp/fleet-project", focus: false });
   });
 
   test("reopen uses done panes when no empty pane exists and refuses a busy workspace", async () => {

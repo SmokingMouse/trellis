@@ -358,12 +358,13 @@ export class HerdrClient {
     pane: HerdrPane,
     sessionId: string,
     agentKind: string,
+    cwd: string | null,
   ): Promise<string> {
     const split = await this.request<Record<string, unknown>>("pane.split", {
       target_pane_id: pane.pane_id,
       workspace_id: pane.workspace_id,
       direction: "right",
-      cwd: pane.cwd ?? null,
+      cwd,
       focus: false,
     });
     const created = split.pane as HerdrPane | undefined;

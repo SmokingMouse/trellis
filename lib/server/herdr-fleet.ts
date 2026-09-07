@@ -166,6 +166,7 @@ export class HerdrFleetService {
       target as HerdrPane,
       binding.sessionId,
       binding.agentKind,
+      binding.cwd ?? target.cwd ?? null,
     );
   }
 }
