@@ -81,13 +81,15 @@ function createHarness() {
         } else if (request.method === "session.snapshot") {
           result = {
             type: "session_snapshot",
-            version: "0.8.0",
-            protocol: 19,
-            workspaces: [{ workspace_id: "w1", label: "fleet" }],
-            tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main" }],
-            panes: [basePane],
-            layouts: [],
-            agents: [{ pane_id: "w1:p1", name: "worker", state_change_seq: 10 }],
+            snapshot: {
+              version: "0.8.0",
+              protocol: 19,
+              workspaces: [{ workspace_id: "w1", label: "fleet" }],
+              tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main" }],
+              panes: [basePane],
+              layouts: [],
+              agents: [{ pane_id: "w1:p1", name: "worker", state_change_seq: 10 }],
+            },
           };
         } else if (request.method === "pane.split") {
           result = {

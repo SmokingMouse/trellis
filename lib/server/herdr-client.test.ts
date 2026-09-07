@@ -32,7 +32,6 @@ const pane = (revision: number, status: HerdrPane["agent_status"] = "idle"): Her
 });
 
 const snapshot = (revision = 5, protocol = 19): HerdrSnapshot => ({
-  type: "session_snapshot",
   version: "0.8.0",
   protocol,
   workspaces: [{ workspace_id: "w1", label: "project" }],
@@ -92,7 +91,7 @@ class FakeHerdr {
                 capabilities: {},
               };
             } else if (request.method === "session.snapshot") {
-              result = this.snapshot;
+              result = { type: "session_snapshot", snapshot: this.snapshot };
             } else if (request.method === "pane.split") {
               result = { type: "pane_info", pane: pane(0) };
             } else {

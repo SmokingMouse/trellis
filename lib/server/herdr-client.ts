@@ -11,6 +11,7 @@ import {
   type HerdrPane,
   type HerdrResponse,
   type HerdrSnapshot,
+  type HerdrSnapshotResult,
   type HerdrTab,
   type HerdrWorkspace,
 } from "./herdr-types";
@@ -790,12 +791,12 @@ export class HerdrClient {
     if (this.snapshotting) return this.snapshotting;
     this.snapshotting = (async () => {
       try {
-        const snapshot = await this.requestWithRetry<HerdrSnapshot>(
+        const result = await this.requestWithRetry<HerdrSnapshotResult>(
           "session.snapshot",
           {},
           2,
         );
-        this.applySnapshot(snapshot);
+        this.applySnapshot(result.snapshot);
       } catch (error) {
         if (error instanceof HerdrTransportError) this.markDown(error);
         else this._lastError = error instanceof Error ? error.message : String(error);

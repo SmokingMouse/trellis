@@ -57,7 +57,6 @@ export type HerdrLayout = {
 };
 
 export type HerdrSnapshot = {
-  type: "session_snapshot";
   version: string;
   protocol: number;
   focused_workspace_id?: string | null;
@@ -68,6 +67,11 @@ export type HerdrSnapshot = {
   panes: HerdrPane[];
   layouts: HerdrLayout[];
   agents: HerdrAgent[];
+};
+
+export type HerdrSnapshotResult = {
+  type: "session_snapshot";
+  snapshot: HerdrSnapshot;
 };
 
 export type HerdrResponse<T = Record<string, unknown>> =
