@@ -120,8 +120,10 @@ export default function Home() {
   }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
 
   useEffect(() => {
-    if (isMobile && sessionId) setViewMode("linear");
-  }, [isMobile, sessionId, setViewMode]);
+    if ((isMobile || session?.origin === "herdr") && sessionId) {
+      setViewMode("linear");
+    }
+  }, [isMobile, session?.origin, sessionId, setViewMode]);
 
   if (!hydrated || isMobile === null) {
     return (

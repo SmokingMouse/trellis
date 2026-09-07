@@ -128,6 +128,34 @@ describe("Herdr transcript bindings", () => {
     expect(resolveTranscriptPath(makePane(sessionId, "codex", cwd), home)).toBe(file);
   });
 
+  test("offers resolved Codex transcripts to the mirror importer", () => {
+    const db = new Database(":memory:");
+    ensureHerdrSchema(db);
+    const home = path.join(testHome, "codex-attach-home");
+    const sessionId = "01a07702-753d-7000-8fd6-36bf2cf20000";
+    const cwd = "/tmp/codex-attach";
+    const file = path.join(
+      home,
+      ".codex",
+      "sessions",
+      "nested",
+      `rollout-test-${sessionId}.jsonl`,
+    );
+    write(
+      file,
+      `${JSON.stringify({ type: "session_meta", payload: { id: sessionId, cwd } })}\n`,
+    );
+    const attached: [string, string][] = [];
+    reconcileHerdrPane(makePane(sessionId, "codex", cwd), undefined, {
+      db,
+      home,
+      attachTranscript: (transcriptPath, agentKind) =>
+        attached.push([transcriptPath, agentKind]),
+    });
+    expect(attached).toEqual([[file, "codex"]]);
+    db.close();
+  });
+
   test("upserts by session id, preserves first_seen_at, and tombstones closed panes", () => {
     const db = new Database(":memory:");
     ensureHerdrSchema(db);

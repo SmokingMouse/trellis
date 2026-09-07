@@ -102,7 +102,9 @@ describe("Herdr UI fleet projection", () => {
       "p-working",
     ]);
     expect(workspaces[0].panes[0].status).toBe("waiting");
-    expect(findHerdrPaneForSession(workspaces, "codex-session")?.paneId).toBe(
+    expect(
+      findHerdrPaneForSession(fleet, hooks, workspaces, "codex-session")?.paneId,
+    ).toBe(
       "p-working",
     );
   });

@@ -1,7 +1,7 @@
 import "server-only";
 import type { Database } from "bun:sqlite";
 import {
-  attachHerdrClaudeTranscript,
+  attachHerdrTranscript,
   getHerdrBinding,
   listHerdrBindings,
   markHerdrPaneClosed,
@@ -15,12 +15,13 @@ type FleetOptions = {
   db?: Database;
   home?: string;
   attachClaude?: (transcriptPath: string) => void;
+  attachTranscript?: (transcriptPath: string, agentKind: string) => void;
 };
 
 export class HerdrFleetService {
   private startPromise: Promise<void> | null = null;
   private bindingVersion = 0;
-  private readonly attachedClaudePaths = new Set<string>();
+  private readonly attachedTranscriptKeys = new Set<string>();
   private readonly detach: () => void;
 
   constructor(
@@ -32,14 +33,14 @@ export class HerdrFleetService {
       if (change.kind === "snapshot") {
         reconcileHerdrSnapshot(state.panes, state.agents, {
           ...this.options,
-          attachClaude: this.attachClaude,
+          attachTranscript: this.attachTranscript,
         });
         this.bindingVersion++;
       } else if (change.kind === "pane") {
         reconcileHerdrPane(
           change.pane,
           state.agents.find((agent) => agent.pane_id === change.pane.pane_id),
-          { ...this.options, attachClaude: this.attachClaude },
+          { ...this.options, attachTranscript: this.attachTranscript },
         );
         this.bindingVersion++;
       } else if (change.kind === "pane-closed") {
@@ -49,15 +50,23 @@ export class HerdrFleetService {
     });
   }
 
-  private readonly attachClaude = (transcriptPath: string): void => {
-    if (this.attachedClaudePaths.has(transcriptPath)) return;
-    this.attachedClaudePaths.add(transcriptPath);
-    if (this.options.attachClaude) {
+  private readonly attachTranscript = (
+    transcriptPath: string,
+    agentKind: string,
+  ): void => {
+    const key = `${agentKind}:${transcriptPath}`;
+    if (this.attachedTranscriptKeys.has(key)) return;
+    this.attachedTranscriptKeys.add(key);
+    if (this.options.attachTranscript) {
+      this.options.attachTranscript(transcriptPath, agentKind);
+      return;
+    }
+    if (agentKind === "claude" && this.options.attachClaude) {
       this.options.attachClaude(transcriptPath);
       return;
     }
-    void attachHerdrClaudeTranscript(transcriptPath).catch((error) => {
-      this.attachedClaudePaths.delete(transcriptPath);
+    void attachHerdrTranscript(transcriptPath, agentKind).catch((error) => {
+      this.attachedTranscriptKeys.delete(key);
       console.error("[trellis] failed to attach Herdr transcript", transcriptPath, error);
     });
   };

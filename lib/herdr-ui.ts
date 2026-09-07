@@ -77,6 +77,7 @@ export type HerdrPaneView = {
   agentKind: string;
   agentName: string | null;
   status: HerdrUiStatus;
+  alive: boolean;
   pane: HerdrFleetPane;
   binding: HerdrSessionBinding | null;
   hook: HerdrHookRecord | null;
@@ -158,6 +159,7 @@ export function buildHerdrWorkspaceViews(
             agentKind,
             agentName: binding?.agentName ?? null,
             status: hook?.state ?? paneStatus(pane.agent_status),
+            alive: fleet.available && (binding?.alive ?? true),
             pane,
             binding,
             hook,
@@ -180,6 +182,8 @@ export function buildHerdrWorkspaceViews(
 }
 
 export function findHerdrPaneForSession(
+  fleet: HerdrFleetResponse | null,
+  hooks: HerdrHookRecord[],
   workspaces: HerdrWorkspaceView[],
   sessionId: string | null | undefined,
 ): HerdrPaneView | null {
@@ -190,5 +194,41 @@ export function findHerdrPaneForSession(
     );
     if (pane) return pane;
   }
-  return null;
+  const binding = fleet?.sessions.find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (!binding) return null;
+  const workspace = fleet?.workspaces.find(
+    (candidate) => candidate.workspace_id === binding.workspaceId,
+  );
+  const hook =
+    hooks.find(
+      (candidate) =>
+        candidate.sessionId === binding.sessionId ||
+        candidate.paneKey === binding.paneId,
+    ) ?? null;
+  const label = workspace ? workspaceLabel(workspace) : binding.workspaceId;
+  return {
+    paneId: binding.paneId,
+    workspaceId: binding.workspaceId,
+    workspaceLabel: label,
+    label: binding.label || binding.agentName || binding.agentKind,
+    agentKind: binding.agentKind,
+    agentName: binding.agentName,
+    status: hook?.state ?? paneStatus(binding.agentStatus),
+    alive: Boolean(fleet?.available && binding.alive),
+    pane: {
+      pane_id: binding.paneId,
+      terminal_id: binding.terminalId,
+      focused: false,
+      agent: binding.agentKind,
+      agent_status: binding.agentStatus,
+      cwd: binding.cwd,
+      label: binding.label,
+      terminal_title: null,
+      revision: binding.revision,
+    },
+    binding,
+    hook,
+  };
 }

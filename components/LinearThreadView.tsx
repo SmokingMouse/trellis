@@ -28,12 +28,22 @@ import {
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import { useScrollHide } from "@/hooks/useScrollHide";
 import { useVerifyStreamingStub } from "@/hooks/useVerifyStreamingStub";
+import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import {
+  buildHerdrWorkspaceViews,
+  findHerdrPaneForSession,
+} from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TargetChip } from "./TargetChip";
 import { TurnCard } from "./TurnCard";
 import { BookmarkButton } from "./BookmarkButton";
+import {
+  HerdrComposer,
+  HerdrOfflineBanner,
+  HerdrSessionBadge,
+} from "./HerdrSessionControls";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -71,6 +81,31 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const sendKey = useSessionStore((s) => s.sendKey);
   const threadWidth = useSessionStore((s) => s.threadWidth);
   const setThreadWidth = useSessionStore((s) => s.setThreadWidth);
+  const herdrSnapshot = useHerdrFleet();
+  const herdrWorkspaces = useMemo(
+    () =>
+      buildHerdrWorkspaceViews(
+        herdrSnapshot.fleet,
+        herdrSnapshot.hooks,
+      ),
+    [herdrSnapshot.fleet, herdrSnapshot.hooks],
+  );
+  const herdrPane = useMemo(
+    () =>
+      findHerdrPaneForSession(
+        herdrSnapshot.fleet,
+        herdrSnapshot.hooks,
+        herdrWorkspaces,
+        session?.id,
+      ),
+    [
+      herdrSnapshot.fleet,
+      herdrSnapshot.hooks,
+      herdrWorkspaces,
+      session?.id,
+    ],
+  );
+  const isHerdr = session?.origin === "herdr";
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -467,6 +502,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     isMobile &&
     scrollHidden &&
     waitingNodes.length === 0 &&
+    !isHerdr &&
     !tipStreamingId &&
     !composerExpanded;
   const mobileHeaderHidden = isMobile && scrollHidden;
@@ -517,10 +553,17 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       >
         <div className={`${widthClass} mx-auto px-4 py-3 max-md:h-full flex items-center gap-3`}>
           <div className="min-w-0 flex-1">
-            <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
-              {mode.label} · 线性
-            </div>
+            {isHerdr ? (
+              <HerdrSessionBadge
+                pane={herdrPane}
+                loading={herdrSnapshot.loading}
+              />
+            ) : (
+              <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
+                {mode.label} · 线性
+              </div>
+            )}
             <h1 className="truncate text-sm font-semibold text-ink-strong">
               {session.title}
             </h1>
@@ -548,7 +591,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               </button>
             ))}
           </div>
-          {!isMobile && (
+          {!isMobile && !isHerdr && (
             <button
               type="button"
               onClick={() => setViewMode("canvas")}
@@ -604,6 +647,13 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         }
       >
         <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
+        {isHerdr && session && (
+          <HerdrOfflineBanner
+            sessionId={session.id}
+            pane={herdrPane}
+            loading={herdrSnapshot.loading}
+          />
+        )}
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
             暂无节点
@@ -615,11 +665,15 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             const branches = threadData.branchesByNode.get(node.id) ?? [];
             const isActive = node.id === threadData.anchorId;
             const canDelete =
-              session.rootNodeId !== node.id && node.status !== "streaming";
+              !isHerdr &&
+              session.rootNodeId !== node.id &&
+              node.status !== "streaming";
             // Branching from the tip is just "continue" — the composer
             // already does that, so no button there.
             const canBranch =
-              node.status !== "streaming" && node.id !== tipNode?.id;
+              !isHerdr &&
+              node.status !== "streaming" &&
+              node.id !== tipNode?.id;
             const isBranchTarget = branchFrom?.id === node.id;
             return (
               <Fragment key={node.id}>
@@ -789,7 +843,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 </div>
 
                 <div className="px-4 py-4">
-                  <TurnCard node={node} />
+                  <TurnCard node={node} readOnly={isHerdr} />
 
                   {branches.length > 0 && (
                     <div className="mt-4 pt-2 border-t border-line-faint">
@@ -857,23 +911,27 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               onClear={() => setBranchFrom(null)}
             />
           )}
-          <Composer
-            targetNode={branchFromNode ?? tipNode}
-            mobileCompact={isMobile}
-            onMobileExpandedChange={onComposerExpandedChange}
-            placeholder={
-              branchFromNode
-                ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`
-                : `继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`
-            }
-            onSubmitted={branchFromNode ? () => setBranchFrom(null) : undefined}
-            onEscape={branchFromNode ? () => setBranchFrom(null) : undefined}
-            focusToken={branchFrom?.n ?? null}
-          />
+          {isHerdr ? (
+            herdrPane?.alive ? <HerdrComposer pane={herdrPane} /> : null
+          ) : (
+            <Composer
+              targetNode={branchFromNode ?? tipNode}
+              mobileCompact={isMobile}
+              onMobileExpandedChange={onComposerExpandedChange}
+              placeholder={
+                branchFromNode
+                  ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`
+                  : `继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`
+              }
+              onSubmitted={branchFromNode ? () => setBranchFrom(null) : undefined}
+              onEscape={branchFromNode ? () => setBranchFrom(null) : undefined}
+              focusToken={branchFrom?.n ?? null}
+            />
+          )}
         </div>
       </div>
 
-      {popover?.selection && (
+      {!isHerdr && popover?.selection && (
         <BranchPopover
           selection={popover.selection}
           expanded={popover.expanded}

@@ -12,8 +12,9 @@ type State = "idle" | "loading" | "copied" | "none";
 
 export function CliResumeButton({ nodeId }: { nodeId: string }) {
   const mode = useSessionStore((s) => s.session?.mode);
+  const origin = useSessionStore((s) => s.session?.origin);
   const [state, setState] = useState<State>("idle");
-  if (mode !== "project") return null;
+  if (mode !== "project" || origin === "herdr") return null;
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();

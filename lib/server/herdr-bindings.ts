@@ -53,6 +53,7 @@ type ReconcileOptions = {
   home?: string;
   now?: number;
   attachClaude?: (transcriptPath: string) => void;
+  attachTranscript?: (transcriptPath: string, agentKind: string) => void;
 };
 
 export function claudeProjectSlug(cwd: string): string {
@@ -268,8 +269,12 @@ export function reconcileHerdrPane(
     now,
     now,
   );
-  if (transcriptPath && agentKind === "claude") {
-    options.attachClaude?.(transcriptPath);
+  if (transcriptPath) {
+    if (options.attachTranscript) {
+      options.attachTranscript(transcriptPath, agentKind);
+    } else if (agentKind === "claude") {
+      options.attachClaude?.(transcriptPath);
+    }
   }
   return getHerdrBinding(session.value, db);
 }
@@ -301,7 +306,11 @@ export function reconcileHerdrSnapshot(
   return listHerdrBindings(db);
 }
 
-export async function attachHerdrClaudeTranscript(transcriptPath: string): Promise<void> {
+export async function attachHerdrTranscript(
+  transcriptPath: string,
+  agentKind: string,
+): Promise<void> {
+  if (agentKind !== "claude" && agentKind !== "codex") return;
   const { attachSession } = await import("./cli-sync-watcher");
-  attachSession(transcriptPath, "claude", { origin: "herdr" });
+  attachSession(transcriptPath, agentKind, { origin: "herdr" });
 }
