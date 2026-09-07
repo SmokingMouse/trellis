@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getDB } from "./sqlite";
-import { CODEX_SESSIONS_DIR } from "./codex-paths";
 import {
   findCodexRolloutPath,
   forgetCodexRolloutPath,
@@ -24,8 +23,6 @@ import {
 //   · codex 按文件系统扫 rollout 找 sid，不查它自己的 sqlite 索引——手工构造的
 //     前缀文件（新 UUID + 截断历史）被完整采信（暗号验证通过）；
 //   · reasoning 行的 encrypted_content 丢弃不影响 resume。
-
-const SESSIONS_ROOT = CODEX_SESSIONS_DIR;
 
 export { findCodexRolloutPath } from "./codex-transcript-index";
 
