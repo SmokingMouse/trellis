@@ -8,7 +8,7 @@ test("legacy default, reserved pane and daemon scoped thread stay distinct", () 
   expect(() => parseSessionBinding({id:"s",bindingType:"unknown"},"daemon")).toThrow();
   expect(parseSessionBinding({id:"s",bindingType:"thread"},"daemon",false)).toEqual({type:"fallback",sessionId:"s",reason:"disabled"});
 });
-test("only new project sessions with both switches opt in; custom agent remains legacy", () => {
+test("P2-1 shared enablement: socket enables project, off overrides socket, custom agent stays legacy", () => {
   const old = {a:process.env.TRELLIS_AS,b:process.env.TRELLIS_AS_PROJECT,socket:process.env.TRELLIS_AS_SOCKET};
   try {
     process.env.TRELLIS_AS="on"; process.env.TRELLIS_AS_PROJECT="on";

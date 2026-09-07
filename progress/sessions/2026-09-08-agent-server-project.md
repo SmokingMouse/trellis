@@ -18,3 +18,4 @@
 - P2-2：fallback/startup 失败删除未执行的 as_turns 并清理无引用 as_threads；重试映射仅成功时切换，兼容重试有输出后才解除旧绑定。ProjectRun.start 缓存初始化 promise，并发 catchup 等同一完成态；Mock 注入 preflight 后失败与并发恢复测试通过。
 - P2-3：interrupt 直接发送 turn/interrupt，不再获取租约；重试期间指向暂存的新运行线程。对端持有 10 秒租约的 Mock 中断 probe 已通过。Next：完整 D1–D5 与手机新增重试/普通续聊/硬关断言。
 - P0-1/P1-1 复验补边界：POST 重试探针验证保留原答案与重复点击 409；暂存重试的审批、权限、中断统一指向新运行，而持久绑定仅成功切换。普通续聊还核对 daemon 实际末尾，避免重试移走后 DB 误判旧线程 tip。D1 exit 0，D2 124 pass/432 assertions。
+- fj-trellis-step2-fix-683f 最终验收自测：D1 exit 0；D2 exit 0（124 pass / 432 assertions）；D3、D4 均按原 env -i 命令串行 exit 0；D5 exit 0，另查无脚本/fixture/测试锁残留。新增手机断言覆盖重试成功与失败保留、非 tip 普通提问、硬关回退。Next：信箱交付待独立验收；产物为新契约 out/result.md、proof.json 与日志。

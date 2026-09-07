@@ -160,9 +160,43 @@ EARLY_NODE=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
 [ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")" != "$ORIGINAL_THREAD" ] || fail 'P1-1 early question reused later history'
 grep -q '"type":"done"' "$H/early-question.sse" || fail 'P1-1 early question completion'
 echo 'PASS: P1-1 ordinary early question returns 200 with a seeded new thread and no error node'
+RETRY_BEFORE=$(db "SELECT response FROM nodes WHERE id='$EARLY_NODE'")
+RETRY_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")
+touch "$H/pause-retry"
+post /api/chat "{\"kind\":\"retry\",\"nodeId\":\"$EARLY_NODE\",\"provider\":\"mock\"}" > "$H/retry.sse" &
+REQUEST_PID=$!
+sleep 2
+[ "$(db "SELECT response FROM nodes WHERE id='$EARLY_NODE'")" = "$RETRY_BEFORE" ] || fail 'P0-1 retry cleared original answer before success'
+rm "$H/pause-retry"
+wait "$REQUEST_PID"; REQUEST_PID=
+grep -q '"type":"done"' "$H/retry.sse" || fail 'P0-1 tip retry completion'
+[ "$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")" != "$RETRY_THREAD" ] || fail 'P0-1 tip retry fork'
+db "SELECT response,status,tool_calls_json,token_input,token_output,final_start FROM nodes WHERE id='$EARLY_NODE'" > "$H/retry-before.txt"
+touch "$H/fail-retry"
+post /api/chat "{\"kind\":\"retry\",\"nodeId\":\"$EARLY_NODE\",\"provider\":\"mock\"}" > "$H/retry-failure.sse"
+grep -q '"type":"error"' "$H/retry-failure.sse" || fail 'P0-1 retry error reported'
+db "SELECT response,status,tool_calls_json,token_input,token_output,final_start FROM nodes WHERE id='$EARLY_NODE'" > "$H/retry-after.txt"
+cmp "$H/retry-before.txt" "$H/retry-after.txt" || fail 'P0-1 failed retry changed original answer'
+rm "$H/fail-retry"
+post /api/chat "{\"kind\":\"retry\",\"nodeId\":\"$FIRST\",\"provider\":\"mock\"}" > "$H/retry-early.sse"
+grep -q '"type":"done"' "$H/retry-early.sse" || fail 'P0-1 non-tip retry completion'
+echo 'PASS: P0-1 tip and non-tip retries succeed; pending and failed retry preserve original answers'
 kill "$DAEMON_PID"; wait "$DAEMON_PID" || true; DAEMON_PID=
 post /api/chat "{\"kind\":\"root\",\"question\":\"fallback project\",\"mode\":\"project\",\"workspacePath\":\"$H\",\"provider\":\"mock\"}" > "$H/fallback.sse"
 grep -q '"type":"notice"' "$H/fallback.sse" || fail 'fallback notice'
 grep -q '"type":"done"' "$H/fallback.sse" || fail 'fallback completion'
 echo 'PASS: daemon unavailable falls back to legacy run with notice'
+ab close
+kill "$SERVER_PID"; wait "$SERVER_PID" || true; SERVER_PID=
+export TRELLIS_AS=off TRELLIS_AS_PROJECT=off
+HOME="$H" bun --bun node_modules/next/dist/bin/next start -p "$PORT" -H 127.0.0.1 > "$H/server-hard-off.log" 2>&1 &
+SERVER_PID=$!
+tries=0
+until curl --noproxy '*' -fsS "$BASE/login" >/dev/null 2>&1; do tries=$((tries+1)); [ "$tries" -lt 60 ] || fail 'hard-off readiness'; sleep 1; done
+post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$FIRST\",\"question\":\"hard off preserved input\",\"provider\":\"mock\"}" > "$H/hard-off.sse"
+grep -q '"type":"notice"' "$H/hard-off.sse" || fail 'P1-2 hard off notice'
+grep -q '"type":"done"' "$H/hard-off.sse" || fail 'P1-2 hard off completion'
+HARD_OFF_NODE=$(db "SELECT id FROM nodes WHERE question='hard off preserved input'")
+[ "$(db "SELECT COUNT(*) FROM as_turns WHERE node_id='$HARD_OFF_NODE'")" = 0 ] || fail 'P1-2 hard off created AS turn'
+echo 'PASS: P1-2 hard off falls back for an already bound session without losing input'
 echo 'PASS: AS project verification including tip-only fork contract'

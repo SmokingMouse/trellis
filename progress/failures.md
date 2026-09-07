@@ -6,6 +6,8 @@
 
 ## 已结案
 
+- **AS 重试清空旧答案、非 tip 普通续聊失败、AS=off 对已绑定会话失效** → `resolved`（fj-trellis-step2-fix-683f）：原 reset 在启动前执行，非 tip 被误归类为显式 fork，切流只查 DB 绑定。修为成功后切换重试版本、普通历史提问播种新线程、统一硬关闸回退；并清理 fallback 孤儿映射、共享并发初始化、中断免租约。判定命令：`bun test lib/server/as-project.test.ts lib/server/session-binding.test.ts` 与原 env -i `mobile-as-project.sh`；最终完整 bun test 124 pass，D3/D4 exit 0。
+
 - **验收侧 D4 env -i 非零退出** → `not-reproducible`：假设 project/shadow 并跑造成锁/端口竞争，实查启动前没有脚本、锁和测试端口监听，故不能归因竞争。首轮在额外 browser 诊断后出现 about:blank、N9 超时，证据受干扰；不干预浏览器的两次独占复跑均通过全部用例。判定命令：`sh -c 'env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-shadow.sh </dev/null'` 连续 exit 0；未改代码或删除用例。日志在契约 out/shadow-reverify2.log、shadow-reverify3.log。原验收失败根因仍未确认。
 
 - **AS project 任意节点分叉阻塞验收** → 验收阻塞 `resolved`，协议缺口仍在上游 backlog：7913839 对 fromItemId 返回 -32008。主控裁决只验 tip 成功与早期节点明确拒绝，客户端不伪造历史分叉。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh` exit 0；旧节点数据及 thread 绑定不变。任意节点分叉仍依赖上游 prefix/fromItemId 实现。

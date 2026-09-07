@@ -22,6 +22,11 @@ const script: MockScript = async function* (turnId,input,engine) {
   const question = prompt.split("\n\nuser: ").at(-1)!;
   const answer = pickResponse(prompt,[],null);
   const id = `${turnId}-answer`;
+  while (existsSync(join(home,"pause-retry"))) await Bun.sleep(50);
+  if (existsSync(join(home,"fail-retry"))) {
+    yield {type:"turnCompleted",turnId,status:"failed",error:{code:-32015,message:"mock retry failure"}};
+    return;
+  }
   if(question.includes("approval")) {
     const toolId = `${turnId}-bash`;
     yield {type:"itemStarted",turnId,item:{id:toolId,type:"commandExecution",payload:{command:"echo project-proof",cwd:home}}};
