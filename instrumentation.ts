@@ -3,6 +3,10 @@
 // 仅 nodejs runtime——watcher 用 fs + bun:sqlite，edge runtime 没有。
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // Shadow observer is optional; even import/handshake failure must not delay boot.
+  void import("./lib/server/as-client")
+    .then(({ getShadowClient }) => getShadowClient().connect())
+    .catch(error => console.warn("[trellis/as] shadow connection unavailable:", error.message));
   // Env 卫生：从启动 shell 继承的交互式 CLI 调优变量不该穿透给 trellis spawn 的
   // claude（SDK 的 streamLines 用 {...process.env, ...opts.env} 合并）。实测踩坑：
   // 从 occ alias（CLAUDE_CODE_EFFORT_LEVEL=max）的 session 里启动 dev server →
