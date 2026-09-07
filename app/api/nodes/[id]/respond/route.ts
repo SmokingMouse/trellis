@@ -1,4 +1,5 @@
 import { resolveInteraction } from "@/lib/server/run-bus";
+import { isThreadNode, respondProject } from "@/lib/server/as-project";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,10 @@ export async function POST(
     );
   }
 
+  if (isThreadNode(id)) {
+    try { return Response.json(await respondProject(id, { ...body, toolUseId: body.toolUseId, behavior: body.behavior })); }
+    catch (error) { return Response.json({ error: String(error) }, { status: 409 }); }
+  }
   const result = resolveInteraction(
     id,
     body.toolUseId,

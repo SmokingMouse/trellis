@@ -1,5 +1,6 @@
 import { getNode } from "@/lib/server/repo";
 import { subscribe } from "@/lib/server/run-bus";
+import { isThreadNode, getProjectRun, projectSSE } from "@/lib/server/as-project";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,12 @@ export async function GET(
   const node = getNode(id);
   if (!node) {
     return Response.json({ error: "node not found" }, { status: 404 });
+  }
+  if (isThreadNode(id) && node.status === "streaming") {
+    try {
+      const run = await getProjectRun(id);
+      if (run) return projectSSE(req, run);
+    } catch (error) { return Response.json({ error: String(error) }, { status: 503 }); }
   }
 
   const encoder = new TextEncoder();
