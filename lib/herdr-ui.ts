@@ -139,11 +139,8 @@ function paneStatus(value: string): HerdrUiStatus {
     : "unknown";
 }
 
-function urgency(status: HerdrUiStatus): number {
-  if (status === "waiting") return 0;
-  if (status === "blocked") return 1;
-  if (status === "working") return 2;
-  return 3;
+function comparePanes(a: HerdrPaneView, b: HerdrPaneView): number {
+  return a.label.localeCompare(b.label) || (a.pane.cwd ?? "").localeCompare(b.pane.cwd ?? "") || a.paneId.localeCompare(b.paneId);
 }
 
 function workspaceLabel(workspace: HerdrFleetWorkspace): string {
@@ -201,26 +198,20 @@ export function buildHerdrWorkspaceViews(
             hook,
           };
         })
-        .sort(
-          (a, b) =>
-            urgency(a.status) - urgency(b.status) ||
-            a.label.localeCompare(b.label),
-        );
+        .sort(comparePanes);
       return { id: workspace.workspace_id, label, panes, worktree: workspace.worktree };
     })
     .filter((workspace) => workspace.panes.length > 0)
     .sort(
       (a, b) =>
-        Math.min(...a.panes.map((pane) => urgency(pane.status))) -
-          Math.min(...b.panes.map((pane) => urgency(pane.status))) ||
-        a.label.localeCompare(b.label),
+        a.label.localeCompare(b.label) || a.id.localeCompare(b.id),
     );
 }
 
 export function groupHerdrWorkspaces(workspaces: HerdrWorkspaceView[]) {
   const repositories = new Map<string, {
     id: string; label: string; attention: number;
-    worktrees: { id: string; label: string; title: string; attention: number; panes: HerdrPaneView[] }[];
+    worktrees: { id: string; label: string; title: string; isLinked: boolean; attention: number; panes: HerdrPaneView[] }[];
   }>();
   const ungrouped: HerdrWorkspaceView[] = [];
   for (const workspace of workspaces) {
@@ -240,12 +231,20 @@ export function groupHerdrWorkspaces(workspaces: HerdrWorkspaceView[]) {
       existing.title += `\n${workspace.label}`;
     } else repo.worktrees.push({
       id: wt.checkout_path,
+      isLinked: wt.is_linked_worktree,
       label: wt.git_branch || (wt.is_linked_worktree ? wt.checkout_path.split("/").pop()! : "main"),
       title: `${workspace.label}\n${wt.checkout_path}`,
       attention, panes: [...workspace.panes],
     });
   }
-  return { repositories: [...repositories.values()], ungrouped };
+  for (const repo of repositories.values()) {
+    repo.worktrees.sort((a, b) => Number(a.isLinked) - Number(b.isLinked) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+    for (const wt of repo.worktrees) wt.panes.sort(comparePanes);
+  }
+  return {
+    repositories: [...repositories.values()].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id)),
+    ungrouped: ungrouped.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id)),
+  };
 }
 
 function bindingMatchesSession(binding: HerdrSessionBinding, sessionId: string): boolean {

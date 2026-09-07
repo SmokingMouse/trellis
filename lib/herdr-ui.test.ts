@@ -9,6 +9,23 @@ import {
 } from "./herdr-ui";
 
 describe("Herdr repository tree", () => {
+  test("P1-1 shuffled repositories, checkouts and merged sessions stay stable across status changes", () => {
+    const make = (id: string, root: string, checkout: string, linked: boolean) => ({
+      ...structuredClone(fleet.workspaces[0]), workspace_id: id, label: id,
+      worktree: { repo_root: root, repo_name: "Same name", checkout_path: checkout, is_linked_worktree: linked, git_branch: linked ? "a-feature" : "z-main" },
+    });
+    const input = { ...fleet, sessions: [], workspaces: [make("z", "/z", "/z", false), make("linked", "/a", "/a-linked", true), make("main", "/a", "/a", false), make("duplicate", "/a", "/a", false)] };
+    input.workspaces.forEach((w, i) => w.tabs[0].panes.forEach(p => { p.pane_id += i; }));
+    const shape = () => groupHerdrWorkspaces(buildHerdrWorkspaceViews(input, [])).repositories.map(r => [r.id, r.worktrees.map(w => [w.id, w.panes.map(p => p.paneId)])]);
+    const before = shape();
+    expect(before.map(r => r[0])).toEqual(["/a", "/z"]);
+    const tree = groupHerdrWorkspaces(buildHerdrWorkspaceViews(input, []));
+    expect(tree.repositories[0].worktrees.map(w => w.id)).toEqual(["/a", "/a-linked"]);
+    expect(tree.repositories[0].worktrees[0].panes.map(p => p.label)).toEqual(["builder", "builder", "reviewer", "reviewer"]);
+    input.workspaces.reverse().forEach(w => w.tabs[0].panes.reverse().forEach(p => { p.agent_status = p.label === "reviewer" ? "waiting" : "idle"; }));
+    expect(shape()).toEqual(before);
+    expect(groupHerdrWorkspaces(buildHerdrWorkspaceViews(input, [])).repositories[0].attention).toBe(3);
+  });
   test("groups checkouts by canonical repository, bubbles attention and keeps non-git last", () => {
     const panes = buildHerdrWorkspaceViews(fleet, [])[0].panes;
     const worktree = { repo_root: "/repo", repo_name: "Repo", checkout_path: "/repo", is_linked_worktree: false };
@@ -17,7 +34,7 @@ describe("Herdr repository tree", () => {
       { id: "main", label: "Checkout", worktree, panes: [{ ...panes[0], status: "waiting" }] },
       { id: "linked", label: "Feature", worktree: { ...worktree, checkout_path: "/linked", is_linked_worktree: true, git_branch: "feat/nest" }, panes: [{ ...panes[1], status: "blocked" }] },
       { id: "duplicate", label: "Another tab", worktree, panes: [panes[1]] },
-      { id: "other", label: "Other", worktree: { ...worktree, repo_root: "/other", checkout_path: "/other" }, panes: [panes[0]] },
+      { id: "other", label: "Other", worktree: { ...worktree, repo_name: "Z repo", repo_root: "/other", checkout_path: "/other" }, panes: [panes[0]] },
     ]);
     expect(tree.repositories).toHaveLength(2);
     expect(tree.repositories[0].attention).toBe(2);
@@ -131,7 +148,7 @@ describe("Herdr UI fleet projection", () => {
     expect(views[0].panes.find(p => p.paneId === "p-waiting")?.status).toBe("working");
   });
 
-  test("overlays hook state and puts waiting panes first", () => {
+  test("P1-1 overlays hook state without moving waiting panes", () => {
     const hooks: HerdrHookRecord[] = [
       {
         sessionId: "claude-session",
@@ -145,10 +162,10 @@ describe("Herdr UI fleet projection", () => {
     ];
     const workspaces = buildHerdrWorkspaceViews(fleet, hooks);
     expect(workspaces[0].panes.map((pane) => pane.paneId)).toEqual([
-      "p-waiting",
       "p-working",
+      "p-waiting",
     ]);
-    expect(workspaces[0].panes[0].status).toBe("waiting");
+    expect(workspaces[0].panes[1].status).toBe("waiting");
     expect(
       findHerdrPaneForSession(fleet, hooks, workspaces, "codex-session")?.paneId,
     ).toBe(
