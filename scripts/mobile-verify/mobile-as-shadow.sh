@@ -2,7 +2,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-OUT=${AS_SHADOW_OUT:-/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-as-migrate-1-fix-31ae/out}
+OUT=${AS_SHADOW_OUT:-$ROOT/out/mobile-as-shadow}
 LOCK_DIR=/tmp/trellis-mobile-verify.lock
 OWN_LOCK=0
 H=
@@ -46,6 +46,7 @@ done
 OWN_LOCK=1
 echo "$$ mobile-as-shadow" > "$LOCK_DIR/owner"
 mkdir -p "$OUT"
+echo "Shadow verification artifacts: $OUT"
 lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && fail "port $PORT already in use"
 H=$(mktemp -d /tmp/trellis-as-shadow-XXXXXX)
 export no_proxy='*' http_proxy='' https_proxy='' ALL_PROXY=''
