@@ -80,6 +80,10 @@ export type HerdrWorktree = {
   git_branch?: string | null;
 };
 
+export function normalizeHerdrPath(value: string): string {
+  return value.replace(/\/+$/, "") || (value.startsWith("/") ? "/" : value);
+}
+
 export type HerdrFleetResponse = {
   inputDeliveries?: HerdrInputDelivery[];
   available: boolean;
@@ -215,7 +219,8 @@ export function groupHerdrWorkspaces(workspaces: HerdrWorkspaceView[]) {
   }>();
   const ungrouped: HerdrWorkspaceView[] = [];
   for (const workspace of workspaces) {
-    const wt = workspace.worktree;
+    const metadata = workspace.worktree;
+    const wt = metadata && { ...metadata, repo_root: normalizeHerdrPath(metadata.repo_root), checkout_path: normalizeHerdrPath(metadata.checkout_path) };
     if (!wt?.repo_root || !wt.checkout_path) { ungrouped.push(workspace); continue; }
     let repo = repositories.get(wt.repo_root);
     if (!repo) {

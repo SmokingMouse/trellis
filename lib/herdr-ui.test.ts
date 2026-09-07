@@ -9,6 +9,14 @@ import {
 } from "./herdr-ui";
 
 describe("Herdr repository tree", () => {
+  test("P2-3 trailing slashes share checkout identity and never create empty labels", () => {
+    const view = buildHerdrWorkspaceViews(fleet, [])[0];
+    const tree = groupHerdrWorkspaces(["", "/", "///"].map((suffix, i) => ({ ...view, id: String(i), worktree: { repo_root: `/repo${suffix}`, repo_name: "Repo", checkout_path: `/missing${suffix}`, is_linked_worktree: true } })));
+    expect(tree.repositories).toHaveLength(1);
+    expect(tree.repositories[0].worktrees).toHaveLength(1);
+    expect(tree.repositories[0].worktrees[0]).toMatchObject({ id: "/missing", label: "未知分支" });
+    expect(tree.repositories[0].worktrees[0].panes).toHaveLength(6);
+  });
   test("P2-1 missing and detached branches never claim main", () => {
     for (const git_branch of [undefined, null, "", "HEAD"]) {
       for (const is_linked_worktree of [true, false]) {

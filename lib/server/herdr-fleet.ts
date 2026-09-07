@@ -15,9 +15,10 @@ import { realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { getDB } from "./sqlite";
 import type { HerdrWorktree } from "../herdr-ui";
+import { normalizeHerdrPath } from "../herdr-ui";
 
 function canonicalPath(value: string): string {
-  try { return realpathSync(value); } catch { return value; }
+  try { return realpathSync(value); } catch { return normalizeHerdrPath(value); }
 }
 
 type FleetOptions = {
