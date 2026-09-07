@@ -28,6 +28,7 @@ export class ProjectRun {
   private closing = false;
   private toolVersions = new Map<string, string>();
   private starting?: Promise<void>;
+  private retryResolutions: string[] = [];
   constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false) {
     this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
@@ -108,7 +109,11 @@ export class ProjectRun {
     if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") this.emit({ type: "thinking", text: params.delta });
     if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
       clearPendingInteraction(this.nodeId);
-      if (method === "serverRequest/resolved") getDB().prepare("UPDATE as_turns SET resolved_json=? WHERE node_id=?").run(JSON.stringify([`已由 ${params.decidedBy.label} 处理`]), this.nodeId);
+      if (method === "serverRequest/resolved") {
+        const receipts = [`已由 ${params.decidedBy.label} 处理`];
+        if (this.replacing) this.retryResolutions = receipts;
+        else getDB().prepare("UPDATE as_turns SET resolved_json=? WHERE node_id=?").run(JSON.stringify(receipts), this.nodeId);
+      }
       this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
     }
     this.project();
@@ -132,6 +137,7 @@ export class ProjectRun {
         bindAsThread(getNode(this.nodeId)!.sessionId, this.threadId);
         bindAsTurn(this.nodeId, this.threadId, this.params.clientTurnId!);
         getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(this.params), this.nodeId);
+        if (this.retryResolutions.length) getDB().prepare("UPDATE as_turns SET resolved_json=? WHERE node_id=?").run(JSON.stringify(this.retryResolutions), this.nodeId);
         this.replacing = false;
         this.project();
         pruneAsThreads(getNode(this.nodeId)!.sessionId);
@@ -269,8 +275,12 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
           } else threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
         } else {
           threadId = parent.thread_id;
-          const { thread } = await setup.request("thread/read", {threadId});
-          if (["closed", "systemError", "interrupted"].includes(thread.status.type)) await setup.request("thread/resume", {threadId});
+          const snapshot = await setup.request("thread/attach", {threadId,sinceSeq:0});
+          const last = snapshot.items.slice().sort((a,b)=>b.seq-a.seq)[0];
+          if ((last && last.turnId !== parent.turn_id) || snapshot.queue.length || snapshot.thread.status.type === "running") {
+            threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
+            seedHistory = true;
+          } else if (["closed", "systemError", "interrupted"].includes(snapshot.thread.status.type)) await setup.request("thread/resume", {threadId});
         }
       } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
       const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
@@ -294,6 +304,13 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
   try { return await job; } finally { starts.delete(session.id); }
 }
 export class DaemonUnavailable extends Error {}
+export function hasActiveProjectRun(nodeId: string) { const run = runs.get(nodeId); return !!run && !run.terminal; }
+export function projectTarget(nodeId: string) {
+  const active = runs.get(nodeId);
+  return active && !active.terminal
+    ? { thread_id: active.threadId, turn_id: active.turnId ?? null, daemon_id: daemonIdentity() }
+    : getAsTurn(nodeId);
+}
 export async function getProjectRun(nodeId: string) {
   if (!isShadowEnabled()) return null;
   const existing = runs.get(nodeId); if (existing) { await existing.start(); return existing; }
@@ -307,11 +324,11 @@ export async function getProjectRun(nodeId: string) {
 }
 export function isThreadNode(nodeId: string) {
   const node = getNode(nodeId);
-  return !!node && resolveSessionBinding(node.sessionId).type === "thread" && !!getAsTurn(nodeId);
+  return !!node && resolveSessionBinding(node.sessionId).type === "thread" && !!projectTarget(nodeId);
 }
 export async function withNodeThread<T>(nodeId: string, action: (client: AgentClient, threadId: string) => Promise<T>) {
   if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
-  const binding = getAsTurn(nodeId);
+  const binding = projectTarget(nodeId);
   if (!binding || binding.daemon_id !== daemonIdentity()) throw new Error("node has no binding to this daemon");
   const client = createProjectClient();
   try {
@@ -325,7 +342,7 @@ export async function respondProject(nodeId: string, body: { toolUseId: string; 
     // Re-read under lease: another client may have won between attach and acquire.
     await client.request("thread/attach", { threadId, sinceSeq: 0 });
     const request = client.pendingRequests.get(body.toolUseId);
-    if (!request || request.params.turnId !== getAsTurn(nodeId)?.turn_id) throw new Error("already resolved");
+    if (!request || request.params.turnId !== projectTarget(nodeId)?.turn_id) throw new Error("already resolved");
     const completion = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => done(new Error("approval acknowledgement timed out")), 5000);
       const offResolved = client.onNotification("serverRequest/resolved", p => {

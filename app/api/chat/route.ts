@@ -40,7 +40,7 @@ import {
 } from "@/lib/server/codex-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import { newProjectBinding, resolveSessionBinding, removeAsTurn } from "@/lib/server/session-binding";
-import { startProjectRun, projectSSE, DaemonUnavailable } from "@/lib/server/as-project";
+import { startProjectRun, projectSSE, DaemonUnavailable, hasActiveProjectRun } from "@/lib/server/as-project";
 import { getDB } from "@/lib/server/sqlite";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
@@ -411,7 +411,7 @@ export async function POST(req: Request) {
       if (!body.nodeId) {
         return Response.json({ error: "missing nodeId" }, { status: 400 });
       }
-      if (getNode(body.nodeId)?.status === "streaming") return Response.json({error:"node is still running"}, {status:409});
+      if (getNode(body.nodeId)?.status === "streaming" || hasActiveProjectRun(body.nodeId)) return Response.json({error:"node is still running"}, {status:409});
       const reset = getNode(body.nodeId);
       if (!reset) {
         return Response.json({ error: "node not found" }, { status: 404 });

@@ -60,23 +60,31 @@ try {
     assert.ok(input.includes(repo.getNode(root)!.response));
     assert.ok(!input.includes("second question"));
   } else if (process.argv[2] === "P0-1 retry preserves answers") {
+    const { POST } = await import("../../app/api/chat/route");
+    const retryRequest = (nodeId:string) => POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({kind:"retry",nodeId,provider:"mock"})}));
     const before = row(second), original = binding.getAsTurn(second)!.thread_id;
     let release!: () => void;
     pause = new Promise<void>(resolve => { release = resolve; });
-    const run = await as.startProjectRun({ nodeId: second, prompt: "second question", attachments: [], retry: true });
+    const response = await retryRequest(second);
+    assert.equal(response.status,200);
     assert.deepEqual(row(second), before, "starting a retry must preserve the full answer");
+    assert.equal((await retryRequest(second)).status,409,"a pending replacement cannot be retried concurrently");
     release(); pause = undefined;
-    await done(run);
+    assert.ok((await response.text()).includes('"type":"done"'));
     assert.equal(repo.getNode(second)!.status, "done");
     assert.notEqual(binding.getAsTurn(second)!.thread_id, original, "tip retry uses a native tip fork");
     assert.notDeepEqual(row(second), before);
     fail = true;
     const saved = row(second), savedBinding = binding.getAsTurn(second);
-    await start(second, true);
+    const failed = await retryRequest(second);
+    assert.equal(failed.status,200);
+    assert.ok((await failed.text()).includes('"type":"error"'));
     assert.deepEqual(row(second), saved, "failed retry must retain old answer, tools, usage and status");
     assert.deepEqual(binding.getAsTurn(second), savedBinding);
     fail = false;
-    await start(root, true);
+    const retriedRoot = await retryRequest(root);
+    assert.equal(retriedRoot.status,200);
+    assert.ok((await retriedRoot.text()).includes('"type":"done"'));
     assert.equal(repo.getNode(root)!.status, "done", "non-tip retry seeds a new thread");
   } else if (process.argv[2] === "P1-2 hard off fallback") {
     const before = engines.reduce((n,e) => n + e.sent.length, 0);

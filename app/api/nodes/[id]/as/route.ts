@@ -1,6 +1,6 @@
 import { getNode } from "@/lib/server/repo";
-import { getAsTurn, resolveSessionBinding } from "@/lib/server/session-binding";
-import { permissionProject, withNodeThread } from "@/lib/server/as-project";
+import { resolveSessionBinding } from "@/lib/server/session-binding";
+import { permissionProject, withNodeThread, projectTarget } from "@/lib/server/as-project";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import { getDB } from "@/lib/server/sqlite";
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{id:string}> }) 
   const { id } = await ctx.params;
   const node = getNode(id);
   if (!node) return Response.json({error:"node not found"}, {status:404});
-  const binding = resolveSessionBinding(node.sessionId), turn = getAsTurn(id);
+  const binding = resolveSessionBinding(node.sessionId), turn = projectTarget(id);
   if (binding.type !== "thread" || !turn) return Response.json({ binding: binding.type, thread: null });
   try { return Response.json(await withNodeThread(id, async (client, threadId) => ({
     binding: "thread", turnId: turn.turn_id, thread: (await client.request("thread/read", {threadId})).thread,
