@@ -131,6 +131,7 @@ function seedLineage(
           synced_uuid, cli_provider)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         origin = CASE WHEN excluded.origin = 'herdr' THEN 'herdr' ELSE sessions.origin END,
          title = excluded.title,
          root_node_id = excluded.root_node_id,
          updated_at = excluded.updated_at,

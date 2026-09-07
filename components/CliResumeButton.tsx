@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "./ui/Button";
 import { copyText } from "@/lib/clipboard";
+import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { isHerdrSession } from "@/lib/herdr-ui";
 
 // 「在 CLI 继续」轻量入口：project 模式本就是真 CLI thread，复制对应 family 的
 // resume 命令到剪贴板，去终端即可续这条 lineage。
@@ -12,9 +14,10 @@ type State = "idle" | "loading" | "copied" | "none";
 
 export function CliResumeButton({ nodeId }: { nodeId: string }) {
   const mode = useSessionStore((s) => s.session?.mode);
-  const origin = useSessionStore((s) => s.session?.origin);
+  const session = useSessionStore((s) => s.session);
+  const { fleet } = useHerdrFleet();
   const [state, setState] = useState<State>("idle");
-  if (mode !== "project" || origin === "herdr") return null;
+  if (mode !== "project" || isHerdrSession(session, fleet)) return null;
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();

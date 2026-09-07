@@ -6,6 +6,17 @@ export type HerdrUiStatus =
   | "done"
   | "unknown";
 
+// Live bindings also protect previously attached CLI sessions whose origin
+// has not been promoted yet. Closed Herdr mirrors retain their reopen UI.
+export function isHerdrSession(
+  session: { id: string; origin?: string; herdrAlive?: boolean } | null,
+  fleet?: HerdrFleetResponse | null,
+): boolean {
+  if (!session) return false;
+  const alive = fleet ? fleet.sessions.some(binding => binding.sessionId === session.id && binding.alive) : session.herdrAlive;
+  return session.origin === "herdr" || !!alive;
+}
+
 export type HerdrHookRecord = {
   sessionId: string;
   agent: "claude";

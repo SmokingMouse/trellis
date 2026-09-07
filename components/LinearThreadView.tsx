@@ -32,6 +32,7 @@ import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   buildHerdrWorkspaceViews,
   findHerdrPaneForSession,
+  isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
 import { BranchPopover } from "./BranchPopover";
@@ -106,7 +107,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       session?.id,
     ],
   );
-  const isHerdr = session?.origin === "herdr";
+  const isHerdr = isHerdrSession(session, herdrSnapshot.fleet);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());

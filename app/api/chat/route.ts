@@ -6,6 +6,7 @@ import {
   type Mode,
 } from "@/lib/llm";
 import { getProvider } from "@/lib/llm/server";
+import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
@@ -244,7 +245,7 @@ export async function POST(req: Request) {
     }
     return null;
   })();
-  if (targetSession?.origin === "herdr") {
+  if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
     return Response.json(
       { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
       { status: 409 },

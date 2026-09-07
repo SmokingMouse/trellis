@@ -198,6 +198,10 @@ export function getHerdrBinding(
   return row ? rowToBinding(row) : null;
 }
 
+export function hasAliveHerdrBinding(sessionId: string, db: Database = getDB()): boolean {
+  return !!db.prepare("SELECT 1 FROM herdr_sessions WHERE session_id = ? AND alive = 1").get(sessionId);
+}
+
 export function markHerdrPaneClosed(
   paneId: string,
   db: Database = getDB(),
