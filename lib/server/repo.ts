@@ -177,7 +177,10 @@ type SessionRow = {
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
        origin, source_jsonl_path, cli_provider, require_approval, agent_id,
-       EXISTS(SELECT 1 FROM herdr_sessions h WHERE h.session_id = sessions.id AND h.alive = 1) AS herdr_alive`;
+       EXISTS(SELECT 1 FROM herdr_sessions h
+         JOIN cli_lineages l ON l.cli_session_id = h.session_id
+         WHERE l.trellis_session_id = sessions.id AND h.alive = 1
+         UNION SELECT 1 FROM herdr_sessions h WHERE h.session_id = sessions.id AND h.alive = 1) AS herdr_alive`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";

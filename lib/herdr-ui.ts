@@ -13,7 +13,7 @@ export function isHerdrSession(
   fleet?: HerdrFleetResponse | null,
 ): boolean {
   if (!session) return false;
-  const alive = fleet ? fleet.sessions.some(binding => binding.sessionId === session.id && binding.alive) : session.herdrAlive;
+  const alive = fleet ? fleet.sessions.some(binding => bindingMatchesSession(binding, session.id) && binding.alive) : session.herdrAlive;
   return session.origin === "herdr" || !!alive;
 }
 
@@ -29,6 +29,7 @@ export type HerdrHookRecord = {
 
 export type HerdrSessionBinding = {
   sessionId: string;
+  trellisSessionId?: string;
   agentKind: string;
   paneId: string;
   terminalId: string;
@@ -203,6 +204,10 @@ export function buildHerdrWorkspaceViews(
     );
 }
 
+function bindingMatchesSession(binding: HerdrSessionBinding, sessionId: string): boolean {
+  return binding.sessionId === sessionId || binding.trellisSessionId === sessionId;
+}
+
 export function findHerdrPaneForSession(
   fleet: HerdrFleetResponse | null,
   hooks: HerdrHookRecord[],
@@ -213,12 +218,12 @@ export function findHerdrPaneForSession(
   if (!sessionId) return null;
   for (const workspace of workspaces) {
     const pane = workspace.panes.find(
-      (candidate) => candidate.binding?.sessionId === sessionId,
+      (candidate) => candidate.binding && bindingMatchesSession(candidate.binding, sessionId),
     );
     if (pane) return pane;
   }
   const binding = fleet?.sessions.find(
-    (candidate) => candidate.sessionId === sessionId,
+    (candidate) => bindingMatchesSession(candidate, sessionId),
   );
   if (!binding) return null;
   const workspace = fleet?.workspaces.find(

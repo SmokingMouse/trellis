@@ -8,7 +8,11 @@ mock.module("server-only", () => ({}));
 
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-bindings-"));
 
-const { ensureHerdrSchema } = await import("./sqlite");
+const { ensureHerdrSchema: ensureBindingSchema } = await import("./sqlite");
+function ensureHerdrSchema(db: Database) {
+  ensureBindingSchema(db);
+  db.exec("CREATE TABLE cli_lineages (cli_session_id TEXT, trellis_session_id TEXT)");
+}
 const {
   claudeProjectSlug,
   getHerdrBinding,

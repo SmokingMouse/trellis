@@ -120,6 +120,7 @@ function createHarness() {
   };
   const db = new Database(":memory:");
   ensureHerdrSchema(db);
+  db.exec("CREATE TABLE cli_lineages (cli_session_id TEXT, trellis_session_id TEXT)");
   const attached: string[] = [];
   const client = new HerdrClient({
     socketPath,

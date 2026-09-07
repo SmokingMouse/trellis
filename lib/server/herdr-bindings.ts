@@ -9,6 +9,7 @@ import { getDB } from "./sqlite";
 
 export type HerdrSessionBinding = {
   sessionId: string;
+  trellisSessionId: string;
   sessionSource: string;
   sessionKind: string;
   agentKind: string;
@@ -30,6 +31,7 @@ export type HerdrSessionBinding = {
 
 type BindingRow = {
   session_id: string;
+  trellis_session_id?: string;
   session_source: string;
   session_kind: string;
   agent_kind: string;
@@ -189,6 +191,7 @@ export function resolveTranscriptPath(
 function rowToBinding(row: BindingRow): HerdrSessionBinding {
   return {
     sessionId: row.session_id,
+    trellisSessionId: row.trellis_session_id ?? row.session_id,
     sessionSource: row.session_source,
     sessionKind: row.session_kind,
     agentKind: row.agent_kind,
@@ -211,7 +214,9 @@ function rowToBinding(row: BindingRow): HerdrSessionBinding {
 
 export function listHerdrBindings(db: Database = getDB()): HerdrSessionBinding[] {
   return (db
-    .prepare("SELECT * FROM herdr_sessions ORDER BY last_seen_at DESC")
+    .prepare(`SELECT h.*, l.trellis_session_id FROM herdr_sessions h
+      LEFT JOIN cli_lineages l ON l.cli_session_id = h.session_id
+      ORDER BY h.alive DESC, h.last_seen_at DESC`)
     .all() as BindingRow[]).map(rowToBinding);
 }
 
@@ -220,13 +225,19 @@ export function getHerdrBinding(
   db: Database = getDB(),
 ): HerdrSessionBinding | null {
   const row = db
-    .prepare("SELECT * FROM herdr_sessions WHERE session_id = ?")
-    .get(sessionId) as BindingRow | undefined;
+    .prepare(`SELECT h.*, l.trellis_session_id FROM herdr_sessions h
+      LEFT JOIN cli_lineages l ON l.cli_session_id = h.session_id
+      WHERE h.session_id = ? OR l.trellis_session_id = ?
+      ORDER BY h.alive DESC, h.last_seen_at DESC LIMIT 1`)
+    .get(sessionId, sessionId) as BindingRow | undefined;
   return row ? rowToBinding(row) : null;
 }
 
 export function hasAliveHerdrBinding(sessionId: string, db: Database = getDB()): boolean {
-  return !!db.prepare("SELECT 1 FROM herdr_sessions WHERE session_id = ? AND alive = 1").get(sessionId);
+  return !!db.prepare(`SELECT 1 FROM herdr_sessions h
+    JOIN cli_lineages l ON l.cli_session_id = h.session_id
+    WHERE l.trellis_session_id = ? AND h.alive = 1
+    UNION SELECT 1 FROM herdr_sessions WHERE session_id = ? AND alive = 1`).get(sessionId, sessionId);
 }
 
 export function markHerdrPaneClosed(
