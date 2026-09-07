@@ -3,9 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "bun scripts/prepare-as-dependency.ts",
     "dev": "next dev",
-    "build": "next build",
+    "build": "bun scripts/prepare-as-dependency.ts && next build",
     "start": "bun server.ts",
     "lint": "eslint",
     "test:codex-cli": "bun --conditions react-server scripts/test-codex-cli-import.ts"
