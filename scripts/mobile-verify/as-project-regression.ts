@@ -19,7 +19,7 @@ let pause: Promise<void> | undefined;
 let fail = false;
 const engines: MockEngine[] = [];
 const script: MockScript = async function* (turnId) {
-  yield { type: "itemStarted", turnId, item: { id: `${turnId}-answer`, type: "agentMessage", payload: { text: "" } } };
+  yield { type: "itemStarted", turnId, item: { id: `${turnId}-answer`, type: "agentMessage", payload: { text: pause && process.argv[2] === "idle SSE" ? "x".repeat(200000) : "" } } };
   if (pause) await pause;
   if (fail) { yield { type: "turnCompleted", turnId, status: "failed", error: { code: -32015, message: "mock retry failure" } }; return; }
   yield { type: "itemCompleted", turnId, item: { id: `${turnId}-answer`, type: "agentMessage", payload: { text: `answer ${turnId}` } } };
@@ -50,7 +50,46 @@ try {
   await start(root);
   const second = branch(root, "second question");
   await start(second);
-  if (process.argv[2] === "P1-1 non-tip continuation") {
+  if (process.argv[2] === "idle SSE") {
+    let release!: () => void;
+    pause = new Promise<void>(resolve => { release = resolve; });
+    const pending = branch(second, "quiet large response");
+    const run = await as.startProjectRun({nodeId:pending,prompt:"quiet large response",attachments:[]});
+    const controller = new AbortController();
+    const { GET } = await import("../../app/api/as/threads/[id]/stream/route");
+    const responses = [as.projectSSE(new Request("http://localhost/stream",{signal:controller.signal}),run),
+      await GET(new Request("http://localhost/stream",{signal:controller.signal}),{params:Promise.resolve({id:run.threadId})})];
+    const bytes = [0,0];
+    const readers = responses.map(r=>r.body!.getReader());
+    const pumps = readers.map(async(reader,index)=>{while(true){const {done,value}=await reader.read();if(done)return;bytes[index]+=value.byteLength;}});
+    await Bun.sleep(100);
+    const initial = [...bytes];
+    let attaches = 0;
+    const request = AgentClient.prototype.request;
+    AgentClient.prototype.request = function(method, params) { if(method === "thread/attach") attaches++; return request.call(this,method,params) as never; };
+    try {
+      await Bun.sleep(10100);
+      const proof = {windowMs:10100,initialBytes:initial,projectBytes:bytes[0]-initial[0],shadowBytes:bytes[1]-initial[1],attaches};
+      console.log(JSON.stringify(proof));
+      if (!process.argv.includes("--baseline")) {
+        assert.equal(proof.projectBytes,0); assert.equal(proof.shadowBytes,0); assert.equal(attaches,0);
+      }
+    } finally {
+      AgentClient.prototype.request = request;
+      controller.abort(); await Promise.all(pumps); release(); pause=undefined; await done(run);
+    }
+  } else if (process.argv[2] === "reconnect terminal") {
+    let release!: () => void;
+    pause = new Promise<void>(resolve => { release = resolve; });
+    const pending = branch(second,"offline completion");
+    const run = await as.startProjectRun({nodeId:pending,prompt:"offline completion",attachments:[]});
+    daemon.manager.disconnect(run.client.clientId!);
+    release(); pause=undefined;
+    await done(run);
+    assert.equal(repo.getNode(pending)!.status,"done");
+    assert.equal(repo.getNode(pending)!.response,`answer ${run.turnId}`);
+    assert.equal(engines.reduce((n,e)=>n+e.sent.length,0),3,"reconnect must not repeat engine input");
+  } else if (process.argv[2] === "P1-1 non-tip continuation") {
     const earlier = branch(root, "earlier ordinary question");
     await start(earlier);
     assert.equal(repo.getNode(earlier)!.status, "done");

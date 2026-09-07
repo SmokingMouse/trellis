@@ -160,10 +160,10 @@ test("P2-1 closed/unauthorized observer reloads token and reattaches without a p
   rebuilt.onSnapshot(() => rebuiltPolls++);
   await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "poll after rebuild" }] });
   await Bun.sleep(2200);
-  expect(rebuiltPolls).toBeGreaterThan(0);
+  expect(rebuiltPolls).toBe(0);
 });
 
-test("P1-3 review 200KB/10s repro emits no redundant snapshots and idle stops polling", async () => {
+test("P1-3 review 200KB/10s repro emits no redundant snapshots or attach polls", async () => {
   const f = fixture(); await f.start();
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token: loadToken(f.paths.tokenPath), reconnect: false });
   cleanup.push(() => producer.close());
@@ -184,7 +184,7 @@ test("P1-3 review 200KB/10s repro emits no redundant snapshots and idle stops po
   let polls = 0;
   client.onSnapshot(() => polls++);
   await Bun.sleep(10100);
-  expect(polls).toBeGreaterThanOrEqual(4);
+  expect(polls).toBe(0);
   expect(snapshots).toBe(1);
   expect(bytes - firstBytes).toBe(0);
   f.engine.emit({ type: "turnCompleted", turnId: turn.id, status: "completed" });

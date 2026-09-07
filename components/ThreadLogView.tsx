@@ -76,10 +76,10 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
       第 {turn.ordinal} 轮 · {turn.status === "inProgress" ? "进行中" : turn.status === "completed" ? "已完成" : turn.status === "failed" ? "失败" : turn.status === "interrupted" ? "已中断" : turn.status}
       {turn.error && ` · ${turn.error.message}`}
     </p>)}
-    {log.pending.map(request => <aside className="as-approval" key={request.params.requestId} data-as-approval>
+    {log.pending.map(request => <aside className="as-approval" key={request.requestId} data-as-approval>
       <strong>等待审批 · 只读</strong>
       <p>请在原客户端处理此请求。</p>
-      <pre>{JSON.stringify(request.params, null, 2)}</pre>
+      <pre>{JSON.stringify(request, null, 2)}</pre>
     </aside>)}
     {!items.length && <p className="as-empty">等待这段会话的第一条日志。</p>}
     <ol className="as-items">

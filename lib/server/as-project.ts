@@ -23,15 +23,22 @@ export class ProjectRun {
   turnId?: string;
   terminal?: RunEvent;
   private subscribers = new Set<Subscriber>();
-  private poll?: ReturnType<typeof setInterval>;
-  private polling = false;
   private closing = false;
   private toolVersions = new Map<string, string>();
+  private agentVersions = new Map<string, string>();
+  private lastCatchup?: string;
   private starting?: Promise<void>;
   private retryResolutions: string[] = [];
   constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false) {
     this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
+    let connected = false;
+    this.client.onStateChange(state => {
+      if (state !== "connected") return;
+      // AgentClient has already reattached its cursors before reporting connected.
+      if (connected && !this.closing && !this.terminal) void this.reconcile().catch(error => console.warn(`[trellis/as] reconnect: ${error}`));
+      connected = true;
+    });
     this.client.onError(error => console.warn(`[trellis/as] ${nodeId}: ${error.message}`));
     for (const method of Object.keys(NotificationSchemas) as NotificationMethod[]) {
       this.client.onNotification(method, params => this.notification({ jsonrpc: "2.0", method, params } as ServerNotification));
@@ -40,12 +47,19 @@ export class ProjectRun {
       this.client.onServerRequest(method, request => {
         if (request.params.threadId !== threadId || (this.turnId && request.params.turnId !== this.turnId)) return;
         const interaction = projectInteraction(request);
-        persistPendingInteraction(nodeId, interaction);
-        this.emit({ type: "interaction_required", ...interaction });
+        if (JSON.stringify(getNode(nodeId)?.pendingInteraction) !== JSON.stringify(interaction)) {
+          persistPendingInteraction(nodeId, interaction);
+          this.emit({ type: "interaction_required", ...interaction });
+        }
       });
     }
   }
   private emit(event: RunEvent | CatchupEvent) {
+    if (event.type === "catchup") {
+      const fingerprint = JSON.stringify(event);
+      if (fingerprint === this.lastCatchup) return;
+      this.lastCatchup = fingerprint;
+    } else this.lastCatchup = undefined;
     for (const sub of this.subscribers) { try { sub.onEvent(event); } catch {} }
   }
   private items() { return Object.values(this.log.items).filter(i => i.turnId === this.turnId); }
@@ -80,8 +94,12 @@ export class ProjectRun {
       }
       if (item.type === "subAgent") {
         const agent: import("../types").TaskMeta = { taskType: item.payload.kind === "agent" ? "local_agent" : item.payload.kind === "bash" ? "local_bash" : "local_workflow", phase: item.payload.phase, summary: item.payload.text ?? undefined };
-        patchToolCallAgent({ nodeId: this.nodeId, toolCallId: item.payload.parentItemId, patch: agent });
-        this.emit({ type: "tool_call_update", id: item.payload.parentItemId, agent });
+        const version = JSON.stringify(agent);
+        if (version !== this.agentVersions.get(item.id)) {
+          this.agentVersions.set(item.id, version);
+          patchToolCallAgent({ nodeId: this.nodeId, toolCallId: item.payload.parentItemId, patch: agent });
+          this.emit({ type: "tool_call_update", id: item.payload.parentItemId, agent });
+        }
       }
     }
     const last = items.filter(i => i.type !== "userMessage" && i.completedSeq).sort((a,b) => a.seq-b.seq).at(-1);
@@ -106,15 +124,25 @@ export class ProjectRun {
     if (method === "turn/started" && params.turn.clientTurnId === this.params.clientTurnId) this.turnId = params.turnId;
     if ("turnId" in params && params.turnId && this.turnId && params.turnId !== this.turnId) return;
     this.log = applyShadowEvent(this.log, { type: "notification", notification });
+    if (method === "thread/pendingRequests") {
+      // The notification supplies lifecycle state; the server request supplies
+      // the actionable form. Observers need only the former.
+      if (params.status !== "pending" && getNode(this.nodeId)?.pendingInteraction?.toolUseId === params.requestId) {
+        clearPendingInteraction(this.nodeId);
+        this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
+      }
+      return;
+    }
     if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") this.emit({ type: "thinking", text: params.delta });
     if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
-      clearPendingInteraction(this.nodeId);
+      const wasPending = getNode(this.nodeId)?.pendingInteraction?.toolUseId === params.requestId;
+      if (wasPending) clearPendingInteraction(this.nodeId);
       if (method === "serverRequest/resolved") {
         const receipts = [`已由 ${params.decidedBy.label} 处理`];
         if (this.replacing) this.retryResolutions = receipts;
         else getDB().prepare("UPDATE as_turns SET resolved_json=? WHERE node_id=?").run(JSON.stringify(receipts), this.nodeId);
       }
-      this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
+      if (wasPending) this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
     }
     this.project();
     if (method === "turn/completed" && params.turnId === this.turnId) this.finish(params.turn);
@@ -157,7 +185,6 @@ export class ProjectRun {
       for (const sub of this.subscribers) sub.onClose();
       this.subscribers.clear();
     });
-    clearInterval(this.poll);
     // Let the start RPC finish before closing the wire (a mock can finish synchronously).
     const cleanup = setTimeout(() => { this.client.close(); if (runs.get(this.nodeId) === this) runs.delete(this.nodeId); }, 1000);
     cleanup.unref?.();
@@ -203,24 +230,15 @@ export class ProjectRun {
     if (!this.replacing) updateAsTurn(this.nodeId, result.turn.id);
     this.project();
     if (["completed", "interrupted", "failed", "cancelled"].includes(result.turn.status)) this.finish(result.turn);
-    if (!this.terminal) {
-      this.poll = setInterval(() => {
-        if (this.polling || this.closing) return;
-        this.polling = true;
-        void this.reconcile().catch(error => console.warn(`[trellis/as] reconcile: ${error}`)).finally(() => { this.polling = false; });
-      }, 2000);
-      this.poll.unref?.();
-    }
   }
   async reconcile() {
     await this.client.connect();
-    await this.client.request("thread/attach", { threadId: this.threadId, sinceSeq: 0 });
     // Idempotent replay also supplies the terminal Turn missed while disconnected.
     const { turn } = await this.client.request("turn/start", this.params);
     if (["completed", "interrupted", "failed", "cancelled"].includes(turn.status)) this.finish(turn);
   }
   close() {
-    this.closing = true; clearInterval(this.poll); this.client.close();
+    this.closing = true; this.client.close();
     if (runs.get(this.nodeId) === this) runs.delete(this.nodeId);
   }
 }

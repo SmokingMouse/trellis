@@ -56,11 +56,13 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         unsubscribe = observeThread(value.thread.id, data => {
           if (data.type === "snapshot") {
             setThread(data.snapshot.thread);
+            pendingIds.clear();
             for (const request of data.snapshot.pendingRequests) if (request.params.turnId === value.turnId) pendingIds.add(request.params.requestId);
             return;
           }
           if (data.type !== "notification") return;
           const { method, params } = data.notification;
+          if (method === "thread/pendingRequests" && params.turnId === value.turnId && params.status === "pending") pendingIds.add(params.requestId);
           if (method === "thread/permission/changed") setThread(t => t ? { ...t, permission: params.permission } : t);
           if (method === "thread/engineEvent" && (!params.turnId || params.turnId === value.turnId)) {
             saved.logs = [...saved.logs, `${params.subtype}: ${JSON.stringify(params.payload)}`].slice(-100);
