@@ -31,6 +31,20 @@ function streamingCount(workspaceId: string): number {
   }
 }
 
+function activeSessionCount(workspaceId: string): number {
+  try {
+    const row = getDB()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM sessions
+         WHERE archived = 0 AND workspace_id = ?`,
+      )
+      .get(workspaceId) as { n: number } | undefined;
+    return row?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export type CleanItemPreview = {
   id: string;
   name: string;
@@ -40,6 +54,7 @@ export type CleanItemPreview = {
   dirtyCount: number;
   ignoredCount: number;
   streaming: number;
+  sessionCount: number;
   canClean: boolean;
   reason?: string;
 };
@@ -81,6 +96,7 @@ export async function POST(req: Request) {
   const previews: CleanItemPreview[] = [];
   for (const ws of rows) {
     if (ws.kind !== "worktree") {
+      const sessionCount = activeSessionCount(ws.id);
       previews.push({
         id: ws.id,
         name: ws.name,
@@ -90,6 +106,7 @@ export async function POST(req: Request) {
         dirtyCount: 0,
         ignoredCount: 0,
         streaming: 0,
+        sessionCount,
         canClean: false,
         reason: "不是 worktree（主 checkout 不可删除）",
       });
@@ -97,6 +114,7 @@ export async function POST(req: Request) {
     }
 
     const streaming = streamingCount(ws.id);
+    const sessionCount = activeSessionCount(ws.id);
     const exists = fs.existsSync(ws.path);
     if (!exists) {
       previews.push({
@@ -108,6 +126,7 @@ export async function POST(req: Request) {
         dirtyCount: 0,
         ignoredCount: 0,
         streaming,
+        sessionCount,
         canClean: streaming === 0,
         reason: streaming > 0 ? "有生成中的会话" : "目录已不存在（将清理记录）",
       });
@@ -131,6 +150,7 @@ export async function POST(req: Request) {
       dirtyCount: dirty.length,
       ignoredCount: ignored.length,
       streaming,
+      sessionCount,
       canClean: streaming === 0,
       reason: streaming > 0 ? "有生成中的会话" : undefined,
     });

@@ -13,6 +13,15 @@ export type BatchCleanModalProps = {
   onSuccess: () => void;
 };
 
+function isRecommended(item: CleanItemPreview): boolean {
+  return (
+    item.canClean &&
+    item.dirtyCount === 0 &&
+    item.ignoredCount === 0 &&
+    item.sessionCount === 0
+  );
+}
+
 export function BatchCleanModal({
   open,
   workspaceIds,
@@ -43,9 +52,9 @@ export function BatchCleanModal({
         } else {
           const list: CleanItemPreview[] = res.items || [];
           setItems(list);
-          // 默认选中所有可以安全删除的干净项（无 dirty、无 running）
-          const safeIds = new Set(
-            list.filter((it) => it.canClean && it.dirtyCount === 0).map((it) => it.id),
+          // 会话和本地改动都需要用户逐项确认；默认只选零会话的干净项。
+          const safeIds = new Set<string>(
+            list.filter(isRecommended).map((it) => it.id),
           );
           setSelectedIds(safeIds);
         }
@@ -66,10 +75,14 @@ export function BatchCleanModal({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === items.filter((it) => it.canClean).length) {
+    const recommended = items.filter(isRecommended);
+    if (
+      recommended.length > 0 &&
+      recommended.every((item) => selectedIds.has(item.id))
+    ) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(items.filter((it) => it.canClean).map((it) => it.id)));
+      setSelectedIds(new Set(recommended.map((it) => it.id)));
     }
   };
 
@@ -101,7 +114,7 @@ export function BatchCleanModal({
     }
   };
 
-  const totalSafe = items.filter((it) => it.canClean && it.dirtyCount === 0).length;
+  const totalSafe = items.filter(isRecommended).length;
 
   return (
     <Modal onClose={onClose} size="md" panelClassName="max-h-[85vh] flex flex-col">
@@ -148,11 +161,14 @@ export function BatchCleanModal({
               <label className="flex items-center gap-1.5 cursor-pointer text-ink font-medium select-none">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size > 0 && selectedIds.size === items.filter((it) => it.canClean).length}
+                  checked={
+                    totalSafe > 0 &&
+                    items.filter(isRecommended).every((it) => selectedIds.has(it.id))
+                  }
                   onChange={toggleSelectAll}
                   className="rounded border-line"
                 />
-                全选可清理项 ({selectedIds.size}/{totalSafe})
+                全选建议清理项 ({selectedIds.size}/{totalSafe})
               </label>
               <span className="text-ink-faint tabular-nums">
                 共 {items.length} 个候选工作区
@@ -191,6 +207,11 @@ export function BatchCleanModal({
                         {!it.exists && (
                           <span className="text-nano px-1 rounded bg-surface-muted text-ink-faint">
                             目录已删除
+                          </span>
+                        )}
+                        {it.sessionCount > 0 && (
+                          <span className="text-warn text-nano shrink-0 font-medium">
+                            {it.sessionCount} 个会话
                           </span>
                         )}
                       </div>

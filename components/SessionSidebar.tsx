@@ -415,6 +415,7 @@ export function SessionSidebar() {
     // 不进版本库、但删了很痛的东西 —— `git worktree remove` 不当它们是障碍，
     // 连目录一起删，而 git status 默认根本不列它们。
     const parts: string[] = [];
+    parts.push(`活跃会话：${r.sessionCount ?? 0} 个`);
     if (r.dirtyCount)
       parts.push(`未提交的改动（${r.dirtyCount} 项）：\n${r.dirty.join("\n")}`);
     if (r.ignoredCount)

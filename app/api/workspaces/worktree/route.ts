@@ -63,6 +63,21 @@ function streamingCount(workspaceId: string): number {
   }
 }
 
+/** 当前仍出现在侧栏里的会话；归档会话不阻止清理，也不计入风险提示。 */
+function activeSessionCount(workspaceId: string): number {
+  try {
+    const row = getDB()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM sessions
+         WHERE archived = 0 AND workspace_id = ?`,
+      )
+      .get(workspaceId) as { n: number } | undefined;
+    return row?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** 分支名不能带路径穿越/空白 —— 它会直接变成磁盘上的目录名。 */
 function badBranch(b: string): string | null {
   if (!b || b.length > 100) return "分支名为空或过长";
@@ -247,6 +262,7 @@ export async function DELETE(req: Request) {
   }
 
   if (!force) {
+    const sessionCount = activeSessionCount(workspaceId);
     // force=0 一律**只预演、绝不执行**。删目录不可逆，而这个按钮在触屏上是
     // 常显的（见 SessionSidebar 的 pointer-coarse 分支），误触代价太大 ——
     // 「干净就直接删」实测下来就是点一下目录就没了，连问都不问。
@@ -271,6 +287,7 @@ export async function DELETE(req: Request) {
         dirtyCount: dirty.length,
         ignored: ignored.map((l) => l.slice(3)).slice(0, 20),
         ignoredCount: ignored.length,
+        sessionCount,
       },
       { status: 409 },
     );
