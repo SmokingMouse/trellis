@@ -1,7 +1,13 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 mock.module("server-only", () => ({}));
@@ -57,7 +63,7 @@ describe("worktree cleanup helpers", () => {
     expect(isDefaultCleanCandidate({ ...clean, sessionCount: 1 })).toBeFalse();
   });
 
-  test("prune runs from the surviving main checkout", () => {
+  test("falls back to the DB main checkout after the worktree is already gone", () => {
     const repo = path.join(root, "repo");
     const stale = path.join(root, "stale");
     mkdirSync(repo);
@@ -79,6 +85,37 @@ describe("worktree cleanup helpers", () => {
     expect(main).toBe(repo);
     pruneWorktreeMetadata(main!);
     expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(stale);
+    db.close();
+  });
+
+  test("prune resolves the target worktree's clone before deletion", () => {
+    const cloneA = path.join(root, "clone-a");
+    const cloneB = path.join(root, "clone-b");
+    const worktreeB = path.join(root, "clone-b-worktree");
+    mkdirSync(cloneA);
+    git(cloneA, "init", "-q", "-b", "main");
+    writeFileSync(path.join(cloneA, "base.txt"), "base\n");
+    git(cloneA, "add", "base.txt");
+    git(cloneA, "commit", "-qm", "base");
+    git(root, "clone", "-q", cloneA, cloneB);
+    git(cloneB, "worktree", "add", "-q", "-b", "topic", worktreeB);
+
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE workspaces (
+        id TEXT, project_id TEXT, path TEXT, kind TEXT, created_at INTEGER
+      );
+    `);
+    // 两个 clone 被 remote 聚到同一 project，较早的 DB main 故意指向 clone A。
+    db.prepare("INSERT INTO workspaces VALUES ('main-a','p',?,'main',1)").run(cloneA);
+
+    const pruneFrom = resolveMainCheckoutPath(db, "p", worktreeB);
+    expect(pruneFrom).toBe(realpathSync(cloneB));
+    rmSync(worktreeB, { recursive: true, force: true });
+    pruneWorktreeMetadata(pruneFrom!);
+    expect(git(cloneB, "worktree", "list", "--porcelain")).not.toContain(
+      worktreeB,
+    );
     db.close();
   });
 });

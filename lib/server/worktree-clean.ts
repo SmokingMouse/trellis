@@ -1,6 +1,7 @@
 import "server-only";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import type { Database } from "bun:sqlite";
 
 export function activeWorkspaceSessionCount(
@@ -43,12 +44,23 @@ function git(cwd: string, args: string[]) {
   });
 }
 
-/** 删除前解析主 checkout；worktree 自己删掉后不能再拿它当 prune 的 cwd。 */
+/** 删除前解析所属 clone 的主 checkout；worktree 自己删掉后就取不到 common-dir。 */
 export function resolveMainCheckoutPath(
   db: Database,
   projectId: string,
   currentPath: string,
 ): string | null {
+  // project 按 remote 聚类，同一 project 可能有多个 clone。必须先问目标 worktree
+  // 自己的 common-dir；否则 DB 里较早的另一个 clone 会吃掉 prune，当前 clone 的
+  // stale metadata 则原地残留。
+  const common = git(currentPath, ["rev-parse", "--git-common-dir"]);
+  if (common.status === 0 && common.stdout.trim()) {
+    const commonDir = path.resolve(currentPath, common.stdout.trim());
+    const checkout = path.dirname(commonDir);
+    if (fs.existsSync(checkout)) return checkout;
+  }
+
+  // 目录已先被外部删除时无法再问 git，只能用同 project 的 main 行兜底。
   const main = db
     .prepare(
       `SELECT path FROM workspaces
@@ -57,15 +69,7 @@ export function resolveMainCheckoutPath(
     )
     .get(projectId) as { path: string } | undefined;
   if (main && fs.existsSync(main.path)) return main.path;
-
-  const listed = git(currentPath, ["worktree", "list", "--porcelain"]);
-  if (listed.status !== 0) return null;
-  const first = listed.stdout
-    .split("\n")
-    .find((line) => line.startsWith("worktree "))
-    ?.slice("worktree ".length)
-    .trim();
-  return first && fs.existsSync(first) ? first : null;
+  return null;
 }
 
 export function pruneWorktreeMetadata(mainCheckoutPath: string): void {
