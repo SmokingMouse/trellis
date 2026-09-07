@@ -160,7 +160,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
   const existing = db
     .prepare("SELECT origin FROM sessions WHERE id = ?")
     .get(trellisSessionId) as { origin: string } | undefined;
-  if (existing && existing.origin !== "cli-import") {
+  if (existing && existing.origin !== "cli-import" && existing.origin !== "herdr") {
     return { sessionId: trellisSessionId, status: "skipped-native", turns: 0 };
   }
 

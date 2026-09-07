@@ -1,5 +1,5 @@
 // CLI session 实时同步 watcher（per-session attach 模型，progress/cli-sync.md）。
-// 用户 attach 的 CLI 会话 = origin='cli-import' 且带 source_jsonl_path 的 trellis session。
+// 用户 attach 或 Herdr 绑定的 CLI 会话带 source_jsonl_path，均为只读镜像。
 // watcher 监听这些 jsonl 所在目录，文件变更 → debounce → 重导入对应 attached 会话。
 // 只同步 attached 的文件，目录里其它会话一概不碰（per-session，不是 per-dir 灌）。
 // 启动点：instrumentation.ts register()，每进程一次。
@@ -22,6 +22,11 @@ import { publishCliSessionUpdated } from "./cli-sync-events";
 
 // 当前 attached 会话的源 jsonl 绝对路径集合（每次实时查 DB，保持权威）。
 type AttachedPath = { sid: string; provider: CliProvider };
+type MirrorOrigin = "cli-import" | "herdr";
+
+function isMirrorOrigin(origin: string): origin is MirrorOrigin {
+  return origin === "cli-import" || origin === "herdr";
+}
 
 function attachedPathMap(): Map<string, AttachedPath> {
   const db = getDB();
@@ -45,7 +50,7 @@ function attachedSessions(): {
     .prepare(
       `SELECT id, COALESCE(cli_provider, 'claude') AS provider,
               workspace_path AS cwd
-       FROM sessions WHERE origin = 'cli-import'`,
+       FROM sessions WHERE origin IN ('cli-import', 'herdr')`,
     )
     .all() as { id: string; provider: CliProvider; cwd: string | null }[];
   return rows;
@@ -55,6 +60,7 @@ function seedLineage(
   discovered: DiscoveredLineage,
   provider: CliProvider,
   trellisSessionId = discovered.rootSid,
+  origin: MirrorOrigin = "cli-import",
 ): void {
   const db = getDB();
   const root = discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
@@ -65,7 +71,7 @@ function seedLineage(
   const existing = db
     .prepare("SELECT origin FROM sessions WHERE id = ?")
     .get(trellisSessionId) as { origin: string } | undefined;
-  if (existing && existing.origin !== "cli-import") {
+  if (existing && !isMirrorOrigin(existing.origin)) {
     throw new Error(`session id ${trellisSessionId} already exists as native session`);
   }
 
@@ -91,7 +97,7 @@ function seedLineage(
          (id, title, root_node_id, created_at, updated_at, context_mode,
           workspace_path, workspace_id, model, origin, source_jsonl_path,
           synced_uuid, cli_provider)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'cli-import', ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          root_node_id = excluded.root_node_id,
@@ -112,6 +118,7 @@ function seedLineage(
       parsed.cwd,
       workspaceId,
       provider === "codex" ? "codex" : null,
+      origin,
       root.path,
       parsed.lastUuid,
       provider,
@@ -278,9 +285,13 @@ export function refreshWatches(): void {
 
 // ── 对外操作 ─────────────────────────────────────────────────────────────────
 
-export function attachSession(jsonlPath: string, provider: CliProvider = "claude") {
+export function attachSession(
+  jsonlPath: string,
+  provider: CliProvider = "claude",
+  options: { origin?: MirrorOrigin } = {},
+) {
   const lineage = discoverLineage(jsonlPath, provider);
-  seedLineage(lineage, provider);
+  seedLineage(lineage, provider, lineage.rootSid, options.origin ?? "cli-import");
   const res = importCliLineage(lineage.rootSid);
   refreshWatches();
   return res;
