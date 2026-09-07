@@ -419,6 +419,7 @@ export class HerdrClient {
     this._realtime = false;
     this.baselineReady = false;
     this._lastError = error instanceof Error ? error.message : String(error);
+    this._generation++;
     const eventSocket = this.eventSocket;
     this.eventSocket = null;
     try {
@@ -660,6 +661,7 @@ export class HerdrClient {
     this._realtime = false;
     this.baselineReady = false;
     this._lastError = error instanceof Error ? error.message : String(error);
+    this._generation++;
     this.emit({ kind: "fleet" });
     this.scheduleReconnect();
   }

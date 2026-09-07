@@ -220,7 +220,11 @@ describe("HerdrClient", () => {
     const client = clientFor(server);
     await client.start();
     const before = server.requests.filter((r) => r.method === "session.snapshot").length;
+    const generation = client.state.generation;
     server.disconnectSubscribers();
+    await Bun.sleep(20);
+    expect(client.state.generation).toBeGreaterThan(generation);
+    expect(client.state.realtime).toBeFalse();
     await Bun.sleep(400);
     expect(server.subscribeConnections).toBeGreaterThanOrEqual(2);
     expect(server.requests.filter((r) => r.method === "session.snapshot").length).toBeGreaterThan(
