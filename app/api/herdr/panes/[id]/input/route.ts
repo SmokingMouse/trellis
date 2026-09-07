@@ -20,6 +20,12 @@ export async function POST(
   if (typeof body.text !== "string" || !body.text.trim()) {
     return Response.json({ error: "expected non-empty { text }" }, { status: 400 });
   }
+  if (Buffer.byteLength(body.text, "utf8") > 32 * 1024) {
+    return Response.json({ error: "text exceeds 32 KiB" }, { status: 413 });
+  }
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(body.text)) {
+    return Response.json({ error: "text contains terminal control characters" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const service = getHerdrFleetService();
@@ -30,6 +36,8 @@ export async function POST(
     const status =
       error instanceof HerdrUnavailableError
         ? 503
+        : error instanceof HerdrApiError && error.code === "not_agent_pane"
+          ? 403
         : error instanceof HerdrApiError && error.code === "pane_not_found"
           ? 404
           : 502;

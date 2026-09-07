@@ -244,6 +244,27 @@ describe("HerdrFleetService", () => {
     expect(h.requests.filter(r => r.method === "pane.split")).toHaveLength(1);
   });
 
+  test("HTTP input and keys reject shell panes, controls and oversized text before writing", async () => {
+    const h = createHarness();
+    h.snapshotPanes.push({ ...h.basePane, pane_id: "shell", agent: null, agent_session: null });
+    const globals = globalThis as typeof globalThis & { __trellisHerdrFleet?: InstanceType<typeof HerdrFleetService> };
+    globals.__trellisHerdrFleet = h.service;
+    cleanups.push(() => { delete globals.__trellisHerdrFleet; });
+    const input = await import("../../app/api/herdr/panes/[id]/input/route");
+    const keys = await import("../../app/api/herdr/panes/[id]/keys/route");
+    const request = (body: unknown) => new Request("http://localhost/api/herdr", { method: "POST", body: JSON.stringify(body) });
+    for (const route of [input, keys]) {
+      const body = route === input ? { text: "echo unsafe" } : { keys: ["Enter"] };
+      expect((await route.POST(request(body), { params: Promise.resolve({ id: "shell" }) })).status).toBe(403);
+      expect((await route.POST(request(body), { params: Promise.resolve({ id: "missing" }) })).status).toBe(404);
+    }
+    for (const [text, status] of [["中".repeat(12_000), 413], ["hi\u001b[201~", 400], ["hi\u0000", 400]] as const) {
+      expect((await input.POST(request({ text }), { params: Promise.resolve({ id: "w1:p1" }) })).status).toBe(status);
+    }
+    expect(h.requests.filter(r => r.method === "pane.send_input" || r.method === "pane.send_keys")).toHaveLength(0);
+    expect((await input.POST(request({ text: "hello\n\tworld" }), { params: Promise.resolve({ id: "w1:p1" }) })).status).toBe(200);
+  });
+
   test("HTTP routes expose ETag polling, input, keys, and reopen", async () => {
     const harness = createHarness();
     const globals = globalThis as typeof globalThis & {

@@ -21,7 +21,7 @@ export async function POST(
     !Array.isArray(body.keys) ||
     body.keys.length === 0 ||
     body.keys.length > 32 ||
-    body.keys.some((key) => typeof key !== "string" || !key)
+    body.keys.some((key) => typeof key !== "string" || !key || key.length > 32 || /[\u0000-\u001f\u007f]/.test(key))
   ) {
     return Response.json({ error: "expected non-empty { keys: string[] }" }, { status: 400 });
   }
@@ -35,6 +35,8 @@ export async function POST(
     const status =
       error instanceof HerdrUnavailableError
         ? 503
+        : error instanceof HerdrApiError && error.code === "not_agent_pane"
+          ? 403
         : error instanceof HerdrApiError && error.code === "pane_not_found"
           ? 404
           : 502;

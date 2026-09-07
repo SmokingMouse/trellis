@@ -281,10 +281,10 @@ export class HerdrClient {
     text: string,
     timeoutMs = 300_000,
   ): Promise<Record<string, unknown>> {
+    this.requireAgentPane(paneId);
     const previous = this.inputTails.get(paneId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(async () => {
-      const current = this.panes.get(paneId);
-      if (!current) throw new HerdrApiError("pane not found", "pane_not_found");
+      const current = this.requireAgentPane(paneId);
       if (current.agent_status !== "idle" && current.agent_status !== "done") {
         await this.request("agent.wait", {
           target: paneId,
@@ -292,6 +292,7 @@ export class HerdrClient {
           timeout_ms: timeoutMs,
         }, timeoutMs + 5_000);
       }
+      this.requireAgentPane(paneId);
       const sent = await this.request<Record<string, unknown>>("pane.send_input", {
         pane_id: paneId,
         text,
@@ -320,7 +321,16 @@ export class HerdrClient {
   }
 
   async sendKeys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
+    this.requireAgentPane(paneId);
     return this.request("pane.send_keys", { pane_id: paneId, keys });
+  }
+
+  private requireAgentPane(paneId: string): HerdrPane {
+    if (!this.enabled || !this._available) throw new HerdrUnavailableError();
+    const pane = this.panes.get(paneId);
+    if (!pane) throw new HerdrApiError("pane not found", "pane_not_found");
+    if (!pane.agent) throw new HerdrApiError("target must be an agent pane", "not_agent_pane");
+    return pane;
   }
 
   async splitAndResume(
