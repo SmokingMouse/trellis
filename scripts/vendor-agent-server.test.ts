@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vendorManifest } from "./vendor-agent-server-manifest";
 
@@ -18,6 +19,21 @@ test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides o
     expect(existsSync(join(root, "vendor/agent-server", target.types))).toBe(true);
     expect(existsSync(join(root, "vendor/agent-server", target.default))).toBe(true);
   }
+});
+
+test("N4 missing source explains sibling default and SM_TOOLKIT_DIR override", () => {
+  const temp = mkdtempSync(join(tmpdir(), "as-vendor-path-test-"));
+  try {
+    mkdirSync(join(temp, "repo/scripts"), { recursive: true });
+    const script = join(temp, "repo/scripts/vendor-agent-server.sh");
+    copyFileSync(join(import.meta.dir, "vendor-agent-server.sh"), script);
+    for (const source of ["", join(temp, "custom-source")]) {
+      const result = Bun.spawnSync(["sh", script], { env: { ...process.env, SM_TOOLKIT_DIR: source } });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(source || "../sm-toolkit");
+      expect(result.stderr.toString()).toContain("set SM_TOOLKIT_DIR");
+    }
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
 test("N3 derives new runtime dependencies and removes stale pins without copying dev dependencies", () => {

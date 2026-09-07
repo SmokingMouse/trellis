@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-SOURCE=${SM_TOOLKIT_DIR:-/Users/smokingmouse/sm-toolkit}
+SOURCE=${SM_TOOLKIT_DIR:-$ROOT/../sm-toolkit}
+if [ ! -f "$SOURCE/packages/agent-server/package.json" ]; then
+  echo "agent-server source missing at $SOURCE/packages/agent-server; set SM_TOOLKIT_DIR to a sm-toolkit checkout" >&2
+  exit 1
+fi
 COMMIT=$(git -C "$SOURCE" rev-parse "${SM_TOOLKIT_REF:-HEAD}^{commit}")
 STAGE=$(mktemp -d /tmp/trellis-vendor-as-XXXXXX)
 trap 'rm -rf "$STAGE"' 0
