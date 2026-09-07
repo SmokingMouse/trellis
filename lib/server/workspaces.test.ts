@@ -138,6 +138,34 @@ describe("workspace realpath identity", () => {
     });
   });
 
+  test("recent picker keeps the newest same-source timestamp regardless of order", () => {
+    const trellisRows = [
+      {
+        path: realDir,
+        shortName: "real",
+        lastUsedAt: 100,
+        source: "trellis" as const,
+      },
+      {
+        path: aliasDir,
+        shortName: "alias",
+        lastUsedAt: 5,
+        source: "trellis" as const,
+      },
+    ];
+
+    for (const rows of [trellisRows, [...trellisRows].reverse()]) {
+      expect(mergeRecentWorkspaces([], rows, [])).toEqual([
+        {
+          path: canonicalWorkspacePath(realDir),
+          shortName: path.basename(realDir),
+          lastUsedAt: 100,
+          source: "trellis",
+        },
+      ]);
+    }
+  });
+
   test("scan registration writes no recency timestamp", () => {
     const db = projectTreeDb();
     const id = ensureWorkspaceForPath(unusedDir, "worktree-scan", db);

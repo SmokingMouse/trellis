@@ -51,34 +51,25 @@ export function mergeRecentWorkspaces(
   trellisWorkspaces: RecentWorkspace[],
   claudeWorkspaces: RecentWorkspace[],
 ): RecentWorkspace[] {
-
-  // Merge by canonical path. Trellis updated_at beats claude dir mtime
-  // (more meaningful "last used"). Source flag promotes to "both" on
-  // overlap.
+  // 三路都按 canonical path 做同一个 upsert：时间永远取 max，来源取并集。
+  // 不能靠「后一路覆盖前一路」，因为同一路内部也会出现 /tmp 与
+  // /private/tmp 这种指向同一目录的拼写，SQL 返回顺序不保证新时间在后。
   const merged = new Map<string, RecentWorkspace>();
-  // 先铺零 session 的 worktree，再让真有 session 的两路盖上去 —— 它们的
-  // lastUsedAt 更有意义（真用过 vs 刚建出来）。
-  for (const raw of freshWorktrees) {
-    const w = canonicalRecentWorkspace(raw);
-    merged.set(w.path, w);
-  }
-  for (const raw of trellisWorkspaces) {
-    const w = canonicalRecentWorkspace(raw);
-    merged.set(w.path, w);
-  }
-  for (const raw of claudeWorkspaces) {
+  const upsert = (raw: RecentWorkspace) => {
     const w = canonicalRecentWorkspace(raw);
     const existing = merged.get(w.path);
     if (existing) {
       merged.set(w.path, {
         ...existing,
-        source: "both",
-        // Keep the larger timestamp.
+        source: existing.source === w.source ? existing.source : "both",
         lastUsedAt: Math.max(existing.lastUsedAt, w.lastUsedAt),
       });
     } else {
       merged.set(w.path, w);
     }
+  };
+  for (const source of [freshWorktrees, trellisWorkspaces, claudeWorkspaces]) {
+    for (const w of source) upsert(w);
   }
 
   return Array.from(merged.values());
@@ -86,11 +77,12 @@ export function mergeRecentWorkspaces(
 
 export function canonicalRecentWorkspace(w: RecentWorkspace): RecentWorkspace {
   const canonical = canonicalWorkspacePath(w.path);
-  if (canonical === w.path) return w;
+  const shortName = deriveShortName(canonical);
+  if (canonical === w.path && shortName === w.shortName) return w;
   return {
     ...w,
     path: canonical,
-    shortName: deriveShortName(canonical),
+    shortName,
   };
 }
 
