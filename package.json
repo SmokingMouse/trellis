@@ -2,6 +2,9 @@
   "name": "trellis",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "@smokingmouse/agent": "^0.8.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,6 +17,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
     "@smokingmouse/agent": "^0.8.0",
+    "@smokingmouse/agent-server": "file:/Users/smokingmouse/.herdr/worktrees/sm-toolkit/feat-agent-server/packages/agent-server",
     "@smokingmouse/llm": "^0.4.0",
     "@xyflow/react": "^12.10.2",
     "highlight.js": "^11.11.1",
