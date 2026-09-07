@@ -16,4 +16,5 @@
 
 - workspace 事件在写入本地 Map 前判断：未知 ID 或显式 worktree 值变化才按需快照；已知非 git 工作区省略该 key 不再触发快照。worktree_* 事件保持原逻辑。
 - 两条 N1 回归先在旧实现上失败；覆盖三类 workspace 事件各十次不重拉、未知 workspace、元数据添加/切换/清空及相同元数据不重拉。
-- Next：定向测试与契约 D1–D5 全量验证。
+- 验证：定向 33 pass；D1 tsc exit 0，D2 全量 218 pass / 0 fail / 778 expect；D3 mobile-herdr 与 D4 mobile-slim-shell 均 exit 0；D5 exit 0（3471–3482 无监听、锁不存在、3490 原进程存活）。原始日志在新契约 `fj-hb-nest-fix2-238c/out/`。
+- Next：交主控独立验收。期间观察到 `.fenjue/` 跟踪文件删除，未纳入本单提交；未 push。

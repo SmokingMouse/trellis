@@ -6,6 +6,8 @@
 
 ## 已结案
 
+- **N1 已知非 git workspace 更新触发快照风暴**（fj-hb-nest-fix2-238c）→ `resolved`。症状：每条省略 worktree key 的 workspace_updated 都重拉快照；可证伪假设：缺 key 被误判为未知元数据。改为本地未知 ID 或显式元数据变化才拉取。判定命令：`bun test lib/server/herdr-client.test.ts -t N1`，两条回归在旧实现失败、修后通过；三类 workspace 事件各十次无额外快照，新增/元数据变化仍拉取。全量验证 218 pass。
+
 - **排序 E2E 未结束旧等待卡片**（fj-hb-nest-fix-115b）→ `resolved`。症状：状态对调断言等待；假设：普通 PreToolUse 按既有规则保留 AskUserQuestion。改用匹配的 PostToolUse 结束卡片；判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-herdr.sh </dev/null`。首次尝试主动终止 exit 143，最终复跑证据见契约 out。
 
 - **Herdr 分支缓存测试时钟撞名**（fj-hb-nest-fix-115b）→ `resolved`。症状：单次测试重复 SQLite Binding 类型错误；假设：函数 `now` 通过 options 扩散至 bindings 数值字段。改名 `branchNow` 后消失；判定命令：`bun test lib/server/herdr-fleet.test.ts && bunx tsc --noEmit`，11 pass / exit 0。
