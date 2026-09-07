@@ -1,4 +1,4 @@
-.as-shadow { max-width: 1200px; margin: auto; padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); color: var(--foreground); overflow-wrap: anywhere; }
+.as-shadow { max-width: 1200px; height: 100dvh; overflow-y: auto; margin: auto; padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); color: var(--ink); overflow-wrap: anywhere; }
 .as-shadow button, .as-back { min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; cursor: pointer; touch-action: manipulation; }
 .as-shadow button:focus-visible, .as-back:focus-visible { outline: 2px solid #168577; outline-offset: 3px; }
 .as-shadow button:disabled { opacity: .5; cursor: wait; }
