@@ -10,8 +10,8 @@ const isDev = process.env.NODE_ENV !== "production";
 // SDK-hacking flow (`make link-sdk`, which symlinks the two packages back to
 // ~/sdk): Turbopack only follows symlinks *within* its configured root, and
 // ~/sdk sits outside the project dir, so root must be a common ancestor.
-// Harmless otherwise (long since proven in prod on this machine), so it
-// stays unconditional rather than link-detection-conditional.
+// Keep that common ancestor for checkouts inside HOME; CI clones elsewhere
+// use their own directory so the application remains inside Turbopack's root.
 // A clean clone can be outside HOME (CI and /tmp); root must contain the app.
 const projectRoot = process.cwd().startsWith(os.homedir() + "/") ? os.homedir() : process.cwd();
 
