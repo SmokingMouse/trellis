@@ -18,6 +18,11 @@ export class LeaseManager {
         if (lease && lease.holder.clientId !== clientId)
             throw new ProtocolError(ErrorCode.lease_held, "input lease held", { threadId, holder: lease.holder });
     }
+    assertHeld(threadId, clientId) {
+        this.assertInput(threadId, clientId);
+        if (!this.read(threadId))
+            throw new ProtocolError(ErrorCode.unauthorized, "an active thread lease is required for permission escalation", { threadId });
+    }
     acquire(threadId, holder, ttlMs = 5 * 60_000) {
         this.assertInput(threadId, holder.clientId);
         const lease = { threadId, holder: structuredClone(holder), expiresAtMs: this.now() + ttlMs };

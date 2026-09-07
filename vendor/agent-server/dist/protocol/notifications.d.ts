@@ -1,5 +1,29 @@
 import { z } from "zod";
 export declare const NotificationSchemas: {
+    readonly "thread/permission/changed": z.ZodObject<{
+        threadId: z.ZodString;
+        permission: z.ZodEnum<{
+            default: "default";
+            readonly: "readonly";
+            "auto-edit": "auto-edit";
+            full: "full";
+            acceptEdits: "acceptEdits";
+            plan: "plan";
+            bypassPermissions: "bypassPermissions";
+            dontAsk: "dontAsk";
+        }>;
+    }, z.core.$strict>;
+    readonly "thread/engineEvent": z.ZodObject<{
+        threadId: z.ZodString;
+        turnId: z.ZodOptional<z.ZodString>;
+        backend: z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            external: "external";
+        }>;
+        subtype: z.ZodString;
+        payload: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
+    }, z.core.$strict>;
     readonly initialized: z.ZodObject<{}, z.core.$strip>;
     readonly "thread/started": z.ZodObject<{
         threadId: z.ZodString;
@@ -21,7 +45,7 @@ export declare const NotificationSchemas: {
                     closed: "closed";
                 }>;
                 error: z.ZodOptional<z.ZodObject<{
-                    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                     message: z.ZodString;
                     data: z.ZodOptional<z.ZodObject<{
                         threadId: z.ZodOptional<z.ZodString>;
@@ -42,6 +66,16 @@ export declare const NotificationSchemas: {
             model: z.ZodOptional<z.ZodString>;
             title: z.ZodOptional<z.ZodString>;
             meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+            permission: z.ZodOptional<z.ZodEnum<{
+                default: "default";
+                readonly: "readonly";
+                "auto-edit": "auto-edit";
+                full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
+            }>>;
             createdAtMs: z.ZodNumber;
             closedAtMs: z.ZodOptional<z.ZodNumber>;
             clientThreadId: z.ZodOptional<z.ZodString>;
@@ -59,7 +93,7 @@ export declare const NotificationSchemas: {
                 closed: "closed";
             }>;
             error: z.ZodOptional<z.ZodObject<{
-                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                 message: z.ZodString;
                 data: z.ZodOptional<z.ZodObject<{
                     threadId: z.ZodOptional<z.ZodString>;
@@ -106,6 +140,7 @@ export declare const NotificationSchemas: {
     readonly "thread/metadata/updated": z.ZodObject<{
         threadId: z.ZodString;
         engineThreadId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        model: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
         meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
     }, z.core.$strip>;
@@ -139,7 +174,7 @@ export declare const NotificationSchemas: {
                 contextTokens: z.ZodNullable<z.ZodNumber>;
             }, z.core.$strip>>;
             error: z.ZodOptional<z.ZodObject<{
-                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                 message: z.ZodString;
                 data: z.ZodOptional<z.ZodObject<{
                     threadId: z.ZodOptional<z.ZodString>;
@@ -187,7 +222,7 @@ export declare const NotificationSchemas: {
                 contextTokens: z.ZodNullable<z.ZodNumber>;
             }, z.core.$strip>>;
             error: z.ZodOptional<z.ZodObject<{
-                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                 message: z.ZodString;
                 data: z.ZodOptional<z.ZodObject<{
                     threadId: z.ZodOptional<z.ZodString>;
@@ -230,6 +265,9 @@ export declare const NotificationSchemas: {
             type: z.ZodLiteral<"userMessage">;
             payload: z.ZodObject<{
                 content: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    type: z.ZodLiteral<"bash">;
+                    command: z.ZodString;
+                }, z.core.$strict>, z.ZodObject<{
                     type: z.ZodLiteral<"text">;
                     text: z.ZodString;
                 }, z.core.$strip>, z.ZodObject<{
@@ -390,14 +428,16 @@ export declare const NotificationSchemas: {
             type: z.ZodLiteral<"subAgent">;
             payload: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    agent: "agent";
                     bash: "bash";
+                    agent: "agent";
                     workflow: "workflow";
                 }>;
                 parentItemId: z.ZodString;
                 phase: z.ZodString;
                 progress: z.ZodOptional<z.ZodJSONSchema>;
                 report: z.ZodOptional<z.ZodJSONSchema>;
+                text: z.ZodOptional<z.ZodString>;
+                thinking: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
             id: z.ZodString;
             status: z.ZodOptional<z.ZodEnum<{
@@ -517,6 +557,9 @@ export declare const NotificationSchemas: {
             type: z.ZodLiteral<"userMessage">;
             payload: z.ZodObject<{
                 content: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    type: z.ZodLiteral<"bash">;
+                    command: z.ZodString;
+                }, z.core.$strict>, z.ZodObject<{
                     type: z.ZodLiteral<"text">;
                     text: z.ZodString;
                 }, z.core.$strip>, z.ZodObject<{
@@ -677,14 +720,16 @@ export declare const NotificationSchemas: {
             type: z.ZodLiteral<"subAgent">;
             payload: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    agent: "agent";
                     bash: "bash";
+                    agent: "agent";
                     workflow: "workflow";
                 }>;
                 parentItemId: z.ZodString;
                 phase: z.ZodString;
                 progress: z.ZodOptional<z.ZodJSONSchema>;
                 report: z.ZodOptional<z.ZodJSONSchema>;
+                text: z.ZodOptional<z.ZodString>;
+                thinking: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
             id: z.ZodString;
             status: z.ZodOptional<z.ZodEnum<{
@@ -866,7 +911,7 @@ export declare const NotificationSchemas: {
         threadId: z.ZodOptional<z.ZodString>;
         turnId: z.ZodOptional<z.ZodString>;
         error: z.ZodObject<{
-            code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+            code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
             message: z.ZodString;
             data: z.ZodOptional<z.ZodObject<{
                 threadId: z.ZodOptional<z.ZodString>;
@@ -891,6 +936,8 @@ export declare const NotificationSchemas: {
 };
 export declare const NotificationMethodSchema: z.ZodEnum<{
     error: "error";
+    "thread/permission/changed": "thread/permission/changed";
+    "thread/engineEvent": "thread/engineEvent";
     initialized: "initialized";
     "thread/started": "thread/started";
     "thread/status/changed": "thread/status/changed";

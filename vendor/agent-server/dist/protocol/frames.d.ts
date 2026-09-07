@@ -15,7 +15,7 @@ export declare const ErrorResponseSchema: z.ZodObject<{
     jsonrpc: z.ZodLiteral<"2.0">;
     id: z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>;
     error: z.ZodObject<{
-        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
         message: z.ZodString;
         data: z.ZodOptional<z.ZodObject<{
             threadId: z.ZodOptional<z.ZodString>;
@@ -50,7 +50,7 @@ export declare const FrameSchema: z.ZodUnion<readonly [z.ZodObject<{
     jsonrpc: z.ZodLiteral<"2.0">;
     id: z.ZodNullable<z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>>;
     error: z.ZodObject<{
-        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
         message: z.ZodString;
         data: z.ZodOptional<z.ZodObject<{
             threadId: z.ZodOptional<z.ZodString>;

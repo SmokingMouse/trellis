@@ -20,8 +20,9 @@ export declare const ErrorCode: {
     readonly duplicate_client_id: -32013;
     readonly already_resolved: -32014;
     readonly engine_protocol_error: -32015;
+    readonly backend_unsupported: -32016;
 };
-export declare const ErrorCodeSchema: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+export declare const ErrorCodeSchema: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;
 export declare const ErrorDataSchema: z.ZodObject<{
     threadId: z.ZodOptional<z.ZodString>;
@@ -37,7 +38,7 @@ export declare const ErrorDataSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export declare const RpcErrorSchema: z.ZodObject<{
-    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
     message: z.ZodString;
     data: z.ZodOptional<z.ZodObject<{
         threadId: z.ZodOptional<z.ZodString>;

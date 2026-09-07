@@ -7,6 +7,18 @@ export interface EngineItem {
 }
 export type DeltaKind = "text" | "reasoning" | "summary" | "stdout" | "stderr";
 export type EngineEvent = {
+    type: "modelChanged";
+    model: string;
+} | {
+    type: "permissionChanged";
+    permission: NonNullable<StartThreadParams["permission"]>;
+} | {
+    type: "engineEvent";
+    turnId?: string;
+    backend: Backend;
+    subtype: string;
+    payload: import("../protocol/index.js").JsonObject;
+} | {
     type: "metadata";
     engineThreadId: string;
 } | {
@@ -81,6 +93,8 @@ export interface EngineSession {
     readonly events: AsyncIterable<EngineEvent>;
     spawn(options: SessionOptions): Promise<void>;
     attach(): Promise<void>;
+    engineControl?(subtype: string, params: import("../protocol/index.js").JsonObject): Promise<import("../protocol/index.js").JsonObject>;
+    setPermission?(permission: NonNullable<StartThreadParams["permission"]>): Promise<void>;
     validateTurn?(options: StartTurnParams): void;
     sendTurn(turnId: string, input: UserInput[], options: StartTurnParams): Promise<void>;
     steer(turnId: string, input: UserInput[], options?: Pick<StartTurnParams, "clientTurnId">): Promise<void>;

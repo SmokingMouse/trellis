@@ -64,7 +64,7 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
 
 export function itemText(item: Item): string {
   switch (item.type) {
-    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.path).join("\n");
+    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.type === "bash" ? `!${input.command}` : input.path).join("\n");
     case "agentMessage": return item.payload.text;
     case "reasoning": return [item.payload.summary, item.payload.text].filter(Boolean).join("\n");
     case "commandExecution": return `$ ${item.payload.command}\n${item.payload.cwd}\n${item.payload.aggregatedOutput ?? ""}${item.payload.exitCode == null ? "" : `\nexit ${item.payload.exitCode}`}`;

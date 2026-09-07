@@ -45,6 +45,25 @@ export class ThreadManager {
         this.timer.unref();
     }
     get(threadId) { return this.log.thread(threadId); }
+    async setPermission(params) {
+        const thread = this.get(params.threadId);
+        if (thread.backend !== "claude")
+            throw new ProtocolError(ErrorCode.backend_unsupported, "live permission mode requires Claude");
+        const engine = this.session(thread.id);
+        if (!engine.setPermission)
+            throw new ProtocolError(ErrorCode.backend_unsupported, "live permission mode unavailable");
+        await engine.setPermission(params.permission);
+        return { thread: this.get(thread.id) };
+    }
+    engineControl(params) {
+        const thread = this.get(params.threadId);
+        if (thread.backend !== "claude")
+            throw new ProtocolError(ErrorCode.backend_unsupported, `${thread.backend} does not support Claude engine controls`);
+        const engine = this.session(thread.id);
+        if (!engine.engineControl)
+            throw new ProtocolError(ErrorCode.backend_unsupported, "engine controls unavailable");
+        return engine.engineControl(params.subtype, params.params);
+    }
     session(threadId) {
         const session = this.live.get(threadId);
         if (!session)
@@ -82,6 +101,7 @@ export class ThreadManager {
         }
         const thread = { id: `th_${crypto.randomUUID()}`, backend: params.backend, engineThreadId: internal?.fork ? null : internal?.resume ?? null, cwd: params.cwd ?? process.cwd(), status: { type: "spawning" }, createdAtMs: this.now(), ...(params.model ? { model: params.model } : {}), ...(params.meta ? { meta: params.meta } : {}), ...(params.clientThreadId ? { clientThreadId: params.clientThreadId } : {}) };
         const options = { ...params, cwd: thread.cwd };
+        thread.permission = params.permission ?? "default";
         this.log.insertThread(thread, request, options);
         onCreated?.(thread);
         this.log.publish({ jsonrpc: "2.0", method: "thread/started", params: { threadId: thread.id, thread } });
@@ -160,6 +180,7 @@ export class ThreadManager {
         this.log.saveOptions(thread.id, options);
         thread.cwd = options.cwd ?? thread.cwd;
         thread.model = options.model;
+        thread.permission = options.permission ?? "default";
         delete thread.closedAtMs;
         this.log.saveThread(thread);
         this.setStatus(thread.id, { type: "spawning" });
@@ -191,6 +212,26 @@ export class ThreadManager {
         this.log.publish({ jsonrpc: "2.0", method: "thread/metadata/updated", params: { threadId, engineThreadId } });
     }
     handle(threadId, event) {
+        if (event.type === "modelChanged") {
+            const thread = this.get(threadId);
+            thread.model = event.model;
+            this.log.transaction(() => { this.log.saveThread(thread); this.log.saveOptions(threadId, { ...this.log.options(threadId), model: event.model }); });
+            this.log.publish({ jsonrpc: "2.0", method: "thread/metadata/updated", params: { threadId, model: event.model } });
+            return;
+        }
+        if (event.type === "permissionChanged") {
+            const thread = this.get(threadId);
+            thread.permission = event.permission;
+            this.log.saveThread(thread);
+            this.log.saveOptions(threadId, { ...this.log.options(threadId), permission: event.permission });
+            this.log.publish({ jsonrpc: "2.0", method: "thread/permission/changed", params: { threadId, permission: event.permission } });
+            return;
+        }
+        if (event.type === "engineEvent") {
+            const { type: _, ...params } = event;
+            this.log.publish({ jsonrpc: "2.0", method: "thread/engineEvent", params: { threadId, ...params } });
+            return;
+        }
         if (event.type === "metadata") {
             this.metadata(threadId, event.engineThreadId);
             return;

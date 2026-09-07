@@ -1,18 +1,36 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { EventType, resolveClaudeModel } from "@smokingmouse/agent";
-import { ErrorCode, ProtocolError } from "../protocol/index.js";
+import { ClaudeEffortSchema, ErrorCode, PermissionSchema, ProtocolError } from "../protocol/index.js";
 import { AsyncQueue } from "./session.js";
 import { ClaudeEventMapper, jsonValue, mapPermissionDecision, mapPermissionRequest, record } from "./claude-mapper.js";
+// Local Claude Code 2.1.258 bin/claude.exe: print.ts d.request.subtype dispatch.
+// Default deny: auth, initialization, settings, remote plumbing and lifecycle controls
+// either need a native UI or would desynchronize the daemon's ownership/allowed_roots.
+export const CLAUDE_CONTROL_ALLOWLIST = new Set([
+    "set_model", "set_permission_mode", "set_max_thinking_tokens", "list_models",
+    "file_suggestions", "read_file", "get_workspace_diff", "get_plan",
+    "get_context_usage", "get_session_cost", "get_usage", "get_settings", "get_binary_version",
+    "mcp_status", "mcp_reconnect", "mcp_toggle", "interrupt",
+    "rewind_conversation", "rewind_files", "seed_read_state", "background_tasks", "stop_task",
+    "reload_plugins", "reload_skills", "side_question",
+]);
+export function claudePermission(permission = "default") {
+    return permission === "full" ? "bypassPermissions" : permission === "auto-edit" ? "acceptEdits" : permission === "readonly" ? "default" : permission;
+}
 export function buildClaudeLaunch(options) {
+    validateClaudeEffort(options.effort);
     if (options.sandbox !== undefined)
         throw new ProtocolError(ErrorCode.unsupported_capability, "Claude sandbox override is not supported");
-    if (options.effort !== undefined)
-        throw new ProtocolError(ErrorCode.unsupported_capability, "Claude effort override is not supported");
     const resolved = resolveClaudeModel(options.model);
     const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--settings", JSON.stringify({ permissions: { ask: ["*"] } })];
     if (resolved.model)
         args.push("--model", resolved.model);
+    if (options.effort !== undefined)
+        args.push("--effort", options.effort);
+    if (options.autocompact !== undefined)
+        args.push("--autocompact", String(options.autocompact));
+    args.push("--include-hook-events", "--forward-subagent-text");
     if (options.engineThreadId)
         args.push("--resume", options.engineThreadId);
     if (options.forkSession && options.engineThreadId)
@@ -22,10 +40,13 @@ export function buildClaudeLaunch(options) {
     if (options.tools && options.tools !== "all")
         args.push("--tools", options.tools.join(","));
     const permission = options.permission ?? "default";
-    if (permission === "full")
+    if (permission === "full" || permission === "bypassPermissions")
         args.push("--dangerously-skip-permissions");
-    else
-        args.push("--permission-mode", permission === "auto-edit" ? "acceptEdits" : "default");
+    args.push("--permission-mode", claudePermission(permission));
+    // 2.1.258 PLe checks isBypassPermissionsModeAvailable on a live switch.
+    // This flag permits switching later; it does not select bypass at launch.
+    if (permission === "full" || permission === "bypassPermissions")
+        args.push("--allow-dangerously-skip-permissions");
     if (permission === "readonly")
         args.push("--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit");
     const env = { ...process.env };
@@ -35,8 +56,14 @@ export function buildClaudeLaunch(options) {
         delete env[key];
     return { args, env: { ...env, ...resolved.env } };
 }
+export function validateClaudeEffort(effort) {
+    if (effort !== undefined && !ClaudeEffortSchema.safeParse(effort).success)
+        throw new ProtocolError(ErrorCode.invalid_params, "Claude effort must be low, medium, high, xhigh or max");
+}
 export function claudeUserMessage(input) {
     const content = input.map(part => {
+        if (part.type === "bash")
+            throw new ProtocolError(ErrorCode.invalid_params, "bash must be a standalone turn input");
         if (part.type === "text")
             return part;
         if (part.type === "image")
@@ -67,6 +94,8 @@ export class ClaudeEngine {
     nativeRequests = new Map();
     sawTextDelta = false;
     sawThinkingDelta = false;
+    partials = new Map();
+    bash;
     constructor(config = {}) {
         this.config = config;
     }
@@ -111,13 +140,73 @@ export class ClaudeEngine {
         }
     }
     async attach() { this.assertAlive(); }
+    async engineControl(subtype, params) {
+        this.assertAlive();
+        if (!CLAUDE_CONTROL_ALLOWLIST.has(subtype))
+            throw new ProtocolError(ErrorCode.unsupported_capability, `Claude control is not allowed: ${subtype}`);
+        if ("subtype" in params)
+            throw new ProtocolError(ErrorCode.invalid_params, "params must not override subtype");
+        if (subtype === "set_permission_mode") {
+            if (typeof params.mode !== "string" || !["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"].includes(params.mode))
+                throw new ProtocolError(ErrorCode.invalid_params, "unsupported permission mode");
+            if (params.ultraplan !== undefined && typeof params.ultraplan !== "boolean")
+                throw new ProtocolError(ErrorCode.invalid_params, "ultraplan must be boolean");
+        }
+        const interrupting = this.interrupting;
+        if (subtype === "interrupt" && this.active)
+            this.interrupting = true;
+        try {
+            const frame = await this.control({ ...params, subtype }, true);
+            if (record(frame.response).subtype === "success") {
+                if (subtype === "set_permission_mode") {
+                    const mode = PermissionSchema.safeParse(record(record(frame.response).response).mode ?? params.mode);
+                    if (mode.success)
+                        this.permissionChanged(mode.data);
+                }
+                if (subtype === "set_model" && this.options && (params.model == null || typeof params.model === "string")) {
+                    // 2.1.258 Tf/Im: omitted or null model is the native "default" reset.
+                    this.options.model = params.model ?? "default";
+                    this.events.push({ type: "modelChanged", model: this.options.model });
+                }
+            }
+            if (record(frame.response).subtype !== "success" && subtype === "interrupt")
+                this.interrupting = interrupting;
+            return frame;
+        }
+        catch (error) {
+            if (subtype === "interrupt")
+                this.interrupting = interrupting;
+            throw error;
+        }
+    }
+    permissionChanged(permission) {
+        if (this.options)
+            this.options.permission = permission;
+        this.sessionGrants.clear();
+        this.events.push({ type: "permissionChanged", permission });
+    }
+    async setPermission(permission) {
+        if (permission === "readonly") {
+            if (this.options?.permission === "readonly")
+                return;
+            throw new ProtocolError(ErrorCode.unsupported_capability, "readonly is a launch-time tool restriction; use a native permission mode for hot switching");
+        }
+        const response = await this.engineControl("set_permission_mode", { mode: claudePermission(permission) });
+        if (record(response.response).subtype !== "success")
+            throw new ProtocolError(ErrorCode.unsupported_capability, String(record(response.response).error ?? "Claude rejected permission mode"), { raw: response });
+    }
     assertAlive() { if (!this.process || this.dead || this.closed)
         throw new ProtocolError(ErrorCode.engine_unavailable, "Claude session is not alive"); }
     validateTurn(options) {
-        if ((options.cwd !== undefined && options.cwd !== this.options?.cwd) || options.sandbox !== undefined || options.effort !== undefined)
-            throw new ProtocolError(ErrorCode.unsupported_capability, "Changing cwd, sandbox or effort on a live Claude session is not supported");
-        if (options.permission && options.permission !== (this.options?.permission ?? "default"))
-            throw new ProtocolError(ErrorCode.unsupported_capability, "Changing permission policy requires a new Claude session");
+        validateClaudeEffort(options.effort);
+        if (options.permission === "readonly" && this.options?.permission !== "readonly")
+            throw new ProtocolError(ErrorCode.unsupported_capability, "readonly requires a new session; native permission modes support hot switching");
+        if (options.input.some(p => p.type === "bash") && (options.input.length !== 1 || options.input[0].type !== "bash"))
+            throw new ProtocolError(ErrorCode.invalid_params, "bash must be a standalone turn input");
+        if ((options.cwd !== undefined && options.cwd !== this.options?.cwd) || options.sandbox !== undefined)
+            throw new ProtocolError(ErrorCode.unsupported_capability, "Changing cwd or sandbox on a live Claude session is not supported");
+        if (options.effort !== undefined && options.effort !== this.options?.effort)
+            throw new ProtocolError(ErrorCode.unsupported_capability, "Use thread/effort/set with maxThinkingTokens for live Claude thinking budget; effort labels are launch-only");
         if (options.model && options.model !== this.options?.model && resolveClaudeModel(options.model).env)
             throw new ProtocolError(ErrorCode.unsupported_capability, "Changing endpoint requires a new Claude session");
     }
@@ -126,7 +215,14 @@ export class ClaudeEngine {
         this.validateTurn(options);
         if (this.active)
             throw new ProtocolError(ErrorCode.turn_not_active, "Claude already has an active turn");
-        const message = claudeUserMessage(input);
+        const bash = input.length === 1 && input[0].type === "bash" ? input[0] : undefined;
+        // Local 2.1.258 print.ts: if(d.type==="bash_command") invokes
+        // runHeadlessBashCommand({command:d.command,cwd:d.cwd,...}), then emits user
+        // isReplay frames containing bash-input followed by bash-stdout/stderr/exit-code.
+        // It does NOT emit result. uuid is a native UUID (not an AS turn id).
+        const message = bash ? { type: "bash_command", command: bash.command, cwd: this.options?.cwd ?? process.cwd(), uuid: crypto.randomUUID() } : claudeUserMessage(input);
+        if (options.permission && claudePermission(options.permission) !== claudePermission(this.options?.permission))
+            await this.setPermission(options.permission);
         const model = options.model ?? this.options?.model;
         if (model)
             await this.control({ subtype: "set_model", model: resolveClaudeModel(model).model });
@@ -136,12 +232,21 @@ export class ClaudeEngine {
         this.sawTextDelta = false;
         this.sawThinkingDelta = false;
         this.mapper.beginTurn(turnId);
+        this.partials.clear();
+        this.taskParents.clear();
+        this.bash = undefined;
+        if (bash) {
+            this.bash = { itemId: `bash_${crypto.randomUUID()}` };
+            this.emit({ type: EventType.ToolCall, data: { id: this.bash.itemId, name: "Bash", input: { command: bash.command } }, backend: "claude", sessionId: this.engineThreadId });
+        }
         this.write(message);
     }
     async steer(turnId, input) {
         this.assertAlive();
         if (this.active !== turnId || this.interrupting)
             throw new ProtocolError(ErrorCode.turn_not_active, "turn changed before steer");
+        if (this.bash || input.some(p => p.type === "bash"))
+            throw new ProtocolError(ErrorCode.invalid_params, "bash is only supported as a standalone turn/start");
         this.write(claudeUserMessage(input));
     }
     async interrupt(turnId) {
@@ -175,11 +280,11 @@ export class ClaudeEngine {
         this.events.end();
     }
     write(message) { this.assertAlive(); this.process.stdin.write(JSON.stringify(message) + "\n"); }
-    control(request) {
+    control(request, raw = false) {
         const request_id = `as_control_${crypto.randomUUID()}`;
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => { this.controls.delete(request_id); reject(new ProtocolError(ErrorCode.engine_unavailable, `Claude ${request.subtype} timed out`, { stderr: this.stderr })); }, this.config.handshakeTimeoutMs ?? 15000);
-            this.controls.set(request_id, { resolve, reject, timer });
+            this.controls.set(request_id, { resolve, reject, timer, raw });
             try {
                 this.write({ type: "control_request", request_id, request });
             }
@@ -214,16 +319,35 @@ export class ClaudeEngine {
             if (pending) {
                 clearTimeout(pending.timer);
                 this.controls.delete(String(response.request_id));
-                if (response.subtype === "success")
-                    pending.resolve();
+                if (pending.raw || response.subtype === "success")
+                    pending.resolve(jsonValue(obj));
                 else
                     pending.reject(new ProtocolError(ErrorCode.engine_unavailable, String(response.error ?? "Claude control failed"), { stderr: this.stderr }));
             }
             return;
         }
         if (t === "control_request") {
-            if (obj.request?.subtype !== "can_use_tool" || !this.active || !this.options)
-                throw new ProtocolError(ErrorCode.engine_protocol_error, "Unsupported Claude control request");
+            const subtype = record(obj.request).subtype;
+            if (subtype === "prompt_suggestion")
+                return;
+            if (subtype !== "can_use_tool" || !this.active || !this.options) {
+                const message = `Unsupported Claude control request: ${String(subtype)}`;
+                // Local @anthropic-ai/claude-code 2.1.258 bin/claude.exe (rg -a):
+                // bJe: behavior enum [completed,cancelled]; gAn: action enum [accept,decline,cancel].
+                // can_use_tool deny schema requires behavior:"deny", message:string.
+                // hae/ul: control_response.response = {subtype:"error",request_id,error:string}
+                // for unknown requests. Use dialog cancellation: parked dialogs ignore error replies.
+                const response = subtype === "can_use_tool" ? { behavior: "deny", message }
+                    : subtype === "request_user_dialog" ? { behavior: "cancelled" }
+                        : subtype === "elicitation" ? { action: "cancel" } : undefined;
+                if (typeof obj.request_id === "string") {
+                    this.write({ type: "control_response", response: response === undefined
+                            ? { subtype: "error", request_id: obj.request_id, error: message }
+                            : { subtype: "success", request_id: obj.request_id, response } });
+                }
+                this.events.push({ type: "error", error: new ProtocolError(ErrorCode.engine_protocol_error, message).toJSON(), willRetry: false });
+                return;
+            }
             const req = { requestId: String(obj.request_id), toolUseId: String(obj.request.tool_use_id), toolName: String(obj.request.tool_name), input: obj.request.input };
             emit(EventType.ToolCall, { id: req.toolUseId, name: req.toolName, input: req.input });
             const grantKey = JSON.stringify([req.toolName, req.input]);
@@ -261,6 +385,7 @@ export class ClaudeEngine {
             this.events.push({ type: "metadata", engineThreadId: this.engineThreadId });
         }
         if (t === "system") {
+            this.events.push({ type: "engineEvent", ...(this.active ? { turnId: this.active } : {}), backend: this.backend, subtype: String(obj.subtype ?? "system"), payload: jsonValue(obj) });
             if (obj.subtype === "init")
                 return;
             const phase = { task_started: "started", task_progress: "progress", task_updated: "updated", task_notification: "completed" };
@@ -280,6 +405,19 @@ export class ClaudeEngine {
         }
         if (t === "stream_event") {
             const delta = obj.event?.delta;
+            if (obj.parent_tool_use_id) {
+                const parent = String(obj.parent_tool_use_id), seen = this.partials.get(parent) ?? { text: false, thinking: false };
+                if (delta?.type === "text_delta") {
+                    seen.text = true;
+                    emit(EventType.TextChunk, { text: delta.text, parentToolUseId: parent });
+                }
+                if (delta?.type === "thinking_delta") {
+                    seen.thinking = true;
+                    emit(EventType.Thinking, { text: delta.thinking, parentToolUseId: parent });
+                }
+                this.partials.set(parent, seen);
+                return;
+            }
             if (delta?.type === "text_delta") {
                 this.sawTextDelta = true;
                 emit(EventType.TextChunk, { text: delta.text });
@@ -291,6 +429,20 @@ export class ClaudeEngine {
             return;
         }
         if (t === "assistant") {
+            if (obj.parent_tool_use_id) {
+                // 2.1.258 --forward-subagent-text emits assistant/user envelopes with this parent.
+                const parent = String(obj.parent_tool_use_id), seen = this.partials.get(parent);
+                for (const block of obj.message?.content ?? []) {
+                    if (block.type === "text" && !seen?.text && block.text)
+                        emit(EventType.TextChunk, { text: block.text, parentToolUseId: parent });
+                    if (block.type === "thinking" && !seen?.thinking && block.thinking)
+                        emit(EventType.Thinking, { text: block.thinking, parentToolUseId: parent });
+                    if (block.type === "tool_use")
+                        emit(EventType.ToolCall, { id: block.id, name: block.name, input: block.input, parentToolUseId: parent });
+                }
+                this.partials.delete(parent);
+                return;
+            }
             const u = obj.message?.usage;
             if (u)
                 this.context = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
@@ -308,6 +460,23 @@ export class ClaudeEngine {
             return;
         }
         if (t === "user") {
+            if (this.bash && this.active && !obj.parent_tool_use_id && obj.isReplay === true && typeof obj.message?.content === "string") {
+                const content = obj.message.content;
+                const field = (tag) => content.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))?.[1];
+                const decode = (text) => text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#(?:39|x27);/g, "'").replace(/&amp;/g, "&");
+                const code = field("bash-exit-code"), stderr = field("bash-stderr");
+                if (code !== undefined || stderr?.startsWith("Command failed:")) {
+                    const exitCode = code !== undefined && /^-?\d+$/.test(code) ? Number(code) : 1;
+                    emit(EventType.ToolCallDone, { id: this.bash.itemId, output: decode(field("bash-stdout") ?? ""), stderr: decode(stderr ?? ""), exitCode, isError: exitCode !== 0 });
+                    this.bash = undefined;
+                    this.active = null;
+                    for (const event of this.mapper.finish(this.interrupting ? "interrupted" : "completed"))
+                        this.events.push(event);
+                }
+                return;
+            }
+            if (typeof obj.message?.content === "string")
+                return; // Native replay text, not tool_result blocks.
             if (!this.active) {
                 if ((obj.message?.content ?? []).some((block) => block.type === "tool_result")) {
                     this.events.push({ type: "error", error: new ProtocolError(ErrorCode.engine_protocol_error, "tool result without active turn").toJSON(), willRetry: false });
@@ -343,8 +512,17 @@ export class ClaudeEngine {
             this.fail(new ProtocolError(ErrorCode.engine_unavailable, String(obj.message ?? obj.error ?? "Claude error")));
             return;
         }
-        if (["keep_alive", "rate_limit_event", "tool_progress", "tool_use_summary", "auth_status"].includes(t))
+        // 2.1.258 Ase schema emits prompt_suggestion as a top-level informational frame.
+        if (t === "rate_limit_event") {
+            this.events.push({ type: "engineEvent", ...(this.active ? { turnId: this.active } : {}), backend: this.backend, subtype: t, payload: jsonValue(obj) });
             return;
-        throw new ProtocolError(ErrorCode.engine_protocol_error, "Unknown Claude frame", { raw: JSON.stringify(raw).slice(0, 2000) });
+        }
+        if (["keep_alive", "tool_progress", "tool_use_summary", "auth_status", "prompt_suggestion"].includes(t))
+            return;
+        if (typeof t === "string") {
+            this.events.push({ type: "engineEvent", ...(this.active ? { turnId: this.active } : {}), backend: this.backend, subtype: t, payload: jsonValue(obj) });
+            return;
+        }
+        this.events.push({ type: "error", error: new ProtocolError(ErrorCode.engine_protocol_error, "Claude frame has no string type", { raw: jsonValue(raw) }).toJSON(), willRetry: false });
     }
 }

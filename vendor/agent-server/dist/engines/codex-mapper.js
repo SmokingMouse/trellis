@@ -32,6 +32,8 @@ function status(value, completed) {
 }
 export function codexUserInput(input) {
     return input.map(part => {
+        if (part.type === "bash")
+            throw new ProtocolError(ErrorCode.backend_unsupported, "bash input requires Claude");
         if (part.type === "text")
             return { type: "text", text: part.text, text_elements: [] };
         if (part.type === "image")

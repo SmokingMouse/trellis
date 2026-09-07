@@ -73,6 +73,10 @@ export declare class AgentClient {
     private scheduleReconnect;
     close(): void;
     request<M extends Method>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
+    engineControl(params: MethodParams<"thread/engineControl">): Promise<MethodResult<"thread/engineControl">>;
+    setPermission(params: MethodParams<"thread/permission/set">): Promise<MethodResult<"thread/permission/set">>;
+    setEffort(params: MethodParams<"thread/effort/set">): Promise<MethodResult<"thread/effort/set">>;
+    compact(params: MethodParams<"thread/compact">): Promise<MethodResult<"thread/compact">>;
     private call;
     private send;
     private receive;

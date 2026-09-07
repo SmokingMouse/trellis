@@ -5,6 +5,7 @@ export declare class LeaseManager {
     constructor(now?: () => number);
     read(threadId: string): Lease | undefined;
     assertInput(threadId: string, clientId: string): void;
+    assertHeld(threadId: string, clientId: string): void;
     acquire(threadId: string, holder: ClientIdentity, ttlMs?: number): Lease;
     release(threadId: string, clientId: string): void;
     disconnect(clientId: string): void;

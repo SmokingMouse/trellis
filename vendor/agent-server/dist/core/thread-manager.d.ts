@@ -25,6 +25,8 @@ export declare class ThreadManager {
     private now;
     constructor(log: ItemLog, factory: EngineFactory, options?: ThreadManagerOptions);
     get(threadId: string): Thread;
+    setPermission(params: MethodParams<"thread/permission/set">): Promise<MethodResult<"thread/permission/set">>;
+    engineControl(params: MethodParams<"thread/engineControl">): Promise<MethodResult<"thread/engineControl">>;
     session(threadId: string): EngineSession;
     queue(threadId: string): TurnQueue;
     setStatus(threadId: string, status: ThreadStatus): void;
