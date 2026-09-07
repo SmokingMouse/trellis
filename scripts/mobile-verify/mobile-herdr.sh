@@ -387,12 +387,51 @@ ab eval --stdin <<'JS'
   const proof = window.herdrInputProof;
   if (proof?.status !== 202 || proof.elapsed >= 1500) throw new Error(`busy input did not acknowledge queue: ${JSON.stringify(proof)}`);
   if (!document.querySelector('[data-herdr-delivery]')?.textContent.includes('已排队')) throw new Error('queued label missing');
+  if (document.querySelector('[data-herdr-input]')?.value !== 'mobile-herdr-busy-proof') throw new Error('queued input text was cleared');
   return proof;
 })()
 JS
 wait_for_log "background queue delivers busy input" '"text":"mobile-herdr-busy-proof","keys":["Enter"]'
 wait_for_js "queued input becomes delivered by event" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'delivered'"
+wait_for_js "delivered input clears composer" "document.querySelector('[data-herdr-input]')?.value === ''"
 wait_for_js "delivery received through SSE" "window.herdrDeliveryEvents.some(fleet => fleet.inputDeliveries.some(input => input.inputId === window.herdrInputProof.result.inputId && input.status === 'delivered'))"
+
+echo "== failed first input does not poison second queued input =="
+wait_for_js "previous queue drained" "(async () => (await (await fetch('/api/herdr/fleet')).json()).workspaces.flatMap(w => w.tabs.flatMap(t => t.panes)).find(p => p.pane_id === 'pane-claude')?.agent_status === 'idle')()"
+ab eval --stdin <<'JS'
+(async () => {
+  const response = await fetch('/api/herdr/panes/pane-claude/keys', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F12'] }),
+  });
+  if (!response.ok) throw new Error('could not arm fake wait failure');
+  return true;
+})()
+JS
+wait_for_js "fake pane busy for failure case" "(async () => (await (await fetch('/api/herdr/fleet')).json()).workspaces.flatMap(w => w.tabs.flatMap(t => t.panes)).find(p => p.pane_id === 'pane-claude')?.agent_status === 'working')()"
+ab fill 'textarea[data-herdr-input]' 'mobile-herdr-first-fails'
+ab click '[data-herdr-send]'
+wait_for_js "first failing input retains queued text" "document.querySelector('[data-herdr-delivery]')?.dataset.herdrDelivery === 'queued' && document.querySelector('[data-herdr-input]')?.value === 'mobile-herdr-first-fails'"
+ab eval --stdin <<'JS'
+(async () => {
+  window.firstFailedInput = window.herdrInputProof.result.inputId;
+  if (window.herdrInputProof.status !== 202) throw new Error('first input was not queued');
+  const response = await fetch('/api/herdr/panes/pane-claude/input', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'mobile-herdr-second-delivers' }),
+  });
+  const { result } = await response.json();
+  if (response.status !== 202 || result.status !== 'queued') throw new Error('second input was not queued');
+  window.secondDeliveredInput = result.inputId;
+  return { first: window.firstFailedInput, second: window.secondDeliveredInput };
+})()
+JS
+# Simulate editing the retained draft; failure must restore the submitted text.
+ab fill 'textarea[data-herdr-input]' ''
+wait_for_js "failed input restores text and shows retry prompt" "document.querySelector('[data-herdr-delivery]')?.dataset.herdrDelivery === 'error' && document.querySelector('[data-herdr-delivery]')?.textContent.includes('发送失败') && document.querySelector('[data-herdr-input]')?.value === 'mobile-herdr-first-fails'"
+wait_for_log "second input delivered after first failure" '"text":"mobile-herdr-second-delivers","keys":["Enter"]'
+wait_for_js "failure and success receipts stay independent" "window.herdrDeliveryEvents.some(fleet => fleet.inputDeliveries.some(input => input.inputId === window.firstFailedInput && input.status === 'failed' && input.error === 'first wait failed') && fleet.inputDeliveries.some(input => input.inputId === window.secondDeliveredInput && input.status === 'delivered' && !input.error))"
+if grep -F '"text":"mobile-herdr-first-fails","keys":["Enter"]' "$FAKE_LOG" >/dev/null 2>&1; then
+  fail 'first input was sent despite its failed wait'
+fi
 
 echo "== iPhone drawer, header, cards and touch targets =="
 ab set device "iPhone 15"

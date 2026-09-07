@@ -326,7 +326,7 @@ export class HerdrClient {
     const receipt: HerdrInputDelivery = { inputId: crypto.randomUUID(), paneId, status: "queued" };
     const queued = this.inputTails.has(paneId) || !["idle", "done"].includes(acceptedPane.agent_status);
     const previous = this.inputTails.get(paneId) ?? Promise.resolve();
-    const run = previous.then(async () => {
+    const run = previous.then(() => undefined, () => undefined).then(async () => {
       const current = this.requireAgentPane(paneId);
       if (current.agent_status !== "idle" && current.agent_status !== "done") {
         await this.request("agent.wait", {

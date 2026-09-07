@@ -50,6 +50,7 @@ class FakeHerdr {
   protocol = 19;
   snapshot = snapshot();
   waitDelayMs = 0;
+  waitFailures = 0;
   snapshotDelayMs = 0;
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private subscribers = new Set<Bun.Socket<{ buffer: string }>>();
@@ -85,6 +86,11 @@ class FakeHerdr {
           }
           const capturedSnapshot = structuredClone(this.snapshot);
           const send = () => {
+            if (request.method === "agent.wait" && this.waitFailures > 0) {
+              this.waitFailures--;
+              socket.end(`${JSON.stringify({ id: request.id, error: { code: "wait_failed", message: "first wait failed" } })}\n`);
+              return;
+            }
             let result: Record<string, unknown>;
             if (request.method === "ping") {
               result = {
@@ -343,6 +349,30 @@ describe("HerdrClient", () => {
     expect(client.sendKeys("w1:p1", ["Enter"])).rejects.toBeInstanceOf(
       HerdrUnavailableError,
     );
+  });
+
+  test("queued inputs have independent receipts when the first wait fails", async () => {
+    const server = new FakeHerdr();
+    server.snapshot.panes = [pane(5, "working")];
+    server.waitDelayMs = 30;
+    server.waitFailures = 1;
+    servers.push(server);
+    const client = clientFor(server);
+    await client.start();
+    const first = await client.enqueueInput("w1:p1", "first", 500);
+    const second = await client.enqueueInput("w1:p1", "second", 500);
+    expect(first.status).toBe("queued");
+    expect(second.status).toBe("queued");
+    expect(first.inputId).not.toBe(second.inputId);
+    const deadline = Date.now() + 1000;
+    while (client.inputDeliveries.some(input => input.status === "queued") && Date.now() < deadline) await Bun.sleep(10);
+    expect(client.inputDeliveries.find(input => input.inputId === first.inputId)).toEqual({
+      ...first, status: "failed", error: "first wait failed",
+    });
+    expect(client.inputDeliveries.find(input => input.inputId === second.inputId)).toEqual({
+      ...second, status: "delivered",
+    });
+    expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["second"]);
   });
 
   test("serializes input per pane", async () => {

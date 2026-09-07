@@ -154,6 +154,7 @@ const panes = [
 
 const subscribers = new Set<Bun.Socket<{ buffer: string }>>();
 const timers = new Set<ReturnType<typeof setTimeout>>();
+let failNextWait = false;
 
 function emit(event: string, data: Record<string, unknown>) {
   const line = JSON.stringify({ event, data: { type: event, ...data } }) + "\n";
@@ -227,6 +228,10 @@ function resultFor(request: RequestEnvelope): Record<string, unknown> {
       updatePane("pane-codex", "idle");
       return { type: "ok" };
     case "pane.send_keys":
+      if (JSON.stringify(request.params.keys) === '["F12"]') {
+        failNextWait = true;
+        updatePane(String(request.params.pane_id), "working");
+      }
       if (request.params.pane_id === "pane-codex" && JSON.stringify(request.params.keys) === '["Escape"]') {
         const index = panes.findIndex(pane => pane.pane_id === "pane-codex");
         if (index >= 0) panes.splice(index, 1);
@@ -283,10 +288,16 @@ const listener = Bun.listen({
           return;
         }
         if (request.method === "agent.wait") {
+          const shouldFail = failNextWait;
+          failNextWait = false;
           const timer = setTimeout(() => {
             timers.delete(timer);
             fs.appendFileSync(requestLog, JSON.stringify({ completed: "agent.wait", id: request.id }) + "\n");
-            try { socket.end(JSON.stringify({ id: request.id, result: resultFor(request) }) + "\n"); } catch { /* client disconnected */ }
+            try {
+              socket.end(JSON.stringify(shouldFail
+                ? { id: request.id, error: { code: "wait_failed", message: "first wait failed" } }
+                : { id: request.id, result: resultFor(request) }) + "\n");
+            } catch { /* client disconnected */ }
           }, waitDelayMs);
           timers.add(timer);
           return;

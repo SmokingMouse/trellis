@@ -214,8 +214,11 @@ function rowToBinding(row: BindingRow): HerdrSessionBinding {
 
 export function listHerdrBindings(db: Database = getDB()): HerdrSessionBinding[] {
   return (db
-    .prepare(`SELECT h.*, l.trellis_session_id FROM herdr_sessions h
-      LEFT JOIN cli_lineages l ON l.cli_session_id = h.session_id
+    .prepare(`SELECT h.*, (
+        SELECT l.trellis_session_id FROM cli_lineages l
+        WHERE l.cli_session_id = h.session_id
+        ORDER BY l.rowid DESC LIMIT 1
+      ) AS trellis_session_id FROM herdr_sessions h
       ORDER BY h.alive DESC, h.last_seen_at DESC`)
     .all() as BindingRow[]).map(rowToBinding);
 }

@@ -16,6 +16,7 @@ function ensureHerdrSchema(db: Database) {
 const {
   claudeProjectSlug,
   getHerdrBinding,
+  listHerdrBindings,
   markHerdrPaneClosed,
   reconcileHerdrPane,
   reconcileHerdrSnapshot,
@@ -58,6 +59,20 @@ function write(file: string, contents: string): void {
 }
 
 describe("Herdr transcript bindings", () => {
+  test("lists each binding once using its most recently registered lineage", () => {
+    const db = new Database(":memory:");
+    ensureHerdrSchema(db);
+    for (const id of ["shared-cli", "unlinked-cli"]) {
+      reconcileHerdrPane(makePane(id), undefined, { db, home: testHome, now: 100 });
+    }
+    db.exec("INSERT INTO cli_lineages VALUES ('shared-cli', 'old-root'), ('shared-cli', 'new-root')");
+    const bindings = listHerdrBindings(db);
+    expect(bindings).toHaveLength(2);
+    expect(bindings.find(binding => binding.sessionId === "shared-cli")?.trellisSessionId).toBe("new-root");
+    expect(bindings.find(binding => binding.sessionId === "unlinked-cli")?.trellisSessionId).toBe("unlinked-cli");
+    db.close();
+  });
+
   test("large transcripts stop after the cwd header (review rv_perf regression)", () => {
     const file = path.join(testHome, "large.jsonl");
     write(file, JSON.stringify({ cwd: "/large-project" }) + "\n");

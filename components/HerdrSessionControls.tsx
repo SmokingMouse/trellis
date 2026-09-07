@@ -105,14 +105,28 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
     "idle" | "sending" | "queued" | "delivered" | "error"
   >("idle");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef(new Map<string, string>());
 
-  const delivery = fleet?.inputDeliveries?.find(input => input.inputId === inputId && input.paneId === pane.paneId);
   useEffect(() => {
-    if (delivery?.status === "delivered") setState("delivered");
-    if (delivery?.status === "failed") setState("error");
-  }, [delivery?.status]);
+    let failed = false;
+    for (const delivery of fleet?.inputDeliveries ?? []) {
+      const outgoing = pendingRef.current.get(delivery.inputId);
+      if (outgoing === undefined || delivery.paneId !== pane.paneId || delivery.status === "queued") continue;
+      pendingRef.current.delete(delivery.inputId);
+      if (delivery.status === "delivered") {
+        // A receipt must not erase a newer draft or another failed input.
+        setText(current => current === outgoing ? "" : current);
+        if (delivery.inputId === inputId) setState("delivered");
+      } else {
+        setText(current => !current || current === outgoing ? outgoing : `${current}\n${outgoing}`);
+        failed = true;
+      }
+    }
+    if (failed) setState("error");
+  }, [fleet?.inputDeliveries, inputId, pane.paneId]);
   useEffect(() => {
     setInputId(null);
+    pendingRef.current.clear();
     setState("idle");
     if (timerRef.current) clearTimeout(timerRef.current);
   }, [pane.paneId]);
@@ -125,6 +139,7 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
   );
 
   const submit = async () => {
+    const draft = text;
     const outgoing = text.trim();
     if (!outgoing || state === "sending") return;
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -141,7 +156,8 @@ export function HerdrComposer({ pane }: { pane: HerdrPaneView }) {
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const { result } = await response.json() as { result: HerdrInputDelivery };
-      setText("");
+      if (result.status === "queued") pendingRef.current.set(result.inputId, draft);
+      else setText(current => current === draft ? "" : current);
       setInputId(result.inputId);
       setState(result.status === "queued" ? "queued" : "delivered");
       void refreshHerdrFleet();
