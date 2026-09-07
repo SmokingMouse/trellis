@@ -232,7 +232,7 @@ export function groupHerdrWorkspaces(workspaces: HerdrWorkspaceView[]) {
     } else repo.worktrees.push({
       id: wt.checkout_path,
       isLinked: wt.is_linked_worktree,
-      label: wt.git_branch || (wt.is_linked_worktree ? wt.checkout_path.split("/").pop()! : "main"),
+      label: wt.git_branch && wt.git_branch !== "HEAD" ? wt.git_branch : "未知分支",
       title: `${workspace.label}\n${wt.checkout_path}`,
       attention, panes: [...workspace.panes],
     });

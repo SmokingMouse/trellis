@@ -9,6 +9,14 @@ import {
 } from "./herdr-ui";
 
 describe("Herdr repository tree", () => {
+  test("P2-1 missing and detached branches never claim main", () => {
+    for (const git_branch of [undefined, null, "", "HEAD"]) {
+      for (const is_linked_worktree of [true, false]) {
+        const tree = groupHerdrWorkspaces([{ ...buildHerdrWorkspaceViews(fleet, [])[0], worktree: { repo_root: "/repo", repo_name: "Repo", checkout_path: "/repo", is_linked_worktree, git_branch } }]);
+        expect(tree.repositories[0].worktrees[0].label).toBe("未知分支");
+      }
+    }
+  });
   test("P1-1 shuffled repositories, checkouts and merged sessions stay stable across status changes", () => {
     const make = (id: string, root: string, checkout: string, linked: boolean) => ({
       ...structuredClone(fleet.workspaces[0]), workspace_id: id, label: id,
@@ -39,7 +47,7 @@ describe("Herdr repository tree", () => {
     expect(tree.repositories).toHaveLength(2);
     expect(tree.repositories[0].attention).toBe(2);
     expect(tree.repositories[0].worktrees.map(w => [w.id, w.label, w.attention, w.panes.length])).toEqual([
-      ["/repo", "main", 1, 2], ["/linked", "feat/nest", 1, 1],
+      ["/repo", "未知分支", 1, 2], ["/linked", "feat/nest", 1, 1],
     ]);
     expect(tree.repositories[0].worktrees[0].title).toContain("Another tab");
     expect(tree.ungrouped.map(w => w.id)).toEqual(["scratch"]);
