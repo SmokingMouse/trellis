@@ -94,6 +94,40 @@ try {
     assert.equal(node.status, "done");
     assert.ok(node.response.length);
     assert.ok(!binding.getAsTurn(node.id));
+  } else if (process.argv[2] === "P2-2 failed startup cleans bindings") {
+    const before = getDB().prepare("SELECT * FROM as_threads ORDER BY thread_id").all();
+    const originalStart = as.ProjectRun.prototype.start;
+    as.ProjectRun.prototype.start = async () => { throw new as.DaemonUnavailable("mock failure after preflight"); };
+    const { POST } = await import("../../app/api/chat/route");
+    try {
+      const response = await POST(new Request("http://localhost/api/chat", { method:"POST", body:JSON.stringify({kind:"branch", parentNodeId:root, question:"startup fallback", provider:"mock"}) }));
+      assert.equal(response.status, 200);
+      assert.ok((await response.text()).includes('"type":"notice"'));
+      assert.deepEqual(getDB().prepare("SELECT * FROM as_threads ORDER BY thread_id").all(), before, "orphan fresh-thread row must be pruned");
+      const node = getDB().prepare("SELECT id,status FROM nodes WHERE question='startup fallback'").get() as {id:string;status:string};
+      assert.equal(node.status, "done");
+      assert.ok(!binding.getAsTurn(node.id));
+    } finally { as.ProjectRun.prototype.start = originalStart; }
+  } else if (process.argv[2] === "P2-2 concurrent catchup shares initialization") {
+    const pending = branch(second, "concurrent catchup");
+    const threadId = binding.getAsTurn(second)!.thread_id;
+    const params = { threadId, clientTurnId:randomUUID(), input:[{type:"text",text:"concurrent catchup"}] };
+    binding.bindAsTurn(pending, threadId, params.clientTurnId);
+    getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), pending);
+    let release!: () => void;
+    pause = new Promise<void>(resolve => { release = resolve; });
+    const originalConnect = AgentClient.prototype.connect;
+    const clients = new Set<AgentClient>();
+    AgentClient.prototype.connect = async function () { clients.add(this); await Bun.sleep(20); return originalConnect.call(this); };
+    try {
+      const [a,b] = await Promise.all([as.getProjectRun(pending), as.getProjectRun(pending)]);
+      assert.ok(a);
+      assert.equal(a,b);
+      assert.equal(clients.size,1, "only one writable client initializes");
+      assert.ok(a.turnId, "both callers await the initialized run");
+      release(); pause = undefined;
+      await done(a);
+    } finally { AgentClient.prototype.connect = originalConnect; }
   } else throw new Error("unknown regression case");
   console.log(`PASS: ${process.argv[2]}`);
 } finally {

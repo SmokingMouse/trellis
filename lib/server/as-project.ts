@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentClient } from "@smokingmouse/agent-server/client";
 import { NotificationSchemas, type NotificationMethod, type ServerNotification, type AttachResult, type Turn, type StartTurnParams, type StartThreadParams } from "@smokingmouse/agent-server/protocol";
 import { createProjectClient, withProjectLease, setProjectPermission } from "./as-client";
-import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding } from "./session-binding";
+import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding, removeAsTurn, pruneAsThreads } from "./session-binding";
 import { getDB } from "./sqlite";
 import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
 import { providerFamily } from "../llm/providers";
@@ -27,6 +27,7 @@ export class ProjectRun {
   private polling = false;
   private closing = false;
   private toolVersions = new Map<string, string>();
+  private starting?: Promise<void>;
   constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false) {
     this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
@@ -128,10 +129,12 @@ export class ProjectRun {
       }
       getDB().transaction(() => {
         resetNodeForRetry(this.nodeId);
+        bindAsThread(getNode(this.nodeId)!.sessionId, this.threadId);
         bindAsTurn(this.nodeId, this.threadId, this.params.clientTurnId!);
         getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(this.params), this.nodeId);
         this.replacing = false;
         this.project();
+        pruneAsThreads(getNode(this.nodeId)!.sessionId);
       })();
       this.emit(this.catchup());
     }
@@ -183,9 +186,12 @@ export class ProjectRun {
     if (this.terminal) { sub.onEvent(this.terminal); sub.onClose(); this.subscribers.delete(sub); }
     return () => { this.subscribers.delete(sub); };
   }
-  async start() {
-    await this.client.connect();
-    await this.client.request("thread/attach", { threadId: this.threadId, sinceSeq: 0 });
+  start() { return this.starting ??= this.startOnce(); }
+  private async startOnce() {
+    try {
+      await this.client.connect();
+      await this.client.request("thread/attach", { threadId: this.threadId, sinceSeq: 0 });
+    } catch (error) { throw new DaemonUnavailable(String(error)); }
     const result = await this.client.request("turn/start", this.params);
     this.turnId = result.turn.id;
     if (!this.replacing) updateAsTurn(this.nodeId, result.turn.id);
@@ -207,7 +213,10 @@ export class ProjectRun {
     const { turn } = await this.client.request("turn/start", this.params);
     if (["completed", "interrupted", "failed", "cancelled"].includes(turn.status)) this.finish(turn);
   }
-  close() { this.closing = true; clearInterval(this.poll); this.client.close(); }
+  close() {
+    this.closing = true; clearInterval(this.poll); this.client.close();
+    if (runs.get(this.nodeId) === this) runs.delete(this.nodeId);
+  }
 }
 
 export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; fork?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
@@ -264,16 +273,20 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
           if (["closed", "systemError", "interrupted"].includes(thread.status.type)) await setup.request("thread/resume", {threadId});
         }
       } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
-      bindAsThread(session.id, threadId);
       const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
       const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: recoveredHistory ? `${recoveredHistory}\n\nuser: ${args.prompt}` : args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
+      const run = new ProjectRun(node.id, threadId, params, args.retry);
       if (!args.retry) {
+        bindAsThread(session.id, threadId);
         bindAsTurn(node.id, threadId, params.clientTurnId!);
         getDB().prepare("UPDATE as_turns SET request_json=? WHERE node_id=?").run(JSON.stringify(params), node.id);
       }
-      const run = new ProjectRun(node.id, threadId, params, args.retry);
       runs.set(node.id, run);
-      try { await run.start(); } catch (error) { run.close(); runs.delete(node.id); throw error; }
+      try { await run.start(); } catch (error) {
+        run.close();
+        if (!args.retry && !run.turnId) removeAsTurn(node.id);
+        throw error;
+      }
       return run;
     } finally { setup.close(); }
   })();
@@ -283,14 +296,14 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
 export class DaemonUnavailable extends Error {}
 export async function getProjectRun(nodeId: string) {
   if (!isShadowEnabled()) return null;
-  const existing = runs.get(nodeId); if (existing) return existing;
+  const existing = runs.get(nodeId); if (existing) { await existing.start(); return existing; }
   const binding = getAsTurn(nodeId);
   if (!binding || getNode(nodeId)?.status !== "streaming") return null;
   if (binding.daemon_id !== daemonIdentity()) throw new Error("session daemon mapping changed");
   const row = getDB().prepare("SELECT request_json FROM as_turns WHERE node_id=?").get(nodeId) as {request_json:string};
   const run = new ProjectRun(nodeId, binding.thread_id, JSON.parse(row.request_json));
   runs.set(nodeId, run);
-  try { await run.start(); return run; } catch (e) { run.close(); runs.delete(nodeId); throw e; }
+  try { await run.start(); return run; } catch (e) { run.close(); throw e; }
 }
 export function isThreadNode(nodeId: string) {
   const node = getNode(nodeId);

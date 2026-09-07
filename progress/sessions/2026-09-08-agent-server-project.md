@@ -15,3 +15,4 @@
 - 新契约 fj-trellis-step2-fix-683f：P1-1 将非 tip 普通续聊与显式 fork 分开，普通续聊用祖先历史播种新线程；mobile 增加 HTTP 200、新绑定、节点 done 断言。Next：修复重试保留原答案、硬关闸与连接/租约问题，统一复跑验收。
 - P0-1：AS 重试结果先缓存在运行投影里，成功后事务替换原答案和 turn 绑定；失败保留正文、工具、usage、状态和旧绑定。tip 重试原生 fork 后重发，非 tip（含 daemon 比 DB 更晚）播种新线程。兼容路径延迟至首个正文/工具输出或成功才 reset。Mock 回归 P0-1/P1-1 已通过，Next：硬关闸与资源清理。
 - P1-2/P2-1：绑定解析新增 disabled fallback，共用 isShadowEnabled；AS=off 覆盖 SOCKET，已绑定新输入带 notice 走旧引擎；PROJECT=off 仅停打标。README/.env 同步。真实 Mock daemon + POST 路由 probe 通过，硬关后 engine turn 计数不变。
+- P2-2：fallback/startup 失败删除未执行的 as_turns 并清理无引用 as_threads；重试映射仅成功时切换，兼容重试有输出后才解除旧绑定。ProjectRun.start 缓存初始化 promise，并发 catchup 等同一完成态；Mock 注入 preflight 后失败与并发恢复测试通过。

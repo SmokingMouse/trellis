@@ -39,7 +39,7 @@ import {
   codexLineageForNode,
 } from "@/lib/server/codex-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
-import { newProjectBinding, resolveSessionBinding } from "@/lib/server/session-binding";
+import { newProjectBinding, resolveSessionBinding, removeAsTurn } from "@/lib/server/session-binding";
 import { startProjectRun, projectSSE, DaemonUnavailable } from "@/lib/server/as-project";
 import { getDB } from "@/lib/server/sqlite";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
@@ -496,7 +496,7 @@ export async function POST(req: Request) {
         return Response.json({ error: String(error) }, { status: 503 });
       }
       asFallback = true;
-      getDB().prepare("DELETE FROM as_turns WHERE node_id=?").run(nodeId);
+      if (body.kind !== "retry") removeAsTurn(nodeId);
       console.warn(`[trellis/as] daemon unavailable; falling back for ${nodeId}`);
     }
   }
@@ -801,6 +801,7 @@ export async function POST(req: Request) {
   startRun({
     nodeId,
     retry: body.kind === "retry",
+    onRetryCommitted: asFallback ? () => removeAsTurn(nodeId) : undefined,
     // chat B-fork writes the forked id to THIS node (per-node); native isolated
     // project writes the fresh lineage head's id to THIS node (fork heads were
     // pre-written above, so claudeSessionId is set → undefined); legacy project

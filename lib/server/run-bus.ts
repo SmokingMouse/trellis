@@ -289,6 +289,7 @@ export type ProviderEvent =
 export function startRun(args: {
   nodeId: string;
   retry?: boolean;
+  onRetryCommitted?: () => void;
   // Where session_init writes the freshly-spawned CLI session id:
   //   "root" — walk to root, store there (project: whole tree shares one id).
   //   "node" — store on this node itself (chat B-fork: each node owns its
@@ -390,6 +391,7 @@ async function runLoop(
     if (!retryWaitingForOutput) return;
     resetNodeForRetry(args.nodeId);
     retryWaitingForOutput = false;
+    args.onRetryCommitted?.();
     state.committedText = "";
     state.committedToolCalls = [];
     for (const sub of state.subscribers) {
