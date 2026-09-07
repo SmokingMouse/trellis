@@ -168,6 +168,9 @@ const panes = [
 const subscribers = new Set<Bun.Socket<{ buffer: string }>>();
 const timers = new Set<ReturnType<typeof setTimeout>>();
 let failNextWait = false;
+let newWorkspaceOpen = false;
+const newWorkspace = { workspace_id: "workspace-new", label: "New Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: `${fakeHome}/missing-checkout///`, is_linked_worktree: true } };
+const newTab = { tab_id: "tab-new", workspace_id: "workspace-new", label: "New" };
 
 function emit(event: string, data: Record<string, unknown>) {
   const line = JSON.stringify({ event, data: { type: event, ...data } }) + "\n";
@@ -202,11 +205,13 @@ function resultFor(request: RequestEnvelope): Record<string, unknown> {
           focused_tab_id: "tab-fake",
           focused_pane_id: "pane-claude",
           workspaces: [
-            { workspace_id: "workspace-fake", label: "Fake Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: cwd, is_linked_worktree: false } },
             { workspace_id: "workspace-linked", label: "Linked Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: linkedCwd, is_linked_worktree: true } },
+            { workspace_id: "workspace-fake", label: "Fake Workspace", worktree: { repo_root: cwd, repo_name: "Fake Repository", checkout_path: cwd, is_linked_worktree: false } },
             { workspace_id: "workspace-scratch", label: "Scratch Workspace" },
+            ...(newWorkspaceOpen ? [newWorkspace] : []),
           ],
           tabs: [
+            ...(newWorkspaceOpen ? [newTab] : []),
             { tab_id: "tab-linked", workspace_id: "workspace-linked", label: "Agent" },
             { tab_id: "tab-scratch", workspace_id: "workspace-scratch", label: "Agent" },
             {
@@ -245,6 +250,30 @@ function resultFor(request: RequestEnvelope): Record<string, unknown> {
       updatePane("pane-codex", "idle");
       return { type: "ok" };
     case "pane.send_keys":
+      if (JSON.stringify(request.params.keys) === '["F8"]') {
+        updatePane("pane-claude", "blocked");
+        updatePane("pane-codex", "waiting");
+      }
+      if (JSON.stringify(request.params.keys) === '["F9"]') {
+        updatePane("pane-claude", "idle");
+        updatePane("pane-codex", "blocked");
+      }
+      if (JSON.stringify(request.params.keys) === '["F10"]' && !newWorkspaceOpen) {
+        newWorkspaceOpen = true;
+        const pane = { ...panes.find(p => p.pane_id === "pane-scratch")!, pane_id: "pane-new", terminal_id: "term-new", workspace_id: "workspace-new", tab_id: "tab-new", cwd: newWorkspace.worktree.checkout_path, label: "New agent" };
+        panes.push(pane);
+        emit("workspace_created", { workspace: newWorkspace });
+        emit("tab_created", { tab: newTab });
+        emit("pane_created", { pane });
+      }
+      if (JSON.stringify(request.params.keys) === '["F11"]' && newWorkspaceOpen) {
+        newWorkspaceOpen = false;
+        const index = panes.findIndex(p => p.pane_id === "pane-new");
+        if (index >= 0) panes.splice(index, 1);
+        emit("pane_closed", { pane_id: "pane-new" });
+        emit("tab_closed", { tab_id: "tab-new" });
+        emit("workspace_closed", { workspace_id: "workspace-new" });
+      }
       if (JSON.stringify(request.params.keys) === '["F12"]') {
         failNextWait = true;
         updatePane(String(request.params.pane_id), "working");

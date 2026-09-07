@@ -297,6 +297,40 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab screenshot "$OUT/desktop-herdr-sidebar.png"
+# P1-1: clear the waiting hook, then reverse urgency while retaining tree positions.
+curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"Bash","tool_input":{"command":"true"}}' >/dev/null
+ab eval --stdin <<'JS'
+(async () => {
+  window.herdrTreeOrder = [...document.querySelectorAll('[data-herdr-repo], [data-herdr-worktree], [data-herdr-pane]')].map(e => e.dataset.herdrRepo || e.dataset.herdrWorktree || e.dataset.herdrPane);
+  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F8'] }) });
+  return true;
+})()
+JS
+wait_for_js "P1-1 reversed urgency keeps main checkout first" "document.querySelector('[data-herdr-pane]')?.dataset.herdrPane === 'pane-claude' && document.querySelector('[data-herdr-pane]')?.dataset.herdrStatus === 'blocked' && document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'waiting' && JSON.stringify(window.herdrTreeOrder) === JSON.stringify([...document.querySelectorAll('[data-herdr-repo], [data-herdr-worktree], [data-herdr-pane]')].map(e => e.dataset.herdrRepo || e.dataset.herdrWorktree || e.dataset.herdrPane))"
+ab eval --stdin <<'JS'
+(async () => {
+  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F9'] }) });
+  window.newWorkspaceStarted = performance.now();
+  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F10'] }) });
+  return true;
+})()
+JS
+wait_for_js "P1-2 event-created workspace is nested immediately" "Boolean(document.querySelector('[data-herdr-repo] [data-herdr-worktree] [data-herdr-pane=\"pane-new\"]'))"
+ab eval --stdin <<'JS'
+(async () => {
+  if (performance.now() - window.newWorkspaceStarted >= 10000) throw new Error('P1-2 new workspace waited for snapshot');
+  const wt = document.querySelector('[data-herdr-pane="pane-new"]').closest('[data-herdr-worktree]');
+  if (wt.dataset.herdrWorktree.endsWith('/')) throw new Error('P2-3 trailing checkout slash survived');
+  if (!wt.querySelector('[data-sidebar-group]').innerText.includes('未知分支')) throw new Error('P2-1 missing checkout claimed a branch');
+  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F11'] }) });
+  return true;
+})()
+JS
+wait_for_js "P1-2 closed workspace leaves no empty checkout" "document.querySelectorAll('[data-herdr-worktree]').length === 2 && !document.querySelector('[data-herdr-pane=\"pane-new\"]')"
+curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion","tool_input":{"questions":[{"header":"发布策略","question":"请选择交付方案","options":[{"label":"快速方案","description":"优先速度"},{"label":"稳妥方案","description":"优先验证"}]}]}}' >/dev/null
+wait_for_js "waiting hook restored" "document.querySelector('[data-herdr-pane]')?.dataset.herdrStatus === 'waiting'"
 ab click '[data-herdr-repo] > [data-sidebar-group] > button'
 wait_for_js "collapsed repository retains attention" "document.querySelector('[data-herdr-repo]')?.innerText.includes('2 待处理') && !document.querySelector('[data-herdr-worktree]')"
 ab screenshot "$OUT/desktop-herdr-collapsed.png"
@@ -494,6 +528,14 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab screenshot "$OUT/iphone-herdr-drawer.png"
+ab click '[role=dialog] [data-herdr-worktree]:first-child > [data-sidebar-group] > button'
+wait_for_js "P2-2 mobile collapsed worktree shows attention" "!document.querySelector('[role=dialog] [data-herdr-pane=\"pane-claude\"]') && document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
+ab click '[role=dialog] [data-herdr-repo] > [data-sidebar-group] > button'
+wait_for_js "P2-2 mobile collapsed repository shows attention" "!document.querySelector('[role=dialog] [data-herdr-worktree]') && document.querySelector('[role=dialog] [data-herdr-repo] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
+ab click '[role=dialog] [data-herdr-repo] > [data-sidebar-group] > button'
+wait_for_js "P2-2 mobile expanding repository hides only its badge" "!document.querySelector('[role=dialog] [data-herdr-repo] > [data-sidebar-group]')?.innerText.includes('待处理') && document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
+ab click '[role=dialog] [data-herdr-worktree]:first-child > [data-sidebar-group] > button'
+wait_for_js "P2-2 mobile expanding worktree hides its badge" "Boolean(document.querySelector('[role=dialog] [data-herdr-pane=\"pane-claude\"]')) && !document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('待处理')"
 ab click '[role="dialog"] [data-herdr-pane="pane-claude"]'
 wait_for_js "drawer closes into Herdr session" "!document.querySelector('[role=dialog] [data-herdr-group]') && Boolean(document.querySelector('[data-herdr-badge]'))"
 ab eval --stdin <<'JS'
