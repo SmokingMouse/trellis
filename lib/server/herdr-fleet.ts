@@ -157,10 +157,11 @@ export class HerdrFleetService {
     const binding = getHerdrBinding(sessionId, this.options.db);
     if (!binding) throw new Error("Herdr session not found");
     const state = this.client.state;
+    const candidates = state.panes.filter((pane) => pane.workspace_id === binding.workspaceId);
     const target =
-      state.panes.find((pane) => pane.pane_id === binding.paneId) ??
-      state.panes.find((pane) => pane.workspace_id === binding.workspaceId);
-    if (!target) throw new Error("Original Herdr workspace has no pane to split");
+      candidates.find((pane) => pane.agent == null) ??
+      candidates.find((pane) => pane.agent_status === "idle" || pane.agent_status === "done");
+    if (!target) throw new Error("Original Herdr workspace has no idle pane; open one in Herdr first");
     return this.client.splitAndResume(
       target as HerdrPane,
       binding.sessionId,

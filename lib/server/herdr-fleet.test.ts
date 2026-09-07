@@ -56,6 +56,7 @@ function createHarness() {
     revision: 1,
   };
   const requests: RequestEnvelope[] = [];
+  const snapshotPanes = [basePane];
   const subscribers = new Set<Bun.Socket<{ buffer: string }>>();
   const listener = Bun.listen({
     unix: socketPath,
@@ -86,7 +87,7 @@ function createHarness() {
               protocol: 19,
               workspaces: [{ workspace_id: "w1", label: "fleet" }],
               tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main" }],
-              panes: [basePane],
+              panes: snapshotPanes,
               layouts: [],
               agents: [{ pane_id: "w1:p1", name: "worker", state_change_seq: 10 }],
             },
@@ -139,7 +140,7 @@ function createHarness() {
     db.close();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  return { service, client, requests, attached, transcript, sessionId, basePane, emit };
+  return { service, client, requests, attached, transcript, sessionId, basePane, snapshotPanes, emit };
 }
 
 describe("HerdrFleetService", () => {
@@ -204,6 +205,7 @@ describe("HerdrFleetService", () => {
       target_pane_id: "w1:p1",
       workspace_id: "w1",
       cwd: "/tmp/fleet-project",
+      focus: false,
     });
     const input = harness.requests.find(
       (request) =>
@@ -214,6 +216,32 @@ describe("HerdrFleetService", () => {
       text: `claude --resume ${harness.sessionId}`,
       keys: ["Enter"],
     });
+  });
+
+  test("reopen prefers agent-free panes in the same workspace and never focuses them", async () => {
+    const h = createHarness();
+    h.snapshotPanes.push(
+      { ...h.basePane, pane_id: "foreign", workspace_id: "w2", agent: null, agent_session: null },
+      { ...h.basePane, pane_id: "idle", agent_status: "idle", agent_session: null },
+      { ...h.basePane, pane_id: "empty", agent: null, agent_session: null },
+    );
+    h.basePane.agent_status = "working";
+    await h.service.ensureStarted();
+    await h.service.reopen(h.sessionId);
+    expect(h.requests.find(r => r.method === "pane.split")?.params).toMatchObject({ target_pane_id: "empty", workspace_id: "w1", focus: false });
+  });
+
+  test("reopen uses done panes when no empty pane exists and refuses a busy workspace", async () => {
+    const h = createHarness();
+    h.basePane.agent_status = "working";
+    h.snapshotPanes.push({ ...h.basePane, pane_id: "done", agent_status: "done", agent_session: null });
+    await h.service.ensureStarted();
+    await h.service.reopen(h.sessionId);
+    expect(h.requests.find(r => r.method === "pane.split")?.params.target_pane_id).toBe("done");
+    h.emit({ event: "pane_closed", data: { type: "pane_closed", pane_id: "done" } });
+    await Bun.sleep(30);
+    await expect(h.service.reopen(h.sessionId)).rejects.toThrow("no idle pane");
+    expect(h.requests.filter(r => r.method === "pane.split")).toHaveLength(1);
   });
 
   test("HTTP routes expose ETag polling, input, keys, and reopen", async () => {

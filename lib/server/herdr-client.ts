@@ -333,7 +333,7 @@ export class HerdrClient {
       workspace_id: pane.workspace_id,
       direction: "right",
       cwd: pane.cwd ?? null,
-      focus: true,
+      focus: false,
     });
     const created = split.pane as HerdrPane | undefined;
     const paneId = created?.pane_id;
