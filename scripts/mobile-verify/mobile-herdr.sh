@@ -356,6 +356,8 @@ wait_for_js "offline read-only banner" "Boolean(document.querySelector('[data-he
 ab eval --stdin <<'JS'
 (() => {
   if (document.querySelector('[data-herdr-input]')) throw new Error('Herdr input remained after pane went down');
+  if (document.querySelector('[data-thread-scroll] [data-herdr-card]')) throw new Error('stale interaction card remained after pane went down');
+  if (!document.querySelector('[data-herdr-badge]')?.textContent?.includes('offline')) throw new Error('Herdr badge did not switch to offline');
   const button = document.querySelector('[data-herdr-reopen]');
   if (!button?.textContent?.includes('在 Herdr 里重新打开')) throw new Error('reopen copy missing');
   return button.getBoundingClientRect().toJSON();

@@ -17,7 +17,7 @@ export function HerdrSessionBadge({
       className="flex min-w-0 items-center gap-1.5 text-label text-ink-faint"
       title={
         pane
-          ? `${pane.workspaceLabel} · ${pane.paneId} · ${pane.agentKind} · ${pane.status}`
+          ? `${pane.workspaceLabel} · ${pane.paneId} · ${pane.agentKind} · ${pane.alive ? pane.status : "offline"}`
           : "Herdr 会话"
       }
     >
@@ -26,7 +26,7 @@ export function HerdrSessionBadge({
       </span>
       {pane ? (
         <span className="min-w-0 truncate">
-          {pane.workspaceLabel} · {pane.paneId} · {pane.agentKind} · {pane.status}
+          {pane.workspaceLabel} · {pane.paneId} · {pane.agentKind} · {pane.alive ? pane.status : "offline"}
         </span>
       ) : (
         <span>{loading ? "正在读取 pane…" : "pane 已离线"}</span>

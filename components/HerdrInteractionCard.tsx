@@ -57,7 +57,7 @@ export function HerdrInteractionCard({
   const codexBlocked =
     pane.agentKind === "codex" && pane.status === "blocked" && !pane.hook;
   const waiting = pane.status === "waiting";
-  const visible = waiting || codexBlocked;
+  const visible = pane.alive && (waiting || codexBlocked);
   const [step, setStep] = useState(0);
   const [answerState, setAnswerState] = useState<
     "idle" | "sending" | "answered" | "error"
