@@ -939,6 +939,9 @@ export function SessionSidebar() {
 
       <div className="flex-1 overflow-y-auto py-1.5">
         <HerdrSidebarGroup
+          GroupRow={GroupRow}
+          collapsed={collapsed}
+          onToggle={toggleCollapsed}
           activeSessionId={activeId}
           onOpenSession={(sessionId) => {
             setEditingId(null);
@@ -1249,6 +1252,7 @@ function GroupRow({
     >
       <button
         onClick={toggleable ? onToggle : undefined}
+        aria-expanded={toggleable ? !collapsed : undefined}
         title={title}
         style={{ paddingLeft: PAD(level) }}
         className={`flex-1 min-w-0 flex items-center gap-1 h-full text-left text-ui ${
@@ -1277,7 +1281,7 @@ function GroupRow({
       )}
       {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
       {badge && (
-        <span className="shrink-0 text-nano tabular-nums text-ink-faint group-hover:hidden">
+        <span className={`shrink-0 text-nano tabular-nums text-ink-faint ${(onAdd || onInspectDiff || onBatchClean || onRemove) ? "group-hover:hidden" : ""}`}>
           {badge}
         </span>
       )}
