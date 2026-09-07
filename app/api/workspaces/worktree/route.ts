@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { getDB } from "@/lib/server/sqlite";
-import { ensureWorkspaceForPath } from "@/lib/server/workspaces";
+import { ensureWorkspaceForPath, touchWorkspace } from "@/lib/server/workspaces";
 import { killWorkspaceTerminals } from "@/lib/server/terminals";
 import {
   activeWorkspaceSessionCount,
@@ -197,6 +197,7 @@ export async function POST(req: Request) {
 
   // created_by='trellis' —— 只有这一类才允许从 UI 删磁盘。
   const id = ensureWorkspaceForPath(target, "trellis", db);
+  if (id) touchWorkspace(id, db);
   return Response.json({ ok: true, workspaceId: id, path: target });
 }
 

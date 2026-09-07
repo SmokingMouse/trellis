@@ -26,6 +26,7 @@ const {
   ensureWorkspaceForPath,
   listProjectTree,
   mergeDuplicateWorkspacePaths,
+  touchWorkspace,
 } = await import("./workspaces");
 const { mergeRecentWorkspaces, sortRecentWorkspaces } = await import(
   "../../app/api/workspaces/recent/route"
@@ -144,6 +145,62 @@ describe("workspace realpath identity", () => {
     expect(
       db.prepare("SELECT last_used_at FROM workspaces WHERE id = ?").get(id!),
     ).toEqual({ last_used_at: null });
+    db.close();
+  });
+
+  test("non-scan registration starts at created_at and UI use refreshes recency", () => {
+    const db = projectTreeDb();
+    const id = ensureWorkspaceForPath(unusedDir, "trellis", db);
+    const discoveredId = ensureWorkspaceForPath(realDir, "discovered", db);
+    expect(id).toBeString();
+    expect(discoveredId).toBeString();
+    for (const workspaceId of [id!, discoveredId!]) {
+      const created = db
+        .prepare(
+          "SELECT created_at, last_used_at FROM workspaces WHERE id = ?",
+        )
+        .get(workspaceId) as { created_at: number; last_used_at: number };
+      expect(created.last_used_at).toBe(created.created_at);
+    }
+
+    db.prepare("UPDATE workspaces SET last_used_at = 1 WHERE id = ?").run(id!);
+    touchWorkspace(id!, db);
+    const touched = db
+      .prepare("SELECT last_used_at FROM workspaces WHERE id = ?")
+      .get(id!) as { last_used_at: number };
+    expect(touched.last_used_at).toBeGreaterThan(1);
+    db.close();
+  });
+
+  test("a UI-created worktree ranks first in the sidebar and recent picker", () => {
+    const db = projectTreeDb();
+    const id = ensureWorkspaceForPath(unusedDir, "trellis", db);
+    expect(id).toBeString();
+    const workspace = db
+      .prepare("SELECT project_id FROM workspaces WHERE id = ?")
+      .get(id!) as { project_id: string };
+    db.prepare(
+      `INSERT INTO workspaces
+       (id,project_id,name,path,kind,git_branch,created_by,created_at,last_used_at)
+       VALUES ('old',?,'old',?,'worktree','old','trellis',1,1)`,
+    ).run(workspace.project_id, activeDir);
+    touchWorkspace(id!, db);
+
+    const project = listProjectTree(db).find((p) => p.id === workspace.project_id);
+    expect(project?.workspaces[0]?.id).toBe(id!);
+    const recent = db
+      .prepare("SELECT last_used_at FROM workspaces WHERE id = ?")
+      .get(id!) as { last_used_at: number };
+    const rows = sortRecentWorkspaces([
+      { path: activeDir, shortName: "old", lastUsedAt: 1, source: "trellis" },
+      {
+        path: unusedDir,
+        shortName: "unused",
+        lastUsedAt: recent.last_used_at,
+        source: "trellis",
+      },
+    ]);
+    expect(rows[0]?.path).toBe(unusedDir);
     db.close();
   });
 
