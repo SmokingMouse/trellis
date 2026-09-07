@@ -100,6 +100,16 @@ export type HerdrWorkspaceView = {
   panes: HerdrPaneView[];
 };
 
+export const HERDR_HOOK_TTL_MS = 5 * 60_000;
+
+function freshHook(hook: HerdrHookRecord | null | undefined, now: number): HerdrHookRecord | null {
+  return hook && now - hook.updatedAt < HERDR_HOOK_TTL_MS ? hook : null;
+}
+
+function liveStatus(hook: HerdrHookRecord | null, status: string): HerdrUiStatus {
+  return hook?.state === "waiting" ? "waiting" : paneStatus(status);
+}
+
 const KNOWN_STATUSES = new Set<HerdrUiStatus>([
   "working",
   "waiting",
@@ -133,6 +143,7 @@ function workspaceLabel(workspace: HerdrFleetWorkspace): string {
 export function buildHerdrWorkspaceViews(
   fleet: HerdrFleetResponse | null,
   hooks: HerdrHookRecord[],
+  now = Date.now(),
 ): HerdrWorkspaceView[] {
   if (!fleet) return [];
   const bindingByPane = new Map(
@@ -153,10 +164,10 @@ export function buildHerdrWorkspaceViews(
         .filter((pane) => Boolean(pane.agent))
         .map((pane): HerdrPaneView => {
           const binding = bindingByPane.get(pane.pane_id) ?? null;
-          const hook =
-            (binding ? hookBySession.get(binding.sessionId) : null) ??
-            hookByPane.get(pane.pane_id) ??
-            null;
+          const hook = freshHook(
+            binding ? hookBySession.get(binding.sessionId) : hookByPane.get(pane.pane_id),
+            now,
+          );
           const agentKind = pane.agent ?? binding?.agentKind ?? "unknown";
           return {
             paneId: pane.pane_id,
@@ -169,7 +180,7 @@ export function buildHerdrWorkspaceViews(
               agentKind,
             agentKind,
             agentName: binding?.agentName ?? null,
-            status: hook?.state ?? paneStatus(pane.agent_status),
+            status: liveStatus(hook, pane.agent_status),
             alive: fleet.available && (binding?.alive ?? true),
             pane,
             binding,
@@ -197,6 +208,7 @@ export function findHerdrPaneForSession(
   hooks: HerdrHookRecord[],
   workspaces: HerdrWorkspaceView[],
   sessionId: string | null | undefined,
+  now = Date.now(),
 ): HerdrPaneView | null {
   if (!sessionId) return null;
   for (const workspace of workspaces) {
@@ -212,12 +224,11 @@ export function findHerdrPaneForSession(
   const workspace = fleet?.workspaces.find(
     (candidate) => candidate.workspace_id === binding.workspaceId,
   );
-  const hook =
+  const hook = freshHook(
     hooks.find(
       (candidate) =>
-        candidate.sessionId === binding.sessionId ||
-        candidate.paneKey === binding.paneId,
-    ) ?? null;
+        candidate.sessionId === binding.sessionId,
+    ), now);
   const label = workspace ? workspaceLabel(workspace) : binding.workspaceId;
   return {
     paneId: binding.paneId,
@@ -226,7 +237,7 @@ export function findHerdrPaneForSession(
     label: binding.label || binding.agentName || binding.agentKind,
     agentKind: binding.agentKind,
     agentName: binding.agentName,
-    status: hook?.state ?? paneStatus(binding.agentStatus),
+    status: liveStatus(hook, binding.agentStatus),
     alive: Boolean(fleet?.available && binding.alive),
     pane: {
       pane_id: binding.paneId,

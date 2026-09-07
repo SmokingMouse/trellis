@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildHerdrWorkspaceViews,
   findHerdrPaneForSession,
+  HERDR_HOOK_TTL_MS,
   type HerdrFleetResponse,
   type HerdrHookRecord,
 } from "./herdr-ui";
@@ -84,6 +85,29 @@ const fleet: HerdrFleetResponse = {
 };
 
 describe("Herdr UI fleet projection", () => {
+  test("only fresh waiting hooks override live pane state, including fallback views", () => {
+    const now = 1_000_000;
+    const doneFleet = structuredClone(fleet);
+    doneFleet.workspaces[0].tabs[0].panes[1].agent_status = "done";
+    doneFleet.sessions[1].agentStatus = "done";
+    for (const [state, age, expected] of [
+      ["working", 0, "done"], ["done", 0, "done"],
+      ["waiting", 0, "waiting"], ["waiting", HERDR_HOOK_TTL_MS + 1, "done"],
+    ] as const) {
+      const hooks: HerdrHookRecord[] = [{ sessionId: "claude-session", agent: "claude", state, toolName: null, interactivePrompt: {}, paneKey: "p-waiting", updatedAt: now - age }];
+      const views = buildHerdrWorkspaceViews(doneFleet, hooks, now);
+      expect(views[0].panes.find(p => p.paneId === "p-waiting")?.status).toBe(expected);
+      expect(findHerdrPaneForSession(doneFleet, hooks, [], "claude-session", now)?.status).toBe(expected);
+      if (age > HERDR_HOOK_TTL_MS) expect(views[0].panes.find(p => p.paneId === "p-waiting")?.hook).toBeNull();
+    }
+  });
+
+  test("a reused pane cannot inherit the prior session's waiting hook", () => {
+    const hooks: HerdrHookRecord[] = [{ sessionId: "old-session", agent: "claude", state: "waiting", toolName: null, interactivePrompt: {}, paneKey: "p-waiting", updatedAt: Date.now() }];
+    const views = buildHerdrWorkspaceViews(fleet, hooks);
+    expect(views[0].panes.find(p => p.paneId === "p-waiting")?.status).toBe("working");
+  });
+
   test("overlays hook state and puts waiting panes first", () => {
     const hooks: HerdrHookRecord[] = [
       {
@@ -93,7 +117,7 @@ describe("Herdr UI fleet projection", () => {
         toolName: "AskUserQuestion",
         interactivePrompt: { questions: [] },
         paneKey: "p-waiting",
-        updatedAt: 10,
+        updatedAt: Date.now(),
       },
     ];
     const workspaces = buildHerdrWorkspaceViews(fleet, hooks);

@@ -3,6 +3,12 @@ import { getDB } from "@/lib/server/sqlite";
 import { applyHookEvent, type NormalizeOptions } from "./normalize";
 import type { AgentHookRecord, ClaudeHookPayload, StashedState } from "./types";
 
+export const HOOK_RETENTION_MS = 24 * 60 * 60_000;
+
+export function pruneHookRecords(now = Date.now()): number {
+  return getDB().prepare("DELETE FROM agent_hook_state WHERE updated_at < ?").run(now - HOOK_RETENTION_MS).changes;
+}
+
 type Row = {
   session_id: string;
   agent: string;
@@ -58,6 +64,7 @@ export function getHookRecord(sessionId: string): AgentHookRecord | null {
 }
 
 export function listHookRecords(): AgentHookRecord[] {
+  pruneHookRecords();
   const rows = getDB()
     .prepare("SELECT * FROM agent_hook_state ORDER BY updated_at DESC")
     .all() as Row[];
@@ -119,6 +126,7 @@ export function recordClaudeHook(
   const sessionId =
     typeof payload.session_id === "string" ? payload.session_id : "";
   if (!sessionId) return null;
+  pruneHookRecords(opts.now);
   const next = applyHookEvent(getHookRecord(sessionId), payload, opts);
   if (!next) return null;
   saveHookRecord(next);
