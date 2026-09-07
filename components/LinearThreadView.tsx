@@ -44,6 +44,7 @@ import {
   HerdrOfflineBanner,
   HerdrSessionBadge,
 } from "./HerdrSessionControls";
+import { HerdrInteractionCard } from "./HerdrInteractionCard";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -647,6 +648,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         }
       >
         <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
+        {isHerdr && herdrPane && (
+          <HerdrInteractionCard pane={herdrPane} />
+        )}
         {isHerdr && session && (
           <HerdrOfflineBanner
             sessionId={session.id}

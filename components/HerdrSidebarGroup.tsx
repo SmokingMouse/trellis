@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { buildHerdrWorkspaceViews, type HerdrUiStatus } from "@/lib/herdr-ui";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { HerdrInteractionCard } from "@/components/HerdrInteractionCard";
 
 const STATUS_STYLE: Record<HerdrUiStatus, string> = {
   working: "bg-accent animate-pulse",
@@ -71,8 +72,8 @@ export function HerdrSidebarGroup({
                 const active = sessionId === activeSessionId;
                 const urgent = pane.status === "waiting" || pane.status === "blocked";
                 return (
-                  <button
-                    key={pane.paneId}
+                  <div key={pane.paneId}>
+                    <button
                     type="button"
                     data-herdr-pane={pane.paneId}
                     data-herdr-status={pane.status}
@@ -88,24 +89,29 @@ export function HerdrSidebarGroup({
                     title={`${pane.label} · ${pane.agentKind} · ${pane.status}${
                       sessionId ? "" : "\n会话 transcript 正在同步"
                     }`}
-                  >
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[pane.status]}`}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1 truncate text-ui">
-                      {pane.label}
-                    </span>
-                    <span className="shrink-0 text-nano uppercase text-ink-faint">
-                      {pane.agentKind}
-                    </span>
-                    <span className="shrink-0 text-nano">{pane.status}</span>
-                    {urgent && (
-                      <span className="sr-only">
-                        {pane.status === "waiting" ? "等你回答" : "终端在等你"}
+                    >
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[pane.status]}`}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate text-ui">
+                        {pane.label}
                       </span>
+                      <span className="shrink-0 text-nano uppercase text-ink-faint">
+                        {pane.agentKind}
+                      </span>
+                      <span className="shrink-0 text-nano">{pane.status}</span>
+                      {urgent && (
+                        <span className="sr-only">
+                          {pane.status === "waiting" ? "等你回答" : "终端在等你"}
+                        </span>
+                      )}
+                    </button>
+                    {(pane.status === "waiting" ||
+                      (pane.agentKind === "codex" && pane.status === "blocked")) && (
+                      <HerdrInteractionCard pane={pane} compact />
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>

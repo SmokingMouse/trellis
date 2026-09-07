@@ -96,6 +96,11 @@ function createHarness() {
             type: "pane_info",
             pane: { ...basePane, pane_id: "w1:p2", terminal_id: "term-2", revision: 0 },
           };
+        } else if (request.method === "pane.read") {
+          result = {
+            type: "pane_read",
+            lines: Array.from({ length: 45 }, (_, index) => `line-${index + 1}`),
+          };
         }
         socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
       },
@@ -218,6 +223,7 @@ describe("HerdrFleetService", () => {
     const fleetRoute = await import("../../app/api/herdr/fleet/route");
     const inputRoute = await import("../../app/api/herdr/panes/[id]/input/route");
     const keysRoute = await import("../../app/api/herdr/panes/[id]/keys/route");
+    const readRoute = await import("../../app/api/herdr/panes/[id]/read/route");
     const reopenRoute = await import("../../app/api/herdr/sessions/[id]/reopen/route");
 
     const first = await fleetRoute.GET(new Request("http://trellis/api/herdr/fleet"));
@@ -254,6 +260,18 @@ describe("HerdrFleetService", () => {
     expect(
       harness.requests.find((request) => request.method === "pane.send_keys")?.params.keys,
     ).toEqual(["1", "Enter"]);
+
+    const read = await readRoute.GET(
+      new Request("http://trellis/api/herdr/panes/w1:p1/read"),
+      { params: Promise.resolve({ id: "w1:p1" }) },
+    );
+    expect(read.status).toBe(200);
+    const screen = (await read.json()) as { text: string };
+    expect(screen.text.split("\n")).toHaveLength(40);
+    expect(screen.text.startsWith("line-6\n")).toBeTrue();
+    expect(
+      harness.requests.find((request) => request.method === "pane.read")?.params,
+    ).toEqual({ pane_id: "w1:p1", source: "recent" });
 
     const reopened = await reopenRoute.POST(
       new Request(`http://trellis/api/herdr/sessions/${harness.sessionId}/reopen`, {

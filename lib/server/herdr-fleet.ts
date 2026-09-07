@@ -145,6 +145,13 @@ export class HerdrFleetService {
     return this.client.sendKeys(paneId, keys);
   }
 
+  read(paneId: string): Promise<Record<string, unknown>> {
+    return this.client.request("pane.read", {
+      pane_id: paneId,
+      source: "recent",
+    });
+  }
+
   async reopen(sessionId: string): Promise<string> {
     const binding = getHerdrBinding(sessionId, this.options.db);
     if (!binding) throw new Error("Herdr session not found");
