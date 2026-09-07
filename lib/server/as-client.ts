@@ -30,6 +30,7 @@ export class ShadowClient {
   private connecting?: Promise<AgentClient>;
   private timer?: ReturnType<typeof setTimeout>;
   private attempts = 0;
+  private lastExternalRetry = -Infinity;
   private failure?: Error;
   private listeners = new Set<(event: ShadowEvent) => void>();
   private threadId?: string;
@@ -62,11 +63,18 @@ export class ShadowClient {
     }, shadowRetryDelay(this.attempts++, this.options.retryMs));
     this.timer.unref?.();
   }
-  connect(): Promise<AgentClient> {
+  connect(externalRetry = false): Promise<AgentClient> {
     if (this.stopped) return Promise.reject(new Error("observer closed"));
     if (this.connecting) return this.connecting;
-    // Requests must not reset or bypass an outstanding outage backoff.
-    if (this.timer) return Promise.reject(this.failure ?? new Error("observer reconnecting"));
+    // A list refresh may bypass backoff once per second; concurrent requests share the attempt.
+    if (this.timer) {
+      const now = performance.now();
+      if (!externalRetry || now - this.lastExternalRetry < 1000) {
+        return Promise.reject(this.failure ?? new Error("observer reconnecting"));
+      }
+      this.lastExternalRetry = now;
+      clearTimeout(this.timer); this.timer = undefined;
+    }
     if (this.client?.state === "connected" && (!this.threadId || this.attachedClient === this.client)) return Promise.resolve(this.client);
     this.connecting = this.open().finally(() => { this.connecting = undefined; });
     return this.connecting;
@@ -158,7 +166,7 @@ export class ShadowClient {
     }
   }
   async listThreads(cursor?: string) {
-    return (await this.connect()).request("thread/list", { limit: 100, ...(cursor ? { cursor } : {}) });
+    return (await this.connect(true)).request("thread/list", { limit: 100, ...(cursor ? { cursor } : {}) });
   }
   async attach(threadId: string, sinceSeq = 0) {
     if (!Number.isSafeInteger(sinceSeq) || sinceSeq < 0) throw new Error("invalid sinceSeq");

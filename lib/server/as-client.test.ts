@@ -75,6 +75,40 @@ test("invalid cursors reject before connection", async () => {
   observer.close();
 });
 
+test("N8 list refresh reconnects immediately during five-minute backoff", async () => {
+  const f = fixture();
+  const warnings: string[] = [], recovered: string[] = [];
+  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath,
+    retryMs: 300000, warn: text => warnings.push(text), info: text => recovered.push(text) });
+  cleanup.push(() => observer.close());
+  await expect(observer.connect()).rejects.toThrow();
+  await f.start();
+  expect((await observer.listThreads()).threads).toEqual([]);
+  expect(warnings).toHaveLength(1);
+  expect(recovered).toHaveLength(1);
+});
+
+test("N8 external retry bursts are coalesced and debounced for one second", async () => {
+  const f = fixture();
+  const observer = new ShadowClient({ socketPath: f.paths.socketPath, token: "test-token", retryMs: 300000, warn: () => {} });
+  cleanup.push(() => observer.close());
+  let attempts = 0;
+  observer.onEvent(event => { if (event.type === "connection" && event.state === "connecting") attempts++; });
+  await expect(observer.connect()).rejects.toThrow();
+  expect(attempts).toBe(1);
+  const burst = () => Promise.allSettled(Array.from({ length: 20 }, () => observer.listThreads()));
+  await burst();
+  expect(attempts).toBe(2);
+  await burst();
+  expect(attempts).toBe(2);
+  await Bun.sleep(1050);
+  await burst();
+  expect(attempts).toBe(3);
+  observer.close();
+  await expect(observer.listThreads()).rejects.toThrow("observer closed");
+  expect(attempts).toBe(3);
+});
+
 test("P1-2 observer is opt-in and backoff doubles from 1s to a 5 minute cap", () => {
   expect(isShadowEnabled({})).toBe(false);
   expect(isShadowEnabled({ TRELLIS_AS: "off" })).toBe(false);
