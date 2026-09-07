@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { AgentClient, MockEngine, type MockScript } from "@smokingmouse/agent-server";
-import { runDaemon, resolveDaemonPaths } from "@smokingmouse/agent-server/daemon";
+import { runDaemon, resolveDaemonPaths, loadToken } from "@smokingmouse/agent-server/daemon";
 
 mock.module("server-only", () => ({}));
 const home = mkdtempSync("/tmp/trellis-as-regression-");
@@ -128,6 +128,20 @@ try {
       release(); pause = undefined;
       await done(a);
     } finally { AgentClient.prototype.connect = originalConnect; }
+  } else if (process.argv[2] === "P2-3 interrupt bypasses peer lease") {
+    const pending = branch(second, "interrupt under lease");
+    let release!: () => void;
+    pause = new Promise<void>(resolve => { release = resolve; });
+    const run = await as.startProjectRun({nodeId:pending,prompt:"interrupt under lease",attachments:[]});
+    const peer = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),reconnect:false});
+    try {
+      await peer.request("thread/attach",{threadId:run.threadId,sinceSeq:0});
+      await peer.request("thread/lease/acquire",{threadId:run.threadId,ttlMs:10000});
+      await as.interruptProject(pending);
+      await done(run);
+      assert.equal(repo.getNode(pending)!.status,"error");
+      assert.ok(engines.some(e => e.interrupted.includes(run.turnId!)));
+    } finally { release(); pause=undefined; peer.close(); }
   } else throw new Error("unknown regression case");
   console.log(`PASS: ${process.argv[2]}`);
 } finally {

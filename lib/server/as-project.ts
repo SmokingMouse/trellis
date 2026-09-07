@@ -356,7 +356,9 @@ export async function respondProject(nodeId: string, body: { toolUseId: string; 
   }));
 }
 export async function interruptProject(nodeId: string) {
-  return withNodeThread(nodeId, (client, threadId) => withProjectLease(client, threadId, () => client.request("turn/interrupt", { threadId, turnId: getAsTurn(nodeId)?.turn_id ?? undefined })));
+  const active = runs.get(nodeId);
+  if (active && !active.terminal) return active.client.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId });
+  return withNodeThread(nodeId, (client, threadId) => client.request("turn/interrupt", { threadId, turnId: getAsTurn(nodeId)?.turn_id ?? undefined }));
 }
 export async function permissionProject(nodeId: string, permission: NonNullable<StartThreadParams["permission"]>) {
   if (["full", "bypassPermissions"].includes(permission)) throw new Error("bypass 只能在创建线程时选择");

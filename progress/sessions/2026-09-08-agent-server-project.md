@@ -16,3 +16,4 @@
 - P0-1：AS 重试结果先缓存在运行投影里，成功后事务替换原答案和 turn 绑定；失败保留正文、工具、usage、状态和旧绑定。tip 重试原生 fork 后重发，非 tip（含 daemon 比 DB 更晚）播种新线程。兼容路径延迟至首个正文/工具输出或成功才 reset。Mock 回归 P0-1/P1-1 已通过，Next：硬关闸与资源清理。
 - P1-2/P2-1：绑定解析新增 disabled fallback，共用 isShadowEnabled；AS=off 覆盖 SOCKET，已绑定新输入带 notice 走旧引擎；PROJECT=off 仅停打标。README/.env 同步。真实 Mock daemon + POST 路由 probe 通过，硬关后 engine turn 计数不变。
 - P2-2：fallback/startup 失败删除未执行的 as_turns 并清理无引用 as_threads；重试映射仅成功时切换，兼容重试有输出后才解除旧绑定。ProjectRun.start 缓存初始化 promise，并发 catchup 等同一完成态；Mock 注入 preflight 后失败与并发恢复测试通过。
+- P2-3：interrupt 直接发送 turn/interrupt，不再获取租约；重试期间指向暂存的新运行线程。对端持有 10 秒租约的 Mock 中断 probe 已通过。Next：完整 D1–D5 与手机新增重试/普通续聊/硬关断言。
