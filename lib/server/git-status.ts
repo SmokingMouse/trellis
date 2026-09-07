@@ -94,7 +94,7 @@ async function defaultBranch(cwd: string): Promise<string | null> {
  * 已知漏报：squash / rebase 合并下 tip 不在主干的可达集里，这里会返回 false
  * （该提示回收却不提示）。方向是安全的 —— 宁可漏报也不能误报。
  */
-async function isMergedInto(
+export async function isMergedInto(
   cwd: string,
   tip: string,
   base: string,
@@ -107,10 +107,11 @@ async function isMergedInto(
     `${tip}..${base}`,
   ]);
   if (!out) return false;
-  // 每行形如 "<merge> <parent1> <parent2> …"，跳过第一列（merge 自己）
+  // 每行形如 "<merge> <parent1> <parent2> …"。前两列分别是 merge 自己和
+  // 主干第一父；只认第二及以后父，避免把停在第一父上的零提交分支当成已合并。
   return out
     .split("\n")
-    .some((line) => line.trim().split(/\s+/).slice(1).includes(tip));
+    .some((line) => line.trim().split(/\s+/).slice(2).includes(tip));
 }
 
 async function statusOf(row: {
