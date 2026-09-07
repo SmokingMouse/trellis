@@ -135,7 +135,10 @@ export function applyHookEvent(
   const stashIfSubagent = () => {
     // A running child does not imply that a prompt belongs to it. Keep the
     // parent's card unless the hook explicitly identifies a child invocation.
-    if ((str(payload.agent_id) || str(payload.subagent_id)) && next.subagents.length > 0 && !next.stashed && prev) {
+    const owner = prev?.interactivePrompt && typeof prev.interactivePrompt === "object"
+      ? str((prev.interactivePrompt as Record<string, unknown>).agent_id) : null;
+    if ((str(payload.agent_id) || str(payload.subagent_id)) && next.subagents.length > 0 && !next.stashed && prev &&
+        (!prev.interactivePrompt || owner !== str(payload.agent_id))) {
       next.stashed = {
         state: prev.state,
         toolName: prev.toolName,
@@ -153,11 +156,13 @@ export function applyHookEvent(
       break;
     }
     case "SessionEnd": {
+      next.stashed = null;
       setState("done");
       dismiss();
       break;
     }
     case "UserPromptSubmit": {
+      next.stashed = null;
       next.prompt = str(payload.prompt) ?? next.prompt;
       next.toolName = null;
       next.toolInput = null;
@@ -189,6 +194,9 @@ export function applyHookEvent(
     case "PostToolUse":
     case "PostToolUseFailure": {
       next.toolName = str(payload.tool_name) ?? next.toolName;
+      if (next.stashed?.interactivePrompt && closesPrompt(next.stashed.interactivePrompt, payload)) {
+        next.stashed = null;
+      }
       if (!closesPrompt(next.interactivePrompt, payload)) break;
       dismiss();
       setState("working");
@@ -196,6 +204,7 @@ export function applyHookEvent(
     }
     case "Stop":
     case "StopFailure": {
+      next.stashed = null;
       dismiss();
       next.toolName = null;
       next.toolInput = null;
@@ -216,9 +225,10 @@ export function applyHookEvent(
       if (at >= 0) next.subagents.splice(at, 1);
       else next.subagents.pop();
       if (next.subagents.length === 0 && next.stashed) {
-        // 只有卡还挂着才复位 —— 期间要是已经正常撤过卡、状态往前走了，
-        // 拿旧快照盖回去等于把会话拨回过去。
-        if (next.state === "waiting") {
+        // 子工具完成会先进入 working；父卡仍在 stash 时也必须复位。
+        // 父工具自己的完成事件会清 stash，避免把已答的父卡复活。
+        if (next.state === "waiting" ||
+            (next.stashed.interactivePrompt && next.interactivePrompt !== next.stashed.interactivePrompt)) {
           next.state = next.stashed.state;
           next.toolName = next.stashed.toolName;
           next.toolInput = next.stashed.toolInput;

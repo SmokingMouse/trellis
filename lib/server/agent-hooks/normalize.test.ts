@@ -232,6 +232,21 @@ describe("Stop 的 lastAssistantMessage", () => {
 });
 
 describe("子 agent 名单与父状态 stash/restore", () => {
+  test("R4 restores the parent's question after child approval completes before SubagentStop", () => {
+    const parent = feed([
+      ev("PreToolUse", { agent_id: "parent", tool_name: "AskUserQuestion", tool_use_id: "parent-q", tool_input: { questions: [{ question: "父问题" }] } }),
+      ev("SubagentStart", { agent_id: "child", agent_type: "Explore" }),
+    ]);
+    const child = feed([ev("PermissionRequest", { agent_id: "child", tool_name: "Bash", summary: "子工具" })], parent);
+    expect(child.stashed?.interactivePrompt).toEqual(parent.interactivePrompt);
+    const completed = feed([ev("PostToolUse", { agent_id: "child", tool_name: "Bash", tool_use_id: "child-bash" })], child);
+    expect(completed.state).toBe("working");
+    const stop = ev("SubagentStop", { agent_id: "child", agent_type: "Explore" });
+    expect(feed([stop], completed)).toMatchObject({ state: "waiting", interactivePrompt: parent.interactivePrompt, stashed: null });
+    const parentCompleted = ev("PostToolUse", { agent_id: "parent", tool_name: "AskUserQuestion", tool_use_id: "parent-q" });
+    expect(feed([parentCompleted, stop], completed).interactivePrompt).toBeNull();
+    expect(feed([ev("Stop"), stop], completed).interactivePrompt).toBeNull();
+  });
   test("子 agent 的 waiting 顶掉父状态，SubagentStop 后复位", () => {
     const working = feed([
       ev("SessionStart"),
