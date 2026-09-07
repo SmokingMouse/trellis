@@ -9,6 +9,7 @@ mock.module("server-only", () => ({}));
 const root = mkdtempSync("/tmp/trellis-worktree-clean-");
 const {
   activeWorkspaceSessionCount,
+  isDefaultCleanCandidate,
   pruneWorktreeMetadata,
   resolveMainCheckoutPath,
 } = await import("./worktree-clean");
@@ -32,14 +33,28 @@ afterAll(() => {
 });
 
 describe("worktree cleanup helpers", () => {
-  test("active count excludes archived sessions", () => {
+  test("active count includes only unarchived user sessions", () => {
     const db = new Database(":memory:");
     db.exec(`
-      CREATE TABLE sessions (id TEXT, archived INTEGER, workspace_id TEXT);
-      INSERT INTO sessions VALUES ('active',0,'w'), ('archived',1,'w');
+      CREATE TABLE sessions (id TEXT, archived INTEGER, kind TEXT, workspace_id TEXT);
+      INSERT INTO sessions VALUES
+        ('active-user',0,'user','w'),
+        ('active-task',0,'task','w'),
+        ('archived-user',1,'user','w');
     `);
     expect(activeWorkspaceSessionCount(db, "w")).toBe(1);
     db.close();
+  });
+
+  test("clean count excludes worktrees with active user sessions", () => {
+    const clean = {
+      canClean: true,
+      dirtyCount: 0,
+      ignoredCount: 0,
+      sessionCount: 0,
+    };
+    expect(isDefaultCleanCandidate(clean)).toBeTrue();
+    expect(isDefaultCleanCandidate({ ...clean, sessionCount: 1 })).toBeFalse();
   });
 
   test("prune runs from the surviving main checkout", () => {

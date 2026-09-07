@@ -6,6 +6,7 @@ import { invalidateGitStatus } from "@/lib/server/git-status";
 import { killWorkspaceTerminals } from "@/lib/server/terminals";
 import {
   activeWorkspaceSessionCount,
+  isDefaultCleanCandidate,
   pruneWorktreeMetadata,
   resolveMainCheckoutPath,
 } from "@/lib/server/worktree-clean";
@@ -160,7 +161,7 @@ export async function POST(req: Request) {
       preview: true,
       items: previews,
       totalCount: previews.length,
-      cleanCount: previews.filter((p) => p.canClean && p.dirtyCount === 0 && p.ignoredCount === 0).length,
+      cleanCount: previews.filter(isDefaultCleanCandidate).length,
       dirtyCount: previews.filter((p) => p.dirtyCount > 0 || p.ignoredCount > 0).length,
     });
   }

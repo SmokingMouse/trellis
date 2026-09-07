@@ -11,13 +11,27 @@ export function activeWorkspaceSessionCount(
     const row = db
       .prepare(
         `SELECT COUNT(*) AS n FROM sessions
-         WHERE archived = 0 AND workspace_id = ?`,
+         WHERE archived = 0 AND kind = 'user' AND workspace_id = ?`,
       )
       .get(workspaceId) as { n: number } | undefined;
     return row?.n ?? 0;
   } catch {
     return 0;
   }
+}
+
+export function isDefaultCleanCandidate(item: {
+  canClean: boolean;
+  dirtyCount: number;
+  ignoredCount: number;
+  sessionCount: number;
+}): boolean {
+  return (
+    item.canClean &&
+    item.dirtyCount === 0 &&
+    item.ignoredCount === 0 &&
+    item.sessionCount === 0
+  );
 }
 
 function git(cwd: string, args: string[]) {
