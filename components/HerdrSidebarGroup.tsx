@@ -68,7 +68,7 @@ export function HerdrSidebarGroup({
                 </span>
               </div>
               {workspace.panes.map((pane) => {
-                const sessionId = pane.binding?.sessionId ?? null;
+                const sessionId = pane.binding?.trellisSessionId ?? pane.binding?.sessionId ?? null;
                 const active = sessionId === activeSessionId;
                 const urgent = pane.status === "waiting" || pane.status === "blocked";
                 return (

@@ -260,7 +260,10 @@ export function reconcileHerdrPane(
   const db = options.db ?? getDB();
   const now = options.now ?? Date.now();
   const agentKind = pane.agent ?? session.agent;
-  const existing = getHerdrBinding(session.value, db);
+  // Pane reconciliation is keyed by the exact reported CLI sid; lineage
+  // resolution is only for callers starting from a Trellis session id.
+  const existingRow = db.prepare("SELECT * FROM herdr_sessions WHERE session_id = ?").get(session.value) as BindingRow | undefined;
+  const existing = existingRow ? rowToBinding(existingRow) : null;
   const cachedPath = existing?.transcriptPath;
   const transcriptPath =
     cachedPath &&
@@ -318,7 +321,9 @@ export function reconcileHerdrPane(
       options.attachClaude?.(transcriptPath);
     }
   }
-  return getHerdrBinding(session.value, db);
+  const row = db.prepare(`SELECT h.*, l.trellis_session_id FROM herdr_sessions h
+    LEFT JOIN cli_lineages l ON l.cli_session_id = h.session_id WHERE h.session_id = ?`).get(session.value) as BindingRow;
+  return rowToBinding(row);
 }
 
 export function reconcileHerdrSnapshot(
