@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 
@@ -59,6 +59,9 @@ export function HerdrInteractionCard({
   const waiting = pane.status === "waiting";
   const visible = pane.alive && (waiting || codexBlocked);
   const [step, setStep] = useState(0);
+  const [selected, setSelected] = useState<number[]>([]);
+  const sending = useRef(false);
+  const promptKey = JSON.stringify(pane.hook?.interactivePrompt);
   const [answerState, setAnswerState] = useState<
     "idle" | "sending" | "answered" | "error"
   >("idle");
@@ -67,8 +70,9 @@ export function HerdrInteractionCard({
 
   useEffect(() => {
     setStep(0);
+    setSelected([]);
     setAnswerState("idle");
-  }, [pane.hook?.updatedAt, pane.paneId, pane.status]);
+  }, [promptKey, pane.paneId, pane.status]);
 
   const loadScreen = async () => {
     setScreenError(false);
@@ -101,7 +105,8 @@ export function HerdrInteractionCard({
     finalAnswer = true,
     advanceQuestion = false,
   ) => {
-    if (answerState === "sending" || answerState === "answered") return;
+    if (sending.current || answerState === "answered") return false;
+    sending.current = true;
     setAnswerState("sending");
     try {
       const response = await fetch(
@@ -115,10 +120,17 @@ export function HerdrInteractionCard({
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       if (finalAnswer) setAnswerState("answered");
       else setAnswerState("idle");
-      if (advanceQuestion) setStep((current) => current + 1);
+      if (advanceQuestion) {
+        setStep((current) => current + 1);
+        setSelected([]);
+      }
       void refreshHerdrFleet();
+      return true;
     } catch {
       setAnswerState("error");
+      return false;
+    } finally {
+      sending.current = false;
     }
   };
 
@@ -135,8 +147,19 @@ export function HerdrInteractionCard({
     );
   }
 
-  const question = questions[Math.min(step, Math.max(0, questions.length - 1))];
+  const reviewing = questions.length > 0 && step >= questions.length;
+  const question = questions[step];
   const askOptions = question ? options(question) : [];
+  const multiSelect = question?.multiSelect === true;
+  const needsReview = questions.length > 1 || questions.some(question => question.multiSelect === true);
+
+  // Calibrated in our own Herdr pane with Claude Code 2.1.258 (Sonnet),
+  // 2026-09-07: single-select digit submits immediately. In a multi-select,
+  // digits toggle; Enter toggles the highlighted item (it does NOT submit).
+  // Herdr key "right" opens the Review tab, then Enter submits the answers.
+  // Permission card: digit "1" alone allows; Escape cancels the tool and
+  // interrupts the turn. Verified both on an ask-rule Bash printf permission.
+  // Keep these as separate user actions so no extra Enter reaches the next card.
 
   return (
     <div
@@ -153,7 +176,7 @@ export function HerdrInteractionCard({
             : "Herdr 正在等你回答"}
         {questions.length > 1 && (
           <span className="ml-auto text-label font-normal tabular-nums">
-            {step + 1}/{questions.length}
+            {Math.min(step + 1, questions.length)}/{questions.length}
           </span>
         )}
       </div>
@@ -175,19 +198,17 @@ export function HerdrInteractionCard({
                 type="button"
                 data-herdr-option={index + 1}
                 data-mobile-target="herdr-option"
+                aria-pressed={multiSelect ? selected.includes(index) : undefined}
                 disabled={answerState === "sending"}
-                onClick={() => {
-                  const final = step >= questions.length - 1;
-                  void sendKeys(
-                    [String(index + 1), "Enter"],
-                    final,
-                    !final,
-                  );
+                onClick={async () => {
+                  const final = !needsReview && step >= questions.length - 1;
+                  const sent = await sendKeys([String(index + 1)], final, !multiSelect && !final);
+                  if (sent && multiSelect) setSelected(current => current.includes(index) ? current.filter(item => item !== index) : [...current, index]);
                 }}
                 className="min-h-11 rounded-field border border-warn-line bg-surface px-3 py-2 text-left text-sm text-ink disabled:opacity-60"
               >
                 <span className="mr-1.5 font-mono text-label text-ink-faint">
-                  {index + 1}
+                  {multiSelect ? (selected.includes(index) ? "☑" : "☐") : index + 1}
                 </span>
                 <span className="font-medium">
                   {typeof option.label === "string"
@@ -204,7 +225,24 @@ export function HerdrInteractionCard({
               </button>
             ))}
           </div>
+          {multiSelect && (
+            <button type="button" data-herdr-multi-next data-mobile-target="herdr-multi-next"
+              disabled={answerState === "sending"}
+              onClick={() => void sendKeys(["right"], false, true)}
+              className="mt-2 min-h-11 w-full rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60">
+              {step >= questions.length - 1 ? "确认所选项" : "下一题"}
+            </button>
+          )}
         </div>
+      )}
+
+      {reviewing && (
+        <button type="button" data-herdr-submit-answers data-mobile-target="herdr-submit-answers"
+          disabled={answerState === "sending"}
+          onClick={() => void sendKeys(["Enter"])}
+          className="mt-2 min-h-11 w-full rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60">
+          提交回答
+        </button>
       )}
 
       {approvalPrompt && (
@@ -219,7 +257,7 @@ export function HerdrInteractionCard({
               type="button"
               data-mobile-target="herdr-permission-allow"
               disabled={answerState === "sending"}
-              onClick={() => void sendKeys(["1", "Enter"])}
+              onClick={() => void sendKeys(["1"])}
               className="min-h-11 rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60"
             >
               允许
@@ -281,7 +319,7 @@ export function HerdrInteractionCard({
         </div>
       )}
 
-      {!question && !approvalPrompt && !codexBlocked && (
+      {!question && !reviewing && !approvalPrompt && !codexBlocked && (
         <div className="mt-2 flex gap-2">
           <button
             type="button"

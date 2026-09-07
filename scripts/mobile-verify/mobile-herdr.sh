@@ -287,8 +287,35 @@ wait_for_js "Herdr session badge" "Boolean(document.querySelector('[data-herdr-b
 wait_for_js "AskUserQuestion card" "document.querySelector('[data-herdr-question]')?.textContent?.includes('请选择交付方案') === true"
 ab screenshot "$OUT/desktop-herdr-session.png"
 ab click '[data-herdr-option="2"]'
-wait_for_log "option raw keys" '"keys":["2","Enter"]'
+wait_for_log "single option submits without extra Enter" '"keys":["2"]'
 wait_for_js "answered card state" "Boolean(document.querySelector('[data-herdr-card-state=answered]'))"
+
+curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion","tool_use_id":"multi-proof","tool_input":{"questions":[{"question":"选择多个验收项","multiSelect":true,"options":[{"label":"Alpha"},{"label":"Beta"},{"label":"Gamma"}]}]}}' >/dev/null
+wait_for_js "multi-select card" "document.querySelector('[data-thread-scroll] [data-herdr-question]')?.textContent?.includes('选择多个验收项') === true"
+ab click '[data-thread-scroll] [data-herdr-option="1"]'
+wait_for_js "first option toggled without submitting" "document.querySelector('[data-thread-scroll] [data-herdr-option=\"1\"]')?.getAttribute('aria-pressed') === 'true'"
+ab click '[data-thread-scroll] [data-herdr-option="3"]'
+wait_for_js "two options remain selected" "document.querySelectorAll('[data-thread-scroll] [data-herdr-option][aria-pressed=true]').length === 2"
+ab click '[data-thread-scroll] [data-herdr-multi-next]'
+wait_for_log "multi-select opens review tab" '"keys":["right"]'
+wait_for_js "explicit answer submission" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-submit-answers]'))"
+ab click '[data-thread-scroll] [data-herdr-submit-answers]'
+wait_for_js "multi-select submitted" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-card-state=answered]'))"
+
+for decision in allow deny; do
+  curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+    --data-urlencode "payload={\"hook_event_name\":\"PermissionRequest\",\"session_id\":\"$CLAUDE_SESSION\",\"tool_name\":\"Bash\",\"tool_use_id\":\"permission-$decision\",\"summary\":\"permission-$decision\"}" >/dev/null
+  wait_for_js "permission $decision" "document.querySelector('[data-thread-scroll] [data-herdr-card-kind=permission]')?.textContent?.includes('permission-$decision') === true"
+  ab click "[data-thread-scroll] [data-mobile-target=herdr-permission-$decision]"
+  wait_for_js "permission $decision sent" "Boolean(document.querySelector('[data-thread-scroll] [data-herdr-card-state=answered]'))"
+done
+wait_for_log "permission allow digit only" '"keys":["1"]'
+wait_for_log "permission deny Escape" '"keys":["Escape"]'
+
+curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
+  --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion","tool_use_id":"mobile-question","tool_input":{"questions":[{"question":"请选择交付方案","options":[{"label":"快速方案"},{"label":"稳妥方案"}]}]}}' >/dev/null
+wait_for_js "question restored for mobile inspection" "document.querySelector('[data-thread-scroll] [data-herdr-question]')?.textContent?.includes('请选择交付方案') === true"
 
 ab fill 'textarea[data-herdr-input]' 'mobile-herdr-input-proof'
 ab eval --stdin <<'JS'
