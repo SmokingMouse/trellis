@@ -6,6 +6,8 @@
 
 ## 已结案
 
+- **验收侧 D4 env -i 非零退出** → `not-reproducible`：假设 project/shadow 并跑造成锁/端口竞争，实查启动前没有脚本、锁和测试端口监听，故不能归因竞争。首轮在额外 browser 诊断后出现 about:blank、N9 超时，证据受干扰；不干预浏览器的两次独占复跑均通过全部用例。判定命令：`sh -c 'env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-shadow.sh </dev/null'` 连续 exit 0；未改代码或删除用例。日志在契约 out/shadow-reverify2.log、shadow-reverify3.log。原验收失败根因仍未确认。
+
 - **AS project 任意节点分叉阻塞验收** → 验收阻塞 `resolved`，协议缺口仍在上游 backlog：7913839 对 fromItemId 返回 -32008。主控裁决只验 tip 成功与早期节点明确拒绝，客户端不伪造历史分叉。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh` exit 0；旧节点数据及 thread 绑定不变。任意节点分叉仍依赖上游 prefix/fromItemId 实现。
 - **AS 长链页面导航挂起** → `resolved`：假设同 thread 的多个节点独立 EventSource 占满浏览器连接；改为按 thread 共享订阅，最后一个控件卸载后关闭。判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-project.sh`；完整复跑 exit 0，早期节点错误页面导航与截图成功。
 
