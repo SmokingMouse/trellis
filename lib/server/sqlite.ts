@@ -82,6 +82,9 @@ function migrate(db: Database) {
       FOREIGN KEY (daemon_id, thread_id) REFERENCES as_threads(daemon_id, thread_id)
     );
   `);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('as_turns') WHERE name='request_json'").get()) {
+    db.exec("ALTER TABLE as_turns ADD COLUMN request_json TEXT");
+  }
 
   // Idempotent column add for project mode: each trellis session may bind
   // to one claude CLI session id (null in chat).
