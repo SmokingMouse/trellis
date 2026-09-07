@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "bun scripts/prepare-as-dependency.ts && next build",
+    "build": "bun scripts/prepare-as-dependency.ts && bun --bun node_modules/next/dist/bin/next build",
     "start": "bun server.ts",
     "lint": "eslint",
     "test:codex-cli": "bun --conditions react-server scripts/test-codex-cli-import.ts"
