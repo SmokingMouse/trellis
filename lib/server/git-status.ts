@@ -79,39 +79,33 @@ async function defaultBranch(cwd: string): Promise<string | null> {
 /**
  * 这条分支是不是已经并入主干了。
  *
- * 判据 = **分支 tip 是某个 merge commit 的第二父**（`--ancestry-path` 限定
- * 只看 tip 到主干这条线上的合并）。
+ * 判据 = **分支 tip 可达于主干，但不在主干的 first-parent 链上**。
  *
- * 为什么不用 `git merge-base --is-ancestor`：实测它对「刚建出来还没提交的
- * worktree」和「真做完已合并的分支」返回**同一个值**（都是 0）——
- * 因为前者的 tip 就等于主干的 tip，天然是自己的祖先。用它做判据会建议你
- * 删掉正在用的工作区，而刚建的 worktree 恰恰是干净的、dirty 闸兜不住。
+ * `merge-base --is-ancestor` 单独不够：零提交分支的 tip 就是主干当前或历史 tip，
+ * 天然可达。first-parent 排除把这种「主干自己走过的历史」剔掉；真正通过
+ * `--no-ff` 合入的 topic tip 则只出现在 merge commit 的旁支上，仍会被识别。
  *
  * 为什么基准用**本地**主干而不是 `origin/main`：实测 `origin/main` 常常
  * 领先本地 main（`git fetch` 一跑就发生），拿它当基准会让「tip != 基准 tip」
  * 对正在用的工作区成立，同样误判。而 `--no-ff` 合并本来就是先落本地。
  *
- * 已知漏报：squash / rebase 合并下 tip 不在主干的可达集里，这里会返回 false
- * （该提示回收却不提示）。方向是安全的 —— 宁可漏报也不能误报。
+ * 已知漏报：squash 的 topic tip 不可达；rebase-ff 与「主干先合进分支、再 ff」
+ * 的 tip 都落在 first-parent 链上。这里均返回 false，方向是安全的 —— 宁可漏报
+ * 也不能误报。
  */
 export async function isMergedInto(
   cwd: string,
   tip: string,
   base: string,
 ): Promise<boolean> {
-  const out = await git(cwd, [
-    "rev-list",
-    "--merges",
-    "--parents",
-    "--ancestry-path",
-    `${tip}..${base}`,
-  ]);
-  if (!out) return false;
-  // 每行形如 "<merge> <parent1> <parent2> …"。前两列分别是 merge 自己和
-  // 主干第一父；只认第二及以后父，避免把停在第一父上的零提交分支当成已合并。
-  return out
-    .split("\n")
-    .some((line) => line.trim().split(/\s+/).slice(2).includes(tip));
+  // 该命令成功时没有 stdout，所以必须用 null 区分退出码 0/非 0。
+  if ((await git(cwd, ["merge-base", "--is-ancestor", tip, base])) === null) {
+    return false;
+  }
+
+  const firstParent = await git(cwd, ["rev-list", "--first-parent", base]);
+  if (firstParent === null) return false;
+  return !firstParent.split("\n").includes(tip);
 }
 
 async function statusOf(row: {
