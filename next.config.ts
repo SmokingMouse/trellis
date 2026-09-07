@@ -48,6 +48,7 @@ const nextConfig: NextConfig = {
     "@openai/codex-sdk",
     "@openai/codex",
     "@smokingmouse/agent",
+    "@smokingmouse/agent-server",
     "@smokingmouse/llm",
     "@larksuiteoapi/node-sdk",
     "ws",
