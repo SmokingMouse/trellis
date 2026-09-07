@@ -108,6 +108,7 @@ ab click "[data-as-thread=\"$THREAD_ID\"]"
 wait_js 'observer connected' "document.querySelector('[data-as-log]')?.textContent.includes('实时连接') === true"
 touch "$H/start"
 wait_js 'read-only pending approval visible' "Boolean(document.querySelector('[data-as-approval]')) && Boolean(document.querySelector('[data-as-item=thought]'))"
+wait_js 'P2-2 daemon error and started turn visible' "document.querySelector('[data-as-error]')?.textContent.includes('shadow test recoverable error') && Boolean(document.querySelector('[data-as-turn][data-turn-status=inProgress]'))"
 ab screenshot "$OUT/mobile-as-approval.png"
 touch "$H/approve"
 wait_js 'live delta before completion' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。' && document.querySelector('[data-as-item=answer]')?.dataset.itemStatus === 'inProgress' && !document.querySelector('[data-as-approval]')"
@@ -157,6 +158,8 @@ ab eval --stdin <<JS > "$OUT/as-browser-proof.json"
 JS
 ab screenshot "$OUT/mobile-as-resumed.png" --full
 bun scripts/mobile-verify/as-shadow-http-verify.ts "$BASE" "$THREAD_ID" "$H/expected.json" > "$OUT/as-http-proof.json"
+touch "$H/second-turn"
+wait_js 'P2-2 live completed turn visible' "[...document.querySelectorAll('[data-as-turn]')].some(el => el.dataset.turnStatus === 'completed' && el.textContent.includes('第 2 轮'))"
 ab set viewport 1280 800
 wait_js 'desktop no horizontal overflow' 'document.documentElement.scrollWidth <= innerWidth'
 ab screenshot "$OUT/desktop-as-shadow.png" --full

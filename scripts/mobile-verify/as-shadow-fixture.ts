@@ -16,6 +16,11 @@ async function waitFile(name: string) {
   }
 }
 const script: MockScript = async function* (turnId, _input, engine) {
+  if (_input[0]?.type === "text" && _input[0].text === "lifecycle") {
+    yield { type: "turnCompleted", turnId, status: "completed" };
+    return;
+  }
+  yield { type: "error", turnId, error: { code: -32015, message: "shadow test recoverable error" }, willRetry: true };
   yield { type: "itemStarted", turnId, item: { id: "thought", type: "reasoning", payload: { text: "" } } };
   yield { type: "itemDelta", turnId, itemId: "thought", kind: "reasoning", text: "先核对同一份日志。" };
   yield { type: "itemCompleted", turnId, item: { id: "thought", type: "reasoning", payload: { text: "先核对同一份日志。" } } };
@@ -63,4 +68,6 @@ process.on("SIGTERM", () => void stop());
 process.on("SIGINT", () => void stop());
 await waitFile("start");
 await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "验证实时与断点续传" }] });
+await waitFile("second-turn");
+await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "lifecycle" }] });
 await daemon.closed;
