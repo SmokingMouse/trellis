@@ -145,10 +145,11 @@ export class HerdrFleetService {
     return this.client.sendKeys(paneId, keys);
   }
 
-  read(paneId: string): Promise<Record<string, unknown>> {
+  read(paneId: string): Promise<{ type: "pane_read"; read: { text: string } }> {
     return this.client.request("pane.read", {
       pane_id: paneId,
       source: "recent",
+      lines: 200,
     });
   }
 

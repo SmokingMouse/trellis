@@ -97,9 +97,14 @@ function createHarness() {
             pane: { ...basePane, pane_id: "w1:p2", terminal_id: "term-2", revision: 0 },
           };
         } else if (request.method === "pane.read") {
+          // Wire shape captured by review rv_read_shape.ts / rv_readtext.ts.
           result = {
             type: "pane_read",
-            lines: Array.from({ length: 45 }, (_, index) => `line-${index + 1}`),
+            read: {
+              pane_id: basePane.pane_id, workspace_id: basePane.workspace_id, tab_id: basePane.tab_id,
+              source: "recent", format: "text", revision: 1, truncated: false,
+              text: Array.from({ length: 45 }, (_, index) => `line-${index + 1}`).join("\n"),
+            },
           };
         }
         socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
@@ -271,7 +276,7 @@ describe("HerdrFleetService", () => {
     expect(screen.text.startsWith("line-6\n")).toBeTrue();
     expect(
       harness.requests.find((request) => request.method === "pane.read")?.params,
-    ).toEqual({ pane_id: "w1:p1", source: "recent" });
+    ).toEqual({ pane_id: "w1:p1", source: "recent", lines: 200 });
 
     const reopened = await reopenRoute.POST(
       new Request(`http://trellis/api/herdr/sessions/${harness.sessionId}/reopen`, {

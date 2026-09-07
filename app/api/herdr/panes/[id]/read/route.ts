@@ -11,29 +11,6 @@ const CACHE_MS = 1_000;
 const cache = new Map<string, { at: number; text: string }>();
 const pending = new Map<string, Promise<string>>();
 
-function readText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value
-      .map((item) =>
-        typeof item === "string"
-          ? item
-          : item && typeof item === "object" && "text" in item
-            ? String((item as { text: unknown }).text ?? "")
-            : "",
-      )
-      .filter(Boolean)
-      .join("\n");
-  }
-  if (!value || typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  for (const key of ["lines", "content", "text", "screen", "output", "data"]) {
-    const text = readText(record[key]);
-    if (text) return text;
-  }
-  return "";
-}
-
 function lastLines(text: string, count = 40): string {
   return text.replace(/\r/g, "").split("\n").slice(-count).join("\n");
 }
@@ -47,7 +24,10 @@ async function cachedRead(paneId: string): Promise<string> {
     const service = getHerdrFleetService();
     await service.ensureStarted();
     const result = await service.read(paneId);
-    const text = lastLines(readText(result));
+    if (typeof result.read?.text !== "string") {
+      throw new HerdrApiError("pane.read returned no read.text", "bad_response");
+    }
+    const text = lastLines(result.read.text);
     cache.set(paneId, { at: Date.now(), text });
     return text;
   })();
