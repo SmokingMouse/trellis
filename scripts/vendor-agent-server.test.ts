@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { vendorManifest } from "./vendor-agent-server-manifest";
 
 test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides or lifecycle repair", () => {
   const root = join(import.meta.dir, "..");
@@ -12,11 +13,21 @@ test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides o
   expect(project.scripts.build).not.toContain("prepare-as-dependency");
   expect(vendor.scripts).toBeUndefined();
   expect(vendor.devDependencies).toBeUndefined();
-  expect(vendor.dependencies).toEqual({ "@smokingmouse/agent": "0.8.0", zod: "^4.4.3" });
+  expect(Object.values(vendor.dependencies).every(range => typeof range === "string" && !range.startsWith("workspace:"))).toBe(true);
   for (const target of Object.values(vendor.exports) as { types: string; default: string }[]) {
     expect(existsSync(join(root, "vendor/agent-server", target.types))).toBe(true);
     expect(existsSync(join(root, "vendor/agent-server", target.default))).toBe(true);
   }
+});
+
+test("N3 derives new runtime dependencies and removes stale pins without copying dev dependencies", () => {
+  const source = { name: "example", version: "1.0.0", dependencies: { added: "^2.0.0", local: "workspace:*" }, devDependencies: { devOnly: "1.0.0" } };
+  expect(vendorManifest(source, { local: "3.0.0", removed: "1.0.0" })).toEqual({
+    name: "example", version: "1.0.0", type: undefined, license: undefined, main: undefined,
+    types: undefined, exports: undefined, dependencies: { added: "^2.0.0", local: "3.0.0" },
+  });
+  expect(() => vendorManifest(source, {})).toThrow("published exact version for local");
+  expect(() => vendorManifest(source, { local: "workspace:*" })).toThrow("published exact version");
 });
 
 test("N1 vendor excludes unusable maps and dangling sourceMappingURL references", () => {

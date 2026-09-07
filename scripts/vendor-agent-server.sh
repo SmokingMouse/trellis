@@ -28,11 +28,6 @@ for (const file of readdirSync(process.env.AS_VENDOR_DEST, { recursive: true }))
   writeFileSync(path, readFileSync(path, "utf8").replace(/^\/\/# sourceMappingURL=.*$/gm, ""));
 }
 '
-AS_VENDOR_SOURCE="$STAGE/packages/agent-server/package.json" AS_VENDOR_DEST="$DEST/package.json" bun -e '
-const source = await Bun.file(process.env.AS_VENDOR_SOURCE).json();
-const {name, version, type, license, main, types, exports} = source;
-await Bun.write(process.env.AS_VENDOR_DEST, JSON.stringify({name, version, type, license, main, types, exports,
-  dependencies: {"@smokingmouse/agent": "0.8.0", zod: "^4.4.3"}}, null, 2) + "\n");
-'
-printf 'sm-toolkit commit %s\npackage packages/agent-server\nbuild bun tsc --build packages/agent-server\nagent runtime pinned to published 0.8.0 (Trellis baseline)\n' "$COMMIT" > "$DEST/VENDORED_FROM"
+bun "$ROOT/scripts/vendor-agent-server-manifest.ts" "$STAGE/packages/agent-server/package.json" "$DEST/package.json"
+printf 'sm-toolkit commit %s\npackage packages/agent-server\nbuild bun tsc --build packages/agent-server\nworkspace runtime versions pinned in package.json\n' "$COMMIT" > "$DEST/VENDORED_FROM"
 echo "Vendored agent-server from $COMMIT"
