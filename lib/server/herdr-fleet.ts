@@ -11,6 +11,14 @@ import {
 import { HerdrClient } from "./herdr-client";
 import type { HerdrPane } from "./herdr-types";
 import type { HerdrInputDelivery } from "../herdr-input";
+import { realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { getDB } from "./sqlite";
+import type { HerdrWorktree } from "../herdr-ui";
+
+function canonicalPath(value: string): string {
+  try { return realpathSync(value); } catch { return value; }
+}
 
 type FleetOptions = {
   db?: Database;
@@ -22,6 +30,7 @@ type FleetOptions = {
 export class HerdrFleetService {
   private startPromise: Promise<void> | null = null;
   private bindingVersion = 0;
+  private worktrees = new Map<string, HerdrWorktree>();
   private readonly attachedTranscriptKeys = new Set<string>();
   private readonly detach: () => void;
 
@@ -32,6 +41,7 @@ export class HerdrFleetService {
     this.detach = client.subscribe((change) => {
       const state = client.state;
       if (change.kind === "snapshot") {
+        this.reconcileWorktrees();
         reconcileHerdrSnapshot(state.panes, state.agents, {
           ...this.options,
           attachTranscript: this.attachTranscript,
@@ -49,6 +59,41 @@ export class HerdrFleetService {
         this.bindingVersion++;
       }
     });
+  }
+
+  private reconcileWorktrees(): void {
+    const metadata = this.client.state.workspaces.filter(w => w.worktree?.repo_root && w.worktree.checkout_path);
+    const next = new Map<string, HerdrWorktree>();
+    if (metadata.length) {
+      const db = this.options.db ?? getDB();
+      const branches = new Map<string, string>();
+      const projectNames = new Map<string, string>();
+      // Older isolated databases may not have the project/workspace schema.
+      if (db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").get()) {
+        const rows = db.query("SELECT path, git_branch FROM workspaces WHERE git_branch IS NOT NULL").all() as { path: string; git_branch: string }[];
+        for (const row of rows) branches.set(canonicalPath(row.path), row.git_branch);
+        if (db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get()) {
+          const names = db.query("SELECT w.path, p.name FROM workspaces w JOIN projects p ON p.id = w.project_id").all() as { path: string; name: string }[];
+          for (const row of names) projectNames.set(canonicalPath(row.path), row.name);
+        }
+      }
+      const resolved = new Map<string, string | null>();
+      for (const workspace of metadata) {
+        const wt = workspace.worktree!;
+        const checkout = canonicalPath(wt.checkout_path);
+        if (!resolved.has(checkout)) {
+          let branch = branches.get(checkout) || null;
+          if (!branch) {
+            try { branch = execFileSync("git", ["-C", checkout, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null; } catch { /* missing checkout or git */ }
+          }
+          resolved.set(checkout, branch);
+        }
+        const root = canonicalPath(wt.repo_root);
+        next.set(workspace.workspace_id, { ...wt, repo_root: root, repo_name: projectNames.get(root) || wt.repo_name, checkout_path: checkout, git_branch: resolved.get(checkout) });
+      }
+    }
+    // Replaced only by snapshots; pane events and fleet reads never invoke git.
+    this.worktrees = next;
   }
 
   private readonly attachTranscript = (
@@ -101,6 +146,7 @@ export class HerdrFleetService {
     const state = this.client.state;
     const workspaces = state.workspaces.map((workspace) => ({
       ...workspace,
+      worktree: this.worktrees.get(workspace.workspace_id) ?? null,
       tabs: state.tabs
         .filter((tab) => tab.workspace_id === workspace.workspace_id)
         .map((tab) => ({

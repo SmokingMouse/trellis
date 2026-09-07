@@ -3,13 +3,14 @@ import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 mock.module("server-only", () => ({}));
 
 const { ensureHerdrSchema } = await import("./sqlite");
 const { HerdrClient } = await import("./herdr-client");
 const { HerdrFleetService } = await import("./herdr-fleet");
-import type { HerdrPane } from "./herdr-types";
+import type { HerdrPane, HerdrWorkspace } from "./herdr-types";
 
 type RequestEnvelope = {
   id: string;
@@ -57,6 +58,7 @@ function createHarness(waitDelayMs = 0) {
   };
   const requests: RequestEnvelope[] = [];
   const snapshotPanes = [basePane];
+  const snapshotWorkspaces: HerdrWorkspace[] = [{ workspace_id: "w1", label: "fleet" }];
   const subscribers = new Set<Bun.Socket<{ buffer: string }>>();
   const listener = Bun.listen({
     unix: socketPath,
@@ -85,7 +87,7 @@ function createHarness(waitDelayMs = 0) {
             snapshot: {
               version: "0.8.0",
               protocol: 19,
-              workspaces: [{ workspace_id: "w1", label: "fleet" }],
+              workspaces: snapshotWorkspaces,
               tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main" }],
               panes: snapshotPanes,
               layouts: [],
@@ -145,10 +147,35 @@ function createHarness(waitDelayMs = 0) {
     db.close();
     fs.rmSync(home, { recursive: true, force: true });
   });
-  return { service, client, requests, attached, transcript, sessionId, basePane, snapshotPanes, emit };
+  return { service, client, requests, attached, transcript, sessionId, basePane, snapshotPanes, snapshotWorkspaces, db, home, emit };
 }
 
 describe("HerdrFleetService", () => {
+  test("canonicalizes worktrees and caches branch metadata until the next snapshot", async () => {
+    const h = createHarness();
+    const repo = path.join(h.home, "repo");
+    const alias = path.join(h.home, "alias");
+    execFileSync("git", ["init", "-b", "main", repo], { stdio: "ignore" });
+    execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "test"], { stdio: "ignore" });
+    fs.symlinkSync(repo, alias);
+    h.snapshotWorkspaces[0].worktree = { repo_root: alias, repo_name: "Repo", checkout_path: alias, is_linked_worktree: false };
+    await h.service.ensureStarted();
+    const metadata = () => h.service.fleet().workspaces[0].worktree;
+    expect(metadata()).toMatchObject({ repo_root: fs.realpathSync(repo), checkout_path: fs.realpathSync(repo), git_branch: "main" });
+    const etag = h.service.etag();
+    execFileSync("git", ["-C", repo, "checkout", "-b", "changed"], { stdio: "ignore" });
+    h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, agent_status: "blocked", revision: 2 } } });
+    await Bun.sleep(40);
+    expect(h.service.etag()).not.toBe(etag);
+    expect(metadata()).toMatchObject({ git_branch: "main" });
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(metadata()).toMatchObject({ git_branch: "changed" });
+    h.db.exec("CREATE TABLE projects (id TEXT, name TEXT); CREATE TABLE workspaces (path TEXT, git_branch TEXT, project_id TEXT)");
+    h.db.query("INSERT INTO projects VALUES ('p', 'Custom project')").run();
+    h.db.query("INSERT INTO workspaces VALUES (?, 'registered', 'p')").run(alias);
+    await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+    expect(metadata()).toMatchObject({ git_branch: "registered", repo_name: "Custom project" });
+  });
   test("R6 busy HTTP input immediately returns 202 and SSE reports background delivery", async () => {
     const h = createHarness(400);
     h.basePane.agent_status = "working";

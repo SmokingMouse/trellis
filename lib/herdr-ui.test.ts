@@ -1,11 +1,34 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildHerdrWorkspaceViews,
+  groupHerdrWorkspaces,
   findHerdrPaneForSession,
   HERDR_HOOK_TTL_MS,
   type HerdrFleetResponse,
   type HerdrHookRecord,
 } from "./herdr-ui";
+
+describe("Herdr repository tree", () => {
+  test("groups checkouts by canonical repository, bubbles attention and keeps non-git last", () => {
+    const panes = buildHerdrWorkspaceViews(fleet, [])[0].panes;
+    const worktree = { repo_root: "/repo", repo_name: "Repo", checkout_path: "/repo", is_linked_worktree: false };
+    const tree = groupHerdrWorkspaces([
+      { id: "scratch", label: "Scratch", panes: [panes[0]] },
+      { id: "main", label: "Checkout", worktree, panes: [{ ...panes[0], status: "waiting" }] },
+      { id: "linked", label: "Feature", worktree: { ...worktree, checkout_path: "/linked", is_linked_worktree: true, git_branch: "feat/nest" }, panes: [{ ...panes[1], status: "blocked" }] },
+      { id: "duplicate", label: "Another tab", worktree, panes: [panes[1]] },
+      { id: "other", label: "Other", worktree: { ...worktree, repo_root: "/other", checkout_path: "/other" }, panes: [panes[0]] },
+    ]);
+    expect(tree.repositories).toHaveLength(2);
+    expect(tree.repositories[0].attention).toBe(2);
+    expect(tree.repositories[0].worktrees.map(w => [w.id, w.label, w.attention, w.panes.length])).toEqual([
+      ["/repo", "main", 1, 2], ["/linked", "feat/nest", 1, 1],
+    ]);
+    expect(tree.repositories[0].worktrees[0].title).toContain("Another tab");
+    expect(tree.ungrouped.map(w => w.id)).toEqual(["scratch"]);
+    expect(groupHerdrWorkspaces([])).toEqual({ repositories: [], ungrouped: [] });
+  });
+});
 
 const fleet: HerdrFleetResponse = {
   available: true,

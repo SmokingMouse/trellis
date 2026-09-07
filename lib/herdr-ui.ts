@@ -66,9 +66,18 @@ export type HerdrFleetTab = {
 
 export type HerdrFleetWorkspace = {
   workspace_id: string;
+  worktree?: HerdrWorktree | null;
   label?: string | null;
   name?: string | null;
   tabs: HerdrFleetTab[];
+};
+
+export type HerdrWorktree = {
+  repo_root: string;
+  repo_name: string;
+  checkout_path: string;
+  is_linked_worktree: boolean;
+  git_branch?: string | null;
 };
 
 export type HerdrFleetResponse = {
@@ -101,6 +110,7 @@ export type HerdrPaneView = {
 export type HerdrWorkspaceView = {
   id: string;
   label: string;
+  worktree?: HerdrWorktree | null;
   panes: HerdrPaneView[];
 };
 
@@ -196,7 +206,7 @@ export function buildHerdrWorkspaceViews(
             urgency(a.status) - urgency(b.status) ||
             a.label.localeCompare(b.label),
         );
-      return { id: workspace.workspace_id, label, panes };
+      return { id: workspace.workspace_id, label, panes, worktree: workspace.worktree };
     })
     .filter((workspace) => workspace.panes.length > 0)
     .sort(
@@ -205,6 +215,37 @@ export function buildHerdrWorkspaceViews(
           Math.min(...b.panes.map((pane) => urgency(pane.status))) ||
         a.label.localeCompare(b.label),
     );
+}
+
+export function groupHerdrWorkspaces(workspaces: HerdrWorkspaceView[]) {
+  const repositories = new Map<string, {
+    id: string; label: string; attention: number;
+    worktrees: { id: string; label: string; title: string; attention: number; panes: HerdrPaneView[] }[];
+  }>();
+  const ungrouped: HerdrWorkspaceView[] = [];
+  for (const workspace of workspaces) {
+    const wt = workspace.worktree;
+    if (!wt?.repo_root || !wt.checkout_path) { ungrouped.push(workspace); continue; }
+    let repo = repositories.get(wt.repo_root);
+    if (!repo) {
+      repo = { id: wt.repo_root, label: wt.repo_name, attention: 0, worktrees: [] };
+      repositories.set(repo.id, repo);
+    }
+    const attention = workspace.panes.filter(p => p.status === "waiting" || p.status === "blocked").length;
+    repo.attention += attention;
+    const existing = repo.worktrees.find(w => w.id === wt.checkout_path);
+    if (existing) {
+      existing.panes.push(...workspace.panes);
+      existing.attention += attention;
+      existing.title += `\n${workspace.label}`;
+    } else repo.worktrees.push({
+      id: wt.checkout_path,
+      label: wt.git_branch || (wt.is_linked_worktree ? wt.checkout_path.split("/").pop()! : "main"),
+      title: `${workspace.label}\n${wt.checkout_path}`,
+      attention, panes: [...workspace.panes],
+    });
+  }
+  return { repositories: [...repositories.values()], ungrouped };
 }
 
 function bindingMatchesSession(binding: HerdrSessionBinding, sessionId: string): boolean {

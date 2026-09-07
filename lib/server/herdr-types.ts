@@ -41,6 +41,7 @@ export type HerdrAgent = {
 
 export type HerdrWorkspace = {
   workspace_id: string;
+  worktree?: import("../herdr-ui").HerdrWorktree | null;
   [key: string]: unknown;
 };
 
