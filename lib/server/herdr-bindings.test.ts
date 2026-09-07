@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,6 +16,7 @@ const {
   reconcileHerdrPane,
   reconcileHerdrSnapshot,
   resolveTranscriptPath,
+  transcriptCwd,
 } = await import("./herdr-bindings");
 import type { HerdrPane } from "./herdr-types";
 
@@ -53,6 +54,36 @@ function write(file: string, contents: string): void {
 }
 
 describe("Herdr transcript bindings", () => {
+  test("large transcripts stop after the cwd header (review rv_perf regression)", () => {
+    const file = path.join(testHome, "large.jsonl");
+    write(file, JSON.stringify({ cwd: "/large-project" }) + "\n");
+    const fd = fs.openSync(file, "r+");
+    fs.ftruncateSync(fd, 12 * 1024 * 1024);
+    fs.closeSync(fd);
+    const reads = spyOn(fs, "readSync");
+    try {
+      expect(transcriptCwd("claude", file)).toBe("/large-project");
+      expect(reads.mock.calls).toHaveLength(1);
+      expect(reads.mock.calls[0][1].byteLength).toBe(8192);
+    } finally { reads.mockRestore(); }
+    write(file, 'bad line\n' + JSON.stringify({ padding: "中".repeat(4000), payload: { cwd: "/跨块" } }));
+    expect(transcriptCwd("codex", file)).toBe("/跨块");
+  });
+
+  test("misses skip repeated traversal but expire when a transcript appears", () => {
+    const home = path.join(testHome, "miss-cache");
+    const pane = makePane("missing-id", "codex", "/project");
+    expect(resolveTranscriptPath(pane, home, 1_000)).toBeNull();
+    const file = path.join(home, ".codex", "sessions", "nested", "rollout-test-missing-id.jsonl");
+    write(file, JSON.stringify({ payload: { cwd: "/project" } }) + "\n");
+    const scans = spyOn(fs, "readdirSync");
+    try {
+      expect(resolveTranscriptPath(pane, home, 1_001)).toBeNull();
+      expect(scans.mock.calls).toHaveLength(0);
+    } finally { scans.mockRestore(); }
+    expect(resolveTranscriptPath(pane, home, 6_001)).toBe(file);
+  });
+
   test("creates the complete herdr_sessions schema", () => {
     const db = new Database(":memory:");
     ensureHerdrSchema(db);

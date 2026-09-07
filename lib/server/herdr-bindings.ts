@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import type { HerdrAgent, HerdrPane } from "./herdr-types";
 import { getDB } from "./sqlite";
 
@@ -104,35 +105,60 @@ export function transcriptCwd(
   agentKind: string,
   transcriptPath: string,
 ): string | null {
-  let raw: string;
+  let fd: number | undefined;
   try {
-    raw = fs.readFileSync(transcriptPath, "utf8");
+    fd = fs.openSync(transcriptPath, "r");
+    const buffer = Buffer.alloc(8 * 1024);
+    const decoder = new StringDecoder("utf8");
+    let pending = "";
+    const cwdFromLine = (line: string): string | null => {
+      try {
+        const entry = JSON.parse(line) as { cwd?: unknown; payload?: { cwd?: unknown } };
+        const cwd = agentKind === "codex" ? entry.payload?.cwd : entry.cwd;
+        return typeof cwd === "string" ? cwd : null;
+      } catch { return null; }
+    };
+    // cwd is header metadata. Bound corrupt/no-header files as well as reads
+    // of valid multi-megabyte sessions; never materialize the entire transcript.
+    for (let consumed = 0; consumed < 1024 * 1024;) {
+      const read = fs.readSync(fd, buffer, 0, buffer.length, null);
+      consumed += read;
+      if (!read) return cwdFromLine(pending + decoder.end());
+      pending += decoder.write(buffer.subarray(0, read));
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) >= 0) {
+        const cwd = cwdFromLine(pending.slice(0, newline));
+        if (cwd !== null) return cwd;
+        pending = pending.slice(newline + 1);
+      }
+    }
   } catch {
     return null;
-  }
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line) as {
-        cwd?: unknown;
-        payload?: { cwd?: unknown };
-      };
-      const cwd = agentKind === "codex" ? entry.payload?.cwd : entry.cwd;
-      if (typeof cwd === "string") return cwd;
-    } catch {
-      /* A partially-written tail line is normal. */
-    }
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
   return null;
 }
 
+const transcriptMisses = new Map<string, number>();
+const TRANSCRIPT_MISS_TTL_MS = 5_000;
+
 export function resolveTranscriptPath(
   pane: HerdrPane,
   home = os.homedir(),
+  now = Date.now(),
 ): string | null {
   const session = pane.agent_session;
   if (!session) return null;
   const agentKind = pane.agent ?? session.agent;
+  const key = JSON.stringify([home, agentKind, session.kind, session.value, pane.cwd]);
+  if ((transcriptMisses.get(key) ?? 0) > now) return null;
+  const miss = () => {
+    for (const [key, until] of transcriptMisses) if (until <= now) transcriptMisses.delete(key);
+    if (transcriptMisses.size >= 1024) transcriptMisses.delete(transcriptMisses.keys().next().value!);
+    transcriptMisses.set(key, now + TRANSCRIPT_MISS_TTL_MS);
+    return null;
+  };
   let candidate: string | null = null;
   if (session.kind === "path") {
     candidate = path.resolve(session.value);
@@ -153,9 +179,10 @@ export function resolveTranscriptPath(
     const matches = listCodexMatches(home, session.value);
     if (matches.length === 1) candidate = matches[0];
   }
-  if (!candidate || !fs.existsSync(candidate)) return null;
+  if (!candidate || !fs.existsSync(candidate)) return miss();
   const recordedCwd = transcriptCwd(agentKind, candidate);
-  if (pane.cwd && recordedCwd !== pane.cwd) return null;
+  if (pane.cwd && recordedCwd !== pane.cwd) return miss();
+  transcriptMisses.delete(key);
   return candidate;
 }
 
