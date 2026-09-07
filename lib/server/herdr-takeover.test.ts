@@ -71,3 +71,17 @@ test("alive bindings lock root, branch, retry, CLI resume and UI even with stale
   expect(hasAliveHerdrBinding(sid)).toBeFalse();
   expect(getSession(sid)?.herdrAlive).toBeFalse();
 });
+
+test("P2-3 direct CLI resume API refuses every live owner regardless of origin", async () => {
+  const session = getSession(sid)!;
+  const request = () => resume.GET(new Request("http://localhost/api/nodes/direct/cli-resume"), { params: Promise.resolve({ id: session.rootNodeId }) });
+  sqlite.getDB().prepare("UPDATE herdr_sessions SET alive = 1 WHERE session_id = ?").run(sid);
+  for (const origin of ["native", "cli-import", "herdr"]) {
+    sqlite.getDB().prepare("UPDATE sessions SET origin = ? WHERE id = ?").run(origin, sid);
+    const response = await request();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ resumable: false });
+  }
+  markHerdrPaneClosed("test:p1");
+  expect((await request()).status).toBe(200);
+});

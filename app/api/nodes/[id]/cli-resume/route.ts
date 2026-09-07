@@ -19,6 +19,8 @@ export async function GET(
 ) {
   const { id } = await ctx.params;
   const node = getNode(id);
+  // This route is callable without the UI. Check the live driver before
+  // resolving a transcript or constructing any resume command.
   if (node && hasAliveHerdrBinding(node.sessionId)) {
     return Response.json({ resumable: false, error: "Session is driven by Herdr" }, { status: 409 });
   }
