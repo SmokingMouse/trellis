@@ -241,7 +241,7 @@ wait_for_js "authenticated home" "location.pathname !== '/login'"
 assert_not_login
 
 ab open "$URL"
-wait_for_js "fixture linear composer" "Boolean(document.querySelector('textarea[data-composer-input]'))"
+wait_for_js "fixture linear composer and deep-link title" "Boolean(document.querySelector('textarea[data-composer-input]')) && document.querySelector('[data-mobile-header]')?.textContent?.includes('手机精简壳验收会话标题') === true"
 assert_not_login
 
 echo "== M1: 390x844 slim Header =="

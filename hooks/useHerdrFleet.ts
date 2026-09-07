@@ -31,6 +31,23 @@ const listeners = new Set<(next: HerdrFleetSnapshot) => void>();
 function publish(next: HerdrFleetSnapshot): void {
   snapshot = next;
   for (const listener of listeners) listener(next);
+  // A page already holds task and CLI sync streams. Open the delivery stream
+  // only while inputs are queued, so navigation/hydration keeps HTTP slots.
+  const queued = next.fleet?.inputDeliveries?.some(input => input.status === "queued");
+  if (listeners.size > 0 && queued && !events) {
+    events = new EventSource("/api/herdr/events");
+    events.onmessage = (event) => {
+      try {
+        const fleet = JSON.parse(event.data) as HerdrFleetResponse;
+        eventVersion++;
+        etag = null;
+        publish({ ...snapshot, fleet, loading: false, error: null });
+      } catch { /* polling recovers a malformed or interrupted event */ }
+    };
+  } else if (!queued || listeners.size === 0) {
+    events?.close();
+    events = null;
+  }
 }
 
 async function poll(): Promise<void> {
@@ -86,15 +103,6 @@ function subscribe(listener: (next: HerdrFleetSnapshot) => void): () => void {
   listeners.add(listener);
   listener(snapshot);
   if (listeners.size === 1) {
-    events = new EventSource("/api/herdr/events");
-    events.onmessage = (event) => {
-      try {
-        const fleet = JSON.parse(event.data) as HerdrFleetResponse;
-        eventVersion++;
-        etag = null;
-        publish({ ...snapshot, fleet, loading: false, error: null });
-      } catch { /* polling recovers a malformed or interrupted event */ }
-    };
     void poll();
     timer = setInterval(() => void poll(), POLL_MS);
   }

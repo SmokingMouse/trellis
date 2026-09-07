@@ -340,7 +340,7 @@ ab eval --stdin <<'JS'
     const started = performance.now();
     const response = await original(...args);
     if (String(args[0]).endsWith('/pane-claude/input')) {
-      window.herdrInputProof = { status: response.status, elapsed: performance.now() - started };
+      window.herdrInputProof = { status: response.status, elapsed: performance.now() - started, result: (await response.clone().json()).result };
     }
     return response;
   };
@@ -364,6 +364,21 @@ wait_for_js "event-driven Codex idle status" "document.querySelector('[data-herd
 wait_for_log "subscription initial replay" '"replay":2'
 wait_for_log "pane_updated events" '"event":"pane_updated"'
 
+ab eval --stdin <<'JS'
+(() => {
+  const OriginalEventSource = window.EventSource;
+  window.herdrDeliveryEvents = [];
+  window.EventSource = class extends OriginalEventSource {
+    constructor(...args) {
+      super(...args);
+      if (String(args[0]).includes('/api/herdr/events')) {
+        this.addEventListener('message', event => window.herdrDeliveryEvents.push(JSON.parse(event.data)));
+      }
+    }
+  };
+  return true;
+})()
+JS
 ab fill 'textarea[data-herdr-input]' 'mobile-herdr-busy-proof'
 ab click '[data-herdr-send]'
 wait_for_js "busy input immediately queued" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'queued'"
@@ -377,6 +392,7 @@ ab eval --stdin <<'JS'
 JS
 wait_for_log "background queue delivers busy input" '"text":"mobile-herdr-busy-proof","keys":["Enter"]'
 wait_for_js "queued input becomes delivered by event" "document.querySelector('[data-herdr-delivery]')?.getAttribute('data-herdr-delivery') === 'delivered'"
+wait_for_js "delivery received through SSE" "window.herdrDeliveryEvents.some(fleet => fleet.inputDeliveries.some(input => input.inputId === window.herdrInputProof.result.inputId && input.status === 'delivered'))"
 
 echo "== iPhone drawer, header, cards and touch targets =="
 ab set device "iPhone 15"
