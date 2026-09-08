@@ -13,6 +13,13 @@ export type HerdrFleetSnapshot = {
   error: string | null;
 };
 
+export function herdrUnavailableText({ fleet, loading, error }: Pick<HerdrFleetSnapshot, "fleet" | "loading" | "error">): string {
+  if (loading) return "正在连接 Herdr…";
+  if (fleet?.enabled === false) return "Herdr 未启用";
+  if (/\b(?:ENOENT|ECONNREFUSED)\b/.test(fleet?.lastError || error || "")) return "Herdr 未运行";
+  return "Herdr 暂时无法连接";
+}
+
 const POLL_MS = 2_500;
 let snapshot: HerdrFleetSnapshot = {
   fleet: null,
@@ -29,6 +36,10 @@ let eventVersion = 0;
 const listeners = new Set<(next: HerdrFleetSnapshot) => void>();
 
 function publish(next: HerdrFleetSnapshot): void {
+  const diagnostic = next.fleet?.lastError || next.error;
+  if (diagnostic && diagnostic !== (snapshot.fleet?.lastError || snapshot.error)) {
+    console.warn("[Herdr]", diagnostic);
+  }
   snapshot = next;
   for (const listener of listeners) listener(next);
   // A page already holds task and CLI sync streams. Open the delivery stream

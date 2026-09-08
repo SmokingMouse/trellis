@@ -623,7 +623,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           </button>
         </div>}
         {isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
-          模型在右上角切换 · 默认 Claude Sonnet
+          模型在右上角切换 · {currentProvider ? `默认 ${currentProvider.shortLabel}` : "使用当前默认模型"}
         </div>}
       </div>
       {isMobile && moreSettingsOpen && (
