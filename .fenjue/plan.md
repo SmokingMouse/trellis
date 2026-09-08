@@ -709,3 +709,44 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
 - [ ] tui-ingress-slice3-review3: 复核 slice 3 二次返工：Claude 主会话（--model sonnet）真机切换后端线程可用、wire_schema_clean、零回归 | after: tui-ingress-slice3-fix2 | mode: readonly | kind: claude
   cid: fj-tui-ingress-slice3-review3-93dc
 - [ ] tui-ingress-integrate: 集成：把 feat/codex-ingress-s3（含二次返工）、feat/codex-ingress-s4、feat/readonly-p2-whitelist 合入 feat/codex-ingress，解冲突，全量测试与 typecheck，两后端全部判据冒烟各 3 次（含 unix://、wire_schema_clean、cross_backend_model_override_tolerated），文档合并；交付后由 leader 重建试点 daemon | after: tui-ingress-slice3-review3,tui-ingress-slice4-review,as-readonly-p2-whitelist-review2 | kind: codex
+  cid: fj-tui-ingress-integrate-a848
+- [ ] fenjue-ship-main: 焚决 feat/agent-tui-runner 本地合入 main，测试绿，bundle sha 与安装副本一致 | kind: codex
+  cid: fj-fenjue-ship-main-ea23
+- [ ] trellis-integrate-d: Trellis 四波集成 feat/ship-d：桥 → 影子 → 第二步 → mobile wave3 → wave1，tsc/test，七条手机脚本 + AS E2E 在隔离实例跑绿，不 vendor 不部署 | kind: codex
+  cid: fj-trellis-integrate-d-2925
+- [ ] smtk-ship-main: sm-toolkit：feat/codex-ingress → main（gh PR + merge），~/sm-toolkit 拉 main 构建 dist，按 scripts/agent-server 模板装 launchd（含 codex_ingress 配置），停 pane daemon 改由 launchd 常驻，两后端冒烟对常驻 daemon 各 3 次 | after: tui-ingress-integrate | kind: codex
+  cid: fj-smtk-ship-main-3d07
+- [ ] trellis-ship-d: Trellis 上线：feat/ship-d 重新 vendor ~/sm-toolkit main 的 agent-server，tsc/test/E2E，gh PR → merge → make deploy → 验活；再给一个项目开 TRELLIS_AS（写明回退开关） | after: trellis-integrate-d,smtk-ship-main | kind: codex
+  cid: fj-trellis-ship-d-6529
+- [ ] ingress-fresh-start: 修生产冒烟 P1：官方 TUI 冷启动 thread/start 的 native config override 被整体拒绝——按项分流映射/忽略/拒绝，冒烟加 fresh_tui_session_ok 与 --mode prod，PR 合 main 并构建，重启由 leader | kind: codex
+  cid: fj-ingress-fresh-start-01bb
+- [ ] as-adopt: 外部线程收编主页：daemon 上非 Trellis 开的线程自动成为主页会话（归属按 cwd、线性树回填、来源标记），双向可提问/审批/中断，TRELLIS_AS_ADOPT 开关，E2E 脚本 + 真机证据，不 push 不部署 | kind: codex | keep-seat
+  cid: fj-as-adopt-a06a
+- [ ] as-adopt-review: 异源复核收编：真机对常驻 daemon 建临时线程验证出现/归属/提问/审批/删除解绑/开关 off，E2E 与单测反例，零回归 | after: as-adopt | mode: readonly | kind: claude | keep-seat
+  cid: fj-as-adopt-review-d57c
+- [ ] as-adopt-ship: 收编上线：feat/as-adopt → PR 合 main → make deploy → 生产 TRELLIS_AS_ADOPT=on → 临时线程真机验活（写明回退） | after: as-adopt-review2 | kind: codex
+  cid: fj-as-adopt-ship-184a
+- [ ] as-observe-retire: 删掉只读观察页：/console/threads、/api/as/threads*、ThreadLogView、as-shadow 脚本与文档引用，PR 合 main 并部署 | after: as-adopt-ship | kind: codex
+  cid: fj-as-observe-retire-6552
+- [ ] codex-mapper-display-items: agent-server Codex 映射补齐 0.153.4 全部 ThreadItem 类型（sleep/imageView/hookPrompt/enteredReviewMode/exitedReviewMode → toolCall），schema 全覆盖测试，真机 pty 证明不再出 Unknown 红条 | kind: codex
+  cid: fj-codex-mapper-display-items-aa07
+- [ ] ui-audit: Trellis 交互/UI 整体体检（只读）：13 条路由桌面+手机截图清单、核心动线走查、P0–P2 问题清单、一致性统计、保留项、5–8 个重设计方向候选供用户拍板 | mode: readonly | kind: claude
+  cid: fj-ui-audit-7b23
+- [ ] ui-nits-p1: UI 体检第一批单点修复：侧栏 Herdr 裸异常改降级文案（P1-8）、machine 页 GB/TB 单位（P1-10）、新会话默认模型文案与 Header 一致（P2-1），带测试与修后截图，不 push 不部署 | after: ui-audit | kind: codex
+  cid: fj-ui-nits-p1-f2de
+- [ ] sidebar-tree-ia: 侧栏与工作树信息架构方案（只读）：现状盘点每种条目实体来源与不一致点、统一概念模型、A/B/C 候选 + 推荐 + 分波顺序、自包含 HTML 静态稿供用户拍板 | after: ui-audit | mode: readonly | kind: claude
+  cid: fj-sidebar-tree-ia-4784
+- [ ] sidebar-wave1: 侧栏 IA 波 1 · 统一最小单元：会话种类谓词放开（herdr/task 进列表 + 来源 chip），删稍后再读/定时任务/未归组三组与两处死代码，前后截图与 SQL 对比，11 条手机脚本绿 | after: sidebar-tree-ia | kind: codex
+  cid: fj-sidebar-wave1-cc46
+- [ ] sidebar-wave2: 侧栏 IA 波 2 · 排布切换：工具条「按项目/按时间」+ 来源筛选 + 含归档；最近组与 Herdr 组退役（能力搬入会话内面板/行内状态）；chat 会话归伪项目「速记」；空工作区折叠 | after: sidebar-wave1 | kind: codex
+  cid: fj-sidebar-wave2-c6c6
+- [ ] sidebar-wave3: 侧栏 IA 波 3 · 会话内面板合并：TreePanel + Outline → 右侧 push 式「结构」面板（默认 36px 竖条），递归森林 + 当前话题 + 当前链高亮 + 其它分支，手机复用全屏 sheet，正文零遮挡 | after: sidebar-wave2-integrate | kind: codex
+- [ ] sidebar-wave4: 侧栏 IA 波 4 · 画布地图化：画布改为面板里的地图覆盖层，进入必 fitView，选中即关闭落回线性 | after: sidebar-wave3 | kind: codex
+- [ ] as-adopt-fix: 收编返工：修复核 P1-1（cwd 等于系统根被收进主目录/暂存区）与 P1-2（每 1.5 秒全量快照 30 MB → 增量 cursor + 仅变化线程 attach），顺手 P2-1～3，探针修前后数字 | after: as-adopt-review | kind: codex | keep-seat
+  cid: fj-as-adopt-fix-4fb3
+- [ ] as-adopt-review2: 复核收编返工：ownership-exact 全 PASS、探针稳态零 attach、P2 处理、零回归 | after: as-adopt-fix | mode: readonly | kind: claude | keep-seat
+  cid: fj-as-adopt-review2-ebce
+- [ ] sidebar-wave2-integrate: 波 2 集成：feat/sidebar-wave2 合入 origin/main（含收编 PR #48/#49），解冲突保住两边语义，tsc/test/11 条脚本绿，push；PR #50 由主控合并部署 | after: sidebar-wave2 | kind: codex
+  cid: fj-sidebar-wave2-integrate-b80f
+- [ ] as-controls-polish: 收编会话节点视图：引擎事件默认过滤+人话化+可展开原始 JSON，外部会话权限只读，截图验证 | after: as-adopt-ship | kind: codex
+  cid: fj-as-controls-polish-dfcc
