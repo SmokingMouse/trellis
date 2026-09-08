@@ -27,7 +27,11 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
     if (!container) return;
     let previousTop = container.scrollTop;
     const onScroll = () => {
-      if (container.scrollTop < previousTop - 1) following.current = false;
+      const bottom = Math.max(0, container.scrollHeight - container.clientHeight);
+      // Removing an approval can clamp scrollTop to a shorter document's bottom.
+      // That is layout movement, not the reader scrolling away from the tail.
+      const clampedToBottom = previousTop > bottom && Math.abs(container.scrollTop - bottom) <= 1;
+      if (container.scrollTop < previousTop - 1 && !clampedToBottom) following.current = false;
       else if (container.scrollTop > previousTop && container.scrollHeight - container.clientHeight - container.scrollTop <= 48) following.current = true;
       previousTop = container.scrollTop;
       setFollowTail(following.current);

@@ -6,6 +6,8 @@
 
 ## 已结案
 
+- **D4 独占运行仍在 N9 底部点击处失败** → `resolved`（fj-trellis-step2c-31e1 返验）：启动前无 mobile 进程、锁与测试端口，排除本轮资源竞争。审批移除使内容缩短，scrollTop 被浏览器夹到新底部；旧 onScroll 将位置下降当成用户上滑。保留真实上滑停止逻辑，仅排除夹到新底部的布局移动，增加 600px 内容移除的浏览器反例。判定命令：原 `env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-as-shadow.sh </dev/null` 修前 exit 1、修后 exit 0，原 N9 与 4px 上滑断言全部保留。日志在契约 out/d4-exclusive-reverify.log、d4-layout-fix.log。
+
 - **分叉继承工具仍显示 running** → `resolved`（fj-trellis-step2c-31e1）：上游将 live item 标成 failed，但保留缺失的 completedAtMs；假设 Trellis 用时间戳而非 status 判断运行态。改为协议 status 优先，保留旧无 status 快照兼容；判定命令 `bun test lib/server/as-client.test.ts -t 'live fork'` exit 0，真实 mock daemon 分叉快照映射为 error，完成时间仍为 null。
 
 - **AS 重试清空旧答案、非 tip 普通续聊失败、AS=off 对已绑定会话失效** → `resolved`（fj-trellis-step2-fix-683f）：原 reset 在启动前执行，非 tip 被误归类为显式 fork，切流只查 DB 绑定。修为成功后切换重试版本、普通历史提问播种新线程、统一硬关闸回退；并清理 fallback 孤儿映射、共享并发初始化、中断免租约。判定命令：`bun test lib/server/as-project.test.ts lib/server/session-binding.test.ts` 与原 env -i `mobile-as-project.sh`；最终完整 bun test 124 pass，D3/D4 exit 0。
