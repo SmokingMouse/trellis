@@ -1,3 +1,4 @@
+import { ErrorCode, ProtocolError } from "../protocol/index.js";
 import { AsyncQueue } from "./session.js";
 export class MockEngine {
     script;
@@ -10,6 +11,8 @@ export class MockEngine {
     sent = [];
     steered = [];
     interrupted = [];
+    controls = [];
+    controlResponse;
     closed = false;
     active = null;
     generation = 0;
@@ -24,6 +27,12 @@ export class MockEngine {
         this.events.push({ type: "metadata", engineThreadId: this.engineThreadId });
     }
     async attach() { this.attachCount++; }
+    async engineControl(subtype, params) {
+        this.controls.push({ subtype, params });
+        if (!this.controlResponse)
+            throw new ProtocolError(ErrorCode.backend_unsupported, "mock engine controls unavailable");
+        return this.controlResponse(subtype, params);
+    }
     async sendTurn(turnId, input, options) {
         this.sent.push({ turnId, input, options });
         this.active = turnId;

@@ -11,6 +11,11 @@ export interface ServerOptions {
     orphanTimeoutMs?: number;
     approvalTimeoutMs?: number;
     idleTimeoutMs?: number;
+    interruptTimeoutMs?: number;
+    readonlyAutoAllow?: boolean;
+    readonlyCommands?: string[];
+    defaultModel?: string;
+    deniedModels?: string[];
 }
 export interface InProcessClient {
     readonly clientId: string;

@@ -323,6 +323,7 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 |---|---|
 | `TRELLIS_AS` | 默认不启用；`on` 启用，`off` 是最高优先级硬关闸，即使已配置 socket 也禁用。未设置时，非空 `TRELLIS_AS_SOCKET` 会自动启用。 |
 | `TRELLIS_AS_PROJECT` | `on` 时为新 project 会话绑定 daemon thread，默认关闭。已绑定会话由 `TRELLIS_AS` 控制。 |
+| `TRELLIS_AS_PROJECT_ID` | 可选的精确 `projects.id`，只允许该项目所属工作区的新会话绑定 AS；未知归属保持 legacy。未设置时保留全部新 project 会话可切流的行为；停流请关闭 PROJECT 或 AS，不要只删此筛选值。 |
 | `TRELLIS_AS_SOCKET` | daemon Unix socket 的绝对路径。未设置时遵循 agent-server 路径规则：`AGENT_SERVER_SOCKET_PATH` 优先，其次绝对 `XDG_RUNTIME_DIR` 下的 `sm-toolkit/agent-server.sock`，其次绝对 `XDG_STATE_HOME` 下的同一路径，最后为 `$HOME/.sm-toolkit/agent-server.sock`。 |
 | `TRELLIS_AS_TOKEN_PATH` | 已运行 daemon 的 token 文件绝对路径，不是 token 内容。默认绝对 `XDG_STATE_HOME` 下的 `sm-toolkit/agent-server/token`，否则 `$HOME/.agent-server/token`。自定义 socket 不会自动改变 token 路径，两个配置需指向同一个 daemon。 |
 

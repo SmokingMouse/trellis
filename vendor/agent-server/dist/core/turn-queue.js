@@ -6,16 +6,19 @@ export class TurnQueue {
     status;
     maxQueuedTurns;
     onEngineFailure;
+    interruptTimeoutMs;
     active = null;
     frozen = false;
     dispatch = new Map();
-    constructor(threadId, log, engine, status, maxQueuedTurns = 8, onEngineFailure) {
+    interruptTimer;
+    constructor(threadId, log, engine, status, maxQueuedTurns = 8, onEngineFailure, interruptTimeoutMs = 5000) {
         this.threadId = threadId;
         this.log = log;
         this.engine = engine;
         this.status = status;
         this.maxQueuedTurns = maxQueuedTurns;
         this.onEngineFailure = onEngineFailure;
+        this.interruptTimeoutMs = interruptTimeoutMs;
     }
     get runningTurnId() { return this.active; }
     get isFrozen() { return this.frozen; }
@@ -93,6 +96,21 @@ export class TurnQueue {
         await this.dispatch.get(turnId);
         this.assertActive(turnId);
         await this.engine().interrupt(turnId);
+        if (this.active === turnId && !this.interruptTimer) {
+            // An ack does not prove completion. Retire an engine that never closes
+            // the interrupted generation; do not let it leak output into a new turn.
+            this.interruptTimer = setTimeout(() => {
+                this.interruptTimer = undefined;
+                if (this.active !== turnId)
+                    return;
+                const error = new ProtocolError(ErrorCode.engine_unavailable, "interrupt acknowledged without turn completion; resume required", { threadId: this.threadId, turnId, retryable: true }).toJSON();
+                if (this.onEngineFailure)
+                    this.onEngineFailure(error);
+                else
+                    this.freeze(error);
+            }, this.interruptTimeoutMs);
+            this.interruptTimer.unref();
+        }
         return turnId;
     }
     cancel(turnId) {
@@ -107,6 +125,8 @@ export class TurnQueue {
     complete(turnId, status, usage, error) {
         if (this.active !== turnId)
             return; // late terminal frames must not finish the next turn
+        clearTimeout(this.interruptTimer);
+        this.interruptTimer = undefined;
         const turn = this.log.turn(turnId);
         turn.status = status;
         turn.completedAtMs = Date.now();

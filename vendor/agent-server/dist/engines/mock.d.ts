@@ -1,4 +1,5 @@
 import type { Backend, PendingServerRequest, ServerRequestResult, StartTurnParams, UserInput } from "../protocol/index.js";
+import { type JsonObject } from "../protocol/index.js";
 import { AsyncQueue, type EngineEvent, type EngineSession, type SessionOptions } from "./session.js";
 export type MockStep = EngineEvent | {
     waitMs: number;
@@ -25,12 +26,18 @@ export declare class MockEngine implements EngineSession {
         input: UserInput[];
     }>;
     interrupted: string[];
+    controls: Array<{
+        subtype: string;
+        params: JsonObject;
+    }>;
+    controlResponse?: (subtype: string, params: JsonObject) => JsonObject | Promise<JsonObject>;
     closed: boolean;
     private active;
     private generation;
     constructor(script?: MockScript | undefined, backend?: Backend);
     spawn(options: SessionOptions): Promise<void>;
     attach(): Promise<void>;
+    engineControl(subtype: string, params: JsonObject): Promise<JsonObject>;
     sendTurn(turnId: string, input: UserInput[], options: StartTurnParams): Promise<void>;
     private play;
     emit(event: EngineEvent): void;

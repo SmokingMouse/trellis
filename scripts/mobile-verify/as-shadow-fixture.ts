@@ -60,7 +60,7 @@ producer.onNotification("turn/completed", () => {
       items: snapshot.items.map(item => ({ id: item.id, status: item.status, text: itemText(item) })), snapshot }, null, 2));
   });
 });
-const { thread } = await producer.request("thread/start", { backend: "codex", cwd: home });
+const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: home });
 writeFileSync(join(home, "thread-id"), thread.id);
 let ending = false;
 async function stop() { if (ending) return; ending = true; producer.close(); await daemon.shutdown(); process.exit(0); }

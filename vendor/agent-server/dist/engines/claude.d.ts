@@ -16,6 +16,10 @@ export interface ClaudeEngineOptions {
         cwd?: string;
         env: NodeJS.ProcessEnv;
     }) => ChildProcessWithoutNullStreams;
+    /** Auto-allow readonly Bash commands under default/plan/acceptEdits without an approval round trip. Default true. */
+    readonlyAutoAllow?: boolean;
+    /** Overrides the default readonly command allowlist entirely (not merged). */
+    readonlyCommands?: readonly string[];
 }
 export declare class ClaudeEngine implements EngineSession {
     private readonly config;
@@ -42,6 +46,8 @@ export declare class ClaudeEngine implements EngineSession {
     private bash?;
     private lastAssistantUuid?;
     private seeding?;
+    private readonly readonlyAutoAllow;
+    private readonly readonlyCommandSet;
     constructor(config?: ClaudeEngineOptions);
     spawn(options: SessionOptions): Promise<void>;
     attach(): Promise<void>;
@@ -51,6 +57,17 @@ export declare class ClaudeEngine implements EngineSession {
     private assertAlive;
     validateTurn(options: StartTurnParams): void;
     sendTurn(turnId: string, input: UserInput[], options: StartTurnParams): Promise<void>;
+    /**
+     * Returns a denial message if the standalone bash turn must not reach the engine, else undefined.
+     * A standalone bash turn (`turn/start` with `input:[{type:"bash"}]`) never round-trips native
+     * can_use_tool for ANY permission mode (see the comment at the call site in sendTurn), so this is
+     * the only gate this command will ever see. readonly_auto_allow only decides whether an
+     * allowlisted read-only command may skip the broker -- it must never decide whether the gate
+     * exists at all (P0-1): turning it off makes every standalone bash turn require approval, it does
+     * not remove the gate. bypassPermissions/dontAsk keep native mode's already-decided outcome but
+     * still leave an audit trail (P0-2), matching the can_use_tool fallback in receive().
+     */
+    private gateStandaloneBash;
     steer(turnId: string, input: UserInput[]): Promise<void>;
     interrupt(turnId: string): Promise<void>;
     close(_reason: string): Promise<void>;

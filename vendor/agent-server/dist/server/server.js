@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -171,8 +171,8 @@ export class AgentServer {
                 return new CodexEngine();
             if (backend !== "claude")
                 throw new ProtocolError(ErrorCode.unsupported_capability, `backend ${backend} is not installed`);
-            return new ClaudeEngine();
-        }), options);
+            return new ClaudeEngine({ readonlyAutoAllow: options.readonlyAutoAllow, readonlyCommands: options.readonlyCommands });
+        }), { ...options, allowedRoots: this.allowedRoots });
         this.approvals = new ApprovalBroker(this.log, () => this.connections, this.leases, { orphanTimeoutMs: options.orphanTimeoutMs, timeoutMs: options.approvalTimeoutMs, onDeliveryError: (threadId, error) => this.threads.engineDied(threadId, rpcError(error)) });
         this.threads.approvals = this.approvals;
     }
@@ -253,6 +253,12 @@ export class AgentServer {
         }
         catch (error) {
             const rpc = rpcError(error);
+            // A rejected start has no subscription or stored thread. Deliver its audit
+            // event to the requester using the attempted thread ID from error.data.
+            if (rpc.data?.reason === "model_denied" && rpc.data.threadId && !connection.attached.has(rpc.data.threadId)) {
+                const detail = rpc.data.detail;
+                connection.notification({ jsonrpc: "2.0", method: "thread/engineEvent", params: { threadId: rpc.data.threadId, backend: detail.backend, subtype: "model_denied", payload: detail } });
+            }
             connection.emit({ jsonrpc: "2.0", id: "id" in frame ? frame.id : null, error: rpc });
             if (rpc.code === ErrorCode.unsupported_protocol_version || ("method" in frame && frame.method === "initialize" && rpc.code === ErrorCode.unauthorized))
                 connection.close();
@@ -292,6 +298,18 @@ export class AgentServer {
             }
             case "thread/start": {
                 const p = params(method);
+                if (p.fjContext) {
+                    p.fjContext.root = this.cwd(p.fjContext.root);
+                    if (!statSync(p.fjContext.root).isDirectory())
+                        throw new ProtocolError(ErrorCode.invalid_params, "fjContext.root must be a directory");
+                    p.model = this.threads.model(p.model, p.backend, `th_${crypto.randomUUID()}`);
+                    if (!p.permission)
+                        throw new ProtocolError(ErrorCode.invalid_params, "fjContext requires explicit permission");
+                    if (p.backend === "codex" && (p.model !== "gpt-6-astra" || p.serviceTier !== "default"))
+                        throw new ProtocolError(ErrorCode.invalid_params, "fj Codex requires gpt-6-astra and serviceTier default");
+                }
+                if (p.backend === "claude" && p.serviceTier !== undefined)
+                    throw new ProtocolError(ErrorCode.unsupported_capability, "serviceTier requires Codex");
                 if (p.backend === "claude")
                     validateClaudeEffort(p.effort);
                 if (!this.backends.includes(p.backend))
@@ -326,13 +344,28 @@ export class AgentServer {
             }
             case "thread/resume": {
                 const p = params(method);
+                if (p.fjContext)
+                    throw new ProtocolError(ErrorCode.invalid_params, "fjContext is immutable; resume uses persisted context");
                 if (p.cwd)
                     this.cwd(p.cwd);
                 if (p.backend && !this.backends.includes(p.backend))
                     throw new ProtocolError(ErrorCode.unsupported_capability, "backend is not available");
                 const existing = p.threadId ? this.threads.get(p.threadId) : p.engineThreadId ? this.log.findEngine(p.engineThreadId, p.backend) : undefined;
-                if ((existing?.backend ?? p.backend ?? "claude") === "claude")
+                if (existing) {
+                    const saved = this.log.options(existing.id);
+                    if (saved.fjContext) {
+                        this.cwd(saved.fjContext.root);
+                        if (p.model !== undefined)
+                            p.model = this.threads.model(p.model, existing.backend, existing.id);
+                        if (p.model !== undefined && existing.backend === "codex" && p.model !== "gpt-6-astra")
+                            throw new ProtocolError(ErrorCode.invalid_params, "fj resume requires an explicit compatible model");
+                    }
+                }
+                if ((existing?.backend ?? p.backend ?? "claude") === "claude") {
+                    if (p.serviceTier !== undefined)
+                        throw new ProtocolError(ErrorCode.unsupported_capability, "serviceTier requires Codex");
                     validateClaudeEffort(p.effort);
+                }
                 if (existing)
                     permissionInput(existing.id, p.permission);
                 if (!existing && !p.cwd)
@@ -362,6 +395,15 @@ export class AgentServer {
                 return {};
             }
             case "thread/read": return { thread: this.threads.get(params(method).threadId) };
+            case "thread/name/set": {
+                const p = params(method), thread = this.threads.get(p.threadId);
+                this.leases.assertInput(thread.id, connection.clientId);
+                this.cwd(thread.cwd);
+                thread.title = p.name;
+                this.log.saveThread(thread);
+                this.log.publish({ jsonrpc: "2.0", method: "thread/metadata/updated", params: { threadId: thread.id, title: thread.title } });
+                return {};
+            }
             case "thread/items/list": return this.log.listItems(params(method));
             case "thread/list": {
                 const p = params(method), limit = p.limit ?? 100;
@@ -381,6 +423,7 @@ export class AgentServer {
                 this.cwd(this.threads.get(p.threadId).cwd);
                 return this.threads.fork(p, thread => this.attach(connection, thread.id));
             }
+            // Lifecycle operations, like interrupt, must remain available to peers.
             case "thread/close": {
                 const p = params(method);
                 return this.threads.close(p.threadId, p.reason).then(() => { this.leases.clear(p.threadId); return {}; });
@@ -391,6 +434,8 @@ export class AgentServer {
                 permissionInput(p.threadId, p.permission);
                 if (p.cwd)
                     this.cwd(p.cwd);
+                if (p.model !== undefined)
+                    p.model = this.threads.model(p.model, this.threads.get(p.threadId).backend, p.threadId);
                 return this.threads.queue(p.threadId).enqueue(p);
             }
             case "turn/steer": {

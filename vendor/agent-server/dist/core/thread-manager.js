@@ -1,5 +1,6 @@
 import { ErrorCode, ProtocolError, rpcError } from "../protocol/index.js";
 import { TurnQueue } from "./turn-queue.js";
+import { executionModel } from "./model-policy.js";
 const transitions = {
     spawning: ["idle", "systemError", "closed"], idle: ["running", "closed", "systemError"],
     running: ["idle", "interrupted", "systemError", "closed"], interrupted: ["idle", "systemError", "closed"],
@@ -8,6 +9,7 @@ const transitions = {
 export class ThreadManager {
     log;
     factory;
+    options;
     live = new Map();
     engineThreads = new Map();
     opening = new Map();
@@ -23,6 +25,7 @@ export class ThreadManager {
     constructor(log, factory, options = {}) {
         this.log = log;
         this.factory = factory;
+        this.options = options;
         this.maxQueuedTurns = options.maxQueuedTurns ?? 8;
         this.idleTimeoutMs = options.idleTimeoutMs ?? 30 * 60_000;
         this.now = options.now ?? Date.now;
@@ -59,10 +62,22 @@ export class ThreadManager {
         const thread = this.get(params.threadId);
         if (thread.backend !== "claude")
             throw new ProtocolError(ErrorCode.backend_unsupported, `${thread.backend} does not support Claude engine controls`);
+        if (params.subtype === "set_model")
+            params = { ...params, params: { ...params.params, model: this.model(params.params.model, thread.backend, thread.id) } };
         const engine = this.session(thread.id);
         if (!engine.engineControl)
             throw new ProtocolError(ErrorCode.backend_unsupported, "engine controls unavailable");
         return engine.engineControl(params.subtype, params.params);
+    }
+    model(value, backend, threadId) {
+        try {
+            return executionModel(value, backend, this.options, threadId);
+        }
+        catch (error) {
+            if (error instanceof ProtocolError && error.data.reason === "model_denied")
+                this.log.publish({ jsonrpc: "2.0", method: "thread/engineEvent", params: { threadId, backend, subtype: "model_denied", payload: error.data.detail } });
+            throw error;
+        }
     }
     session(threadId) {
         const session = this.live.get(threadId);
@@ -74,7 +89,7 @@ export class ThreadManager {
         this.get(threadId);
         let queue = this.queues.get(threadId);
         if (!queue) {
-            queue = new TurnQueue(threadId, this.log, () => this.session(threadId), status => this.setStatus(threadId, status), this.maxQueuedTurns, error => this.engineDied(threadId, error));
+            queue = new TurnQueue(threadId, this.log, () => this.session(threadId), status => this.setStatus(threadId, status), this.maxQueuedTurns, error => this.engineDied(threadId, error), this.options.interruptTimeoutMs);
             this.queues.set(threadId, queue);
         }
         return queue;
@@ -93,16 +108,21 @@ export class ThreadManager {
     }
     async start(params, onCreated, internal) {
         const request = internal?.request ?? params;
+        const id = `th_${crypto.randomUUID()}`;
+        if (params.backend !== "external")
+            params = { ...params, model: this.model(params.model, params.backend, id) };
         const existing = this.log.deduplicate("threads", params.clientThreadId, request);
         if (existing) {
             onCreated?.(existing);
             await this.opening.get(existing.id);
             return { thread: this.get(existing.id), deduplicated: true };
         }
-        const thread = { id: `th_${crypto.randomUUID()}`, backend: params.backend, engineThreadId: internal?.fork ? null : internal?.resume ?? null, cwd: params.cwd ?? process.cwd(), status: { type: "spawning" }, createdAtMs: this.now(), ...(params.model ? { model: params.model } : {}), ...(params.meta ? { meta: params.meta } : {}), ...(params.clientThreadId ? { clientThreadId: params.clientThreadId } : {}) };
+        const thread = { id, backend: params.backend, engineThreadId: internal?.fork ? null : internal?.resume ?? null, cwd: params.cwd ?? process.cwd(), status: { type: "spawning" }, createdAtMs: this.now(), ...(params.model ? { model: params.model } : {}), ...(params.meta ? { meta: params.meta } : {}), ...(params.clientThreadId ? { clientThreadId: params.clientThreadId } : {}) };
         if (internal?.forkedFrom)
             thread.forkedFrom = internal.forkedFrom;
         const options = { ...params, cwd: thread.cwd, ...(internal?.seedHistory ? { seedHistory: internal.seedHistory } : {}), ...(internal?.fork ? { engineThreadId: internal.resume, forkSession: true, forkPoint: internal.forkPoint } : {}) };
+        if (params.fjContext)
+            thread.meta = { ...thread.meta, fjContext: params.fjContext };
         thread.permission = params.permission ?? "default";
         this.log.transaction(() => {
             this.log.insertThread(thread, request, options);
@@ -145,7 +165,8 @@ export class ThreadManager {
                     }
                 })();
                 this.consumers.set(thread.id, consumer);
-                await session.spawn(options);
+                // Server-owned scope always replaces saved/client session data, including on resume.
+                await session.spawn({ ...options, allowedRoots: this.options.allowedRoots });
                 if (this.live.get(thread.id) !== session)
                     throw new ProtocolError(ErrorCode.engine_unavailable, "engine died while spawning");
                 if (session.engineThreadId)
@@ -176,6 +197,8 @@ export class ThreadManager {
         }
         if ((params.engineThreadId && thread.engineThreadId !== params.engineThreadId) || (params.backend && thread.backend !== params.backend))
             throw new ProtocolError(ErrorCode.invalid_params, "thread identity does not match");
+        if (params.model !== undefined && thread.backend !== "external")
+            this.model(params.model, thread.backend, thread.id);
         onAttach?.(thread);
         await this.closing.get(thread.id);
         const pending = this.opening.get(thread.id);
@@ -188,6 +211,8 @@ export class ThreadManager {
         thread = this.get(thread.id);
         const { threadId: _, engineThreadId: __, ...overrides } = params;
         const options = { ...this.log.options(thread.id), ...overrides, backend: thread.backend };
+        if (thread.backend !== "external")
+            options.model = this.model(options.model, thread.backend, thread.id);
         this.log.saveOptions(thread.id, options);
         thread.cwd = options.cwd ?? thread.cwd;
         thread.model = options.model;
@@ -225,6 +250,33 @@ export class ThreadManager {
         const { seedHistory: __, engineThreadId: ___, forkSession: ____, forkPoint: _____, ...clean } = options;
         return this.start({ ...clean, clientThreadId: params.clientThreadId }, onCreated, { ...(native ? { resume: source.engineThreadId, fork: true, forkPoint } : { seedHistory: prefix }), prefix, forkedFrom: { threadId: source.id, itemId }, request: params });
     }
+    // Persist an otherwise-silent auto-allow so "why did this not need approval" is answerable
+    // after the fact, not just via the in-memory engineEvent broadcast (see docs P1-3).
+    recordReadonlyAutoAllow(threadId, turnId, payload) {
+        const { requestId, toolUseId, command, matchedRules } = payload;
+        if (typeof requestId !== "string" || typeof toolUseId !== "string" || typeof command !== "string" || !Array.isArray(matchedRules))
+            return;
+        this.log.recordReadonlyAutoAllow({ id: requestId, threadId, turnId, itemId: toolUseId, command, matchedRules: matchedRules.map(String), now: this.now() });
+    }
+    recordReadonlyDenied(threadId, turnId, payload) {
+        const { requestId, toolUseId, toolName } = payload;
+        if (typeof requestId !== "string" || typeof toolUseId !== "string" || typeof toolName !== "string")
+            return;
+        this.log.recordReadonlyDenied({ id: requestId, threadId, turnId, itemId: toolUseId, toolName, now: this.now() });
+    }
+    // Fires at spawn, before any turn exists, so unlike recordReadonlyDenied this does not gate on turnId.
+    recordReadonlyToolsDisabled(threadId, payload) {
+        const { requestId, toolNames, reason } = payload;
+        if (typeof requestId !== "string" || !Array.isArray(toolNames) || typeof reason !== "string")
+            return;
+        this.log.recordReadonlyToolsDisabled({ id: requestId, threadId, toolNames: toolNames.map(String), reason, now: this.now() });
+    }
+    recordPermissionAutoResponse(threadId, turnId, payload) {
+        const { requestId, toolUseId, toolName, permission, behavior } = payload;
+        if (typeof requestId !== "string" || typeof toolUseId !== "string" || typeof toolName !== "string" || typeof permission !== "string" || typeof behavior !== "string")
+            return;
+        this.log.recordPermissionAutoResponse({ id: requestId, threadId, turnId, itemId: toolUseId, toolName, permission, behavior, now: this.now() });
+    }
     metadata(threadId, engineThreadId) {
         const owner = this.engineThreads.get(engineThreadId);
         if (owner && owner !== threadId)
@@ -257,11 +309,24 @@ export class ThreadManager {
         }
         if (event.type === "engineEvent") {
             const { type: _, ...params } = event;
+            if (params.subtype === "readonly_auto_allow" && params.turnId)
+                this.recordReadonlyAutoAllow(threadId, params.turnId, params.payload);
+            if (params.subtype === "readonly_denied" && params.turnId)
+                this.recordReadonlyDenied(threadId, params.turnId, params.payload);
+            if (params.subtype === "readonly_tools_disabled")
+                this.recordReadonlyToolsDisabled(threadId, params.payload);
+            if (params.subtype === "permission_auto_response" && params.turnId)
+                this.recordPermissionAutoResponse(threadId, params.turnId, params.payload);
             this.log.publish({ jsonrpc: "2.0", method: "thread/engineEvent", params: { threadId, ...params } });
             return;
         }
         if (event.type === "metadata") {
             this.metadata(threadId, event.engineThreadId);
+            if (event.nativeThreadData) {
+                const thread = this.get(threadId);
+                thread.meta = { ...thread.meta, nativeThreadData: event.nativeThreadData };
+                this.log.saveThread(thread);
+            }
             return;
         }
         if (event.type === "exit") {

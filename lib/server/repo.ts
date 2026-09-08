@@ -1049,6 +1049,14 @@ export function createSessionWithRoot(args: {
   const workspaceId = workspacePath
     ? resolveWorkspaceId(workspacePath)
     : null;
+  // Limit new AS bindings to the rollout project after canonical workspace
+  // registration. Missing/unknown ownership must stay on the legacy path.
+  const rolloutProject = process.env.TRELLIS_AS_PROJECT_ID?.trim();
+  const workspaceProject = rolloutProject && workspaceId
+    ? db.prepare("SELECT project_id FROM workspaces WHERE id=?").get(workspaceId) as { project_id: string } | null
+    : null;
+  const bindingType = args.bindingType === "thread" && rolloutProject && workspaceProject?.project_id !== rolloutProject
+    ? "legacy" : args.bindingType ?? "legacy";
   const tx = db.transaction(() => {
     // 新建 project session 一律走 per-lineage 隔离（spec:
     // progress/project-lineage-isolation-spec.md）；存量行保持 0（旧共享语义）。
@@ -1072,7 +1080,7 @@ export function createSessionWithRoot(args: {
       mode === "project" ? 1 : 0,
       requireApproval ? 1 : 0,
       agentId,
-      args.bindingType ?? "legacy",
+      bindingType,
     );
 
     db.prepare(

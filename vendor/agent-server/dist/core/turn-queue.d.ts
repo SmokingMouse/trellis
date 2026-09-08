@@ -8,10 +8,12 @@ export declare class TurnQueue {
     private readonly status;
     readonly maxQueuedTurns: number;
     private readonly onEngineFailure?;
+    private readonly interruptTimeoutMs;
     private active;
     private frozen;
     private dispatch;
-    constructor(threadId: string, log: ItemLog, engine: () => EngineSession, status: (status: ThreadStatus) => void, maxQueuedTurns?: number, onEngineFailure?: ((error: RpcError) => void) | undefined);
+    private interruptTimer?;
+    constructor(threadId: string, log: ItemLog, engine: () => EngineSession, status: (status: ThreadStatus) => void, maxQueuedTurns?: number, onEngineFailure?: ((error: RpcError) => void) | undefined, interruptTimeoutMs?: number);
     get runningTurnId(): string | null;
     get isFrozen(): boolean;
     read(): {

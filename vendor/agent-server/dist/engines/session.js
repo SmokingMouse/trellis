@@ -1,3 +1,17 @@
+/** A daemon must never lend its pane or another contract's identity to an engine. */
+export function sessionEnvironment(options, source = process.env) {
+    const env = { ...source };
+    for (const key of Object.keys(env))
+        if (key.startsWith("HERDR_") || key.startsWith("FENJUE_"))
+            delete env[key];
+    if (options.fjContext) {
+        env.FENJUE_ROOT = options.fjContext.root;
+        env.FENJUE_CID = options.fjContext.cid;
+        if (options.fjContext.seat)
+            env.FENJUE_SEAT = options.fjContext.seat;
+    }
+    return env;
+}
 /** Single-consumer stream, shared by engines and transport-neutral connections. */
 export class AsyncQueue {
     values = [];

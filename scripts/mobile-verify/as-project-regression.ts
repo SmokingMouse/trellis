@@ -26,7 +26,7 @@ const script: MockScript = async function* (turnId) {
   yield { type: "itemCompleted", turnId, item: { id: `${turnId}-answer`, type: "agentMessage", payload: { text: `answer ${turnId}` } } };
   yield { type: "turnCompleted", turnId, status: "completed", forkPoint: `checkpoint-${turnId}` };
 };
-const daemon = await runDaemon({ paths, graceMs: 0, logger: () => {}, serverOptions: { allowedRoots: [home], backends: ["claude"], engineFactory: () => { const engine = new MockEngine(script, "claude"); engines.push(engine); return engine; } } });
+const daemon = await runDaemon({ paths, graceMs: 0, logger: () => {}, serverOptions: { defaultModel: "sonnet", allowedRoots: [home], backends: ["claude"], engineFactory: () => { const engine = new MockEngine(script, "claude"); engines.push(engine); return engine; } } });
 const oldDaemon = process.argv[2] === "fork capability fallback";
 if (oldDaemon) omitMidThreadFork(daemon.server);
 const sid = randomUUID(), root = randomUUID();
@@ -50,6 +50,22 @@ async function start(nodeId: string, retry = false) {
 }
 function row(nodeId: string) { return getDB().prepare("SELECT response,status,tool_calls_json,token_input,token_output,final_start FROM nodes WHERE id=?").get(nodeId); }
 try {
+  if (process.argv[2] === "single project rollout") {
+    const project = getDB().prepare("SELECT w.project_id FROM sessions s JOIN workspaces w ON w.id=s.workspace_id WHERE s.id=?").get(sid) as {project_id:string};
+    const create = (workspacePath: string | null) => {
+      const id = randomUUID();
+      return repo.createSessionWithRoot({sessionId:id,nodeId:randomUUID(),title:"rollout",question:"do not run",now:Date.now(),mode:"project",workspacePath,bindingType:"thread"}).session;
+    };
+    process.env.TRELLIS_AS_PROJECT_ID = "another-project";
+    assert.equal(create(home).bindingType, "legacy");
+    process.env.TRELLIS_AS_PROJECT_ID = project.project_id;
+    assert.equal(create(home).bindingType, "thread");
+    assert.equal(create(null).bindingType, "legacy");
+    assert.equal(repo.getSession(sid)!.bindingType, "thread");
+    delete process.env.TRELLIS_AS_PROJECT_ID;
+    assert.equal(create(home).bindingType, "thread");
+    console.log("PASS: exact project rollout, unknown ownership fails closed, existing bindings unchanged, unset preserves compatibility");
+  }
   await start(root);
   const second = branch(root, "second question");
   await start(second);
@@ -227,7 +243,7 @@ try {
       assert.equal(repo.getNode(pending)!.status,"error");
       assert.ok(engines.some(e => e.interrupted.includes(run.turnId!)));
     } finally { release(); pause=undefined; peer.close(); }
-  } else throw new Error("unknown regression case");
+  } else if (process.argv[2] !== "single project rollout") throw new Error("unknown regression case");
   console.log(`PASS: ${process.argv[2]}`);
 } finally {
   await daemon.shutdown();

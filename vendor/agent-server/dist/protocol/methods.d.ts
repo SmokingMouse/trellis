@@ -9,6 +9,12 @@ export declare const EngineCapabilitiesSchema: z.ZodObject<{
     compact: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;
 export declare const ThreadOptionsSchema: z.ZodObject<{
+    fjContext: z.ZodOptional<z.ZodObject<{
+        root: z.ZodString;
+        cid: z.ZodString;
+        seat: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
     cwd: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
     effort: z.ZodOptional<z.ZodString>;
@@ -29,6 +35,12 @@ export declare const ThreadOptionsSchema: z.ZodObject<{
     autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
 }, z.core.$strict>;
 export declare const StartThreadParamsSchema: z.ZodObject<{
+    fjContext: z.ZodOptional<z.ZodObject<{
+        root: z.ZodString;
+        cid: z.ZodString;
+        seat: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
     cwd: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
     effort: z.ZodOptional<z.ZodString>;
@@ -543,6 +555,12 @@ export declare const AttachResultSchema: z.ZodObject<{
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export declare const ResumeThreadParamsSchema: z.ZodUnion<readonly [z.ZodObject<{
+    fjContext: z.ZodOptional<z.ZodObject<{
+        root: z.ZodString;
+        cid: z.ZodString;
+        seat: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
     cwd: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
     effort: z.ZodOptional<z.ZodString>;
@@ -569,6 +587,12 @@ export declare const ResumeThreadParamsSchema: z.ZodUnion<readonly [z.ZodObject<
     }>>;
     threadId: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
+    fjContext: z.ZodOptional<z.ZodObject<{
+        root: z.ZodString;
+        cid: z.ZodString;
+        seat: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>>;
+    serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
     cwd: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
     effort: z.ZodOptional<z.ZodString>;
@@ -655,6 +679,12 @@ export declare const MethodSchemas: {
     };
     readonly "thread/start": {
         readonly params: z.ZodObject<{
+            fjContext: z.ZodOptional<z.ZodObject<{
+                root: z.ZodString;
+                cid: z.ZodString;
+                seat: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
             cwd: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
             effort: z.ZodOptional<z.ZodString>;
@@ -894,6 +924,12 @@ export declare const MethodSchemas: {
     };
     readonly "thread/resume": {
         readonly params: z.ZodUnion<readonly [z.ZodObject<{
+            fjContext: z.ZodOptional<z.ZodObject<{
+                root: z.ZodString;
+                cid: z.ZodString;
+                seat: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
             cwd: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
             effort: z.ZodOptional<z.ZodString>;
@@ -920,6 +956,12 @@ export declare const MethodSchemas: {
             }>>;
             threadId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
+            fjContext: z.ZodOptional<z.ZodObject<{
+                root: z.ZodString;
+                cid: z.ZodString;
+                seat: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>>;
+            serviceTier: z.ZodOptional<z.ZodLiteral<"default">>;
             cwd: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
             effort: z.ZodOptional<z.ZodString>;
@@ -1921,6 +1963,13 @@ export declare const MethodSchemas: {
             }, z.core.$strip>;
         }, z.core.$strip>;
     };
+    readonly "thread/name/set": {
+        readonly params: z.ZodObject<{
+            threadId: z.ZodString;
+            name: z.ZodString;
+        }, z.core.$strip>;
+        readonly result: z.ZodObject<{}, z.core.$strip>;
+    };
     readonly "thread/fork": {
         readonly params: z.ZodObject<{
             threadId: z.ZodString;
@@ -2205,6 +2254,7 @@ export declare const MethodSchema: z.ZodEnum<{
     "thread/items/list": "thread/items/list";
     "thread/list": "thread/list";
     "thread/read": "thread/read";
+    "thread/name/set": "thread/name/set";
     "thread/fork": "thread/fork";
     "thread/close": "thread/close";
     "thread/interrupt": "thread/interrupt";

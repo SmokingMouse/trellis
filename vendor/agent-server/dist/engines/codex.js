@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { ErrorCode, ProtocolError, ServerRequestMethodSchema } from "../protocol/index.js";
-import { AsyncQueue } from "./session.js";
+import { AsyncQueue, sessionEnvironment } from "./session.js";
 import { CodexEventMapper, codexProtocolError, codexRecord, codexString, codexUserInput, mapCodexDecision, mapCodexRequest } from "./codex-mapper.js";
 import { CODEX_SCHEMA_VERSION } from "./codex-version.js";
 import { codexHistoryInstructions } from "./fork-history.js";
@@ -36,7 +36,7 @@ export function buildCodexThreadParams(options) {
         ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
         ...(options.model !== undefined ? { model: options.model } : {}),
         ...(sandbox ? { sandbox } : {}), ...(approval ? { approvalPolicy: approval } : {}),
-        approvalsReviewer: "user", serviceTier: "default",
+        approvalsReviewer: "user", serviceTier: options.serviceTier ?? "default",
         ...(options.systemPrompt !== undefined ? { baseInstructions: options.systemPrompt } : {}),
         ...(options.seedHistory?.length ? { developerInstructions: codexHistoryInstructions(options.seedHistory) } : {}),
         ...(options.forkSession && options.forkPoint ? { lastTurnId: options.forkPoint } : {}),
@@ -44,14 +44,14 @@ export function buildCodexThreadParams(options) {
         ...(options.engineThreadId ? { threadId: options.engineThreadId, excludeTurns: true } : {}),
     };
 }
-function turnOverrides(options) {
+function turnOverrides(options, serviceTier = "default") {
     checkEffort(options.effort);
     const mode = sandboxMode(options), approval = approvalPolicy(options.permission);
     const sandboxPolicy = mode === "read-only" ? { type: "readOnly" } : mode === "workspace-write" ? { type: "workspaceWrite" } : mode === "danger-full-access" ? { type: "dangerFullAccess" } : undefined;
     return {
         ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}),
         ...(options.effort !== undefined ? { effort: options.effort } : {}), ...(approval ? { approvalPolicy: approval } : {}),
-        ...(sandboxPolicy ? { sandboxPolicy } : {}), serviceTier: "default", approvalsReviewer: "user",
+        ...(sandboxPolicy ? { sandboxPolicy } : {}), serviceTier, approvalsReviewer: "user",
         ...(options.clientTurnId ? { clientUserMessageId: options.clientTurnId } : {}),
     };
 }
@@ -62,6 +62,28 @@ export class CodexEngine {
     emitsUserMessages = true;
     emitsTokenUsage = true;
     events = new AsyncQueue();
+    nativeToolCalls = new Map();
+    claimNativeToolCall(id, owner) {
+        const call = this.nativeToolCalls.get(id);
+        if (!call || call.owner)
+            return false;
+        call.owner = owner;
+        return true;
+    }
+    respondNativeToolCall(id, owner, response) {
+        const call = this.nativeToolCalls.get(id);
+        if (!call || call.owner !== owner)
+            throw new ProtocolError(ErrorCode.unauthorized, "native tool response owner mismatch");
+        this.write({ id, ...response });
+        this.nativeToolCalls.delete(id);
+    }
+    releaseNativeToolCalls(owner) {
+        for (const call of this.nativeToolCalls.values())
+            if (call.owner === owner) {
+                delete call.owner;
+                this.events.push({ type: "engineEvent", backend: "codex", subtype: "item/tool/call", payload: structuredClone(call.frame) });
+            }
+    }
     engineThreadId = null;
     process;
     options;
@@ -75,6 +97,10 @@ export class CodexEngine {
     dead = false;
     closed = false;
     ready = false;
+    threadResponse;
+    nativeTurns = new Map();
+    nativeHistoryFresh = false;
+    turnReaders = new Map();
     constructor(config = {}) {
         this.config = config;
     }
@@ -84,8 +110,9 @@ export class CodexEngine {
         const params = buildCodexThreadParams(options);
         this.options = options;
         this.mapper = new CodexEventMapper(Boolean(options.engineThreadId));
+        this.nativeHistoryFresh = !options.engineThreadId;
         try {
-            this.process = (this.config.spawnProcess ?? ((command, args, opts) => spawn(command, args, { ...opts, stdio: "pipe" })))(this.config.executable ?? "codex", ["app-server", "--listen", "stdio://"], { cwd: options.cwd, env: { ...process.env } });
+            this.process = (this.config.spawnProcess ?? ((command, args, opts) => spawn(command, args, { ...opts, stdio: "pipe" })))(this.config.executable ?? "codex", ["app-server", "--listen", "stdio://"], { cwd: options.cwd, env: sessionEnvironment(options) });
             const child = this.process;
             child.stdout.setEncoding("utf8");
             child.stderr.setEncoding("utf8");
@@ -127,7 +154,8 @@ export class CodexEngine {
                 if (version !== CODEX_SCHEMA_VERSION)
                     this.events.push({ type: "error", error: codexProtocolError(`Codex version ${version ?? "unknown"} differs from pinned schema ${CODEX_SCHEMA_VERSION}`, { initialized, thread }).toJSON(), willRetry: false });
                 this.engineThreadId = id;
-                this.events.push({ type: "metadata", engineThreadId: id });
+                this.events.push({ type: "metadata", engineThreadId: id, nativeThreadData: { ...structuredClone(thread), turns: [] } });
+                this.threadResponse = structuredClone(result);
             });
             this.assertAlive();
             this.ready = true;
@@ -145,12 +173,21 @@ export class CodexEngine {
         this.validateTurn(options);
         if (this.active)
             throw new ProtocolError(ErrorCode.turn_not_active, "Codex already has an active turn");
+        this.nativeHistoryFresh = false;
         const turn = { id: turnId, interrupting: false, buffered: [] };
         this.active = turn;
         this.mapper.beginTurn(turnId);
         this.mapper.registerInput(input, options.clientTurnId);
         try {
-            await this.request("turn/start", { threadId: this.engineThreadId, input: codexUserInput(input), ...turnOverrides(options) }, result => this.bindTurn(turn, codexString(codexRecord(result.turn).id, "turn id")));
+            await this.request("turn/start", { threadId: this.engineThreadId, input: codexUserInput(input), ...turnOverrides(options, this.options?.serviceTier) }, result => {
+                this.nativeTurns.set(turnId, structuredClone(result));
+                if (this.nativeTurns.size > 32)
+                    this.nativeTurns.delete(this.nativeTurns.keys().next().value);
+                this.bindTurn(turn, codexString(codexRecord(result.turn).id, "turn id"));
+                for (const reader of this.turnReaders.get(turnId) ?? [])
+                    reader.resolve(structuredClone(result));
+                this.turnReaders.delete(turnId);
+            });
         }
         catch (error) {
             this.fail(error instanceof ProtocolError ? error : this.unavailable(String(error)));
@@ -179,6 +216,8 @@ export class CodexEngine {
             return;
         this.closed = true;
         this.ready = false;
+        this.active = undefined;
+        this.nativeToolCalls.clear();
         this.rejectPending(this.unavailable("Codex session closed"));
         this.approvals.clear();
         const child = this.process;
@@ -191,6 +230,81 @@ export class CodexEngine {
             });
         }
         this.events.end();
+    }
+    /** Read-only native views for ingress; mutations still enter through as/1. */
+    nativeThreadStart() {
+        if (!this.threadResponse)
+            throw this.unavailable("native thread snapshot is not available");
+        return structuredClone(this.threadResponse);
+    }
+    async nativeThreadRead(includeTurns = true) {
+        this.assertReady();
+        try {
+            return await this.request("thread/read", { threadId: this.engineThreadId, includeTurns });
+        }
+        catch (error) {
+            if (!includeTurns || !this.emptyNativeHistoryError(error, "thread/read"))
+                throw error;
+            // Read current metadata, not the stale thread/start snapshot. A concurrent
+            // first turn invalidates the empty-history proof and requires a fresh read.
+            const result = await this.nativeThreadRead(false);
+            if (!this.nativeHistoryFresh)
+                return this.nativeThreadRead(true);
+            return { ...result, thread: { ...result.thread, turns: [] } };
+        }
+    }
+    async nativeThreadHistory(method, params) {
+        this.assertReady();
+        try {
+            return await this.request(method, { ...params, threadId: this.engineThreadId });
+        }
+        catch (error) {
+            // Never swallow cursor/filter errors or infer empty history for an imported
+            // thread. Nonempty pages and their opaque cursors remain native end to end.
+            if (params.cursor != null || params.turnId != null || !this.emptyNativeHistoryError(error, method))
+                throw error;
+            return { data: [], nextCursor: null, backwardsCursor: null };
+        }
+    }
+    emptyNativeHistoryError(error, method) {
+        if (!this.nativeHistoryFresh || !(error instanceof ProtocolError) || typeof error.data.raw !== "string")
+            return false;
+        let native;
+        try {
+            native = JSON.parse(error.data.raw);
+        }
+        catch {
+            return false;
+        }
+        // Pinned 0.153.4 exposes an unmaterialized paginated store as Unsupported.
+        // Only threads created by this engine, before any turn dispatch, qualify.
+        if (native.code === -32601 && native.message === (method === "thread/items/list" ? "thread/items/list is not supported yet" : "list_turns is not supported yet"))
+            return true;
+        const operation = method === "thread/read" ? "includeTurns" : "thread/turns/list";
+        return method !== "thread/items/list" && native.code === -32600 && native.message === `thread ${this.engineThreadId} is not materialized yet; ${operation} is unavailable before first user message`;
+    }
+    nativeTurnId(turnId) {
+        return this.active?.id === turnId ? this.active.nativeId : this.nativeTurns.get(turnId)?.turn?.id;
+    }
+    waitNativeTurn(turnId, signal) {
+        this.assertReady();
+        const result = this.nativeTurns.get(turnId);
+        if (result)
+            return Promise.resolve(structuredClone(result));
+        return new Promise((resolve, reject) => {
+            const readers = this.turnReaders.get(turnId) ?? new Set();
+            const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); readers.delete(reader); if (!readers.size)
+                this.turnReaders.delete(turnId); };
+            const reader = { resolve: (value) => { cleanup(); resolve(value); }, reject: (error) => { cleanup(); reject(error); } };
+            const abort = () => reader.reject(this.unavailable("native turn reader disconnected"));
+            const timer = setTimeout(() => reader.reject(this.unavailable("native turn acknowledgement timed out")), this.config.requestTimeoutMs ?? 30_000);
+            readers.add(reader);
+            this.turnReaders.set(turnId, readers);
+            if (signal?.aborted)
+                abort();
+            else
+                signal?.addEventListener("abort", abort, { once: true });
+        });
     }
     unavailable(message) { return new ProtocolError(ErrorCode.engine_unavailable, message, { stderr: this.stderr, retryable: true }); }
     assertAlive() { if (!this.process || this.dead || this.closed)
@@ -224,15 +338,24 @@ export class CodexEngine {
             }
         });
     }
-    rejectPending(error) { for (const call of this.pending.values()) {
-        clearTimeout(call.timer);
-        call.reject(error);
-    } this.pending.clear(); }
+    rejectPending(error) {
+        for (const call of this.pending.values()) {
+            clearTimeout(call.timer);
+            call.reject(error);
+        }
+        this.pending.clear();
+        for (const readers of this.turnReaders.values())
+            for (const reader of [...readers])
+                reader.reject(error);
+        this.turnReaders.clear();
+    }
     fail(error) {
         if (this.dead || this.closed)
             return;
         this.dead = true;
         this.ready = false;
+        this.active = undefined;
+        this.nativeToolCalls.clear();
         this.approvals.clear();
         this.rejectPending(error);
         this.events.push({ type: "exit", error: error.toJSON() });
@@ -283,6 +406,15 @@ export class CodexEngine {
         if (typeof frame.method !== "string")
             throw codexProtocolError("Invalid Codex JSON-RPC frame", raw);
         const method = frame.method, params = codexRecord(frame.params);
+        if (hasId && method === "item/tool/call" && params.namespace === "codex_tui") {
+            if (!this.active?.nativeId || params.threadId !== this.engineThreadId || params.turnId !== this.active.nativeId || this.nativeToolCalls.has(frame.id)) {
+                this.rejectRequest(frame, codexProtocolError("Invalid native TUI tool ownership", raw));
+                return;
+            }
+            this.nativeToolCalls.set(frame.id, { frame: structuredClone(frame) });
+            this.events.push({ type: "engineEvent", turnId: this.active.id, backend: "codex", subtype: method, payload: structuredClone(frame) });
+            return;
+        }
         if (hasId && !ServerRequestMethodSchema.safeParse(method).success) {
             this.rejectRequest(frame, codexProtocolError(`Unknown Codex server request: ${method}`, raw));
             return;
@@ -337,6 +469,9 @@ export class CodexEngine {
         }
         const events = this.mapper.map(method, params);
         if (method === "turn/completed") {
+            for (const [id, call] of this.nativeToolCalls)
+                if (call.frame.params.turnId === nativeTurnId)
+                    this.nativeToolCalls.delete(id);
             this.active = undefined;
             for (const event of events)
                 if (event.type === "turnCompleted")

@@ -22,7 +22,7 @@ test("live fork freezes tools, retains interrupted seed history, and filters pen
   cleanup.push(() => daemon.shutdown());
   const client = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),reconnect:false});
   cleanup.push(() => client.close());
-  const {thread} = await client.request("thread/start",{backend:"claude",cwd:home});
+  const {thread} = await client.request("thread/start",{backend:"claude",model:"sonnet",cwd:home});
   const {turn} = await client.request("turn/start",{threadId:thread.id,input:[{type:"text",text:"hold tool"}]});
   engines[0].emit({type:"itemStarted",turnId:turn.id,item:{id:"live-tool",type:"commandExecution",payload:{command:"mock hold",cwd:home}}});
   await until(() => daemon.server.log.snapshot(thread.id).items.some(i=>i.id === "live-tool"));
@@ -102,7 +102,7 @@ test("socket loss reattaches with completed cursor and reconciles offline comple
   const f = fixture(), daemon = await f.start();
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token: loadToken(f.paths.tokenPath), reconnect: false });
   cleanup.push(() => producer.close());
-  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: f.home });
+  const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: f.home });
   const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 80, warn: () => {} });
   cleanup.push(() => observer.close());
   const snapshots: AttachResult[] = [];
@@ -194,7 +194,7 @@ test("P2-1 closed/unauthorized observer reloads token and reattaches without a p
   writeFileSync(tokenPath, token);
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token, reconnect: false });
   cleanup.push(() => producer.close());
-  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: f.home });
+  const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: f.home });
   const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
   cleanup.push(() => observer.close());
   let snapshots = 0, closed = 0;
@@ -224,7 +224,7 @@ test("P1-3 review 200KB/10s repro emits no redundant snapshots or attach polls",
   const f = fixture(); await f.start();
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token: loadToken(f.paths.tokenPath), reconnect: false });
   cleanup.push(() => producer.close());
-  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: f.home });
+  const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: f.home });
   const { turn } = await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "long command" }] });
   f.engine.emit({ type: "itemStarted", turnId: turn.id, item: { id: "large", type: "commandExecution", payload: { command: "mock", cwd: f.home, aggregatedOutput: "x".repeat(200000) } } });
   await until(() => producer.sinceSeq(thread.id) >= 3);
@@ -278,7 +278,7 @@ test("P2-1 review daemon kill/restart repro reconciles persisted items on the sa
   const first = await start("first-ready");
   const producer = await AgentClient.connectUnix({ path: paths.socketPath, token: loadToken(paths.tokenPath), reconnect: false });
   cleanup.push(() => producer.close());
-  const { thread } = await producer.request("thread/start", { backend: "codex", cwd: home });
+  const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: home });
   await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "persist" }] });
   await until(() => producer.sinceSeq(thread.id) >= 3);
   const observer = new ShadowClient({ socketPath: paths.socketPath, tokenPath: paths.tokenPath, retryMs: 20, warn: () => {}, info: () => {} });

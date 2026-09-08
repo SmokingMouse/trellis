@@ -45,7 +45,7 @@ class ProjectMock extends MockEngine {
     this.emit({type:"permissionChanged",permission:permission==="auto-edit"?"acceptEdits":permission});
   }
 }
-const daemon = await runDaemon({paths,graceMs:0,serverOptions:{backends:["claude"],allowedRoots:[home],engineFactory:()=>{
+const daemon = await runDaemon({paths,graceMs:0,serverOptions:{defaultModel:"sonnet",backends:["claude"],allowedRoots:[home],engineFactory:()=>{
   const engine=new ProjectMock(script,"claude"); engines.push(engine); return engine;
 }}});
 const peer = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),client:{name:"peer",version:"1",kind:"tui",label:"第二终端"},capabilities:{engineEvents:true,serverRequests:["item/commandExecution/requestApproval"]},reconnect:false});

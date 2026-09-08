@@ -3,14 +3,18 @@ import type { EngineFactory, EngineSession } from "../engines/session.js";
 import { ItemLog } from "./item-log.js";
 import { TurnQueue } from "./turn-queue.js";
 import type { ApprovalBroker } from "./approval-broker.js";
-export interface ThreadManagerOptions {
+import { type ModelPolicyOptions } from "./model-policy.js";
+export interface ThreadManagerOptions extends ModelPolicyOptions {
     maxQueuedTurns?: number;
     idleTimeoutMs?: number;
+    interruptTimeoutMs?: number;
     now?: () => number;
+    allowedRoots?: readonly string[];
 }
 export declare class ThreadManager {
     readonly log: ItemLog;
     private readonly factory;
+    private readonly options;
     readonly live: Map<string, EngineSession>;
     readonly engineThreads: Map<string, string>;
     private opening;
@@ -27,6 +31,7 @@ export declare class ThreadManager {
     get(threadId: string): Thread;
     setPermission(params: MethodParams<"thread/permission/set">): Promise<MethodResult<"thread/permission/set">>;
     engineControl(params: MethodParams<"thread/engineControl">): Promise<MethodResult<"thread/engineControl">>;
+    model(value: unknown, backend: Thread["backend"], threadId: string): string;
     session(threadId: string): EngineSession;
     queue(threadId: string): TurnQueue;
     setStatus(threadId: string, status: ThreadStatus): void;
@@ -42,6 +47,10 @@ export declare class ThreadManager {
     private open;
     resume(params: MethodParams<"thread/resume">, onAttach?: (thread: Thread) => void): Promise<MethodResult<"thread/resume">>;
     fork(params: MethodParams<"thread/fork">, onCreated?: (thread: Thread) => void): Promise<MethodResult<"thread/fork">>;
+    private recordReadonlyAutoAllow;
+    private recordReadonlyDenied;
+    private recordReadonlyToolsDisabled;
+    private recordPermissionAutoResponse;
     private metadata;
     private handle;
     engineDied(threadId: string, error: RpcError): void;

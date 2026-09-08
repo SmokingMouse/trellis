@@ -21,6 +21,7 @@ export type EngineEvent = {
 } | {
     type: "metadata";
     engineThreadId: string;
+    nativeThreadData?: import("../protocol/index.js").JsonObject;
 } | {
     type: "status";
     status: ThreadStatus;
@@ -86,7 +87,10 @@ export interface SessionOptions extends StartThreadParams {
     forkSession?: boolean;
     forkPoint?: string;
     seedHistory?: Item[];
+    allowedRoots?: readonly string[];
 }
+/** A daemon must never lend its pane or another contract's identity to an engine. */
+export declare function sessionEnvironment(options: Pick<SessionOptions, "fjContext">, source?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 export interface EngineSession {
     readonly backend: Backend;
     readonly engineThreadId: string | null;
