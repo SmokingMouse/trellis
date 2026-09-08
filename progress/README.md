@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-agent-server 外部线程收编已接入主页；空会话手机首问验证触发契约停机，等待主控返工裁定。
+agent-server 外部线程按首 turn 收编已通过手机与真机验证，交付待验收；空会话 hydrate 症状留待专项排查。
 
 ## Goals
 

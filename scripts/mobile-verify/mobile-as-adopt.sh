@@ -65,15 +65,6 @@ ab click 'button[type="submit"]'
 ab open "$BASE/?session=$SID&node=$NODE"
 wait_js 'adopted conversation rendered in home' "Boolean(document.querySelector('[data-as-project=\"$NODE\"]')) && document.body.innerText.includes('外部线程回复') && document.body.innerText.includes('外部会话')"
 ab screenshot "$OUT/mobile-as-adopt.png"
-EMPTY_SID=$(bun -e 'console.log((await Bun.file(process.argv[1]).json()).emptySid)' "$H/proof.json")
-ab open "$BASE/?session=$EMPTY_SID"
-ab eval "fetch('/api/sessions/$EMPTY_SID').then(r=>r.json()).then(d=>({id:d.session?.id,origin:d.session?.origin,mode:d.session?.mode,status:d.session?.externalStatus,nodes:d.nodes?.length}))"
-wait_js 'empty adopted session has an enabled composer' "Boolean(document.querySelector('[data-composer-input]:not(:disabled)')) && document.body.innerText.includes('外部线程已收编')"
-ab snapshot -i
-ab fill '[data-composer-input]' 'empty home UI proof'
-ab click 'button[aria-label="发送"]'
-wait_js 'empty thread first UI reply visible' "document.body.innerText.includes('外部线程回复：empty home UI proof')"
-bun scripts/mobile-verify/as-adopt-proof.ts "$H" empty-ui
 ab close
 # Restart against the same database: identities and turn counts must survive.
 sqlite3 "$TRELLIS_DB_PATH" 'SELECT thread_id,session_id FROM as_adoptions ORDER BY thread_id' > "$H/identities-before.txt"

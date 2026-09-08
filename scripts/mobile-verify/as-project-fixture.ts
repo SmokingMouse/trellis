@@ -1,11 +1,29 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { AgentClient, MockEngine, type MockScript } from "@smokingmouse/agent-server";
 import { loadToken, resolveDaemonPaths, runDaemon } from "@smokingmouse/agent-server/daemon";
 import type { StartThreadParams } from "@smokingmouse/agent-server/protocol";
 import { pickResponse } from "../../lib/llm/mock-responses";
 const home = process.argv[2];
 if (!home?.startsWith("/tmp/trellis-as-project-")) throw new Error("isolated home required");
+// The copied history belongs to another daemon. This fresh fixture must begin
+// with no remote bindings; retain sessions/nodes and the original reuse assertion.
+const databasePath=join(home,"trellis.db");
+if(process.env.TRELLIS_DB_PATH!==databasePath) throw new Error("isolated database required");
+if(existsSync(databasePath)) {
+  const db=new Database(databasePath);
+  try {
+    db.transaction(()=>{
+      for(const table of ["as_turns","as_threads"]) {
+        if(db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+          const {changes}=db.run(`DELETE FROM ${table}`);
+          console.log(`fixture reset: ${table} removed ${changes} copied daemon bindings`);
+        }
+      }
+    })();
+  } finally {db.close();}
+}
 const paths = resolveDaemonPaths({ NODE_ENV:"test", HOME:home, AGENT_SERVER_SOCKET_PATH:join(home,"as.sock") });
 const engines: MockEngine[] = [];
 const peerEvents: unknown[] = [];

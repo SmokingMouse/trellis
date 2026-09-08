@@ -2,13 +2,13 @@
 
 ## 待查
 
-- **AS project 原始 thread reuse 断言包含源库历史**（fj-as-adopt-a06a）。症状：恢复 main 原脚本后独占复跑 exit 1，审批/撤卡/三轮共用 engine 均 PASS。可证伪假设已获计数支持：源库已有 1 个线程，隔离副本全库 COUNT=2、fixture 会话 COUNT=1。判定命令：统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh`；证据在契约 out/mobile-as-project-original-baseline.log 与 mobile-as-project-baseline-counts.txt。此前限定会话 COUNT 的修改及通过结论已撤回，保留原断言；已发 progress seq=13。
-
-- **空收编会话手机首问未通过**（fj-as-adopt-a06a，连续三次触发同一断言，按契约停机）。症状：后端 GET 会话返回 200、origin=external、mode=project、nodes=[]，浏览器仍显示新会话，并提示 hydrate failed: signal is aborted without reason。可证伪假设：初始化/深链切换阶段请求被 5 秒超时取消，导致目标会话未进入 store；尚未确认原因。判定命令：`env -i HOME=/Users/smokingmouse PATH="$PATH" TRELLIS_LARK=off TRELLIS_SCHEDULER=off TRELLIS_HOOKS=off TRELLIS_HERDR=off TRELLIS_VERIFY_SOURCE_DB=/Users/smokingmouse/.trellis/data.db sh scripts/mobile-verify/mobile-as-adopt.sh`。证据：契约 out/adopt-e2e-final.log 与 failure.png；须主控授权返工后再继续，不能把早期基础 E2E 的 exit 0 当最终通过。
+- **疑似通用空会话 hydrate 中止**（fj-as-adopt-a06a 发现，按主控裁定列为非本单引入的待查问题）。症状：GET /api/sessions/<empty> 返回 200、nodes=[]，前端五秒后提示 hydrate failed: signal is aborted without reason。可证伪假设：初始化/深链请求超时导致目标空会话未进入 store，根因未确认。历史判定命令：提交 a991584 上统一前缀执行 `sh scripts/mobile-verify/mobile-as-adopt.sh`，证据 out/adopt-e2e-final.log 与 failure.png。原用例三次失败曾触发停机；主控随后授权继续且仅收编至少一个 turn 的线程，本单不修 hydrate。新 E2E 改验零 turn 不建会话、首轮后五秒内收编，exit 0；此结果不表示通用空会话问题已修复。
 
 - **cpa 的 codex 上游间歇 `503 auth_unavailable (providers=codex)`，且当日内恶化为挂起**（S105 发现）。症状：`codex:gpt-5.5` 类注入模型（sm_endpoint / `CPA_API_KEY` bearer）多请求轮次约半数请求 503、codex 内部 5 次重试常耗尽 → turn failed；晚间进一步退化为请求挂起（probe 120s 超时无事件）。**已证伪**：本机 key 过期（curl 同 key 直打 `/v1/responses` 200）、SDK 注入参数错（单请求轮次曾成功 + S101/S102 同参数实测过）、0.7.0 代码回归（`transport:"exec"` 同注入同 503 模式）。**可证伪假设**：cpa（vultr-tokyo cliproxyapi）把 codex 形状流量路由到「codex」OAuth 池，该池凭证耗尽/过期；config.toml 的 cliproxyapi provider（同 key + `requires_openai_auth=true`）当时仍通，或因路由到不同池。**判定命令**：池恢复后跑 `node /tmp/codex-inject-probe.mjs d`（挂了随时可从 S105 session 记录重建）——稳定 completed = 池问题坐实；仍 503 而 config.toml 路径通 = 需比对 cpa 侧对两种 provider 配置的路由差异（`requires_openai_auth` / provider name）。修复大概率在 cpa 服务端（补 codex OAuth 池凭证），不在 trellis/SDK。
 
 ## 已结案
+
+- **AS project 原始 thread reuse 断言包含源库历史**（fj-as-adopt-a06a）→ `resolved`。恢复 main 原脚本后独占复跑稳定 exit 1，审批/撤卡/三轮共用 engine 均 PASS；源库已有 1 个线程，副本全库 COUNT=2、fixture 会话 COUNT=1。早期限定会话 COUNT 的修改已撤回。最终只在 as-project-fixture 启动时校验临时 DB 路径并清理复制的旧 as_turns/as_threads，保留 sessions/nodes 和原断言；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修前证据 out/mobile-as-project-original-baseline.log，修后 out/resumed-mobile-as-project-isolated.log、as-project-isolated-fixture.log；生产源库只读复核仍为 1。
 
 - **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。原列于此的 AS project COUNT 修改按主控要求撤回，问题重新列入待查，历史通过记录不作 D4 证明。
 

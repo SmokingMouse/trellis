@@ -71,10 +71,12 @@ export function resolveAdoptionWorkspace(cwd: string, bridges: { repo_root: stri
 export function adoptSnapshot(snapshot: AttachResult, turns: Record<string, Turn> = {}, bridges: Parameters<typeof resolveAdoptionWorkspace>[1] = []) {
   if (!isAdoptEnabled()) return null;
   const db = getDB(), thread = snapshot.thread, daemon = daemonIdentity();
+  const groups = adoptionTurns(snapshot, turns);
   return db.transaction(() => {
     let adopted = db.prepare("SELECT * FROM as_adoptions WHERE daemon_id=? AND thread_id=?").get(daemon, thread.id) as Adoption | null;
     if (adopted && !adopted.session_id) return null; // Permanent deletion tombstone.
     if (!adopted) {
+      if (groups.length === 0) return null; // Keep observing until its first turn.
       if (thread.status.type === "closed" || hasAsThreadClaim(thread.clientThreadId) || db.prepare("SELECT 1 FROM as_threads WHERE daemon_id=? AND thread_id=?").get(daemon, thread.id)) return null;
       const id = randomUUID(), now = Date.now(), workspaceId = resolveAdoptionWorkspace(thread.cwd, bridges);
       db.prepare(`INSERT INTO sessions (id,title,root_node_id,created_at,updated_at,context_mode,workspace_path,workspace_id,model,origin,binding_type,require_approval)
@@ -96,7 +98,7 @@ export function adoptSnapshot(snapshot: AttachResult, turns: Record<string, Turn
       changed = true;
     }
     let parent: string | null = null;
-    for (const group of adoptionTurns(snapshot, turns)) {
+    for (const group of groups) {
       const {turn,items,question} = group;
       const existing = db.prepare("SELECT node_id FROM as_turns WHERE daemon_id=? AND thread_id=? AND turn_id=?").get(daemon, thread.id, turn.id) as {node_id:string} | null;
       let nodeId = existing?.node_id;
@@ -123,6 +125,10 @@ export function adoptSnapshot(snapshot: AttachResult, turns: Record<string, Turn
       // be ahead of this polling snapshot; never rewind it with older items.
       if (hasActiveProjectRun(nodeId)) continue;
       const node = getNode(nodeId)!;
+      if (node.question === "外部操作" && question !== node.question && items.some(i => i.type === "userMessage")) {
+        db.prepare("UPDATE nodes SET question=? WHERE id=?").run(question,nodeId);
+        changed = true;
+      }
       const {response,finalStart} = projectResponse(items);
       const calls = items.map(itemToolCall).filter(c => c !== null);
       for (const item of items) if (item.type === "subAgent") {

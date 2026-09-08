@@ -59,29 +59,27 @@ try {
     await parity(sid,await settled(thread.id));
     await wait("approval card withdrawn",()=>nodes(sid).every(n=>!n.pending_interaction_json));
     const fallback=(await rpc("thread/start",{backend:"claude",cwd:join(home,"external"),model:"sonnet"})).thread;
-    const fallbackSid=(await wait("empty external thread has a session",()=>sessionFor(fallback.id),4500)).id;
+    const countBefore=JSON.parse(await api("/api/sessions")).sessions.length;
+    await Bun.sleep(3500);
+    assert.equal(sessionFor(fallback.id),null);
+    assert.equal(JSON.parse(await api("/api/sessions")).sessions.length,countBefore);
+    console.log("PASS: zero-turn thread stays out of home sessions across scans");
+    await rpc("turn/start",{threadId:fallback.id,input:[{type:"text",text:"first external turn"}]});
+    const first=await settled(fallback.id),firstCompleted=Date.now();
+    const fallbackSid=(await wait("first turn triggers adoption within five seconds",()=>sessionFor(fallback.id),4500)).id;
+    await parity(fallbackSid,first);
+    assert.ok(Date.now()-firstCompleted<=5000);
+    assert.ok(JSON.parse(await api("/api/sessions")).sessions.some((s:{id:string})=>s.id===fallbackSid));
+    console.log("PASS: first completed turn appears within five seconds with exact backfill");
     const project=db.query("SELECT p.name,p.cluster_key FROM projects p JOIN workspaces w ON w.project_id=p.id JOIN sessions s ON s.workspace_id=w.id WHERE s.id=?").get(fallbackSid) as {name:string;cluster_key:string};
     assert.deepEqual(project,{name:"外部会话",cluster_key:"trellis:external"});
-    // First home question on an empty adopted thread must reuse it too.
-    assert.ok((await api("/api/chat",{kind:"root",sessionId:fallbackSid,question:"first home turn",provider:"mock"})).includes('"type":"done"'));
-    await parity(fallbackSid,await settled(fallback.id));
     assert.equal((db.query("SELECT root_node_id FROM sessions WHERE id=?").get(fallbackSid) as {root_node_id:string}).root_node_id,nodes(fallbackSid)[0].id);
     await rpc("thread/close",{threadId:fallback.id});
     await wait("external close retained in home",()=>{const s=db.query("SELECT status FROM as_adoptions WHERE session_id=?").get(fallbackSid) as {status:string};return s.status==="closed";});
     const reject=await fetch(base+"/api/chat",{method:"POST",headers,body:JSON.stringify({kind:"branch",parentNodeId:nodes(fallbackSid)[0].id,question:"closed must reject"})});
     assert.equal(reject.status,409);
-    const empty=(await rpc("thread/start",{backend:"claude",cwd:join(home,"external"),model:"sonnet"})).thread;
-    const emptySid=(await wait("empty UI fixture adopted",()=>sessionFor(empty.id),4500)).id;
-    writeFileSync(join(home,"proof.json"),JSON.stringify({sid,threadId:thread.id,nodeId:nodes(sid).at(-1)!.id,fallbackSid,emptySid,emptyThreadId:empty.id,items:web.items},null,2));
-    console.log("PASS: ownership, backfill, peer live turn, home turn visible to peer, approval resolved, empty thread, closed refusal");
-  } else if(phase==="empty-ui") {
-    const proof=JSON.parse(readFileSync(join(home,"proof.json"),"utf8"));
-    const snap=await settled(proof.emptyThreadId);
-    assert.ok(snap.items.some(i=>i.type==="userMessage"&&i.payload.content.some(c=>c.type==="text"&&c.text==="empty home UI proof")));
-    await parity(proof.emptySid,snap);
-    assert.equal(nodes(proof.emptySid).length,1);
-    assert.equal((db.query("SELECT root_node_id FROM sessions WHERE id=?").get(proof.emptySid) as {root_node_id:string}).root_node_id,nodes(proof.emptySid)[0].id);
-    console.log("PASS: empty adopted thread accepts first question from home UI on its original thread");
+    writeFileSync(join(home,"proof.json"),JSON.stringify({sid,threadId:thread.id,nodeId:nodes(sid).at(-1)!.id,fallbackSid,items:web.items},null,2));
+    console.log("PASS: ownership, backfill, peer live turn, home turn visible to peer, approval resolved, first-turn adoption, closed refusal");
   } else if(phase==="delete") {
     const proof=JSON.parse(readFileSync(join(home,"proof.json"),"utf8"));
     await api(`/api/sessions/${proof.sid}`,undefined,"DELETE");
@@ -94,6 +92,7 @@ try {
     const before=await (await fetch(fixture+"/proof")).json();
     const count=before.requests.filter((r:{client:string})=>["trellis-adopt","trellis-project"].includes(r.client)).length;
     const {thread}=await rpc("thread/start",{backend:"claude",cwd:join(home,"external")});
+    await rpc("turn/start",{threadId:thread.id,input:[{type:"text",text:"off must not adopt"}]});
     await Bun.sleep(5000);
     assert.equal(sessionFor(thread.id),null);
     const after=await (await fetch(fixture+"/proof")).json();

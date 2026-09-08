@@ -25,6 +25,9 @@ export function adoptionTurns(snapshot: AttachResult, turns: Record<string, Turn
     const group = groups.get(item.turnId) ?? [];
     group.push(item); groups.set(item.turnId, group);
   }
+  for (const turn of Object.values(turns)) {
+    if (turn.threadId === snapshot.thread.id && !groups.has(turn.id)) groups.set(turn.id, []);
+  }
   return [...groups].map(([id, items], index, all) => {
     const user = items.find(i => i.type === "userMessage");
     const content = user?.type === "userMessage" ? user.payload.content : [];
@@ -33,7 +36,7 @@ export function adoptionTurns(snapshot: AttachResult, turns: Record<string, Turn
       || index === all.length - 1 && ["interrupted", "systemError"].includes(snapshot.thread.status.type);
     const turn: Turn = turns[id] ?? { id, threadId: snapshot.thread.id, ordinal: index+1,
       clientTurnId: user?.type === "userMessage" ? user.payload.clientTurnId : undefined,
-      enqueuedAtMs: items[0].startedAtMs, status: running ? "inProgress" : failed ? "failed" : "completed" };
+      enqueuedAtMs: items[0]?.startedAtMs ?? snapshot.thread.createdAtMs, status: running ? "inProgress" : failed ? "failed" : "completed" };
     return { turn, items, content, question: content.map(i => i.type === "text" ? i.text : i.type === "bash" ? i.command : `[${i.type}] ${i.path}`).join("\n") || "外部操作" };
   });
 }

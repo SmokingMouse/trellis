@@ -323,7 +323,7 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 |---|---|
 | `TRELLIS_AS` | 默认不启用；`on` 启用，`off` 是最高优先级硬关闸，即使已配置 socket 也禁用。未设置时，非空 `TRELLIS_AS_SOCKET` 会自动启用。 |
 | `TRELLIS_AS_PROJECT` | `on` 时为新 project 会话绑定 daemon thread，默认关闭。已绑定会话由 `TRELLIS_AS` 控制。 |
-| `TRELLIS_AS_ADOPT` | 默认 `off`；设为 `on` 自动收编 daemon 上尚未绑定且非 closed 的外部线程。`TRELLIS_AS=off` 覆盖它。 |
+| `TRELLIS_AS_ADOPT` | 默认 `off`；设为 `on` 自动收编 daemon 上至少有一个 turn、尚未绑定且非 closed 的外部线程。`TRELLIS_AS=off` 覆盖它。 |
 | `TRELLIS_AS_PROJECT_ID` | 可选的精确 `projects.id`，只允许该项目所属工作区的新会话绑定 AS；未知归属保持 legacy。未设置时保留全部新 project 会话可切流的行为；停流请关闭 PROJECT 或 AS，不要只删此筛选值。 |
 | `TRELLIS_AS_SOCKET` | daemon Unix socket 的绝对路径。未设置时遵循 agent-server 路径规则：`AGENT_SERVER_SOCKET_PATH` 优先，其次绝对 `XDG_RUNTIME_DIR` 下的 `sm-toolkit/agent-server.sock`，其次绝对 `XDG_STATE_HOME` 下的同一路径，最后为 `$HOME/.sm-toolkit/agent-server.sock`。 |
 | `TRELLIS_AS_TOKEN_PATH` | 已运行 daemon 的 token 文件绝对路径，不是 token 内容。默认绝对 `XDG_STATE_HOME` 下的 `sm-toolkit/agent-server/token`，否则 `$HOME/.agent-server/token`。自定义 socket 不会自动改变 token 路径，两个配置需指向同一个 daemon。 |
@@ -336,7 +336,7 @@ project 从最新空闲节点续聊复用 thread；早期节点续聊、显式 f
 
 客户端随仓库 vendor，来源固定在 `vendor/agent-server/VENDORED_FROM`；刷新用 `SM_TOOLKIT_DIR=/path/to/sm-toolkit sh scripts/vendor-agent-server.sh` 后执行 `bun install`。复核命令：`bunx tsc --noEmit`、`bun test`、`scripts/mobile-verify/mobile-as-project.sh`、`scripts/mobile-verify/mobile-as-shadow.sh`；移动验收只用 mock 引擎与脚本锁定的隔离端口。
 
-外部会话收编由 `TRELLIS_AS_ADOPT=on` 单独开启，不依赖 PROJECT 开关或 PROJECT_ID 灰度范围。启动全量扫描（含分页），健康时每 1.5 秒扫描并同步 turn/items；故障按 2–30 秒指数退避。关闭 ADOPT 不启动扫描器，不向 daemon 发出收编请求。非 closed、未绑定的线程按 cwd 的最长包含 workspace 归属，Herdr 的 repo/worktree 元数据也参与；没有匹配时自动创建唯一的系统项目「外部会话」（`cluster_key=trellis:external`）。会话及节点携带 `origin=external`、backend，标题保留 meta/fjContext 中的标题或契约号。
+外部会话收编由 `TRELLIS_AS_ADOPT=on` 单独开启，不依赖 PROJECT 开关或 PROJECT_ID 灰度范围。启动全量扫描（含分页），健康时每 1.5 秒扫描并同步 turn/items；故障按 2–30 秒指数退避。关闭 ADOPT 不启动扫描器，不向 daemon 发出收编请求。零 turn 线程持续观察但不建会话，首个 turn 出现后才收编；扫描快照及 turn 通知都可识别首轮。非 closed、未绑定的线程按 cwd 的最长包含真实 workspace 根归属，Herdr 的 repo/worktree 元数据也参与；系统 home/scratch 兜底根不参与祖先匹配。没有真实匹配时自动创建唯一的系统项目「外部会话」（`cluster_key=trellis:external`）。会话及节点携带 `origin=external`、backend，标题保留 meta/fjContext 中的标题或契约号。
 
 主页提问复用原 thread，审批竞答、中断和分叉沿用 project 路径；正在运行的轮次不能被静默覆盖。外部线程关闭后，主页保留历史并显示已结束，拒绝新提问。Trellis **不会调用 `thread/close` 收编线程**；删除会话只解绑，`as_adoptions` 留永久墓碑，即使外部再有新 turn 或 Trellis 重启也不会重新收编。关闭 ADOPT 不删除已收编历史；需要回退时设 `TRELLIS_AS_ADOPT=off` 并重启。整体关闭可设 `TRELLIS_AS=off`，收编会话保持历史并拒绝发送，不会另起兼容引擎。
 

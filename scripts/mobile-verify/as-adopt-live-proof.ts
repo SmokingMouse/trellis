@@ -15,6 +15,18 @@ try {
     const {thread}=await peer.request("thread/start",{backend:"claude",model:"sonnet",cwd,permission:"default",clientThreadId:`${marker}-${Date.now()}`,meta:{title:"Trellis 收编临时验收",purpose:marker}});
     writeFileSync(file,JSON.stringify({threadId:thread.id,cwd:realpathSync(cwd),createdThread:thread},null,2));
     console.log(`PASS: created own sonnet proof thread ${thread.id}`);
+    await peer.request("turn/start",{threadId:thread.id,input:[{type:"text",text:"只回复 TRELLIS_AS_ADOPT_SEED_OK。不要调用工具，不要读取文件。"}]});
+    const deadline=Date.now()+120000;
+    let seeded=false;
+    while(Date.now()<deadline) {
+      const snapshot=await peer.request("thread/attach",{threadId:thread.id,sinceSeq:0});
+      if(snapshot.thread.status.type!=="running" && snapshot.items.some(i=>i.type==="agentMessage"&&i.payload.text.includes("TRELLIS_AS_ADOPT_SEED_OK"))) {
+        writeFileSync(file,JSON.stringify({threadId:thread.id,cwd:realpathSync(cwd),createdThread:thread,seed:snapshot},null,2));seeded=true;break;
+      }
+      await Bun.sleep(500);
+    }
+    assert.ok(seeded,"own thread seed turn did not finish");
+    console.log("PASS: own temporary thread completed its first external turn before adoption");
   } else {
     const proof=JSON.parse(readFileSync(file,"utf8"));
     const {thread}=await peer.request("thread/read",{threadId:proof.threadId});
@@ -43,7 +55,9 @@ try {
         proof.project=db.query("SELECT p.name,p.cluster_key FROM projects p JOIN workspaces w ON w.project_id=p.id JOIN sessions s ON s.workspace_id=w.id WHERE s.id=?").get(row.session_id);
         assert.equal(proof.project.cluster_key,"trellis:external");
         console.log("PASS: live temporary thread appears in home under 外部会话");
-        const response=await fetch(base+"/api/chat",{method:"POST",headers,body:JSON.stringify({kind:"root",sessionId:row.session_id,question:"只回复 TRELLIS_AS_ADOPT_LIVE_OK。不要调用工具，不要读取文件，不要做其他操作。"}),signal:AbortSignal.timeout(120000)});
+        const tip=db.query("SELECT id FROM nodes WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(row.session_id) as {id:string};
+        assert.ok(tip,"seed turn must be backfilled");
+        const response=await fetch(base+"/api/chat",{method:"POST",headers,body:JSON.stringify({kind:"branch",parentNodeId:tip.id,question:"只回复 TRELLIS_AS_ADOPT_LIVE_OK。不要调用工具，不要读取文件，不要做其他操作。"}),signal:AbortSignal.timeout(120000)});
         const sse=await response.text();writeFileSync(join(home,"live-response.sse"),sse);
         assert.equal(response.status,200,sse);assert.ok(sse.includes('"type":"done"'),sse);
         proof.snapshot=await peer.request("thread/attach",{threadId:thread.id,sinceSeq:0});
