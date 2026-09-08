@@ -8,7 +8,7 @@ PORT=3473
 BASE="http://127.0.0.1:$PORT"
 H=/tmp/trellis-mv-mobile-slim-shell
 DB="$H/.trellis/data.db"
-SOURCE_DB="$HOME/.trellis/data.db"
+SOURCE_DB="${TRELLIS_VERIFY_SOURCE_DB:-$HOME/.trellis/data.db}"
 LOG="$H/server.log"
 OUT="$H/out"
 SESSION=mv-mobile-slim-shell-$$
@@ -365,7 +365,8 @@ ab eval --stdin <<'JS'
   const menu = document.querySelector('[data-mobile-overflow-menu]');
   assert(menu, 'overflow menu missing');
   const text = menu.textContent || '';
-  for (const label of ['搜索', '思维树', '画布', '工作区文件', '笔记', '导出', '模式', '模型', '主题', '任务', '设置', '转桌面版']) {
+  // Wave 3 unifies TreePanel/Outline under the same user-facing name.
+  for (const label of ['搜索', '结构', '画布', '工作区文件', '笔记', '导出', '模式', '模型', '主题', '任务', '设置', '转桌面版']) {
     assert(text.includes(label), `overflow missing ${label}`);
   }
   const targets = [...menu.querySelectorAll('[data-mobile-target]')];
@@ -405,7 +406,7 @@ ab eval --stdin <<'JS'
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 })()
 JS
-ab click 'button[aria-label="关闭思维树"]'
+ab click 'button[aria-label="关闭结构"]'
 wait_for_js "TreePanel closed to linear" "!document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('textarea[data-composer-input]'))"
 
 echo "== M11: overflow canvas entry performs delayed fitView =="
@@ -444,7 +445,10 @@ ab eval --stdin <<'JS'
   assert(localStorage.getItem('trellis-desktop-mode') === '1', 'desktop marker missing after reload');
   const linear = document.querySelector('[data-safe-area="linear-thread"]');
   const linearRect = linear.getBoundingClientRect();
-  assert(linearRect.left === 0 && linearRect.width >= 382, `forced desktop linear rect=${JSON.stringify(linearRect.toJSON())}`);
+  // Forced desktop now reserves the 36px structure rail, just like a wide
+  // desktop. Assert the push partition, not the retired full-width surface.
+  const structureRect = document.querySelector('[data-structure-panel]').getBoundingClientRect();
+  assert(linearRect.left === 0 && Math.abs(linearRect.right - structureRect.left) < 1 && Math.abs(linearRect.width + structureRect.width - innerWidth) < 1, `forced desktop push rects=${JSON.stringify({linear:linearRect.toJSON(),structure:structureRect.toJSON()})}`);
   const hamburger = document.querySelector('[data-mobile-target="header-session-drawer"]');
   const hamburgerRect = hamburger.getBoundingClientRect();
   assert(hamburger.offsetParent !== null && hamburgerRect.width >= 44 && hamburgerRect.height >= 44, `forced desktop hamburger=${JSON.stringify(hamburgerRect.toJSON())}`);

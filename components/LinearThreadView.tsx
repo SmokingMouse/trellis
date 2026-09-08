@@ -538,6 +538,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       // 是 0px，等于没这回事。
       style={{
         left: "var(--trellis-sb, 0px)",
+        right: "var(--trellis-structure-w, 0px)",
         bottom: "var(--trellis-term-h, 0px)",
       }}
     >

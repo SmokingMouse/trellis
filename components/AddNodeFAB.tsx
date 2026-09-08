@@ -40,7 +40,7 @@ export function AddNodeFAB() {
   return (
     <>
       {/* bottom-24 clears the docked composer bar (#3) at the viewport foot. */}
-      <div ref={wrapRef} className="fixed bottom-24 right-3 z-30">
+      <div ref={wrapRef} className="fixed bottom-24 right-3 z-30" style={{ right: "calc(var(--trellis-structure-w, 0px) + 12px)" }}>
         {menuOpen && (
           <div className="absolute bottom-14 right-0 w-56 bg-surface-raised border border-line rounded-lg shadow-pop py-1 text-sm ui-enter-pop">
             <MenuItem

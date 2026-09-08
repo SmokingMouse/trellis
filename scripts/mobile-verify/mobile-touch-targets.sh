@@ -524,6 +524,9 @@ ab scrollintoview '[data-thread-node-id="mv-touch-done"]'
 wait_for_js "desktop answer actions visible" "Boolean(document.querySelector('[data-thread-node-id=mv-touch-done] [data-mobile-target=node-branch]'))"
 
 echo "== desktop 1280x800: unchanged baseline =="
+# Wave 3: new-topic now lives in the default-collapsed structure panel.
+ab click 'button[aria-label="展开结构"]'
+wait_for_js "desktop structure expanded" "Boolean(document.querySelector('[data-structure-panel=expanded]'))"
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -542,9 +545,14 @@ ab eval --stdin <<'JS'
     ['response regenerate', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-regenerate"]', 85.67, 28.75],
     ['response card image', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-card-image"]', 78.98, 28.75],
     ['response copy full', '[data-thread-node-id="mv-touch-done"] button[aria-label="复制全文"]', 72, 28.75],
-    ['new tree entry', '[data-mobile-target="new-tree-open"]', 55.28, 32],
   ];
   const tolerance = 0.25;
+  // The renamed 新话题 action uses the structure toolbar geometry, not the
+  // retired floating TreePanel's 55.28px label. Verify reachability in its host.
+  const panel = document.querySelector('[data-structure-panel]').getBoundingClientRect();
+  const newTopic = document.querySelector('[data-mobile-target="new-tree-open"]');
+  const nr = newTopic.getBoundingClientRect();
+  if (!newTopic.textContent.includes('新话题') || nr.height < 24 || nr.left < panel.left || nr.right > panel.right) throw new Error('new-topic structure entry is not reachable');
   const results = specs.map(([name, selector, expectedWidth, expectedHeight]) => {
     const el = document.querySelector(selector);
     if (!el) throw new Error(`${name}: missing ${selector}`);
@@ -641,6 +649,10 @@ ab eval --stdin <<'JS'
 JS
 ab click '[data-mobile-target="new-tree-close"]'
 
+# The structure panel now persists across session switches. Restore its
+# default rail before comparing the existing wide Ask-card geometry.
+ab click 'button[aria-label="收起结构"]'
+wait_for_js "structure rail before Ask baseline" "Boolean(document.querySelector('[data-structure-panel=collapsed]'))"
 ab open "$BASE/?session=mv-touch-ask-session&node=mv-touch-ask"
 reauth_if_needed
 wait_for_js "desktop ask app shell" "Boolean(document.querySelector('header'))"

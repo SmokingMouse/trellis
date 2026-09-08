@@ -18,6 +18,7 @@ import { AddNodeFAB } from "./AddNodeFAB";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { Outline } from "./Outline";
+import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 import { TargetChip } from "./TargetChip";
 import {
   useSelectionWithin,
@@ -414,6 +415,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         // paddingBottom 同理让出终端面板高度，否则画布下缘被面板盖住。
         style={{
           paddingLeft: "var(--trellis-sb, 0px)",
+          paddingRight: "var(--trellis-structure-w, 0px)",
           paddingBottom: "var(--trellis-term-h, 0px)",
           boxSizing: "border-box",
           touchAction: "none",
@@ -442,6 +444,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
         className="fixed top-[60px] right-3 z-30 w-10 h-10 rounded-full bg-surface border border-line shadow-raise flex items-center justify-center text-ink-muted hover:bg-surface-muted active:scale-95 transition-transform"
         title="回到全局视图 (F / 点击空白)"
         aria-label="回到全局视图"
+        style={{ right: "calc(var(--trellis-structure-w, 0px) + 12px)" }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />
@@ -457,7 +460,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       )}
       <AddNodeFAB />
       <DockedComposer />
-      <Outline />
+      {!STRUCTURE_PANEL && <Outline />}
     </>
   );
 }
@@ -496,6 +499,7 @@ function DockedComposer() {
       // TerminalPanel 发布；关闭时 0px = 贴底，与原来一致）。
       style={{
         left: "var(--trellis-sb, 0px)",
+        right: "var(--trellis-structure-w, 0px)",
         bottom: "var(--trellis-term-h, 0px)",
       }}
     >
