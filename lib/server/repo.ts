@@ -1,4 +1,5 @@
 import "server-only";
+import { sessionSourcePredicate } from "../session-source";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -382,7 +383,7 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
       `SELECT ${SESSION_COLS},
        (SELECT COUNT(*) FROM nodes n WHERE n.session_id = sessions.id
         AND n.parent_id IS NULL AND n.hidden_at IS NULL) AS tree_count FROM sessions
-       WHERE archived = ? AND kind IN ('user', 'lark', 'herdr', 'task')
+       WHERE archived = ? AND ${sessionSourcePredicate()}
        ORDER BY updated_at DESC`,
     )
     .all(want) as (SessionRow & { tree_count: number })[];
@@ -407,7 +408,7 @@ export function countArchivedSessions(): number {
   // 与 listSessions 的归档视图同一口径：任务会话也计入（能找回才敢归档）。
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task','lark','herdr')",
+      `SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND ${sessionSourcePredicate()}`,
     )
     .get() as { n: number };
   return row.n;
@@ -2424,7 +2425,7 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
                 n.id
            FROM nodes n JOIN sessions s ON s.id = n.session_id
           WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
-            AND s.archived = 0 AND s.kind IN ('user', 'lark', 'herdr', 'task')
+            AND s.archived = 0 AND ${sessionSourcePredicate("s.kind")}
          UNION ALL
          SELECT n.id, c.root_id, c.depth + 1,
                 max(c.activity, n.created_at, coalesce(n.read_at, 0)),

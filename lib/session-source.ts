@@ -1,5 +1,11 @@
 import type { Session } from "./types";
 
+/** 所有会话导航查询共用的来源范围；列名只允许查询内部的固定标识符。 */
+const sidebarSessionKinds = ["user", "lark", "herdr", "task"] as const;
+export function sessionSourcePredicate(column: "kind" | "s.kind" = "kind"): string {
+  return `${column} IN (${sidebarSessionKinds.map(kind => `'${kind}'`).join(", ")})`;
+}
+
 /** 自动化与外部入口沿用侧栏 chip；原生 user 会话不增加标记。 */
 export function sessionSourceChip(session: Pick<Session, "kind" | "origin">) {
   if (session.kind === "herdr" || session.origin === "herdr") {

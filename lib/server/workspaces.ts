@@ -1,4 +1,5 @@
 import "server-only";
+import { sessionSourcePredicate } from "../session-source";
 import fs from "node:fs";
 import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
@@ -358,7 +359,7 @@ export function listProjectTree(db: Database = getDB()): ApiProject[] {
     .prepare(
       `SELECT workspace_id AS w, COUNT(*) AS n, MAX(updated_at) AS u
        FROM sessions WHERE archived = 0 AND workspace_id IS NOT NULL
-         AND kind = 'user'
+         AND ${sessionSourcePredicate()}
        GROUP BY workspace_id`,
     )
     .all() as { w: string; n: number; u: number }[]) {
@@ -397,6 +398,8 @@ export function listProjectTree(db: Database = getDB()): ApiProject[] {
   // 删掉 worktree 之后，侧栏那行会永久留着、点进去是个已不存在的目录。
   // 行本身不删（会话靠它归组，且「移除 workspace 不连坐会话」是既定纪律），
   // 只是不显示；真正的清理由重扫的 prune 和删除接口负责。
+  // 这是与来源无关的工作区语义过滤：discovered 空目录（含仅归档）及失效路径
+  // 仍隐藏；不按 dir: / 伪项目或 Herdr、task 等会话来源区别处理。
   const visible = (w: ApiWorkspace) =>
     (w.sessionCount > 0 || w.createdBy !== "discovered") && pathExists(w.path);
 
