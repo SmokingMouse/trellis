@@ -39,6 +39,7 @@ export declare class AgentClient {
     private cursors;
     private pending;
     private requestStates;
+    private pendingStatesEnabled;
     private frameListeners;
     private notifications;
     private requests;
@@ -52,7 +53,7 @@ export declare class AgentClient {
     get clientId(): string | undefined;
     get initializeResult(): MethodResult<"initialize"> | undefined;
     get pendingRequests(): ReadonlyMap<string, ServerRequestHandle>;
-    /** Latest observed states, including terminal states until detach/reconnect/attach reconciliation. */
+    /** Empty unless negotiated and subscribed; terminal states last until detach/reconnect/attach reconciliation. */
     get pendingRequestStates(): ReadonlyMap<string, PendingRequestState>;
     static connectUnix(options: ClientOptions & {
         path: string;

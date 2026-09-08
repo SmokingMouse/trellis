@@ -107,10 +107,15 @@ export class ThreadManager {
         this.log.transaction(() => {
             this.log.insertThread(thread, request, options);
             if (internal?.prefix && internal.forkedFrom)
-                this.log.copyPrefix(internal.forkedFrom.threadId, thread.id, internal.prefix);
+                this.log.copyPrefix(internal.forkedFrom.threadId, thread.id, internal.prefix, internal.fork === true);
         });
         onCreated?.(thread);
         this.log.publish({ jsonrpc: "2.0", method: "thread/started", params: { threadId: thread.id, thread } });
+        if (internal?.seedHistory)
+            this.log.publish({ jsonrpc: "2.0", method: "thread/engineEvent", params: {
+                    threadId: thread.id, backend: thread.backend, subtype: "fork/seeded",
+                    payload: { reason: "native_checkpoint_unavailable", sourceThreadId: internal.forkedFrom.threadId, itemId: internal.forkedFrom.itemId },
+                } });
         await this.open(thread, { ...options, threadId: thread.id, engineThreadId: internal?.resume, forkSession: internal?.fork, forkPoint: internal?.forkPoint });
         return { thread: this.get(thread.id) };
     }
@@ -208,7 +213,10 @@ export class ThreadManager {
         const index = params.fromItemId === undefined ? all.length - 1 : all.findIndex(item => item.id === params.fromItemId);
         if (params.fromItemId !== undefined && index < 0)
             throw new ProtocolError(ErrorCode.invalid_params, "fromItemId does not belong to the source thread", { threadId: source.id, itemId: params.fromItemId });
-        const prefix = all.slice(0, index + 1), itemId = prefix.at(-1)?.id ?? null;
+        // Work in the source process cannot complete in the branch. Freeze its
+        // payload, but mark the inherited item terminal in both AS and seed history.
+        const prefix = all.slice(0, index + 1).map(item => item.status === "inProgress" ? { ...item, status: "failed" } : item);
+        const itemId = prefix.at(-1)?.id ?? null;
         const forkPoint = itemId ? this.log.forkPoint(source.id, itemId) : undefined;
         // Unmapped and live boundaries must never silently inherit a later native suffix.
         const unflushedSeed = source.backend === "claude" && this.log.options(source.id).seedHistory !== undefined;
@@ -299,8 +307,10 @@ export class ThreadManager {
                 break;
             case "turnCompleted": {
                 this.approvals?.expireThread(threadId, "turn_completed", turnId);
-                const { seedHistory: _, engineThreadId: __, forkSession: ___, forkPoint: ____, ...options } = this.log.options(threadId);
-                this.log.saveOptions(threadId, options);
+                if (event.status === "completed") {
+                    const { seedHistory: _, engineThreadId: __, forkSession: ___, forkPoint: ____, ...options } = this.log.options(threadId);
+                    this.log.saveOptions(threadId, options);
+                }
                 this.queue(threadId).complete(turnId, event.status, event.usage, event.error);
                 const last = this.log.snapshot(threadId).items.filter(item => item.turnId === turnId).at(-1);
                 if (last && event.status === "completed" && event.forkPoint)

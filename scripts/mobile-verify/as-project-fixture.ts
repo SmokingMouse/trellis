@@ -38,7 +38,7 @@ const script: MockScript = async function* (turnId,input,engine) {
   if(question.includes("hold")) await waitFile("finish-first");
   if(question.includes("interrupt")) { yield {waitMs:120000}; return; }
   yield {type:"itemCompleted",turnId,item:{id,type:"agentMessage",payload:{text:answer}}};
-  yield {type:"turnCompleted",turnId,status:"completed",usage:{usd:null,inputTokens:Math.ceil(prompt.length/4),outputTokens:Math.ceil(answer.length/4),cachedTokens:0,cacheCreation:0,estimated:true,contextTokens:null}};
+  yield {type:"turnCompleted",turnId,status:"completed",forkPoint:`checkpoint-${turnId}`,usage:{usd:null,inputTokens:Math.ceil(prompt.length/4),outputTokens:Math.ceil(answer.length/4),cachedTokens:0,cacheCreation:0,estimated:true,contextTokens:null}};
 };
 class ProjectMock extends MockEngine {
   async setPermission(permission:NonNullable<StartThreadParams["permission"]>) {

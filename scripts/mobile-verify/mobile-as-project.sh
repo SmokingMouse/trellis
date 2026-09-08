@@ -164,6 +164,7 @@ grep -q '"type":"done"' "$H/early-question.sse" || fail 'P1-1 early question com
 bun scripts/mobile-verify/as-project-fork-proof.ts "$FIRST" "$EARLY_NODE"
 echo 'PASS: ordinary early continuation and explicit fork both return 200 with exact native history'
 bun scripts/mobile-verify/as-project-regression.ts 'fork capability fallback'
+bun scripts/mobile-verify/as-project-regression.ts 'nested native fork'
 RETRY_BEFORE=$(db "SELECT response FROM nodes WHERE id='$EARLY_NODE'")
 RETRY_THREAD=$(db "SELECT thread_id FROM as_turns WHERE node_id='$EARLY_NODE'")
 touch "$H/pause-retry"

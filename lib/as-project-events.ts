@@ -24,7 +24,9 @@ export function itemToolCall(item: Item): ToolCall | null {
     case "webSearch": name = "WebSearch"; input = { query: item.payload.query }; output = printable(item.payload.results); break;
     default: return null;
   }
-  return { id: item.id, name, input, output, stderr: null, status: item.completedAtMs == null ? "running" : failed ? "error" : "done",
+  // Fork snapshots terminate inherited live items without inventing completion timestamps.
+  const running = item.status ? item.status === "inProgress" : item.completedAtMs == null;
+  return { id: item.id, name, input, output, stderr: null, status: running ? "running" : failed ? "error" : "done",
     startedAt: item.startedAtMs, endedAt: item.completedAtMs ?? null,
     durationMs: item.completedAtMs == null ? null : Math.max(0, item.completedAtMs - item.startedAtMs) };
 }

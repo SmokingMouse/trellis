@@ -7,8 +7,65 @@ import { runDaemon, resolveDaemonPaths, loadToken, type RunningDaemon } from "@s
 import type { AttachResult } from "@smokingmouse/agent-server/protocol";
 import { ShadowClient, shadowRetryDelay } from "./as-client";
 import { isShadowEnabled } from "../as-config";
+import { itemToolCall } from "../as-project-events";
 
 const cleanup: (() => void | Promise<void>)[] = [];
+
+test("live fork freezes tools, retains interrupted seed history, and filters pending snapshots", async () => {
+  const home = mkdtempSync(join(tmpdir(), "as-fork-test-"));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  const paths = resolveDaemonPaths({ NODE_ENV: "test", HOME: home, AGENT_SERVER_SOCKET_PATH: join(home, "as.sock") });
+  const engines: MockEngine[] = [];
+  const daemon = await runDaemon({paths, graceMs:0, logger:()=>{}, serverOptions:{allowedRoots:[home], engineFactory:()=>{
+    const engine = new MockEngine(undefined,"claude"); engines.push(engine); return engine;
+  }}});
+  cleanup.push(() => daemon.shutdown());
+  const client = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),reconnect:false});
+  cleanup.push(() => client.close());
+  const {thread} = await client.request("thread/start",{backend:"claude",cwd:home});
+  const {turn} = await client.request("turn/start",{threadId:thread.id,input:[{type:"text",text:"hold tool"}]});
+  engines[0].emit({type:"itemStarted",turnId:turn.id,item:{id:"live-tool",type:"commandExecution",payload:{command:"mock hold",cwd:home}}});
+  await until(() => daemon.server.log.snapshot(thread.id).items.some(i=>i.id === "live-tool"));
+  const source = daemon.server.log.snapshot(thread.id).items;
+  const events: string[] = [];
+  client.onNotification("thread/engineEvent",p=>{ if(p.subtype === "fork/seeded") events.push(p.threadId); });
+  const {thread:fork} = await client.request("thread/fork",{threadId:thread.id,fromItemId:"live-tool"});
+  const observer = new ShadowClient({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
+  cleanup.push(() => observer.close());
+  const snapshot = await observer.attach(fork.id);
+  const inherited = snapshot.items.find(i=>i.id === "live-tool")!;
+  expect(inherited.status).toBe("failed");
+  expect(inherited.completedAtMs).toBeUndefined();
+  expect(itemToolCall(inherited)).toMatchObject({status:"error",endedAt:null,durationMs:null});
+  expect(daemon.server.log.snapshot(thread.id).items).toEqual(source);
+  const seed = engines[1].options!.seedHistory;
+  expect(seed?.find(i=>i.id === "live-tool")?.status).toBe("failed");
+  await until(() => events.includes(fork.id));
+  let interrupted = false;
+  client.onNotification("turn/completed",p=>{if(p.threadId === fork.id && p.turn.status === "interrupted") interrupted = true;});
+  const {turn:attempt} = await client.request("turn/start",{threadId:fork.id,input:[{type:"text",text:"interrupt seed"}]});
+  await client.request("turn/interrupt",{threadId:fork.id,turnId:attempt.id});
+  await until(() => interrupted);
+  await client.request("thread/close",{threadId:fork.id});
+  await client.request("thread/resume",{threadId:fork.id});
+  expect(engines.at(-1)!.options!.seedHistory).toEqual(seed);
+
+  engines[0].emit({type:"approval",request:{method:"item/commandExecution/requestApproval",params:{requestId:"pending-filter",threadId:thread.id,turnId:turn.id,itemId:"live-tool",command:"mock hold",cwd:home,startedAtMs:Date.now()}},respond:()=>{}});
+  await until(() => client.pendingRequestStates.has("pending-filter"));
+  for (const capabilities of [{pendingRequests:false}, {pendingRequests:true,notifications:{optOut:["thread/pendingRequests" as const]}}]) {
+    const filtered = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),capabilities,reconnect:false});
+    cleanup.push(() => filtered.close());
+    const attached = await filtered.request("thread/attach",{threadId:thread.id,sinceSeq:0});
+    expect(attached.pendingRequests).toHaveLength(1);
+    expect(attached.pendingRequests[0].state).toBeUndefined();
+    expect(filtered.pendingRequestStates.size).toBe(0);
+  }
+  const pendingObserver = new ShadowClient({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
+  cleanup.push(() => pendingObserver.close());
+  const pendingSnapshot = await pendingObserver.attach(thread.id);
+  expect(pendingSnapshot.pendingRequests[0].state?.status).toBe("pending");
+  expect((await pendingObserver.connect()).pendingRequestStates.has("pending-filter")).toBe(true);
+});
 afterEach(async () => { for (const fn of cleanup.splice(0).reverse()) await fn(); });
 async function until(predicate: () => boolean) {
   for (let i = 0; i < 200; i++) { if (predicate()) return; await Bun.sleep(10); }

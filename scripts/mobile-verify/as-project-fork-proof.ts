@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { Database } from "bun:sqlite";
 import { AgentClient } from "@smokingmouse/agent-server";
 import { loadToken } from "@smokingmouse/agent-server/paths";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const db = new Database(process.env.TRELLIS_DB_PATH!,{readonly:true});
 const mapping = (nodeId:string) => db.query("SELECT thread_id,last_item_id,turn_id FROM as_turns WHERE node_id=?").get(nodeId) as {thread_id:string;last_item_id:string;turn_id:string};
@@ -24,5 +26,12 @@ try {
   const node = db.query("SELECT question FROM nodes WHERE id=?").get(process.argv[3]) as {question:string};
   assert.ok(user?.type === "userMessage");
   assert.deepEqual(user.payload.content,[{type:"text",text:node.question}]);
+  const counts = JSON.parse(readFileSync(join(dirname(process.env.TRELLIS_DB_PATH!),"counts.json"),"utf8")) as {
+    engines: {thread:string;options:{forkSession?:boolean;forkPoint?:string;seedHistory?:unknown}}[];
+  };
+  const engine = counts.engines.find(e=>e.thread === child.thread_id)!;
+  assert.equal(engine.options.forkSession,true,"mock checkpoint must take the native engine path");
+  assert.equal(engine.options.forkPoint,`checkpoint-${parent.turn_id}`);
+  assert.equal(engine.options.seedHistory,undefined);
   console.log(`PASS: fork ${child.thread_id} inherits exactly ${prefix.length} items through ${parent.last_item_id}; new input is unseeded`);
 } finally {client.close();db.close();}

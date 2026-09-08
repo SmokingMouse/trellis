@@ -24,7 +24,7 @@ const script: MockScript = async function* (turnId) {
   if (pause) await pause;
   if (fail) { yield { type: "turnCompleted", turnId, status: "failed", error: { code: -32015, message: "mock retry failure" } }; return; }
   yield { type: "itemCompleted", turnId, item: { id: `${turnId}-answer`, type: "agentMessage", payload: { text: `answer ${turnId}` } } };
-  yield { type: "turnCompleted", turnId, status: "completed" };
+  yield { type: "turnCompleted", turnId, status: "completed", forkPoint: `checkpoint-${turnId}` };
 };
 const daemon = await runDaemon({ paths, graceMs: 0, logger: () => {}, serverOptions: { allowedRoots: [home], backends: ["claude"], engineFactory: () => { const engine = new MockEngine(script, "claude"); engines.push(engine); return engine; } } });
 const oldDaemon = process.argv[2] === "fork capability fallback";
@@ -120,6 +120,22 @@ try {
       assert.ok(!input.includes("second question"));
       assert.deepEqual(daemon.server.log.snapshot(original.thread_id).items,source,"source history unchanged");
     }
+  } else if (process.argv[2] === "nested native fork") {
+    const original = binding.getAsTurn(root)!;
+    const source = daemon.server.log.snapshot(original.thread_id);
+    const child = branch(root, "first fork");
+    const first = await start(child);
+    const grandchild = branch(child, "nested fork at inherited boundary");
+    // Select an inherited checkpoint in the fork, rather than its new tip.
+    getDB().prepare("UPDATE as_turns SET last_item_id=? WHERE node_id=?").run(original.last_item_id, child);
+    const secondFork = await as.startProjectRun({nodeId:grandchild,prompt:repo.getNode(grandchild)!.question,attachments:[],fork:true});
+    await done(secondFork);
+    const options = engines.at(-1)!.options!;
+    assert.equal(options.forkSession,true);
+    assert.equal(options.forkPoint,`checkpoint-${original.turn_id}`);
+    assert.equal(options.seedHistory,undefined,"inherited checkpoints must not degrade to seeding");
+    assert.deepEqual(daemon.server.log.snapshot(secondFork.threadId).thread.forkedFrom,{threadId:first.threadId,itemId:original.last_item_id});
+    assert.deepEqual(daemon.server.log.snapshot(original.thread_id),source);
   } else if (process.argv[2] === "P0-1 retry preserves answers") {
     const { POST } = await import("../../app/api/chat/route");
     const retryRequest = (nodeId:string) => POST(new Request("http://localhost/api/chat", {method:"POST",body:JSON.stringify({kind:"retry",nodeId,provider:"mock"})}));
