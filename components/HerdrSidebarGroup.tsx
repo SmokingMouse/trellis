@@ -2,7 +2,7 @@
 
 import { useMemo, type ComponentType } from "react";
 import { buildHerdrWorkspaceViews, groupHerdrWorkspaces, type HerdrPaneView, type HerdrUiStatus } from "@/lib/herdr-ui";
-import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { herdrUnavailableText, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { HerdrInteractionCard } from "@/components/HerdrInteractionCard";
 
 const STATUS_STYLE: Record<HerdrUiStatus, string> = {
@@ -34,11 +34,7 @@ export function HerdrSidebarGroup({
   );
   const available = Boolean(fleet?.available);
   const tree = useMemo(() => groupHerdrWorkspaces(workspaces), [workspaces]);
-  const unavailableText = loading
-    ? "正在连接 Herdr…"
-    : !fleet?.enabled
-      ? "Herdr 未启用"
-      : fleet?.lastError || error || "Herdr 当前不可用";
+  const unavailableText = herdrUnavailableText({ fleet, loading, error });
 
   const renderPanes = (panes: HerdrPaneView[]) => panes.map((pane) => {
     const sessionId = pane.binding?.trellisSessionId ?? pane.binding?.sessionId ?? null;

@@ -253,6 +253,7 @@ WAIT_URL="$BASE/?session=mv-followup-wait-session&node=mv-followup-wait-root"
 
 ab open "$READ_URL"
 wait_for_js "reading fixture composer" "Boolean(document.querySelector('[data-composer-state=compact] [data-composer-input]'))"
+wait_for_js "reading fixture response loaded" "document.querySelector('[data-thread-node-id=mv-followup-reading]')?.textContent?.includes('第 90 段') === true"
 
 echo "== mobile Composer compact, hide, restore, expand =="
 ab eval --stdin <<'JS'
@@ -486,7 +487,8 @@ JS
 echo "== desktop 1280x800 unchanged baseline =="
 ab set viewport 1280 800
 ab open "$READ_URL"
-wait_for_js "desktop reading fixture" "Boolean(document.querySelector('[data-composer-input]')) && Boolean(document.querySelector('[data-chat-node-id=\"mv-followup-reading\"] p'))"
+wait_for_js "desktop reading fixture" "Boolean(document.querySelector('[data-composer-input]'))"
+wait_for_js "desktop reading response loaded" "document.querySelector('[data-chat-node-id=mv-followup-reading]')?.textContent?.includes('第 90 段') === true"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };

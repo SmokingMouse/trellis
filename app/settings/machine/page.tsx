@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatBytes } from "@/lib/format-bytes";
 
 type Snapshot = {
   sampledAt: string;
@@ -99,15 +100,4 @@ function ResourceCard({ label, percent, detail }: { label: string; percent: numb
       </div>
     </section>
   );
-}
-
-function formatBytes(bytes: number): string {
-  const units = ["B", "KB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
