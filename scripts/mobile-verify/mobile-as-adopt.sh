@@ -64,6 +64,23 @@ ab fill '#pw' as-adopt-pass
 ab click 'button[type="submit"]'
 ab open "$BASE/?session=$SID&node=$NODE"
 wait_js 'adopted conversation rendered in home' "Boolean(document.querySelector('[data-as-project=\"$NODE\"]')) && document.body.innerText.includes('外部线程回复') && document.body.innerText.includes('外部会话')"
+wait_js 'external permission is read only' "Boolean(document.querySelector('[data-as-permission]')) && !document.querySelector('select[data-as-permission]') && !document.body.innerText.includes('Shift+Tab 切换')"
+curl --noproxy '*' -fsS -X POST http://127.0.0.1:3480/engine-events
+wait_js 'engine events default collapsed and debug events hidden' "(() => { const el=document.querySelector('[data-as-system-log]');return el && !el.open && el.textContent.includes('已折叠 2 条调试事件') && el.querySelectorAll('[data-as-engine-event]').length===3; })()"
+CONTROL="[data-as-project=\"$NODE\"]"
+ab eval "document.querySelector('$CONTROL [data-as-system-log] > summary').scrollIntoView({block:'center'}); true"
+ab click "$CONTROL [data-as-system-log] > summary"
+wait_js 'human readable engine exit' "document.body.innerText.includes('引擎退出 (143)') && !document.body.innerText.includes('durationMs')"
+ab click "$CONTROL [data-as-show-all]"
+wait_js 'all events have readable summaries' "document.body.innerText.includes('hook postToolUse 完成 · 12 ms') && document.body.innerText.includes('sleep 45 s')"
+ab click "$CONTROL [data-as-engine-event]:first-child > summary"
+wait_js 'individual event JSON expands' "Boolean(document.querySelector('[data-as-engine-event][open] pre'))"
+ab reload
+wait_js 'show all preference survives reload' "document.querySelector('$CONTROL [data-as-show-all]')?.checked === true && document.querySelector('$CONTROL [data-as-system-log]').querySelectorAll('[data-as-engine-event]').length===5 && !document.querySelector('$CONTROL [data-as-system-log]').open"
+ab eval "document.querySelector('$CONTROL [data-as-system-log] > summary').scrollIntoView({block:'center'}); true"
+ab click "$CONTROL [data-as-system-log] > summary"
+ab click "$CONTROL [data-as-show-all]"
+wait_js 'mobile engine list fits screen' "document.documentElement.scrollWidth <= innerWidth"
 ab screenshot "$OUT/mobile-as-adopt.png"
 ab close
 # Restart against the same database: identities and turn counts must survive.

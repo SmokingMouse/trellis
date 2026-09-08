@@ -61,7 +61,7 @@ const timer=setInterval(async()=>{
       await peer.request("thread/attach",{threadId:thread.id,sinceSeq:0}); attached.add(thread.id);
       writeFileSync(join(home,"peer-attached"),thread.id);
     }
-    for(const engine of engines) if(!engine.closed) engine.emit({type:"engineEvent",backend:"claude",subtype:"system",payload:{type:"system",subtype:"project-proof",message:"系统日志验证"}});
+    for(const engine of engines) if(!engine.closed) engine.emit({type:"engineEvent",backend:"claude",subtype:"warning",payload:{message:"project-proof 引擎事件验证"}});
     if(existsSync(join(home,"approve-other"))) for(const request of peer.pendingRequests.values()) {
       if(request.method!=="item/commandExecution/requestApproval") continue;
       await peer.request("thread/lease/acquire",{threadId:request.params.threadId,ttlMs:3000});

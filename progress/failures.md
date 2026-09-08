@@ -8,6 +8,9 @@
 
 ## 已结案
 
+- **收编事件 E2E 多节点选择器误点与计数范围错误**（fj-as-controls-polish-dfcc）→ `resolved`。症状：点击后目标日志未展开，刷新后全页事件数不等于单节点 5 条。可证伪假设：线性会话的四个节点同时挂载，通用 selector 落到视口外首节点并把四份列表一起计数。改为 nodeId 限定、点击前 scrollIntoView、节点内统计，统一前缀 `sh scripts/mobile-verify/mobile-as-adopt.sh` 完整 exit 0。初轮 exit 1 与诊断轮主动终止 exit 143 日志保留在契约 out/mobile-as-adopt-first.log、mobile-as-adopt-diagnostic.log；最终证据 mobile-as-adopt.log。
+
+||||||| 0f126ab
 - **AS shadow 全部断言通过后验证锁目录已消失**（fj-sidebar-wave2-c6c6 补充复验）→ `not-reproducible`。症状：功能断言全部 PASS，清理 `rmdir /tmp/trellis-mobile-verify.lock` 报不存在导致 exit 1。可证伪假设：共享锁被其它清理动作提前移除，具体进程未定位；同代码单独复跑退出 0，未修改清理脚本掩盖错误。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-as-shadow.sh`。失败证据 `mobile-as-shadow-cleanup-attempt1.log`、复跑 `mobile-as-shadow.log` 均在契约 out。
 
 - **稍后再读脚本在长问题的回答懒挂载前等待按钮**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：真库随机选中的节点有完整回答，但 `response-more` 等待超时。可证伪假设：长问题把回答推离视口，`ResponseBody` 的 `useNearViewport` 只挂纯文本占位。脚本在每次打开会话后先滚到回答；日志记录滚动前位置，原书签、跨设备同步及分页断言全部通过。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-read-later.sh`，exit 0。首次失败及最终日志在契约 out 的 `mobile-read-later-attempt1.log` / `mobile-read-later.log`；产品代码未改。
