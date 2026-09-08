@@ -184,7 +184,7 @@ click_tree_node() {
     ab click '[data-mobile-target="overflow-tree"]'
     wait_for_js "in-session structure sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open]'))"
   else
-    ab eval '(() => { const b=[...document.querySelectorAll("button")].find(e => e.title === "切换到线性 thread"); b?.click(); return true; })()' >/dev/null
+    ab eval 'document.querySelector("[aria-label=关闭地图]")?.click(); true' >/dev/null
     ab eval 'document.querySelector("button[aria-label=展开结构]")?.click(); true' >/dev/null
   fi
   wait_for_js "structure filter entry" "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
@@ -445,13 +445,14 @@ assert_mobile_landing "$TREE_ID" "new tree active in mobile linear shell"
 wait_for_js "TreePanel remains closed after new tree" "!document.querySelector('[data-mobile-tree-sheet]')"
 [ "$(sqlite3 "$DB" "SELECT coalesce(parent_id,'NULL') FROM nodes WHERE id='$TREE_ID';")" = "NULL" ] || fail "new tree node is not a root"
 
-echo "== 4–5a. canvas to TreePanel same-session branch forces linear and survives reload =="
+echo "== 4–5a. structure map selection returns to linear and survives reload =="
 open_mobile_overflow
-ab click '[data-mobile-target="overflow-canvas"]'
-wait_for_js "mobile canvas selected" "(() => { const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null'); return saved?.viewMode === 'canvas' && Boolean(document.querySelector('[data-canvas-surface]')); })()"
-open_mobile_drawer
-click_tree_node "第二棵树长文"
-assert_mobile_landing "$ROOT2_ID" "same-session TreePanel exits canvas"
+ab click '[data-mobile-target="overflow-tree"]'
+ab click '[data-map-open]'
+wait_for_js "mobile map fitted with linear state" "(() => { const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null'); return saved?.viewMode === 'linear' && Number(document.querySelector('[data-canvas-map]')?.dataset.mapFitCount)>0; })()"
+ab click "[data-map-node=\"$ROOT2_ID\"]"
+wait_for_js "map selection closes sheet and highlights target" "!document.querySelector('[data-canvas-map]') && !document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('[data-thread-node-id=\"$ROOT2_ID\"][data-map-highlight]'))"
+assert_mobile_landing "$ROOT2_ID" "map returns to selected linear node"
 ab reload
 assert_mobile_landing "$ROOT2_ID" "URL-backed active chain survives reload"
 
@@ -470,7 +471,7 @@ wait_for_js "header and Composer hide on downward scroll" "(() => {
 ab eval '(() => { const scroll=document.querySelector("[data-thread-scroll]"); scroll.scrollTop=Math.max(0, scroll.scrollTop-180); scroll.dispatchEvent(new Event("scroll")); return true; })()' >/dev/null
 wait_for_js "header and Composer restore on upward scroll" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden') && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false'"
 
-echo "== 6. H-3: hidden linear chrome resets across canvas remount =="
+echo "== 6. H-3: map entry and return reveal linear chrome =="
 wait_for_js "linear chrome hidden for H-3" "(() => {
   const scroll=document.querySelector('[data-thread-scroll]');
   if (!scroll) return false;
@@ -481,9 +482,11 @@ wait_for_js "linear chrome hidden for H-3" "(() => {
 })()"
 ab eval 'document.querySelector("[data-mobile-header] [aria-label=\"更多功能\"]")?.click(); true' >/dev/null
 wait_for_js "overflow opens from hidden header" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-ab click '[data-mobile-target="overflow-canvas"]'
-wait_for_js "canvas clears hidden header state" "Boolean(document.querySelector('[data-canvas-surface]')) && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
-ab eval '(() => { const button=[...document.querySelectorAll("button")].find((element) => element.title === "切换到线性 thread"); if (!button) throw new Error("linear return button missing"); button.click(); return true; })()' >/dev/null
+ab click '[data-mobile-target="overflow-tree"]'
+ab click '[data-map-open]'
+wait_for_js "map clears hidden header state" "Boolean(document.querySelector('[data-canvas-map]')) && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+ab click '[aria-label="关闭地图"]'
+ab click '[data-mobile-target="tree-sheet-close"]'
 wait_for_js "linear remount chrome visible" "Boolean(document.querySelector('[data-thread-header]')) && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false' && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
 echo "== 7a. desktop anchored edit focuses the re-asked sibling =="
@@ -525,10 +528,10 @@ wait_for_js "desktop edit new sibling active" "(() => {
 [ -n "$(sqlite3 "$DB" "SELECT parent_anchor_text FROM nodes WHERE id='$DESKTOP_EDIT_ID';")" ] || fail "desktop anchored edit lost parent_anchor_text"
 
 echo "== 7b. desktop TreePanel navigation and fixed header =="
-ab eval '(() => { const button=[...document.querySelectorAll("[data-thread-header] button")].find((element) => element.textContent?.includes("画布")); if (!button) throw new Error("desktop canvas button missing"); button.click(); return true; })()' >/dev/null
-wait_for_js "desktop canvas selected" "Boolean(document.querySelector('[data-canvas-surface]'))"
-click_tree_node "第二棵树长文"
-wait_for_js "desktop TreePanel selects the other topic in linear view" "new URL(location.href).searchParams.get('node') === '$ROOT2_ID' && !document.querySelector('[data-canvas-surface]')"
+ab click '[data-map-open]'
+wait_for_js "desktop map fitted" "Number(document.querySelector('[data-canvas-map]')?.dataset.mapFitCount)>0"
+ab click "[data-map-node=\"$ROOT2_ID\"]"
+wait_for_js "desktop map selects the other topic in linear view" "new URL(location.href).searchParams.get('node') === '$ROOT2_ID' && !document.querySelector('[data-canvas-map]') && !document.querySelector('[data-canvas-surface]') && Boolean(document.querySelector('[data-thread-node-id=\"$ROOT2_ID\"][data-map-highlight]'))"
 ab eval --stdin <<'JS'
 (() => {
   const header = document.querySelector('header');

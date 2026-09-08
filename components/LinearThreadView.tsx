@@ -1,4 +1,5 @@
 "use client";
+import { CANVAS_MAP } from "@/lib/canvas-map";
 import {
   Fragment,
   useCallback,
@@ -215,6 +216,23 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // return at the root card. Declared BEFORE the anchor-scroll effect so the
   // skip flag is armed by the time that effect runs for the same commit.
   const skipAnchorScrollRef = useRef(false);
+  const mapNavigation = useSessionStore(s => s.mapNavigation);
+  const [mapHighlight, setMapHighlight] = useState<string | null>(null);
+  useEffect(() => {
+    if (!mapNavigation) return;
+    const frame = requestAnimationFrame(() => {
+      const card = roundRefs.current.get(mapNavigation.nodeId);
+      if (!card) return;
+      card.scrollIntoView({ block: "start" });
+      card.focus({ preventScroll: true });
+      setMapHighlight(mapNavigation.nodeId);
+    });
+    const timer = window.setTimeout(() => {
+      setMapHighlight(null);
+      if (useSessionStore.getState().mapNavigation === mapNavigation) useSessionStore.setState({ mapNavigation: null });
+    }, 2200);
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [mapNavigation]);
   useEffect(() => {
     if (!session?.id) return;
     // A streaming tip owns the viewport (bottom-lock) — let it win.
@@ -564,7 +582,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             ) : (
               <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
-                {mode.label} · 线性
+                {mode.label}{!CANVAS_MAP && " · 线性"}
               </div>
             )}
             <h1 className="truncate text-sm font-semibold text-ink-strong">
@@ -594,7 +612,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               </button>
             ))}
           </div>
-          {!isMobile && !isHerdr && (
+          {!CANVAS_MAP && !isMobile && !isHerdr && (
             <button
               type="button"
               onClick={() => setViewMode("canvas")}
@@ -701,6 +719,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 <section
                   ref={setRoundRef(node.id)}
                   data-thread-node-id={node.id}
+                  data-map-highlight={mapHighlight === node.id || undefined}
+                  tabIndex={-1}
+                  style={mapHighlight === node.id ? { outline: "3px solid var(--color-accent-ink)", outlineOffset: 3 } : undefined}
                   className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
                     isActive
                       ? "border-accent-line ring-2 ring-accent-muted"

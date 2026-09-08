@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { CANVAS_MAP, normalizeViewMode } from "@/lib/canvas-map";
 import type { Mode, ProviderId, ProviderInfo } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId, PROVIDERS } from "@/lib/llm";
 import type {
@@ -191,6 +192,8 @@ function persistTreeVisits(
 // per-tab sessionStorage) so reopening a session lands back where you left.
 const VIEW_KEY = (sid: string) => `trellis-view:${sid}`;
 
+// "canvas" is accepted only by the one-release rollback reader. Map visibility
+// is transient panel state, never a persisted reading mode.
 export type ViewMode = "canvas" | "linear";
 
 type ViewState = {
@@ -218,12 +221,8 @@ function parseReadingPosition(value: unknown): ReadingPosition | undefined {
   return { nodeId: v.nodeId, offset: Math.max(0, Math.round(v.offset)) };
 }
 
-function isViewMode(value: unknown): value is ViewMode {
-  return value === "canvas" || value === "linear";
-}
-
 function defaultViewModeForSession(session: Pick<Session, "mode"> | null): ViewMode {
-  return session?.mode === "project" ? "linear" : "canvas";
+  return CANVAS_MAP || session?.mode === "project" ? "linear" : "canvas";
 }
 
 function loadViewState(sessionId: string): ViewState | null {
@@ -236,7 +235,7 @@ function loadViewState(sessionId: string): ViewState | null {
     return {
       activeNodeId:
         typeof parsed.activeNodeId === "string" ? parsed.activeNodeId : null,
-      viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : undefined,
+      viewMode: normalizeViewMode(parsed.viewMode),
       fullScreen: Boolean(parsed.fullScreen),
       lastViewed: parseReadingPosition(parsed.lastViewed),
     };
@@ -421,9 +420,11 @@ type State = {
   markSessionLive: (sessionId: string) => void;
   // #7: the two surfaces. "linear" = the unified reading/chat thread (all
   // modes; replaced the old NodeFullView fullscreen reader), "canvas" = the
-  // tree structure view. Project sessions default to linear; chat defaults
-  // to canvas on desktop, linear on mobile (page effect).
+  // legacy tree reader, available only with CANVAS_MAP off. With the map
+  // enabled every session reads linearly; map visibility is panel-local.
   viewMode: ViewMode;
+  mapNavigation: { nodeId: string; sequence: number } | null;
+  jumpFromMap: (nodeId: string) => void;
   // #5: stream failures that happen before the server creates a node (fetch
   // refused / non-2xx). There's no node to attach the error to, so it
   // surfaces through this global slot → StreamAlertToast. Auto-cleared.
@@ -855,7 +856,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       return { liveSessionIds: next };
     });
   },
-  viewMode: "canvas",
+  viewMode: defaultViewModeForSession(null),
+  mapNavigation: null,
+  jumpFromMap: (nodeId) => {
+    if (!get().nodes[nodeId]) return;
+    get().setActiveNode(nodeId);
+    set(s => ({ viewMode: "linear", mobileTreePanelOpen: false,
+      readingPosition: { nodeId, offset: 0 },
+      mapNavigation: { nodeId, sequence: (s.mapNavigation?.sequence ?? 0) + 1 } }));
+  },
   streamAlert: null,
   fetchProgress: {},
   toolCallsLoading: {},
@@ -968,7 +977,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       session: null,
       nodes: {},
       activeNodeId: null,
-      viewMode: "canvas",
+      viewMode: defaultViewModeForSession(null),
       notes: [],
       collapsedNodeIds: new Set(),
       lastEditedNodeId: null,
@@ -1208,6 +1217,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setViewMode: (mode) => {
+    if (CANVAS_MAP) { set({ viewMode: "linear" }); return; }
     if (mode === "canvas") {
       // Returning to canvas: pan to the most-recently-edited node so the
       // user lands on the freshest work, not whatever the previous

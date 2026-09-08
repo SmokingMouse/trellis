@@ -45,6 +45,25 @@ test("会话行 previewSession 恢复上次 node、阅读偏移和视图；重�
   expect(requests).toEqual(["/api/sessions/a"]);
 });
 
+test("旧 canvas 存储保留节点和偏移，但恢复为 linear", async () => {
+  storage.set("trellis-view:a", JSON.stringify({ activeNodeId: "a-tip", viewMode: "canvas", lastViewed: { nodeId: "a-root", offset: 37 } }));
+  await useSessionStore.getState().previewSession("a");
+  expect(useSessionStore.getState()).toMatchObject({ activeNodeId: "a-tip", viewMode: "linear", readingPosition: { nodeId: "a-root", offset: 37 } });
+  useSessionStore.getState().setViewMode("canvas");
+  expect(useSessionStore.getState().viewMode).toBe("linear");
+});
+
+test("地图选择关闭手机 sheet，落回线性指定节点；重复选择仍触发定位", async () => {
+  await useSessionStore.getState().previewSession("a");
+  useSessionStore.setState({ mobileTreePanelOpen: true });
+  useSessionStore.getState().jumpFromMap("a-tip");
+  expect(useSessionStore.getState()).toMatchObject({ activeNodeId: "a-tip", viewMode: "linear", mobileTreePanelOpen: false, readingPosition: { nodeId: "a-tip", offset: 0 }, mapNavigation: { nodeId: "a-tip", sequence: 1 } });
+  useSessionStore.getState().jumpFromMap("a-tip");
+  expect(useSessionStore.getState().mapNavigation?.sequence).toBe(2);
+  useSessionStore.getState().jumpFromMap("deleted");
+  expect(useSessionStore.getState().mapNavigation?.sequence).toBe(2);
+});
+
 test("openNodeInSession 跨会话落到指定分支，同会话不重载，已删除节点不覆盖落点", async () => {
   await useSessionStore.getState().openNodeInSession("a", "a-tip");
   expect(useSessionStore.getState().activeNodeId).toBe("a-tip");

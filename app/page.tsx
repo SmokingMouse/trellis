@@ -1,4 +1,5 @@
 "use client";
+import { CANVAS_MAP, migrateMapUrl } from "@/lib/canvas-map";
 import { useEffect, useRef, useState } from "react";
 import {
   isOptimisticNodeId,
@@ -115,7 +116,7 @@ export default function Home() {
   // requested query while previewDeepSession is still in flight.
   useEffect(() => {
     if (!hydrated || !deepLinkApplied) return;
-    const url = new URL(window.location.href);
+    const url = migrateMapUrl(new URL(window.location.href));
     if (!sessionId) {
       url.searchParams.delete("session");
       url.searchParams.delete("node");
@@ -158,8 +159,8 @@ export default function Home() {
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}
-      {session && (STRUCTURE_PANEL ? <StructurePanel isMobile={isMobile} /> : viewMode === "linear" && <TreePanel />)}
-      {session && viewMode === "canvas" && (
+      {session && (STRUCTURE_PANEL || CANVAS_MAP ? <StructurePanel isMobile={isMobile} /> : viewMode === "linear" && <TreePanel />)}
+      {session && !CANVAS_MAP && viewMode === "canvas" && (
         <>
           <Canvas
             onNodeFocus={isMobile ? () => setViewMode("linear") : undefined}
