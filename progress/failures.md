@@ -8,9 +8,9 @@
 
 ## 已结案
 
-- **AS project 原始 thread reuse 断言包含源库历史**（fj-as-adopt-a06a）→ `resolved`。恢复 main 原脚本后独占复跑稳定 exit 1，审批/撤卡/三轮共用 engine 均 PASS；源库已有 1 个线程，副本全库 COUNT=2、fixture 会话 COUNT=1。早期限定会话 COUNT 的修改已撤回。最终只在 as-project-fixture 启动时校验临时 DB 路径并清理复制的旧 as_turns/as_threads，保留 sessions/nodes 和原断言；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修前证据 out/mobile-as-project-original-baseline.log，修后 out/resumed-mobile-as-project-isolated.log、as-project-isolated-fixture.log；生产源库只读复核仍为 1。
+- **AS project 全库 thread reuse 断言包含无关线程**（fj-as-adopt-a06a）→ `resolved`。生产快照已有其他 AS 线程，副本全库 COUNT=2、fixture 会话 COUNT=1；审批/撤卡/三轮共用 engine 均 PASS。按最新主控裁定将 COUNT 限定为 fixture 的 session_id，保留原始生产快照，不再清理旧绑定；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修改只影响此断言统计范围，独立的三轮共用 engine 检查及重试/分叉断言不变。最终证据 out/ruling-mobile-as-project.log、ruling-as-project-counts.txt；曾恢复全库断言及使用临时库清理的历史证据仍保留，但不作为最终版本。
 
-- **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。原列于此的 AS project COUNT 修改按主控要求撤回，问题重新列入待查，历史通过记录不作 D4 证明。
+- **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。AS project COUNT 问题与最终裁定另列上条，历史记录保留。
 
 - **N1 已知非 git workspace 更新触发快照风暴**（fj-hb-nest-fix2-238c）→ `resolved`。症状：每条省略 worktree key 的 workspace_updated 都重拉快照；可证伪假设：缺 key 被误判为未知元数据。改为本地未知 ID 或显式元数据变化才拉取。判定命令：`bun test lib/server/herdr-client.test.ts -t N1`，两条回归在旧实现失败、修后通过；三类 workspace 事件各十次无额外快照，新增/元数据变化仍拉取。全量验证 218 pass。
 

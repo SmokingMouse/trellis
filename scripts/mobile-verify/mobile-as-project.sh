@@ -107,7 +107,9 @@ wait "$REQUEST_PID"; REQUEST_PID=
 post /api/chat "{\"kind\":\"branch\",\"parentNodeId\":\"$SECOND\",\"question\":\"compare project\",\"provider\":\"mock\"}" > "$H/third.sse"
 THIRD=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
 COUNTS_FILE="$H/counts.json" bun -e 'const c=await Bun.file(process.env.COUNTS_FILE).json(); if(c.spawns!==1||c.turns!==3) throw Error(JSON.stringify(c)); if(c.engines[0].options.effort!=="high"||c.engines[0].options.permission!=="plan")throw Error("run options lost");if(!c.engines[0].sent[0].input.some(i=>i.type==="image"&&i.mime==="image/png"&&i.path.startsWith("/")))throw Error("image attachment lost"); if(!c.peerEvents.some(e=>e.type==="delta"))throw Error("peer missed live stream"); console.log("PASS: three turns share one engine, image input, mapped run options and peer live stream")'
-[ "$(db "SELECT COUNT(DISTINCT thread_id) FROM as_turns")" = 1 ] || fail 'thread reuse'
+# Production snapshots can contain unrelated AS threads; only this fixture's
+# three turns must reuse one thread. Keep the copied history intact.
+[ "$(db "SELECT COUNT(DISTINCT t.thread_id) FROM as_turns t JOIN nodes n ON n.id=t.node_id WHERE n.session_id='$SID'")" = 1 ] || fail 'thread reuse'
 post /api/chat "{\"kind\":\"root\",\"question\":\"compare project\",\"mode\":\"chat\",\"provider\":\"mock\"}" > "$H/legacy.sse"
 LEGACY=$(db 'SELECT id FROM nodes ORDER BY created_at DESC LIMIT 1')
 [ "$(db "SELECT response FROM nodes WHERE id='$THIRD'")" = "$(db "SELECT response FROM nodes WHERE id='$LEGACY'")" ] || fail 'DB response parity'
