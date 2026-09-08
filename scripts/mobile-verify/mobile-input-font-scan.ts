@@ -63,7 +63,44 @@ function smallOverrides(tag: string): string[] {
     if (pixels < 16) reasons.push(`inline font-size ${match[1]}${match[2]}`);
   }
 
+  // `style={someVar}` hides the font-size behind a variable the regexes above
+  // can't see through; flag for manual confirmation instead of silently passing.
+  const styleIndirection = /\bstyle\s*=\s*\{\s*([A-Za-z_$][\w$]*)\s*\}/g;
+  for (const match of tag.matchAll(styleIndirection)) {
+    reasons.push(`style passed via variable, cannot statically verify font-size: style={${match[1]}}`);
+  }
+
   return [...new Set(reasons)];
+}
+
+// The mobile fallback in app/globals.css only wins because it is the last
+// input/textarea/select font-size rule in source order. If someone appends a
+// smaller-font rule after it, this cheap check catches the regression even
+// though this script never scans CSS files.
+function checkGlobalsCssFallbackIsLast(cwd: string): string | null {
+  const cssPath = join(cwd, "app", "globals.css");
+  const source = readFileSync(cssPath, "utf8");
+  const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
+  let last: { line: number; selector: string; declaration: string } | null = null;
+  for (const match of source.matchAll(rulePattern)) {
+    const [, selectorRaw, body] = match;
+    const selector = selectorRaw.trim();
+    if (!/\b(input|textarea|select)\b/i.test(selector)) continue;
+    const fontSizeMatch = body.match(/font-size\s*:\s*[^;]+;?/i);
+    if (!fontSizeMatch) continue;
+    const line = source.slice(0, match.index).split("\n").length;
+    last = { line, selector, declaration: fontSizeMatch[0].trim().replace(/;$/, "") };
+  }
+  if (!last) return "app/globals.css: no input/textarea/select font-size rule found";
+  const isKnownFallback =
+    /\binput\b/i.test(last.selector) &&
+    /\btextarea\b/i.test(last.selector) &&
+    /\bselect\b/i.test(last.selector) &&
+    /^font-size\s*:\s*16px$/i.test(last.declaration);
+  if (!isKnownFallback) {
+    return `app/globals.css:${last.line}: last input/textarea/select font-size rule is not the mobile 16px fallback (selector="${last.selector.replace(/\s+/g, " ")}", declaration="${last.declaration}") — a later rule may override it`;
+  }
+  return null;
 }
 
 const findings: Finding[] = [];
@@ -114,4 +151,11 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log(`mobile input font scan passed: ${scanned} text controls, 0 escaping overrides`);
+const cssFallbackError = checkGlobalsCssFallbackIsLast(process.cwd());
+if (cssFallbackError) {
+  console.error("Mobile font-size fallback in app/globals.css is no longer authoritative:");
+  console.error(`- ${cssFallbackError}`);
+  process.exit(1);
+}
+
+console.log(`mobile input font scan passed: ${scanned} text controls, 0 escaping overrides; globals.css fallback still last`);
