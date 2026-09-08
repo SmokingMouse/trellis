@@ -43,7 +43,7 @@ import { startRun, subscribe } from "@/lib/server/run-bus";
 import { newProjectBinding, resolveSessionBinding, removeAsTurn } from "@/lib/server/session-binding";
 import { startProjectRun, projectSSE, DaemonUnavailable, hasActiveProjectRun } from "@/lib/server/as-project";
 import { getAdoption } from "@/lib/server/as-adopt";
-import { isShadowEnabled } from "@/lib/as-config";
+import { isAgentServerEnabled } from "@/lib/as-config";
 import { getDB } from "@/lib/server/sqlite";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
@@ -246,7 +246,7 @@ export async function POST(req: Request) {
   if (existingSessionId && getSession(existingSessionId)?.origin === "external") {
     const adoption = getAdoption(existingSessionId);
     if (!adoption) return Response.json({error:"收编会话不属于当前 Agent daemon"},{status:409});
-    if (!isShadowEnabled() || adoption?.status === "closed") return Response.json({error:!isShadowEnabled() ? "Agent 服务已关闭" : "外部线程已结束，不能再提问"},{status:409});
+    if (!isAgentServerEnabled() || adoption?.status === "closed") return Response.json({error:!isAgentServerEnabled() ? "Agent 服务已关闭" : "外部线程已结束，不能再提问"},{status:409});
   }
   if (existingSessionId && getSession(existingSessionId)?.bindingType === "pane") {
     return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });

@@ -1,7 +1,7 @@
 import { getSession } from "./repo";
 import { getDB } from "./sqlite";
 import { resolveDaemonPaths } from "@smokingmouse/agent-server/paths";
-import { isShadowEnabled, isAdoptEnabled } from "../as-config";
+import { isAgentServerEnabled, isAdoptEnabled } from "../as-config";
 
 export type SessionBinding =
   | { type: "legacy" }
@@ -22,10 +22,10 @@ export function daemonIdentity() { return process.env.TRELLIS_AS_SOCKET ?? resol
 export function resolveSessionBinding(sessionId: string) {
   const session = getSession(sessionId);
   if (!session) throw new Error("session not found");
-  return parseSessionBinding(session, daemonIdentity(), isShadowEnabled());
+  return parseSessionBinding(session, daemonIdentity(), isAgentServerEnabled());
 }
 export function newProjectBinding(mode: string, agentId?: string | null): "legacy" | "thread" {
-  return mode === "project" && !agentId && isShadowEnabled() && process.env.TRELLIS_AS_PROJECT === "on" ? "thread" : "legacy";
+  return mode === "project" && !agentId && isAgentServerEnabled() && process.env.TRELLIS_AS_PROJECT === "on" ? "thread" : "legacy";
 }
 export type AsTurn = {
   node_id: string; thread_id: string; daemon_id: string; turn_id: string | null;

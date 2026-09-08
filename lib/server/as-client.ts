@@ -1,9 +1,9 @@
 import { AgentClient } from "@smokingmouse/agent-server/client";
 import { loadToken, resolveDaemonPaths } from "@smokingmouse/agent-server/paths";
 import { NotificationSchemas, type AttachResult, type NotificationMethod, type ServerNotification } from "@smokingmouse/agent-server/protocol";
-import type { ShadowEvent } from "../as-shadow";
+import type { ThreadEvent } from "../as-thread-event";
 
-export interface ShadowOptions {
+export interface ThreadObserverOptions {
   socketPath?: string;
   token?: string;
   tokenPath?: string;
@@ -11,7 +11,7 @@ export interface ShadowOptions {
   warn?: (message: string) => void;
   info?: (message: string) => void;
 }
-export function shadowRetryDelay(attempt: number, base = 1000) {
+export function threadRetryDelay(attempt: number, base = 1000) {
   return Math.min(300000, base * 2 ** Math.min(attempt, 20));
 }
 function snapshotFingerprint(snapshot: AttachResult) {
@@ -19,7 +19,7 @@ function snapshotFingerprint(snapshot: AttachResult) {
 }
 
 /** Trellis owns the only retry timer; the library only handles wire/RPC/cursors. */
-export class ShadowClient {
+export class ThreadObserver {
   private client?: AgentClient;
   private attachedClient?: AgentClient;
   private lastSnapshot?: AttachResult;
@@ -27,19 +27,18 @@ export class ShadowClient {
   private connecting?: Promise<AgentClient>;
   private timer?: ReturnType<typeof setTimeout>;
   private attempts = 0;
-  private lastExternalRetry = -Infinity;
   private failure?: Error;
-  private listeners = new Set<(event: ShadowEvent) => void>();
+  private listeners = new Set<(event: ThreadEvent) => void>();
   private threadId?: string;
   private cursor = 0;
   private fingerprint?: string;
-  constructor(private readonly options: ShadowOptions = {}) {}
+  constructor(private readonly options: ThreadObserverOptions = {}) {}
 
-  onEvent(listener: (event: ShadowEvent) => void) {
+  onEvent(listener: (event: ThreadEvent) => void) {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
-  private emit(event: ShadowEvent) {
+  private emit(event: ThreadEvent) {
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* Isolate disconnected consumers. */ }
     }
@@ -54,21 +53,13 @@ export class ShadowClient {
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.connect().catch(() => {});
-    }, shadowRetryDelay(this.attempts++, this.options.retryMs));
+    }, threadRetryDelay(this.attempts++, this.options.retryMs));
     this.timer.unref?.();
   }
-  connect(externalRetry = false): Promise<AgentClient> {
+  connect(): Promise<AgentClient> {
     if (this.stopped) return Promise.reject(new Error("observer closed"));
     if (this.connecting) return this.connecting;
-    // A list refresh may bypass backoff once per second; concurrent requests share the attempt.
-    if (this.timer) {
-      const now = performance.now();
-      if (!externalRetry || now - this.lastExternalRetry < 1000) {
-        return Promise.reject(this.failure ?? new Error("observer reconnecting"));
-      }
-      this.lastExternalRetry = now;
-      clearTimeout(this.timer); this.timer = undefined;
-    }
+    if (this.timer) return Promise.reject(this.failure ?? new Error("observer reconnecting"));
     if (this.client?.state === "connected" && (!this.threadId || this.attachedClient === this.client)) return Promise.resolve(this.client);
     this.connecting = this.open().finally(() => { this.connecting = undefined; });
     return this.connecting;
@@ -84,7 +75,7 @@ export class ShadowClient {
         const paths = resolveDaemonPaths();
         const client = new AgentClient({ transport: "unix", path: this.options.socketPath ?? process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
           token: this.options.token ?? loadToken(this.options.tokenPath ?? process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
-          client: { name: "trellis-shadow", version: "0.1.0", kind: "web", label: "Trellis 只读" },
+          client: { name: "trellis-thread-observer", version: "0.1.0", kind: "web", label: "Trellis 线程状态" },
           capabilities: { serverRequests: [], engineEvents: true, bashInput: true, pendingRequests: true },
           connectTimeoutMs: 1500, requestTimeoutMs: 5000, reconnect: false,
         });
@@ -138,9 +129,6 @@ export class ShadowClient {
       throw error;
     }
   }
-  async listThreads(cursor?: string) {
-    return (await this.connect(true)).request("thread/list", { limit: 100, ...(cursor ? { cursor } : {}) });
-  }
   async attach(threadId: string, sinceSeq = 0) {
     if (!Number.isSafeInteger(sinceSeq) || sinceSeq < 0) throw new Error("invalid sinceSeq");
     if (this.threadId && this.threadId !== threadId) throw new Error("one thread per observer");
@@ -156,9 +144,6 @@ export class ShadowClient {
     this.listeners.clear();
   }
 }
-
-const globalAs = globalThis as typeof globalThis & { trellisShadow?: ShadowClient };
-export function getShadowClient() { return globalAs.trellisShadow ??= new ShadowClient(); }
 
 /** Separate writable connection; observers never participate in approvals. */
 export function createProjectClient(options: {reconnect?: false; observe?: boolean} = {}) {

@@ -22,6 +22,8 @@ codex_bin: /Users/smokingmouse/.nvm/versions/node/v24.14.1/bin/codex   # codex-t
 - blocker 带合理 fallback 的，按 fallback 走
 - 需要选默认项的技术选择（库 / 目录 / 命名）
 
+- **本轮落地授权（用户 2026-09-08 20:1x 明令「直接都干完，不需要经过我」）**：sm-toolkit feat/codex-ingress 合 main 与发 PR、焚决合 main、daemon launchd 常驻、Trellis feat/ship-d 的 PR 合并与 `make deploy` 上线、给一个项目开 TRELLIS_AS 切流——全部不再问用户；验活脚本不绿不部署，部署后验活失败立即回退（上一版镜像 / TRELLIS_AS=off）。仅限本轮清单，新方向仍问。
+
 ## 必须问我
 - 发布、定价、对外发消息、动生产环境
 - 删除未合入的分支或 worktree

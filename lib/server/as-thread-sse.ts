@@ -1,5 +1,5 @@
 /** The initial replay is a single indivisible frame and is not live backpressure. */
-export function createShadowSseBuffer(onClose: () => void) {
+export function createThreadSseBuffer(onClose: () => void) {
   const encoder = new TextEncoder();
   const replay = new WeakSet<Uint8Array>();
   let controller: ReadableStreamDefaultController<Uint8Array>;
