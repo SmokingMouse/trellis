@@ -27,6 +27,17 @@ try {
   assert.equal(isAdoptEnabled({TRELLIS_AS:"on",TRELLIS_AS_ADOPT:"on"}),true);
   assert.equal(isAdoptEnabled({TRELLIS_AS:"off",TRELLIS_AS_ADOPT:"on",TRELLIS_AS_SOCKET:"x"}),false);
   assert.equal(matchAdoptionRoot("/a/bb",[{id:"w",projectId:"p",path:"/a/b"}]),null);
+  assert.equal(matchAdoptionRoot("/a/b/src",[{id:"outer",projectId:"p",path:"/a"},{id:"inner",projectId:"p",path:"/a/b"}])?.id,"inner");
+  // System home/scratch workspaces must not claim unrelated directories below them.
+  for (const [key,root] of [["trellis:home",home],["trellis:scratch",join(home,".trellis/scratch")]]) {
+    db.prepare("INSERT OR IGNORE INTO projects(id,name,cluster_key,created_at,updated_at) VALUES (?,?,?,?,?)")
+      .run(key,key,key,Date.now(),Date.now());
+    const project=db.query("SELECT id FROM projects WHERE cluster_key=?").get(key) as {id:string};
+    db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES (?,?,?,?,?,?,?)")
+      .run(`adopt-unit-${key}`,project.id,key,root,"directory","discovered",Date.now());
+    const workspace=resolveAdoptionWorkspace(join(root,"unregistered-directory"));
+    assert.equal((db.query("SELECT p.cluster_key FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.id=?").get(workspace) as {cluster_key:string}).cluster_key,"trellis:external");
+  }
   assert.equal(resolveAdoptionWorkspace(join(home,"repo/sub")),"adopt-fixture-workspace");
   const worktree=resolveAdoptionWorkspace(join(home,"checkout/src"),[{repo_root:join(home,"repo"),checkout_path:join(home,"checkout")}]);
   assert.equal((db.prepare("SELECT project_id FROM workspaces WHERE id=?").get(worktree) as {project_id:string}).project_id,"adopt-fixture-project");
