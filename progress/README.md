@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-agent-server 外部线程按首 turn 收编已通过手机与真机验证，交付待验收；空会话 hydrate 症状留待专项排查。
+单一 TUI 落地中：ingress 三片过审、试点 daemon 已开 ingress、fj 显示端切 codex-tui 试点两单在跑；剩硬化片；桥、影子与第二步、AS 合 main、daemon 常驻等用户点头。
 
 ## Goals
 
