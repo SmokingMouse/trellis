@@ -5,6 +5,7 @@
 // 让位的共享 guard——此前四处各自手写同一判断，易漂移。
 
 import { STRUCTURE_PANEL } from "./structure-panel";
+import { CANVAS_MAP } from "./canvas-map";
 
 export function isEditableTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
@@ -22,7 +23,7 @@ export function isEditableTarget(t: EventTarget | null): boolean {
 export type Shortcut = {
   keys: string; // 展示用键位（⌘P / J·K / Alt+↑↓←→）
   label: string;
-  scope: "全局" | "线性视图" | "画布" | "选中文字时" | "输入框";
+  scope: "全局" | "线性视图" | "画布" | "地图" | "选中文字时" | "输入框";
 };
 
 export const SHORTCUTS: Shortcut[] = [
@@ -34,7 +35,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "?", label: "打开本快捷键面板", scope: "全局" },
   { keys: "B", label: "跳回父节点锚点", scope: "线性视图" },
   { keys: "⌘J", label: STRUCTURE_PANEL ? "结构：过滤跳转本会话节点" : "树面板：过滤跳转本会话节点", scope: STRUCTURE_PANEL ? "全局" : "线性视图" },
-  { keys: "F", label: "回全局视图（fit view）", scope: "画布" },
+  { keys: "F", label: "回全局视图（fit view）", scope: CANVAS_MAP ? "地图" : "画布" },
   { keys: "⌘K", label: "以选区为锚点分叉追问", scope: "选中文字时" },
   { keys: "⌘D", label: "摘选区为笔记", scope: "选中文字时" },
   { keys: "↩ / ⌘↩", label: "发送（可在输入框角标切换）", scope: "输入框" },

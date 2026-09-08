@@ -1,4 +1,7 @@
 "use client";
+import { createPortal } from "react-dom";
+import { CANVAS_MAP } from "@/lib/canvas-map";
+import { CanvasMap } from "./CanvasMap";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
@@ -12,6 +15,7 @@ import { buildStructure, DEFAULT_STRUCTURE_PREFERENCE, readStructurePreference, 
  */
 export function StructurePanel({ isMobile }: { isMobile: boolean }) {
   const sessionId = useSessionStore(s => s.session?.id);
+  const [mapSession, setMapSession] = useState<string | null>(null);
   const mobileOpen = useSessionStore(s => s.mobileTreePanelOpen);
   const setMobileOpen = useSessionStore(s => s.setMobileTreePanelOpen);
   const setViewMode = useSessionStore(s => s.setViewMode);
@@ -97,7 +101,9 @@ export function StructurePanel({ isMobile }: { isMobile: boolean }) {
         <button ref={closeRef} data-mobile-target={isMobile ? "tree-sheet-close" : undefined} aria-label={isMobile ? "关闭结构" : "收起结构"} onClick={close} className="min-h-9 min-w-8 max-md:min-h-11 max-md:min-w-11 text-lg text-ink-muted hover:bg-surface-muted">{isMobile ? "×" : "›"}</button>
       </div>
       <StructureContent key={sessionId} model={model} isMobile={isMobile} close={close} />
+      {CANVAS_MAP && <button data-map-open onClick={() => setMapSession(sessionId ?? null)} className="min-h-11 shrink-0 border-t border-line px-3 py-2 text-left font-medium text-accent-ink hover:bg-accent-muted">🗺 地图</button>}
     </>}
+    {CANVAS_MAP && mapSession && mapSession === sessionId && createPortal(<CanvasMap mobile={isMobile} close={() => setMapSession(null)} />, document.body)}
   </aside>;
 }
 
@@ -176,7 +182,7 @@ function StructureContent({ model, isMobile, close }: { model: ReturnType<typeof
     <div className="flex shrink-0 flex-wrap gap-1 border-b border-line-faint p-2 text-ink-muted">
       <button data-mobile-target="new-tree-open" className="rounded px-2 py-1 max-md:min-h-11 hover:bg-accent-muted text-accent-ink" onClick={() => { if (isMobile) close(); setComposeRootOpen(true); }}>＋ 新话题</button>
       <button aria-label="过滤跳转" title="过滤跳转（⌘J）" className="rounded px-2 py-1 max-md:min-h-11 hover:bg-surface-muted" onClick={() => setFilter(old => old === null ? "" : null)}>⌕ 过滤</button>
-      <button className="rounded px-2 py-1 max-md:min-h-11 hover:bg-surface-muted" onClick={() => { if (isMobile) close(); setViewMode("canvas"); }}>画布</button>
+      {!CANVAS_MAP && <button className="rounded px-2 py-1 max-md:min-h-11 hover:bg-surface-muted" onClick={() => { if (isMobile) close(); setViewMode("canvas"); }}>画布</button>}
       <button aria-pressed={unreadOnly} className="rounded px-2 py-1 max-md:min-h-11 hover:bg-surface-muted" onClick={() => setUnreadOnly(v => !v)}>{unreadOnly ? "全部节点" : "只看未读"}</button>
     </div>
     {filter !== null && <div className="p-2"><input ref={inputRef} aria-label="过滤节点" placeholder="过滤节点…" className="w-full rounded border border-line bg-surface px-2 py-2 text-base md:text-xs" value={filter}

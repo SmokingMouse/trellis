@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-外部线程收编与侧栏波 1 已上线，启动期阻塞已修；波 2 在验收、观察页退役在做，之后波 3 结构面板与波 4 画布地图；观察一天后 AS 切流扩到全部项目。
+侧栏波 4 画布地图化已完成，待主控独立验收。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S164） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个 · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
