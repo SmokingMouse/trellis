@@ -149,7 +149,9 @@ else
 fi
 
 mkdir -p "$H/.trellis" "$OUT"
-sqlite3 ~/.trellis/data.db ".backup $DB"
+SOURCE_DB="${TRELLIS_VERIFY_SOURCE_DB:-$HOME/.trellis/data.db}"
+sqlite3 "$SOURCE_DB" ".backup $DB"
+echo "mobile-safe-area: source snapshot=$SOURCE_DB; AS-bound sessions=$(sqlite3 "$DB" "SELECT count(*) FROM sessions WHERE binding_type='thread';")"
 sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_secret='invalid';"
 
 SID=36b126d3-83a5-4cd8-9669-2cfdc209747f
@@ -403,6 +405,11 @@ sqlite3 "$DB" "DELETE FROM notes WHERE id='mv-safe-note';"
 agent-browser --session "$SESSION" set viewport 1280 800
 agent-browser --session "$SESSION" open "$URL"
 agent-browser --session "$SESSION" wait 'textarea[data-composer-input]'
+# The Composer can mount before previewDeepSession applies the requested
+# node. Header's context button depends on that node's lineage, so a transient
+# six-button shell is not the desktop baseline. Wait for the actual fixture.
+agent-browser --session "$SESSION" wait "[data-thread-node-id=\"$NID\"]"
+agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('header button[aria-label=\"上下文占用，点击查看详情\"]')?.offsetParent)"
 agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -435,11 +442,17 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
     ['[Claude]Opus▾', 127.5, 24],
     ['主题', 28, 28],
   ];
-  assert(headerButtons.length === expectedHeader.length, `Header 可见按钮数量变化: ${headerButtons.length}`);
-  headerButtons.forEach((button, index) => {
+  const actualHeader = headerButtons.map((button) => {
     const rect = button.getBoundingClientRect();
-    const [expectedLabel, width, height] = expectedHeader[index];
-    assert(label(button) === expectedLabel, `Header 按钮清单变化: ${label(button)} != ${expectedLabel}`);
+    return { label: label(button), width: rect.width, height: rect.height };
+  });
+  const expectedLabels = expectedHeader.map(([name]) => name);
+  const actualLabels = actualHeader.map((button) => button.label);
+  assert(JSON.stringify([...actualLabels].sort()) === JSON.stringify([...expectedLabels].sort()),
+    `Header 按钮集合变化: ${JSON.stringify({ expected: expectedLabels, actual: actualHeader })}`);
+  expectedHeader.forEach(([expectedLabel, width, height]) => {
+    const button = headerButtons.find((candidate) => label(candidate) === expectedLabel);
+    const rect = button.getBoundingClientRect();
     assert(near(rect.width, width) && near(rect.height, height), `Header 按钮尺寸变化: ${expectedLabel} ${rect.width}x${rect.height}`);
   });
 
@@ -452,7 +465,7 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
     assert(near(rect.width, 44) && near(rect.height, 44), `Composer 按钮尺寸变化: ${label(button)} ${rect.width}x${rect.height}`);
   });
 
-  return { safe, header: { width: hr.width, height: hr.height }, composer: { left: cr.left, top: cr.top, width: cr.width, height: cr.height, fontSize: desktopComposerFontSize }, headerButtons: expectedHeader.map(([name]) => name), composerButtons: expectedComposer };
+  return { safe, header: { width: hr.width, height: hr.height }, composer: { left: cr.left, top: cr.top, width: cr.width, height: cr.height, fontSize: desktopComposerFontSize }, headerButtons: actualHeader, composerButtons: expectedComposer };
 })()
 DESKTOP_EOF
 agent-browser --session "$SESSION" screenshot "$OUT/1280x800-desktop.png"
