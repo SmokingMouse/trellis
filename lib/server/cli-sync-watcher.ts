@@ -345,11 +345,22 @@ let started = false;
 export function startCliSyncWatcher(): void {
   if (started) return;
   started = true;
+  // Observe changes immediately; offline catchup must not hold instrumentation
+  // (and every first HTTP request) behind all persisted transcript histories.
+  void catchUpAttachedSessions();
+}
+
+async function catchUpAttachedSessions(): Promise<void> {
   try {
     // Heal moved Codex rollout paths before the startup re-import reads them.
     attachedPathMap();
-    // 启动时补一次全量重导（捕获进程不在时 CLI 侧的离线变更），再起 watch。
+    refreshWatches();
+    // 启动时补齐进程离线期间的变更，监听先建立以免漏掉补齐期间的新写入。
     for (const session of attachedSessions()) {
+      // Yield between synchronous per-session imports, including before the
+      // first one. A single deferred callback around the whole loop still
+      // blocks the event loop for the sum of all transcript parsing times.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       try {
         const db = getDB();
         const root = db
