@@ -7,7 +7,10 @@ export function sessionSourcePredicate(column: "kind" | "s.kind" = "kind"): stri
 }
 
 /** 自动化与外部入口沿用侧栏 chip；原生 user 会话不增加标记。 */
-export function sessionSourceChip(session: Pick<Session, "kind" | "origin">) {
+export function sessionSourceChip(session: Pick<Session, "kind" | "origin" | "backend">) {
+  if (session.origin === "external") {
+    return { label: "外部", title: session.backend ? `外部会话 · ${session.backend}` : "外部会话" };
+  }
   if (session.kind === "herdr" || session.origin === "herdr") {
     return { label: "⚓", title: "Herdr 会话" };
   }

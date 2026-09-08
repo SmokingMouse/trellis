@@ -41,7 +41,7 @@ import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSideb
 import { SIDEBAR_V2, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
-const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "task", "lark"].includes(v as string);
+const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "task", "lark", "external"].includes(v as string);
 
 // Workbench Wave 4 — VSCode-style left explorer sidebar (R1 + R2 + R3).
 //
@@ -864,7 +864,7 @@ export function SessionSidebar() {
           <div className="flex flex-wrap items-center gap-x-2 min-w-0">
             <label className="flex items-center gap-1 min-w-[5.5rem] flex-1 text-ink-muted">来源
               <select aria-label="来源" value={source} onChange={e => setSource(e.target.value as SidebarSource)} className="min-w-0 flex-1 h-7 max-md:h-11 rounded bg-surface text-ink border border-line">
-                <option value="all">全部</option><option value="web">网页</option><option value="herdr">Herdr</option><option value="task">任务</option><option value="lark">飞书</option>
+                <option value="all">全部</option><option value="web">网页</option><option value="herdr">Herdr</option><option value="task">任务</option><option value="lark">飞书</option><option value="external">外部</option>
               </select>
             </label>
             <label className="flex items-center gap-1 h-7 max-md:h-11 text-ink-muted whitespace-nowrap cursor-pointer"><input type="checkbox" checked={includeArchived} onChange={e => setIncludeArchived(e.target.checked)} />含已归档</label>

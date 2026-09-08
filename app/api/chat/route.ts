@@ -42,6 +42,8 @@ import {
 import { startRun, subscribe } from "@/lib/server/run-bus";
 import { newProjectBinding, resolveSessionBinding, removeAsTurn } from "@/lib/server/session-binding";
 import { startProjectRun, projectSSE, DaemonUnavailable, hasActiveProjectRun } from "@/lib/server/as-project";
+import { getAdoption } from "@/lib/server/as-adopt";
+import { isShadowEnabled } from "@/lib/as-config";
 import { getDB } from "@/lib/server/sqlite";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
@@ -241,6 +243,11 @@ export async function POST(req: Request) {
     return Response.json({error:"invalid effort"}, {status:400});
   }
   const existingSessionId = body.kind === "root" ? body.sessionId : getNode(body.kind === "branch" ? body.parentNodeId : body.nodeId)?.sessionId;
+  if (existingSessionId && getSession(existingSessionId)?.origin === "external") {
+    const adoption = getAdoption(existingSessionId);
+    if (!adoption) return Response.json({error:"收编会话不属于当前 Agent daemon"},{status:409});
+    if (!isShadowEnabled() || adoption?.status === "closed") return Response.json({error:!isShadowEnabled() ? "Agent 服务已关闭" : "外部线程已结束，不能再提问"},{status:409});
+  }
   if (existingSessionId && getSession(existingSessionId)?.bindingType === "pane") {
     return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
   }
@@ -505,7 +512,7 @@ export async function POST(req: Request) {
   let asFallback = false;
   const binding = resolveSessionBinding(trellisSessionId);
   if (binding.type === "pane") return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
-  if ((binding.type === "thread" || binding.type === "fallback") && !mentionActive && !resolvedAgentId) {
+  if ((binding.type === "thread" || binding.type === "fallback") && ((!mentionActive && !resolvedAgentId) || getSession(trellisSessionId)?.origin === "external")) {
     try {
       if (binding.type === "fallback") throw new DaemonUnavailable("Agent 服务已关闭");
       const run = await startProjectRun({ nodeId, prompt: questionForLLM, attachments: providerAttachments,
@@ -514,7 +521,7 @@ export async function POST(req: Request) {
         effort: typeof asOptions.effort === "string" ? asOptions.effort : process.env.TRELLIS_AS_EFFORT });
       return projectSSE(req, run, createdEvent);
     } catch (error) {
-      if (!(error instanceof DaemonUnavailable)) {
+      if (!(error instanceof DaemonUnavailable) || getSession(trellisSessionId)?.origin === "external") {
         if (body.kind !== "retry") finalizeNode({nodeId, status:"error", errorMessage:String(error), tokenInput:0, tokenOutput:0, tokenCacheRead:0, tokenCacheCreation:0, now:Date.now()});
         return Response.json({ error: String(error) }, { status: 503 });
       }

@@ -1,10 +1,11 @@
 import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY, type ProjectSummary, type Session, type WorkspaceSummary } from "./types";
 
-export type SidebarSource = "all" | "web" | "herdr" | "task" | "lark";
+export type SidebarSource = "all" | "web" | "herdr" | "task" | "lark" | "external";
 export type SidebarLayout = "project" | "time";
 export const SIDEBAR_V2 = process.env.NEXT_PUBLIC_TRELLIS_SIDEBAR_V2 !== "off" && process.env.NEXT_PUBLIC_TRELLIS_SIDEBAR_V2 !== "0";
 
 export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSource {
+  if (s.origin === "external") return "external";
   if (s.kind === "herdr" || s.origin === "herdr") return "herdr";
   if (s.kind === "task") return "task";
   if (s.kind === "lark" || s.origin === "lark") return "lark";

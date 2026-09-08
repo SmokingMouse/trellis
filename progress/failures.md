@@ -2,6 +2,8 @@
 
 ## 待查
 
+- **疑似通用空会话 hydrate 中止**（fj-as-adopt-a06a 发现，按主控裁定列为非本单引入的待查问题）。症状：GET /api/sessions/<empty> 返回 200、nodes=[]，前端五秒后提示 hydrate failed: signal is aborted without reason。可证伪假设：初始化/深链请求超时导致目标空会话未进入 store，根因未确认。历史判定命令：提交 a991584 上统一前缀执行 `sh scripts/mobile-verify/mobile-as-adopt.sh`，证据 out/adopt-e2e-final.log 与 failure.png。原用例三次失败曾触发停机；主控随后授权继续且仅收编至少一个 turn 的线程，本单不修 hydrate。新 E2E 改验零 turn 不建会话、首轮后五秒内收编，exit 0；此结果不表示通用空会话问题已修复。
+
 - **cpa 的 codex 上游间歇 `503 auth_unavailable (providers=codex)`，且当日内恶化为挂起**（S105 发现）。症状：`codex:gpt-5.5` 类注入模型（sm_endpoint / `CPA_API_KEY` bearer）多请求轮次约半数请求 503、codex 内部 5 次重试常耗尽 → turn failed；晚间进一步退化为请求挂起（probe 120s 超时无事件）。**已证伪**：本机 key 过期（curl 同 key 直打 `/v1/responses` 200）、SDK 注入参数错（单请求轮次曾成功 + S101/S102 同参数实测过）、0.7.0 代码回归（`transport:"exec"` 同注入同 503 模式）。**可证伪假设**：cpa（vultr-tokyo cliproxyapi）把 codex 形状流量路由到「codex」OAuth 池，该池凭证耗尽/过期；config.toml 的 cliproxyapi provider（同 key + `requires_openai_auth=true`）当时仍通，或因路由到不同池。**判定命令**：池恢复后跑 `node /tmp/codex-inject-probe.mjs d`（挂了随时可从 S105 session 记录重建）——稳定 completed = 池问题坐实；仍 503 而 config.toml 路径通 = 需比对 cpa 侧对两种 provider 配置的路由差异（`requires_openai_auth` / provider name）。修复大概率在 cpa 服务端（补 codex OAuth 池凭证），不在 trellis/SDK。
 
 ## 已结案
@@ -13,6 +15,10 @@
 - **波 2 手机断言仍依赖已退役链行 / 将 checkbox 视为文本输入**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：touch-targets 找不到 `session-chain-row`；safe-area 将归档 checkbox 的 11px 字号判作文本输入失败。可证伪假设：测试范围滞后于新工具条。链行断言迁到排布 / 来源 / 归档触控目标；字体检查排除非文本 input，与既有 `mobile-input-font-scan.ts` 同口径，文本及 select 的 16px 守卫保留。判定命令：统一隔离前缀分别运行 `sh scripts/mobile-verify/mobile-touch-targets.sh`、`sh scripts/mobile-verify/mobile-safe-area.sh`，最终均 exit 0；首次日志保留在契约 out。
 
 - **波 2 手机导航脚本沿用顶端链行点击**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：切到统一项目列表后跨会话恢复等待超时；可证伪假设：目标会话在抽屉下方，旧自动点击未先滚动。CDP 实测目标行 top=4218px、URL 未切换；补 `scrollIntoView` 和视口断言后，真实点击恢复保存的 node/view，完整脚本通过。判定命令：`env -i HOME=/Users/smokingmouse PATH="$PATH" TRELLIS_LARK=off TRELLIS_SCHEDULER=off TRELLIS_HOOKS=off TRELLIS_HERDR=off TRELLIS_VERIFY_SOURCE_DB=/Users/smokingmouse/.trellis/data.db sh scripts/mobile-verify/mobile-branch-chain.sh`。首次失败还受额外浏览器诊断干扰；两次尝试日志保留在契约 out。
+
+- **AS project 全库 thread reuse 断言包含无关线程**（fj-as-adopt-a06a）→ `resolved`。生产快照已有其他 AS 线程，副本全库 COUNT=2、fixture 会话 COUNT=1；审批/撤卡/三轮共用 engine 均 PASS。按最新主控裁定将 COUNT 限定为 fixture 的 session_id，保留原始生产快照，不再清理旧绑定；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修改只影响此断言统计范围，独立的三轮共用 engine 检查及重试/分叉断言不变。最终证据 out/ruling-mobile-as-project.log、ruling-as-project-counts.txt；曾恢复全库断言及使用临时库清理的历史证据仍保留，但不作为最终版本。
+
+- **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。AS project COUNT 问题与最终裁定另列上条，历史记录保留。
 
 - **N1 已知非 git workspace 更新触发快照风暴**（fj-hb-nest-fix2-238c）→ `resolved`。症状：每条省略 worktree key 的 workspace_updated 都重拉快照；可证伪假设：缺 key 被误判为未知元数据。改为本地未知 ID 或显式元数据变化才拉取。判定命令：`bun test lib/server/herdr-client.test.ts -t N1`，两条回归在旧实现失败、修后通过；三类 workspace 事件各十次无额外快照，新增/元数据变化仍拉取。全量验证 218 pass。
 

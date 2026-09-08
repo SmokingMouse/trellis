@@ -340,6 +340,8 @@ export const HOME_CLUSTER_KEY = "trellis:home";
 export type Session = {
   /** Visible root topics, supplied by the sidebar list endpoint. */
   treeCount?: number;
+  backend?: string;
+  externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;

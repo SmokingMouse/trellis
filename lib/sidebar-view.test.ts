@@ -34,6 +34,17 @@ test("空工作区折叠只包含当前无会话的目录，展开保留原对�
   expect(partitionEmptyWorkspaces(workspaces, new Map()).empty).toHaveLength(2);
 });
 
+test("收编会话保留外部来源、项目归属与跨来源时间排序", () => {
+  const external = session("external", 5, { kind: "user", origin: "external", backend: "codex", workspaceId: "external-workspace" });
+  const active = [session("older-web", 1), external, session("newer-web", 10)];
+  expect(selectSidebarSessions(active, [], "all", false).map(s => s.id)).toEqual(["newer-web", "external", "older-web"]);
+  expect(selectSidebarSessions(active, [], "external", false)).toEqual([external]);
+  expect(selectSidebarSessions(active, [], "web", false).map(s => s.id)).toEqual(["newer-web", "older-web"]);
+  expect(selectSidebarSessions([], [{ ...external, archived: true }], "external", true)).toHaveLength(1);
+  const project = { id: "external-project", name: "外部会话", clusterKey: "trellis:external", gitRemote: null, workspaces: [workspace("external-workspace")] } as ProjectSummary;
+  expect(sessionLocation(external, [project])).toBe("外部会话 / external-workspace");
+});
+
 test("伪项目只改展示名，按时间仍可定位项目和工作区", () => {
   expect(projectPresentation({ name: "旧名", clusterKey: SCRATCH_CLUSTER_KEY })).toEqual({ name: "暂存区（临时目录）", description: "没有所属仓库的临时目录与会话", icon: "◇" });
   expect(projectPresentation({ name: "旧名", clusterKey: HOME_CLUSTER_KEY }).name).toBe("主目录（个人目录）");
