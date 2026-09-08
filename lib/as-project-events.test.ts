@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Item, Turn, PendingServerRequest } from "@smokingmouse/agent-server/protocol";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "./as-project-events";
-import { applyShadowEvent, emptyThreadLog } from "./as-log";
+import { applyThreadEvent, emptyThreadLog } from "./as-thread-log";
 
 const item = (id:string, seq:number, text:string): Extract<Item,{type:"agentMessage"}> => ({id, seq, turnId:"turn", startedAtMs:10, type:"agentMessage", payload:{text}});
 test("message boundaries determine finalStart and preserve order", () => {
@@ -32,10 +32,10 @@ test("turn termination maps usage and abort independently of items", () => {
 test("partial snapshot and completed payload replace text without duplication", () => {
   let log=emptyThreadLog();
   const partial={...item("a",1,"hello"),status:"inProgress" as const};
-  log=applyShadowEvent(log,{type:"notification",notification:{jsonrpc:"2.0",method:"item/started",params:{threadId:"th",turnId:"turn",itemId:"a",seq:1,startedAtMs:10,item:partial}}});
-  log=applyShadowEvent(log,{type:"notification",notification:{jsonrpc:"2.0",method:"item/agentMessage/delta",params:{threadId:"th",turnId:"turn",itemId:"a",delta:" world"}}});
+  log=applyThreadEvent(log,{type:"notification",notification:{jsonrpc:"2.0",method:"item/started",params:{threadId:"th",turnId:"turn",itemId:"a",seq:1,startedAtMs:10,item:partial}}});
+  log=applyThreadEvent(log,{type:"notification",notification:{jsonrpc:"2.0",method:"item/agentMessage/delta",params:{threadId:"th",turnId:"turn",itemId:"a",delta:" world"}}});
   const completion={jsonrpc:"2.0" as const,method:"item/completed" as const,params:{threadId:"th",turnId:"turn",itemId:"a",seq:2,completedAtMs:20,item:{...partial,completedSeq:2,completedAtMs:20,status:"completed" as const,payload:{text:"hello world!"}}}};
-  log=applyShadowEvent(log,{type:"notification",notification:completion});
-  log=applyShadowEvent(log,{type:"notification",notification:completion});
+  log=applyThreadEvent(log,{type:"notification",notification:completion});
+  log=applyThreadEvent(log,{type:"notification",notification:completion});
   expect(projectResponse(Object.values(log.items))).toEqual({response:"hello world!",finalStart:0});
 });

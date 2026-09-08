@@ -1,20 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { ShadowEvent } from "@/lib/as-shadow";
+import type { ThreadEvent } from "@/lib/as-thread-event";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { Thread } from "@smokingmouse/agent-server/protocol";
 
 const modes = ["default", "acceptEdits", "plan", "dontAsk"];
 const labels: Record<string,string> = { default: "逐次确认", acceptEdits: "允许编辑", plan: "计划模式", dontAsk: "不询问", full: "绕过审批", bypassPermissions: "绕过审批" };
-const observers = new Map<string, {source:EventSource; listeners:Set<(event:ShadowEvent)=>void>; snapshot?:ShadowEvent}>();
-function observeThread(threadId:string, listener:(event:ShadowEvent)=>void) {
+const observers = new Map<string, {source:EventSource; listeners:Set<(event:ThreadEvent)=>void>; snapshot?:ThreadEvent}>();
+function observeThread(threadId:string, nodeId:string, listener:(event:ThreadEvent)=>void) {
   let observer=observers.get(threadId);
   if (!observer) {
-    observer={source:new EventSource(`/api/as/threads/${threadId}/stream`),listeners:new Set()};
+    observer={source:new EventSource(`/api/nodes/${encodeURIComponent(nodeId)}/as/stream`),listeners:new Set()};
     observers.set(threadId,observer);
     const active=observer;
     active.source.onmessage=event=>{
-      const data=JSON.parse(event.data) as ShadowEvent;
+      const data=JSON.parse(event.data) as ThreadEvent;
       if(data.type==="snapshot") active.snapshot=data;
       for(const callback of active.listeners) callback(data);
     };
@@ -55,7 +55,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         if (!value.thread) return;
         setThread(value.thread); setSupported(value.permissionSet); setError("");
         if (value.resolved?.length) { saved.resolved = value.resolved; setResolved(saved.resolved); remember(); }
-        unsubscribe = observeThread(value.thread.id, data => {
+        unsubscribe = observeThread(value.thread.id, nodeId, data => {
           if (data.type === "snapshot") {
             setThread(data.snapshot.thread);
             pendingIds.clear();

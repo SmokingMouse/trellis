@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { createShadowSseBuffer } from "./as-sse";
+import { createThreadSseBuffer } from "./as-thread-sse";
 
 test("P2-6 >1MB initial replay does not close SSE before its first consumer", async () => {
   let closed = 0;
-  const buffer = createShadowSseBuffer(() => closed++);
+  const buffer = createThreadSseBuffer(() => closed++);
   const initial = "data: " + "x".repeat(2 * 1024 * 1024) + "\n\n";
   buffer.send(initial, true);
   buffer.send("data: live\n\n");
@@ -21,7 +21,7 @@ test("P2-6 >1MB initial replay does not close SSE before its first consumer", as
 
 test("P2-6 live slow-consumer backlog remains bounded after replay exemption", () => {
   let closed = 0;
-  const buffer = createShadowSseBuffer(() => closed++);
+  const buffer = createThreadSseBuffer(() => closed++);
   buffer.send("snapshot", true);
   buffer.send("x".repeat(1024 * 1024));
   buffer.send("more");
