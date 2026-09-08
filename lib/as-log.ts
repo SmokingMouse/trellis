@@ -3,13 +3,20 @@ import type { ShadowEvent } from "./as-shadow";
 
 export interface ThreadLog {
   items: Record<string, Item>;
-  pending: PendingServerRequest[];
+  pending: NotificationParams<"thread/pendingRequests">[];
   cursor: number;
   state: string;
   turns: Record<string, Turn>;
   errors: NotificationParams<"error">[];
 }
 export const emptyThreadLog = (): ThreadLog => ({ items: {}, pending: [], cursor: 0, state: "connecting", turns: {}, errors: [] });
+
+function pendingState(request: PendingServerRequest): NotificationParams<"thread/pendingRequests"> {
+  const p = request.params;
+  return request.state ?? { threadId:p.threadId, turnId:p.turnId, requestId:p.requestId, itemId:p.itemId,
+    kind: request.method === "item/commandExecution/requestApproval" ? "commandExecution" : request.method === "item/fileChange/requestApproval" ? "fileChange" : request.method === "item/permissions/requestApproval" ? "permissions" : "userInput",
+    status:"pending", decidedBy:null, createdAtMs:"startedAtMs" in p ? p.startedAtMs : 0, updatedAtMs:0 };
+}
 
 /** Snapshots/completions replace payloads; only live deltas append. */
 export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog {
@@ -22,10 +29,19 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
       items[item.id] = item;
     }
     const cursor = Math.max(log.cursor, event.snapshot.nextSeq - 1);
-    const pending = JSON.stringify(log.pending) === JSON.stringify(event.snapshot.pendingRequests) ? log.pending : event.snapshot.pendingRequests;
+    const states = event.snapshot.pendingRequests.map(pendingState);
+    const pending = JSON.stringify(log.pending) === JSON.stringify(states) ? log.pending : states;
     return items === log.items && pending === log.pending && cursor === log.cursor ? log : { ...log, items, pending, cursor };
   }
   const { method, params } = event.notification;
+  if (method === "thread/pendingRequests") {
+    const previous = log.pending.find(request => request.requestId === params.requestId);
+    if (params.status === "pending" && JSON.stringify(previous) === JSON.stringify(params)) return log;
+    if (params.status !== "pending" && !previous) return log;
+    const pending = log.pending.filter(request => request.requestId !== params.requestId);
+    if (params.status === "pending") pending.push(params);
+    return { ...log, pending };
+  }
   if (method === "error") {
     if (log.errors.some(error => JSON.stringify(error) === JSON.stringify(params))) return log;
     return { ...log, errors: [...log.errors, params] };
@@ -39,7 +55,7 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
     return { ...log, items: { ...log.items, [params.item.id]: params.item }, cursor: params.seq };
   }
   if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
-    const pending = log.pending.filter(request => request.params.requestId !== params.requestId);
+    const pending = log.pending.filter(request => request.requestId !== params.requestId);
     return pending.length === log.pending.length ? log : { ...log, pending };
   }
   if (!("itemId" in params)) return log;
@@ -64,7 +80,7 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
 
 export function itemText(item: Item): string {
   switch (item.type) {
-    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.path).join("\n");
+    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.type === "bash" ? `!${input.command}` : input.path).join("\n");
     case "agentMessage": return item.payload.text;
     case "reasoning": return [item.payload.summary, item.payload.text].filter(Boolean).join("\n");
     case "commandExecution": return `$ ${item.payload.command}\n${item.payload.cwd}\n${item.payload.aggregatedOutput ?? ""}${item.payload.exitCode == null ? "" : `\nexit ${item.payload.exitCode}`}`;

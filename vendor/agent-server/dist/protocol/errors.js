@@ -7,11 +7,13 @@ export const ErrorCode = {
     thread_closed: -32007, unsupported_capability: -32008, cursor_expired: -32009,
     turn_not_found: -32010, turn_not_active: -32011, lease_held: -32012,
     duplicate_client_id: -32013, already_resolved: -32014, engine_protocol_error: -32015,
+    backend_unsupported: -32016,
 };
 export const ErrorCodeSchema = z.union(Object.values(ErrorCode).map(code => z.literal(code)));
 export const ErrorDataSchema = z.object({
     threadId: z.string().optional(), turnId: z.string().optional(), itemId: z.string().optional(),
     retryable: z.boolean(), detail: z.json().optional(), stderr: z.string().optional(),
+    reason: z.string().optional(),
     raw: z.json().optional(), holder: z.object({ clientId: z.string(), label: z.string() }).optional(),
 });
 export const RpcErrorSchema = z.object({ code: ErrorCodeSchema, message: z.string(), data: ErrorDataSchema.optional() });

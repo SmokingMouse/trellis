@@ -115,6 +115,20 @@ touch "$H/approve"
 wait_js 'live delta before completion' "document.querySelector('[data-as-item=answer] pre')?.textContent === '实时片段已到达。' && document.querySelector('[data-as-item=answer]')?.dataset.itemStatus === 'inProgress' && !document.querySelector('[data-as-approval]')"
 ab screenshot "$OUT/mobile-as-live.png"
 wait_js 'P2-3 initially follows live tail' "(() => { const main = document.querySelector('.as-shadow'); return main.scrollHeight - main.clientHeight - main.scrollTop < 50; })()"
+ab eval --stdin <<'JS'
+(async () => {
+  const main = document.querySelector('.as-shadow');
+  const spacer = document.createElement('div');
+  spacer.style.height = '600px';
+  document.querySelector('.as-items').append(spacer);
+  main.scrollTop = main.scrollHeight;
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  spacer.remove();
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  return {scrollTop:main.scrollTop, bottom:main.scrollHeight-main.clientHeight, follows:document.querySelector('[data-as-log]').dataset.followTail};
+})()
+JS
+wait_js 'approval-sized layout shrink preserves automatic following' "document.querySelector('[data-as-log]')?.dataset.followTail === 'true' && !document.querySelector('[data-as-follow]')"
 position=$(ab eval "(() => { const r = document.querySelector('.as-shadow').getBoundingClientRect(); return [Math.floor(r.right - 24), Math.floor(r.bottom - 24)].join(' '); })()" | tr -d '"')
 set -- $position
 ab mouse move "$1" "$2"

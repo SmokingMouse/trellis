@@ -8,6 +8,20 @@ const snapshot = (items: Item[], nextSeq: number): AttachResult => ({
   items, nextSeq, queue: [], pendingRequests: [],
 });
 
+test("pending notifications add, deduplicate and withdraw read-only approvals without snapshots", () => {
+  const params = {threadId:"thread",turnId:"turn",requestId:"approval",itemId:"command",kind:"commandExecution" as const,status:"pending" as const,decidedBy:null,createdAtMs:1,updatedAtMs:1};
+  const event = {type:"notification" as const,notification:{jsonrpc:"2.0" as const,method:"thread/pendingRequests" as const,params}};
+  const pending = applyShadowEvent(emptyThreadLog(),event);
+  expect(pending.pending).toEqual([params]);
+  expect(applyShadowEvent(pending,event)).toBe(pending);
+  for (const status of ["resolved","expired"] as const) {
+    const terminal = {...event,notification:{...event.notification,params:{...params,status,updatedAtMs:2}}};
+    const cleared = applyShadowEvent(pending,terminal);
+    expect(cleared.pending).toEqual([]);
+    expect(applyShadowEvent(cleared,terminal)).toBe(cleared);
+  }
+});
+
 test("P2-2 projects daemon errors and turn started/completed, deduplicating repeated frames", () => {
   const error = { type: "notification" as const, notification: { jsonrpc: "2.0" as const, method: "error" as const, params: { threadId: "thread", error: { code: -32015 as const, message: "engine protocol mismatch" }, willRetry: false } } };
   let log = applyShadowEvent(emptyThreadLog(), error);

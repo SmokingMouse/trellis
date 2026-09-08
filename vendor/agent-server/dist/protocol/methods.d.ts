@@ -1,4 +1,13 @@
 import { z } from "zod";
+export declare const EngineCapabilitiesSchema: z.ZodObject<{
+    engineEvents: z.ZodOptional<z.ZodBoolean>;
+    engineControl: z.ZodOptional<z.ZodBoolean>;
+    permissionSet: z.ZodOptional<z.ZodBoolean>;
+    effortSet: z.ZodOptional<z.ZodBoolean>;
+    subAgentText: z.ZodOptional<z.ZodBoolean>;
+    bashInput: z.ZodOptional<z.ZodBoolean>;
+    compact: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strict>;
 export declare const ThreadOptionsSchema: z.ZodObject<{
     cwd: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
@@ -8,11 +17,16 @@ export declare const ThreadOptionsSchema: z.ZodObject<{
         readonly: "readonly";
         "auto-edit": "auto-edit";
         full: "full";
+        acceptEdits: "acceptEdits";
+        plan: "plan";
+        bypassPermissions: "bypassPermissions";
+        dontAsk: "dontAsk";
     }>>;
     sandbox: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
     meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+    autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
 }, z.core.$strict>;
 export declare const StartThreadParamsSchema: z.ZodObject<{
     cwd: z.ZodOptional<z.ZodString>;
@@ -23,11 +37,16 @@ export declare const StartThreadParamsSchema: z.ZodObject<{
         readonly: "readonly";
         "auto-edit": "auto-edit";
         full: "full";
+        acceptEdits: "acceptEdits";
+        plan: "plan";
+        bypassPermissions: "bypassPermissions";
+        dontAsk: "dontAsk";
     }>>;
     sandbox: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
     meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+    autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
     backend: z.ZodEnum<{
         claude: "claude";
         codex: "codex";
@@ -38,6 +57,9 @@ export declare const StartThreadParamsSchema: z.ZodObject<{
 export declare const StartTurnParamsSchema: z.ZodObject<{
     threadId: z.ZodString;
     input: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        type: z.ZodLiteral<"bash">;
+        command: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"text">;
         text: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
@@ -59,6 +81,10 @@ export declare const StartTurnParamsSchema: z.ZodObject<{
         readonly: "readonly";
         "auto-edit": "auto-edit";
         full: "full";
+        acceptEdits: "acceptEdits";
+        plan: "plan";
+        bypassPermissions: "bypassPermissions";
+        dontAsk: "dontAsk";
     }>>;
     sandbox: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -81,7 +107,7 @@ export declare const AttachResultSchema: z.ZodObject<{
                 closed: "closed";
             }>;
             error: z.ZodOptional<z.ZodObject<{
-                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                 message: z.ZodString;
                 data: z.ZodOptional<z.ZodObject<{
                     threadId: z.ZodOptional<z.ZodString>;
@@ -90,6 +116,7 @@ export declare const AttachResultSchema: z.ZodObject<{
                     retryable: z.ZodBoolean;
                     detail: z.ZodOptional<z.ZodJSONSchema>;
                     stderr: z.ZodOptional<z.ZodString>;
+                    reason: z.ZodOptional<z.ZodString>;
                     raw: z.ZodOptional<z.ZodJSONSchema>;
                     holder: z.ZodOptional<z.ZodObject<{
                         clientId: z.ZodString;
@@ -102,6 +129,20 @@ export declare const AttachResultSchema: z.ZodObject<{
         model: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
         meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+        permission: z.ZodOptional<z.ZodEnum<{
+            default: "default";
+            readonly: "readonly";
+            "auto-edit": "auto-edit";
+            full: "full";
+            acceptEdits: "acceptEdits";
+            plan: "plan";
+            bypassPermissions: "bypassPermissions";
+            dontAsk: "dontAsk";
+        }>>;
+        forkedFrom: z.ZodOptional<z.ZodObject<{
+            threadId: z.ZodString;
+            itemId: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
         createdAtMs: z.ZodNumber;
         closedAtMs: z.ZodOptional<z.ZodNumber>;
         clientThreadId: z.ZodOptional<z.ZodString>;
@@ -110,6 +151,9 @@ export declare const AttachResultSchema: z.ZodObject<{
         type: z.ZodLiteral<"userMessage">;
         payload: z.ZodObject<{
             content: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                type: z.ZodLiteral<"bash">;
+                command: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
                 type: z.ZodLiteral<"text">;
                 text: z.ZodString;
             }, z.core.$strip>, z.ZodObject<{
@@ -270,14 +314,16 @@ export declare const AttachResultSchema: z.ZodObject<{
         type: z.ZodLiteral<"subAgent">;
         payload: z.ZodObject<{
             kind: z.ZodEnum<{
-                agent: "agent";
                 bash: "bash";
+                agent: "agent";
                 workflow: "workflow";
             }>;
             parentItemId: z.ZodString;
             phase: z.ZodString;
             progress: z.ZodOptional<z.ZodJSONSchema>;
             report: z.ZodOptional<z.ZodJSONSchema>;
+            text: z.ZodOptional<z.ZodString>;
+            thinking: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
         id: z.ZodString;
         status: z.ZodOptional<z.ZodEnum<{
@@ -394,7 +440,7 @@ export declare const AttachResultSchema: z.ZodObject<{
         enqueuedAtMs: z.ZodNumber;
         preview: z.ZodString;
     }, z.core.$strip>>;
-    pendingRequests: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+    pendingRequests: z.ZodArray<z.ZodIntersection<z.ZodDiscriminatedUnion<[z.ZodObject<{
         method: z.ZodLiteral<"item/commandExecution/requestApproval">;
         params: z.ZodObject<{
             command: z.ZodString;
@@ -469,7 +515,32 @@ export declare const AttachResultSchema: z.ZodObject<{
                 raw: z.ZodJSONSchema;
             }, z.core.$strip>>;
         }, z.core.$strip>;
-    }, z.core.$strip>], "method">>;
+    }, z.core.$strip>], "method">, z.ZodObject<{
+        state: z.ZodOptional<z.ZodObject<{
+            threadId: z.ZodString;
+            turnId: z.ZodString;
+            requestId: z.ZodString;
+            itemId: z.ZodString;
+            kind: z.ZodEnum<{
+                commandExecution: "commandExecution";
+                fileChange: "fileChange";
+                permissions: "permissions";
+                userInput: "userInput";
+            }>;
+            status: z.ZodEnum<{
+                pending: "pending";
+                resolved: "resolved";
+                expired: "expired";
+            }>;
+            decidedBy: z.ZodNullable<z.ZodObject<{
+                clientId: z.ZodString;
+                label: z.ZodString;
+            }, z.core.$strip>>;
+            createdAtMs: z.ZodNumber;
+            updatedAtMs: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>>;
 }, z.core.$strip>;
 export declare const ResumeThreadParamsSchema: z.ZodUnion<readonly [z.ZodObject<{
     cwd: z.ZodOptional<z.ZodString>;
@@ -480,11 +551,16 @@ export declare const ResumeThreadParamsSchema: z.ZodUnion<readonly [z.ZodObject<
         readonly: "readonly";
         "auto-edit": "auto-edit";
         full: "full";
+        acceptEdits: "acceptEdits";
+        plan: "plan";
+        bypassPermissions: "bypassPermissions";
+        dontAsk: "dontAsk";
     }>>;
     sandbox: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
     meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+    autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
     engineThreadId: z.ZodOptional<z.ZodString>;
     backend: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -501,11 +577,16 @@ export declare const ResumeThreadParamsSchema: z.ZodUnion<readonly [z.ZodObject<
         readonly: "readonly";
         "auto-edit": "auto-edit";
         full: "full";
+        acceptEdits: "acceptEdits";
+        plan: "plan";
+        bypassPermissions: "bypassPermissions";
+        dontAsk: "dontAsk";
     }>>;
     sandbox: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
     meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+    autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
     threadId: z.ZodOptional<z.ZodString>;
     backend: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -526,6 +607,9 @@ export declare const MethodSchemas: {
                 label: z.ZodString;
             }, z.core.$strip>;
             capabilities: z.ZodOptional<z.ZodObject<{
+                pendingRequests: z.ZodOptional<z.ZodBoolean>;
+                engineEvents: z.ZodOptional<z.ZodBoolean>;
+                bashInput: z.ZodOptional<z.ZodBoolean>;
                 serverRequests: z.ZodOptional<z.ZodArray<z.ZodEnum<{
                     "item/commandExecution/requestApproval": "item/commandExecution/requestApproval";
                     "item/fileChange/requestApproval": "item/fileChange/requestApproval";
@@ -545,6 +629,8 @@ export declare const MethodSchemas: {
             }, z.core.$strip>;
             clientId: z.ZodString;
             capabilities: z.ZodObject<{
+                pendingRequests: z.ZodOptional<z.ZodBoolean>;
+                midThreadFork: z.ZodOptional<z.ZodBoolean>;
                 backends: z.ZodArray<z.ZodEnum<{
                     claude: "claude";
                     codex: "codex";
@@ -555,6 +641,15 @@ export declare const MethodSchemas: {
                 leases: z.ZodBoolean;
                 externalProviders: z.ZodBoolean;
                 maxQueuedTurns: z.ZodNumber;
+                engine: z.ZodOptional<z.ZodObject<{
+                    engineEvents: z.ZodOptional<z.ZodBoolean>;
+                    engineControl: z.ZodOptional<z.ZodBoolean>;
+                    permissionSet: z.ZodOptional<z.ZodBoolean>;
+                    effortSet: z.ZodOptional<z.ZodBoolean>;
+                    subAgentText: z.ZodOptional<z.ZodBoolean>;
+                    bashInput: z.ZodOptional<z.ZodBoolean>;
+                    compact: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>;
             }, z.core.$strip>;
         }, z.core.$strip>;
     };
@@ -568,11 +663,16 @@ export declare const MethodSchemas: {
                 readonly: "readonly";
                 "auto-edit": "auto-edit";
                 full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
             }>>;
             sandbox: z.ZodOptional<z.ZodString>;
             systemPrompt: z.ZodOptional<z.ZodString>;
             tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
             meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+            autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
             backend: z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
@@ -599,7 +699,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -608,6 +708,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -620,9 +721,173 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            deduplicated: z.ZodOptional<z.ZodLiteral<true>>;
+        }, z.core.$strip>;
+    };
+    readonly "thread/engineControl": {
+        readonly params: z.ZodObject<{
+            threadId: z.ZodString;
+            subtype: z.ZodString;
+            params: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
+        }, z.core.$strict>;
+        readonly result: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
+    };
+    readonly "thread/permission/set": {
+        readonly params: z.ZodObject<{
+            threadId: z.ZodString;
+            permission: z.ZodEnum<{
+                default: "default";
+                readonly: "readonly";
+                "auto-edit": "auto-edit";
+                full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
+            }>;
+        }, z.core.$strict>;
+        readonly result: z.ZodObject<{
+            thread: z.ZodObject<{
+                id: z.ZodString;
+                backend: z.ZodEnum<{
+                    claude: "claude";
+                    codex: "codex";
+                    external: "external";
+                }>;
+                engineThreadId: z.ZodNullable<z.ZodString>;
+                status: z.ZodObject<{
+                    type: z.ZodEnum<{
+                        spawning: "spawning";
+                        idle: "idle";
+                        running: "running";
+                        interrupted: "interrupted";
+                        systemError: "systemError";
+                        closed: "closed";
+                    }>;
+                    error: z.ZodOptional<z.ZodObject<{
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
+                        message: z.ZodString;
+                        data: z.ZodOptional<z.ZodObject<{
+                            threadId: z.ZodOptional<z.ZodString>;
+                            turnId: z.ZodOptional<z.ZodString>;
+                            itemId: z.ZodOptional<z.ZodString>;
+                            retryable: z.ZodBoolean;
+                            detail: z.ZodOptional<z.ZodJSONSchema>;
+                            stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
+                            raw: z.ZodOptional<z.ZodJSONSchema>;
+                            holder: z.ZodOptional<z.ZodObject<{
+                                clientId: z.ZodString;
+                                label: z.ZodString;
+                            }, z.core.$strip>>;
+                        }, z.core.$strip>>;
+                    }, z.core.$strip>>;
+                }, z.core.$strip>;
+                cwd: z.ZodString;
+                model: z.ZodOptional<z.ZodString>;
+                title: z.ZodOptional<z.ZodString>;
+                meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
+                createdAtMs: z.ZodNumber;
+                closedAtMs: z.ZodOptional<z.ZodNumber>;
+                clientThreadId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            deduplicated: z.ZodOptional<z.ZodLiteral<true>>;
+        }, z.core.$strip>;
+    };
+    readonly "thread/effort/set": {
+        readonly params: z.ZodObject<{
+            threadId: z.ZodString;
+            maxThinkingTokens: z.ZodNullable<z.ZodNumber>;
+            thinkingDisplay: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+                summarized: "summarized";
+                omitted: "omitted";
+            }>>>;
+        }, z.core.$strict>;
+        readonly result: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
+    };
+    readonly "thread/compact": {
+        readonly params: z.ZodObject<{
+            threadId: z.ZodString;
+            instructions: z.ZodOptional<z.ZodString>;
+            clientTurnId: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+        readonly result: z.ZodObject<{
+            turn: z.ZodObject<{
+                id: z.ZodString;
+                threadId: z.ZodString;
+                ordinal: z.ZodNumber;
+                status: z.ZodEnum<{
+                    interrupted: "interrupted";
+                    queued: "queued";
+                    inProgress: "inProgress";
+                    completed: "completed";
+                    failed: "failed";
+                    cancelled: "cancelled";
+                }>;
+                clientTurnId: z.ZodOptional<z.ZodString>;
+                enqueuedAtMs: z.ZodNumber;
+                startedAtMs: z.ZodOptional<z.ZodNumber>;
+                completedAtMs: z.ZodOptional<z.ZodNumber>;
+                durationMs: z.ZodOptional<z.ZodNumber>;
+                usage: z.ZodOptional<z.ZodObject<{
+                    usd: z.ZodNullable<z.ZodNumber>;
+                    inputTokens: z.ZodNumber;
+                    outputTokens: z.ZodNumber;
+                    cachedTokens: z.ZodNumber;
+                    cacheCreation: z.ZodNumber;
+                    estimated: z.ZodBoolean;
+                    contextTokens: z.ZodNullable<z.ZodNumber>;
+                }, z.core.$strip>>;
+                error: z.ZodOptional<z.ZodObject<{
+                    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
+                    message: z.ZodString;
+                    data: z.ZodOptional<z.ZodObject<{
+                        threadId: z.ZodOptional<z.ZodString>;
+                        turnId: z.ZodOptional<z.ZodString>;
+                        itemId: z.ZodOptional<z.ZodString>;
+                        retryable: z.ZodBoolean;
+                        detail: z.ZodOptional<z.ZodJSONSchema>;
+                        stderr: z.ZodOptional<z.ZodString>;
+                        reason: z.ZodOptional<z.ZodString>;
+                        raw: z.ZodOptional<z.ZodJSONSchema>;
+                        holder: z.ZodOptional<z.ZodObject<{
+                            clientId: z.ZodString;
+                            label: z.ZodString;
+                        }, z.core.$strip>>;
+                    }, z.core.$strip>>;
+                }, z.core.$strip>>;
             }, z.core.$strip>;
             deduplicated: z.ZodOptional<z.ZodLiteral<true>>;
         }, z.core.$strip>;
@@ -637,11 +902,16 @@ export declare const MethodSchemas: {
                 readonly: "readonly";
                 "auto-edit": "auto-edit";
                 full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
             }>>;
             sandbox: z.ZodOptional<z.ZodString>;
             systemPrompt: z.ZodOptional<z.ZodString>;
             tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
             meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+            autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
             engineThreadId: z.ZodOptional<z.ZodString>;
             backend: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -658,11 +928,16 @@ export declare const MethodSchemas: {
                 readonly: "readonly";
                 "auto-edit": "auto-edit";
                 full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
             }>>;
             sandbox: z.ZodOptional<z.ZodString>;
             systemPrompt: z.ZodOptional<z.ZodString>;
             tools: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"all">, z.ZodArray<z.ZodString>]>>;
             meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+            autocompact: z.ZodOptional<z.ZodUnion<readonly [z.ZodLiteral<"auto">, z.ZodNumber]>>;
             threadId: z.ZodOptional<z.ZodString>;
             backend: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -690,7 +965,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -699,6 +974,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -711,6 +987,20 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
@@ -743,7 +1033,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -752,6 +1042,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -764,6 +1055,20 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
@@ -772,6 +1077,9 @@ export declare const MethodSchemas: {
                 type: z.ZodLiteral<"userMessage">;
                 payload: z.ZodObject<{
                     content: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        type: z.ZodLiteral<"bash">;
+                        command: z.ZodString;
+                    }, z.core.$strict>, z.ZodObject<{
                         type: z.ZodLiteral<"text">;
                         text: z.ZodString;
                     }, z.core.$strip>, z.ZodObject<{
@@ -932,14 +1240,16 @@ export declare const MethodSchemas: {
                 type: z.ZodLiteral<"subAgent">;
                 payload: z.ZodObject<{
                     kind: z.ZodEnum<{
-                        agent: "agent";
                         bash: "bash";
+                        agent: "agent";
                         workflow: "workflow";
                     }>;
                     parentItemId: z.ZodString;
                     phase: z.ZodString;
                     progress: z.ZodOptional<z.ZodJSONSchema>;
                     report: z.ZodOptional<z.ZodJSONSchema>;
+                    text: z.ZodOptional<z.ZodString>;
+                    thinking: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
                 id: z.ZodString;
                 status: z.ZodOptional<z.ZodEnum<{
@@ -1056,7 +1366,7 @@ export declare const MethodSchemas: {
                 enqueuedAtMs: z.ZodNumber;
                 preview: z.ZodString;
             }, z.core.$strip>>;
-            pendingRequests: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            pendingRequests: z.ZodArray<z.ZodIntersection<z.ZodDiscriminatedUnion<[z.ZodObject<{
                 method: z.ZodLiteral<"item/commandExecution/requestApproval">;
                 params: z.ZodObject<{
                     command: z.ZodString;
@@ -1131,7 +1441,32 @@ export declare const MethodSchemas: {
                         raw: z.ZodJSONSchema;
                     }, z.core.$strip>>;
                 }, z.core.$strip>;
-            }, z.core.$strip>], "method">>;
+            }, z.core.$strip>], "method">, z.ZodObject<{
+                state: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    turnId: z.ZodString;
+                    requestId: z.ZodString;
+                    itemId: z.ZodString;
+                    kind: z.ZodEnum<{
+                        commandExecution: "commandExecution";
+                        fileChange: "fileChange";
+                        permissions: "permissions";
+                        userInput: "userInput";
+                    }>;
+                    status: z.ZodEnum<{
+                        pending: "pending";
+                        resolved: "resolved";
+                        expired: "expired";
+                    }>;
+                    decidedBy: z.ZodNullable<z.ZodObject<{
+                        clientId: z.ZodString;
+                        label: z.ZodString;
+                    }, z.core.$strip>>;
+                    createdAtMs: z.ZodNumber;
+                    updatedAtMs: z.ZodNumber;
+                    reason: z.ZodOptional<z.ZodString>;
+                }, z.core.$strip>>;
+            }, z.core.$strip>>>;
         }, z.core.$strip>;
     };
     readonly "thread/detach": {
@@ -1156,6 +1491,9 @@ export declare const MethodSchemas: {
                 type: z.ZodLiteral<"userMessage">;
                 payload: z.ZodObject<{
                     content: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                        type: z.ZodLiteral<"bash">;
+                        command: z.ZodString;
+                    }, z.core.$strict>, z.ZodObject<{
                         type: z.ZodLiteral<"text">;
                         text: z.ZodString;
                     }, z.core.$strip>, z.ZodObject<{
@@ -1316,14 +1654,16 @@ export declare const MethodSchemas: {
                 type: z.ZodLiteral<"subAgent">;
                 payload: z.ZodObject<{
                     kind: z.ZodEnum<{
-                        agent: "agent";
                         bash: "bash";
+                        agent: "agent";
                         workflow: "workflow";
                     }>;
                     parentItemId: z.ZodString;
                     phase: z.ZodString;
                     progress: z.ZodOptional<z.ZodJSONSchema>;
                     report: z.ZodOptional<z.ZodJSONSchema>;
+                    text: z.ZodOptional<z.ZodString>;
+                    thinking: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
                 id: z.ZodString;
                 status: z.ZodOptional<z.ZodEnum<{
@@ -1473,7 +1813,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -1482,6 +1822,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -1494,6 +1835,20 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
@@ -1524,7 +1879,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -1533,6 +1888,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -1545,6 +1901,20 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
@@ -1576,7 +1946,7 @@ export declare const MethodSchemas: {
                         closed: "closed";
                     }>;
                     error: z.ZodOptional<z.ZodObject<{
-                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                        code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                         message: z.ZodString;
                         data: z.ZodOptional<z.ZodObject<{
                             threadId: z.ZodOptional<z.ZodString>;
@@ -1585,6 +1955,7 @@ export declare const MethodSchemas: {
                             retryable: z.ZodBoolean;
                             detail: z.ZodOptional<z.ZodJSONSchema>;
                             stderr: z.ZodOptional<z.ZodString>;
+                            reason: z.ZodOptional<z.ZodString>;
                             raw: z.ZodOptional<z.ZodJSONSchema>;
                             holder: z.ZodOptional<z.ZodObject<{
                                 clientId: z.ZodString;
@@ -1597,6 +1968,20 @@ export declare const MethodSchemas: {
                 model: z.ZodOptional<z.ZodString>;
                 title: z.ZodOptional<z.ZodString>;
                 meta: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodJSONSchema>>;
+                permission: z.ZodOptional<z.ZodEnum<{
+                    default: "default";
+                    readonly: "readonly";
+                    "auto-edit": "auto-edit";
+                    full: "full";
+                    acceptEdits: "acceptEdits";
+                    plan: "plan";
+                    bypassPermissions: "bypassPermissions";
+                    dontAsk: "dontAsk";
+                }>>;
+                forkedFrom: z.ZodOptional<z.ZodObject<{
+                    threadId: z.ZodString;
+                    itemId: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>>;
                 createdAtMs: z.ZodNumber;
                 closedAtMs: z.ZodOptional<z.ZodNumber>;
                 clientThreadId: z.ZodOptional<z.ZodString>;
@@ -1645,6 +2030,9 @@ export declare const MethodSchemas: {
         readonly params: z.ZodObject<{
             threadId: z.ZodString;
             input: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                type: z.ZodLiteral<"bash">;
+                command: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
                 type: z.ZodLiteral<"text">;
                 text: z.ZodString;
             }, z.core.$strip>, z.ZodObject<{
@@ -1666,6 +2054,10 @@ export declare const MethodSchemas: {
                 readonly: "readonly";
                 "auto-edit": "auto-edit";
                 full: "full";
+                acceptEdits: "acceptEdits";
+                plan: "plan";
+                bypassPermissions: "bypassPermissions";
+                dontAsk: "dontAsk";
             }>>;
             sandbox: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
@@ -1697,7 +2089,7 @@ export declare const MethodSchemas: {
                     contextTokens: z.ZodNullable<z.ZodNumber>;
                 }, z.core.$strip>>;
                 error: z.ZodOptional<z.ZodObject<{
-                    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015>[]>;
+                    code: z.ZodUnion<z.ZodLiteral<-32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016>[]>;
                     message: z.ZodString;
                     data: z.ZodOptional<z.ZodObject<{
                         threadId: z.ZodOptional<z.ZodString>;
@@ -1706,6 +2098,7 @@ export declare const MethodSchemas: {
                         retryable: z.ZodBoolean;
                         detail: z.ZodOptional<z.ZodJSONSchema>;
                         stderr: z.ZodOptional<z.ZodString>;
+                        reason: z.ZodOptional<z.ZodString>;
                         raw: z.ZodOptional<z.ZodJSONSchema>;
                         holder: z.ZodOptional<z.ZodObject<{
                             clientId: z.ZodString;
@@ -1722,6 +2115,9 @@ export declare const MethodSchemas: {
             threadId: z.ZodString;
             expectedTurnId: z.ZodString;
             input: z.ZodArray<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                type: z.ZodLiteral<"bash">;
+                command: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
                 type: z.ZodLiteral<"text">;
                 text: z.ZodString;
             }, z.core.$strip>, z.ZodObject<{
@@ -1799,6 +2195,10 @@ export declare const MethodSchemas: {
 export declare const MethodSchema: z.ZodEnum<{
     initialize: "initialize";
     "thread/start": "thread/start";
+    "thread/engineControl": "thread/engineControl";
+    "thread/permission/set": "thread/permission/set";
+    "thread/effort/set": "thread/effort/set";
+    "thread/compact": "thread/compact";
     "thread/resume": "thread/resume";
     "thread/attach": "thread/attach";
     "thread/detach": "thread/detach";

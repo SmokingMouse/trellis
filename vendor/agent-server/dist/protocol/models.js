@@ -5,8 +5,10 @@ export const TimestampSchema = z.number().int().nonnegative().max(Number.MAX_SAF
 export const JsonObjectSchema = z.record(z.string(), z.json());
 export const AbsolutePathSchema = z.string().regex(/^(?:\/|[A-Za-z]:[\\/])/, "absolute local path required");
 export const BackendSchema = z.enum(["claude", "codex", "external"]);
-export const PermissionSchema = z.enum(["readonly", "auto-edit", "full", "default"]);
+export const ClaudeEffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export const PermissionSchema = z.enum(["readonly", "auto-edit", "full", "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"]);
 export const UserInputSchema = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("bash"), command: z.string().min(1) }),
     z.object({ type: z.literal("text"), text: z.string() }),
     z.object({ type: z.literal("image"), path: AbsolutePathSchema, mime: z.string().min(1) }),
     z.object({ type: z.literal("file"), path: AbsolutePathSchema, mime: z.string().optional(), name: z.string().optional() }),
@@ -23,6 +25,8 @@ export const ThreadStatusSchema = z.object({ type: ThreadStatusTypeSchema, error
 export const ThreadSchema = z.object({
     id: IdSchema, backend: BackendSchema, engineThreadId: IdSchema.nullable(), status: ThreadStatusSchema,
     cwd: AbsolutePathSchema, model: z.string().optional(), title: z.string().optional(), meta: JsonObjectSchema.optional(),
+    permission: PermissionSchema.optional(),
+    forkedFrom: z.object({ threadId: IdSchema, itemId: IdSchema.nullable() }).optional(),
     createdAtMs: TimestampSchema, closedAtMs: TimestampSchema.optional(), clientThreadId: IdSchema.optional(),
 });
 export const TurnSchema = z.object({
@@ -53,7 +57,7 @@ export const ItemPayloadSchemas = {
     fileChange: z.object({ changes: FileChangesSchema, status: z.enum(["inProgress", "completed", "failed", "rejected"]) }),
     toolCall: z.object({ name: z.string(), namespace: z.string().optional(), input: z.json(), output: z.json().optional(), isError: z.boolean().optional() }),
     mcpToolCall: z.object({ server: z.string(), tool: z.string(), arguments: z.json(), result: z.json().optional(), error: z.json().optional() }),
-    subAgent: z.object({ kind: z.enum(["agent", "bash", "workflow"]), parentItemId: IdSchema, phase: z.string(), progress: z.json().optional(), report: z.json().optional() }),
+    subAgent: z.object({ kind: z.enum(["agent", "bash", "workflow"]), parentItemId: IdSchema, phase: z.string(), progress: z.json().optional(), report: z.json().optional(), text: z.string().optional(), thinking: z.string().optional() }),
     webSearch: z.object({ query: z.string(), results: z.json().optional() }),
     imageOutput: z.object({ paths: z.array(z.string()) }),
     plan: PlanSchema,

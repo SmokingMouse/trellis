@@ -15,10 +15,7 @@ export function shadowRetryDelay(attempt: number, base = 1000) {
   return Math.min(300000, base * 2 ** Math.min(attempt, 20));
 }
 function snapshotFingerprint(snapshot: AttachResult) {
-  return JSON.stringify([snapshot.thread.status.type, snapshot.nextSeq,
-    snapshot.pendingRequests.map(request => request.params.requestId).sort(),
-    snapshot.items.filter(item => item.status === "inProgress")
-      .map(item => [item.id, JSON.stringify(item.payload).length]).sort()]);
+  return JSON.stringify(snapshot);
 }
 
 /** Trellis owns the only retry timer; the library only handles wire/RPC/cursors. */
@@ -35,9 +32,6 @@ export class ShadowClient {
   private listeners = new Set<(event: ShadowEvent) => void>();
   private threadId?: string;
   private cursor = 0;
-  private poll?: ReturnType<typeof setInterval>;
-  private polling = false;
-  private running = false;
   private fingerprint?: string;
   constructor(private readonly options: ShadowOptions = {}) {}
 
@@ -79,32 +73,19 @@ export class ShadowClient {
     this.connecting = this.open().finally(() => { this.connecting = undefined; });
     return this.connecting;
   }
-  private stopPoll() { clearInterval(this.poll); this.poll = undefined; this.polling = false; }
-  private startPoll() {
-    if (this.poll || !this.threadId || !this.running) return;
-    this.poll = setInterval(() => {
-      const client = this.client, threadId = this.threadId;
-      if (this.polling || !threadId || client?.state !== "connected") return;
-      this.polling = true;
-      void client.request("thread/attach", { threadId, sinceSeq: this.cursor })
-        .catch(error => this.failed(error)).finally(() => { if (this.client === client) this.polling = false; });
-    }, 2000);
-    this.poll.unref?.();
-  }
   private async open(): Promise<AgentClient> {
     try {
       if (!this.client || this.client.state !== "connected") {
         const old = this.client;
         this.client = undefined; // old callbacks cannot arm timers while replacing it
         old?.close();
-        this.stopPoll();
         this.fingerprint = undefined; // reconnect snapshots must always reconcile
         this.attachedClient = undefined;
         const paths = resolveDaemonPaths();
         const client = new AgentClient({ transport: "unix", path: this.options.socketPath ?? process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
           token: this.options.token ?? loadToken(this.options.tokenPath ?? process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
           client: { name: "trellis-shadow", version: "0.1.0", kind: "web", label: "Trellis 只读" },
-          capabilities: { serverRequests: [] },
+          capabilities: { serverRequests: [], engineEvents: true, bashInput: true, pendingRequests: true },
           connectTimeoutMs: 1500, requestTimeoutMs: 5000, reconnect: false,
         });
         this.client = client;
@@ -115,7 +96,6 @@ export class ShadowClient {
           if (state === "closed" || state === "disconnected") {
             if (this.attachedClient === client) this.failed(new Error("daemon disconnected; reconnecting"));
             this.attachedClient = undefined;
-            this.stopPoll();
             this.retry();
           }
         });
@@ -123,8 +103,6 @@ export class ShadowClient {
           if (this.stopped || this.client !== client) return;
           this.lastSnapshot = snapshot;
           this.cursor = Math.max(this.cursor, snapshot.nextSeq - 1);
-          this.running = snapshot.thread.status.type === "running";
-          if (this.running) this.startPoll(); else this.stopPoll();
           const fingerprint = snapshotFingerprint(snapshot);
           if (fingerprint !== this.fingerprint) {
             this.fingerprint = fingerprint;
@@ -138,10 +116,6 @@ export class ShadowClient {
               || (method === "error" && (!("threadId" in params) || !params.threadId));
             if (!relevant) return;
             if ("seq" in params) this.cursor = Math.max(this.cursor, params.seq);
-            if (method === "thread/status/changed" && "status" in params) {
-              this.running = params.status.type === "running";
-              if (this.running) this.startPoll(); else this.stopPoll();
-            }
             this.emit({ type: "notification", notification: { jsonrpc: "2.0", method, params } as ServerNotification });
           });
         }
@@ -151,7 +125,6 @@ export class ShadowClient {
       if (this.threadId && this.attachedClient !== client) {
         await client.request("thread/attach", { threadId: this.threadId, sinceSeq: this.cursor });
         this.attachedClient = client;
-        this.startPoll();
       }
       if (this.stopped) throw new Error("observer closed");
       clearTimeout(this.timer); this.timer = undefined;
@@ -179,7 +152,6 @@ export class ShadowClient {
   close() {
     this.stopped = true;
     clearTimeout(this.timer);
-    this.stopPoll();
     this.client?.close();
     this.listeners.clear();
   }
@@ -187,3 +159,35 @@ export class ShadowClient {
 
 const globalAs = globalThis as typeof globalThis & { trellisShadow?: ShadowClient };
 export function getShadowClient() { return globalAs.trellisShadow ??= new ShadowClient(); }
+
+/** Separate writable connection; observers never participate in approvals. */
+export function createProjectClient() {
+  const paths = resolveDaemonPaths();
+  return new AgentClient({ transport: "unix", path: process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
+    token: loadToken(process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
+    client: { name: "trellis-project", version: "0.2.0", kind: "web", label: "Trellis 网页" },
+    capabilities: { engineEvents: true, bashInput: true, pendingRequests: true, serverRequests: [
+      "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
+      "item/permissions/requestApproval", "item/tool/requestUserInput",
+    ] },
+    connectTimeoutMs: 1500, requestTimeoutMs: 5000,
+    reconnect: { minDelayMs: 1000, maxDelayMs: 30000 },
+  });
+}
+
+export function supportsMidThreadFork(client: AgentClient) {
+  return client.initializeResult?.capabilities.midThreadFork === true;
+}
+
+export async function withProjectLease<T>(client: AgentClient, threadId: string, action: () => Promise<T>): Promise<T> {
+  if (!client.initializeResult?.capabilities.leases) throw new Error("daemon does not support leases");
+  await client.request("thread/lease/acquire", { threadId, ttlMs: 10000 });
+  try { return await action(); }
+  finally { await client.request("thread/lease/release", { threadId }).catch(() => {}); }
+}
+
+export async function setProjectPermission(client: AgentClient, threadId: string,
+  permission: import("@smokingmouse/agent-server/protocol").MethodParams<"thread/permission/set">["permission"]) {
+  if (!client.initializeResult?.capabilities.engine?.permissionSet) throw new Error("daemon does not support permission/set");
+  return withProjectLease(client, threadId, () => client.setPermission({ threadId, permission }));
+}

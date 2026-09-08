@@ -30,6 +30,7 @@ import type {
 // types but the response is always present (no null) and position is omitted.
 
 export type ApiSession = {
+  bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
   rootNodeId: string;
@@ -156,6 +157,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
 
 type SessionRow = {
   herdr_alive: number;
+  binding_type: "legacy" | "pane" | "thread";
   id: string;
   title: string;
   root_node_id: string;
@@ -176,7 +178,7 @@ type SessionRow = {
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, cli_provider, require_approval, agent_id,
+       origin, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type,
        EXISTS(SELECT 1 FROM herdr_sessions h
          JOIN cli_lineages l ON l.cli_session_id = h.session_id
          WHERE l.trellis_session_id = sessions.id AND h.alive = 1
@@ -297,6 +299,7 @@ function resolveWorkspaceId(absPath: string): string | null {
 
 function rowToSession(r: SessionRow): ApiSession {
   return {
+    bindingType: r.binding_type,
     id: r.id,
     title: r.title,
     rootNodeId: r.root_node_id,
@@ -993,6 +996,7 @@ export function claudeSessionPath(sessionId: string, cwd: string | null): string
 }
 
 export function createSessionWithRoot(args: {
+  bindingType?: "legacy" | "thread";
   sessionId: string;
   nodeId: string;
   title: string;
@@ -1030,8 +1034,8 @@ export function createSessionWithRoot(args: {
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
                              context_mode, workspace_path, workspace_id,
                              system_prompt, model,
-                             lineage_isolation, require_approval, agent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             lineage_isolation, require_approval, agent_id, binding_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -1046,6 +1050,7 @@ export function createSessionWithRoot(args: {
       mode === "project" ? 1 : 0,
       requireApproval ? 1 : 0,
       agentId,
+      args.bindingType ?? "legacy",
     );
 
     db.prepare(
@@ -2362,7 +2367,7 @@ export function reapInterruptedStreams(): number {
     .prepare(
       `UPDATE nodes SET status = 'error', error_message = 'interrupted',
               pending_interaction_json = NULL
-       WHERE status = 'streaming'`,
+       WHERE status = 'streaming' AND id NOT IN (SELECT node_id FROM as_turns)`,
     )
     .run();
   return result.changes;

@@ -45,6 +45,7 @@ export class ItemLog {
         PRIMARY KEY(thread_id, id), UNIQUE(thread_id, seq)
       );
       CREATE INDEX IF NOT EXISTS items_turn ON items(thread_id, turn_id, seq);
+      CREATE TABLE IF NOT EXISTS fork_points (thread_id TEXT NOT NULL REFERENCES threads(id), item_id TEXT NOT NULL, native_id TEXT NOT NULL, PRIMARY KEY(thread_id,item_id));
       CREATE TABLE IF NOT EXISTS approvals (
         id TEXT PRIMARY KEY, thread_id TEXT NOT NULL REFERENCES threads(id), turn_id TEXT NOT NULL REFERENCES turns(id),
         item_id TEXT NOT NULL, kind TEXT NOT NULL, params_json TEXT NOT NULL, status TEXT NOT NULL,
@@ -84,6 +85,38 @@ export class ItemLog {
     }
     options(id) { return JSON.parse(this.db.query("SELECT options_json FROM threads WHERE id = ?").get(id).options_json); }
     saveOptions(id, options) { this.db.query("UPDATE threads SET options_json = ? WHERE id = ?").run(JSON.stringify(options), id); }
+    saveForkPoint(threadId, itemId, nativeId) {
+        this.db.query("INSERT OR REPLACE INTO fork_points VALUES(?,?,?)").run(threadId, itemId, nativeId);
+    }
+    forkPoint(threadId, itemId) {
+        return this.db.query("SELECT native_id FROM fork_points WHERE thread_id=? AND item_id=?").get(threadId, itemId)?.native_id;
+    }
+    /** Snapshot payloads and cursors; inherited turns get fresh globally unique IDs. */
+    copyPrefix(sourceId, targetId, items, copyForkPoints = false) {
+        this.transaction(() => {
+            const turns = new Map();
+            let nextSeq = 1;
+            for (const item of items) {
+                let turnId = turns.get(item.turnId);
+                if (!turnId) {
+                    turnId = `tu_${crypto.randomUUID()}`;
+                    turns.set(item.turnId, turnId);
+                    const original = this.turn(item.turnId, sourceId);
+                    const turn = { id: turnId, threadId: targetId, ordinal: turns.size, status: "completed", enqueuedAtMs: original.enqueuedAtMs };
+                    this.insertTurn(turn, { threadId: targetId, input: [] }, "");
+                    this.dequeue(turnId);
+                }
+                this.db.query("INSERT INTO items(thread_id,id,seq,turn_id,type,status,payload_json,started_at,completed_at,completed_seq) VALUES(?,?,?,?,?,?,?,?,?,?)").run(targetId, item.id, item.seq, turnId, item.type, item.status ?? "inProgress", JSON.stringify(item.payload), item.startedAtMs, item.completedAtMs ?? null, item.completedSeq ?? null);
+                nextSeq = Math.max(nextSeq, item.seq + 1, (item.completedSeq ?? 0) + 1);
+                if (copyForkPoints) {
+                    const point = this.forkPoint(sourceId, item.id);
+                    if (point)
+                        this.saveForkPoint(targetId, item.id, point);
+                }
+            }
+            this.db.query("UPDATE threads SET next_seq=? WHERE id=?").run(nextSeq, targetId);
+        });
+    }
     deduplicate(table, key, request) {
         if (!key)
             return;

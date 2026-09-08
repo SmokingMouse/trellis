@@ -190,6 +190,7 @@ export type PendingInteraction = {
 };
 
 export type ChatNode = {
+  asNotice?: string;
   id: string;
   sessionId: string;
   parentId: string | null;
@@ -337,6 +338,7 @@ export const SCRATCH_CLUSTER_KEY = "trellis:scratch";
 export const HOME_CLUSTER_KEY = "trellis:home";
 
 export type Session = {
+  bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
   rootNodeId: string;

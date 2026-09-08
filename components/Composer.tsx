@@ -27,11 +27,13 @@ export function Composer({
   onEscape,
   focusToken,
   mobileCompact = false,
+  fork = false,
   onMobileExpandedChange,
 }: {
   // The node a submit branches from (thread tip in linear view, the active
   // node on canvas). null → composer renders disabled.
   targetNode: ChatNode | null;
+  fork?: boolean;
   placeholder?: string;
   // Fired right after a submit dispatches — the linear view uses it to drop
   // its "branch from #N" retarget chip so the next turn goes to the tip.
@@ -228,7 +230,7 @@ export function Composer({
     att.clear();
     // S88: 剥出开头的 `@slug` —— slug 走 body 字段，剩下的才是问题本身。
     const [mentionAgentSlug, question] = splitMention(trimmed);
-    streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug });
+    streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork });
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
   };

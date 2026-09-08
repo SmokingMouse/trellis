@@ -630,6 +630,7 @@ type Actions = {
       attachments?: NodeAttachment[];
       mentionAgentSlug?: string | null;
       focusNew?: boolean;
+      fork?: boolean;
     },
   ) => Promise<void>;
   // Re-run an existing node in place: server keeps the same id, wipes the
@@ -1467,6 +1468,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       await runStream(
         {
           kind: "branch",
+          ...(opts?.fork ? { fork: true } : {}),
           parentNodeId: parentId,
           question,
           parentAnchor: anchor,
@@ -1496,9 +1498,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   retryNode: async (nodeId) => {
     const { provider } = get();
-    // Optimistically reset the local node so the UI flips back to the
-    // streaming state immediately. The server's "created" event will
-    // overwrite this with the canonical reset row.
+    // Keep the previous answer visible until the server commits a replacement.
     set((s) => {
       const n = s.nodes[nodeId];
       if (!n) return s;
@@ -1507,14 +1507,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...s.nodes,
           [nodeId]: {
             ...n,
-            response: "",
             status: "streaming",
             errorMessage: null,
-            tokenCount: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-            // Retry wipes the panel — server clears tool_calls_json
-            // in resetNodeForRetry; mirror locally so the UI doesn't
-            // briefly show stale entries during the network round-trip.
-            toolCalls: [],
             // A路②: server also clears pending_interaction_json on retry.
             pendingInteraction: null,
           },
@@ -1544,6 +1538,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       if (STREAM_CONTROLLERS.get(nodeId) === controller) {
         STREAM_CONTROLLERS.delete(nodeId);
       }
+      // Failed retries retain the canonical answer, usage and status.
+      try {
+        const response = await fetch(`/api/nodes/${nodeId}`);
+        if (response.ok) {
+          const { node } = await response.json();
+          if (node) set(s => ({ nodes: { ...s.nodes, [nodeId]: { ...s.nodes[nodeId], ...node, toolCalls: s.nodes[nodeId]?.toolCalls ?? [] } } }));
+        }
+      } catch { /* A later reload reconciles when offline. */ }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
   },
@@ -2744,6 +2746,7 @@ type ChatRequestBody =
     }
   | {
       kind: "branch";
+      fork?: boolean;
       parentNodeId: string;
       question: string;
       parentAnchor: ParentAnchor | null;
@@ -2850,7 +2853,8 @@ type StreamEvent =
       toolName: string;
       input: unknown;
     }
-  | { type: "interaction_resolved"; toolUseId: string };
+  | { type: "interaction_resolved"; toolUseId: string }
+  | { type: "notice"; message: string };
 
 // 流式期间的 node patch 合批：catchup / tool_call_start / tool_call_done /
 // tool_call_update 这类事件在一次 run 里能以每秒数个的速率轰过来，每个都
@@ -3100,6 +3104,9 @@ function handleStreamEvent(
       if (get().session?.id === event.sessionId) {
         void get().loadSession(event.sessionId);
       }
+    } else if (event.type === "notice" && currentNodeId) {
+      const id = currentNodeId;
+      useSessionStore.setState(s => ({ nodes: { ...s.nodes, [id]: { ...s.nodes[id], asNotice: event.message } } }));
     } else if (event.type === "catchup" && currentNodeId) {
       // Reconnect path: server-authoritative snapshot of where the run
       // is right now. Overwrite the response + toolCalls and reset the

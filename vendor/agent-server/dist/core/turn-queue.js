@@ -36,7 +36,7 @@ export class TurnQueue {
         if ((this.active || this.frozen) && this.read().length >= this.maxQueuedTurns)
             throw new ProtocolError(ErrorCode.thread_busy, "turn queue is full", { threadId: this.threadId, retryable: true });
         const turn = { id: `tn_${crypto.randomUUID()}`, threadId: this.threadId, ordinal: (this.log.turns(this.threadId).at(-1)?.ordinal ?? 0) + 1, status: "queued", enqueuedAtMs: Date.now(), ...(params.clientTurnId ? { clientTurnId: params.clientTurnId } : {}) };
-        this.log.transaction(() => this.log.insertTurn(turn, params, params.input.map(p => p.type === "text" ? p.text : p.path).join(" ").slice(0, 200)));
+        this.log.transaction(() => this.log.insertTurn(turn, params, params.input.map(p => p.type === "text" ? p.text : p.type === "bash" ? `!${p.command}` : p.path).join(" ").slice(0, 200)));
         this.changed();
         this.pump();
         return { turn: this.log.turn(turn.id) };

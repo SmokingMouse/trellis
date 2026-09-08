@@ -14,6 +14,7 @@ export declare class ClaudeEventMapper {
     private items;
     private textItem?;
     private reasoningItem?;
+    private subAgents;
     private turnId;
     constructor(cwd?: string);
     beginTurn(turnId: string): void;

@@ -27,7 +27,11 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
     if (!container) return;
     let previousTop = container.scrollTop;
     const onScroll = () => {
-      if (container.scrollTop < previousTop - 1) following.current = false;
+      const bottom = Math.max(0, container.scrollHeight - container.clientHeight);
+      // Removing an approval can clamp scrollTop to a shorter document's bottom.
+      // That is layout movement, not the reader scrolling away from the tail.
+      const clampedToBottom = previousTop > bottom && Math.abs(container.scrollTop - bottom) <= 1;
+      if (container.scrollTop < previousTop - 1 && !clampedToBottom) following.current = false;
       else if (container.scrollTop > previousTop && container.scrollHeight - container.clientHeight - container.scrollTop <= 48) following.current = true;
       previousTop = container.scrollTop;
       setFollowTail(following.current);
@@ -76,10 +80,10 @@ export function ThreadLogView({ threadId }: { threadId: string }) {
       第 {turn.ordinal} 轮 · {turn.status === "inProgress" ? "进行中" : turn.status === "completed" ? "已完成" : turn.status === "failed" ? "失败" : turn.status === "interrupted" ? "已中断" : turn.status}
       {turn.error && ` · ${turn.error.message}`}
     </p>)}
-    {log.pending.map(request => <aside className="as-approval" key={request.params.requestId} data-as-approval>
+    {log.pending.map(request => <aside className="as-approval" key={request.requestId} data-as-approval>
       <strong>等待审批 · 只读</strong>
       <p>请在原客户端处理此请求。</p>
-      <pre>{JSON.stringify(request.params, null, 2)}</pre>
+      <pre>{JSON.stringify(request, null, 2)}</pre>
     </aside>)}
     {!items.length && <p className="as-empty">等待这段会话的第一条日志。</p>}
     <ol className="as-items">

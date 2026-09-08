@@ -36,6 +36,9 @@ declare class Connection implements InProcessClient, ApprovalClient {
     readonly reverse: Map<string | number, string>;
     readonly delivered: Set<string>;
     readonly optOut: Set<string>;
+    engineEvents: boolean;
+    pendingRequests: boolean;
+    bashInput: boolean;
     label: string;
     initialized: boolean;
     initializing: boolean;

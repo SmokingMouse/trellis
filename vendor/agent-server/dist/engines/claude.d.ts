@@ -1,10 +1,13 @@
 import { type ChildProcessWithoutNullStreams } from "node:child_process";
-import { type StartTurnParams, type UserInput } from "../protocol/index.js";
+import { type JsonObject, type StartTurnParams, type UserInput } from "../protocol/index.js";
 import { AsyncQueue, type EngineEvent, type EngineSession, type SessionOptions } from "./session.js";
+export declare const CLAUDE_CONTROL_ALLOWLIST: Set<string>;
+export declare function claudePermission(permission?: SessionOptions["permission"]): string;
 export declare function buildClaudeLaunch(options: SessionOptions): {
     args: string[];
     env: NodeJS.ProcessEnv;
 };
+export declare function validateClaudeEffort(effort?: string): void;
 export declare function claudeUserMessage(input: UserInput[]): Record<string, unknown>;
 export interface ClaudeEngineOptions {
     executable?: string;
@@ -35,9 +38,16 @@ export declare class ClaudeEngine implements EngineSession {
     private nativeRequests;
     private sawTextDelta;
     private sawThinkingDelta;
+    private partials;
+    private bash?;
+    private lastAssistantUuid?;
+    private seeding?;
     constructor(config?: ClaudeEngineOptions);
     spawn(options: SessionOptions): Promise<void>;
     attach(): Promise<void>;
+    engineControl(subtype: string, params: JsonObject): Promise<JsonObject>;
+    private permissionChanged;
+    setPermission(permission: NonNullable<SessionOptions["permission"]>): Promise<void>;
     private assertAlive;
     validateTurn(options: StartTurnParams): void;
     sendTurn(turnId: string, input: UserInput[], options: StartTurnParams): Promise<void>;

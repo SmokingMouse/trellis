@@ -15,6 +15,8 @@ export class AgentClient {
     calls = new Map();
     cursors = new Map();
     pending = new Map();
+    requestStates = new Map();
+    pendingStatesEnabled = false;
     frameListeners = new Set();
     notifications = new Set();
     requests = new Set();
@@ -31,6 +33,8 @@ export class AgentClient {
     get clientId() { return this.initialized?.clientId; }
     get initializeResult() { return this.initialized && structuredClone(this.initialized); }
     get pendingRequests() { return new Map(this.pending); }
+    /** Empty unless negotiated and subscribed; terminal states last until detach/reconnect/attach reconciliation. */
+    get pendingRequestStates() { return structuredClone(this.requestStates); }
     static async connectUnix(options) {
         const client = new AgentClient({ transport: "unix", path: options.path }, options);
         try {
@@ -56,6 +60,7 @@ export class AgentClient {
     onFrame(listener) { return this.listen(this.frameListeners, listener); }
     onStateChange(listener) { return this.listen(this.states, listener); }
     onSnapshot(listener) { return this.listen(this.snapshots, listener); }
+    onPendingRequests(listener) { return this.onNotification("thread/pendingRequests", listener); }
     onError(listener) { this.errors.add(listener); return () => this.errors.delete(listener); }
     onNotification(method, listener) {
         return this.listen(this.notifications, frame => { if (frame.method === method)
@@ -110,11 +115,14 @@ export class AgentClient {
                 throw new Error("connection cancelled");
             }
             this.wire = wire;
+            const capabilities = { engineEvents: true, bashInput: true, pendingRequests: true, ...this.options.capabilities };
             this.initialized = await this.call("initialize", {
                 protocolVersion: this.options.protocolVersion ?? "as/1", token: this.options.token,
                 client: this.options.client ?? { name: "agent-client", version: "0.1.0", kind: "library", label: "agent-client" },
-                capabilities: this.options.capabilities,
+                capabilities,
             });
+            this.pendingStatesEnabled = capabilities.pendingRequests === true && this.initialized.capabilities.pendingRequests === true
+                && !capabilities.notifications?.optOut.includes("thread/pendingRequests");
             this.send({ jsonrpc: "2.0", method: "initialized", params: {} });
             for (const threadId of [...this.cursors.keys()]) {
                 try {
@@ -150,6 +158,8 @@ export class AgentClient {
         this.wire = undefined;
         wire?.close();
         this.pending.clear();
+        this.requestStates.clear();
+        this.pendingStatesEnabled = false;
         for (const call of this.calls.values()) {
             clearTimeout(call.timer);
             call.reject(error);
@@ -170,6 +180,11 @@ export class AgentClient {
         await this.connect();
         return this.call(method, params);
     }
+    engineControl(params) { return this.request("thread/engineControl", params); }
+    setPermission(params) { return this.request("thread/permission/set", params); }
+    setEffort(params) { return this.request("thread/effort/set", params); }
+    compact(params) { return this.request("thread/compact", params); }
+    fork(params) { return this.request("thread/fork", params); }
     call(method, params) {
         const id = `cli_${++this.sequence}`;
         return new Promise((resolve, reject) => {
@@ -248,6 +263,8 @@ export class AgentClient {
                 this.trackItem(notification.params.threadId, notification.params.item);
             if (notification.method === "serverRequest/resolved" || notification.method === "serverRequest/expired")
                 this.pending.delete(notification.params.requestId);
+            if (notification.method === "thread/pendingRequests" && this.pendingStatesEnabled)
+                this.requestStates.set(notification.params.requestId, structuredClone(notification.params));
             this.emit(this.notifications, notification);
         }
         catch (error) {
@@ -288,12 +305,18 @@ export class AgentClient {
         if (method === "thread/detach") {
             const { threadId } = params;
             this.cursors.delete(threadId);
+            this.clearRequestStates(threadId);
             for (const [id, request] of this.pending)
                 if (request.params.threadId === threadId)
                     this.pending.delete(id);
         }
         else if (method === "thread/attach") {
             const snapshot = result, threadId = snapshot.thread.id;
+            this.clearRequestStates(threadId);
+            if (this.pendingStatesEnabled)
+                for (const request of snapshot.pendingRequests)
+                    if (request.state)
+                        this.requestStates.set(request.params.requestId, structuredClone(request.state));
             const cursor = this.cursor(threadId);
             cursor.highest = Math.max(cursor.highest, snapshot.nextSeq - 1);
             for (const item of snapshot.items)
@@ -312,6 +335,11 @@ export class AgentClient {
         }
         else if (method === "thread/start" || method === "thread/resume" || method === "thread/fork")
             this.cursor(result.thread.id);
+    }
+    clearRequestStates(threadId) {
+        for (const [id, state] of this.requestStates)
+            if (state.threadId === threadId)
+                this.requestStates.delete(id);
     }
 }
 export const connectUnix = AgentClient.connectUnix;

@@ -1,4 +1,5 @@
 import { abortRun } from "@/lib/server/run-bus";
+import { isThreadNode, interruptProject } from "@/lib/server/as-project";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,10 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  if (isThreadNode(id)) {
+    try { await interruptProject(id); return Response.json({ aborted: true }); }
+    catch (error) { return Response.json({ error: String(error) }, { status: 409 }); }
+  }
   const ok = abortRun(id);
   return Response.json({ aborted: ok }, { status: ok ? 200 : 404 });
 }

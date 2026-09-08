@@ -1,16 +1,22 @@
 import { z } from "zod";
 import { ClientIdentitySchema, FileChangesSchema, IdSchema, ItemSchema, JsonObjectSchema, PlanSchema, QueuedTurnSchema, ThreadSchema, ThreadStatusSchema, TimestampSchema, TurnSchema, UsageSchema } from "./models.js";
 import { RpcErrorSchema } from "./errors.js";
+import { BackendSchema } from "./models.js";
+import { PermissionSchema } from "./models.js";
+import { PendingRequestStateSchema } from "./requests.js";
 const item = { threadId: IdSchema, turnId: IdSchema, itemId: IdSchema };
 const delta = z.object({ ...item, delta: z.string() });
 export const NotificationSchemas = {
+    "thread/pendingRequests": PendingRequestStateSchema,
+    "thread/permission/changed": z.strictObject({ threadId: IdSchema, permission: PermissionSchema }),
+    "thread/engineEvent": z.strictObject({ threadId: IdSchema, turnId: IdSchema.optional(), backend: BackendSchema, subtype: z.string(), payload: JsonObjectSchema }),
     initialized: z.object({}),
     "thread/started": z.object({ threadId: IdSchema, thread: ThreadSchema }),
     "thread/status/changed": z.object({ threadId: IdSchema, status: ThreadStatusSchema }),
     "thread/queue/changed": z.object({ threadId: IdSchema, queue: z.array(QueuedTurnSchema) }),
     "thread/closed": z.object({ threadId: IdSchema, reason: z.string() }),
     "thread/tokenUsage/updated": z.object({ threadId: IdSchema, usage: UsageSchema }),
-    "thread/metadata/updated": z.object({ threadId: IdSchema, engineThreadId: IdSchema.nullable().optional(), title: z.string().optional(), meta: JsonObjectSchema.optional() }),
+    "thread/metadata/updated": z.object({ threadId: IdSchema, engineThreadId: IdSchema.nullable().optional(), model: z.string().optional(), title: z.string().optional(), meta: JsonObjectSchema.optional() }),
     "turn/started": z.object({ threadId: IdSchema, turnId: IdSchema, turn: TurnSchema }),
     "turn/completed": z.object({ threadId: IdSchema, turnId: IdSchema, turn: TurnSchema }),
     "turn/plan/updated": z.object({ threadId: IdSchema, turnId: IdSchema, plan: PlanSchema }),
