@@ -182,7 +182,7 @@ export function SessionSidebar() {
   // change or any store mutation that bumps sessionsRevision.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/sessions")
+    fetch(SIDEBAR_V2 ? "/api/sessions?includeEmptyWorkspaces=1" : "/api/sessions")
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled) {

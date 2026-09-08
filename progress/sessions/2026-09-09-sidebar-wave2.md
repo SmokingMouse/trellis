@@ -8,8 +8,8 @@
 - 同一快照、统一来源修复后 DOM 导航行：旧布局 163 → 新布局 141（分组 56 → 48、会话行 98 → 93、链行 7 → 0、Herdr 组 / 归档尾行各 1 → 0）。原 user-only 骨架为 139 行，修复带回此前被遗漏的工作区层，单独保留原始证据。快照含 95 个活跃会话，按时间全部展示；按项目默认另有 2 个会话位于既有已合并折叠组。实际行数未达到方案约 60 行的估计，没有为凑数截断会话。
 - 稍后再读脚本补真实滚动：快照长问题使回答位于视口下方 5121px，懒挂载前没有操作按钮；滚到回答后原有全部断言通过。首次失败和修后日志保留，未改产品行为。
 - 主控裁决已落实：波 1 遗漏的项目树来源过滤纳入本波。`lib/session-source.ts` 的唯一来源谓词供 `listSessions`、`listRecentChains`、`listProjectTree` 及归档计数共用，Herdr / task 不再因 user-only 计数落入暂存区。
-- 验收基线按契约 out/decision.md 第 2 条：现有 10 条手机 shell 脚本 + 字体扫描；随后续 PR #48 加入 main 的 `mobile-as-adopt.sh` 不强制，本分支不引入该 PR。
-- 上次提到的第二个过滤条件是 `listProjectTree` 的 `(sessionCount > 0 || createdBy !== "discovered") && pathExists(path)`：隐藏无活跃会话的 discovered 工作区（包括仅归档目录）及不存在的目录，保留主动新建 / 扫描登记的空工作区。它不区分来源或 `dir:` / 伪项目，按裁决保留并在代码加注释；无可见工作区的项目仍隐藏。新增单测对比所有来源的项目树计数与统一列表，覆盖 Herdr / task、归档和空 / 失效目录。
+- 验收基线按最新补充裁决：现有 10 条手机 shell 脚本，字体扫描单列、不计入 10 条。main 已有 `mobile-as-adopt.sh`，但本分支不含其依赖的 PR #48；本波未合并该 PR 或选跑此非强制脚本。
+- 上次提到的第二个过滤条件是 `listProjectTree` 的 `(sessionCount > 0 || createdBy !== "discovered") && pathExists(path)`：默认隐藏无活跃会话的 discovered 工作区（包括仅归档目录）及不存在的目录，保留主动新建 / 扫描登记的空工作区。它不区分来源或 `dir:` / 伪项目；flag off / 旧调用方保留该过滤。按补充裁决，V2 显式请求 `/api/sessions?includeEmptyWorkspaces=1`，保留所有现存空工作区，让仅归档会话在含归档时仍归原工作区；失效路径始终隐藏。单测对比四来源计数、V2 与旧骨架语义，截图脚本检查归档会话工作区位置。
 
 证据目录：`/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-sidebar-wave2-c6c6/out/`。
 

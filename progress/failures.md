@@ -6,6 +6,8 @@
 
 ## 已结案
 
+- **AS shadow 全部断言通过后验证锁目录已消失**（fj-sidebar-wave2-c6c6 补充复验）→ `not-reproducible`。症状：功能断言全部 PASS，清理 `rmdir /tmp/trellis-mobile-verify.lock` 报不存在导致 exit 1。可证伪假设：共享锁被其它清理动作提前移除，具体进程未定位；同代码单独复跑退出 0，未修改清理脚本掩盖错误。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-as-shadow.sh`。失败证据 `mobile-as-shadow-cleanup-attempt1.log`、复跑 `mobile-as-shadow.log` 均在契约 out。
+
 - **稍后再读脚本在长问题的回答懒挂载前等待按钮**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：真库随机选中的节点有完整回答，但 `response-more` 等待超时。可证伪假设：长问题把回答推离视口，`ResponseBody` 的 `useNearViewport` 只挂纯文本占位。脚本在每次打开会话后先滚到回答；日志记录滚动前位置，原书签、跨设备同步及分页断言全部通过。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-read-later.sh`，exit 0。首次失败及最终日志在契约 out 的 `mobile-read-later-attempt1.log` / `mobile-read-later.log`；产品代码未改。
 
 - **波 2 手机断言仍依赖已退役链行 / 将 checkbox 视为文本输入**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：touch-targets 找不到 `session-chain-row`；safe-area 将归档 checkbox 的 11px 字号判作文本输入失败。可证伪假设：测试范围滞后于新工具条。链行断言迁到排布 / 来源 / 归档触控目标；字体检查排除非文本 input，与既有 `mobile-input-font-scan.ts` 同口径，文本及 select 的 16px 守卫保留。判定命令：统一隔离前缀分别运行 `sh scripts/mobile-verify/mobile-touch-targets.sh`、`sh scripts/mobile-verify/mobile-safe-area.sh`，最终均 exit 0；首次日志保留在契约 out。

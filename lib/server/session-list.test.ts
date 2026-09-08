@@ -79,4 +79,14 @@ test("项目树对 Herdr / task 等来源的计数与统一列表一致，工作
   expect(workspaces.find(w => w.id === "workspace-herdr")?.sessionCount).toBe(1);
   expect(workspaces.find(w => w.id === "workspace-task")?.sessionCount).toBe(1);
   expect(listSessions({ archived: true }).find(s => s.id === "herdr-1")?.workspaceId).toBe("archive-only");
+  const complete = listProjectTree(db, { includeEmpty: true }).find(p => p.id === "sources")!.workspaces;
+  expect(complete.map(w => w.id).sort()).toEqual([
+    "archive-only", "empty-created", "empty-discovered",
+    "workspace-herdr", "workspace-lark", "workspace-task", "workspace-user",
+  ]);
+  const archivedSession = listSessions({ archived: true }).find(s => s.id === "herdr-1")!;
+  expect(complete.find(w => w.id === archivedSession.workspaceId)?.sessionCount).toBe(0);
+  expect(complete.some(w => w.id === "missing")).toBeFalse();
+  // 显式请求 V2 骨架不会改变后续旧调用方的默认行为。
+  expect(listProjectTree(db).find(p => p.id === "sources")!.workspaces).toEqual(workspaces);
 });
