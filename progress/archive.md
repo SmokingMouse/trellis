@@ -179,3 +179,5 @@
   3. 视图接入：`TurnCard`（线性视图/工作台）底部操作栏左侧嵌入 `TurnStatsMeta`，流式期间与完成态自适应；`ChatNode`（画布视图完整卡片与紧凑卡片）接入 `TurnStatsMeta`，全端体验对齐。
 - **验证**: `bun test` 17/17 全过（涵盖精度、耗时格式化、工具时间区间合并与扣除、TPS 纯模型速率计算）；`tsc --noEmit` 零错；`scripts/test-cli-jsonl.ts` 与 `scripts/test-tool-tree.ts` 全绿。
 - **Next**: 合并至 main，下次 `make deploy` 部署上线。
+
+> 2026-09-07 README 瘦身搬来的指针注记：`sessions/` 里 2026-09-03 有两条 S133 撞号并存（文件名为键）；`0000-legacy.md` = S132–128 存量。

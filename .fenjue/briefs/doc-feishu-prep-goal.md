@@ -1,0 +1,6 @@
+为《Trellis 当前架构介绍》准备飞书导入，只产文件、绝对不建文档、不调用任何 lark-cli 写操作（docs +create / +update / drive +import / whiteboard 写入一律禁止；只允许 lark-cli 的只读或 --help 调用）。先读 ~/.claude/skills/lark-doc/SKILL.md、references/lark-doc-create.md、references/lark-doc-xml.md、references/lark-doc-xml-extended-blocks.md、references/style/lark-doc-style.md、references/style/lark-doc-create-workflow.md、references/lark-doc-whiteboard.md，以及 ~/.claude/skills/write-tech-design/references/feishu-engineering-doc.md。
+交付（全部放本单 out/）：
+(1) 可重复运行的转换脚本 md2lark.ts（bun）：输入 article.md 与同目录 svg，输出 feishu.xml——编号标题映射为 h1/h2/h3；GFM 表格映射为飞书表格块；列表、粗体保留；行内代码只保留真命令/真代码；一级节之间加分割线；```mermaid 代码块转成 <whiteboard type="mermaid">（按飞书安全子集校验：无花括号、标签含括号整体加引号、换行用 <br/>）；![..](overview.svg) 转成 <whiteboard type="svg">（按 lark-doc-whiteboard.md 的 SVG 规则：viewBox、无外部字体、尺寸限制，必要时清洗 SVG）；文档标题用 <title>。
+(2) 用当前草稿 /Users/smokingmouse/python/learning/trellis/.fenjue/archive/fj-doc-write-d187/out/article.md 跑一遍产出 out/feishu.xml 作为样例（成稿改定后会用最终稿重跑同一脚本）；xmllint --noout 通过；lark-cli 若有本地校验/预览能力（查 --help）就用它校验，没有就写明。
+(3) out/import-plan.md：导入步骤（建文档命令的完整参数、bot 身份下给用户 member-add 的步骤、画板块数量与类型、预计块数），以及无法用 XML 表达而需降级的内容清单。
+硬规则：不写凭证；XML 里不得出现带用户名的绝对路径；只读仓库；临时物只在 /tmp。产物齐全后发 result。blocker 期间不发 result。

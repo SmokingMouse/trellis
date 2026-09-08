@@ -1,0 +1,3 @@
+目标：修 agent-tui 信息设计急救的异源复核阻断项 P1-1～P1-6（复核报告 `/Users/smokingmouse/python/learning/trellis/.fenjue/archive/fj-tui-display-quickwin-review-9ab4/out/review.md`「阻断项」表，每条都带证据与「返工验收条件」，逐条按该条件自证；原实现单 `.fenjue/archive/fj-tui-display-quickwin-e873/out/result.md` 同前缀）。你是 Claude sonnet 坐席，分支 feat/tui-display-quickwin（本 worktree），只改 apps/agent-tui，不动协议客户端 / 租约 / 审批握手 / 按键路由语义。
+已知要点（以报告为准）：失败命令折叠态必须显示退出码（payload exitCode 缺省时从输出首行诊断取）；Read/Grep 摘要必须单行；空 reasoning 时间线不得留空串项；折叠态物理行数 ≤ 8（含头部与提示行）；`bun test apps/agent-tui/src` 在默认环境（不靠 `env -u NO_COLOR`）全绿；其余按表。
+交付：修复提交；每条 P1 在 out/result.md 里给「复核条件 → 我的证据（命令 + 输出摘要）」；重新打包 `apps/agent-tui/bin/agent-tui` 并用它连生产 daemon（显式 `--model sonnet`）截一帧折叠态与展开态。产物目录 `$FENJUE_ROOT/.fenjue/tasks/$FENJUE_CID/out/`。
