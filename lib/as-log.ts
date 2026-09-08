@@ -1,0 +1,74 @@
+import type { Item, PendingServerRequest, Turn, NotificationParams } from "@smokingmouse/agent-server/protocol";
+import type { ShadowEvent } from "./as-shadow";
+
+export interface ThreadLog {
+  items: Record<string, Item>;
+  pending: PendingServerRequest[];
+  cursor: number;
+  state: string;
+  turns: Record<string, Turn>;
+  errors: NotificationParams<"error">[];
+}
+export const emptyThreadLog = (): ThreadLog => ({ items: {}, pending: [], cursor: 0, state: "connecting", turns: {}, errors: [] });
+
+/** Snapshots/completions replace payloads; only live deltas append. */
+export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog {
+  if (event.type === "connection") return log.state === event.state ? log : { ...log, state: event.state };
+  if (event.type === "snapshot") {
+    let items = log.items;
+    for (const item of event.snapshot.items) {
+      if (JSON.stringify(log.items[item.id]) === JSON.stringify(item)) continue;
+      if (items === log.items) items = { ...items };
+      items[item.id] = item;
+    }
+    const cursor = Math.max(log.cursor, event.snapshot.nextSeq - 1);
+    const pending = JSON.stringify(log.pending) === JSON.stringify(event.snapshot.pendingRequests) ? log.pending : event.snapshot.pendingRequests;
+    return items === log.items && pending === log.pending && cursor === log.cursor ? log : { ...log, items, pending, cursor };
+  }
+  const { method, params } = event.notification;
+  if (method === "error") {
+    if (log.errors.some(error => JSON.stringify(error) === JSON.stringify(params))) return log;
+    return { ...log, errors: [...log.errors, params] };
+  }
+  if (method === "turn/started" || method === "turn/completed") {
+    if (JSON.stringify(log.turns[params.turnId]) === JSON.stringify(params.turn)) return log;
+    return { ...log, turns: { ...log.turns, [params.turnId]: params.turn } };
+  }
+  if (method === "item/started" || method === "item/completed") {
+    if (params.seq <= log.cursor) return log;
+    return { ...log, items: { ...log.items, [params.item.id]: params.item }, cursor: params.seq };
+  }
+  if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
+    const pending = log.pending.filter(request => request.params.requestId !== params.requestId);
+    return pending.length === log.pending.length ? log : { ...log, pending };
+  }
+  if (!("itemId" in params)) return log;
+  const item = log.items[params.itemId];
+  if (!item || item.status !== "inProgress") return log;
+  if (("delta" in params && !params.delta) || ("chunk" in params && !params.chunk)) return log;
+  let updated = item;
+  if (method === "item/agentMessage/delta" && item.type === "agentMessage")
+    updated = { ...item, payload: { ...item.payload, text: item.payload.text + params.delta } };
+  if (method === "item/reasoning/textDelta" && item.type === "reasoning")
+    updated = { ...item, payload: { ...item.payload, text: (item.payload.text ?? "") + params.delta } };
+  if (method === "item/reasoning/summaryTextDelta" && item.type === "reasoning")
+    updated = { ...item, payload: { ...item.payload, summary: (item.payload.summary ?? "") + params.delta } };
+  if (method === "item/commandExecution/outputDelta" && item.type === "commandExecution")
+    updated = { ...item, payload: { ...item.payload, aggregatedOutput: (item.payload.aggregatedOutput ?? "") + params.chunk } };
+  if (method === "item/fileChange/patchUpdated" && item.type === "fileChange")
+    updated = { ...item, payload: { ...item.payload, changes: params.changes } };
+  if (method === "item/subAgent/progress" && item.type === "subAgent")
+    updated = { ...item, payload: { ...item.payload, phase: params.phase, progress: params.progress } };
+  return updated === item || JSON.stringify(updated) === JSON.stringify(item) ? log : { ...log, items: { ...log.items, [item.id]: updated } };
+}
+
+export function itemText(item: Item): string {
+  switch (item.type) {
+    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.path).join("\n");
+    case "agentMessage": return item.payload.text;
+    case "reasoning": return [item.payload.summary, item.payload.text].filter(Boolean).join("\n");
+    case "commandExecution": return `$ ${item.payload.command}\n${item.payload.cwd}\n${item.payload.aggregatedOutput ?? ""}${item.payload.exitCode == null ? "" : `\nexit ${item.payload.exitCode}`}`;
+    case "fileChange": return item.payload.changes.map(change => `${change.kind} ${change.path}\n${change.diff ?? ""}`).join("\n");
+    default: return JSON.stringify(item.payload, null, 2);
+  }
+}
