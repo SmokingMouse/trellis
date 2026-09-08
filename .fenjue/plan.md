@@ -741,7 +741,9 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
 - [ ] sidebar-wave2: 侧栏 IA 波 2 · 排布切换：工具条「按项目/按时间」+ 来源筛选 + 含归档；最近组与 Herdr 组退役（能力搬入会话内面板/行内状态）；chat 会话归伪项目「速记」；空工作区折叠 | after: sidebar-wave1 | kind: codex
   cid: fj-sidebar-wave2-c6c6
 - [ ] sidebar-wave3: 侧栏 IA 波 3 · 会话内面板合并：TreePanel + Outline → 右侧 push 式「结构」面板（默认 36px 竖条），递归森林 + 当前话题 + 当前链高亮 + 其它分支，手机复用全屏 sheet，正文零遮挡 | after: sidebar-wave2-integrate | kind: codex
+  cid: fj-sidebar-wave3-8dc6
 - [ ] sidebar-wave4: 侧栏 IA 波 4 · 画布地图化：画布改为面板里的地图覆盖层，进入必 fitView，选中即关闭落回线性 | after: sidebar-wave3 | kind: codex
+  cid: fj-sidebar-wave4-7058
 - [ ] as-adopt-fix: 收编返工：修复核 P1-1（cwd 等于系统根被收进主目录/暂存区）与 P1-2（每 1.5 秒全量快照 30 MB → 增量 cursor + 仅变化线程 attach），顺手 P2-1～3，探针修前后数字 | after: as-adopt-review | kind: codex | keep-seat
   cid: fj-as-adopt-fix-4fb3
 - [ ] as-adopt-review2: 复核收编返工：ownership-exact 全 PASS、探针稳态零 attach、P2 处理、零回归 | after: as-adopt-fix | mode: readonly | kind: claude | keep-seat

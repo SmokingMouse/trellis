@@ -239,3 +239,8 @@
 - [fj-as-adopt-review2-ebce] 复核收编返工：ownership-exact 全 PASS、探针稳态零 attach、P2 处理、零回归 | accepted | reworks=0 | 2026-09-09T01:12:52+08:00 | e3b0c44298fc
 - [fj-as-adopt-ship-184a] 收编上线：feat/as-adopt → PR 合 main → make deploy → 生产 TRELLIS_AS | accepted | reworks=1 | 2026-09-09T02:05:23+08:00 | ff8c6ecfdcca
 - [fj-sidebar-wave2-c6c6] 侧栏 IA 波 2 · 排布切换：工具条「按项目/按时间」+ 来源筛选 + 含归档；最近组与 Herdr 组退役（能力搬 | accepted | reworks=0 | 2026-09-09T02:19:56+08:00 | cec8286ba005
+- [fj-sidebar-wave2-integrate-b80f] 波 2 集成：feat/sidebar-wave2 合入 origin/main（含收编 PR #48/#49），解冲突 | accepted | reworks=0 | 2026-09-09T02:55:32+08:00 | 39b776599bce
+- [fj-as-controls-polish-dfcc] 收编会话节点视图：引擎事件默认过滤+人话化+可展开原始 JSON，外部会话权限只读，截图验证 | accepted | reworks=0 | 2026-09-09T03:00:14+08:00 | 1aa62237c901
+- [fj-as-observe-retire-6552] 删掉只读观察页：/console/threads、/api/as/threads*、ThreadLogView、as-s | accepted | reworks=0 | 2026-09-09T03:03:02+08:00 | 1b0051133d95
+- [fj-sidebar-wave3-8dc6] 侧栏 IA 波 3 · 会话内面板合并：TreePanel + Outline → 右侧 push 式「结构」面板（默认 | accepted | reworks=0 | 2026-09-09T03:51:53+08:00 | c4b885742ac9
+- [fj-sidebar-wave4-7058] 侧栏 IA 波 4 · 画布地图化：画布改为面板里的地图覆盖层，进入必 fitView，选中即关闭落回线性 | accepted | reworks=0 | 2026-09-09T04:29:26+08:00 | 33706c8eda17
