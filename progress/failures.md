@@ -6,6 +6,10 @@
 
 ## 已结案
 
+- **波 2 手机断言仍依赖已退役链行 / 将 checkbox 视为文本输入**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：touch-targets 找不到 `session-chain-row`；safe-area 将归档 checkbox 的 11px 字号判作文本输入失败。可证伪假设：测试范围滞后于新工具条。链行断言迁到排布 / 来源 / 归档触控目标；字体检查排除非文本 input，与既有 `mobile-input-font-scan.ts` 同口径，文本及 select 的 16px 守卫保留。判定命令：统一隔离前缀分别运行 `sh scripts/mobile-verify/mobile-touch-targets.sh`、`sh scripts/mobile-verify/mobile-safe-area.sh`，最终均 exit 0；首次日志保留在契约 out。
+
+- **波 2 手机导航脚本沿用顶端链行点击**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：切到统一项目列表后跨会话恢复等待超时；可证伪假设：目标会话在抽屉下方，旧自动点击未先滚动。CDP 实测目标行 top=4218px、URL 未切换；补 `scrollIntoView` 和视口断言后，真实点击恢复保存的 node/view，完整脚本通过。判定命令：`env -i HOME=/Users/smokingmouse PATH="$PATH" TRELLIS_LARK=off TRELLIS_SCHEDULER=off TRELLIS_HOOKS=off TRELLIS_HERDR=off TRELLIS_VERIFY_SOURCE_DB=/Users/smokingmouse/.trellis/data.db sh scripts/mobile-verify/mobile-branch-chain.sh`。首次失败还受额外浏览器诊断干扰；两次尝试日志保留在契约 out。
+
 - **N1 已知非 git workspace 更新触发快照风暴**（fj-hb-nest-fix2-238c）→ `resolved`。症状：每条省略 worktree key 的 workspace_updated 都重拉快照；可证伪假设：缺 key 被误判为未知元数据。改为本地未知 ID 或显式元数据变化才拉取。判定命令：`bun test lib/server/herdr-client.test.ts -t N1`，两条回归在旧实现失败、修后通过；三类 workspace 事件各十次无额外快照，新增/元数据变化仍拉取。全量验证 218 pass。
 
 - **排序 E2E 未结束旧等待卡片**（fj-hb-nest-fix-115b）→ `resolved`。症状：状态对调断言等待；假设：普通 PreToolUse 按既有规则保留 AskUserQuestion。改用匹配的 PostToolUse 结束卡片；判定命令：`env -i HOME=$HOME PATH=$PATH sh scripts/mobile-verify/mobile-herdr.sh </dev/null`。首次尝试主动终止 exit 143，最终复跑证据见契约 out。

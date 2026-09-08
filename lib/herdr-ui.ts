@@ -8,6 +8,23 @@ export type HerdrUiStatus =
   | "done"
   | "unknown";
 
+export type HerdrSessionStatus = { status: HerdrUiStatus; alive: boolean; paneId: string };
+
+/** Navigation owns sessions; fleet data supplies only status, never extra leaves. */
+export function buildHerdrSessionStatusMap(fleet: HerdrFleetResponse | null, hooks: HerdrHookRecord[], error: string | null = null): Map<string, HerdrSessionStatus> {
+  const map = new Map<string, HerdrSessionStatus>();
+  for (const binding of fleet?.sessions ?? []) {
+    map.set(binding.trellisSessionId ?? binding.sessionId, { status: "unknown", alive: false, paneId: binding.paneId });
+  }
+  for (const workspace of buildHerdrWorkspaceViews(fleet, hooks)) {
+    for (const pane of workspace.panes) {
+      const id = pane.binding?.trellisSessionId ?? pane.binding?.sessionId;
+      if (id) map.set(id, { status: pane.status, alive: Boolean(!error && fleet?.available && pane.binding?.alive), paneId: pane.paneId });
+    }
+  }
+  return map;
+}
+
 // Live bindings also protect previously attached CLI sessions whose origin
 // has not been promoted yet. Closed Herdr mirrors retain their reopen UI.
 export function isHerdrSession(

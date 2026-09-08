@@ -40,4 +40,10 @@ test("四种来源进入会话与最近链列表，归档和隐藏根仍隔离",
   expect(listSessions({ archived: true }).map(s => s.id).sort()).toEqual(["herdr-1", "lark-1", "task-1", "user-1"]);
   expect(countArchivedSessions()).toBe(4);
   expect(listRecentChains().map(c => c.tipId).sort()).toEqual(["herdr-0", "lark-0", "task-0", "user-0"]);
+  expect(listSessions().find(s => s.id === "herdr-0")?.treeCount).toBe(1);
+  db.prepare(`INSERT INTO nodes (id,session_id,parent_id,question,status,created_at)
+    VALUES ('second-topic','herdr-0',NULL,'topic','done',3),
+           ('child','herdr-0','second-topic','child','done',4)`).run();
+  expect(listSessions().find(s => s.id === "herdr-0")?.treeCount).toBe(2);
+  expect(listSessions({ archived: true }).every(s => s.treeCount === 1)).toBeTrue();
 });

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isBoolean, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
 import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
@@ -83,7 +84,7 @@ export function TreePanel() {
   const setViewMode = useSessionStore((s) => s.setViewMode);
 
   const [collapsed, setCollapsed] = useState(false);
-  const [coldOpen, setColdOpen] = useState(false);
+  const [coldOpen, setColdOpen] = useSidebarPreference("tree-earlier-open", false, isBoolean);
   // 树重命名编辑态
   const [editingRootId, setEditingRootId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");

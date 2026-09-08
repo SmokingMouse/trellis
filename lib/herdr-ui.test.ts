@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildHerdrSessionStatusMap,
   buildHerdrWorkspaceViews,
   groupHerdrWorkspaces,
   findHerdrPaneForSession,
@@ -7,6 +8,18 @@ import {
   type HerdrFleetResponse,
   type HerdrHookRecord,
 } from "./herdr-ui";
+
+test("侧栏 status map 仅索引已绑定会话，断线和关闭 pane 保留离线状态", () => {
+  const online = buildHerdrSessionStatusMap(fleet, []);
+  expect(online.size).toBe(fleet.sessions.length);
+  const binding = fleet.sessions[0];
+  const id = binding.trellisSessionId ?? binding.sessionId;
+  expect(online.get(id)?.alive).toBe(true);
+  expect(buildHerdrSessionStatusMap(fleet, [], "network failure").get(id)?.alive).toBe(false);
+  expect(buildHerdrSessionStatusMap({ ...fleet, available: false }, []).get(id)?.alive).toBe(false);
+  expect(buildHerdrSessionStatusMap({ ...fleet, workspaces: [] }, []).get(id)?.alive).toBe(false);
+  expect(buildHerdrSessionStatusMap(null, []).size).toBe(0);
+});
 
 describe("Herdr repository tree", () => {
   test("P2-3 trailing slashes share checkout identity and never create empty labels", () => {

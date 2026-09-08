@@ -30,6 +30,7 @@ import type {
 // types but the response is always present (no null) and position is omitted.
 
 export type ApiSession = {
+  treeCount?: number;
   bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
@@ -378,12 +379,14 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const rows = db
     .prepare(
       // 来源只决定行内 chip；所有来源共享活跃 / 归档语义。
-      `SELECT ${SESSION_COLS} FROM sessions
+      `SELECT ${SESSION_COLS},
+       (SELECT COUNT(*) FROM nodes n WHERE n.session_id = sessions.id
+        AND n.parent_id IS NULL AND n.hidden_at IS NULL) AS tree_count FROM sessions
        WHERE archived = ? AND kind IN ('user', 'lark', 'herdr', 'task')
        ORDER BY updated_at DESC`,
     )
-    .all(want) as SessionRow[];
-  return rows.map(rowToSession);
+    .all(want) as (SessionRow & { tree_count: number })[];
+  return rows.map(row => ({ ...rowToSession(row), treeCount: row.tree_count }));
 }
 
 // 任务专用列表，保留现有 API / tab 消费方兼容。

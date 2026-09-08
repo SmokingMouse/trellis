@@ -268,81 +268,47 @@ ab fill '#pw' "$AUTH_PASS"
 ab click 'button[type="submit"]'
 wait_for_js "authenticated home" "location.pathname !== '/login'"
 
-echo "== desktop Herdr fleet and interaction =="
-wait_for_js "three Herdr pane rows" "document.querySelectorAll('[data-herdr-pane]').length === 3"
-wait_for_js "waiting row is first" "document.querySelector('[data-herdr-pane]')?.getAttribute('data-herdr-status') === 'waiting'"
+# Wave 2: sessions are the only leaves. Unbound scratch/new panes are not navigation rows;
+# repo/worktree grouping comes from /api/sessions, not the separate Herdr fleet.
+echo "== desktop unified Herdr session rows =="
+wait_for_js "two mirrored Herdr sessions" "document.querySelectorAll('[data-sidebar-list] [data-herdr-pane]').length === 2"
+wait_for_js "waiting status overlays the Claude session" "document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-claude\"]')?.dataset.herdrStatus === 'waiting'"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const group = document.querySelector('[data-herdr-group]');
-  const rows = [...group.querySelectorAll('[data-herdr-pane]')];
-  assert(group.innerText.includes('Herdr'), 'Herdr heading missing');
-  const repo = group.querySelector('[data-herdr-repo]');
-  assert(group.querySelectorAll('[data-herdr-repo]').length === 1, 'repository grouping missing');
-  const worktrees = [...repo.querySelectorAll('[data-herdr-worktree]')];
-  assert(worktrees.length === 2, 'two checkouts must share a repository');
-  assert(worktrees.every(w => w.querySelectorAll('[data-herdr-pane]').length === 1), 'one pane per checkout');
-  assert(worktrees[0].querySelector('[data-sidebar-group]').innerText.includes('main'), 'main branch missing');
-  assert(worktrees[1].querySelector('[data-sidebar-group]').innerText.includes('feat/mobile'), 'linked branch missing');
-  assert(worktrees[0].querySelector('button').title.includes('Fake Workspace'), 'Herdr label missing from title');
-  assert(!repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 expanded repository must hide attention');
-  assert(worktrees.every(w => !w.querySelector('[data-sidebar-group]').innerText.includes('待处理')), 'P2-2 expanded worktrees must hide attention');
-  const scratch = group.querySelector('[data-herdr-workspace="workspace-scratch"]');
-  assert(scratch && !scratch.closest('[data-herdr-repo]') && repo.nextElementSibling === scratch, 'non-git workspace must be flat at the end');
-  assert(rows.length === 3, `pane rows=${rows.length}`);
-  assert(rows[0].dataset.herdrPane === 'pane-claude', `first pane=${rows[0].dataset.herdrPane}`);
-  assert(rows[0].dataset.herdrStatus === 'waiting', `first status=${rows[0].dataset.herdrStatus}`);
-  assert(rows[1].dataset.herdrStatus === 'blocked', `second status=${rows[1].dataset.herdrStatus}`);
-  assert(group.querySelector('[data-herdr-card-kind="terminal"]'), 'Codex blocked terminal card missing');
-  assert(group.querySelector('[data-herdr-screen]')?.innerText.includes('fake terminal line'), 'Codex screen tail missing');
-  return rows.map((row) => ({ pane: row.dataset.herdrPane, status: row.dataset.herdrStatus }));
+  const list = document.querySelector('[data-sidebar-list]');
+  const rows = [...list.querySelectorAll('[data-session-id]')];
+  assert(!document.querySelector('[data-herdr-group]'), 'retired Herdr group mounted');
+  assert(!document.querySelector('[data-mobile-target="session-chain-row"]'), 'retired recent chains mounted');
+  assert(document.querySelectorAll('[data-sidebar-toolbar]').length === 1, 'one toolbar required');
+  assert(rows.length === 2 && new Set(rows.map(r => r.dataset.sessionId)).size === 2, 'mirrors must appear once');
+  assert(rows.every(r => r.closest('[data-sidebar-project]')), 'mirrors must belong to the project tree');
+  assert(rows.every(r => r.querySelector('[aria-label="Herdr 会话"]')), 'source chips missing');
+  assert(!list.querySelector('[data-herdr-pane="pane-scratch"]'), 'unbound pane must not create a dead navigation row');
+  assert(!list.querySelector('[data-herdr-card]'), 'interaction belongs inside the session');
+  assert(list.querySelector('[data-herdr-pane="pane-codex"]').dataset.herdrStatus === 'blocked', 'Codex status missing');
+  window.herdrTreeOrder = rows.map(r => r.dataset.sessionId);
+  return rows.map(r => ({ session: r.dataset.sessionId, status: r.dataset.herdrStatus }));
 })()
 JS
 ab screenshot "$OUT/desktop-herdr-sidebar.png"
-# P1-1: clear the waiting hook, then reverse urgency while retaining tree positions.
+# Urgency still updates live, without sorting a second fleet tree.
 curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
   --data-urlencode 'payload={"hook_event_name":"PostToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion"}' >/dev/null
-ab eval --stdin <<'JS'
-(async () => {
-  window.herdrTreeOrder = [...document.querySelectorAll('[data-herdr-repo], [data-herdr-worktree], [data-herdr-pane]')].map(e => e.dataset.herdrRepo || e.dataset.herdrWorktree || e.dataset.herdrPane);
-  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F8'] }) });
-  return true;
-})()
-JS
-wait_for_js "P1-1 reversed urgency keeps main checkout first" "document.querySelector('[data-herdr-pane]')?.dataset.herdrPane === 'pane-claude' && document.querySelector('[data-herdr-pane]')?.dataset.herdrStatus === 'blocked' && document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'waiting' && JSON.stringify(window.herdrTreeOrder) === JSON.stringify([...document.querySelectorAll('[data-herdr-repo], [data-herdr-worktree], [data-herdr-pane]')].map(e => e.dataset.herdrRepo || e.dataset.herdrWorktree || e.dataset.herdrPane))"
-ab eval --stdin <<'JS'
-(async () => {
-  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F9'] }) });
-  window.newWorkspaceStarted = performance.now();
-  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F10'] }) });
-  return true;
-})()
-JS
-wait_for_js "P1-2 event-created workspace is nested immediately" "Boolean(document.querySelector('[data-herdr-repo] [data-herdr-worktree] [data-herdr-pane=\"pane-new\"]'))"
-ab eval --stdin <<'JS'
-(async () => {
-  if (performance.now() - window.newWorkspaceStarted >= 10000) throw new Error('P1-2 new workspace waited for snapshot');
-  const wt = document.querySelector('[data-herdr-pane="pane-new"]').closest('[data-herdr-worktree]');
-  if (wt.dataset.herdrWorktree.endsWith('/')) throw new Error('P2-3 trailing checkout slash survived');
-  if (!wt.querySelector('[data-sidebar-group]').innerText.includes('未知分支')) throw new Error('P2-1 missing checkout claimed a branch');
-  await fetch('/api/herdr/panes/pane-claude/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ keys: ['F11'] }) });
-  return true;
-})()
-JS
-wait_for_js "P1-2 closed workspace leaves no empty checkout" "document.querySelectorAll('[data-herdr-worktree]').length === 2 && !document.querySelector('[data-herdr-pane=\"pane-new\"]')"
+ab eval "(async () => { await fetch('/api/herdr/panes/pane-claude/keys', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys:['F8']})}); return true; })()"
+wait_for_js "status changes without reordering sessions" "document.querySelector('[data-herdr-pane=\"pane-claude\"]')?.dataset.herdrStatus === 'blocked' && document.querySelector('[data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'waiting' && JSON.stringify(window.herdrTreeOrder) === JSON.stringify([...document.querySelectorAll('[data-sidebar-list] [data-session-id]')].map(r => r.dataset.sessionId))"
+ab eval "(async () => { await fetch('/api/herdr/panes/pane-claude/keys', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys:['F9']})}); return true; })()"
 curl --noproxy '*' -fsS "$BASE/api/hooks/claude" -H "x-trellis-hook-token: $HOOK_TOKEN" \
   --data-urlencode 'payload={"hook_event_name":"PreToolUse","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","tool_name":"AskUserQuestion","tool_input":{"questions":[{"header":"发布策略","question":"请选择交付方案","options":[{"label":"快速方案","description":"优先速度"},{"label":"稳妥方案","description":"优先验证"}]}]}}' >/dev/null
-wait_for_js "waiting hook restored" "document.querySelector('[data-herdr-pane]')?.dataset.herdrStatus === 'waiting'"
-ab click '[data-herdr-repo] > [data-sidebar-group] > button'
-wait_for_js "collapsed repository retains attention" "document.querySelector('[data-herdr-repo]')?.innerText.includes('2 待处理') && !document.querySelector('[data-herdr-worktree]')"
+wait_for_js "waiting hook restored" "document.querySelector('[data-herdr-pane=\"pane-claude\"]')?.dataset.herdrStatus === 'waiting'"
+# Collapse persistence now belongs to the unified project, with session counts.
+ab eval "(() => { const p=document.querySelector('[data-herdr-pane=\"pane-claude\"]').closest('[data-sidebar-project]'); window.collapsedProject=p.dataset.sidebarProject; p.querySelector('[data-sidebar-group] > button').click(); return true; })()"
+wait_for_js "project collapse hides its session" "!document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
 ab screenshot "$OUT/desktop-herdr-collapsed.png"
 ab reload
-wait_for_js "repository collapse survives reload" "Boolean(document.querySelector('[data-herdr-repo] button[aria-expanded=false]')) && !document.querySelector('[data-herdr-worktree]')"
-ab click '[data-herdr-repo] > [data-sidebar-group] > button'
-wait_for_js "repository expands" "document.querySelectorAll('[data-herdr-worktree]').length === 2"
-ab click '[data-herdr-worktree]:first-child > [data-sidebar-group] > button'
-wait_for_js "worktree collapse retains attention" "!document.querySelector('[data-herdr-pane=\"pane-claude\"]') && document.querySelector('[data-herdr-worktree]')?.innerText.includes('1 待处理')"
-ab click '[data-herdr-worktree]:first-child > [data-sidebar-group] > button'
+wait_for_js "project collapse survives reload" "Boolean(document.querySelector('[data-sidebar-project] button[aria-expanded=false]')) && !document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
+ab eval "document.querySelector('[data-sidebar-project] button[aria-expanded=false]').click(); true"
+wait_for_js "project expands" "Boolean(document.querySelector('[data-herdr-pane=\"pane-claude\"]'))"
 ab click '[data-herdr-pane="pane-claude"]'
 wait_for_js "Herdr session badge" "Boolean(document.querySelector('[data-herdr-badge]'))"
 wait_for_js "AskUserQuestion card" "document.querySelector('[data-herdr-question]')?.textContent?.includes('请选择交付方案') === true"
@@ -497,49 +463,30 @@ ab open "$BASE/?session=$CLAUDE_SESSION"
 wait_for_js "iPhone Herdr badge" "Boolean(document.querySelector('[data-herdr-badge]'))"
 wait_for_js "iPhone AskUserQuestion card" "Boolean(document.querySelector('[data-herdr-question]'))"
 ab click 'button[aria-label="会话列表"]'
-wait_for_js "iPhone Herdr drawer" "Boolean(document.querySelector('[role=dialog] [data-herdr-group]'))"
+wait_for_js "iPhone unified drawer" "Boolean(document.querySelector('[role=dialog] [data-sidebar-toolbar]'))"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const group = document.querySelector('[role=dialog] [data-herdr-group]');
-  const drawer = group?.closest('[role=dialog]');
-  assert(drawer, 'mobile Herdr drawer missing');
-  const rows = [...group.querySelectorAll('[data-herdr-pane]')];
-  assert(rows.length === 3, `mobile rows=${rows.length}`);
-  const repo = group.querySelector('[data-herdr-repo]');
-  assert(repo?.querySelectorAll('[data-herdr-worktree]').length === 2, 'mobile nested worktrees missing');
-  assert(!group.querySelector('[data-herdr-workspace="workspace-scratch"]').closest('[data-herdr-repo]'), 'mobile scratch must be flat');
-  assert(!repo.querySelector(':scope > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 mobile expanded repository must hide attention');
-  assert(!repo.querySelector('[data-herdr-worktree] > [data-sidebar-group]').innerText.includes('待处理'), 'P2-2 mobile expanded worktree must hide attention');
-  for (const button of group.querySelectorAll('[data-sidebar-group] > button')) {
-    assert(button.getBoundingClientRect().height >= 44, 'group touch target under 44px');
-  }
-  assert(rows[0].dataset.herdrStatus === 'waiting', `mobile first=${rows[0].dataset.herdrStatus}`);
+  const drawer = document.querySelector('[role=dialog] [data-sidebar-list]').closest('[role=dialog]');
+  const rows = [...drawer.querySelectorAll('[data-session-id]')];
+  assert(rows.length === 2, 'two mirrored sessions expected');
+  assert(!drawer.querySelector('[data-herdr-group]'), 'retired fleet tree mounted');
+  assert(!drawer.querySelector('[data-herdr-card]'), 'cards belong inside sessions');
+  assert(rows.every(r => r.closest('[data-sidebar-project]')), 'project membership missing');
+  assert(drawer.querySelector('[data-herdr-pane="pane-claude"]').dataset.herdrStatus === 'waiting', 'waiting status missing');
   for (const row of rows) {
     const rect = row.getBoundingClientRect();
-    assert(rect.height >= 44, `pane touch height=${rect.height}`);
-    assert(rect.left >= 0 && rect.right <= innerWidth, `pane overflow=${JSON.stringify(rect.toJSON())}`);
+    assert(rect.height >= 44 && rect.left >= 0 && rect.right <= innerWidth, 'session touch geometry');
   }
-  const targets = [...drawer.querySelectorAll('[data-herdr-card] button')];
-  assert(targets.length > 0, 'mobile card controls missing');
-  for (const target of targets) {
-    const rect = target.getBoundingClientRect();
-    assert(rect.width >= 44 && rect.height >= 44, `card touch target=${rect.width}x${rect.height}`);
+  for (const target of drawer.querySelectorAll('[data-sidebar-toolbar] button, [data-sidebar-toolbar] select, [data-sidebar-toolbar] label')) {
+    assert(target.getBoundingClientRect().height >= 44, 'toolbar touch height');
   }
-  return { rows: rows.length, cardTargets: targets.length, viewport: [innerWidth, innerHeight] };
+  return { rows: rows.length, viewport: [innerWidth, innerHeight] };
 })()
 JS
 ab screenshot "$OUT/iphone-herdr-drawer.png"
-ab click '[role=dialog] [data-herdr-worktree]:first-child > [data-sidebar-group] > button'
-wait_for_js "P2-2 mobile collapsed worktree shows attention" "!document.querySelector('[role=dialog] [data-herdr-pane=\"pane-claude\"]') && document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
-ab click '[role=dialog] [data-herdr-repo] > [data-sidebar-group] > button'
-wait_for_js "P2-2 mobile collapsed repository shows attention" "!document.querySelector('[role=dialog] [data-herdr-worktree]') && document.querySelector('[role=dialog] [data-herdr-repo] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
-ab click '[role=dialog] [data-herdr-repo] > [data-sidebar-group] > button'
-wait_for_js "P2-2 mobile expanding repository hides only its badge" "!document.querySelector('[role=dialog] [data-herdr-repo] > [data-sidebar-group]')?.innerText.includes('待处理') && document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('1 待处理')"
-ab click '[role=dialog] [data-herdr-worktree]:first-child > [data-sidebar-group] > button'
-wait_for_js "P2-2 mobile expanding worktree hides its badge" "Boolean(document.querySelector('[role=dialog] [data-herdr-pane=\"pane-claude\"]')) && !document.querySelector('[role=dialog] [data-herdr-worktree] > [data-sidebar-group]')?.innerText.includes('待处理')"
 ab click '[role="dialog"] [data-herdr-pane="pane-claude"]'
-wait_for_js "drawer closes into Herdr session" "!document.querySelector('[role=dialog] [data-herdr-group]') && Boolean(document.querySelector('[data-herdr-badge]'))"
+wait_for_js "drawer closes into Herdr session" "!document.querySelector('[role=dialog] [data-sidebar-list]') && Boolean(document.querySelector('[data-herdr-badge]'))"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -571,9 +518,9 @@ ab eval --stdin <<'JS'
 JS
 wait_for_log "pane_closed event" '"event":"pane_closed"'
 ab click 'button[aria-label="会话列表"]'
-wait_for_js "closed pane removed by event" "Boolean(document.querySelector('[role=dialog] [data-herdr-group]')) && !document.querySelector('[data-herdr-pane=\"pane-codex\"]')"
+wait_for_js "closed pane retains readable session with offline status" "document.querySelector('[role=dialog] [data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'offline'"
 ab click '[role="dialog"] [data-herdr-pane="pane-claude"]'
-wait_for_js "return after close event" "!document.querySelector('[role=dialog] [data-herdr-group]')"
+wait_for_js "return after close event" "!document.querySelector('[role=dialog] [data-sidebar-list]')"
 
 echo "== fake Herdr down becomes read-only =="
 stop_pid "$FAKE_PID"

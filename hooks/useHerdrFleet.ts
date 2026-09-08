@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { buildHerdrSessionStatusMap } from "@/lib/herdr-ui";
 import type {
   HerdrFleetResponse,
   HerdrHookRecord,
@@ -136,4 +137,11 @@ export function useHerdrFleet(): HerdrFleetSnapshot {
   const [state, setState] = useState(snapshot);
   useEffect(() => subscribe(setState), []);
   return state;
+}
+
+/** Sidebar projection. Full fleet consumers remain in the in-session controls. */
+export function useHerdrSessionStatuses() {
+  const state = useHerdrFleet();
+  const statuses = useMemo(() => buildHerdrSessionStatusMap(state.fleet, state.hooks, state.error), [state.fleet, state.hooks, state.error]);
+  return { statuses, available: Boolean(state.fleet?.available && !state.error), unavailableText: herdrUnavailableText(state) };
 }
