@@ -8,6 +8,7 @@ import os from "node:os";
 import { CODEX_SESSIONS_DIR } from "./codex-paths";
 import { parseCliSessionJsonl, type ParsedCliSession } from "./cli-import";
 import { parseCodexSessionJsonl } from "./codex-import";
+import { parseCliTranscript, type CliProvider } from "./cli-transcript";
 import { trellisOwnedSessionIds } from "./cli-import-db";
 import { getDB } from "./sqlite";
 import {
@@ -16,10 +17,11 @@ import {
 } from "./cli-lineage";
 
 export type { CliLineageMember, DiscoveredLineage } from "./cli-lineage";
+export { parseCliTranscript } from "./cli-transcript";
+export type { CliProvider } from "./cli-transcript";
 
 export const PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
 export { CODEX_SESSIONS_DIR } from "./codex-paths";
-export type CliProvider = "claude" | "codex";
 
 // 路径安全：只允许 PROJECTS_DIR 下的目录（防越权读任意目录）。
 export function isWithinProjects(dir: string): boolean {
@@ -48,15 +50,6 @@ function attachedPaths(): Set<string> {
     )
     .all() as { p: string }[];
   return new Set(rows.map((r) => r.p));
-}
-
-export function parseCliTranscript(
-  provider: CliProvider,
-  jsonlPath: string,
-): ParsedCliSession | null {
-  return provider === "codex"
-    ? parseCodexSessionJsonl(jsonlPath)
-    : parseCliSessionJsonl(jsonlPath);
 }
 
 export function discoverLineage(

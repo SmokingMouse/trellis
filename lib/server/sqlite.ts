@@ -1,4 +1,5 @@
 import "server-only";
+import { AGENT_HOOK_TABLES_SQL } from "@/lib/server/agent-hooks/types";
 import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
 import os from "node:os";
@@ -25,6 +26,22 @@ export function getDB(): Database {
   migrate(db);
   _db = db;
   return db;
+}
+
+/**
+ * 单测用的复位闸：丢掉当前进程持有的连接，下次 getDB() 按当下的 TRELLIS_DB_PATH
+ * 重开。`bun test` 一个进程跑完所有测试文件，而这个 singleton 是跨文件共享的 ——
+ * 谁先 getDB() 谁定死了 path，谁 close() 谁让后面的文件拿到一个已关闭的 handle
+ * （症状：RangeError: Cannot use a closed database）。用 DB 的测试文件在开头和
+ * afterAll 各调一次，就能互不干扰。
+ */
+export function resetDBForTests(): void {
+  try {
+    _db?.close();
+  } catch {
+    /* 已经关了 */
+  }
+  _db = null;
 }
 
 function migrate(db: Database) {
@@ -59,6 +76,37 @@ function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS nodes_parent ON nodes(parent_id);
   `);
 
+  ensureHerdrSchema(db);
+
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'binding_type'").get()) {
+    db.exec("ALTER TABLE sessions ADD COLUMN binding_type TEXT NOT NULL DEFAULT 'legacy' CHECK(binding_type IN ('legacy','pane','thread'))");
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS as_threads (
+      thread_id TEXT NOT NULL,
+      daemon_id TEXT NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (daemon_id, thread_id)
+    );
+    CREATE INDEX IF NOT EXISTS as_threads_session ON as_threads(session_id);
+    CREATE TABLE IF NOT EXISTS as_turns (
+      node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL,
+      daemon_id TEXT NOT NULL,
+      turn_id TEXT,
+      client_turn_id TEXT NOT NULL,
+      last_item_id TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (daemon_id, thread_id) REFERENCES as_threads(daemon_id, thread_id)
+    );
+  `);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('as_turns') WHERE name='request_json'").get()) {
+    db.exec("ALTER TABLE as_turns ADD COLUMN request_json TEXT");
+  }
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('as_turns') WHERE name='resolved_json'").get()) {
+    db.exec("ALTER TABLE as_turns ADD COLUMN resolved_json TEXT");
+  }
   // Idempotent column add for project mode: each trellis session may bind
   // to one claude CLI session id (null in chat).
   // Legacy: this column was authoritative pre-2026-05. After the per-root
@@ -758,7 +806,7 @@ function migrate(db: Database) {
       WHERE trigger_id IS NOT NULL;
   `);
 
-  // 任务会话不该挤在用户的会话侧栏里。'user' | 'task' | 'lark'。
+  // 任务与 Herdr 镜像各有自己的分组。'user' | 'task' | 'lark' | 'herdr'。
   // 注意：这个 `kind` 与 `nodes.kind`（'qa' | 'reference'）**同名不同义**，
   // 两者没有任何关系，写查询时别把两张表的 kind 当同一个枚举（S89 记）。
   const hasSessionKind = db
@@ -767,6 +815,7 @@ function migrate(db: Database) {
   if (!hasSessionKind) {
     db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
   }
+  db.exec("UPDATE sessions SET kind = 'herdr' WHERE origin = 'herdr' AND kind <> 'herdr'");
 
   // 飞书是入口，Trellis 的 session/node 树仍是对话真源。bot 只保存连接与执行配置，
   // chat 只保存飞书会话到树链尾的映射，inbox 只承担消息去重；三者不复制回答正文。
@@ -854,6 +903,12 @@ function migrate(db: Database) {
     if (!has) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} TEXT`);
   }
 
+  // Claude Code hook 接收端（app/api/hooks/claude）：按 claude 的 session_id
+  // 一行，记「这个会话此刻在干嘛 / 卡在哪张卡上」。与 nodes 表刻意不建外键 ——
+  // hook 来自**任意**一个本机 claude（终端里手起的也算），绝大多数根本不是
+  // trellis 的会话；这张表是外部世界的投影，不是内部数据的延伸。
+  db.exec(AGENT_HOOK_TABLES_SQL);
+
   // Stage 16: FTS5 cross-session full-text search. Single virtual table
   // covers question / response / reference / note text. trigram tokenizer
   // is the FTS5-builtin pick for mixed CJK + ASCII: 3-char sliding window
@@ -892,7 +947,7 @@ function migrate(db: Database) {
   db.prepare(
     `UPDATE nodes SET status = 'error', error_message = 'interrupted',
             pending_interaction_json = NULL
-     WHERE status = 'streaming'`,
+     WHERE status = 'streaming' AND id NOT IN (SELECT node_id FROM as_turns)`,
   ).run();
 
   // ★ S88：上面那条的**对称件**，必须成对存在 —— 只做一个比都不做更危险。
@@ -957,6 +1012,33 @@ function migrate(db: Database) {
       tx();
     }
   }
+}
+
+export function ensureHerdrSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS herdr_sessions (
+      session_id TEXT PRIMARY KEY,
+      session_source TEXT NOT NULL,
+      session_kind TEXT NOT NULL,
+      agent_kind TEXT NOT NULL,
+      pane_id TEXT NOT NULL,
+      terminal_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      tab_id TEXT NOT NULL,
+      label TEXT,
+      agent_name TEXT,
+      cwd TEXT,
+      transcript_path TEXT,
+      agent_status TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      state_change_seq INTEGER,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      alive INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS herdr_sessions_pane ON herdr_sessions(pane_id);
+    CREATE INDEX IF NOT EXISTS herdr_sessions_alive ON herdr_sessions(alive);
+  `);
 }
 
 // 把 lib/agent-presets.ts 的五个预设种进 agents 表。

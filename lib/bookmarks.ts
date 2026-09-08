@@ -25,6 +25,20 @@ export function mergeBookmarkWindowIntoNodes<
   return next;
 }
 
+// C2-2: nodes the client marked bookmarked locally that the current window
+// doesn't vouch for one way or the other. The window is newest-first and
+// bounded, so an absent id might just be paginated out — these are the only
+// ones worth a targeted server round-trip to tell "still bookmarked" apart
+// from "unbookmarked elsewhere".
+export function staleBookmarkCandidateIds<
+  T extends { id: string; bookmarkedAt?: number | null },
+>(nodes: Record<string, T>, windowNodeIds: Iterable<string>): string[] {
+  const windowSet = new Set(windowNodeIds);
+  return Object.values(nodes)
+    .filter((node) => node.bookmarkedAt != null && !windowSet.has(node.id))
+    .map((node) => node.id);
+}
+
 // Bookmark rows are navigation aids, not another markdown renderer. Flatten
 // the common markdown constructs before truncating so the sidebar never shows
 // syntax noise such as `**`, link destinations, or heading markers.

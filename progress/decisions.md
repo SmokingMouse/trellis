@@ -261,3 +261,72 @@ jsonl 文件。集合来自 `nodes.claude_session_id` / `codex_session_id`。
 **Decision**：用户勾选要镜像哪几个 project 目录/会话，只 watch 这些。
 **Why**：本机 88 个 project 目录，全量镜像会把 SessionPicker / SessionTabs 瞬间淹没。
 **Alternatives**：全量自动镜像 —— 拒绝，列表噪音不可接受。
+
+## 2026-09-06 「编辑问题重问」桌面与手机统一聚焦新兄弟节点
+- **Decision**: `editNode` 一律 `focusNew:true`——编辑重问后无论桌面/手机、无论被编辑节点是否带选区 anchor，都跳到新生成的兄弟节点。
+- **Why**: 旧桌面行为（编辑带 `parent_anchor_text` 的节点后留在原链、新兄弟在后台）是「anchor 同时承担引用语义与聚焦策略」的耦合副产物（诊断 `fj-branch-chain-diag-462d` R1），不是设计；「编辑重问」是用户明确动作，落到结果处更符合直觉。review-d（`fj-review-d-43ac` D-1）按「桌面零回归」判为 major，主控裁决为有意变更并补桌面断言守住新语义。
+- **Alternatives**: 给 `editNode` 透传 mobile flag 保桌面旧行为（拒绝：保留的是一个偶然行为，且两端不一致会让同一按钮在不同端表现不同）。
+
+## 2026-09-07 · worktree 的身份键与「活跃」定义
+- Decision：worktree 在 Trellis 里以 realpath 为身份键；「已合并」以「tip 是主干祖先且不在主干 first-parent 链上」判定；「活跃」只来自会话活动或用户在 UI 主动新建，被动扫描到的目录不伪造活跃度、但仍显示（沉底）。
+- Why：诊断（`.fenjue/archive/fj-wt-diag-a677/out/diagnosis.md`）根因是三层各用一个键（路径原串 / realpath / 分支）且「目录存在」被当成「正在用」，导致同目录双行、排序倒挂、零提交 worktree 被误判已合并并成为批量清理默认勾选项（数据风险）。
+- Alternatives：隐藏零会话 worktree（拒绝：CLI 建的看不见，回到 boot-only 问题）；只认 merge 第二父（拒绝：update-branch 工作流下第二父也可能是主干旧 tip，review 用反例打穿）；方案 C 分支面板 + schema 重构（未拒绝，收益长期、成本 1–2 周，先做 A，B 待用户拍板）。
+
+## 2026-09-08 · agent-server 不做隐式提权策略
+- **Decision**：AS 里 bypassPermissions/dontAsk 只能在 thread/start（或等价的 resume 建线程）时声明；已在跑的 plan/default 线程即使持有 lease 也不能切到 bypass（AS 放行、原生 CLI 拒绝、状态不变）。不加 daemon 级「策略开关」。
+- **Why**：提权门禁由 lease 保证「谁在控制」，但「能否绕过审批」应在建线程时一次定死，避免任何客户端在会话中途把审批关掉；用户 88% 会话本就以 bypass 启动，代价可接受。
+- **Alternatives**：server 级策略开关允许 lease 持有者随时提权——被拒，多一个隐式提权面。来源：`.fenjue/archive/fj-as-foundation-review2-f487/out/review.md` 「两条须知」。
+
+## 2026-09-08 · 只读命令免审名单采用 fail-closed 白名单解析器
+- **Decision**：agent-server 审批经纪人的只读命令免审（READONLY_AUTO_ALLOW 下沉）不用黑名单式「拦危险构造」，改为严格解析 + 白名单形状：整条命令必须可解析，连接符仅 `| && || ; 换行`，任何命令/参数/进程替换、重定向、heredoc、引号内 `$`、包装命令（env/command/exec/xargs/source/eval/sudo/sh -c…）一律不放行；每个命令 argv[0] 裸名且解析到系统目录，选项走白名单校验器（git 拒绝全局 flag 与写盘选项，rg 拒绝 --pre 类，find 拒绝 exec/print-to-file 类）。解析失败或形状不符 → 走审批。
+- **Why**：两轮对抗复核各打穿 3–5 类（换行/单 & 分隔、git --output、双引号内 `$(…)`、env -S、rg --pre），说明黑名单永远差一条；免审的价值只在「常见只读命令不打扰」，覆盖面可以窄，安全边界必须闭合。
+- **Alternatives**：继续按复核补黑名单——被拒，每轮都会有新向量；完全不免审——体验差（阶段 2 首单实测每条 Bash 一张卡）。来源：`.fenjue/archive/fj-as-readonly-allow-review-332b` 与 `-review2-5f0a` 两份报告。
+
+## 2026-09-08 agent-tui 以本地 Claude Code 源码的核心设计为参照，不从零发明交互
+- **Decision**：agent-tui 的交互与渲染设计以 `~/python/ai/claude-code`（source map 泄露快照）的核心设计为参照：先两路只读调研（源码解构 + 自审）再出分阶段方案；内核仍是 agent-server 协议、引擎无关。私有源码只做设计参考，不整段抄代码；渲染层若引入 Ink 用上游 MIT 版。
+- **Why**：用户 2026-09-08 明令「不用从零开始开发 tui，参考他里面的核心设计」；此前 TUI 线四个特性各经 2–3 轮复核仍在焦点路由、宽字符、性能上反复踩坑，成熟设计已在手边。
+- **Alternatives**：继续自研迭代（拒绝：返工成本已证明）；直接复用 fork 的 Ink 代码（拒绝：私有代码许可风险）。
+
+## 2026-09-08 只读线程的写保护由 daemon 强制，不依赖 Claude CLI 的 plan 模式
+- **Decision**：agent-server 的 readonly 权限 = 引擎 default 模式 + `permissions.ask=["*"]` + `--disallowedTools` 写类工具 + 审批经纪人拒写、Bash 走 fail-closed 白名单；readonly 与 plan 拆成两种模式，plan 线程的 Bash 同样由 daemon 兜底。
+- **Why**：三审真机冒烟发现 readonly 作为 plan 别名时，CLI 对 Bash 不回传 can_use_tool，免审名单与经纪人被整体绕过，`touch` 无审批执行且无留痕（fj-as-readonly-allow-review3-8b89 §P0-1）。解析器本体 186 例零绕过，问题在门外。
+- **Alternatives**：继续用 CLI plan 模式并信任其自带分类（拒绝：行为不可控、无留痕）；readonly 线程禁用 Bash（拒绝：只读调研坐席离不开 ls/grep/git log）。
+
+## 2026-09-08 agent-tui 路线定案：OpenTUI 渲染层 + 自写组件，React 绑定，先过三闸再投组件层
+- **Decision**：渲染层复用 OpenTUI（@opentui/core + @opentui/react + keymap，锁 0.5.11 / React 19.2.4），应用层自写组件并移植现有 controller/model 逻辑；opencode TUI 只逐组件借鉴，不整体 fork。绑定层选 React，推翻判据写死：阶段 1c 变高历史闸中 React commit 段占比 >50% 且加 memo 后 p95 仍不达标 → 用 Solid 原样重跑再定。先起阶段 0（合规闸与依赖锁）+ 阶段 1（基线 + 三闸：真实终端/IME、真实变高历史、编译发布与背压）共 5 单做 GO/NO-GO，NO-GO 转 pi-tui；阶段 2–4（布局缓存、脱渲染、测试解耦）两种结果下都做。用户 2026-09-08 拍板。
+- **Why**：同机基准 OpenTUI 完整历史 p95 0.25 ms 对现有渲染器 34 ms；opencode TUI 对自家 SDK 112 个调用点 / 80 接口 / 50 事件 case，薄 fork 估 16–24 单对 A-OpenTUI 8–12 单；React 是唯一有我们自己实测数据的绑定，且阶段 1 夹具经验（一次挂载 + flushSync/renderer.loop/useThread:false）是 React 专属。方案：`.fenjue/archive/fj-tui-adoption-plan-7755/out/tui-adoption-plan.md`。
+- **Alternatives**：fork opencode（拒绝：耦合面实测过大、两套会话模型）；Ink（拒绝：字符串 diff 模型，窗口化后仍 18/26 ms）；自研完整渲染引擎（拒绝：25–40 单买免费的东西）；Solid 绑定（保留为推翻判据触发时的对照）。
+
+## 2026-09-08 TUI 不自研：显示端复用官方 / 开源 TUI，agent-server 对齐其协议
+- **Decision**：推翻同日「OpenTUI 渲染层 + 自写组件」路线（阶段 0 与 1a 已落地的合规脚本、依赖锁、基准夹具保留；阶段 1b–8 放弃）。人类用的显示端直接用现成 TUI：Claude 线程走 Claude Code 公开二进制的直连模式（`claude cc://host:port/...`，POST /sessions 协议），Codex 线程走 Codex 官方 TUI 与 app-server 协议；agent-server 对外实现这两套协议的适配层。agent-tui 只做维护（信息设计急救单照常收尾），不再投功能与渲染层重构。用户 2026-09-08 14:2x 明令：「不应该在 tui 上下太多功夫，直接找一个能用的 tui 体验，把协议和 app server 对齐，不要太增加开发量」。
+- **Why**：自研组件层最少 8–12 单再加性能对冲与三闸，而人类要的是「能用、顺手」，官方 TUI 已经是最好的那个；把开发量压到协议适配层一层。
+- **Alternatives**：OpenTUI 路线（搁置，方案存档于 fj-tui-adoption-plan-7755）；fork opencode（已因耦合面否决）。
+- **风险**：两套协议均未文档化、随版本漂移（Claude 直连模式尤甚）；需要版本钉死 + 冒烟回归；Codex TUI 若进程内直连 core，则需维护一个小 patch。
+
+## 2026-09-08 单一 TUI 定为 Codex 官方 TUI；Claude Code 原生 TUI 直连被证伪
+- **Decision**：显示端统一用 Codex 官方 TUI（`codex --remote ws://…`，零修改），agent-server 新增 Codex app-server 协议 ingress：Codex 线程 native passthrough + AS 治理插入，Claude 线程由 AS 合成 native item 显示；agent-tui 退役。
+- **Why**：Claude spike（fj-cc-native-tui-spike-0e0a）：公开构建 2.1.258 的 direct-connect 入口被 `bun:bundle` 编译期宏裁掉，`cc://` 被当 prompt、假服务端零请求，无任何 flag/env 可开。Codex spike（fj-codex-native-tui-spike-23ce）：上游 CLI 公开 `--remote ADDR`，TUI 经 RemoteAppServerClient 走 WebSocket 连外部 app-server；18 行代理已让官方 0.153.4 TUI 跑通；AS item 模型本就照 app-server 建，路径 (a) 估：小接入 1–2 日、可用版 6–10 日。
+- **Alternatives**：官方 native daemon + AS 外挂观察（拒绝：无法强租约/强只读）；patch Codex TUI（无必要：上游已做远程）；等 Anthropic 打开 DIRECT_CONNECT（盯梢项）。
+
+## 2026-09-08 codex-ingress 架构：独立 listener、每线程一进程 + control 进程、Claude 线程单向合成
+- **Decision**：AS 新增独立 `codex-ingress`（先 ws:// 带 bearer，unix:// 必须是 WebSocket over unix、推到 slice 4），一个 TUI 连接 = 一个 AS Connection，沿用既有 client identity 做租约 / 审批 audience / 审计；进程模型保留每 AS thread 一个 `codex app-server` 进程 + ingress 自有的 control 进程服务连接级只读方法，不改共享单进程；Claude 线程只做 AS Item → native item 的单向合成，四类审批 1:1，不支持的方法返回明确 JSON-RPC 错误；副作用方法白名单 fail-closed，readonly 线程另加显式 deny；总回退开关 `codex_ingress.enabled` 默认 false。四切片共 7 坐席日。方案：`.fenjue/archive/fj-tui-ingress-design-cd8e/out/tui-ingress-design.md`。
+- **Why**：改共享单进程会动 CodexEngine 的所有权与生命周期（不可逆），路由表 + control 进程改动最小；双向全量转换会重演「假 app-server」维护负担。
+- **Alternatives**：共享官方 app-server 进程（推迟）；双向转换（拒绝）。
+
+## 2026-09-08 codex-ingress 对 Claude 专属语义的三条投影裁决
+- **Decision**：① Claude 通用工具审批（{toolName,input}）投影为 native `tool/requestUserInput`（allow / deny），答案映射回 AS permissions 决策并经 broker，不伪造 network/fileSystem profile、不只回 -32601；② Claude 线程 effort 为 launch-only，TUI 改 effort 返回明确错误文案，不做 token 换算；③ multiSelect 问题投影为自由作答 + 编号选项与「逗号分隔」提示，解析回 answers 数组。
+- **Why**：0.153.4 官方 `RequestPermissionProfile` 只允许 network/fileSystem 且 additionalProperties:false（slice 2 schema-proof）；伪造范围改变授权含义，而只报错会让 TUI 用户在待决审批上干等。
+- **Alternatives**：保持 -32601 由其他 as/1 客户端回答（拒绝：人用官方 TUI 时无人回答）；扩展 native schema（拒绝：不 fork Codex）。
+
+## 2026-09-08 ingress 租约与 Herdr 状态两条裁决
+- **Decision**：① codex-ingress 的 resume / attach 不取输入租约，只在升权时取短租约并即刻释放；thread/close 与 turn/interrupt 不受他人输入租约门控（fj 作为独立 AS 客户端必须能在官方 TUI 附着期间 reply / close）。② Herdr protocol 19 的 pane 状态只有 idle/working/blocked/unknown，fj 旁挂 reporter 用 state=idle + message=waiting|done 表达，不扩 Herdr。
+- **Why**：fj runner 实现单实测 full resume 取 5 分钟租约致 fj reply/close 撞 lease_held（方案 §4.1 本就规定租约仅升权时取）；Herdr schema 是机器事实，fj next 以 AS 状态为准，Herdr 显示是次要通道。
+
+## 2026-09-08 只读免审解析器的展开闸全局化
+- **Decision**：shell 展开元字符（brace / glob / tilde / 参数与命令替换 / 进程替换）出现在任一未引号 argv 即整条 deny，闸在解析器级对所有免审命令生效，不按命令逐个补。
+- **Why**：四审真机 `git log {--output=<路径>,HEAD}` 免审放行并写盘——上一轮只给 find/rg/grep/file 挂了展开闸，git 的 `--output` 逐 token 检查对展开后才成形的 argv 无效（fj-as-readonly-p2-whitelist-review-d2fb §P0-1）。
+- **Alternatives**：按命令补闸（拒绝：同类攻击已第二次从「另一半」打穿）。
+
+## 2026-09-08 ingress 对 TUI 级模型跨后端 override 的容忍
+- **Decision**：官方 TUI 的 `--model` 只在 thread/start 决定后端；对已存在线程（resume / turn/start）带来的跨后端模型 override 视为沿用线程当前模型，并推可见提示，操作继续；同后端 override 照常生效。不静默切引擎、不让整轮或 resume 失败。
+- **Why**：slice 3 再审：TUI 以 `--model sonnet` 启动后切到 Codex 线程 resume 被 -32602 拒绝，混合后端在最自然的启动方式下不可用（fj-tui-ingress-slice3-review2-f820 §P1-1）。

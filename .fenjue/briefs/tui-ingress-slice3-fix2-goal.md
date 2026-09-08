@@ -1,0 +1,5 @@
+目标：修 slice 3 再审的 P1-1 与 schema 不合规项（复核报告 `/Users/smokingmouse/python/learning/trellis/.fenjue/archive/fj-tui-ingress-slice3-review2-f820/out/review.md` §P1-1 与 V7，先读）。你是 gpt-6-astra 实现坐席（显示端是官方 Codex TUI），分支 feat/codex-ingress-s3（本 worktree）。
+问题一：官方 TUI 以 `--model sonnet`（或任何 TUI 级默认模型）启动后，picker 切到另一后端的线程发 turn 时，TUI 把该模型作为 override 带上，ingress 拒绝跨后端 override → 该轮失败，用户体验上「Claude 主会话」不可用。
+leader 裁决：TUI 级模型只在 thread/start 决定后端；对已存在线程，跨后端的模型 override 视为「沿用线程当前模型」并向 TUI 推一条可见的 thread/status 或 warning 通知说明「该线程为 <backend>，已沿用 <model>」，turn 正常执行；同后端的 override 照常生效；不得静默切引擎、不得让整轮失败。冒烟恢复契约原文的「Claude 主会话（TUI `--model sonnet` 启动）」变体并加判据 `cross_backend_model_override_tolerated`。
+问题二：V7 逐条 schema 校验 5315 项中 3 项不合规——Claude 权限卡投影的 `item/tool/requestUserInput` 缺必填 `isBlocking`（及报告列出的其余字段）；补齐并把「AS→TUI 每条 response / notification / serverRequest 逐条过官方 schema」做成冒烟脚本的固定判据 `wire_schema_clean`。
+交付：改动 + 单测；两种后端冒烟（全部判据含新增两条）各 3 次；全量测试与 typecheck 绿；文档更新。产出 `$FENJUE_ROOT/.fenjue/tasks/$FENJUE_CID/out/result.md`。提交到本分支，交付时 `git status --short` 为空。

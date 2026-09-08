@@ -7,6 +7,8 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
   const bookmarks = useSessionStore((s) => s.bookmarks);
   const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
+  const bookmarksLoadingMore = useSessionStore((s) => s.bookmarksLoadingMore);
+  const loadMoreBookmarks = useSessionStore((s) => s.loadMoreBookmarks);
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const toggleBookmark = useSessionStore((s) => s.toggleBookmark);
@@ -65,12 +67,18 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       ))}
       {bookmarksTotal > bookmarks.length && (
-        <div
+        <button
+          type="button"
+          data-mobile-target="bookmark-load-more"
           data-bookmark-remaining
-          className="min-h-11 px-3 flex items-center text-label text-ink-faint"
+          disabled={bookmarksLoadingMore}
+          className="min-h-11 w-full px-3 flex items-center justify-center text-label text-accent hover:bg-surface-muted disabled:opacity-60"
+          onClick={() => void loadMoreBookmarks()}
         >
-          还有 {bookmarksTotal - bookmarks.length} 条
-        </div>
+          {bookmarksLoadingMore
+            ? "加载中…"
+            : `加载更多（还有 ${bookmarksTotal - bookmarks.length} 条）`}
+        </button>
       )}
     </div>
   );

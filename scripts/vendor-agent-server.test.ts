@@ -1,0 +1,64 @@
+import { expect, test } from "bun:test";
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { vendorManifest } from "./vendor-agent-server-manifest";
+
+test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides or lifecycle repair", () => {
+  const root = join(import.meta.dir, "..");
+  const project = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const vendor = JSON.parse(readFileSync(join(root, "vendor/agent-server/package.json"), "utf8"));
+  expect(project.dependencies["@smokingmouse/agent-server"]).toBe("file:./vendor/agent-server");
+  expect(project.overrides).toBeUndefined();
+  expect(project.scripts.postinstall).toBeUndefined();
+  expect(project.scripts.build).not.toContain("prepare-as-dependency");
+  expect(vendor.scripts).toBeUndefined();
+  expect(vendor.devDependencies).toBeUndefined();
+  expect(Object.values(vendor.dependencies).every(range => typeof range === "string" && !range.startsWith("workspace:"))).toBe(true);
+  for (const target of Object.values(vendor.exports) as { types: string; default: string }[]) {
+    expect(existsSync(join(root, "vendor/agent-server", target.types))).toBe(true);
+    expect(existsSync(join(root, "vendor/agent-server", target.default))).toBe(true);
+  }
+});
+
+test("N4 missing source explains sibling default and SM_TOOLKIT_DIR override", () => {
+  const temp = mkdtempSync(join(tmpdir(), "as-vendor-path-test-"));
+  try {
+    mkdirSync(join(temp, "repo/scripts"), { recursive: true });
+    const script = join(temp, "repo/scripts/vendor-agent-server.sh");
+    copyFileSync(join(import.meta.dir, "vendor-agent-server.sh"), script);
+    for (const source of ["", join(temp, "custom-source")]) {
+      const result = Bun.spawnSync(["sh", script], { env: { ...process.env, SM_TOOLKIT_DIR: source } });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(source || "../sm-toolkit");
+      expect(result.stderr.toString()).toContain("set SM_TOOLKIT_DIR");
+    }
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("N3 derives new runtime dependencies and removes stale pins without copying dev dependencies", () => {
+  const source = { name: "example", version: "1.0.0", dependencies: { added: "^2.0.0", local: "workspace:*" }, devDependencies: { devOnly: "1.0.0" } };
+  expect(vendorManifest(source, { local: "3.0.0", removed: "1.0.0" })).toEqual({
+    name: "example", version: "1.0.0", type: undefined, license: undefined, main: undefined,
+    types: undefined, exports: undefined, dependencies: { added: "^2.0.0", local: "3.0.0" },
+  });
+  expect(() => vendorManifest(source, {})).toThrow("published exact version for local");
+  expect(() => vendorManifest(source, { local: "workspace:*" })).toThrow("published exact version");
+});
+
+test("N1 vendor excludes unusable maps and dangling sourceMappingURL references", () => {
+  const dist = join(import.meta.dir, "../vendor/agent-server/dist");
+  const files = readdirSync(dist, { recursive: true }) as string[];
+  expect(files.some(file => file.endsWith(".map"))).toBe(false);
+  for (const file of files.filter(file => /\.(js|ts)$/.test(file))) {
+    expect(readFileSync(join(dist, file), "utf8")).not.toContain("sourceMappingURL=");
+  }
+});
+
+test("N2 vendor includes the complete upstream MIT license", () => {
+  const license = readFileSync(join(import.meta.dir, "../vendor/agent-server/LICENSE"), "utf8");
+  expect(license).toContain("MIT License");
+  expect(license).toContain("Permission is hereby granted, free of charge");
+  expect(license).toContain("THE SOFTWARE IS PROVIDED");
+  expect(license).toContain("Copyright");
+});

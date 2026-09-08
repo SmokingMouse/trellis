@@ -25,17 +25,22 @@ import { FilePreview } from "@/components/FilePreview";
 import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { ScrollHideProvider } from "@/hooks/useScrollHide";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
 import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
+import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { isHerdrSession } from "@/lib/herdr-ui";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
   const hydrated = useSessionStore((s) => s.hydrated);
   const session = useSessionStore((s) => s.session);
+  const { fleet } = useHerdrFleet();
+  const herdrControlled = isHerdrSession(session, fleet);
   const hydrateError = useSessionStore((s) => s.hydrateError);
   const viewMode = useSessionStore((s) => s.viewMode);
   const setViewMode = useSessionStore((s) => s.setViewMode);
@@ -120,8 +125,10 @@ export default function Home() {
   }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
 
   useEffect(() => {
-    if (isMobile && sessionId) setViewMode("linear");
-  }, [isMobile, sessionId, setViewMode]);
+    if ((isMobile || herdrControlled) && sessionId) {
+      setViewMode("linear");
+    }
+  }, [isMobile, herdrControlled, sessionId, setViewMode]);
 
   if (!hydrated || isMobile === null) {
     return (
@@ -132,7 +139,7 @@ export default function Home() {
   }
 
   return (
-    <>
+    <ScrollHideProvider>
       <Header isMobile={isMobile} />
       <SessionSidebar />
       <SessionTabs />
@@ -182,6 +189,6 @@ export default function Home() {
       <FilePreview />
       <BookmarksDrawer />
       <KeyboardHelp />
-    </>
+    </ScrollHideProvider>
   );
 }

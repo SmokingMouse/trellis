@@ -5,8 +5,7 @@
 import "server-only";
 import { existsSync } from "node:fs";
 import { getDB } from "./sqlite";
-import { parseCliSessionJsonl } from "./cli-import";
-import { parseCodexSessionJsonl } from "./codex-import";
+import { parseCliTranscript } from "./cli-transcript";
 import { ensureWorkspaceForPath } from "./workspaces";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
 
@@ -81,10 +80,7 @@ function parseLineagesChecked(rows: LineageRow[]): {
   const out: ParsedLineage[] = [];
   let anyUnreadable = false;
   for (const row of rows) {
-    const parsed =
-      row.provider_family === "codex"
-        ? parseCodexSessionJsonl(row.jsonl_path)
-        : parseCliSessionJsonl(row.jsonl_path);
+    const parsed = parseCliTranscript(row.provider_family, row.jsonl_path);
     if (!parsed || parsed.turns.length === 0) {
       if (!existsSync(row.jsonl_path)) anyUnreadable = true;
       continue;
@@ -160,7 +156,7 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
   const existing = db
     .prepare("SELECT origin FROM sessions WHERE id = ?")
     .get(trellisSessionId) as { origin: string } | undefined;
-  if (existing && existing.origin !== "cli-import") {
+  if (existing && existing.origin !== "cli-import" && existing.origin !== "herdr") {
     return { sessionId: trellisSessionId, status: "skipped-native", turns: 0 };
   }
 

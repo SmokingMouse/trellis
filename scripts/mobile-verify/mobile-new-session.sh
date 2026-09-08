@@ -319,7 +319,7 @@ echo "== project mode: mode/workspace use full-width rows at both phone heights 
 ab eval --stdin <<'JS'
 (() => {
   localStorage.setItem('trellis-mode', 'project');
-  localStorage.setItem('trellis-workspace', '/Users/smokingmouse/python/learning/trellis/worktrees/feature-with-a-very-long-workspace-name');
+  localStorage.setItem('trellis-workspace', '/Users/test-user/projects/trellis/worktrees/feature-with-a-very-long-workspace-name');
   location.reload();
   return true;
 })()

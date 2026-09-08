@@ -1,0 +1,11 @@
+在分支 feat/as-foundation（基于 feat/agent-server 6b0f179）给 agent-server 协议与 claude 引擎打底，让后续 agent-tui 与 Trellis 能拿到原生 Claude Code 的能力。依据：对齐清单 /Users/smokingmouse/python/learning/trellis/.fenjue/archive/fj-as-parity-probe-a5c7/out/parity.md（§1 协议面证据、§4 第 3/4/8/9/10/12/13 项、末尾「通用逃生门」建议）。只改 packages/agent-server（协议 schema/zod、core、engines、client 库）、docs/agent-server/protocol.md 与 README；不改 apps/agent-tui 的界面（后续单做），但 client 库要暴露新事件与方法。交付：
+(1) thread/engineEvent 通知：把 claude 引擎收到的 system 帧按 {threadId, turnId?, backend, subtype, payload} 原样上抛（含 hook 事件、local_command、api_retry、model_refusal_fallback、memory、rate_limit、turn_duration、away_summary 与一切未知子类型），已建模的 init/compact_boundary/task_* 照旧；spawn 加 --include-hook-events；codex 引擎有对应的通知也走同一口。
+(2) thread/engineControl 直通：请求 {threadId, subtype, params} → 向 CLI 发 control_request 并把 control_response 原样返回；白名单从本机 claude bundle 的 57 个子类型里挑安全的（set_model、set_permission_mode、set_max_thinking_tokens、file_suggestions、mcp 状态类、interrupt、rewind/diff/context/usage 类等），危险或无意义的（登录、反馈、初始化类）明确拒绝；codex 后端返回 backend_unsupported 错误码；记录在 protocol.md 并标明这是 backend-specific 逃生门。
+(3) 权限模式全集与热切：PermissionSchema 扩到 default / acceptEdits / plan / bypassPermissions / dontAsk；thread/start 映射到 --permission-mode；新增 thread/permission/set → set_permission_mode，thread 状态里带当前模式，通知变更；去掉 validateTurn 里对换模式的硬拒。
+(4) effort：thread/start 支持 effort 并透传 --effort，去掉 claude.ts 里的 throw；热切走 thread/effort/set → set_max_thinking_tokens（或 engineControl）。
+(5) 子 agent 正文：spawn 加 --forward-subagent-text，mapper 按 parent_tool_use_id 挂到 subAgent item（没有该 item 类型就加）。
+(6) bash 输入类型：UserInputSchema 加 {type:"bash", command}，映射到 stream-json 的 bash 输入帧（从 bundle 核实帧名与形状，注释写证据）。
+(7) compact：thread/compact 方法（bundle 里有 compact 控制指令就用，否则按用户文本 /compact 转发并说明）；--autocompact 作为 thread/start 选项透传。
+(8) 兼容与版本：全部只增不改，旧客户端（Trellis vendored 的 as-client）不掉线不报错；initialize 能力协商里加对应 capability 标记；zod strictObject 一致；scripts/check-codex-alignment.ts 仍通过。
+(9) 测试：每项用 fake child stdio 单测（帧进出形状、拒绝路径、旧客户端兼容）；bun run typecheck、cd packages/agent-server && bun test、cd apps/agent-tui && bun test 全绿。
+提交按 (1)–(7) 切小步。不 push、不动 feat/agent-server、不起真 claude/codex。产物 out/result.md：每项 → 协议名 → CLI 子类型证据 → 测试名；protocol.md 变更摘要；实际命令与结果。blocker 期间不发 result。

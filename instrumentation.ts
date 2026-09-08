@@ -1,8 +1,14 @@
 // Next server 启动钩子（register 每进程跑一次，在处理首个请求前）。
 // 用来拉起 CLI session 同步 watcher（Stage B，progress/cli-sync.md）。
 // 仅 nodejs runtime——watcher 用 fs + bun:sqlite，edge runtime 没有。
+import { isShadowEnabled } from "./lib/as-config";
+
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // Shadow observer is optional; even import/handshake failure must not delay boot.
+  if (isShadowEnabled()) void import("./lib/server/as-client")
+    .then(({ getShadowClient }) => getShadowClient().connect())
+    .catch(() => { /* ShadowClient logs once per outage and retries independently. */ });
   // Env 卫生：从启动 shell 继承的交互式 CLI 调优变量不该穿透给 trellis spawn 的
   // claude（SDK 的 streamLines 用 {...process.env, ...opts.env} 合并）。实测踩坑：
   // 从 occ alias（CLAUDE_CODE_EFFORT_LEVEL=max）的 session 里启动 dev server →
@@ -33,6 +39,10 @@ export async function register() {
     "./lib/server/cli-sync-watcher"
   );
   startCliSyncWatcher();
+  // Herdr is an optional enhancement. Start its ping/subscription/snapshot loop
+  // in the background so a missing socket never delays the Trellis server.
+  const { getHerdrFleetService } = await import("./lib/server/herdr-fleet");
+  void getHerdrFleetService().ensureStarted();
   // S88：自定义 Agent 的 SDK 能力探测。放在调度器之前 —— SDK 版本不对时，多传的
   // RunOptions 字段会被 TS 的结构类型放过、被运行时**静默丢弃**：agent 完全不生效，
   // 但 spawn 正常、回答正常、零报错。这是整套里最难查的一类故障，必须在启动时喊。
@@ -47,6 +57,17 @@ export async function register() {
     }
   } catch {
     /* 探测失败不拦启动 */
+  }
+  // Claude Code hook 的端点文件（~/.trellis/hooks/endpoint.env + 脚本副本）。
+  // 必须在这里写而不是在路由里懒写：hook 脚本是**外部**进程，它只能从这个文件
+  // 知道我们监听在哪个端口、口令是什么；服务没起来时它读不到文件就静默退出。
+  // TRELLIS_HOOKS=off 关闸（部署 smoke 用，同 TRELLIS_LARK）。
+  const { installHookEndpoint } = await import("./lib/server/agent-hooks/install");
+  const hookInstall = installHookEndpoint();
+  if (hookInstall.installed) {
+    console.log(`[trellis] agent hooks endpoint → ${hookInstall.endpoint} (port ${hookInstall.port})`);
+  } else if (hookInstall.reason !== "TRELLIS_HOOKS=off") {
+    console.warn(`[trellis] agent hooks endpoint 未写成：${hookInstall.reason}`);
   }
   const { installDefaultChannels } = await import("./lib/server/notify");
   installDefaultChannels();

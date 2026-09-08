@@ -30,6 +30,7 @@ import type {
 // types but the response is always present (no null) and position is omitted.
 
 export type ApiSession = {
+  bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
   rootNodeId: string;
@@ -58,6 +59,7 @@ export type ApiSession = {
   // 'cli-import'（attach 的本机 CLI 会话，双向绑定，只读 detach 安全）。
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
+  herdrAlive?: boolean;
   sourceJsonlPath: string | null;
   cliProvider: "claude" | "codex" | null;
   // 权限确认：true = project 轮次的可变更工具需用户逐个允许/拒绝
@@ -154,6 +156,8 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
+  herdr_alive: number;
+  binding_type: "legacy" | "pane" | "thread";
   id: string;
   title: string;
   root_node_id: string;
@@ -174,7 +178,11 @@ type SessionRow = {
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, cli_provider, require_approval, agent_id`;
+       origin, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type,
+       EXISTS(SELECT 1 FROM herdr_sessions h
+         JOIN cli_lineages l ON l.cli_session_id = h.session_id
+         WHERE l.trellis_session_id = sessions.id AND h.alive = 1
+         UNION SELECT 1 FROM herdr_sessions h WHERE h.session_id = sessions.id AND h.alive = 1) AS herdr_alive`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -291,6 +299,7 @@ function resolveWorkspaceId(absPath: string): string | null {
 
 function rowToSession(r: SessionRow): ApiSession {
   return {
+    bindingType: r.binding_type,
     id: r.id,
     title: r.title,
     rootNodeId: r.root_node_id,
@@ -303,6 +312,7 @@ function rowToSession(r: SessionRow): ApiSession {
     archived: r.archived === 1,
     model: r.model,
     origin: r.origin ?? "native",
+    herdrAlive: r.herdr_alive === 1,
     sourceJsonlPath: r.source_jsonl_path,
     cliProvider: r.cli_provider,
     requireApproval: r.require_approval === 1,
@@ -515,7 +525,7 @@ export function deleteSession(id: string): void {
   // FK graph — do it explicitly.
   ftsDeleteBySession(db, id);
   // cli-import 镜像的 jsonl 是用户的原始 CLI 历史，绝不能跟着删 —— 只清 DB 行。
-  if (meta && meta.origin !== "cli-import") {
+  if (meta && meta.origin !== "cli-import" && meta.origin !== "herdr") {
     const cwd = sessionCwd(meta.mode as Mode, meta.wp);
     for (const r of claudeIdRows) {
       try {
@@ -872,8 +882,11 @@ const VISIBLE_BOOKMARK_ROOTS_CTE = `WITH RECURSIVE bookmark_roots(
    WHERE parent_id IS NULL AND hidden_at IS NULL
 )`;
 
-export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
+export function listBookmarks(
+  opts: { limit?: number; offset?: number } = {},
+): Bookmark[] {
   const limit = Math.min(100, Math.max(1, Math.trunc(opts.limit ?? 50)));
+  const offset = Math.max(0, Math.trunc(opts.offset ?? 0));
   const rows = getDB()
     .prepare(
       `${VISIBLE_BOOKMARK_ROOTS_CTE}
@@ -883,9 +896,9 @@ export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
          JOIN visible_bookmarks visible ON visible.node_id = n.id
          JOIN sessions s ON s.id = n.session_id
         ORDER BY n.bookmarked_at DESC, n.id
-        LIMIT ?`,
+        LIMIT ? OFFSET ?`,
     )
-    .all(limit) as Array<{
+    .all(limit, offset) as Array<{
     node_id: string;
     session_id: string;
     session_title: string;
@@ -915,6 +928,25 @@ export function countBookmarks(): number {
     )
     .get() as { total: number };
   return row.total;
+}
+
+// C2-2: a client's local `nodes[id].bookmarkedAt` can go stale when the
+// bookmark is toggled off from another tab/device — the bounded bookmarks
+// window only reports what's *currently* bookmarked, so a node that just
+// dropped off it is indistinguishable from "still bookmarked, just outside
+// the page". Callers pass exactly the locally-bookmarked ids that fell
+// outside the window and get back each one's true current state.
+export function getBookmarkStatuses(
+  nodeIds: string[],
+): Record<string, number | null> {
+  const result: Record<string, number | null> = {};
+  if (nodeIds.length === 0) return result;
+  const placeholders = nodeIds.map(() => "?").join(",");
+  const rows = getDB()
+    .prepare(`SELECT id, bookmarked_at FROM nodes WHERE id IN (${placeholders})`)
+    .all(...nodeIds) as Array<{ id: string; bookmarked_at: number | null }>;
+  for (const row of rows) result[row.id] = row.bookmarked_at;
+  return result;
 }
 
 // Walk the parent chain up to this node's tree root (parent_id IS NULL).
@@ -986,6 +1018,7 @@ export function claudeSessionPath(sessionId: string, cwd: string | null): string
 }
 
 export function createSessionWithRoot(args: {
+  bindingType?: "legacy" | "thread";
   sessionId: string;
   nodeId: string;
   title: string;
@@ -1016,6 +1049,14 @@ export function createSessionWithRoot(args: {
   const workspaceId = workspacePath
     ? resolveWorkspaceId(workspacePath)
     : null;
+  // Limit new AS bindings to the rollout project after canonical workspace
+  // registration. Missing/unknown ownership must stay on the legacy path.
+  const rolloutProject = process.env.TRELLIS_AS_PROJECT_ID?.trim();
+  const workspaceProject = rolloutProject && workspaceId
+    ? db.prepare("SELECT project_id FROM workspaces WHERE id=?").get(workspaceId) as { project_id: string } | null
+    : null;
+  const bindingType = args.bindingType === "thread" && rolloutProject && workspaceProject?.project_id !== rolloutProject
+    ? "legacy" : args.bindingType ?? "legacy";
   const tx = db.transaction(() => {
     // 新建 project session 一律走 per-lineage 隔离（spec:
     // progress/project-lineage-isolation-spec.md）；存量行保持 0（旧共享语义）。
@@ -1023,8 +1064,8 @@ export function createSessionWithRoot(args: {
       `INSERT INTO sessions (id, title, root_node_id, created_at, updated_at,
                              context_mode, workspace_path, workspace_id,
                              system_prompt, model,
-                             lineage_isolation, require_approval, agent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             lineage_isolation, require_approval, agent_id, binding_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       args.sessionId,
       args.title,
@@ -1039,6 +1080,7 @@ export function createSessionWithRoot(args: {
       mode === "project" ? 1 : 0,
       requireApproval ? 1 : 0,
       agentId,
+      bindingType,
     );
 
     db.prepare(
@@ -2355,7 +2397,7 @@ export function reapInterruptedStreams(): number {
     .prepare(
       `UPDATE nodes SET status = 'error', error_message = 'interrupted',
               pending_interaction_json = NULL
-       WHERE status = 'streaming'`,
+       WHERE status = 'streaming' AND id NOT IN (SELECT node_id FROM as_turns)`,
     )
     .run();
   return result.changes;

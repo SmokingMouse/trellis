@@ -303,6 +303,8 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
    TRELLIS_AUTH_PASS=<登录密码>
    TRELLIS_AUTH_TOKEN=<随机长串，cookie 会话令牌>
    TRELLIS_REPO_DIR=<trellis 仓库 checkout 的绝对路径>
+   # 可选：agent-server 只读影子模式，配置说明见下
+   TRELLIS_AS=off
    ```
 
    前两个任一缺失 = 认证闸**静默关闭**。机器只在内网/Tailscale 里可以不配；挂公网隧道必须配——Trellis 能 spawn CLI 在宿主机执行任意代码，这道闸是唯一的门。`TRELLIS_REPO_DIR` 给应用内「检查更新/更新到最新」用（release 目录不是 git 仓库，部署脚本要回到 checkout 里跑）。
@@ -310,6 +312,30 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 5. **首次部署**：`make deploy FORCE=1`——此时服务工作目录还不是 `~/.trellis/current`（正是下一步要改的），preflight 会拦，首次明知故犯一次。
 6. **`make install-service`**：把服务定义的工作目录改到 `~/.trellis/current`（自动备份原文件并重载）。之后 `make deploy` 不再需要 FORCE，仓库目录退化为纯开发 checkout。
 7. **验证**：`make deploy-status`；`curl http://127.0.0.1:3088/__gate/health` 应给出 `next=ready` 且 `auth=on`。
+
+### agent-server 影子模式
+
+影子观察与 project 切流共用启用判定：`TRELLIS_AS=off` 优先级最高，即使设置了 socket 也关闭；否则 `TRELLIS_AS=on` 或设置 `TRELLIS_AS_SOCKET` 即启用。另设 `TRELLIS_AS_PROJECT=on` 才给新 project 会话打 thread 标记。只关 PROJECT 会停止新会话打标，已绑定会话继续使用 daemon；关 AS 则已绑定会话的新请求也带 notice 回退兼容模式，保留输入与祖先历史。pane 绑定仍由 herdr-bridge 接线。
+
+先独立启动 agent-server daemon，再在开发用 `.env.local` 或部署用 `~/.trellis/shared/.env.local` 配置下表变量并重启 Trellis。可参考仓库的 [.env.example](.env.example)。打开 `/console/threads` 查看只读日志；审批和执行仍在原客户端完成，既有 chat 链路不受影响。
+
+| 变量 | 含义与默认值 |
+|---|---|
+| `TRELLIS_AS` | 默认不启用；`on` 启用，`off` 是最高优先级硬关闸，即使已配置 socket 也禁用。未设置时，非空 `TRELLIS_AS_SOCKET` 会自动启用。 |
+| `TRELLIS_AS_PROJECT` | `on` 时为新 project 会话绑定 daemon thread，默认关闭。已绑定会话由 `TRELLIS_AS` 控制。 |
+| `TRELLIS_AS_PROJECT_ID` | 可选的精确 `projects.id`，只允许该项目所属工作区的新会话绑定 AS；未知归属保持 legacy。未设置时保留全部新 project 会话可切流的行为；停流请关闭 PROJECT 或 AS，不要只删此筛选值。 |
+| `TRELLIS_AS_SOCKET` | daemon Unix socket 的绝对路径。未设置时遵循 agent-server 路径规则：`AGENT_SERVER_SOCKET_PATH` 优先，其次绝对 `XDG_RUNTIME_DIR` 下的 `sm-toolkit/agent-server.sock`，其次绝对 `XDG_STATE_HOME` 下的同一路径，最后为 `$HOME/.sm-toolkit/agent-server.sock`。 |
+| `TRELLIS_AS_TOKEN_PATH` | 已运行 daemon 的 token 文件绝对路径，不是 token 内容。默认绝对 `XDG_STATE_HOME` 下的 `sm-toolkit/agent-server/token`，否则 `$HOME/.agent-server/token`。自定义 socket 不会自动改变 token 路径，两个配置需指向同一个 daemon。 |
+
+连接失败不会阻断 Trellis 启动；自动重连从 1 秒指数退避至 5 分钟，同一故障仅首次警告，恢复记录一次。列表刷新（`GET /api/as/threads`）可在退避期立即重试，同一观察者最短间隔 1 秒且并发合并。关闭时 AS API 返回 503。AS 页面与接口沿用 Trellis 现有鉴权闸；这些变量仅在服务端读取，不要使用 `NEXT_PUBLIC_` 前缀。
+
+审批观察依赖 daemon 的 `pendingRequests` 能力：首次 attach/断线重连用快照初始化，随后订阅 `thread/pendingRequests`；project 的可操作表单来自 server request。两条路径均不再每 2 秒 attach，静默时不重复推送历史；影子 SSE 保留每 15 秒一条轻量保活注释。旧 daemon 缺少通知能力时只能在首次 attach/重连看到审批快照，应升级 daemon 后使用实时审批观察。
+
+project 从最新空闲节点续聊复用 thread；早期节点续聊、显式 fork、重试，或原 thread 已被其他客户端推进时，需要新 thread。daemon 声明 `midThreadFork` 时，以 `as_turns.last_item_id` 为边界发送 `thread/fork {fromItemId}`，新历史只含所选节点之前的完整前缀。缺少该能力才把所选祖先历史播种到新 thread；有能力但边界无效时直接报错，不静默退回播种。无 daemon 映射的兼容历史仍需播种。
+
+客户端随仓库 vendor，来源固定在 `vendor/agent-server/VENDORED_FROM`；刷新用 `SM_TOOLKIT_DIR=/path/to/sm-toolkit sh scripts/vendor-agent-server.sh` 后执行 `bun install`。复核命令：`bunx tsc --noEmit`、`bun test`、`scripts/mobile-verify/mobile-as-project.sh`、`scripts/mobile-verify/mobile-as-shadow.sh`；移动验收只用 mock 引擎与脚本锁定的隔离端口。
+
+### 常驻服务模板
 
 **launchd（macOS）**：存为 `~/Library/LaunchAgents/com.smokingmouse.trellis.plist`（label 可用 `TRELLIS_DEPLOY_LABEL` 换），`launchctl bootstrap gui/$(id -u) <plist路径>` 加载。把 `/Users/YOU` 全部换成真实家目录——plist 不展开 `~`：
 

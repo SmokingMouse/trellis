@@ -6,6 +6,7 @@ import {
   type Mode,
 } from "@/lib/llm";
 import { getProvider } from "@/lib/llm/server";
+import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
@@ -15,7 +16,6 @@ import {
   createRootInSession,
   createBranchNode,
   buildHistoryForNode,
-  resetNodeForRetry,
   getNode,
   getNodeAttachments,
   getSession,
@@ -25,6 +25,7 @@ import {
   isLineageIsolated,
   setNodeResumeId,
   setNodeAgent,
+  finalizeNode,
 } from "@/lib/server/repo";
 import {
   attachedLineageForNode,
@@ -39,6 +40,10 @@ import {
   codexLineageForNode,
 } from "@/lib/server/codex-fork";
 import { startRun, subscribe } from "@/lib/server/run-bus";
+import { newProjectBinding, resolveSessionBinding, removeAsTurn } from "@/lib/server/session-binding";
+import { startProjectRun, projectSSE, DaemonUnavailable, hasActiveProjectRun } from "@/lib/server/as-project";
+import { getDB } from "@/lib/server/sqlite";
+import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
   resolveBlobPath,
   isValidHash,
@@ -87,6 +92,7 @@ type ChatRequestRoot = {
 
 type ChatRequestBranch = {
   kind: "branch";
+  fork?: boolean;
   parentNodeId: string;
   question: string;
   parentAnchor?: { selectedText: string } | null;
@@ -228,6 +234,38 @@ export async function POST(req: Request) {
   if (body.kind !== "retry" && !body.question?.trim()) {
     return Response.json({ error: "empty question" }, { status: 400 });
   }
+  const asOptions = body as ChatRequest & { permission?: unknown; effort?: unknown };
+  const permission = asOptions.permission === undefined ? undefined : PermissionSchema.safeParse(asOptions.permission);
+  if (permission && !permission.success) return Response.json({error:"invalid permission"}, {status:400});
+  if (asOptions.effort !== undefined && (typeof asOptions.effort !== "string" || !["low","medium","high","xhigh","max"].includes(asOptions.effort))) {
+    return Response.json({error:"invalid effort"}, {status:400});
+  }
+  const existingSessionId = body.kind === "root" ? body.sessionId : getNode(body.kind === "branch" ? body.parentNodeId : body.nodeId)?.sessionId;
+  if (existingSessionId && getSession(existingSessionId)?.bindingType === "pane") {
+    return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
+  }
+
+  // Herdr-bound transcripts have a single driver: the terminal agent. They are
+  // mirrored into Trellis for reading only; regular chat must never resume or
+  // fork them behind Herdr's back.
+  const targetSession = (() => {
+    if (body.kind === "root" && body.sessionId) return getSession(body.sessionId);
+    if (body.kind === "branch" && body.parentNodeId) {
+      const parent = getNode(body.parentNodeId);
+      return parent ? getSession(parent.sessionId) : null;
+    }
+    if (body.kind === "retry" && body.nodeId) {
+      const node = getNode(body.nodeId);
+      return node ? getSession(node.sessionId) : null;
+    }
+    return null;
+  })();
+  if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
+    return Response.json(
+      { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
+      { status: 409 },
+    );
+  }
 
   const providerId = isProviderId(body.provider)
     ? body.provider
@@ -357,6 +395,7 @@ export async function POST(req: Request) {
           model: providerId,
           requireApproval: resolvedRequireApproval,
           agentId: resolvedAgentId,
+          bindingType: newProjectBinding(resolvedMode, resolvedAgentId),
           attachments: resolvedAttachments,
         });
         createdEvent = { type: "created", session, node };
@@ -395,7 +434,8 @@ export async function POST(req: Request) {
       if (!body.nodeId) {
         return Response.json({ error: "missing nodeId" }, { status: 400 });
       }
-      const reset = resetNodeForRetry(body.nodeId);
+      if (getNode(body.nodeId)?.status === "streaming" || hasActiveProjectRun(body.nodeId)) return Response.json({error:"node is still running"}, {status:409});
+      const reset = getNode(body.nodeId);
       if (!reset) {
         return Response.json({ error: "node not found" }, { status: 404 });
       }
@@ -462,6 +502,27 @@ export async function POST(req: Request) {
     fileAttachments,
     mode !== "chat" || chatEnhanced,
   );
+  let asFallback = false;
+  const binding = resolveSessionBinding(trellisSessionId);
+  if (binding.type === "pane") return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });
+  if ((binding.type === "thread" || binding.type === "fallback") && !mentionActive && !resolvedAgentId) {
+    try {
+      if (binding.type === "fallback") throw new DaemonUnavailable("Agent 服务已关闭");
+      const run = await startProjectRun({ nodeId, prompt: questionForLLM, attachments: providerAttachments,
+        fork: body.kind === "branch" && (body.fork === true || !!body.parentAnchor),
+        retry: body.kind === "retry", permission: permission?.success ? permission.data : undefined,
+        effort: typeof asOptions.effort === "string" ? asOptions.effort : process.env.TRELLIS_AS_EFFORT });
+      return projectSSE(req, run, createdEvent);
+    } catch (error) {
+      if (!(error instanceof DaemonUnavailable)) {
+        if (body.kind !== "retry") finalizeNode({nodeId, status:"error", errorMessage:String(error), tokenInput:0, tokenOutput:0, tokenCacheRead:0, tokenCacheCreation:0, now:Date.now()});
+        return Response.json({ error: String(error) }, { status: 503 });
+      }
+      asFallback = true;
+      if (body.kind !== "retry") removeAsTurn(nodeId);
+      console.warn(`[trellis/as] daemon unavailable; falling back for ${nodeId}`);
+    }
+  }
   let chatBFork = mode === "chat" && family === "claude" && reqDepth === 0;
   // codex chat（B-fork 等价，depth 0）：codex 无 --fork-session，但 `codex exec
   // resume` 线性续聊 + 前缀 rollout 分叉可以拼出同一语义（分支互相隔离、历史住
@@ -506,6 +567,7 @@ export async function POST(req: Request) {
     chatBFork || codexChatHandled || mode === "project"
       ? []
       : buildHistoryForNode(nodeId, { maxDepth: foldDepth });
+  if (asFallback) history = buildHistoryForNode(nodeId, { maxDepth: 20 });
   // Resume id (StreamRequest.claudeSessionId — legacy name, value is the active
   // family's resume id). project shares the ROOT's id across the whole tree
   // (getRoot…, each root owns a per-family id since the post-2026-05 upgrade).
@@ -761,6 +823,8 @@ export async function POST(req: Request) {
   }
   startRun({
     nodeId,
+    retry: body.kind === "retry",
+    onRetryCommitted: asFallback ? () => removeAsTurn(nodeId) : undefined,
     // chat B-fork writes the forked id to THIS node (per-node); native isolated
     // project writes the fresh lineage head's id to THIS node (fork heads were
     // pre-written above, so claudeSessionId is set → undefined); legacy project
@@ -859,6 +923,7 @@ export async function POST(req: Request) {
       // event the client sees is still the `created` payload assembled
       // up here. After that, live RunEvents flow through.
       send(createdEvent);
+      if (asFallback) send({ type: "notice", message: "Agent 服务暂不可达，本轮已使用兼容模式。" });
 
       const unsubscribe = subscribe(nodeId, {
         onEvent: (event) => {

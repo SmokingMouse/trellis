@@ -1,0 +1,21 @@
+# agent-server project 切流
+
+- 契约 fj-trellis-step2-8442；独立 feat/agent-server-step2。
+- vendor 升至 sm-toolkit 7913839；写客户端声明审批与 engineEvent 能力，提供短 lease 与 permission/set。
+- 验证：vendor 脚本成功；协议新增 bash 输入已适配影子文本显示。
+- Next：提交验收；任意 fromItemId 分叉留上游 backlog，不阻塞本单。
+- 已接入 project 双写投影、幂等 turn 重放/catchup、图片输入、审批/interrupt 分流、权限控件与系统日志。TS 检查通过。
+- 阻塞已上报 fj：7913839 的 thread/fork 明确拒绝 fromItemId；等待主控提供上游修复或范围决策，其他验收继续。
+- 验证：bun test 117 pass；mobile-as-shadow exit 0；mobile-as-project 三轮单引擎、网页刷新、第二端审批、权限/系统日志、DB 对比、中断与降级均通过，最终 fromItemId 分叉 HTTP 503 导致 exit 1。
+- 最终独立验证：tsc exit 0；bun test 118 pass/0 fail；slim-shell/new-session/branch-chain 全 exit 0；project 最新补验双向审批、图片路径、精确 catchup、创建参数与热 bypass 拒绝全部通过，唯 fromItemId 503；D5 清理 exit 0，3490 未触碰。报告与日志在契约 out/report.md，阻塞期间不发 result。
+- 绑定模型：sessions.binding_type 默认 legacy，pane 仅保留解析接口；as_threads 按 daemon/thread 记录会话，as_turns 保存节点与分叉坐标。boot reap 排除 daemon 驱动的节点。
+- 主控裁决收窄分叉：显式 fork 从最新节点调用无 fromItemId 的 thread/fork；早期节点明确拒绝，保留旧节点数据与绑定。普通续聊继续复用 thread。
+- 同 thread 的节点控件共享 EventSource，避免长链重复订阅耗尽浏览器连接。复跑 D3 exit 0，包含 tip 新绑定、早期节点失败网页截图、旧数据比较与降级；D1/D2/D5 exit 0。最终报告和 proof.json 位于契约 out。
+- D4 验收返查：原 env -i 命令连续两次无干预独占复跑 exit 0；未改代码或删用例。首轮额外浏览器诊断后页面变为 about:blank，N9 超时 exit 1，该轮受诊断干扰，不能作为原验收失败的根因证据。启动前和收尾均无 project/shadow 脚本、测试锁或 3471–3482 监听；D5 exit 0。不将尚未定位的验收失败归因于锁冲突。
+- 新契约 fj-trellis-step2-fix-683f：P1-1 将非 tip 普通续聊与显式 fork 分开，普通续聊用祖先历史播种新线程；mobile 增加 HTTP 200、新绑定、节点 done 断言。Next：修复重试保留原答案、硬关闸与连接/租约问题，统一复跑验收。
+- P0-1：AS 重试结果先缓存在运行投影里，成功后事务替换原答案和 turn 绑定；失败保留正文、工具、usage、状态和旧绑定。tip 重试原生 fork 后重发，非 tip（含 daemon 比 DB 更晚）播种新线程。兼容路径延迟至首个正文/工具输出或成功才 reset。Mock 回归 P0-1/P1-1 已通过，Next：硬关闸与资源清理。
+- P1-2/P2-1：绑定解析新增 disabled fallback，共用 isShadowEnabled；AS=off 覆盖 SOCKET，已绑定新输入带 notice 走旧引擎；PROJECT=off 仅停打标。README/.env 同步。真实 Mock daemon + POST 路由 probe 通过，硬关后 engine turn 计数不变。
+- P2-2：fallback/startup 失败删除未执行的 as_turns 并清理无引用 as_threads；重试映射仅成功时切换，兼容重试有输出后才解除旧绑定。ProjectRun.start 缓存初始化 promise，并发 catchup 等同一完成态；Mock 注入 preflight 后失败与并发恢复测试通过。
+- P2-3：interrupt 直接发送 turn/interrupt，不再获取租约；重试期间指向暂存的新运行线程。对端持有 10 秒租约的 Mock 中断 probe 已通过。Next：完整 D1–D5 与手机新增重试/普通续聊/硬关断言。
+- P0-1/P1-1 复验补边界：POST 重试探针验证保留原答案与重复点击 409；暂存重试的审批、权限、中断统一指向新运行，而持久绑定仅成功切换。普通续聊还核对 daemon 实际末尾，避免重试移走后 DB 误判旧线程 tip。D1 exit 0，D2 124 pass/432 assertions。
+- fj-trellis-step2-fix-683f 最终验收自测：D1 exit 0；D2 exit 0（124 pass / 432 assertions）；D3、D4 均按原 env -i 命令串行 exit 0；D5 exit 0，另查无脚本/fixture/测试锁残留。新增手机断言覆盖重试成功与失败保留、非 tip 普通提问、硬关回退。Next：信箱交付待独立验收；产物为新契约 out/result.md、proof.json 与日志。
