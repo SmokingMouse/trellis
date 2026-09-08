@@ -59,6 +59,7 @@ export type ApiSession = {
   // 'cli-import'（attach 的本机 CLI 会话，双向绑定，只读 detach 安全）。
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
+  kind?: string;
   herdrAlive?: boolean;
   sourceJsonlPath: string | null;
   cliProvider: "claude" | "codex" | null;
@@ -156,6 +157,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
+  kind: string;
   herdr_alive: number;
   binding_type: "legacy" | "pane" | "thread";
   id: string;
@@ -178,7 +180,7 @@ type SessionRow = {
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type,
+       origin, kind, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type,
        EXISTS(SELECT 1 FROM herdr_sessions h
          JOIN cli_lineages l ON l.cli_session_id = h.session_id
          WHERE l.trellis_session_id = sessions.id AND h.alive = 1
@@ -312,6 +314,7 @@ function rowToSession(r: SessionRow): ApiSession {
     archived: r.archived === 1,
     model: r.model,
     origin: r.origin ?? "native",
+    kind: r.kind,
     herdrAlive: r.herdr_alive === 1,
     sourceJsonlPath: r.source_jsonl_path,
     cliProvider: r.cli_provider,
@@ -374,20 +377,16 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const want = opts?.archived ? 1 : 0;
   const rows = db
     .prepare(
-      // S88: kind='task' 是自动化任务的常驻会话，不挤进用户的**活跃**列表；
-      // kind='lark' 则必须与 user 一起展示——飞书只是入口，树才是对话本体。
-      // —— 它们在侧栏有自己的「定时任务」分组（S117，listTaskSessions）。
-      // 归档视图放宽 kind：归档的任务会话若也被排除，就从每个列表里都消失了。
+      // 来源只决定行内 chip；所有来源共享活跃 / 归档语义。
       `SELECT ${SESSION_COLS} FROM sessions
-       WHERE archived = ? AND (kind IN ('user', 'lark') OR (? = 1 AND kind = 'task'))
+       WHERE archived = ? AND kind IN ('user', 'lark', 'herdr', 'task')
        ORDER BY updated_at DESC`,
     )
-    .all(want, want) as SessionRow[];
+    .all(want) as SessionRow[];
   return rows.map(rowToSession);
 }
 
-// S117: 任务的常驻会话（kind='task'）。不混进 listSessions —— 它们在侧栏有
-// 自己的「定时任务」分组，且 tab 条要能把深链进来的任务会话 resolve 出标题。
+// 任务专用列表，保留现有 API / tab 消费方兼容。
 export function listTaskSessions(): ApiSession[] {
   const db = getDB();
   const rows = db
@@ -405,7 +404,7 @@ export function countArchivedSessions(): number {
   // 与 listSessions 的归档视图同一口径：任务会话也计入（能找回才敢归档）。
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task','lark')",
+      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task','lark','herdr')",
     )
     .get() as { n: number };
   return row.n;
@@ -2406,9 +2405,9 @@ export function reapInterruptedStreams(): number {
 // ── S133 最近链（侧栏「最近」分组）────────────────────────────────────
 //
 // 每条链（根→叶子 lineage）一行，按链上 max(created_at, read_at) 降序。递归
-// CTE 从**可见根**出发（未归档的 user/lark 会话、未雪藏的树 —— 与 listSessions
+// CTE 从**可见根**出发（所有来源的未归档会话、未雪藏的树 —— 与 listSessions
 // 和树面板同口径），沿 parent_id 下钻、逐级累计活动时间；没有子节点的即叶子
-// = 链尾。任务会话（kind='task'）照 listSessions 排除：它们在侧栏有自己的组。
+// = 链尾。
 //
 // 归组 / 截断 / 打标签在 lib/recent.ts（纯函数，可测）；这里只负责取行。
 export function listRecentChains(limit = 200): RecentChainRow[] {
@@ -2422,7 +2421,7 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
                 n.id
            FROM nodes n JOIN sessions s ON s.id = n.session_id
           WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
-            AND s.archived = 0 AND s.kind IN ('user', 'lark')
+            AND s.archived = 0 AND s.kind IN ('user', 'lark', 'herdr', 'task')
          UNION ALL
          SELECT n.id, c.root_id, c.depth + 1,
                 max(c.activity, n.created_at, coalesce(n.read_at, 0)),

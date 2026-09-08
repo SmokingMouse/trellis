@@ -84,7 +84,6 @@ export function TreePanel() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useState(false);
-  const [hiddenOpen, setHiddenOpen] = useState<boolean | null>(null);
   // 树重命名编辑态
   const [editingRootId, setEditingRootId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -131,8 +130,6 @@ export function TreePanel() {
     () => groupTrees(entries, activeRootId),
     [entries, activeRootId],
   );
-  const isHiddenExpanded =
-    hiddenOpen ?? (groups.hot.length === 0 && groups.cold.length === 0);
   const activeRows = useMemo(
     () =>
       activeRootId ? flattenTree(activeRootId, nodesMap, collapsedNodeIds) : [],
@@ -266,7 +263,6 @@ export function TreePanel() {
   if (entries.length === 0) return null;
 
   const totalNodes = Object.keys(nodesMap).length;
-  const hiddenUnread = groups.hidden.reduce((s, e) => s + e.unreadCount, 0);
 
   const hoverRow = (nodeId: string) => (e: React.MouseEvent) => {
     const body = bodyRef.current;
@@ -1141,36 +1137,6 @@ export function TreePanel() {
                     </div>
                   )}
 
-                  {groups.hidden.length > 0 && (
-                    <div
-                      className={
-                        groups.hot.length > 0 || groups.cold.length > 0
-                          ? "mt-1 pt-1 border-t border-line-faint"
-                          : ""
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setHiddenOpen(!isHiddenExpanded)}
-                        className="w-full px-2 py-1 flex items-center gap-1 rounded text-ink-faint hover:bg-surface-muted"
-                      >
-                        <span
-                          className={`inline-block transition-transform ${isHiddenExpanded ? "rotate-90" : ""}`}
-                          aria-hidden
-                        >
-                          ▸
-                        </span>
-                        已隐藏 · {groups.hidden.length} 棵
-                        {hiddenUnread > 0 && (
-                          <span className="ml-auto inline-flex items-center gap-0.5 text-nano text-ink-faint tabular-nums">
-                            <span className="w-1 h-1 rounded-full bg-unread/60" aria-hidden />
-                            {hiddenUnread}
-                          </span>
-                        )}
-                      </button>
-                      {isHiddenExpanded && groups.hidden.map(renderTreeRow)}
-                    </div>
-                  )}
                 </>
               )}
             </div>

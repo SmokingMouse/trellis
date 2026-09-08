@@ -48,11 +48,9 @@ function buildForest(
   return roots;
 }
 
-export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
+export function Outline() {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
-  const outlineOpen = useSessionStore((s) => s.outlineOpen);
-  const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
   const forest = useMemo(
     () => (session ? buildForest(nodes, session.rootNodeId) : []),
     [session, nodes],
@@ -63,19 +61,11 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
     [nodes],
   );
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [hiddenOpen, setHiddenOpen] = useState<boolean | null>(null);
 
   const visibleForest = useMemo(
     () => forest.filter((t) => t.hiddenAt === null),
     [forest],
   );
-  const hiddenForest = useMemo(
-    () => forest.filter((t) => t.hiddenAt !== null),
-    [forest],
-  );
-  const isHiddenExpanded =
-    hiddenOpen ?? (visibleForest.length === 0);
-
   if (forest.length === 0) return null;
 
   const body = (
@@ -99,17 +89,6 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
               {unreadCount} 未读
             </button>
           )}
-          {variant === "drawer" && (
-            <button
-              onClick={() => setOutlineOpen(false)}
-              aria-label="关闭"
-              className="md:hidden w-6 h-6 -mr-1 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-                <path d="M3 3 L9 9 M9 3 L3 9" />
-              </svg>
-            </button>
-          )}
         </div>
       </div>
       {visibleForest.map((t, i) => (
@@ -122,68 +101,8 @@ export function Outline({ variant = "rail" }: { variant?: "rail" | "drawer" }) {
           <TreeRow node={t} branchDepth={0} isBranch={false} indices={indices} unreadOnly={unreadOnly} />
         </div>
       ))}
-      {hiddenForest.length > 0 && (
-        <div
-          className={
-            visibleForest.length > 0
-              ? "mt-1.5 pt-1.5 border-t border-line-faint"
-              : ""
-          }
-        >
-          <button
-            type="button"
-            onClick={() => setHiddenOpen(!isHiddenExpanded)}
-            className="w-full px-2 py-1 flex items-center gap-1 rounded text-ink-faint hover:bg-surface-muted transition-colors"
-          >
-            <span
-              className={`inline-block transition-transform ${
-                isHiddenExpanded ? "rotate-90" : ""
-              }`}
-              aria-hidden
-            >
-              ▸
-            </span>
-            已隐藏 · {hiddenForest.length} 棵
-          </button>
-          {isHiddenExpanded &&
-            hiddenForest.map((t) => (
-              <div key={t.id} className="mt-1">
-                <TreeRow
-                  node={t}
-                  branchDepth={0}
-                  isBranch={false}
-                  indices={indices}
-                  unreadOnly={unreadOnly}
-                />
-              </div>
-            ))}
-        </div>
-      )}
     </>
   );
-
-  // Mobile drawer (mounted at page top-level so it survives fullscreen, where
-  // the canvas — and the rail Outline inside it — is unmounted).
-  if (variant === "drawer") {
-    return (
-      <>
-        {outlineOpen && (
-          <div
-            className="md:hidden fixed inset-0 z-40 bg-scrim/40 ui-enter-fade"
-            onClick={() => setOutlineOpen(false)}
-            aria-hidden
-          />
-        )}
-        <aside
-          className={`md:hidden fixed z-50 inset-x-3 top-[60px] bottom-3 bg-surface/95 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-overlay overflow-y-auto ${
-            outlineOpen ? "block ui-enter-pop" : "hidden"
-          }`}
-        >
-          {body}
-        </aside>
-      </>
-    );
-  }
 
   // Desktop rail (default): permanent left rail, hidden on mobile. Wave 4:
   // shift right of the explorer sidebar when it's open (var from page.tsx;

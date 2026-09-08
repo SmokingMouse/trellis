@@ -208,6 +208,8 @@ done
   export HOME="$H"
   export TRELLIS_DB_PATH="$DB"
   export TRELLIS_LARK=off
+  # 本脚本验证 fake socket / 隔离 HOME 下的 hooks；外层 hard-off 不应关闭被测夹具。
+  export TRELLIS_HERDR=on TRELLIS_HOOKS=on
   export TRELLIS_AUTH_PASS="$AUTH_PASS"
   export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
   export HERDR_SOCKET_PATH="$SOCKET"

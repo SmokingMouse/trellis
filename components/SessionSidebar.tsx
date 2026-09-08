@@ -29,12 +29,11 @@ import {
   type RecentSession,
   type WorkspaceSummary,
   type Session,
-  type SidebarTask,
   type WorkspaceGitStatus,
 } from "@/lib/types";
 import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
-import { BookmarkRows } from "@/components/BookmarkRows";
+import { sessionSourceChip } from "@/lib/session-source";
 import { HerdrSidebarGroup } from "@/components/HerdrSidebarGroup";
 
 // S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
@@ -96,9 +95,6 @@ export function SessionSidebar() {
   const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
-  const bookmarks = useSessionStore((s) => s.bookmarks);
-  const bookmarksTotal = useSessionStore((s) => s.bookmarksTotal);
-  const refreshBookmarks = useSessionStore((s) => s.refreshBookmarks);
   const [attachOpen, setAttachOpen] = useState(false);
   const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
@@ -126,10 +122,6 @@ export function SessionSidebar() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  // S117：「定时任务」分组。骨架行来自 tasks（任务是常驻实体），taskSessions
-  // 是 kind='task' 的会话对象（喂 SidebarRow；也含任务已删的存量孤儿会话）。
-  const [tasks, setTasks] = useState<SidebarTask[]>([]);
-  const [taskSessions, setTaskSessions] = useState<Session[]>([]);
   // S133：「最近」分组 —— 最近活动的会话，粒度到链（根→叶子 lineage）。走
   // 独立一路 /api/recent（递归 CTE），不并进 /api/sessions 的热路径；归组 /
   // 截断规则见 lib/recent.ts。
@@ -206,8 +198,6 @@ export function SessionSidebar() {
           setSessions(data.sessions ?? []);
           setArchivedCount(data.archivedCount ?? 0);
           setProjects(data.projects ?? []);
-          setTasks(data.tasks ?? []);
-          setTaskSessions(data.taskSessions ?? []);
         }
       })
       .catch(() => {
@@ -243,10 +233,6 @@ export function SessionSidebar() {
       cancelled = true;
     };
   }, [activeId, sessionsRevision, recentRunKey, recentNonce]);
-
-  useEffect(() => {
-    void refreshBookmarks();
-  }, [activeId, sessionsRevision, refreshBookmarks]);
 
   // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
   //
@@ -288,11 +274,10 @@ export function SessionSidebar() {
     const onFocus = () => {
       setGitNonce((n) => n + 1);
       setRecentNonce((n) => n + 1);
-      void refreshBookmarks();
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refreshBookmarks]);
+  }, []);
 
   // Lazy-load archived rows only while the footer is open. Re-runs on any
   // mutation (sessionsRevision) so unarchiving instantly removes the row.
@@ -484,8 +469,8 @@ export function SessionSidebar() {
     />
   );
 
-  // Chat 与「未归组」也可折叠。用合成 id 走 projects 那套同一个 collapsed 集合，
-  // 免得为两个扁平分组再开一份状态。
+  // Chat 也可折叠。用合成 id 走 projects 那套同一个 collapsed 集合，
+  // 复用扁平分组状态。
   const renderGroup = (id: string, label: string, list: Session[]) => {
     if (list.length === 0) return null;
     const isCollapsed = collapsed.has(id);
@@ -514,7 +499,7 @@ export function SessionSidebar() {
     if (recent.length === 0) return null;
     const isCollapsed = collapsed.has("__recent");
     const sessionById = new Map(
-      [...sessions, ...taskSessions].map((s) => [s.id, s]),
+      sessions.map((s) => [s.id, s]),
     );
     const toggleExpanded = (id: string) =>
       setRecentExpanded((prev) => {
@@ -608,87 +593,6 @@ export function SessionSidebar() {
     );
   };
 
-  const renderBookmarksGroup = () => {
-    if (bookmarksTotal === 0) return null;
-    const isCollapsed = collapsed.has("__bookmarks");
-    return (
-      <div className="mb-3" data-read-later-group>
-        <GroupRow
-          level={0}
-          collapsed={isCollapsed}
-          label={`🔖 稍后再读 (${bookmarksTotal})`}
-          title={`稍后再读 · ${bookmarksTotal} 张卡片`}
-          badge={null}
-          onToggle={() => toggleCollapsed("__bookmarks")}
-        />
-        {!isCollapsed && (
-          <IndentGuide level={0}>
-            <BookmarkRows onNavigate={() => setMobileNavOpen(false)} />
-          </IndentGuide>
-        )}
-      </div>
-    );
-  };
-
-  // S117：「定时任务」固定分组。行的实体是**任务**而非会话 —— 会话是第一次
-  // 执行时才懒建的，没跑过的任务也该有固定入口（建了任务它就在这里，不因
-  // 没跑过而隐身）。有 home 会话的行走 SidebarRow：点击预览 = 直接进执行历史，
-  // running 脉冲 / 完成未读角标全部免费复用（/api/runs 不区分任务节点）。
-  const renderTasksGroup = () => {
-    const sessionById = new Map(taskSessions.map((s) => [s.id, s]));
-    const claimed = new Set(tasks.map((t) => t.homeSessionId).filter(Boolean));
-    // 任务已删但 kind 仍是 'task' 的存量孤儿会话（改版前删的任务）—— 不吞，
-    // 否则那几个月的执行历史从每个列表里都消失了。
-    const orphanTaskSessions = taskSessions.filter((s) => !claimed.has(s.id));
-    const count = tasks.length + orphanTaskSessions.length;
-    if (count === 0) return null;
-    const isCollapsed = collapsed.has("__tasks");
-    return (
-      <div className="mb-3">
-        <GroupRow
-          level={0}
-          collapsed={isCollapsed}
-          label="⏱ 定时任务"
-          title={`定时任务 · ${tasks.length} 个\n点行进入执行历史；新建 / 触发器 / 运行明细在 设置 → 任务`}
-          badge={isCollapsed ? String(count) : null}
-          onToggle={() => toggleCollapsed("__tasks")}
-          onAdd={() => router.push("/settings/tasks")}
-          addTitle="管理定时任务（新建 / 触发器 / 运行历史）"
-        />
-        {!isCollapsed && (
-          <IndentGuide level={0}>
-            {tasks.map((t) => {
-              const s = t.homeSessionId
-                ? sessionById.get(t.homeSessionId)
-                : undefined;
-              if (s) return renderRow(s, 1);
-              // 还没执行过（或会话被归档/删除）：占位行，说明去哪把它跑起来。
-              return (
-                <div
-                  key={t.id}
-                  style={{ paddingLeft: PAD(1) }}
-                  className={`${ROW_HEIGHT_CLASS} mx-1 rounded-md flex items-center gap-1.5 pr-1 text-ink-faint ${
-                    t.enabled ? "" : "opacity-50"
-                  }`}
-                  title={`${t.name}\n还没有执行记录 —— 第一次执行时会在这里长出会话（设置 → 任务 里可手动 ▶）`}
-                >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full shrink-0 opacity-40 bg-line"
-                    aria-hidden
-                  />
-                  <span className="flex-1 min-w-0 truncate text-ui italic">
-                    ⏱ {t.name}
-                  </span>
-                </div>
-              );
-            })}
-            {orphanTaskSessions.map((s) => renderRow(s, 1))}
-          </IndentGuide>
-        )}
-      </div>
-    );
-  };
-
   // S1 三级：Project → Workspace → Session。折叠子树时把「藏了几个会话」
   // 回显出来（与树面板折叠行同语义 —— 折叠不该把状态一起藏掉）。
   //
@@ -746,18 +650,21 @@ export function SessionSidebar() {
     );
   };
 
+  const sidebarProjects = orphans.length > 0 && !projects.some((p) => p.clusterKey === SCRATCH_CLUSTER_KEY)
+    ? [...projects, { id: SCRATCH_CLUSTER_KEY, name: "暂存区", clusterKey: SCRATCH_CLUSTER_KEY, gitRemote: null, workspaces: [] }]
+    : projects;
   const renderProjects = () =>
-    projects.map((p) => {
+    sidebarProjects.map((p) => {
+      const unassigned = p.clusterKey === SCRATCH_CLUSTER_KEY ? orphans : [];
       const pCollapsed = collapsed.has(p.id);
       const pCount = p.workspaces.reduce(
         (n, w) => n + (byWorkspace.get(w.id)?.length ?? 0),
-        0,
+        unassigned.length,
       );
       // 平铺时各 workspace 的会话汇到一起，重新按最近活跃排 —— 每个 list
       // 内部有序不代表拼起来有序。
       const flatList = isFlat(p)
-        ? p.workspaces
-            .flatMap((w) => byWorkspace.get(w.id) ?? [])
+        ? [...p.workspaces.flatMap((w) => byWorkspace.get(w.id) ?? []), ...unassigned]
             .sort((a, b) => b.updatedAt - a.updatedAt)
         : [];
       // 一个会话都没有就别平铺 —— 那会剩下个底下空无一物的项目行，
@@ -950,23 +857,16 @@ export function SessionSidebar() {
             void previewSession(sessionId);
           }}
         />
-        {sessions.length === 0 && tasks.length === 0 && taskSessions.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="px-3 py-3 text-label text-ink-faint italic">
             还没有会话，点上面「新会话」开始
           </div>
         ) : (
           <>
-            {renderBookmarksGroup()}
-            {/* S133：最近活动的会话，粒度到链。收藏有数据时位于它之上。 */}
+            {/* S133：最近活动的会话，粒度到链。 */}
             {renderRecentGroup()}
             {renderProjects()}
             {renderGroup("__chat", "Chat", chat)}
-            {/* S117：定时任务的固定分组 —— 每个任务的常驻会话在这里可点可看，
-                不再只有 设置 → 任务 深链一条路。 */}
-            {renderTasksGroup()}
-            {/* 归不了组的 project 会话：目录已被删，或存量行压根没记 cwd。
-                单列一组而不是悄悄隐藏，否则用户会以为会话丢了。 */}
-            {renderGroup("__orphans", "未归组", orphans)}
           </>
         )}
       </div>
@@ -1342,7 +1242,7 @@ function SidebarRow({
   onDelete,
 }: {
   session: Session;
-  /** 缩进层级：1 = 挂在 Chat / 未归组下，2 = 挂在 Project → Workspace 下 */
+  /** 缩进层级：1 = 挂在 Chat / 暂存区下，2 = 挂在 Project → Workspace 下 */
   indent?: number;
   active: boolean;
   preview: boolean;
@@ -1363,6 +1263,7 @@ function SidebarRow({
   const style = modeStyle(session.mode);
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(session.title);
+  const sourceChip = sessionSourceChip(session);
   const indicatorStatus =
     status ?? (running ? "streaming" : unread ? "unread" : "done");
   const statusTitle =
@@ -1469,6 +1370,16 @@ function SidebarRow({
           } ${preview ? "italic" : ""}`}
         >
           {session.title}
+        </span>
+      )}
+
+      {sourceChip && !editing && (
+        <span
+          className="shrink-0 text-nano font-semibold px-1 py-px rounded bg-surface-muted text-ink-muted"
+          title={sourceChip.title}
+          aria-label={sourceChip.title}
+        >
+          {sourceChip.label}
         </span>
       )}
 
