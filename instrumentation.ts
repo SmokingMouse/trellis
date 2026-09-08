@@ -33,6 +33,10 @@ export async function register() {
     "./lib/server/cli-sync-watcher"
   );
   startCliSyncWatcher();
+  // Herdr is an optional enhancement. Start its ping/subscription/snapshot loop
+  // in the background so a missing socket never delays the Trellis server.
+  const { getHerdrFleetService } = await import("./lib/server/herdr-fleet");
+  void getHerdrFleetService().ensureStarted();
   // S88：自定义 Agent 的 SDK 能力探测。放在调度器之前 —— SDK 版本不对时，多传的
   // RunOptions 字段会被 TS 的结构类型放过、被运行时**静默丢弃**：agent 完全不生效，
   // 但 spawn 正常、回答正常、零报错。这是整套里最难查的一类故障，必须在启动时喊。
@@ -47,6 +51,17 @@ export async function register() {
     }
   } catch {
     /* 探测失败不拦启动 */
+  }
+  // Claude Code hook 的端点文件（~/.trellis/hooks/endpoint.env + 脚本副本）。
+  // 必须在这里写而不是在路由里懒写：hook 脚本是**外部**进程，它只能从这个文件
+  // 知道我们监听在哪个端口、口令是什么；服务没起来时它读不到文件就静默退出。
+  // TRELLIS_HOOKS=off 关闸（部署 smoke 用，同 TRELLIS_LARK）。
+  const { installHookEndpoint } = await import("./lib/server/agent-hooks/install");
+  const hookInstall = installHookEndpoint();
+  if (hookInstall.installed) {
+    console.log(`[trellis] agent hooks endpoint → ${hookInstall.endpoint} (port ${hookInstall.port})`);
+  } else if (hookInstall.reason !== "TRELLIS_HOOKS=off") {
+    console.warn(`[trellis] agent hooks endpoint 未写成：${hookInstall.reason}`);
   }
   const { installDefaultChannels } = await import("./lib/server/notify");
   installDefaultChannels();

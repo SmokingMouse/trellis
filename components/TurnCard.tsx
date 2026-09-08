@@ -50,7 +50,13 @@ import { BookmarkButton } from "./BookmarkButton";
 // 事件（合批后仍是每帧一次）都会让父组件重渲。未变的节点（同引用）直接跳
 // 过——避免 15 张已完成卡片每次都重跑完整语法高亮。只有正在流式
 // 的节点引用每帧更新，正常重渲（且流式态已不跑高亮，成本低）。
-export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
+export const TurnCard = memo(function TurnCard({
+  node,
+  readOnly = false,
+}: {
+  node: ChatNode;
+  readOnly?: boolean;
+}) {
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const hasParent = useSessionStore((s) =>
     Boolean(node.parentId && s.nodes[node.parentId]),
@@ -87,6 +93,7 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
         nodeId={node.id}
         question={node.question}
         attachments={node.attachments}
+        readOnly={readOnly}
       />
       {/* One chronological timeline of everything the turn did — delegated
           work nests under the call that spawned it rather than being pulled
@@ -105,11 +112,11 @@ export const TurnCard = memo(function TurnCard({ node }: { node: ChatNode }) {
           re-parented under our marks and throws NotFoundError. Unmounting
           cleanly lets the cleanup clearMarks() run before React touches the
           DOM. */}
-      <ResponseBody key={node.id} node={node} />
+      <ResponseBody key={node.id} node={node} readOnly={readOnly} />
       {/* A路③: when this node's run is paused on an interactive tool, render
           the answer form below the response so the user can reply in place
           and the model continues. */}
-      {node.pendingInteraction && (
+      {!readOnly && node.pendingInteraction && (
         <InteractionForm
           nodeId={node.id}
           interaction={node.pendingInteraction}
@@ -150,8 +157,10 @@ function RegenerateVariantButton({
 
 function MobileResponseActions({
   node,
+  readOnly,
 }: {
   node: ChatNode;
+  readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -203,8 +212,10 @@ function MobileResponseActions({
             mobileMenu
             onToggle={() => setOpen(false)}
           />
-          <CliResumeButton nodeId={node.id} />
-          <RegenerateVariantButton nodeId={node.id} question={node.question} />
+          {!readOnly && <CliResumeButton nodeId={node.id} />}
+          {!readOnly && (
+            <RegenerateVariantButton nodeId={node.id} question={node.question} />
+          )}
           <CardImageButton
             title={node.topicLabel ?? node.question}
             content={finalResponseText(node)}
@@ -219,10 +230,12 @@ function QuestionBlock({
   nodeId,
   question,
   attachments,
+  readOnly,
 }: {
   nodeId: string;
   question: string;
   attachments: NodeAttachment[];
+  readOnly: boolean;
 }) {
   const editNode = useSessionStore((s) => s.editNode);
   const sendKey = useSessionStore((s) => s.sendKey);
@@ -294,30 +307,32 @@ function QuestionBlock({
           </div>
         )}
       </div>
-      <button
-        onClick={() => {
-          setText(question);
-          setEditing(true);
-        }}
-        title="编辑问题（会新建一个分支重问）"
-        aria-label="编辑问题"
-        className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-md text-ink-muted opacity-60 sm:opacity-0 group-hover:opacity-100 hover:bg-surface-raised hover:text-accent transition-opacity"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
+      {!readOnly && (
+        <button
+          onClick={() => {
+            setText(question);
+            setEditing(true);
+          }}
+          title="编辑问题（会新建一个分支重问）"
+          aria-label="编辑问题"
+          className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-md text-ink-muted opacity-60 sm:opacity-0 group-hover:opacity-100 hover:bg-surface-raised hover:text-accent transition-opacity"
         >
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-        </svg>
-      </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -359,7 +374,13 @@ function MentionChip() {
   );
 }
 
-function ResponseBody({ node }: { node: ChatNode }) {
+function ResponseBody({
+  node,
+  readOnly,
+}: {
+  node: ChatNode;
+  readOnly: boolean;
+}) {
   const retryNode = useSessionStore((s) => s.retryNode);
   const bodyRef = useRef<HTMLDivElement>(null);
   const isStreaming = node.status === "streaming";
@@ -519,8 +540,10 @@ function ResponseBody({ node }: { node: ChatNode }) {
                 isStreaming={false}
               />
               <div className="hidden items-center gap-2 ml-auto md:flex">
-                <CliResumeButton nodeId={node.id} />
-                <RegenerateVariantButton nodeId={node.id} question={node.question} />
+                {!readOnly && <CliResumeButton nodeId={node.id} />}
+                {!readOnly && (
+                  <RegenerateVariantButton nodeId={node.id} question={node.question} />
+                )}
                 <CardImageButton
                   title={node.topicLabel ?? node.question}
                   // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
@@ -532,7 +555,7 @@ function ResponseBody({ node }: { node: ChatNode }) {
                   className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
                 />
               </div>
-              <MobileResponseActions node={node} />
+              <MobileResponseActions node={node} readOnly={readOnly} />
             </div>
             <GeneratedFilesBar node={node} />
           </>
@@ -556,7 +579,8 @@ function ResponseBody({ node }: { node: ChatNode }) {
           errorMessage={node.errorMessage}
         />
       )}
-      {isError &&
+      {!readOnly &&
+        isError &&
         !hasChildren &&
         (node.errorMessage === "aborted" ? (
           <div className="mt-3 p-2.5 bg-surface-muted border border-line rounded text-ink-muted text-ui flex items-start gap-2">

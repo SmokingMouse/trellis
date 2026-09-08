@@ -19,12 +19,19 @@ type Usage = {
   output_tokens?: number;
 };
 
+type ResponsePart = {
+  text: string;
+  final: boolean;
+};
+
 type TurnDraft = ParsedTurn & {
   eventText: string[];
-  responseText: string[];
+  responseParts: ResponsePart[];
   seenResponseIds: Set<string>;
   toolByCallId: Map<string, ToolCall>;
   latestTimestamp: number;
+  completedDurationMs: number | null;
+  pendingFinalBreak: boolean;
 };
 
 function ms(value: unknown): number {
@@ -38,9 +45,9 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+function contentTexts(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
   return content
     .map((item) => {
       if (typeof item === "string") return item;
@@ -52,8 +59,22 @@ function contentText(content: unknown): string {
           ? block.content
           : "";
     })
-    .filter(Boolean)
-    .join("\n");
+    .filter(Boolean);
+}
+
+function contentText(content: unknown): string {
+  return contentTexts(content).join("\n");
+}
+
+const HARNESS_USER_PREFIX =
+  /^(?:#\s*AGENTS\.md instructions\b|<(?:AGENTS\.md|system-reminder|task-notification|environment_context)(?:\s|>))/i;
+
+function visibleUserText(content: unknown): string | null {
+  const visible = contentTexts(content)
+    .filter((text) => !HARNESS_USER_PREFIX.test(text.trimStart()))
+    .join("\n")
+    .trim();
+  return visible || null;
 }
 
 function parseInput(value: unknown): unknown {
@@ -84,6 +105,10 @@ function toolOutput(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function createTurn(
   id: string,
   parentId: string | null,
@@ -109,10 +134,12 @@ function createTurn(
     durationMs: 0,
     turnOrdinal: ordinal,
     eventText: [],
-    responseText: [],
+    responseParts: [],
     seenResponseIds: new Set(),
     toolByCallId: new Map(),
     latestTimestamp: createdAt,
+    completedDurationMs: null,
+    pendingFinalBreak: false,
   };
 }
 
@@ -150,9 +177,52 @@ export function parseCodexSessionJsonl(
 
   const drafts: TurnDraft[] = [];
   const byTurnId = new Map<string, TurnDraft>();
-  const pendingTools = new Map<string, ToolCall>();
+  const pendingTools = new Map<string, { turn: TurnDraft; call: ToolCall }>();
+  const pendingToolOutputs = new Map<
+    string,
+    { output: string | null; at: number; isError: boolean }
+  >();
   let activeTurnId: string | null = null;
   let latestTimestamp = ms(meta?.timestamp);
+
+  const startUserTurn = (
+    question: string,
+    at: number,
+    explicitTurnId: string | null,
+  ): TurnDraft => {
+    if (explicitTurnId) {
+      const existing = byTurnId.get(explicitTurnId);
+      // Some Codex releases emit the same visible user message through both
+      // response_item and event_msg. One runtime turn must stay one Trellis turn.
+      if (existing) {
+        activeTurnId = existing.id;
+        return existing;
+      }
+    }
+    const unusedActiveId =
+      !explicitTurnId && activeTurnId && !byTurnId.has(activeTurnId)
+        ? activeTurnId
+        : null;
+    const id =
+      explicitTurnId ??
+      unusedActiveId ??
+      crypto
+        .createHash("sha256")
+        .update(`${sessionId}:${drafts.length + 1}:${question}`)
+        .digest("hex")
+        .slice(0, 32);
+    const turn = createTurn(
+      id,
+      drafts.at(-1)?.id ?? null,
+      question,
+      at,
+      drafts.length + 1,
+    );
+    drafts.push(turn);
+    byTurnId.set(id, turn);
+    activeTurnId = id;
+    return turn;
+  };
 
   for (const entry of entries) {
     const payload = entry.payload;
@@ -170,26 +240,9 @@ export function parseCodexSessionJsonl(
         continue;
       }
       if (eventType === "user_message") {
-        const question = stringValue(payload?.message);
+        const question = visibleUserText(payload?.message);
         if (!question) continue;
-        let id = activeTurnId;
-        if (!id || byTurnId.has(id)) {
-          id = crypto
-            .createHash("sha256")
-            .update(`${sessionId}:${drafts.length + 1}:${question}`)
-            .digest("hex")
-            .slice(0, 32);
-        }
-        const turn = createTurn(
-          id,
-          drafts.at(-1)?.id ?? null,
-          question,
-          at,
-          drafts.length + 1,
-        );
-        drafts.push(turn);
-        byTurnId.set(id, turn);
-        activeTurnId = id;
+        startUserTurn(question, at, turnIdFromPayload(payload));
         continue;
       }
 
@@ -198,22 +251,28 @@ export function parseCodexSessionJsonl(
       if (at > active.latestTimestamp) active.latestTimestamp = at;
       if (eventType === "agent_message") {
         const text = stringValue(payload?.message);
-        if (text) active.eventText.push(text);
+        if (text && !active.eventText.includes(text)) active.eventText.push(text);
+      } else if (eventType === "task_complete") {
+        const duration = finiteNumber(payload?.duration_ms);
+        if (duration !== null) active.completedDurationMs = Math.max(0, duration);
+        const text = stringValue(payload?.last_agent_message);
+        if (text && !active.eventText.includes(text)) active.eventText.push(text);
       } else if (eventType === "token_count") {
         const info = payload?.info;
         if (info && typeof info === "object") {
           const infoObj = info as JsonObject;
-          const total = (infoObj.total_token_usage ?? infoObj.last_token_usage) as Usage | undefined;
-          const last = (infoObj.last_token_usage ?? infoObj.total_token_usage) as Usage | undefined;
-          if (total || last) {
-            const totalInput = total?.input_tokens ?? last?.input_tokens ?? 0;
-            const cached = total?.cached_input_tokens ?? last?.cached_input_tokens ?? 0;
+          const usage = (infoObj.last_token_usage ?? infoObj.total_token_usage) as
+            | Usage
+            | undefined;
+          if (usage) {
+            const totalInput = usage.input_tokens ?? 0;
+            const cached = usage.cached_input_tokens ?? 0;
             active.tokens = {
               input: Math.max(0, totalInput - cached),
-              output: total?.output_tokens ?? last?.output_tokens ?? 0,
+              output: usage.output_tokens ?? 0,
               cacheRead: cached,
-              cacheCreation: total?.cache_write_input_tokens ?? last?.cache_write_input_tokens ?? 0,
-              contextTokens: last?.input_tokens ?? totalInput,
+              cacheCreation: usage.cache_write_input_tokens ?? 0,
+              contextTokens: totalInput,
             };
           }
         }
@@ -224,23 +283,50 @@ export function parseCodexSessionJsonl(
     if (entry.type !== "response_item" || !payload) continue;
     const itemType = stringValue(payload.type);
     const itemTurnId = turnIdFromPayload(payload) ?? activeTurnId;
+
+    if (itemType === "message" && payload.role === "user") {
+      const question = visibleUserText(payload.content);
+      if (question) {
+        startUserTurn(question, at, turnIdFromPayload(payload));
+      }
+      continue;
+    }
+
     const turn = itemTurnId ? byTurnId.get(itemTurnId) : undefined;
     if (!turn || !itemType) continue;
     if (at > turn.latestTimestamp) turn.latestTimestamp = at;
 
     if (itemType === "message" && payload.role === "assistant") {
       const text = contentText(payload.content).trim();
-      const responseId = stringValue(payload.id) ?? `${itemTurnId}:${turn.responseText.length}`;
+      const phase = stringValue(payload.phase);
+      const responseId =
+        stringValue(payload.id) ??
+        crypto
+          .createHash("sha256")
+          .update(`${itemTurnId}:${phase ?? ""}:${text}`)
+          .digest("hex");
       if (text && !turn.seenResponseIds.has(responseId)) {
         turn.seenResponseIds.add(responseId);
-        turn.responseText.push(text);
+        turn.responseParts.push({
+          text,
+          final:
+            phase === "final_answer" ||
+            (turn.pendingFinalBreak && phase !== "commentary"),
+        });
+        turn.pendingFinalBreak = false;
       }
+      continue;
+    }
+
+    if (itemType === "reasoning") {
+      if (turn.responseParts.length > 0) turn.pendingFinalBreak = true;
       continue;
     }
 
     if (itemType === "custom_tool_call" || itemType === "function_call") {
       const callId = stringValue(payload.call_id) ?? stringValue(payload.id);
       if (!callId) continue;
+      if (turn.responseParts.length > 0) turn.pendingFinalBreak = true;
       const call: ToolCall = {
         id: callId,
         name: stringValue(payload.name) ?? "tool",
@@ -252,38 +338,61 @@ export function parseCodexSessionJsonl(
         startedAt: at,
         endedAt: at,
       };
+      const completed = pendingToolOutputs.get(callId);
+      if (completed) {
+        call.output = completed.output;
+        call.status = completed.isError ? "error" : "done";
+        call.endedAt = completed.at;
+        call.durationMs = Math.max(0, completed.at - call.startedAt);
+        pendingToolOutputs.delete(callId);
+      }
       turn.toolByCallId.set(callId, call);
-      pendingTools.set(callId, call);
+      pendingTools.set(callId, { turn, call });
       continue;
     }
 
     if (itemType === "custom_tool_call_output" || itemType === "function_call_output") {
       const callId = stringValue(payload.call_id);
       if (!callId) continue;
-      const call = pendingTools.get(callId);
-      if (call) {
-        call.output = toolOutput(payload.output);
+      const pending = pendingTools.get(callId);
+      const output = toolOutput(payload.output);
+      const isError = payload.status === "failed" || payload.is_error === true;
+      if (pending) {
+        const { call, turn: owner } = pending;
+        call.output = output;
+        call.status = isError ? "error" : "done";
         call.endedAt = at;
         call.durationMs = Math.max(0, at - call.startedAt);
+        if (at > owner.latestTimestamp) owner.latestTimestamp = at;
+      } else {
+        pendingToolOutputs.set(callId, { output, at, isError });
       }
     }
   }
 
   if (drafts.length === 0) return null;
   const turns = drafts.map((draft) => {
-    draft.response = (
-      draft.responseText.length > 0 ? draft.responseText : draft.eventText
-    ).join("\n\n");
+    const responseText = draft.responseParts.map((part) => part.text);
+    draft.response = (responseText.length > 0 ? responseText : draft.eventText).join(
+      "\n\n",
+    );
     draft.toolCalls = [...draft.toolByCallId.values()];
+    const finalPartIdx = draft.responseParts.findIndex((part) => part.final);
     const turn: ParsedTurn = {
       id: draft.id,
       parentId: draft.parentId,
       siblingIndex: draft.siblingIndex,
       question: draft.question,
       response: draft.response,
+      finalStart:
+        finalPartIdx > 0
+          ? responseText.slice(0, finalPartIdx).join("\n\n").length + 2
+          : 0,
       toolCalls: draft.toolCalls,
       tokens: draft.tokens,
-      durationMs: Math.max(0, draft.latestTimestamp - draft.createdAt),
+      durationMs:
+        draft.completedDurationMs ??
+        Math.max(0, draft.latestTimestamp - draft.createdAt),
       createdAt: draft.createdAt,
       turnOrdinal: draft.turnOrdinal,
     };

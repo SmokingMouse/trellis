@@ -1,4 +1,6 @@
 import { cliResumeForNode } from "@/lib/server/cli-fork";
+import { getNode } from "@/lib/server/repo";
+import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,12 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const node = getNode(id);
+  // This route is callable without the UI. Check the live driver before
+  // resolving a transcript or constructing any resume command.
+  if (node && hasAliveHerdrBinding(node.sessionId)) {
+    return Response.json({ resumable: false, error: "Session is driven by Herdr" }, { status: 409 });
+  }
   const r = cliResumeForNode(id);
   if (!r) {
     return Response.json({ resumable: false });

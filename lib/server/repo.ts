@@ -58,6 +58,7 @@ export type ApiSession = {
   // 'cli-import'（attach 的本机 CLI 会话，双向绑定，只读 detach 安全）。
   // sourceJsonlPath: cli-import 时的源 jsonl 绝对路径，否则 null。
   origin: string;
+  herdrAlive?: boolean;
   sourceJsonlPath: string | null;
   cliProvider: "claude" | "codex" | null;
   // 权限确认：true = project 轮次的可变更工具需用户逐个允许/拒绝
@@ -154,6 +155,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
 
 type SessionRow = {
+  herdr_alive: number;
   id: string;
   title: string;
   root_node_id: string;
@@ -174,7 +176,11 @@ type SessionRow = {
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, source_jsonl_path, cli_provider, require_approval, agent_id`;
+       origin, source_jsonl_path, cli_provider, require_approval, agent_id,
+       EXISTS(SELECT 1 FROM herdr_sessions h
+         JOIN cli_lineages l ON l.cli_session_id = h.session_id
+         WHERE l.trellis_session_id = sessions.id AND h.alive = 1
+         UNION SELECT 1 FROM herdr_sessions h WHERE h.session_id = sessions.id AND h.alive = 1) AS herdr_alive`;
 
 function rowToNode(r: NodeRow): ApiNode {
   const kind: NodeKind = r.kind === "reference" ? "reference" : "qa";
@@ -303,6 +309,7 @@ function rowToSession(r: SessionRow): ApiSession {
     archived: r.archived === 1,
     model: r.model,
     origin: r.origin ?? "native",
+    herdrAlive: r.herdr_alive === 1,
     sourceJsonlPath: r.source_jsonl_path,
     cliProvider: r.cli_provider,
     requireApproval: r.require_approval === 1,
@@ -515,7 +522,7 @@ export function deleteSession(id: string): void {
   // FK graph — do it explicitly.
   ftsDeleteBySession(db, id);
   // cli-import 镜像的 jsonl 是用户的原始 CLI 历史，绝不能跟着删 —— 只清 DB 行。
-  if (meta && meta.origin !== "cli-import") {
+  if (meta && meta.origin !== "cli-import" && meta.origin !== "herdr") {
     const cwd = sessionCwd(meta.mode as Mode, meta.wp);
     for (const r of claudeIdRows) {
       try {

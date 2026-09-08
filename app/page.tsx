@@ -31,11 +31,15 @@ import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
+import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { isHerdrSession } from "@/lib/herdr-ui";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
   const hydrated = useSessionStore((s) => s.hydrated);
   const session = useSessionStore((s) => s.session);
+  const { fleet } = useHerdrFleet();
+  const herdrControlled = isHerdrSession(session, fleet);
   const hydrateError = useSessionStore((s) => s.hydrateError);
   const viewMode = useSessionStore((s) => s.viewMode);
   const setViewMode = useSessionStore((s) => s.setViewMode);
@@ -120,8 +124,10 @@ export default function Home() {
   }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
 
   useEffect(() => {
-    if (isMobile && sessionId) setViewMode("linear");
-  }, [isMobile, sessionId, setViewMode]);
+    if ((isMobile || herdrControlled) && sessionId) {
+      setViewMode("linear");
+    }
+  }, [isMobile, herdrControlled, sessionId, setViewMode]);
 
   if (!hydrated || isMobile === null) {
     return (

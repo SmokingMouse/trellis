@@ -6,6 +6,7 @@ import {
   type Mode,
 } from "@/lib/llm";
 import { getProvider } from "@/lib/llm/server";
+import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
@@ -227,6 +228,28 @@ export async function POST(req: Request) {
 
   if (body.kind !== "retry" && !body.question?.trim()) {
     return Response.json({ error: "empty question" }, { status: 400 });
+  }
+
+  // Herdr-bound transcripts have a single driver: the terminal agent. They are
+  // mirrored into Trellis for reading only; regular chat must never resume or
+  // fork them behind Herdr's back.
+  const targetSession = (() => {
+    if (body.kind === "root" && body.sessionId) return getSession(body.sessionId);
+    if (body.kind === "branch" && body.parentNodeId) {
+      const parent = getNode(body.parentNodeId);
+      return parent ? getSession(parent.sessionId) : null;
+    }
+    if (body.kind === "retry" && body.nodeId) {
+      const node = getNode(body.nodeId);
+      return node ? getSession(node.sessionId) : null;
+    }
+    return null;
+  })();
+  if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
+    return Response.json(
+      { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
+      { status: 409 },
+    );
   }
 
   const providerId = isProviderId(body.provider)

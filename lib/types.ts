@@ -362,6 +362,7 @@ export type Session = {
   model: string | null;
   // CLI 同步：'native' | 'cli-import'（attach 的本机 CLI 会话，双向绑定）。
   origin?: string;
+  herdrAlive?: boolean;
   // cli-import 的源 jsonl 路径（UI 提示 / detach 用），否则 null。
   sourceJsonlPath?: string | null;
   // CLI family owning sourceJsonlPath. null for native sessions.

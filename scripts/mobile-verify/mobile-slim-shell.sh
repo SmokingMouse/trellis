@@ -11,7 +11,7 @@ DB="$H/.trellis/data.db"
 SOURCE_DB="$HOME/.trellis/data.db"
 LOG="$H/server.log"
 OUT="$H/out"
-SESSION=mv-mobile-slim-shell
+SESSION=mv-mobile-slim-shell-$$
 AUTH_PASS=mv-mobile-slim-shell-pass
 AUTH_TOKEN=mv-mobile-slim-shell-token
 SERVER_PID=
@@ -241,7 +241,7 @@ wait_for_js "authenticated home" "location.pathname !== '/login'"
 assert_not_login
 
 ab open "$URL"
-wait_for_js "fixture linear composer" "Boolean(document.querySelector('textarea[data-composer-input]'))"
+wait_for_js "fixture linear composer and deep-link title" "Boolean(document.querySelector('textarea[data-composer-input]')) && document.querySelector('[data-mobile-header]')?.textContent?.includes('手机精简壳验收会话标题') === true"
 assert_not_login
 
 echo "== M1: 390x844 slim Header =="
