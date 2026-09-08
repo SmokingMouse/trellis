@@ -13,4 +13,6 @@
 
 证据目录：`/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-sidebar-wave2-c6c6/out/`。
 
-Next：交付主控独立验收；不 push、不 PR、不部署。
+整合契约 `fj-sidebar-wave2-integrate-b80f`：先原样提交启动时已有的归档骨架修复为 `ad8d954`，再以 `acc5d72` 合并 `origin/main`（`0f126ab`，PR #48 / #49）。`repo.ts` / `types.ts` 的话题计数与收编字段取并集，`failures.md` 保留双方记录；外部来源接入既有 chip 与来源筛选，收编项目映射、共享 SQL 谓词及 V2 flag 语义保留。`bunx tsc --noEmit` exit 0、`bun test` 290 pass；11 条隔离手机回归及 main 额外的 `mobile-as-adopt-live.sh` 全部首次 exit 0。3497 生产快照两图核实系统项目下收编会话、8 条外部会话时间排序与 backend chip。截图首次碰到其他 worktree 的锁，等待正常释放后完成；最终 3471–3480 / 3497 无监听且锁不存在。证据：`/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-sidebar-wave2-integrate-b80f/out/result.md`。
+
+Next：交付主控独立验收 PR #50；本分支仅本地提交，不 push、不合 PR、不部署。
