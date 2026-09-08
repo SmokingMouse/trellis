@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync,writeFileSync,realpathSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { Database } from "bun:sqlite";
 import { AgentClient } from "@smokingmouse/agent-server/client";
 import { loadToken } from "@smokingmouse/agent-server/paths";
@@ -8,10 +9,10 @@ const home=process.argv[2],mode=process.argv[3],cwd=process.argv[4];
 if(!home.startsWith("/tmp/trellis-as-adopt-live-")) throw Error("isolated proof home required");
 const file=join(home,"live-proof.json");
 const peer=await AgentClient.connectUnix({path:process.env.TRELLIS_AS_SOCKET!,token:loadToken(process.env.TRELLIS_AS_TOKEN_PATH!),client:{name:"trellis-adopt-live-proof",version:"1",kind:"web",label:"收编临时验收"},reconnect:false});
-const marker="fj-as-adopt-a06a-live-proof";
+const marker="fj-as-adopt-live-proof";
 try {
   if(mode==="prepare") {
-    assert.ok(cwd.includes("/.trellis/scratch/as-adopt-proof-"));
+    assert.ok(cwd.includes("/.trellis/scratch/as-adopt-proof-") || cwd===homedir());
     const {thread}=await peer.request("thread/start",{backend:"claude",model:"sonnet",cwd,permission:"default",clientThreadId:`${marker}-${Date.now()}`,meta:{title:"Trellis 收编临时验收",purpose:marker}});
     writeFileSync(file,JSON.stringify({threadId:thread.id,cwd:realpathSync(cwd),createdThread:thread},null,2));
     console.log(`PASS: created own sonnet proof thread ${thread.id}`);
@@ -49,11 +50,13 @@ try {
         assert.ok(row,"live thread did not appear");
         proof.sessionId=row.session_id;
         const headers={"Content-Type":"application/json",Cookie:"trellis_auth=as-adopt-token"};
-        const base="http://127.0.0.1:3479";
+        const base=`http://127.0.0.1:${process.env.AS_ADOPT_LIVE_PORT ?? "3479"}`;
         const list=await (await fetch(base+"/api/sessions",{headers})).json();
         assert.ok(list.sessions.some((s:{id:string})=>s.id===row!.session_id));
         proof.project=db.query("SELECT p.name,p.cluster_key FROM projects p JOIN workspaces w ON w.project_id=p.id JOIN sessions s ON s.workspace_id=w.id WHERE s.id=?").get(row.session_id);
         assert.equal(proof.project.cluster_key,"trellis:external");
+        proof.sessionCwd=(db.query("SELECT workspace_path FROM sessions WHERE id=?").get(row.session_id) as {workspace_path:string}).workspace_path;
+        assert.equal(proof.sessionCwd,proof.cwd,"grouping workspace must preserve the actual execution cwd");
         console.log("PASS: live temporary thread appears in home under 外部会话");
         const tip=db.query("SELECT id FROM nodes WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(row.session_id) as {id:string};
         assert.ok(tip,"seed turn must be backfilled");

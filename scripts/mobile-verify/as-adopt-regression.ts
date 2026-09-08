@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { mock } from "bun:test";
 import { isAdoptEnabled } from "../../lib/as-config";
@@ -29,16 +30,28 @@ try {
   assert.equal(matchAdoptionRoot("/a/bb",[{id:"w",projectId:"p",path:"/a/b"}]),null);
   assert.equal(matchAdoptionRoot("/a/b/src",[{id:"outer",projectId:"p",path:"/a"},{id:"inner",projectId:"p",path:"/a/b"}])?.id,"inner");
   // System home/scratch workspaces must not claim unrelated directories below them.
-  for (const [key,root] of [["trellis:home",home],["trellis:scratch",join(home,".trellis/scratch")]]) {
+  const cluster = (workspace:string) => (db.query("SELECT p.cluster_key FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.id=?").get(workspace) as {cluster_key:string}).cluster_key;
+  for (const [key,root] of [["trellis:home",homedir()],["trellis:scratch",join(home,".trellis/scratch")]]) {
     db.prepare("INSERT OR IGNORE INTO projects(id,name,cluster_key,created_at,updated_at) VALUES (?,?,?,?,?)")
       .run(key,key,key,Date.now(),Date.now());
     const project=db.query("SELECT id FROM projects WHERE cluster_key=?").get(key) as {id:string};
     db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES (?,?,?,?,?,?,?)")
       .run(`adopt-unit-${key}`,project.id,key,root,"directory","discovered",Date.now());
     const workspace=resolveAdoptionWorkspace(join(root,"unregistered-directory"));
-    assert.equal((db.query("SELECT p.cluster_key FROM workspaces w JOIN projects p ON p.id=w.project_id WHERE w.id=?").get(workspace) as {cluster_key:string}).cluster_key,"trellis:external");
+    assert.equal(cluster(workspace),"trellis:external");
+    assert.equal(cluster(resolveAdoptionWorkspace(root)),"trellis:external","exact system root must not be reused");
+    assert.equal(cluster(`adopt-unit-${key}`),key,"existing sessions must retain their system workspace");
   }
+  db.prepare("INSERT INTO projects VALUES ('not-git','private','dir:/private',NULL,1,1)").run();
+  db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES ('not-git','not-git','tmp',?,'directory','discovered',1)").run(realpathSync('/tmp'));
+  assert.equal(cluster(resolveAdoptionWorkspace(home)),"trellis:external","non-git /private/tmp cannot claim external cwd");
+  assert.equal(cluster(resolveAdoptionWorkspace('/tmp')),"trellis:external","non-git exact root cannot be reused");
+  mkdirSync(join(home,"symlink-target")); symlinkSync(join(home,"symlink-target"),join(home,"symlink-alias"));
+  assert.equal(resolveAdoptionWorkspace(join(home,"symlink-alias")),resolveAdoptionWorkspace(join(home,"symlink-target")),"canonical fallback does not create duplicate workspaces");
   assert.equal(resolveAdoptionWorkspace(join(home,"repo/sub")),"adopt-fixture-workspace");
+  mkdirSync(join(home,"repo/nested")); writeFileSync(join(home,"repo/nested/.git"),'gitdir: /fixture/worktree');
+  db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES ('nested','adopt-fixture-project','nested',?,'worktree','discovered',1)").run(join(home,"repo/nested"));
+  assert.equal(resolveAdoptionWorkspace(join(home,"repo/nested/src")),"nested","longest genuine root wins, .git file qualifies");
   const worktree=resolveAdoptionWorkspace(join(home,"checkout/src"),[{repo_root:join(home,"repo"),checkout_path:join(home,"checkout")}]);
   assert.equal((db.prepare("SELECT project_id FROM workspaces WHERE id=?").get(worktree) as {project_id:string}).project_id,"adopt-fixture-project");
   const {thread}=await f.peer.request("thread/start",{backend:"claude",cwd:join(home,"external"),model:"sonnet",meta:{title:"fixture title",fjContext:{cid:"fj-proof"}}});
@@ -129,6 +142,62 @@ try {
   await f.peer.request("turn/interrupt",{threadId:deleting.id});
   const closed=(await f.peer.request("thread/start",{backend:"claude",cwd:join(home,"external")})).thread;
   await f.peer.request("thread/close",{threadId:closed.id}); assert.equal(adoptSnapshot(await snapshot(closed.id)),null);
+  const {createProjectClient}=await import("../../lib/server/as-client");
+  let failNextList=false;
+  let observerClient: ReturnType<typeof createProjectClient>;
+  const service=new AdoptionService(()=>{
+    const client=createProjectClient({reconnect:false,observe:true}), request=client.request.bind(client);
+    observerClient=client;
+    client.request=((method,params)=>{
+      if(method==="thread/list" && failNextList){failNextList=false;return Promise.reject(Error("fixture reconnect"));}
+      return request(method,params);
+    }) as typeof client.request;
+    return client;
+  });
+  const state=service as unknown as {turns:Map<string,unknown>;snapshots:Map<string,{nextSeq:number}>;summaries:Map<string,unknown>;dirty:Set<string>;attached:Set<string>};
+  const observed=(await f.peer.request("thread/start",{backend:"claude",cwd:join(home,"external"),model:"sonnet"})).thread;
+  const observerCalls=()=>f.requests.filter(r=>r.client==="trellis-adopt");
+  try {
+    await service.scan(); await service.scan();
+    let offset=observerCalls().length;
+    await service.scan();
+    assert.deepEqual(observerCalls().slice(offset).map(r=>r.method),["thread/list"],"unchanged scan is one list, zero attach");
+    const cursor=state.snapshots.get(observed.id)!.nextSeq-1;
+    await f.peer.request("turn/start",{threadId:observed.id,input:[{type:"text",text:"incremental first"}]});
+    await complete(observed.id); await Bun.sleep(20);
+    offset=observerCalls().length; await service.scan();
+    const attaches=observerCalls().slice(offset).filter(r=>r.method==="thread/attach");
+    assert.deepEqual(attaches.map(r=>r.params),[{threadId:observed.id,sinceSeq:cursor}],"idle-to-idle turn detected from notifications, only changed thread attaches");
+    const observedSid=(getDB().query("SELECT session_id FROM as_adoptions WHERE thread_id=?").get(observed.id) as {session_id:string}).session_id;
+    const first=getNodes(observedSid)[0]; assert.ok(first.response.includes("incremental first"));
+    const nextCursor=state.snapshots.get(observed.id)!.nextSeq-1; assert.ok(nextCursor>0);
+    await f.peer.request("turn/start",{threadId:observed.id,input:[{type:"text",text:"incremental second"}]});
+    await complete(observed.id); await Bun.sleep(20);
+    offset=observerCalls().length; await service.scan();
+    assert.deepEqual(observerCalls().slice(offset).filter(r=>r.method==="thread/attach").map(r=>r.params),[{threadId:observed.id,sinceSeq:nextCursor}]);
+    assert.equal(getNodes(observedSid).length,2); assert.equal(getNodes(observedSid)[0].response,first.response,"incremental snapshot preserves historical items");
+    failNextList=true; await service.scan(); await service.scan();
+    assert.equal(getNodes(observedSid).length,2,"reconnect reconciles using retained cursor without duplicate nodes");
+    observerClient!.close();
+    await f.peer.request("turn/start",{threadId:observed.id,input:[{type:"text",text:"missed while disconnected"}]}); await complete(observed.id);
+    await service.scan();
+    assert.equal(getNodes(observedSid).length,3,"idle-to-idle turn during a silent disconnect is recovered");
+    await f.peer.request("turn/start",{threadId:observed.id,input:[{type:"text",text:"hold across disconnect"}]}); await Bun.sleep(30); await service.scan();
+    assert.equal(getNodes(observedSid).at(-1)!.status,"streaming");
+    observerClient!.close(); await f.peer.request("turn/interrupt",{threadId:observed.id}); await Bun.sleep(30); await service.scan();
+    assert.equal(getNodes(observedSid).at(-1)!.status,"error","lost terminal notification cannot leave a turn streaming forever");
+    await f.peer.request("thread/close",{threadId:observed.id}); await service.scan();
+    assert.equal(getAdoption(observedSid)?.status,"closed");
+    for(const cache of [state.turns,state.snapshots,state.summaries,state.dirty,state.attached]) assert.equal(cache.has(observed.id),false,"closed thread clears every cache");
+    const removed=(await f.peer.request("thread/start",{backend:"claude",cwd:join(home,"external")})).thread;
+    await service.scan();
+    await f.peer.request("turn/start",{threadId:removed.id,input:[{type:"text",text:"delete cache"}]}); await complete(removed.id); await service.scan();
+    const removedSid=(getDB().query("SELECT session_id FROM as_adoptions WHERE thread_id=?").get(removed.id) as {session_id:string}).session_id;
+    assert.ok(state.turns.has(removed.id)); deleteSession(removedSid); await service.scan();
+    for(const cache of [state.turns,state.snapshots,state.summaries,state.dirty,state.attached]) assert.equal(cache.has(removed.id),false,"deleted session clears every cache");
+    assert.notEqual((await f.peer.request("thread/read",{threadId:removed.id})).thread.status.type,"closed");
+    console.log("PASS: P1-1 exact home/scratch; P2-1 git/Herdr longest roots; P2-2 realpath; P1-2 incremental/idle/reconnect; P2-3 closed/deleted caches");
+  } finally {service.stop();}
   let calls=0;
   for(const flags of [{TRELLIS_AS:"on",TRELLIS_AS_ADOPT:"off"},{TRELLIS_AS:"off",TRELLIS_AS_ADOPT:"on"}]) {
     Object.assign(process.env,flags); const service=new AdoptionService(()=>{calls++;throw Error("off made a request");}); await service.scan();service.stop();

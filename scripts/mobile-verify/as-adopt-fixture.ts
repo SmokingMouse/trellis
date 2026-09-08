@@ -1,15 +1,15 @@
 import { mock } from "bun:test";
-import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AgentClient, MockEngine, type MockScript, type EngineItem, type EngineEvent } from "@smokingmouse/agent-server";
 import { loadToken, resolveDaemonPaths, runDaemon } from "@smokingmouse/agent-server/daemon";
-import { matchAdoptionRoot } from "../../lib/as-adopt";
 mock.module("server-only", () => ({}));
 
 export async function startFixture(home: string) {
   if (!home.startsWith("/tmp/trellis-as-adopt-")) throw Error("isolated fixture home required");
   const paths = resolveDaemonPaths({NODE_ENV:"test",HOME:home,AGENT_SERVER_SOCKET_PATH:join(home,"as.sock")});
   for (const dir of ["repo","checkout","external"]) mkdirSync(join(home,dir),{recursive:true});
+  mkdirSync(join(home,"repo/.git"));
   const script: MockScript = async function* (turnId,input,engine) {
     function* completed(item: EngineItem): Generator<EngineEvent> {
       yield {type:"itemStarted",turnId,item};
@@ -38,13 +38,13 @@ export async function startFixture(home: string) {
     yield {type:"turnCompleted",turnId,status:"completed",forkPoint:`checkpoint-${turnId}`};
   };
   const daemon = await runDaemon({paths,graceMs:0,logger:()=>{},serverOptions:{defaultModel:"sonnet",allowedRoots:[home],backends:["claude"],engineFactory:()=>new MockEngine(script,"claude")}});
-  const requests: {client:string;method:string}[] = [];
+  const requests: {client:string;method:string;params?:unknown}[] = [];
   const labels = new WeakMap<object,string>();
   const receive = daemon.server.receive.bind(daemon.server);
   daemon.server.receive = (connection,raw) => {
     const frame = raw as {method?:string;params?:{client?:{name?:string}}};
     if (frame.method === "initialize") labels.set(connection,frame.params?.client?.name ?? "unknown");
-    if (frame.method) requests.push({client:labels.get(connection) ?? "unknown",method:frame.method});
+    if (frame.method) requests.push({client:labels.get(connection) ?? "unknown",method:frame.method,params:frame.params});
     return receive(connection,raw);
   };
   const peer = await AgentClient.connectUnix({path:paths.socketPath,token:loadToken(paths.tokenPath),client:{name:"fixture-peer",version:"1",kind:"tui",label:"外部客户端"},capabilities:{engineEvents:true,serverRequests:["item/commandExecution/requestApproval"]},reconnect:false});
@@ -52,24 +52,6 @@ export async function startFixture(home: string) {
   peer.onNotification("serverRequest/resolved",p=>resolved.push(p));
   const {getDB} = await import("../../lib/server/sqlite");
   const db = getDB(), now=Date.now();
-  // A production backup may contain a historic /tmp workspace. Remove only
-  // ancestor registrations in this isolated fixture DB so the unknown-cwd case
-  // remains unknown; real production ownership is untouched.
-  const roots=db.prepare("SELECT id,project_id AS projectId,path FROM workspaces").all() as {id:string;projectId:string;path:string}[];
-  for(const root of roots) {
-    try {root.path=realpathSync(root.path);} catch {}
-    if(matchAdoptionRoot(realpathSync(join(home,"external")),[root])) {
-      db.prepare("UPDATE sessions SET workspace_path=NULL WHERE workspace_id=?").run(root.id);
-      db.prepare("DELETE FROM workspaces WHERE id=?").run(root.id);
-    }
-  }
-  // Startup backfill must not recreate a deleted ancestor from an ungrouped
-  // historic session in the copied DB.
-  const oldSessions=db.prepare("SELECT id,workspace_path FROM sessions WHERE workspace_path IS NOT NULL").all() as {id:string;workspace_path:string}[];
-  for(const session of oldSessions) {
-    let root=session.workspace_path;try {root=realpathSync(root);} catch {}
-    if(matchAdoptionRoot(realpathSync(join(home,"external")),[{id:session.id,projectId:"old",path:root}])) db.prepare("UPDATE sessions SET workspace_path=NULL WHERE id=?").run(session.id);
-  }
   db.prepare("INSERT INTO projects(id,name,cluster_key,created_at,updated_at) VALUES (?,?,?,?,?)").run("adopt-fixture-project","收编测试项目",join(home,"repo"),now,now);
   db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES (?,?,?,?,?,?,?)").run("adopt-fixture-workspace","adopt-fixture-project","repo",join(home,"repo"),"directory","discovered",now);
   return {daemon,peer,requests,resolved,paths};

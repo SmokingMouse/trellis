@@ -336,7 +336,9 @@ project 从最新空闲节点续聊复用 thread；早期节点续聊、显式 f
 
 客户端随仓库 vendor，来源固定在 `vendor/agent-server/VENDORED_FROM`；刷新用 `SM_TOOLKIT_DIR=/path/to/sm-toolkit sh scripts/vendor-agent-server.sh` 后执行 `bun install`。复核命令：`bunx tsc --noEmit`、`bun test`、`scripts/mobile-verify/mobile-as-project.sh`、`scripts/mobile-verify/mobile-as-shadow.sh`；移动验收只用 mock 引擎与脚本锁定的隔离端口。
 
-外部会话收编由 `TRELLIS_AS_ADOPT=on` 单独开启，不依赖 PROJECT 开关或 PROJECT_ID 灰度范围。启动全量扫描（含分页），健康时每 1.5 秒扫描并同步 turn/items；故障按 2–30 秒指数退避。关闭 ADOPT 不启动扫描器，不向 daemon 发出收编请求。零 turn 线程持续观察但不建会话，首个 turn 出现后才收编；扫描快照及 turn 通知都可识别首轮。非 closed、未绑定的线程按 cwd 的最长包含真实 workspace 根归属，Herdr 的 repo/worktree 元数据也参与；系统 home/scratch 兜底根不参与祖先匹配。没有真实匹配时自动创建唯一的系统项目「外部会话」（`cluster_key=trellis:external`）。会话及节点携带 `origin=external`、backend，标题保留 meta/fjContext 中的标题或契约号。
+外部会话收编由 `TRELLIS_AS_ADOPT=on` 单独开启，不依赖 PROJECT 开关或 PROJECT_ID 灰度范围。启动发现线程并读取首次快照，健康时每 1.5 秒用一次 `thread/list` 发现新线程（超过协议每页 10000 条才分页）；已订阅线程由通知标记变化，只有新增、摘要变化或收到通知的线程按已存 `sinceSeq` 增量 attach，无变化时零 attach。故障按 2–30 秒指数退避，重连从已投影 cursor 补齐断线变化；关闭/删除线程清理观察缓存。关闭 ADOPT 不启动扫描器，不向 daemon 发出收编请求。零 turn 线程持续观察但不建会话，首个 turn 出现后才收编；扫描快照及 turn 通知都可识别首轮。
+
+非 closed、未绑定的线程按 realpath 后 cwd 的最长包含真实 workspace 根归属；真实根必须有 `.git` 文件/目录，或是 Herdr 已知的 repo/worktree。非 git 目录项目与系统 home/scratch 根均不参与，cwd 精确等于系统根也不复用其归属。没有真实匹配时自动创建唯一的系统项目「外部会话」（`cluster_key=trellis:external`）。若 cwd 已被其他非真实 workspace 占用，则使用外部项目的独立归组 workspace，实际执行目录仍保存在 `sessions.workspace_path`；不移动已有 workspace 或其中的会话。会话及节点携带 `origin=external`、backend，标题保留 meta/fjContext 中的标题或契约号。
 
 主页提问复用原 thread，审批竞答、中断和分叉沿用 project 路径；正在运行的轮次不能被静默覆盖。外部线程关闭后，主页保留历史并显示已结束，拒绝新提问。Trellis **不会调用 `thread/close` 收编线程**；删除会话只解绑，`as_adoptions` 留永久墓碑，即使外部再有新 turn 或 Trellis 重启也不会重新收编。关闭 ADOPT 不删除已收编历史；需要回退时设 `TRELLIS_AS_ADOPT=off` 并重启。整体关闭可设 `TRELLIS_AS=off`，收编会话保持历史并拒绝发送，不会另起兼容引擎。
 
