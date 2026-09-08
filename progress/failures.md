@@ -8,6 +8,8 @@
 
 ## 已结案
 
+- **收编事件 E2E 多节点选择器误点与计数范围错误**（fj-as-controls-polish-dfcc）→ `resolved`。症状：点击后目标日志未展开，刷新后全页事件数不等于单节点 5 条。可证伪假设：线性会话的四个节点同时挂载，通用 selector 落到视口外首节点并把四份列表一起计数。改为 nodeId 限定、点击前 scrollIntoView、节点内统计，统一前缀 `sh scripts/mobile-verify/mobile-as-adopt.sh` 完整 exit 0。初轮 exit 1 与诊断轮主动终止 exit 143 日志保留在契约 out/mobile-as-adopt-first.log、mobile-as-adopt-diagnostic.log；最终证据 mobile-as-adopt.log。
+
 - **AS project 全库 thread reuse 断言包含无关线程**（fj-as-adopt-a06a）→ `resolved`。生产快照已有其他 AS 线程，副本全库 COUNT=2、fixture 会话 COUNT=1；审批/撤卡/三轮共用 engine 均 PASS。按最新主控裁定将 COUNT 限定为 fixture 的 session_id，保留原始生产快照，不再清理旧绑定；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修改只影响此断言统计范围，独立的三轮共用 engine 检查及重试/分叉断言不变。最终证据 out/ruling-mobile-as-project.log、ruling-as-project-counts.txt；曾恢复全库断言及使用临时库清理的历史证据仍保留，但不作为最终版本。
 
 - **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。AS project COUNT 问题与最终裁定另列上条，历史记录保留。

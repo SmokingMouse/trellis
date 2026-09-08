@@ -37,7 +37,8 @@ export async function startFixture(home: string) {
     yield {type:"itemCompleted",turnId,item:{id:`${turnId}-answer`,type:"agentMessage",payload:{text:`外部线程回复：${prompt}`}}};
     yield {type:"turnCompleted",turnId,status:"completed",forkPoint:`checkpoint-${turnId}`};
   };
-  const daemon = await runDaemon({paths,graceMs:0,logger:()=>{},serverOptions:{defaultModel:"sonnet",allowedRoots:[home],backends:["claude"],engineFactory:()=>new MockEngine(script,"claude")}});
+  const engines: MockEngine[] = [];
+  const daemon = await runDaemon({paths,graceMs:0,logger:()=>{},serverOptions:{defaultModel:"sonnet",allowedRoots:[home],backends:["claude"],engineFactory:()=>{const engine=new MockEngine(script,"claude");engines.push(engine);return engine;}}});
   const requests: {client:string;method:string;params?:unknown}[] = [];
   const labels = new WeakMap<object,string>();
   const receive = daemon.server.receive.bind(daemon.server);
@@ -54,7 +55,7 @@ export async function startFixture(home: string) {
   const db = getDB(), now=Date.now();
   db.prepare("INSERT INTO projects(id,name,cluster_key,created_at,updated_at) VALUES (?,?,?,?,?)").run("adopt-fixture-project","收编测试项目",join(home,"repo"),now,now);
   db.prepare("INSERT INTO workspaces(id,project_id,name,path,kind,created_by,created_at) VALUES (?,?,?,?,?,?,?)").run("adopt-fixture-workspace","adopt-fixture-project","repo",join(home,"repo"),"directory","discovered",now);
-  return {daemon,peer,requests,resolved,paths};
+  return {daemon,peer,requests,resolved,paths,engines};
 }
 
 if (import.meta.main) {
@@ -62,6 +63,18 @@ if (import.meta.main) {
   const server = Bun.serve({hostname:"127.0.0.1",port:3480,async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === "/proof") return Response.json({requests:fixture.requests,resolved:fixture.resolved});
+    if (url.pathname === "/engine-events" && req.method === "POST") {
+      for (const engine of fixture.engines) if (!engine.closed) {
+        for (const [subtype,payload] of [
+          ["engine/started", {}],
+          ["hook/completed", {params:{hookName:"postToolUse",durationMs:12}}],
+          ["item/completed", {params:{item:{type:"commandExecution",command:"sleep 45 s"}}}],
+          ["warning", {message:"连接曾短暂中断，现已恢复"}],
+          ["engine/exited", {code:143}],
+        ] as const) engine.emit({type:"engineEvent",backend:"claude",subtype,payload});
+      }
+      return Response.json({ok:true});
+    }
     try {
       const {method,params} = await req.json();
       // Fixture controller is loopback-only, exposes only its own isolated daemon.
