@@ -10,6 +10,15 @@
 
 - **收编事件 E2E 多节点选择器误点与计数范围错误**（fj-as-controls-polish-dfcc）→ `resolved`。症状：点击后目标日志未展开，刷新后全页事件数不等于单节点 5 条。可证伪假设：线性会话的四个节点同时挂载，通用 selector 落到视口外首节点并把四份列表一起计数。改为 nodeId 限定、点击前 scrollIntoView、节点内统计，统一前缀 `sh scripts/mobile-verify/mobile-as-adopt.sh` 完整 exit 0。初轮 exit 1 与诊断轮主动终止 exit 143 日志保留在契约 out/mobile-as-adopt-first.log、mobile-as-adopt-diagnostic.log；最终证据 mobile-as-adopt.log。
 
+||||||| 0f126ab
+- **AS shadow 全部断言通过后验证锁目录已消失**（fj-sidebar-wave2-c6c6 补充复验）→ `not-reproducible`。症状：功能断言全部 PASS，清理 `rmdir /tmp/trellis-mobile-verify.lock` 报不存在导致 exit 1。可证伪假设：共享锁被其它清理动作提前移除，具体进程未定位；同代码单独复跑退出 0，未修改清理脚本掩盖错误。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-as-shadow.sh`。失败证据 `mobile-as-shadow-cleanup-attempt1.log`、复跑 `mobile-as-shadow.log` 均在契约 out。
+
+- **稍后再读脚本在长问题的回答懒挂载前等待按钮**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：真库随机选中的节点有完整回答，但 `response-more` 等待超时。可证伪假设：长问题把回答推离视口，`ResponseBody` 的 `useNearViewport` 只挂纯文本占位。脚本在每次打开会话后先滚到回答；日志记录滚动前位置，原书签、跨设备同步及分页断言全部通过。判定命令：统一隔离前缀运行 `sh scripts/mobile-verify/mobile-read-later.sh`，exit 0。首次失败及最终日志在契约 out 的 `mobile-read-later-attempt1.log` / `mobile-read-later.log`；产品代码未改。
+
+- **波 2 手机断言仍依赖已退役链行 / 将 checkbox 视为文本输入**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：touch-targets 找不到 `session-chain-row`；safe-area 将归档 checkbox 的 11px 字号判作文本输入失败。可证伪假设：测试范围滞后于新工具条。链行断言迁到排布 / 来源 / 归档触控目标；字体检查排除非文本 input，与既有 `mobile-input-font-scan.ts` 同口径，文本及 select 的 16px 守卫保留。判定命令：统一隔离前缀分别运行 `sh scripts/mobile-verify/mobile-touch-targets.sh`、`sh scripts/mobile-verify/mobile-safe-area.sh`，最终均 exit 0；首次日志保留在契约 out。
+
+- **波 2 手机导航脚本沿用顶端链行点击**（fj-sidebar-wave2-c6c6）→ `resolved`。症状：切到统一项目列表后跨会话恢复等待超时；可证伪假设：目标会话在抽屉下方，旧自动点击未先滚动。CDP 实测目标行 top=4218px、URL 未切换；补 `scrollIntoView` 和视口断言后，真实点击恢复保存的 node/view，完整脚本通过。判定命令：`env -i HOME=/Users/smokingmouse PATH="$PATH" TRELLIS_LARK=off TRELLIS_SCHEDULER=off TRELLIS_HOOKS=off TRELLIS_HERDR=off TRELLIS_VERIFY_SOURCE_DB=/Users/smokingmouse/.trellis/data.db sh scripts/mobile-verify/mobile-branch-chain.sh`。首次失败还受额外浏览器诊断干扰；两次尝试日志保留在契约 out。
+
 - **AS project 全库 thread reuse 断言包含无关线程**（fj-as-adopt-a06a）→ `resolved`。生产快照已有其他 AS 线程，副本全库 COUNT=2、fixture 会话 COUNT=1；审批/撤卡/三轮共用 engine 均 PASS。按最新主控裁定将 COUNT 限定为 fixture 的 session_id，保留原始生产快照，不再清理旧绑定；统一前缀下 `sh scripts/mobile-verify/mobile-as-project.sh` 完整 exit 0。修改只影响此断言统计范围，独立的三轮共用 engine 检查及重试/分叉断言不变。最终证据 out/ruling-mobile-as-project.log、ruling-as-project-counts.txt；曾恢复全库断言及使用临时库清理的历史证据仍保留，但不作为最终版本。
 
 - **统一验证前缀下的既有 fixture 假设**（fj-as-adopt-a06a）→ `resolved`（Herdr/followup）。Herdr fixture 被继承的 TRELLIS_HERDR=off 禁用；followup 桌面输入框先于 Markdown 段落就绪。只在隔离 Herdr socket 的子进程显式 on、等待目标段落。判定命令：统一前缀下的 `mobile-herdr.sh`、`mobile-followup-approval.sh`，均复跑 exit 0；日志在契约 out/。AS project COUNT 问题与最终裁定另列上条，历史记录保留。

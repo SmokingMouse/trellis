@@ -1,4 +1,5 @@
 import "server-only";
+import { sessionSourcePredicate } from "../session-source";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -30,6 +31,7 @@ import type {
 // types but the response is always present (no null) and position is omitted.
 
 export type ApiSession = {
+  treeCount?: number;
   backend?: string;
   externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
@@ -391,12 +393,14 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
   const rows = db
     .prepare(
       // 来源只决定行内 chip；所有来源共享活跃 / 归档语义。
-      `SELECT ${SESSION_COLS} FROM sessions
-       WHERE archived = ? AND kind IN ('user', 'lark', 'herdr', 'task')
+      `SELECT ${SESSION_COLS},
+       (SELECT COUNT(*) FROM nodes n WHERE n.session_id = sessions.id
+        AND n.parent_id IS NULL AND n.hidden_at IS NULL) AS tree_count FROM sessions
+       WHERE archived = ? AND ${sessionSourcePredicate()}
        ORDER BY updated_at DESC`,
     )
-    .all(want) as SessionRow[];
-  return rows.map(rowToSession);
+    .all(want) as (SessionRow & { tree_count: number })[];
+  return rows.map(row => ({ ...rowToSession(row), treeCount: row.tree_count }));
 }
 
 // 任务专用列表，保留现有 API / tab 消费方兼容。
@@ -417,7 +421,7 @@ export function countArchivedSessions(): number {
   // 与 listSessions 的归档视图同一口径：任务会话也计入（能找回才敢归档）。
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND kind IN ('user','task','lark','herdr')",
+      `SELECT COUNT(*) AS n FROM sessions WHERE archived = 1 AND ${sessionSourcePredicate()}`,
     )
     .get() as { n: number };
   return row.n;
@@ -2435,7 +2439,7 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
                 n.id
            FROM nodes n JOIN sessions s ON s.id = n.session_id
           WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
-            AND s.archived = 0 AND s.kind IN ('user', 'lark', 'herdr', 'task')
+            AND s.archived = 0 AND ${sessionSourcePredicate("s.kind")}
          UNION ALL
          SELECT n.id, c.root_id, c.depth + 1,
                 max(c.activity, n.created_at, coalesce(n.read_at, 0)),

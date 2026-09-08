@@ -303,7 +303,7 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
    TRELLIS_AUTH_PASS=<登录密码>
    TRELLIS_AUTH_TOKEN=<随机长串，cookie 会话令牌>
    TRELLIS_REPO_DIR=<trellis 仓库 checkout 的绝对路径>
-   # 可选：agent-server 只读影子模式，配置说明见下
+   # 可选：agent-server 主页收编（TRELLIS_AS_ADOPT），配置说明见下
    TRELLIS_AS=off
    ```
 
@@ -313,11 +313,11 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 6. **`make install-service`**：把服务定义的工作目录改到 `~/.trellis/current`（自动备份原文件并重载）。之后 `make deploy` 不再需要 FORCE，仓库目录退化为纯开发 checkout。
 7. **验证**：`make deploy-status`；`curl http://127.0.0.1:3088/__gate/health` 应给出 `next=ready` 且 `auth=on`。
 
-### agent-server 影子模式
+### agent-server 主页收编与 project 切流
 
-影子观察与 project 切流共用启用判定：`TRELLIS_AS=off` 优先级最高，即使设置了 socket 也关闭；否则 `TRELLIS_AS=on` 或设置 `TRELLIS_AS_SOCKET` 即启用。另设 `TRELLIS_AS_PROJECT=on` 才给新 project 会话打 thread 标记。只关 PROJECT 会停止新会话打标，已绑定会话继续使用 daemon；关 AS 则已绑定会话的新请求也带 notice 回退兼容模式，保留输入与祖先历史。pane 绑定仍由 herdr-bridge 接线。
+主页收编与 project 切流共用启用判定：`TRELLIS_AS=off` 优先级最高，即使设置了 socket 也关闭；否则 `TRELLIS_AS=on` 或设置 `TRELLIS_AS_SOCKET` 即启用。另设 `TRELLIS_AS_PROJECT=on` 才给新 project 会话打 thread 标记。只关 PROJECT 会停止新会话打标，已绑定会话继续使用 daemon；关 AS 则 project 新请求带 notice 回退兼容模式，保留输入与祖先历史，外部会话保留历史并拒绝发送。pane 绑定仍由 herdr-bridge 接线。
 
-先独立启动 agent-server daemon，再在开发用 `.env.local` 或部署用 `~/.trellis/shared/.env.local` 配置下表变量并重启 Trellis。可参考仓库的 [.env.example](.env.example)。打开 `/console/threads` 查看只读日志；审批和执行仍在原客户端完成，既有 chat 链路不受影响。
+先独立启动 agent-server daemon，再在开发用 `.env.local` 或部署用 `~/.trellis/shared/.env.local` 配置下表变量并重启 Trellis。可参考仓库的 [.env.example](.env.example)。设置 `TRELLIS_AS_ADOPT=on` 后，在主页查看并继续外部会话，审批与系统日志也在主页呈现。
 
 | 变量 | 含义与默认值 |
 |---|---|
@@ -328,13 +328,13 @@ make install-service   # 把常驻服务的工作目录改成 ~/.trellis/current
 | `TRELLIS_AS_SOCKET` | daemon Unix socket 的绝对路径。未设置时遵循 agent-server 路径规则：`AGENT_SERVER_SOCKET_PATH` 优先，其次绝对 `XDG_RUNTIME_DIR` 下的 `sm-toolkit/agent-server.sock`，其次绝对 `XDG_STATE_HOME` 下的同一路径，最后为 `$HOME/.sm-toolkit/agent-server.sock`。 |
 | `TRELLIS_AS_TOKEN_PATH` | 已运行 daemon 的 token 文件绝对路径，不是 token 内容。默认绝对 `XDG_STATE_HOME` 下的 `sm-toolkit/agent-server/token`，否则 `$HOME/.agent-server/token`。自定义 socket 不会自动改变 token 路径，两个配置需指向同一个 daemon。 |
 
-连接失败不会阻断 Trellis 启动；自动重连从 1 秒指数退避至 5 分钟，同一故障仅首次警告，恢复记录一次。列表刷新（`GET /api/as/threads`）可在退避期立即重试，同一观察者最短间隔 1 秒且并发合并。关闭时 AS API 返回 503。AS 页面与接口沿用 Trellis 现有鉴权闸；这些变量仅在服务端读取，不要使用 `NEXT_PUBLIC_` 前缀。
+连接失败不会阻断 Trellis 启动；收编扫描器按下述策略退避。主页权限与系统日志通过节点 SSE 订阅 daemon 快照与通知，保留断线续传、15 秒保活与慢消费者保护。主页与接口沿用 Trellis 现有鉴权闸；这些变量仅在服务端读取，不要使用 `NEXT_PUBLIC_` 前缀。
 
-审批观察依赖 daemon 的 `pendingRequests` 能力：首次 attach/断线重连用快照初始化，随后订阅 `thread/pendingRequests`；project 的可操作表单来自 server request。两条路径均不再每 2 秒 attach，静默时不重复推送历史；影子 SSE 保留每 15 秒一条轻量保活注释。旧 daemon 缺少通知能力时只能在首次 attach/重连看到审批快照，应升级 daemon 后使用实时审批观察。
+实时审批依赖 daemon 的 `pendingRequests` 能力：首次 attach/断线重连用快照初始化，随后订阅 `thread/pendingRequests`；project 的可操作表单来自 server request。静默时不重复推送历史；旧 daemon 应升级后使用实时审批。
 
 project 从最新空闲节点续聊复用 thread；早期节点续聊、显式 fork、重试，或原 thread 已被其他客户端推进时，需要新 thread。daemon 声明 `midThreadFork` 时，以 `as_turns.last_item_id` 为边界发送 `thread/fork {fromItemId}`，新历史只含所选节点之前的完整前缀。缺少该能力才把所选祖先历史播种到新 thread；有能力但边界无效时直接报错，不静默退回播种。无 daemon 映射的兼容历史仍需播种。
 
-客户端随仓库 vendor，来源固定在 `vendor/agent-server/VENDORED_FROM`；刷新用 `SM_TOOLKIT_DIR=/path/to/sm-toolkit sh scripts/vendor-agent-server.sh` 后执行 `bun install`。复核命令：`bunx tsc --noEmit`、`bun test`、`scripts/mobile-verify/mobile-as-project.sh`、`scripts/mobile-verify/mobile-as-shadow.sh`；移动验收只用 mock 引擎与脚本锁定的隔离端口。
+客户端随仓库 vendor，来源固定在 `vendor/agent-server/VENDORED_FROM`；刷新用 `SM_TOOLKIT_DIR=/path/to/sm-toolkit sh scripts/vendor-agent-server.sh` 后执行 `bun install`。复核命令：`bunx tsc --noEmit`、`bun test`、`scripts/mobile-verify/mobile-as-project.sh`、`scripts/mobile-verify/mobile-as-adopt.sh`；移动验收只用 mock 引擎与脚本锁定的隔离端口。
 
 外部会话收编由 `TRELLIS_AS_ADOPT=on` 单独开启，不依赖 PROJECT 开关或 PROJECT_ID 灰度范围。启动发现线程并读取首次快照，健康时每 1.5 秒用一次 `thread/list` 发现新线程（超过协议每页 10000 条才分页）；已订阅线程由通知标记变化，只有新增、摘要变化或收到通知的线程按已存 `sinceSeq` 增量 attach，无变化时零 attach。故障按 2–30 秒指数退避，重连从已投影 cursor 补齐断线变化；关闭/删除线程清理观察缓存。关闭 ADOPT 不启动扫描器，不向 daemon 发出收编请求。零 turn 线程持续观察但不建会话，首个 turn 出现后才收编；扫描快照及 turn 通知都可识别首轮。
 

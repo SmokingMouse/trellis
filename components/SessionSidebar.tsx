@@ -35,21 +35,13 @@ import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { sessionSourceChip } from "@/lib/session-source";
 import { HerdrSidebarGroup } from "@/components/HerdrSidebarGroup";
+import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
+import { type HerdrSessionStatus } from "@/lib/herdr-ui";
+import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
+import { SIDEBAR_V2, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
-// S1：折叠状态。per-project / per-workspace id 存一个集合，localStorage
-// 持久化（sendKey / treePanelView 同款）。默认全展开 —— 项目数是个位数，
-// 一进来就得手动展开才能看见东西是更差的默认。
-const COLLAPSE_KEY = "trellis-sidebar-collapsed";
-
-function loadCollapsed(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = window.localStorage.getItem(COLLAPSE_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
+const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
+const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "task", "lark", "external"].includes(v as string);
 
 // Workbench Wave 4 — VSCode-style left explorer sidebar (R1 + R2 + R3).
 //
@@ -69,6 +61,11 @@ function loadCollapsed(): Set<string> {
 //  the SessionPicker's management powers aren't lost.
 
 export function SessionSidebar() {
+  const [layout, setLayout] = useSidebarPreference("layout", "project" as SidebarLayout, isLayout);
+  const [source, setSource] = useSidebarPreference("source", "all" as SidebarSource, isSource);
+  const [includeArchived, setIncludeArchived] = useSidebarPreference("include-archived", false, isBoolean);
+  const { statuses: herdrStatus, available: herdrAvailable, unavailableText } = useHerdrSessionStatuses();
+  const fleetSessionKey = [...herdrStatus.keys()].sort().join(",");
   const router = useRouter();
   const activeId = useSessionStore((s) => s.session?.id ?? null);
   const previewId = useSessionStore((s) => s.previewSessionId);
@@ -132,10 +129,9 @@ export function SessionSidebar() {
     () => new Set(),
   );
   const [recentNonce, setRecentNonce] = useState(0);
-  // 惰性初值直接读 localStorage（store 里 loadSidebarOpen 同款），不走 effect。
-  // 不会 hydration 不匹配：projects 初值是 []、靠 fetch 填，首屏一个分组行都不
-  // 渲染，折叠状态在 fetch 回来之前根本不可见。
-  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  // 沿用原 collapsed 数组的存储键；与工具条和面板偏好共用安全的 hydration。
+  const [collapsedIds, setCollapsedIds] = useSidebarPreference("collapsed", [] as string[], isStringArray);
+  const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds]);
   const [width, setWidth] = useState<number>(loadSidebarWidth);
   const [resizing, setResizing] = useState(false);
   const isDesktopViewport = useIsDesktopViewport();
@@ -168,30 +164,25 @@ export function SessionSidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const toggleCollapsed = (id: string) => {
-    setCollapsed((prev) => {
+    setCollapsedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      try {
-        window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]));
-      } catch {
-        /* 隐私模式下写不进去，折叠状态退化成只在本次会话内有效 */
-      }
-      return next;
+      return [...next];
     });
   };
   // Archived view (replaces SessionPicker's "显示已归档" toggle). Count comes
   // free from the main list response; the archived rows are fetched lazily
   // only when the footer is expanded.
   const [archivedCount, setArchivedCount] = useState(0);
-  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archivedOpen, setArchivedOpen] = useSidebarPreference("archived-open", false, isBoolean);
   const [archived, setArchived] = useState<Session[]>([]);
 
   // Same watch contract as SessionPicker / SessionTabs: refetch on active
   // change or any store mutation that bumps sessionsRevision.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/sessions")
+    fetch(SIDEBAR_V2 ? "/api/sessions?includeEmptyWorkspaces=1" : "/api/sessions")
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled) {
@@ -206,7 +197,7 @@ export function SessionSidebar() {
     return () => {
       cancelled = true;
     };
-  }, [activeId, sessionsRevision]);
+  }, [activeId, sessionsRevision, fleetSessionKey]);
 
   // S133：最近分组的刷新触发 —— 切会话 / 列表变更（与主列表同）之外，还看
   // node 级 key 能分辨「同会话 A 刚结束、B 接着运行」与 waiting 状态切换；
@@ -220,6 +211,7 @@ export function SessionSidebar() {
     [runningNodeIds, waitingNodeIds],
   );
   useEffect(() => {
+    if (SIDEBAR_V2) return;
     let cancelled = false;
     fetch("/api/recent")
       .then((r) => r.json())
@@ -282,7 +274,7 @@ export function SessionSidebar() {
   // Lazy-load archived rows only while the footer is open. Re-runs on any
   // mutation (sessionsRevision) so unarchiving instantly removes the row.
   useEffect(() => {
-    if (!archivedOpen) return;
+    if (!(SIDEBAR_V2 ? includeArchived : archivedOpen)) return;
     let cancelled = false;
     fetch("/api/sessions?archived=1")
       .then((r) => r.json())
@@ -293,7 +285,11 @@ export function SessionSidebar() {
     return () => {
       cancelled = true;
     };
-  }, [archivedOpen, sessionsRevision]);
+  }, [archivedOpen, includeArchived, sessionsRevision]);
+
+  const visibleSessions = useMemo(() => SIDEBAR_V2
+    ? selectSidebarSessions(sessions, archived, source, includeArchived)
+    : sessions, [sessions, archived, source, includeArchived]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -317,7 +313,7 @@ export function SessionSidebar() {
     const chat: Session[] = [];
     const orphans: Session[] = [];
     const byWorkspace = new Map<string, Session[]>();
-    for (const s of sessions) {
+    for (const s of visibleSessions) {
       if ((s.mode || "chat") === "chat" && !s.workspaceId) {
         chat.push(s);
         continue;
@@ -332,7 +328,7 @@ export function SessionSidebar() {
       }
     }
     return { chat, byWorkspace, orphans };
-  }, [sessions, projects]);
+  }, [visibleSessions, projects]);
 
   // 落到「在这个目录下开新会话」的草稿态。侧栏里所有「＋」最终都汇到这里 ——
   // 新建 worktree 之后、以及在一个已有 workspace 行上直接开会话。
@@ -448,9 +444,11 @@ export function SessionSidebar() {
       running={isRunning(s.id)}
       unread={unreadIds.has(s.id)}
       status={status}
+      location={SIDEBAR_V2 && layout === "time" ? sessionLocation(s, projects) : undefined}
+      herdr={SIDEBAR_V2 && sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
       live={liveSessionIds.has(s.id)}
       editing={editingId === s.id}
-      onPreview={() => previewSession(s.id)}
+      onPreview={() => { setMobileNavOpen(false); void previewSession(s.id); }}
       onPin={() => pinSession(s.id)}
       onStartEdit={() => setEditingId(s.id)}
       onCancelEdit={() => setEditingId(null)}
@@ -460,7 +458,7 @@ export function SessionSidebar() {
           await renameSession(s.id, next);
         }
       }}
-      onArchive={() => archiveSession(s.id)}
+      onArchive={() => s.archived ? unarchiveSession(s.id) : archiveSession(s.id)}
       onDelete={() => {
         if (confirm("永久删除这个对话？\n（节点不可恢复）")) {
           deleteSession(s.id);
@@ -606,7 +604,7 @@ export function SessionSidebar() {
     const br = g?.branch ?? w.gitBranch;
 
     return (
-      <div key={w.id}>
+      <div key={w.id} data-sidebar-workspace={w.id}>
         <GroupRow
           level={isReclaimable ? 2 : 1}
           collapsed={wCollapsed}
@@ -655,12 +653,17 @@ export function SessionSidebar() {
     : projects;
   const renderProjects = () =>
     sidebarProjects.map((p) => {
+      const presentation = projectPresentation(p);
       const unassigned = p.clusterKey === SCRATCH_CLUSTER_KEY ? orphans : [];
       const pCollapsed = collapsed.has(p.id);
       const pCount = p.workspaces.reduce(
         (n, w) => n + (byWorkspace.get(w.id)?.length ?? 0),
         unassigned.length,
       );
+      if (SIDEBAR_V2 && source !== "all" && pCount === 0) return null;
+      const { empty: emptyWorkspaces } = partitionEmptyWorkspaces(p.workspaces, byWorkspace);
+      const emptyKey = `__empty_${p.id}`;
+      const emptyOpen = collapsed.has(emptyKey);
       // 平铺时各 workspace 的会话汇到一起，重新按最近活跃排 —— 每个 list
       // 内部有序不代表拼起来有序。
       const flatList = isFlat(p)
@@ -676,6 +679,7 @@ export function SessionSidebar() {
       const reclaimableWorkspaces: WorkspaceSummary[] = [];
 
       for (const w of p.workspaces) {
+        if (SIDEBAR_V2 && emptyWorkspaces.includes(w)) continue;
         const g = gitStatus.get(w.id);
         const sessionList = byWorkspace.get(w.id) ?? [];
         const hasRunning = sessionList.some((s) => isRunning(s.id));
@@ -692,12 +696,12 @@ export function SessionSidebar() {
       const isReclaimCollapsed = !collapsed.has(reclaimKey);
 
       return (
-        <div key={p.id} className="mb-3">
+        <div key={p.id} data-sidebar-project={p.id} className="mb-3">
           <GroupRow
             level={0}
             collapsed={pCollapsed}
-            label={p.name}
-            title={`${p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${
+            label={SIDEBAR_V2 ? `${presentation.icon}${presentation.icon ? " " : ""}${presentation.name}` : p.name}
+            title={`${SIDEBAR_V2 ? presentation.description : p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${
               flat && p.workspaces.length === 1
                 ? `${p.workspaces[0].path}\n`
                 : `${p.workspaces.length} 个工作区 (${activeWorkspaces.length} 活跃 · ${reclaimableWorkspaces.length} 已合并) · `
@@ -774,6 +778,12 @@ export function SessionSidebar() {
               )}
             </IndentGuide>
           )}
+          {SIDEBAR_V2 && !pCollapsed && emptyWorkspaces.length > 0 && (
+            <IndentGuide level={0}>
+              <GroupRow level={1} collapsed={!emptyOpen} label={`其它 ${emptyWorkspaces.length} 个工作区`} title="这些工作区没有符合当前筛选的会话；展开可新建会话、查看分支和清理已合并工作区" badge={null} muted onToggle={() => toggleCollapsed(emptyKey)} />
+              {emptyOpen && emptyWorkspaces.map(w => renderWorkspaceItem(w, Boolean(gitStatus.get(w.id)?.reclaimable)))}
+            </IndentGuide>
+          )}
         </div>
       );
     });
@@ -844,8 +854,25 @@ export function SessionSidebar() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1.5">
-        <HerdrSidebarGroup
+      {SIDEBAR_V2 && (
+        <div data-sidebar-toolbar className="shrink-0 border-b border-line-faint p-2 space-y-1 text-label">
+          <div role="group" aria-label="会话排布" className="flex rounded-md border border-line bg-surface p-0.5">
+            {([["project", "按项目"], ["time", "按时间"]] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={layout === value} onClick={() => setLayout(value)} className={`flex-1 rounded px-2 h-7 max-md:h-11 ${layout === value ? "bg-accent-muted text-accent-ink font-semibold" : "text-ink-faint hover:text-ink"}`}>{label}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 min-w-0">
+            <label className="flex items-center gap-1 min-w-[5.5rem] flex-1 text-ink-muted">来源
+              <select aria-label="来源" value={source} onChange={e => setSource(e.target.value as SidebarSource)} className="min-w-0 flex-1 h-7 max-md:h-11 rounded bg-surface text-ink border border-line">
+                <option value="all">全部</option><option value="web">网页</option><option value="herdr">Herdr</option><option value="task">任务</option><option value="lark">飞书</option><option value="external">外部</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 h-7 max-md:h-11 text-ink-muted whitespace-nowrap cursor-pointer"><input type="checkbox" checked={includeArchived} onChange={e => setIncludeArchived(e.target.checked)} />含已归档</label>
+          </div>
+        </div>
+      )}
+      <div data-sidebar-list data-sidebar-layout={SIDEBAR_V2 ? layout : "legacy"} className="flex-1 overflow-y-auto py-1.5">
+        {!SIDEBAR_V2 && <HerdrSidebarGroup
           GroupRow={GroupRow}
           collapsed={collapsed}
           onToggle={toggleCollapsed}
@@ -856,24 +883,25 @@ export function SessionSidebar() {
             setMobileNavOpen(false);
             void previewSession(sessionId);
           }}
-        />
-        {sessions.length === 0 ? (
+        />}
+        {SIDEBAR_V2 && source === "herdr" && !herdrAvailable && <div data-herdr-unavailable className="mx-2 mb-2 rounded-md border border-line bg-surface px-3 py-2 text-label text-ink-muted">{unavailableText}<p className="mt-1 text-nano text-ink-faint">仍可阅读已同步的会话。启动 Herdr 后将自动恢复状态。</p></div>}
+        {visibleSessions.length === 0 ? (
           <div className="px-3 py-3 text-label text-ink-faint italic">
-            还没有会话，点上面「新会话」开始
+            {SIDEBAR_V2 && source !== "all" ? "还没有此来源的会话，切换为「全部」查看其它会话" : "还没有会话，点上面「新会话」开始"}
           </div>
-        ) : (
+        ) : SIDEBAR_V2 && layout === "time" ? visibleSessions.map(s => renderRow(s)) : (
           <>
             {/* S133：最近活动的会话，粒度到链。 */}
-            {renderRecentGroup()}
+            {!SIDEBAR_V2 && renderRecentGroup()}
             {renderProjects()}
-            {renderGroup("__chat", "Chat", chat)}
+            {renderGroup("__chat", SIDEBAR_V2 ? "速记（无工作区）" : "Chat", chat)}
           </>
         )}
       </div>
 
       {/* Archived view — moved here from SessionPicker (now removed from the
           tab strip). Expand to restore archived sessions. */}
-      {archivedCount > 0 && (
+      {!SIDEBAR_V2 && archivedCount > 0 && (
         <div className="shrink-0 border-t border-line-faint">
           <button
             onClick={() => setArchivedOpen((o) => !o)}
@@ -1076,7 +1104,7 @@ function GitBadge({
 }) {
   if (!git.dirty && !git.reclaimable) return null;
   return (
-    <span className="shrink-0 flex items-center gap-1 text-nano md:group-hover:hidden">
+    <span className={`shrink-0 flex items-center gap-1 text-nano ${SIDEBAR_V2 ? "" : "md:group-hover:hidden"}`}>
       {git.dirty > 0 && (
         <button
           type="button"
@@ -1175,13 +1203,13 @@ function GroupRow({
       </button>
       {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 */}
       {tag && (
-        <span className="shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint group-hover:hidden">
+        <span className={`shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}>
           {tag}
         </span>
       )}
       {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
       {badge && (
-        <span className={`shrink-0 text-nano tabular-nums text-ink-faint ${(onAdd || onInspectDiff || onBatchClean || onRemove) ? "group-hover:hidden" : ""}`}>
+        <span className={`shrink-0 text-nano tabular-nums text-ink-faint ${!SIDEBAR_V2 && (onAdd || onInspectDiff || onBatchClean || onRemove) ? "group-hover:hidden" : ""}`}>
           {badge}
         </span>
       )}
@@ -1231,6 +1259,8 @@ function SidebarRow({
   running,
   unread,
   status,
+  location,
+  herdr,
   live,
   editing,
   onPreview,
@@ -1250,6 +1280,8 @@ function SidebarRow({
   unread: boolean;
   /** 最近分组传入整会话链聚合；其他分组缺省时维持原 running/unread 语义。 */
   status?: RecentChain["status"];
+  location?: string;
+  herdr?: HerdrSessionStatus;
   live: boolean;
   editing: boolean;
   onPreview: () => void;
@@ -1263,9 +1295,9 @@ function SidebarRow({
   const style = modeStyle(session.mode);
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(session.title);
-  const sourceChip = sessionSourceChip(session);
+  const sourceChip = sessionSourceChip(session) ?? (location ? { label: "网页", title: "网页会话（含手动接入的 CLI）" } : null);
   const indicatorStatus =
-    status ?? (running ? "streaming" : unread ? "unread" : "done");
+    status ?? (herdr?.alive && (herdr.status === "waiting" || herdr.status === "blocked") ? "waiting" : running || (herdr?.alive && herdr.status === "working") ? "streaming" : unread ? "unread" : "done");
   const statusTitle =
     indicatorStatus === "waiting"
       ? "等你回答"
@@ -1292,7 +1324,12 @@ function SidebarRow({
     <div
       style={{ paddingLeft: PAD(indent) }}
       data-mobile-target="session-row"
-      className={`${ROW_HEIGHT_CLASS} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+      data-session-id={session.id}
+      data-session-source={sidebarSource(session)}
+      data-session-archived={session.archived || undefined}
+      data-herdr-pane={herdr?.paneId || undefined}
+      data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
+      className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -1370,6 +1407,7 @@ function SidebarRow({
           } ${preview ? "italic" : ""}`}
         >
           {session.title}
+          {location && <span className="block truncate text-nano text-ink-faint font-normal not-italic" title={location}>{location}</span>}
         </span>
       )}
 
@@ -1382,13 +1420,16 @@ function SidebarRow({
           {sourceChip.label}
         </span>
       )}
+      {herdr && !editing && <span data-herdr-alive={herdr.alive} title={herdr.alive ? `Herdr 在线 · ${herdr.status}` : "Herdr 离线 · 可阅读历史"} aria-label={herdr.alive ? "Herdr 在线" : "Herdr 离线"} className={`w-1.5 h-1.5 shrink-0 rounded-full ${herdr.alive ? herdr.status === "waiting" || herdr.status === "blocked" ? "bg-warn" : "bg-positive" : "bg-line-strong"}`} />}
+      {SIDEBAR_V2 && !editing && (session.treeCount ?? 0) > 1 && <span title={`${session.treeCount} 个话题，进入会话后在思维树切换`} className="shrink-0 text-nano text-ink-faint tabular-nums">{session.treeCount} 话题</span>}
+      {session.archived && !editing && <span className="shrink-0 text-nano rounded bg-surface-muted px-1 text-ink-faint">归档</span>}
 
       {/* CLI 同步：attach 的会话标来源角标（双向绑定）。正被 CLI 实时驱动时
           换成「● live」脉冲（remote-control 式感知）。 */}
       {session.origin === "cli-import" && !editing && (
         live ? (
           <span
-            className="shrink-0 inline-flex items-center gap-1 text-nano font-semibold px-1 py-px rounded bg-positive text-ink-inverse group-hover:hidden"
+            className={`shrink-0 inline-flex items-center gap-1 text-nano font-semibold px-1 py-px rounded bg-positive text-ink-inverse ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}
             title={`正被一个活的 ${session.cliProvider === "codex" ? "Codex" : "Claude"} 进程实时驱动`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-ink-inverse animate-pulse" />
@@ -1396,7 +1437,7 @@ function SidebarRow({
           </span>
         ) : (
           <span
-            className="shrink-0 text-nano font-semibold px-1 py-px rounded bg-positive-muted text-positive-ink group-hover:hidden"
+            className={`shrink-0 text-nano font-semibold px-1 py-px rounded bg-positive-muted text-positive-ink ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}
             title="已 attach 的本机 CLI 会话（双向同步）"
           >
             {session.cliProvider === "codex" ? "CX" : "CC"}
@@ -1407,7 +1448,7 @@ function SidebarRow({
       {/* Running label — the sidebar row is wide enough to spell it out. */}
       {(indicatorStatus === "waiting" || indicatorStatus === "streaming") &&
         !editing && (
-          <span className="shrink-0 text-nano font-medium text-accent-ink group-hover:hidden">
+          <span className={`shrink-0 text-nano font-medium text-accent-ink ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}>
             {indicatorStatus === "waiting" ? "等你回答" : "生成中"}
           </span>
         )}
@@ -1417,7 +1458,7 @@ function SidebarRow({
           hidden once running again or while hovering (actions take over). */}
       {indicatorStatus === "unread" && !editing && (
         <span
-          className="shrink-0 inline-flex items-center gap-0.5 pl-1 pr-1.5 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line group-hover:hidden"
+          className={`shrink-0 inline-flex items-center gap-0.5 pl-1 pr-1.5 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}
           title="完成·未读"
           aria-label="完成·未读"
         >
@@ -1436,7 +1477,7 @@ function SidebarRow({
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
           </RowIconButton>
-          <RowIconButton title="归档（收起，可恢复）" onClick={onArchive}>
+          <RowIconButton title={session.archived ? "恢复（取消归档）" : "归档（收起，可恢复）"} onClick={onArchive}>
             <rect x="3" y="4" width="18" height="4" rx="1" />
             <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
             <path d="M10 12h4" />

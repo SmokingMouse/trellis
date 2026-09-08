@@ -112,6 +112,13 @@ show_mobile_header() {
   wait_for_js "mobile header visible" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 }
 
+# 真库选中的问题可能很长；回答进入视口附近后才挂载操作按钮（useNearViewport）。
+# 先按真实阅读路径滚到回答，避免把未挂载的离屏按钮误判成书签功能故障。
+reveal_response() {
+  wait_for_js "selected response placeholder" "Boolean(document.querySelector('[data-chat-node-id=\"$NID\"]'))"
+  ab eval "(() => { const response = document.querySelector('[data-chat-node-id=\"$NID\"]'); const before = response.getBoundingClientRect().top; response.scrollIntoView({block: 'start'}); return { responseTopBeforeScroll: before }; })()"
+}
+
 for required_tool in bun agent-browser sqlite3 curl grep find ps awk lsof; do
   command -v "$required_tool" >/dev/null 2>&1 || fail "missing required tool: $required_tool"
 done
@@ -199,6 +206,7 @@ ab fill '#pw' "$AUTH_PASS"
 ab click 'button[type="submit"]'
 wait_for_js "authenticated home" "location.pathname !== '/login'"
 ab open "$URL"
+reveal_response
 wait_for_js "selected content card" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]'))"
 
 echo "== iPhone 15: card bookmark and overflow count =="
@@ -300,6 +308,7 @@ ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-tar
 echo "== 1280x800: action and sidebar group with baseline preserved =="
 ab set viewport 1280 800
 ab open "$URL"
+reveal_response
 wait_for_js "desktop bookmark action" "Boolean([...document.querySelectorAll('[data-thread-node-id=\"$NID\"] [aria-label=\"稍后再读\"]')].find((element) => element.offsetParent !== null))"
 if ! ab eval "Boolean([...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0))" | grep -q '^true$'; then
   ab click 'button[aria-label="展开侧栏"]'
@@ -360,6 +369,7 @@ REMAINING_AFTER_WINDOW=$((TOTAL_BOOKMARKS - 50))
 
 ab set viewport 390 844
 ab open "$URL"
+reveal_response
 wait_for_js "fixture reloaded for C2-1" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]'))"
 show_mobile_header
 ab click 'button[aria-label="更多功能"]'

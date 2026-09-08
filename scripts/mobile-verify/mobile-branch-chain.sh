@@ -174,15 +174,23 @@ open_mobile_drawer() {
   wait_for_js "mobile session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
 }
 
-click_recent_chain() {
+# Wave 2: chain navigation belongs to the existing in-session TreePanel.
+# Exercise its filter/jump entry instead of the retired sidebar Recent rows.
+click_tree_node() {
   needle=$1
-  ab eval "(() => {
-    const rows = [...document.querySelectorAll('[data-mobile-target=\"session-chain-row\"]')];
-    const row = rows.find((element) => element.textContent?.includes('$needle') && element.offsetParent !== null);
-    if (!row) throw new Error('recent chain not found: $needle; rows=' + rows.map((element) => element.textContent?.trim()).join(' | '));
-    row.click();
-    return row.textContent?.trim();
-  })()"
+  if ab eval 'innerWidth < 768' | grep -q '^true$'; then
+    ab eval 'document.querySelector("[role=dialog] [data-mobile-target=drawer-close]")?.click(); true' >/dev/null
+    open_mobile_overflow
+    ab click '[data-mobile-target="overflow-tree"]'
+    wait_for_js "in-session structure sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open]'))"
+  else
+    ab eval '(() => { const b=[...document.querySelectorAll("button")].find(e => e.title === "切换到线性 thread"); b?.click(); return true; })()' >/dev/null
+  fi
+  wait_for_js "structure filter entry" "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
+  ab click 'button[aria-label="过滤跳转"]'
+  ab fill 'input[aria-label="过滤节点"]' "$needle"
+  ab press Enter
+  ab eval 'document.querySelector("[data-mobile-target=tree-sheet-close]")?.click(); true' >/dev/null
 }
 
 for required_tool in bun agent-browser sqlite3 curl grep find ps awk lsof; do
@@ -436,17 +444,17 @@ assert_mobile_landing "$TREE_ID" "new tree active in mobile linear shell"
 wait_for_js "TreePanel remains closed after new tree" "!document.querySelector('[data-mobile-tree-sheet]')"
 [ "$(sqlite3 "$DB" "SELECT coalesce(parent_id,'NULL') FROM nodes WHERE id='$TREE_ID';")" = "NULL" ] || fail "new tree node is not a root"
 
-echo "== 4–5a. canvas Recent same-session chain forces linear and survives reload =="
+echo "== 4–5a. canvas to TreePanel same-session branch forces linear and survives reload =="
 open_mobile_overflow
 ab click '[data-mobile-target="overflow-canvas"]'
 wait_for_js "mobile canvas selected" "(() => { const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null'); return saved?.viewMode === 'canvas' && Boolean(document.querySelector('[data-canvas-surface]')); })()"
 open_mobile_drawer
-click_recent_chain "第二棵树长文"
-assert_mobile_landing "$ROOT2_ID" "same-session Recent exits canvas"
+click_tree_node "第二棵树长文"
+assert_mobile_landing "$ROOT2_ID" "same-session TreePanel exits canvas"
 ab reload
 assert_mobile_landing "$ROOT2_ID" "URL-backed active chain survives reload"
 
-echo "== 4. scroll-hide remains available after Recent navigation =="
+echo "== 4. scroll-hide remains available after TreePanel navigation =="
 ab eval '(() => { const scroll=document.querySelector("[data-thread-scroll]"); if (!scroll || scroll.scrollHeight-scroll.clientHeight < 600) throw new Error("fixture cannot scroll"); scroll.scrollTop=0; scroll.dispatchEvent(new Event("scroll")); return true; })()' >/dev/null
 wait_for_js "mobile header reset before scroll" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 wait_for_js "header and Composer hide on downward scroll" "(() => {
@@ -484,7 +492,7 @@ if ! ab eval "Boolean([...document.querySelectorAll('aside')].find((element) => 
   ab click 'button[aria-label="展开侧栏"]'
 fi
 wait_for_js "desktop sidebar visible" "Boolean([...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0))"
-click_recent_chain "预置锚点分支"
+click_tree_node "预置锚点分支"
 wait_for_js "desktop anchored chain selected" "new URL(location.href).searchParams.get('node') === '$ANCHORED_ID' && Boolean(document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"]')) && !document.querySelector('[data-canvas-surface]')"
 ab eval "(() => {
   const button=document.querySelector('[data-thread-node-id=\"$ANCHORED_ID\"] [aria-label=\"编辑问题\"]');
@@ -515,11 +523,11 @@ wait_for_js "desktop edit new sibling active" "(() => {
 })()"
 [ -n "$(sqlite3 "$DB" "SELECT parent_anchor_text FROM nodes WHERE id='$DESKTOP_EDIT_ID';")" ] || fail "desktop anchored edit lost parent_anchor_text"
 
-echo "== 7b. desktop Recent stays in canvas and desktop header stays at top =="
+echo "== 7b. desktop TreePanel navigation and fixed header =="
 ab eval '(() => { const button=[...document.querySelectorAll("[data-thread-header] button")].find((element) => element.textContent?.includes("画布")); if (!button) throw new Error("desktop canvas button missing"); button.click(); return true; })()' >/dev/null
 wait_for_js "desktop canvas selected" "Boolean(document.querySelector('[data-canvas-surface]'))"
-click_recent_chain "第二棵树长文"
-wait_for_js "desktop Recent preserves canvas semantics" "new URL(location.href).searchParams.get('node') === '$ROOT2_ID' && Boolean(document.querySelector('[data-canvas-surface]'))"
+click_tree_node "第二棵树长文"
+wait_for_js "desktop TreePanel selects the other topic in linear view" "new URL(location.href).searchParams.get('node') === '$ROOT2_ID' && !document.querySelector('[data-canvas-surface]')"
 ab eval --stdin <<'JS'
 (() => {
   const header = document.querySelector('header');
@@ -530,12 +538,18 @@ ab eval --stdin <<'JS'
 })()
 JS
 
-echo "== 5c. cross-session Recent retains existing linear behavior and URL =="
+echo "== 5c. session row restores last reading node, view and URL =="
 ab set viewport 390 844
 wait_for_js "mobile shell restored after desktop baseline" "innerWidth === 390 && Boolean(document.querySelector('[data-mobile-header]'))"
 open_mobile_drawer
-click_recent_chain "跨会话 Recent 链"
-wait_for_js "cross-session Recent target" "(() => {
+# Persist a previously read node; the normal sidebar click must restore it.
+ab eval "localStorage.setItem('trellis-view:$OTHER_SID', JSON.stringify({activeNodeId:'$OTHER_ID',viewMode:'linear',lastViewed:{nodeId:'$OTHER_ID',offset:0}})); true"
+# The former Recent row was near the top; the unified project list may place
+# this session below the fold. Scroll the actual drawer row before pointer input.
+ab eval 'document.querySelector("[role=dialog] [data-session-id=mv-chain-other-session]").scrollIntoView({block:"center"}); true'
+wait_for_js "saved session row is in the drawer viewport" "(() => { const r=document.querySelector('[role=dialog] [data-session-id=mv-chain-other-session]')?.getBoundingClientRect(); return r && r.top >= 0 && r.bottom <= innerHeight; })()"
+ab click '[role="dialog"] [data-session-id="mv-chain-other-session"]'
+wait_for_js "session row restores the saved reading position" "(() => {
   const url=new URL(location.href);
   const saved=JSON.parse(localStorage.getItem('trellis-view:$OTHER_SID') || 'null');
   return url.searchParams.get('session') === '$OTHER_SID'
@@ -551,4 +565,4 @@ open_mobile_drawer
 ab click '[role="dialog"] [data-mobile-target="drawer-new-session"]'
 wait_for_js "new-session screen clears session and node query" "Boolean(document.querySelector('[data-mobile-target=new-session-input]')) && !new URL(location.href).searchParams.has('session') && !new URL(location.href).searchParams.has('node')"
 
-echo "PASS: mobile and desktop branch focus, new-tree Cancel lifecycle, Recent chain mode, URL sync, H-3, and desktop baseline"
+echo "PASS: mobile and desktop branch focus, new-tree Cancel lifecycle, TreePanel branch entry, session reading restore, URL sync, H-3, and desktop baseline"

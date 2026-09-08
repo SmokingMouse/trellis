@@ -75,9 +75,20 @@ try {
     const pending = branch(second, "quiet large response");
     const run = await as.startProjectRun({nodeId:pending,prompt:"quiet large response",attachments:[]});
     const controller = new AbortController();
-    const { GET } = await import("../../app/api/as/threads/[id]/stream/route");
+    const { GET } = await import("../../app/api/nodes/[id]/as/stream/route");
+    const controls = (id: string, query = "") => GET(new Request(`http://localhost/stream${query}`), {params:Promise.resolve({id})});
+    assert.equal((await controls("missing-node")).status, 404);
+    assert.equal((await controls(run.threadId)).status, 404); // Endpoint accepts a local node, never an arbitrary daemon thread.
+    assert.equal((await controls(pending, "?sinceSeq=-1")).status, 400);
+    process.env.TRELLIS_AS = "off";
+    try { assert.equal((await controls(pending)).status, 503); }
+    finally { process.env.TRELLIS_AS = "on"; }
+    process.env.TRELLIS_AS_SOCKET = join(home, "other-daemon.sock");
+    try { assert.equal((await controls(second)).status, 404); }
+    finally { process.env.TRELLIS_AS_SOCKET = paths.socketPath; }
     const responses = [as.projectSSE(new Request("http://localhost/stream",{signal:controller.signal}),run),
-      await GET(new Request("http://localhost/stream",{signal:controller.signal}),{params:Promise.resolve({id:run.threadId})})];
+      await GET(new Request("http://localhost/stream",{signal:controller.signal}),{params:Promise.resolve({id:pending})})];
+    assert.equal(responses[1].status, 200);
     const bytes = [0,0];
     const readers = responses.map(r=>r.body!.getReader());
     const pumps = readers.map(async(reader,index)=>{while(true){const {done,value}=await reader.read();if(done)return;bytes[index]+=value.byteLength;}});
@@ -88,10 +99,10 @@ try {
     AgentClient.prototype.request = function(method, params) { if(method === "thread/attach") attaches++; return request.call(this,method,params) as never; };
     try {
       await Bun.sleep(10100);
-      const proof = {windowMs:10100,initialBytes:initial,projectBytes:bytes[0]-initial[0],shadowBytes:bytes[1]-initial[1],attaches};
+      const proof = {windowMs:10100,initialBytes:initial,projectBytes:bytes[0]-initial[0],controlBytes:bytes[1]-initial[1],attaches};
       console.log(JSON.stringify(proof));
       if (!process.argv.includes("--baseline")) {
-        assert.equal(proof.projectBytes,0); assert.equal(proof.shadowBytes,0); assert.equal(attaches,0);
+        assert.equal(proof.projectBytes,0); assert.equal(proof.controlBytes,0); assert.equal(attaches,0);
       }
     } finally {
       AgentClient.prototype.request = request;

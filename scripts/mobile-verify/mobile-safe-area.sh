@@ -23,6 +23,9 @@ assert_visible_text_fields_at_least_16() {
   agent-browser --session "$SESSION" eval --stdin <<'FIELD_SIZES_EOF'
 (() => {
   const fields = [...document.querySelectorAll('input,textarea,select')].filter((field) => {
+    // Wave 2 adds an archive checkbox. Match the static font scanner's text-
+    // input scope: non-text controls do not open the editing keyboard.
+    if (field.tagName === 'INPUT' && ['checkbox', 'radio', 'range', 'file', 'hidden'].includes(field.type)) return false;
     const rect = field.getBoundingClientRect();
     const style = getComputedStyle(field);
     return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';

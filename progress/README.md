@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-单一 TUI 落地中：ingress 三片过审、试点 daemon 已开 ingress、fj 显示端切 codex-tui 试点两单在跑；剩硬化片；桥、影子与第二步、AS 合 main、daemon 常驻等用户点头。
+外部线程收编与侧栏波 1 已上线，启动期阻塞已修；波 2 在验收、观察页退役在做，之后波 3 结构面板与波 4 画布地图；观察一天后 AS 切流扩到全部项目。
 
 ## Goals
 
@@ -20,9 +20,10 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S160） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S164） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
 - `im-entry-layer.md` IM 入口层 spec
+- `sidebar-tree-ia.md` 侧栏与工作树统一 IA 方案（方案 A 已拍板，四波；静态稿在 `.fenjue/archive/fj-sidebar-tree-ia-4784/out/mockups/`）
 - 其余 `*.md` 为按需读取的 feature spec

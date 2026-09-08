@@ -1,5 +1,5 @@
 import type { Item, PendingServerRequest, Turn, NotificationParams } from "@smokingmouse/agent-server/protocol";
-import type { ShadowEvent } from "./as-shadow";
+import type { ThreadEvent } from "./as-thread-event";
 
 export interface ThreadLog {
   items: Record<string, Item>;
@@ -19,7 +19,7 @@ function pendingState(request: PendingServerRequest): NotificationParams<"thread
 }
 
 /** Snapshots/completions replace payloads; only live deltas append. */
-export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog {
+export function applyThreadEvent(log: ThreadLog, event: ThreadEvent): ThreadLog {
   if (event.type === "connection") return log.state === event.state ? log : { ...log, state: event.state };
   if (event.type === "snapshot") {
     let items = log.items;
@@ -76,15 +76,4 @@ export function applyShadowEvent(log: ThreadLog, event: ShadowEvent): ThreadLog 
   if (method === "item/subAgent/progress" && item.type === "subAgent")
     updated = { ...item, payload: { ...item.payload, phase: params.phase, progress: params.progress } };
   return updated === item || JSON.stringify(updated) === JSON.stringify(item) ? log : { ...log, items: { ...log.items, [item.id]: updated } };
-}
-
-export function itemText(item: Item): string {
-  switch (item.type) {
-    case "userMessage": return item.payload.content.map(input => input.type === "text" ? input.text : input.type === "bash" ? `!${input.command}` : input.path).join("\n");
-    case "agentMessage": return item.payload.text;
-    case "reasoning": return [item.payload.summary, item.payload.text].filter(Boolean).join("\n");
-    case "commandExecution": return `$ ${item.payload.command}\n${item.payload.cwd}\n${item.payload.aggregatedOutput ?? ""}${item.payload.exitCode == null ? "" : `\nexit ${item.payload.exitCode}`}`;
-    case "fileChange": return item.payload.changes.map(change => `${change.kind} ${change.path}\n${change.diff ?? ""}`).join("\n");
-    default: return JSON.stringify(item.payload, null, 2);
-  }
 }

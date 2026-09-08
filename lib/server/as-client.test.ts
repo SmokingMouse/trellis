@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { AgentClient, MockEngine } from "@smokingmouse/agent-server";
 import { runDaemon, resolveDaemonPaths, loadToken, type RunningDaemon } from "@smokingmouse/agent-server/daemon";
 import type { AttachResult } from "@smokingmouse/agent-server/protocol";
-import { ShadowClient, shadowRetryDelay } from "./as-client";
-import { isShadowEnabled } from "../as-config";
+import { ThreadObserver, threadRetryDelay } from "./as-client";
+import { isAgentServerEnabled } from "../as-config";
 import { itemToolCall } from "../as-project-events";
 
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -30,7 +30,7 @@ test("live fork freezes tools, retains interrupted seed history, and filters pen
   const events: string[] = [];
   client.onNotification("thread/engineEvent",p=>{ if(p.subtype === "fork/seeded") events.push(p.threadId); });
   const {thread:fork} = await client.request("thread/fork",{threadId:thread.id,fromItemId:"live-tool"});
-  const observer = new ShadowClient({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
+  const observer = new ThreadObserver({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
   cleanup.push(() => observer.close());
   const snapshot = await observer.attach(fork.id);
   const inherited = snapshot.items.find(i=>i.id === "live-tool")!;
@@ -60,7 +60,7 @@ test("live fork freezes tools, retains interrupted seed history, and filters pen
     expect(attached.pendingRequests[0].state).toBeUndefined();
     expect(filtered.pendingRequestStates.size).toBe(0);
   }
-  const pendingObserver = new ShadowClient({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
+  const pendingObserver = new ThreadObserver({socketPath:paths.socketPath,tokenPath:paths.tokenPath});
   cleanup.push(() => pendingObserver.close());
   const pendingSnapshot = await pendingObserver.attach(thread.id);
   expect(pendingSnapshot.pendingRequests[0].state?.status).toBe("pending");
@@ -72,7 +72,7 @@ async function until(predicate: () => boolean) {
   throw new Error("condition timeout");
 }
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "as-shadow-test-"));
+  const home = mkdtempSync(join(tmpdir(), "as-thread-event-test-"));
   cleanup.push(() => rmSync(home, { recursive: true, force: true }));
   const paths = resolveDaemonPaths({ NODE_ENV: "test", HOME: home, AGENT_SERVER_SOCKET_PATH: join(home, "as.sock") });
   const engine = new MockEngine(undefined, "codex");
@@ -87,7 +87,7 @@ function fixture() {
 
 test("initial daemon absence warns and reconnects without blocking boot", async () => {
   const f = fixture(), warnings: string[] = [];
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 20, warn: message => warnings.push(message) });
+  const observer = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 20, warn: message => warnings.push(message) });
   cleanup.push(() => observer.close());
   let connected = false;
   observer.onEvent(event => { if (event.type === "connection" && event.state === "connected") connected = true; });
@@ -95,7 +95,7 @@ test("initial daemon absence warns and reconnects without blocking boot", async 
   await f.start();
   await until(() => connected);
   expect(warnings.length).toBeGreaterThan(0);
-  expect((await observer.listThreads()).threads).toEqual([]);
+  expect((await observer.connect()).state).toBe("connected");
 });
 
 test("socket loss reattaches with completed cursor and reconciles offline completion", async () => {
@@ -103,7 +103,7 @@ test("socket loss reattaches with completed cursor and reconciles offline comple
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token: loadToken(f.paths.tokenPath), reconnect: false });
   cleanup.push(() => producer.close());
   const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: f.home });
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 80, warn: () => {} });
+  const observer = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 80, warn: () => {} });
   cleanup.push(() => observer.close());
   const snapshots: AttachResult[] = [];
   observer.onEvent(event => { if (event.type === "snapshot") snapshots.push(event.snapshot); });
@@ -121,62 +121,28 @@ test("socket loss reattaches with completed cursor and reconciles offline comple
   expect(recovered.items[0].completedSeq).toBeGreaterThan(cursor);
   expect(recovered.items[0].payload).toEqual({ text: "offline complete" });
   expect((await observer.connect()).sinceSeq(thread.id)).toBe(recovered.nextSeq - 1);
-  const fresh = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
+  const fresh = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
   cleanup.push(() => fresh.close());
   expect((await fresh.attach(thread.id, recovered.nextSeq - 1)).items).toEqual([]);
 });
 
 test("invalid cursors reject before connection", async () => {
-  const observer = new ShadowClient();
+  const observer = new ThreadObserver();
   for (const cursor of [-1, 1.2, NaN, Infinity]) await expect(observer.attach("id", cursor)).rejects.toThrow("invalid sinceSeq");
   observer.close();
 });
 
-test("N8 list refresh reconnects immediately during five-minute backoff", async () => {
-  const f = fixture();
-  const warnings: string[] = [], recovered: string[] = [];
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath,
-    retryMs: 300000, warn: text => warnings.push(text), info: text => recovered.push(text) });
-  cleanup.push(() => observer.close());
-  await expect(observer.connect()).rejects.toThrow();
-  await f.start();
-  expect((await observer.listThreads()).threads).toEqual([]);
-  expect(warnings).toHaveLength(1);
-  expect(recovered).toHaveLength(1);
-});
-
-test("N8 external retry bursts are coalesced and debounced for one second", async () => {
-  const f = fixture();
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, token: "test-token", retryMs: 300000, warn: () => {} });
-  cleanup.push(() => observer.close());
-  let attempts = 0;
-  observer.onEvent(event => { if (event.type === "connection" && event.state === "connecting") attempts++; });
-  await expect(observer.connect()).rejects.toThrow();
-  expect(attempts).toBe(1);
-  const burst = () => Promise.allSettled(Array.from({ length: 20 }, () => observer.listThreads()));
-  await burst();
-  expect(attempts).toBe(2);
-  await burst();
-  expect(attempts).toBe(2);
-  await Bun.sleep(1050);
-  await burst();
-  expect(attempts).toBe(3);
-  observer.close();
-  await expect(observer.listThreads()).rejects.toThrow("observer closed");
-  expect(attempts).toBe(3);
-});
-
 test("P1-2 observer is opt-in and backoff doubles from 1s to a 5 minute cap", () => {
-  expect(isShadowEnabled({})).toBe(false);
-  expect(isShadowEnabled({ TRELLIS_AS: "off" })).toBe(false);
-  expect(isShadowEnabled({ TRELLIS_AS: "on" })).toBe(true);
-  expect(isShadowEnabled({ TRELLIS_AS_SOCKET: "/tmp/test.sock" })).toBe(true);
-  expect([0, 1, 2, 8, 9, 30].map(n => shadowRetryDelay(n))).toEqual([1000, 2000, 4000, 256000, 300000, 300000]);
+  expect(isAgentServerEnabled({})).toBe(false);
+  expect(isAgentServerEnabled({ TRELLIS_AS: "off" })).toBe(false);
+  expect(isAgentServerEnabled({ TRELLIS_AS: "on" })).toBe(true);
+  expect(isAgentServerEnabled({ TRELLIS_AS_SOCKET: "/tmp/test.sock" })).toBe(true);
+  expect([0, 1, 2, 8, 9, 30].map(n => threadRetryDelay(n))).toEqual([1000, 2000, 4000, 256000, 300000, 300000]);
 });
 
 test("P1-2 missing daemon reports once during exponential retries and once on recovery", async () => {
   const f = fixture(), warnings: string[] = [], recoveries: string[] = [];
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 20, warn: msg => warnings.push(msg), info: msg => recoveries.push(msg) });
+  const observer = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, retryMs: 20, warn: msg => warnings.push(msg), info: msg => recoveries.push(msg) });
   cleanup.push(() => observer.close());
   await expect(observer.connect()).rejects.toThrow();
   await Bun.sleep(200); // 20, 40, 80ms retries, all the same outage
@@ -184,7 +150,7 @@ test("P1-2 missing daemon reports once during exponential retries and once on re
   await f.start();
   await until(() => recoveries.length === 1);
   expect(warnings).toHaveLength(1);
-  expect((await observer.listThreads()).threads).toEqual([]);
+  expect((await observer.connect()).state).toBe("connected");
   expect(recoveries).toHaveLength(1);
 });
 
@@ -195,7 +161,7 @@ test("P2-1 closed/unauthorized observer reloads token and reattaches without a p
   const producer = await AgentClient.connectUnix({ path: f.paths.socketPath, token, reconnect: false });
   cleanup.push(() => producer.close());
   const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: f.home });
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
+  const observer = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
   cleanup.push(() => observer.close());
   let snapshots = 0, closed = 0;
   observer.onEvent(event => {
@@ -228,7 +194,7 @@ test("P1-3 review 200KB/10s repro emits no redundant snapshots or attach polls",
   const { turn } = await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "long command" }] });
   f.engine.emit({ type: "itemStarted", turnId: turn.id, item: { id: "large", type: "commandExecution", payload: { command: "mock", cwd: f.home, aggregatedOutput: "x".repeat(200000) } } });
   await until(() => producer.sinceSeq(thread.id) >= 3);
-  const observer = new ShadowClient({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
+  const observer = new ThreadObserver({ socketPath: f.paths.socketPath, tokenPath: f.paths.tokenPath, warn: () => {} });
   cleanup.push(() => observer.close());
   let snapshots = 0, bytes = 0, idle = false;
   observer.onEvent(event => {
@@ -281,7 +247,7 @@ test("P2-1 review daemon kill/restart repro reconciles persisted items on the sa
   const { thread } = await producer.request("thread/start", { backend: "codex", model: "gpt-5.6-sol", cwd: home });
   await producer.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "persist" }] });
   await until(() => producer.sinceSeq(thread.id) >= 3);
-  const observer = new ShadowClient({ socketPath: paths.socketPath, tokenPath: paths.tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
+  const observer = new ThreadObserver({ socketPath: paths.socketPath, tokenPath: paths.tokenPath, retryMs: 20, warn: () => {}, info: () => {} });
   cleanup.push(() => observer.close());
   const snapshots: AttachResult[] = [];
   observer.onEvent(event => { if (event.type === "snapshot") snapshots.push(event.snapshot); });
