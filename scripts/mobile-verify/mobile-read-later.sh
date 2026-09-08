@@ -255,6 +255,48 @@ ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow count zero" "document.querySelector('[data-mobile-target=\"overflow-bookmarks\"]')?.textContent?.includes('(0)') === true"
 ab click '[data-mobile-target="overflow-close"]'
 
+echo "== iPhone 15: bookmark cleared from another device is reconciled on reopen (C2-2) =="
+show_mobile_header
+ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]')?.click(); true"
+wait_for_js "response menu reopened for C2-2" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-response-menu]'))"
+ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-response-menu] [aria-label=\"稍后再读\"]')?.click(); true"
+wait_for_js "card re-bookmarked for C2-2" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-bookmarked=\"true\"]'))"
+
+echo "-- simulating an external toggle-off (another tab/device) via a direct API call, bypassing this tab's JS entirely --"
+EXTERNAL_STATUS=$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' -b "trellis_auth=$AUTH_TOKEN" -X PATCH -H "Content-Type: application/json" -d '{"bookmarked":false}' "$BASE/api/nodes/$NID")
+[ "$EXTERNAL_STATUS" = "200" ] || fail "external unbookmark PATCH returned $EXTERNAL_STATUS"
+DB_BOOKMARK_AFTER_EXTERNAL=$(sqlite3 "$DB" "SELECT coalesce(bookmarked_at,'NULL') FROM nodes WHERE id='$NID';")
+[ "$DB_BOOKMARK_AFTER_EXTERNAL" = "NULL" ] || fail "external unbookmark did not clear bookmarked_at: $DB_BOOKMARK_AFTER_EXTERNAL"
+
+show_mobile_header
+ab click 'button[aria-label="更多功能"]'
+wait_for_js "overflow menu open before C2-2 reopen" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
+ab click '[data-mobile-target="overflow-bookmarks"]'
+wait_for_js "bookmark drawer shows zero after external clear" "document.querySelector('[data-bookmarks-drawer] h2')?.textContent?.includes('(0)') === true"
+ab eval --stdin <<JS
+(() => {
+  const row = document.querySelector('[data-bookmarks-drawer] [data-bookmark-node-id="$NID"]');
+  if (row) throw new Error('externally-cleared bookmark still listed in drawer');
+  return { drawerRowGone: true };
+})()
+JS
+ab click '[data-mobile-target="bookmarks-close"]'
+
+echo "-- verifying the card's own local flag reconciled too, not just the list count --"
+show_mobile_header
+ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]')?.click(); true"
+wait_for_js "response menu reopened after reconcile" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-response-menu]'))"
+ab eval --stdin <<JS
+(() => {
+  const button = document.querySelector('[data-thread-node-id="$NID"] [data-mobile-response-menu] [data-mobile-target="node-bookmark-toggle"]');
+  if (!button) throw new Error('bookmark toggle missing from response menu');
+  if (button.getAttribute('data-bookmarked') !== 'false') throw new Error('C2-2 regression: card still shows stale bookmarked=true, got ' + button.getAttribute('data-bookmarked'));
+  if (button.getAttribute('aria-label') !== '稍后再读') throw new Error('C2-2 regression: card aria-label did not revert, got ' + button.getAttribute('aria-label'));
+  return { bookmarked: button.getAttribute('data-bookmarked'), label: button.getAttribute('aria-label') };
+})()
+JS
+ab eval "document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]')?.click(); true"
+
 echo "== 1280x800: action and sidebar group with baseline preserved =="
 ab set viewport 1280 800
 ab open "$URL"
@@ -302,4 +344,50 @@ ab eval --stdin <<'JS'
 })()
 JS
 
-echo "PASS: card-level read-later bookmark, deep link, mobile sheet, desktop group, and independent read state"
+echo "== iPhone 15: bookmarks beyond the 50-row window are reachable via load more (C2-1) =="
+BULK_BOOKMARK_COUNT=$(sqlite3 "$DB" <<'SQL'
+UPDATE nodes SET bookmarked_at = 2000000000000 + rowid
+WHERE id IN (
+  SELECT n.id FROM nodes n JOIN sessions s ON s.id = n.session_id
+  WHERE s.archived = 0 AND n.parent_id IS NULL AND n.hidden_at IS NULL AND n.bookmarked_at IS NULL
+  LIMIT 55
+);
+SELECT changes();
+SQL
+)
+[ "$BULK_BOOKMARK_COUNT" = "55" ] || fail "bulk bookmark fixture only touched $BULK_BOOKMARK_COUNT nodes, need 55"
+TOTAL_BOOKMARKS=$(sqlite3 "$DB" "SELECT count(*) FROM nodes WHERE bookmarked_at IS NOT NULL;")
+REMAINING_AFTER_WINDOW=$((TOTAL_BOOKMARKS - 50))
+
+ab set viewport 390 844
+ab open "$URL"
+wait_for_js "fixture reloaded for C2-1" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [data-mobile-target=\"response-more\"]'))"
+show_mobile_header
+ab click 'button[aria-label="更多功能"]'
+wait_for_js "overflow shows full bulk count" "document.querySelector('[data-mobile-target=\"overflow-bookmarks\"]')?.textContent?.includes(\"($TOTAL_BOOKMARKS)\") === true"
+ab click '[data-mobile-target="overflow-bookmarks"]'
+wait_for_js "drawer shows full bulk count" "document.querySelector('[data-bookmarks-drawer] h2')?.textContent?.includes(\"($TOTAL_BOOKMARKS)\") === true"
+ab eval --stdin <<JS
+(() => {
+  const rows = document.querySelectorAll('[data-bookmarks-drawer] [data-bookmark-node-id]');
+  if (rows.length !== 50) throw new Error('initial window should cap at 50, got ' + rows.length);
+  const more = document.querySelector('[data-bookmarks-drawer] [data-mobile-target="bookmark-load-more"]');
+  if (!more) throw new Error('C2-1 regression: no load-more entry for the remaining bookmarks');
+  const rect = more.getBoundingClientRect();
+  if (rect.height < 44) throw new Error('load-more target height=' + rect.height);
+  if (!more.textContent.includes('$REMAINING_AFTER_WINDOW')) throw new Error('load-more label wrong: ' + more.textContent);
+  return { rows: rows.length, moreText: more.textContent.trim(), moreHeight: rect.height };
+})()
+JS
+ab eval "document.querySelector('[data-bookmarks-drawer] [data-mobile-target=\"bookmark-load-more\"]')?.scrollIntoView({block: 'center'}); true"
+ab click '[data-bookmarks-drawer] [data-mobile-target="bookmark-load-more"]'
+wait_for_js "all bulk bookmarks reachable after load more" "document.querySelectorAll('[data-bookmarks-drawer] [data-bookmark-node-id]').length === $TOTAL_BOOKMARKS"
+ab eval --stdin <<JS
+(() => {
+  if (document.querySelector('[data-bookmarks-drawer] [data-mobile-target="bookmark-load-more"]')) throw new Error('load-more should disappear once every bookmark is loaded');
+  return { loadMoreGone: true };
+})()
+JS
+ab click '[data-mobile-target="bookmarks-close"]'
+
+echo "PASS: card-level read-later bookmark, deep link, mobile sheet, desktop group, independent read state, cross-device reconciliation, and windowed load-more pagination"

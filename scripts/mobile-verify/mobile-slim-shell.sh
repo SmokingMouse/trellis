@@ -313,6 +313,50 @@ ab eval --stdin <<'JS'
 JS
 wait_for_js "chrome restored from hidden title area" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
+echo "== restoring chrome at the deepest reachable near-bottom scroll leaves no residual jump (C2-3) =="
+# LinearThreadView forces chrome visible within FOLLOW_SLACK_PX (120px) of the
+# true bottom (so live-streaming content always stays trackable), and the
+# measured chrome shift never exceeds ~104px — so hiding chrome any closer
+# than ~120px from the bottom is unreachable through real scrolling. This
+# exercises the deepest position where chrome can still legitimately be
+# hidden; hooks/useScrollHide.test.ts:computeRevealScroll covers the
+# clamp-at-the-true-bottom arithmetic directly, since that branch can't be
+# reached through this browser-level flow at all.
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset for C2-3"'
+wait_for_js "header visible before C2-3 near-bottom scroll" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+ab eval 'const el = document.querySelector("[data-thread-scroll]"); el.scrollTop = el.scrollHeight - el.clientHeight - 130; "scrolled to deepest hideable position"'
+wait_for_js "chrome hidden near bottom" "document.querySelector('[data-mobile-header]')?.dataset.headerHidden === 'true'"
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  const anchor = document.querySelector('[data-thread-node-id="mv-slim-root"]');
+  if (!anchor) throw new Error('C2-3 fixture anchor node missing');
+  const rect = anchor.getBoundingClientRect();
+  sessionStorage.setItem('mv-c2-3-anchor-before', String(rect.bottom));
+  sessionStorage.setItem('mv-c2-3-scrolltop-before', String(scroll.scrollTop));
+  return { scrollTop: scroll.scrollTop, anchorBottom: rect.bottom };
+})()
+JS
+wait_for_js "top-edge reveal target present near bottom" "Boolean(document.querySelector('[data-header-reveal]'))"
+ab click '[data-header-reveal]'
+wait_for_js "chrome restored near bottom" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  const anchor = document.querySelector('[data-thread-node-id="mv-slim-root"]');
+  const rect = anchor.getBoundingClientRect();
+  const before = Number(sessionStorage.getItem('mv-c2-3-anchor-before'));
+  const scrollTopBefore = Number(sessionStorage.getItem('mv-c2-3-scrolltop-before'));
+  const drift = Math.abs(rect.bottom - before);
+  if (drift > 2) {
+    throw new Error(`C2-3 regression: residual jump restoring chrome near scroll bottom. anchorBefore=${before}, anchorAfter=${rect.bottom}, drift=${drift}, scrollTopBefore=${scrollTopBefore}, scrollTopAfter=${scroll.scrollTop}`);
+  }
+  return { anchorBefore: before, anchorAfter: rect.bottom, drift, scrollTopBefore, scrollTopAfter: scroll.scrollTop };
+})()
+JS
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset after C2-3"'
+wait_for_js "header restored after C2-3 reset" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow bottom sheet" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
 ab eval --stdin <<'JS'

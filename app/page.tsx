@@ -25,6 +25,7 @@ import { FilePreview } from "@/components/FilePreview";
 import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { ScrollHideProvider } from "@/hooks/useScrollHide";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
 import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
 import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
@@ -132,7 +133,7 @@ export default function Home() {
   }
 
   return (
-    <>
+    <ScrollHideProvider>
       <Header isMobile={isMobile} />
       <SessionSidebar />
       <SessionTabs />
@@ -182,6 +183,6 @@ export default function Home() {
       <FilePreview />
       <BookmarksDrawer />
       <KeyboardHelp />
-    </>
+    </ScrollHideProvider>
   );
 }

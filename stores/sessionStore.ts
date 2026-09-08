@@ -15,6 +15,7 @@ import {
   BOOKMARK_RESPONSE_LIMIT,
   bookmarkSummary,
   mergeBookmarkWindowIntoNodes,
+  staleBookmarkCandidateIds,
 } from "@/lib/bookmarks";
 import {
   clearStreamPending,
@@ -483,6 +484,9 @@ type State = {
   // Server-side count is separate from the bounded bookmark row window.
   bookmarksTotal: number;
   bookmarksOpen: boolean;
+  // C2-1: true while a "load more" page fetch is in flight, so the row
+  // can't be double-clicked into firing overlapping requests.
+  bookmarksLoadingMore: boolean;
   // Whether the right-side NotesDrawer is open. UI-only — not persisted.
   notesOpen: boolean;
   // Stage 16: cross-session search modal visibility. Lifted into store so
@@ -670,6 +674,13 @@ type Actions = {
   // unreadHolds 抑制视口自动回读，失败回滚。仅对已读的 done 节点生效。
   markNodeUnread: (nodeId: string) => Promise<void>;
   refreshBookmarks: () => Promise<void>;
+  // C2-1: fetches the next page beyond the currently-loaded window and
+  // appends it, so "还有 N 条" is reachable instead of a dead end.
+  loadMoreBookmarks: () => Promise<void>;
+  // C2-2: verifies locally-bookmarked nodes that fell outside the window
+  // against the server, clearing ones toggled off elsewhere (another tab
+  // or device). Called when the list is opened.
+  reconcileStaleBookmarks: () => Promise<void>;
   toggleBookmark: (nodeId: string, on?: boolean) => Promise<void>;
   setBookmarksOpen: (open: boolean) => void;
   // 树面板雪藏：隐藏 / 恢复 nodeId 所在的整棵树（标记落在树根）。乐观更新，
@@ -855,6 +866,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   bookmarks: [],
   bookmarksTotal: 0,
   bookmarksOpen: false,
+  bookmarksLoadingMore: false,
   notesOpen: false,
   searchOpen: false,
   filePreview: null,
@@ -2169,6 +2181,76 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
+  loadMoreBookmarks: async () => {
+    if (get().bookmarksLoadingMore) return;
+    const offset = get().bookmarks.length;
+    set({ bookmarksLoadingMore: true });
+    try {
+      const res = await fetchWithTimeout(
+        `/api/bookmarks?limit=50&offset=${offset}`,
+        5000,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as {
+        bookmarks?: Bookmark[];
+        total?: number;
+      };
+      if (!Array.isArray(body.bookmarks)) return;
+      const page = body.bookmarks;
+      set((s) => {
+        // The window may have shifted (a new bookmark landed, one dropped)
+        // between the initial load and this page fetch — de-dupe by id
+        // rather than assume a stable offset.
+        const seen = new Set(s.bookmarks.map((b) => b.nodeId));
+        const appended = page.filter((b) => !seen.has(b.nodeId));
+        const bookmarks = [...s.bookmarks, ...appended];
+        const total =
+          typeof body.total === "number" && Number.isFinite(body.total)
+            ? Math.max(bookmarks.length, Math.trunc(body.total))
+            : Math.max(bookmarks.length, s.bookmarksTotal);
+        const nodes = mergeBookmarkWindowIntoNodes(s.nodes, page);
+        return { bookmarks, bookmarksTotal: total, nodes };
+      });
+    } catch {
+      // Leave the "load more" row in place; the user can retry the click.
+    } finally {
+      set({ bookmarksLoadingMore: false });
+    }
+  },
+
+  reconcileStaleBookmarks: async () => {
+    const state = get();
+    const windowIds = new Set(state.bookmarks.map((b) => b.nodeId));
+    const candidateIds = staleBookmarkCandidateIds(state.nodes, windowIds);
+    if (candidateIds.length === 0) return;
+    try {
+      const res = await fetchWithTimeout(
+        `/api/bookmarks/status?ids=${candidateIds.map(encodeURIComponent).join(",")}`,
+        5000,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as {
+        statuses?: Record<string, number | null>;
+      };
+      const statuses = body.statuses;
+      if (!statuses) return;
+      set((s) => {
+        let nodes = s.nodes;
+        for (const id of candidateIds) {
+          if (!Object.prototype.hasOwnProperty.call(statuses, id)) continue;
+          const serverAt = statuses[id];
+          const cur = nodes[id];
+          if (!cur || (cur.bookmarkedAt ?? null) === serverAt) continue;
+          if (nodes === s.nodes) nodes = { ...s.nodes };
+          nodes[id] = { ...cur, bookmarkedAt: serverAt };
+        }
+        return nodes === s.nodes ? s : { nodes };
+      });
+    } catch {
+      // Best-effort; the next time the list opens it retries.
+    }
+  },
+
   toggleBookmark: async (nodeId, requested) => {
     const before = get();
     const node = before.nodes[nodeId];
@@ -2249,7 +2331,17 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
   },
 
-  setBookmarksOpen: (open) => set({ bookmarksOpen: open }),
+  setBookmarksOpen: (open) => {
+    set({ bookmarksOpen: open });
+    if (open) {
+      // C2-2: reload the window first (picks up anything toggled off
+      // elsewhere that was inside the window), then targeted-verify what's
+      // left outside it.
+      void get()
+        .refreshBookmarks()
+        .then(() => get().reconcileStaleBookmarks());
+    }
+  },
 
   setTreeHidden: async (nodeId, hidden) => {
     // 客户端同样走到根 —— 面板传的本来就是根 id，这里兜底非根调用。

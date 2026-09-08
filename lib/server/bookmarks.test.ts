@@ -13,6 +13,7 @@ const repo = await import("./repo");
 const bookmarkHelpers = await import("../bookmarks");
 const nodeRoute = await import("../../app/api/nodes/[id]/route");
 const bookmarksRoute = await import("../../app/api/bookmarks/route");
+const bookmarksStatusRoute = await import("../../app/api/bookmarks/status/route");
 
 beforeAll(() => {
   const db = sqlite.getDB();
@@ -116,6 +117,38 @@ describe("read-later repository", () => {
     expect(merged.outside).toBe(nodes.outside);
     expect(merged.outside.bookmarkedAt).toBe(51);
   });
+
+  // C2-1: page two must be reachable, not just a bigger single page.
+  test("listBookmarks offset pages past the first window", () => {
+    repo.setNodeBookmark("n1", true, 5000);
+    repo.setNodeBookmark("n2", true, 6000);
+    const page1 = repo.listBookmarks({ limit: 1, offset: 0 });
+    const page2 = repo.listBookmarks({ limit: 1, offset: 1 });
+    expect(page1).toHaveLength(1);
+    expect(page2).toHaveLength(1);
+    expect(page2[0]?.nodeId).not.toBe(page1[0]?.nodeId);
+    expect(repo.listBookmarks({ limit: 10, offset: 10 })).toHaveLength(0);
+  });
+
+  // C2-2: the targeted status check is how the client tells "still
+  // bookmarked, just paginated out" apart from "unbookmarked elsewhere".
+  test("getBookmarkStatuses reports current state for exactly the requested ids", () => {
+    const statuses = repo.getBookmarkStatuses(["n1", "n2", "does-not-exist"]);
+    expect(statuses.n1).toBe(repo.getNode("n1")?.bookmarkedAt ?? null);
+    expect(statuses.n2).toBe(repo.getNode("n2")?.bookmarkedAt ?? null);
+    expect(Object.prototype.hasOwnProperty.call(statuses, "does-not-exist")).toBeFalse();
+    expect(repo.getBookmarkStatuses([])).toEqual({});
+  });
+
+  test("staleBookmarkCandidateIds only flags locally-bookmarked nodes missing from the window", () => {
+    const nodes = {
+      inWindow: { id: "inWindow", bookmarkedAt: 10 },
+      staleOutside: { id: "staleOutside", bookmarkedAt: 5 },
+      neverBookmarked: { id: "neverBookmarked", bookmarkedAt: null },
+    };
+    const ids = bookmarkHelpers.staleBookmarkCandidateIds(nodes, ["inWindow"]);
+    expect(ids).toEqual(["staleOutside"]);
+  });
 });
 
 describe("read-later routes", () => {
@@ -161,5 +194,32 @@ describe("read-later routes", () => {
     };
     expect(body.bookmarks).toHaveLength(1);
     expect(body.total).toBe(2);
+  });
+
+  // C2-1: the API-level contract behind the "load more" button.
+  test("GET offset returns the next page and total stays stable", async () => {
+    const first = await bookmarksRoute.GET(
+      new Request("http://localhost/api/bookmarks?limit=1&offset=0"),
+    );
+    const second = await bookmarksRoute.GET(
+      new Request("http://localhost/api/bookmarks?limit=1&offset=1"),
+    );
+    const firstBody = (await first.json()) as { bookmarks: Array<{ nodeId: string }>; total: number };
+    const secondBody = (await second.json()) as { bookmarks: Array<{ nodeId: string }>; total: number };
+    expect(firstBody.bookmarks[0]?.nodeId).not.toBe(secondBody.bookmarks[0]?.nodeId);
+    expect(firstBody.total).toBe(secondBody.total);
+  });
+
+  // C2-2: the reconciliation endpoint the client hits for nodes it locally
+  // believes are bookmarked but that dropped out of the window.
+  test("GET /api/bookmarks/status reports true state for requested ids", async () => {
+    const response = await bookmarksStatusRoute.GET(
+      new Request("http://localhost/api/bookmarks/status?ids=n1,n2,missing"),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { statuses: Record<string, number | null> };
+    expect(body.statuses.n1).toBe(repo.getNode("n1")?.bookmarkedAt ?? null);
+    expect(body.statuses.n2).toBe(repo.getNode("n2")?.bookmarkedAt ?? null);
+    expect(Object.prototype.hasOwnProperty.call(body.statuses, "missing")).toBeFalse();
   });
 });

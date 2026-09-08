@@ -872,8 +872,11 @@ const VISIBLE_BOOKMARK_ROOTS_CTE = `WITH RECURSIVE bookmark_roots(
    WHERE parent_id IS NULL AND hidden_at IS NULL
 )`;
 
-export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
+export function listBookmarks(
+  opts: { limit?: number; offset?: number } = {},
+): Bookmark[] {
   const limit = Math.min(100, Math.max(1, Math.trunc(opts.limit ?? 50)));
+  const offset = Math.max(0, Math.trunc(opts.offset ?? 0));
   const rows = getDB()
     .prepare(
       `${VISIBLE_BOOKMARK_ROOTS_CTE}
@@ -883,9 +886,9 @@ export function listBookmarks(opts: { limit?: number } = {}): Bookmark[] {
          JOIN visible_bookmarks visible ON visible.node_id = n.id
          JOIN sessions s ON s.id = n.session_id
         ORDER BY n.bookmarked_at DESC, n.id
-        LIMIT ?`,
+        LIMIT ? OFFSET ?`,
     )
-    .all(limit) as Array<{
+    .all(limit, offset) as Array<{
     node_id: string;
     session_id: string;
     session_title: string;
@@ -915,6 +918,25 @@ export function countBookmarks(): number {
     )
     .get() as { total: number };
   return row.total;
+}
+
+// C2-2: a client's local `nodes[id].bookmarkedAt` can go stale when the
+// bookmark is toggled off from another tab/device — the bounded bookmarks
+// window only reports what's *currently* bookmarked, so a node that just
+// dropped off it is indistinguishable from "still bookmarked, just outside
+// the page". Callers pass exactly the locally-bookmarked ids that fell
+// outside the window and get back each one's true current state.
+export function getBookmarkStatuses(
+  nodeIds: string[],
+): Record<string, number | null> {
+  const result: Record<string, number | null> = {};
+  if (nodeIds.length === 0) return result;
+  const placeholders = nodeIds.map(() => "?").join(",");
+  const rows = getDB()
+    .prepare(`SELECT id, bookmarked_at FROM nodes WHERE id IN (${placeholders})`)
+    .all(...nodeIds) as Array<{ id: string; bookmarked_at: number | null }>;
+  for (const row of rows) result[row.id] = row.bookmarked_at;
+  return result;
 }
 
 // Walk the parent chain up to this node's tree root (parent_id IS NULL).
