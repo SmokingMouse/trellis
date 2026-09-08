@@ -1,4 +1,5 @@
 "use client";
+import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 
 import { useState, type ReactNode } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -200,7 +201,7 @@ export function MobileOverflowMenu({
                   })
                 }
               >
-                思维树
+                {STRUCTURE_PANEL ? "结构" : "思维树"}
               </MenuButton>
               <MenuButton
                 target="overflow-canvas"

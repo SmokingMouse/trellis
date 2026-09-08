@@ -8,7 +8,7 @@ PORT=3478
 BASE="http://127.0.0.1:$PORT"
 H=/tmp/trellis-mv-mobile-branch-chain
 DB="$H/.trellis/data.db"
-SOURCE_DB="$HOME/.trellis/data.db"
+SOURCE_DB="${TRELLIS_VERIFY_SOURCE_DB:-$HOME/.trellis/data.db}"
 LOG="$H/server.log"
 OUT="$H/out"
 SESSION=mv-mobile-branch-chain
@@ -174,8 +174,8 @@ open_mobile_drawer() {
   wait_for_js "mobile session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
 }
 
-# Wave 2: chain navigation belongs to the existing in-session TreePanel.
-# Exercise its filter/jump entry instead of the retired sidebar Recent rows.
+# Wave 3: the shared structure panel is collapsed by default on desktop.
+# Open its rail before exercising the existing filter/jump workflow.
 click_tree_node() {
   needle=$1
   if ab eval 'innerWidth < 768' | grep -q '^true$'; then
@@ -185,6 +185,7 @@ click_tree_node() {
     wait_for_js "in-session structure sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open]'))"
   else
     ab eval '(() => { const b=[...document.querySelectorAll("button")].find(e => e.title === "切换到线性 thread"); b?.click(); return true; })()' >/dev/null
+    ab eval 'document.querySelector("button[aria-label=展开结构]")?.click(); true' >/dev/null
   fi
   wait_for_js "structure filter entry" "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
   ab click 'button[aria-label="过滤跳转"]'
