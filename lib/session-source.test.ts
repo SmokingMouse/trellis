@@ -10,4 +10,6 @@ test("来源 chip：自动化与飞书有标记，原生及 CLI user 不重复�
   expect(sessionSourceChip({ kind: "user", origin: "native" })).toBeNull();
   expect(sessionSourceChip({ kind: "user", origin: "cli-import" })).toBeNull();
   expect(sessionSourceChip({})).toBeNull();
+  expect(sessionSourceChip({ kind: "user", origin: "external", backend: "codex" })).toEqual({ label: "外部", title: "外部会话 · codex" });
+  expect(sessionSourceChip({ origin: "external", backend: "claude" })?.title).toBe("外部会话 · claude");
 });

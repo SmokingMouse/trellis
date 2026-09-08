@@ -280,7 +280,10 @@ ab eval --stdin <<'JS'
     ['drawer advanced', '[role="dialog"] [data-mobile-target="drawer-advanced"]'],
     ['drawer attach', '[role="dialog"] [data-mobile-target="drawer-attach"]'],
     ['drawer session rows', '[role="dialog"] [data-mobile-target="session-row"]', true],
-    ['drawer chain rows', '[role="dialog"] [data-mobile-target="session-chain-row"]', true],
+    // Wave 2 retires sidebar chains; verify the replacement toolbar targets.
+    ['drawer layout buttons', '[role="dialog"] [data-sidebar-toolbar] button', true],
+    ['drawer source filter', '[role="dialog"] [data-sidebar-toolbar] select'],
+    ['drawer archive filter', '[role="dialog"] [data-sidebar-toolbar] label:has(input[type="checkbox"])'],
   ];
   const results = [];
   for (const [name, selector, all] of specs) {
@@ -528,7 +531,7 @@ ab eval --stdin <<'JS'
     ['drawer close', '[data-mobile-target="drawer-close"]', 28, 32],
     ['drawer attach', '[data-mobile-target="drawer-attach"]', 193, 28],
     ['session row', '[data-mobile-target="session-row"]', 201, 26],
-    ['session chain row', '[data-mobile-target="session-chain-row"]', 201, 26],
+    // Chain rows moved to the in-session TreePanel; no desktop sidebar leaf below sessions.
     ['permission allow', '[data-mobile-target="permission-allow"]', 76.39, 34.75],
     ['permission always', '[data-mobile-target="permission-always"]', 128.39, 36.75],
     ['permission deny', '[data-mobile-target="permission-deny"]', 78.39, 36.75],

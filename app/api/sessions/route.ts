@@ -21,7 +21,10 @@ export async function GET(req: Request) {
   return Response.json({
     sessions: listSessions({ archived }),
     archivedCount: countArchivedSessions(),
-    projects: archived ? [] : listProjectTree(),
+    projects: archived ? [] : listProjectTree(undefined, {
+      // V2 在同一骨架内筛选活跃 / 归档会话；旧调用方保留默认过滤。
+      includeEmpty: url.searchParams.get("includeEmptyWorkspaces") === "1",
+    }),
     tasks: archived
       ? []
       : listTasks().map((t) => ({
