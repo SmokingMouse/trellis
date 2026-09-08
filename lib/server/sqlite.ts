@@ -90,6 +90,22 @@ function migrate(db: Database) {
       PRIMARY KEY (daemon_id, thread_id)
     );
     CREATE INDEX IF NOT EXISTS as_threads_session ON as_threads(session_id);
+    CREATE TABLE IF NOT EXISTS as_thread_claims (
+      daemon_id TEXT NOT NULL,
+      client_thread_id TEXT NOT NULL,
+      session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+      PRIMARY KEY (daemon_id,client_thread_id)
+    );
+    CREATE TABLE IF NOT EXISTS as_adoptions (
+      daemon_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+      backend TEXT NOT NULL,
+      status TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (daemon_id, thread_id)
+    );
     CREATE TABLE IF NOT EXISTS as_turns (
       node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
       thread_id TEXT NOT NULL,

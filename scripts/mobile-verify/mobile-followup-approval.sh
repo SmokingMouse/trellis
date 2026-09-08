@@ -486,7 +486,7 @@ JS
 echo "== desktop 1280x800 unchanged baseline =="
 ab set viewport 1280 800
 ab open "$READ_URL"
-wait_for_js "desktop reading fixture" "Boolean(document.querySelector('[data-composer-input]'))"
+wait_for_js "desktop reading fixture" "Boolean(document.querySelector('[data-composer-input]')) && Boolean(document.querySelector('[data-chat-node-id=\"mv-followup-reading\"] p'))"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };

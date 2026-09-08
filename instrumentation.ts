@@ -1,10 +1,13 @@
 // Next server 启动钩子（register 每进程跑一次，在处理首个请求前）。
 // 用来拉起 CLI session 同步 watcher（Stage B，progress/cli-sync.md）。
 // 仅 nodejs runtime——watcher 用 fs + bun:sqlite，edge runtime 没有。
-import { isShadowEnabled } from "./lib/as-config";
+import { isShadowEnabled, isAdoptEnabled } from "./lib/as-config";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (isAdoptEnabled()) void import("./lib/server/as-adopt")
+    .then(({ startAdoption }) => startAdoption())
+    .catch(error => console.warn(`[trellis/as-adopt] ${error}`));
   // Shadow observer is optional; even import/handshake failure must not delay boot.
   if (isShadowEnabled()) void import("./lib/server/as-client")
     .then(({ getShadowClient }) => getShadowClient().connect())

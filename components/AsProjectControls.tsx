@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import type { ShadowEvent } from "@/lib/as-shadow";
 import { useSessionStore } from "@/stores/sessionStore";
+import type { Thread } from "@smokingmouse/agent-server/protocol";
 
 const modes = ["default", "acceptEdits", "plan", "dontAsk"];
 const labels: Record<string,string> = { default: "逐次确认", acceptEdits: "允许编辑", plan: "计划模式", dontAsk: "不询问", full: "绕过审批", bypassPermissions: "绕过审批" };
@@ -26,7 +27,8 @@ function observeThread(threadId:string, listener:(event:ShadowEvent)=>void) {
 export function AsProjectControls({ nodeId }: { nodeId: string }) {
   const threadBound = useSessionStore(s => s.session?.bindingType === "thread");
   const nodeStatus = useSessionStore(s => s.nodes[nodeId]?.status);
-  const [thread, setThread] = useState<{id:string; permission?:string} | null>(null);
+  const [thread, setThread] = useState<Thread | null>(null);
+  const external = useSessionStore(s => s.session?.origin === "external");
   const [supported, setSupported] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [resolved, setResolved] = useState<string[]>([]);
@@ -64,6 +66,8 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
           const { method, params } = data.notification;
           if (method === "thread/pendingRequests" && params.turnId === value.turnId && params.status === "pending") pendingIds.add(params.requestId);
           if (method === "thread/permission/changed") setThread(t => t ? { ...t, permission: params.permission } : t);
+          if (method === "thread/status/changed") setThread(t => t ? {...t,status:params.status} : t);
+          if (method === "thread/closed") setThread(t => t ? {...t,status:{type:"closed"}} : t);
           if (method === "thread/engineEvent" && (!params.turnId || params.turnId === value.turnId)) {
             saved.logs = [...saved.logs, `${params.subtype}: ${JSON.stringify(params.payload)}`].slice(-100);
             setLogs(saved.logs); remember();
@@ -101,6 +105,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   }
   if (!threadBound) return null;
   return <div data-as-project={nodeId} className="my-3 min-w-0 max-w-full space-y-2 text-sm [overflow-wrap:anywhere]">
+    {thread && <p data-as-source className="text-muted">{thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}</p>}
     {notice && <p role="status" data-as-fallback>{notice}</p>}
     {thread && <label className="flex flex-wrap items-center gap-2">权限模式
       <select data-as-permission aria-label="权限模式" value={thread.permission ?? "default"} disabled={!supported || busy}

@@ -32,6 +32,7 @@ import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
+import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
 
@@ -55,6 +56,7 @@ export default function Home() {
   useNodeKeyboardNav();
   useReconnectStreams();
   useCliSyncEvents();
+  useAsAdoption();
   // Wave 4: one app-level /api/runs poll feeds running + unread badges to
   // both the tab strip and the sidebar (no per-component intervals).
   useRunPolling();

@@ -208,6 +208,9 @@ done
   export HOME="$H"
   export TRELLIS_DB_PATH="$DB"
   export TRELLIS_LARK=off
+  # The common verification prefix disables the real bridge. Enable only this
+  # isolated fixture socket, never the user's running Herdr service.
+  export TRELLIS_HERDR=on
   export TRELLIS_AUTH_PASS="$AUTH_PASS"
   export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
   export HERDR_SOCKET_PATH="$SOCKET"

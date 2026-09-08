@@ -161,17 +161,17 @@ const globalAs = globalThis as typeof globalThis & { trellisShadow?: ShadowClien
 export function getShadowClient() { return globalAs.trellisShadow ??= new ShadowClient(); }
 
 /** Separate writable connection; observers never participate in approvals. */
-export function createProjectClient() {
+export function createProjectClient(options: {reconnect?: false; observe?: boolean} = {}) {
   const paths = resolveDaemonPaths();
   return new AgentClient({ transport: "unix", path: process.env.TRELLIS_AS_SOCKET ?? paths.socketPath }, {
     token: loadToken(process.env.TRELLIS_AS_TOKEN_PATH ?? paths.tokenPath),
-    client: { name: "trellis-project", version: "0.2.0", kind: "web", label: "Trellis 网页" },
-    capabilities: { engineEvents: true, bashInput: true, pendingRequests: true, serverRequests: [
+    client: { name: options.observe ? "trellis-adopt" : "trellis-project", version: "0.2.0", kind: "web", label: options.observe ? "Trellis 收编观察" : "Trellis 网页" },
+    capabilities: { engineEvents: true, bashInput: !options.observe, pendingRequests: true, serverRequests: options.observe ? [] : [
       "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
       "item/permissions/requestApproval", "item/tool/requestUserInput",
     ] },
     connectTimeoutMs: 1500, requestTimeoutMs: 5000,
-    reconnect: { minDelayMs: 1000, maxDelayMs: 30000 },
+    reconnect: options.reconnect ?? { minDelayMs: 1000, maxDelayMs: 30000 },
   });
 }
 

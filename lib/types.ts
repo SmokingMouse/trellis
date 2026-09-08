@@ -338,6 +338,8 @@ export const SCRATCH_CLUSTER_KEY = "trellis:scratch";
 export const HOME_CLUSTER_KEY = "trellis:home";
 
 export type Session = {
+  backend?: string;
+  externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
