@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/repo";
 import { isProviderId } from "@/lib/llm";
 import { detachHomeSession } from "@/lib/server/tasks";
+import { detachProjectSession } from "@/lib/server/as-project";
 import {
   buildToolTree,
   countToolTree,
@@ -134,6 +135,7 @@ export async function DELETE(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  if (getSession(id)?.origin === "external") detachProjectSession(id);
   deleteSession(id);
   // S117: 防悬挂 —— 被删的可能是某个任务的常驻会话，下次执行时重建。
   detachHomeSession(id);

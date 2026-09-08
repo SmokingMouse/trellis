@@ -52,6 +52,8 @@ export function Composer({
   const [sketchOpen, setSketchOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
+  const streamRoot = useSessionStore((s) => s.streamRoot);
+  const emptyExternal = useSessionStore(s => s.session?.origin === "external" && Object.keys(s.nodes).length === 0);
   const abortStream = useSessionStore((s) => s.abortStream);
   const sendKey = useSessionStore((s) => s.sendKey);
   const sessionMode = useSessionStore((s) => s.session?.mode);
@@ -93,6 +95,7 @@ export function Composer({
   // the store and never streams; same registry + interception contract as the
   // first-screen QuestionInput.
   const session = useSessionStore((s) => s.session);
+  const externalEnded = session?.origin === "external" && session.externalStatus === "closed";
   const newConversation = useSessionStore((s) => s.newConversation);
   const archiveSession = useSessionStore((s) => s.archiveSession);
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
@@ -221,7 +224,7 @@ export function Composer({
       runCommand(parsed.command, parsed.args);
       return;
     }
-    if (!targetNode || isStreaming || att.hasUploading) return;
+    if ((!targetNode && !emptyExternal) || isStreaming || att.hasUploading || externalEnded) return;
     const attachments =
       att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
     setText("");
@@ -230,7 +233,8 @@ export function Composer({
     att.clear();
     // S88: 剥出开头的 `@slug` —— slug 走 body 字段，剩下的才是问题本身。
     const [mentionAgentSlug, question] = splitMention(trimmed);
-    streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork });
+    if (targetNode) streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork });
+    else void streamRoot(trimmed,{attachToCurrentSession:true,attachments});
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
   };
@@ -317,8 +321,8 @@ export function Composer({
           onPaste={att.handlePaste}
           onFocus={expandMobile}
           rows={1}
-          disabled={!targetNode}
-          placeholder={compact ? "追问…" : (placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`)}
+          disabled={(!targetNode && !emptyExternal) || externalEnded}
+          placeholder={externalEnded ? "外部线程已结束" : compact ? "追问…" : (placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`)}
           className={`min-w-0 flex-1 resize-none rounded-2xl border border-line-strong bg-surface text-body text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50 ${
             compact
               ? "h-[44px] min-h-[44px] max-h-[44px] px-3 py-2.5"
@@ -336,7 +340,7 @@ export function Composer({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={!targetNode || att.atLimit}
+          disabled={(!targetNode && !emptyExternal) || att.atLimit}
           title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
           className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
           aria-label="添加附件"
@@ -348,7 +352,7 @@ export function Composer({
             <button
               type="button"
               onClick={() => setSketchOpen(true)}
-              disabled={!targetNode || att.atLimit}
+              disabled={(!targetNode && !emptyExternal) || att.atLimit}
               title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
               className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
               aria-label="画个草图"
@@ -365,7 +369,7 @@ export function Composer({
         )}
         <button
           onClick={submit}
-          disabled={!text.trim() || !targetNode || att.hasUploading}
+          disabled={!text.trim() || (!targetNode && !emptyExternal) || att.hasUploading || externalEnded}
           title={att.hasUploading ? "等待附件上传…" : undefined}
           className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-accent text-ink-inverse flex items-center justify-center disabled:opacity-30 hover:bg-accent-strong active:scale-95 transition-all shadow-raise"
           aria-label="发送"

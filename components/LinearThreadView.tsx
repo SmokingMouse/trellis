@@ -661,7 +661,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         )}
         {threadData.thread.length === 0 ? (
           <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
-            暂无节点
+            {session.origin === "external" ? session.externalStatus === "closed" ? "外部线程已结束" : "外部线程已收编，可在下方提问" : "暂无节点"}
           </div>
         ) : (
           threadData.thread.map((node, idx) => {

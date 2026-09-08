@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentClient } from "@smokingmouse/agent-server/client";
 import { NotificationSchemas, type NotificationMethod, type ServerNotification, type AttachResult, type Turn, type StartTurnParams, type StartThreadParams } from "@smokingmouse/agent-server/protocol";
 import { createProjectClient, withProjectLease, setProjectPermission, supportsMidThreadFork } from "./as-client";
-import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding, removeAsTurn, pruneAsThreads } from "./session-binding";
+import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding, removeAsTurn, pruneAsThreads, claimAsThread } from "./session-binding";
 import { getDB } from "./sqlite";
 import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
 import { providerFamily } from "../llm/providers";
@@ -11,6 +11,8 @@ import { emptyThreadLog, applyShadowEvent } from "../as-log";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "../as-project-events";
 import type { RunEvent, CatchupEvent } from "./run-bus";
 import { isShadowEnabled } from "../as-config";
+import { getAdoption } from "./as-adopt";
+import { adoptionTurns } from "../as-adopt";
 
 type Subscriber = { onEvent: (event: RunEvent | CatchupEvent) => void; onClose: () => void };
 const state = globalThis as typeof globalThis & { asProjectRuns?: Map<string, ProjectRun>; asProjectStarts?: Map<string, Promise<unknown>> };
@@ -29,7 +31,7 @@ export class ProjectRun {
   private lastCatchup?: string;
   private starting?: Promise<void>;
   private retryResolutions: string[] = [];
-  constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false) {
+  constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false, private observeOnly = false) {
     this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
     let connected = false;
@@ -117,6 +119,10 @@ export class ProjectRun {
     if (pending) persistPendingInteraction(this.nodeId, projectInteraction(pending));
     else clearPendingInteraction(this.nodeId);
     this.emit(this.catchup());
+    if (this.observeOnly) {
+      const turn = adoptionTurns(snapshot).find(g => g.turn.id === this.turnId)?.turn;
+      if (turn && !["queued","inProgress"].includes(turn.status)) this.finish(turn);
+    }
   }
   private notification(notification: ServerNotification) {
     const { method, params } = notification;
@@ -156,8 +162,11 @@ export class ProjectRun {
         this.emit(this.terminal);
         for (const sub of this.subscribers) sub.onClose();
         this.subscribers.clear();
-        this.close();
         if (runs.get(this.nodeId) === this) runs.delete(this.nodeId);
+        // turn/interrupt and turn/start replies can follow this terminal event.
+        // Keep the wire alive briefly so their acknowledgements are not lost.
+        const cleanup = setTimeout(() => this.close(),1000);
+        cleanup.unref?.();
         return;
       }
       getDB().transaction(() => {
@@ -190,8 +199,10 @@ export class ProjectRun {
     cleanup.unref?.();
   }
   private async settled(turn: Turn, response: string) {
+    if (this.observeOnly) return;
     const node = getNode(this.nodeId), session = node && getSession(node.sessionId);
     if (!node || !session) return;
+    if (session.origin === "external") return;
     if (turn.status === "completed" && response.trim() && session.model !== "mock") {
       const family = providerFamily(session.model ?? "claude-opus");
       const { generateTopicLabel, generateSessionTitle } = await import("../llm/topic");
@@ -225,6 +236,7 @@ export class ProjectRun {
       await this.client.connect();
       await this.client.request("thread/attach", { threadId: this.threadId, sinceSeq: 0 });
     } catch (error) { throw new DaemonUnavailable(String(error)); }
+    if (this.observeOnly) return;
     const result = await this.client.request("turn/start", this.params);
     this.turnId = result.turn.id;
     if (!this.replacing) updateAsTurn(this.nodeId, result.turn.id);
@@ -233,6 +245,10 @@ export class ProjectRun {
   }
   async reconcile() {
     await this.client.connect();
+    if (this.observeOnly) {
+      await this.client.request("thread/attach", {threadId:this.threadId,sinceSeq:0});
+      return;
+    }
     // Idempotent replay also supplies the terminal Turn missed while disconnected.
     const { turn } = await this.client.request("turn/start", this.params);
     if (["completed", "interrupted", "failed", "cancelled"].includes(turn.status)) this.finish(turn);
@@ -241,11 +257,24 @@ export class ProjectRun {
     this.closing = true; this.client.close();
     if (runs.get(this.nodeId) === this) runs.delete(this.nodeId);
   }
+  detach() {
+    for (const sub of this.subscribers) sub.onClose();
+    this.subscribers.clear();
+    this.close();
+  }
+}
+
+/** Release web observers only; the external owner retains its running turn. */
+export function detachProjectSession(sessionId: string) {
+  for (const run of runs.values()) if (getNode(run.nodeId)?.sessionId === sessionId) run.detach();
 }
 
 export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; fork?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
   if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
   const node = getNode(args.nodeId)!, session = getSession(node.sessionId)!;
+  const adoption = session.origin === "external" ? getAdoption(session.id) : null;
+  if (session.origin === "external" && !adoption) throw new Error("收编会话不属于当前 Agent daemon");
+  if (adoption?.status === "closed") throw new Error("外部线程已结束，不能再提问");
   if (starts.has(session.id)) throw new Error("session request is starting; retry shortly");
   const job = (async () => {
     let setup: AgentClient;
@@ -255,6 +284,14 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
     } catch (error) { setup!?.close(); throw new DaemonUnavailable(String(error)); }
     try {
       const options = projectThreadOptions(session, { permission: args.permission, effort: args.effort });
+      if (adoption) {
+        const original = (await setup.request("thread/read",{threadId:adoption.thread_id})).thread;
+        if (original.status.type === "closed") throw new Error("外部线程已结束，不能再提问");
+        options.backend = original.backend;
+        options.model = original.model;
+        options.cwd = original.cwd;
+        options.permission = original.permission;
+      }
       if (args.retry && !args.permission) {
         const previous = getAsTurn(node.id);
         if (previous) {
@@ -263,6 +300,11 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
         }
       }
       if (!setup.initializeResult?.capabilities.backends.includes(options.backend)) throw new Error("daemon backend unavailable");
+      const startThread = async () => {
+        const clientThreadId = `trellis-${node.id}-${randomUUID()}`;
+        claimAsThread(session.id,clientThreadId);
+        return (await setup.request("thread/start",{...options,clientThreadId})).thread.id;
+      };
       let parentId = args.retry ? node.id : node.parentId;
       let parent = parentId ? getAsTurn(parentId) : null;
       // @mention is intentionally ephemeral. A legacy fallback answer is not:
@@ -283,18 +325,22 @@ export async function startProjectRun(args: { nodeId: string; prompt: string; at
             // when another client has extended the source beyond our last node.
             const boundary = parent.last_item_id ?? snapshot.items.filter(i=>i.turnId === parent.turn_id && i.completedSeq).sort((a,b)=>b.seq-a.seq)[0]?.id;
             if (!boundary) throw new Error("所选节点缺少 Agent 历史边界，请刷新后重试");
-            threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, fromItemId: boundary, clientThreadId: `trellis-fork-${node.id}-${randomUUID()}` })).thread.id;
+            const clientThreadId = `trellis-fork-${node.id}-${randomUUID()}`;
+            claimAsThread(session.id,clientThreadId);
+            threadId = (await setup.request("thread/fork", { threadId: parent.thread_id, fromItemId: boundary, clientThreadId })).thread.id;
           } else {
             // Older daemons cannot truncate history. Seed only the selected
             // ancestry; never substitute an unbounded live-tip fork.
-            threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
+            threadId = await startThread();
             seedHistory = true;
           }
         } else {
           threadId = parent.thread_id;
           if (["closed", "systemError", "interrupted"].includes(snapshot.thread.status.type)) await setup.request("thread/resume", {threadId});
         }
-      } else threadId = (await setup.request("thread/start", { ...options, clientThreadId: `trellis-${node.id}-${randomUUID()}` })).thread.id;
+      } else if (adoption && !parentId) {
+        threadId = adoption.thread_id;
+      } else threadId = await startThread();
       const recoveredHistory = seedHistory ? buildHistoryForNode(node.id,{maxDepth:20}).map(m=>`${m.role}: ${m.content}`).join("\n\n") : "";
       const params: StartTurnParams = { threadId, clientTurnId: `trellis-${node.id}-${randomUUID()}`, input: [{ type: "text", text: recoveredHistory ? `${recoveredHistory}\n\nuser: ${args.prompt}` : args.prompt }, ...args.attachments.map(a => ({ type: "image" as const, ...a }))] };
       const run = new ProjectRun(node.id, threadId, params, args.retry);
@@ -329,8 +375,8 @@ export async function getProjectRun(nodeId: string) {
   const binding = getAsTurn(nodeId);
   if (!binding || getNode(nodeId)?.status !== "streaming") return null;
   if (binding.daemon_id !== daemonIdentity()) throw new Error("session daemon mapping changed");
-  const row = getDB().prepare("SELECT request_json FROM as_turns WHERE node_id=?").get(nodeId) as {request_json:string};
-  const run = new ProjectRun(nodeId, binding.thread_id, JSON.parse(row.request_json));
+  const row = getDB().prepare("SELECT request_json FROM as_turns WHERE node_id=?").get(nodeId) as {request_json:string|null};
+  const run = new ProjectRun(nodeId, binding.thread_id, row.request_json ? JSON.parse(row.request_json) : {threadId:binding.thread_id,clientTurnId:binding.client_turn_id,input:[]}, false, !row.request_json);
   runs.set(nodeId, run);
   try { await run.start(); return run; } catch (e) { run.close(); throw e; }
 }

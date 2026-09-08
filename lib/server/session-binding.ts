@@ -1,7 +1,7 @@
 import { getSession } from "./repo";
 import { getDB } from "./sqlite";
 import { resolveDaemonPaths } from "@smokingmouse/agent-server/paths";
-import { isShadowEnabled } from "../as-config";
+import { isShadowEnabled, isAdoptEnabled } from "../as-config";
 
 export type SessionBinding =
   | { type: "legacy" }
@@ -38,6 +38,16 @@ export function bindAsThread(sessionId: string, threadId: string) {
   getDB().prepare("INSERT OR IGNORE INTO as_threads (session_id,thread_id,daemon_id,created_at) VALUES (?,?,?,?)")
     .run(sessionId, threadId, daemonIdentity(), Date.now());
 }
+/** Reserve before the RPC: retry forks are not committed to as_turns until success. */
+export function claimAsThread(sessionId: string, clientThreadId: string) {
+  if (!isAdoptEnabled()) return;
+  getDB().prepare("INSERT INTO as_thread_claims (daemon_id,client_thread_id,session_id) VALUES (?,?,?)")
+    .run(daemonIdentity(),clientThreadId,sessionId);
+}
+export function hasAsThreadClaim(clientThreadId?: string) {
+  return !!clientThreadId && !!getDB().prepare("SELECT 1 FROM as_thread_claims WHERE daemon_id=? AND client_thread_id=?")
+    .get(daemonIdentity(),clientThreadId);
+}
 export function bindAsTurn(nodeId: string, threadId: string, clientTurnId: string) {
   getDB().prepare(`INSERT INTO as_turns (node_id,thread_id,daemon_id,client_turn_id,created_at) VALUES (?,?,?,?,?)
     ON CONFLICT(node_id) DO UPDATE SET thread_id=excluded.thread_id,daemon_id=excluded.daemon_id,
@@ -47,6 +57,8 @@ export function bindAsTurn(nodeId: string, threadId: string, clientTurnId: strin
 export function pruneAsThreads(sessionId: string) {
   getDB().prepare(`DELETE FROM as_threads WHERE session_id=? AND NOT EXISTS (
     SELECT 1 FROM as_turns t WHERE t.thread_id=as_threads.thread_id AND t.daemon_id=as_threads.daemon_id
+  ) AND NOT EXISTS (
+    SELECT 1 FROM as_adoptions a WHERE a.thread_id=as_threads.thread_id AND a.daemon_id=as_threads.daemon_id AND a.session_id IS NOT NULL
   )`).run(sessionId);
 }
 export function removeAsTurn(nodeId: string) {

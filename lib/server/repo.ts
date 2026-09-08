@@ -30,6 +30,8 @@ import type {
 // types but the response is always present (no null) and position is omitted.
 
 export type ApiSession = {
+  backend?: string;
+  externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
   id: string;
   title: string;
@@ -74,6 +76,8 @@ export type ApiSession = {
 };
 
 export type ApiNode = {
+  origin?: "external";
+  backend?: string;
   id: string;
   sessionId: string;
   parentId: string | null;
@@ -252,6 +256,7 @@ function rowToNode(r: NodeRow): ApiNode {
   return {
     id: r.id,
     sessionId: r.session_id,
+    ...externalNodeSource(r.id),
     parentId: r.parent_id,
     parentAnchor: r.parent_anchor_text
       ? { selectedText: r.parent_anchor_text }
@@ -300,7 +305,9 @@ function resolveWorkspaceId(absPath: string): string | null {
 }
 
 function rowToSession(r: SessionRow): ApiSession {
+  const external = r.origin === "external" ? getDB().prepare("SELECT backend,status FROM as_adoptions WHERE session_id=?").get(r.id) as {backend:string;status:string} | null : null;
   return {
+    ...(external ? {backend:external.backend,externalStatus:external.status} : {}),
     bindingType: r.binding_type,
     id: r.id,
     title: r.title,
@@ -321,6 +328,12 @@ function rowToSession(r: SessionRow): ApiSession {
     requireApproval: r.require_approval === 1,
     agentId: r.agent_id,
   };
+}
+
+function externalNodeSource(nodeId: string): {origin?:"external";backend?:string} {
+  const source = getDB().prepare(`SELECT a.backend FROM as_turns t JOIN nodes n ON n.id=t.node_id JOIN as_adoptions a ON a.session_id=n.session_id
+    WHERE t.node_id=? AND a.session_id IS NOT NULL`).get(nodeId) as {backend:string} | null;
+  return source ? {origin:"external",backend:source.backend} : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,8 +1149,9 @@ export function createRootInSession(args: {
       args.now,
       attachmentsJson,
     );
-    db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(
+    db.prepare("UPDATE sessions SET updated_at = ?, root_node_id = CASE WHEN root_node_id='' THEN ? ELSE root_node_id END WHERE id = ?").run(
       args.now,
+      args.nodeId,
       args.sessionId,
     );
     ftsUpsert(db, "node_question", args.nodeId, args.sessionId, args.question);
