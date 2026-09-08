@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-单一 TUI 落地中：ingress 三片过审、试点 daemon 已开 ingress、fj 显示端切 codex-tui 试点两单在跑；剩硬化片；桥、影子与第二步、AS 合 main、daemon 常驻等用户点头。
+单一 TUI 落地中：ingress 三片过审、试点 daemon 已开 ingress、fj 显示端切 codex-tui 试点两单在跑；剩硬化片；桥与第二步、AS 合 main、daemon 常驻等用户点头；外部线程由主页收编（TRELLIS_AS_ADOPT），独立观察页退役。
 
 ## Goals
 

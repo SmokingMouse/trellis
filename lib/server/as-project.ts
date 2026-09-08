@@ -7,10 +7,10 @@ import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, reso
 import { getDB } from "./sqlite";
 import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
 import { providerFamily } from "../llm/providers";
-import { emptyThreadLog, applyShadowEvent } from "../as-log";
+import { emptyThreadLog, applyThreadEvent } from "../as-thread-log";
 import { itemToolCall, projectInteraction, projectResponse, projectThreadOptions, turnRunEvent } from "../as-project-events";
 import type { RunEvent, CatchupEvent } from "./run-bus";
-import { isShadowEnabled } from "../as-config";
+import { isAgentServerEnabled } from "../as-config";
 import { getAdoption } from "./as-adopt";
 import { adoptionTurns } from "../as-adopt";
 
@@ -109,7 +109,7 @@ export class ProjectRun {
   }
   private snapshot(snapshot: AttachResult) {
     if (snapshot.thread.id !== this.threadId) return;
-    this.log = applyShadowEvent(this.log, { type: "snapshot", snapshot });
+    this.log = applyThreadEvent(this.log, { type: "snapshot", snapshot });
     if (!this.turnId) {
       const user = snapshot.items.find(i => i.type === "userMessage" && i.payload.clientTurnId === this.params.clientTurnId);
       this.turnId = user?.turnId;
@@ -129,7 +129,7 @@ export class ProjectRun {
     if (!("threadId" in params) || params.threadId !== this.threadId) return;
     if (method === "turn/started" && params.turn.clientTurnId === this.params.clientTurnId) this.turnId = params.turnId;
     if ("turnId" in params && params.turnId && this.turnId && params.turnId !== this.turnId) return;
-    this.log = applyShadowEvent(this.log, { type: "notification", notification });
+    this.log = applyThreadEvent(this.log, { type: "notification", notification });
     if (method === "thread/pendingRequests") {
       // The notification supplies lifecycle state; the server request supplies
       // the actionable form. Observers need only the former.
@@ -270,7 +270,7 @@ export function detachProjectSession(sessionId: string) {
 }
 
 export async function startProjectRun(args: { nodeId: string; prompt: string; attachments: { path: string; mime: string }[]; retry?: boolean; fork?: boolean; permission?: StartThreadParams["permission"]; effort?: string }) {
-  if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
+  if (!isAgentServerEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
   const node = getNode(args.nodeId)!, session = getSession(node.sessionId)!;
   const adoption = session.origin === "external" ? getAdoption(session.id) : null;
   if (session.origin === "external" && !adoption) throw new Error("收编会话不属于当前 Agent daemon");
@@ -370,7 +370,7 @@ export function projectTarget(nodeId: string) {
     : getAsTurn(nodeId);
 }
 export async function getProjectRun(nodeId: string) {
-  if (!isShadowEnabled()) return null;
+  if (!isAgentServerEnabled()) return null;
   const existing = runs.get(nodeId); if (existing) { await existing.start(); return existing; }
   const binding = getAsTurn(nodeId);
   if (!binding || getNode(nodeId)?.status !== "streaming") return null;
@@ -385,7 +385,7 @@ export function isThreadNode(nodeId: string) {
   return !!node && resolveSessionBinding(node.sessionId).type === "thread" && !!projectTarget(nodeId);
 }
 export async function withNodeThread<T>(nodeId: string, action: (client: AgentClient, threadId: string) => Promise<T>) {
-  if (!isShadowEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
+  if (!isAgentServerEnabled()) throw new DaemonUnavailable("Agent 服务已关闭");
   const binding = projectTarget(nodeId);
   if (!binding || binding.daemon_id !== daemonIdentity()) throw new Error("node has no binding to this daemon");
   const client = createProjectClient();
