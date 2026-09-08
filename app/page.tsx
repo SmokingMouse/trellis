@@ -12,7 +12,6 @@ import { SessionSidebar } from "@/components/SessionSidebar";
 import { LinearThreadView } from "@/components/LinearThreadView";
 import { TreePanel } from "@/components/TreePanel";
 import { NewQuestionPicker } from "@/components/NewQuestionPicker";
-import { Outline } from "@/components/Outline";
 import { DoneToast } from "@/components/DoneToast";
 import { TaskToast } from "@/components/TaskToast";
 import { AbortToast } from "@/components/AbortToast";
@@ -60,7 +59,10 @@ export default function Home() {
   useRunPolling();
 
   useEffect(() => {
-    hydrate();
+    // 来源列表放开后，默认最新会话可能由 Herdr 控制。直接自举深链目标，
+    // 避免先订阅其它会话的实时更新，再与深链切换争用当前会话。
+    const target = new URLSearchParams(window.location.search).get("session");
+    hydrate(target ?? undefined);
   }, [hydrate]);
 
   // S88 深链：/?session=<sid>&node=<nid>。任务页的运行历史点进来就走这条 ——
@@ -168,10 +170,6 @@ export default function Home() {
           </button>
         </>
       )}
-      {/* B1: mobile outline drawer — mounted top-level so it survives the
-          linear view (where Canvas + its rail Outline unmount). Desktop hides
-          it (md:hidden) since the rail Outline inside Canvas covers desktop. */}
-      {session && <Outline variant="drawer" />}
       {session && composeRootOpen && (
         <NewQuestionPicker onClose={() => setComposeRootOpen(false)} />
       )}

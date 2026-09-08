@@ -37,14 +37,14 @@ test("Herdr takes priority over both existing and subsequent CLI attaches", () =
   expect(listSessions().some(session => session.id === sid)).toBeTrue();
   attachSession(file, "claude", { origin: "herdr" });
   expect(getSession(sid)?.origin).toBe("herdr");
-  expect(listSessions().some(session => session.id === sid)).toBeFalse();
+  expect(listSessions().some(session => session.id === sid)).toBeTrue();
   attachSession(file);
   expect(getSession(sid)?.origin).toBe("herdr");
   expect((sqlite.getDB().prepare("SELECT kind FROM sessions WHERE id = ?").get(sid) as { kind: string }).kind).toBe("herdr");
   // Older mirrored rows are reclassified when the database opens, too.
   sqlite.getDB().prepare("UPDATE sessions SET kind = 'user' WHERE id = ?").run(sid);
   sqlite.resetDBForTests();
-  expect(listSessions().some(session => session.id === sid)).toBeFalse();
+  expect(listSessions().some(session => session.id === sid)).toBeTrue();
 });
 
 test("alive bindings lock root, branch, retry, CLI resume and UI even with stale origin", async () => {

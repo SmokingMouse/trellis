@@ -96,7 +96,6 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const noteCount = useSessionStore((s) => s.notes.length);
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
-  const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
   const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
@@ -345,32 +344,6 @@ export function Header({ isMobile }: { isMobile: boolean }) {
         </IconButton>
         {session && (
           <>
-            {/* 树形分支 icon——与左侧会话列表 ☰ 明确区分（移动端两个
-                同形三横线曾并列 Header 两端，易混）。 */}
-            {!narrowDesktopOverride && (
-              <IconButton
-                label="思维树"
-                onClick={() => setOutlineOpen(true)}
-                className="md:hidden px-2 py-1"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M6 3v12" />
-                  <circle cx="18" cy="6" r="3" />
-                  <circle cx="6" cy="18" r="3" />
-                  <path d="M18 9a9 9 0 0 1-9 9" />
-                </svg>
-              </IconButton>
-            )}
             {session.mode === "chat" && (
               <button
                 onClick={() => setChatEnhanced(!chatEnhanced)}

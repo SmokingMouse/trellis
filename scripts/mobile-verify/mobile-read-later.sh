@@ -310,35 +310,34 @@ ab eval --stdin <<'JS'
   const aside = [...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0);
   if (!aside) throw new Error('desktop sidebar missing');
   if (aside.querySelector('[data-read-later-group]')) throw new Error('read-later group visible before desktop bookmark');
-  const baseline = aside.querySelectorAll('[data-sidebar-group]').length;
+  // 只统计顶层：异步 git 状态会把子工作区收进“已合并”，与收藏操作无关。
+  const baseline = [...aside.querySelectorAll('[data-sidebar-group] > button')].filter((button) => button.style.paddingLeft === '6px').length;
   sessionStorage.setItem('mv-read-later-group-baseline', String(baseline));
   return { baselineGroups: baseline };
 })()
 JS
 ab eval "[...document.querySelectorAll('[data-thread-node-id=\"$NID\"] [aria-label=\"稍后再读\"]')].find((element) => element.offsetParent !== null)?.click(); true"
-wait_for_js "desktop read-later group" "Boolean([...document.querySelectorAll('[data-read-later-group]')].find((element) => element.offsetParent !== null))"
+wait_for_js "desktop bookmark saved" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [aria-label=\"取消稍后再读\"]'))"
 ab eval --stdin <<JS
 (() => {
   const aside = [...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0);
   const group = aside?.querySelector('[data-read-later-group]');
-  const row = group?.querySelector('[data-bookmark-node-id="$NID"]');
   const bookmark = document.querySelector('[data-thread-node-id="$NID"] [aria-label="取消稍后再读"]');
   const baseline = Number(sessionStorage.getItem('mv-read-later-group-baseline'));
-  const total = aside?.querySelectorAll('[data-sidebar-group]').length;
-  if (!group || !row || !bookmark) throw new Error('desktop bookmark UI incomplete');
-  if (!group.textContent.includes('稍后再读 (1)')) throw new Error('group label=' + group.textContent);
-  if (!row.textContent.includes('$EXPECTED_TITLE')) throw new Error('row title=' + row.textContent);
-  if (total - 1 !== baseline) throw new Error('other groups changed: baseline=' + baseline + ', total=' + total);
-  return { baselineGroups: baseline, totalWithBookmark: total, text: row.textContent.trim() };
+  const total = [...aside.querySelectorAll('[data-sidebar-group] > button')].filter((button) => button.style.paddingLeft === '6px').length;
+  if (group) throw new Error('retired read-later sidebar group reappeared');
+  if (!bookmark) throw new Error('desktop bookmark action missing');
+  if (total !== baseline) throw new Error('bookmark changed sidebar groups: baseline=' + baseline + ', total=' + total);
+  return { baselineGroups: baseline, totalWithBookmark: total, saved: true };
 })()
 JS
 ab eval "[...document.querySelectorAll('[data-thread-node-id=\"$NID\"] [aria-label=\"取消稍后再读\"]')].find((element) => element.offsetParent !== null)?.click(); true"
-wait_for_js "desktop read-later group removed" "![...document.querySelectorAll('[data-read-later-group]')].some((element) => element.offsetParent !== null)"
+wait_for_js "desktop bookmark cleared" "Boolean(document.querySelector('[data-thread-node-id=\"$NID\"] [aria-label=\"稍后再读\"]'))"
 ab eval --stdin <<'JS'
 (() => {
   const aside = [...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0);
   const baseline = Number(sessionStorage.getItem('mv-read-later-group-baseline'));
-  const total = aside?.querySelectorAll('[data-sidebar-group]').length;
+  const total = [...aside.querySelectorAll('[data-sidebar-group] > button')].filter((button) => button.style.paddingLeft === '6px').length;
   if (total !== baseline) throw new Error(`groups after clear=${total}, baseline=${baseline}`);
   return { groupsAfterClear: total };
 })()
@@ -390,4 +389,4 @@ ab eval --stdin <<JS
 JS
 ab click '[data-mobile-target="bookmarks-close"]'
 
-echo "PASS: card-level read-later bookmark, deep link, mobile sheet, desktop group, independent read state, cross-device reconciliation, and windowed load-more pagination"
+echo "PASS: card-level read-later bookmark, deep link, mobile sheet, retired desktop group stays absent, independent read state, cross-device reconciliation, and windowed load-more pagination"
