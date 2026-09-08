@@ -1,4 +1,4 @@
-.as-shadow { max-width: 1200px; height: 100dvh; overflow-y: auto; margin: auto; padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); color: var(--ink); overflow-wrap: anywhere; }
+.as-shadow { max-width: 1200px; height: 100dvh; overflow-y: auto; margin: auto; padding: max(24px, var(--safe-top)) max(20px, var(--safe-right)) max(32px, var(--safe-bottom)) max(20px, var(--safe-left)); color: var(--ink); overflow-wrap: anywhere; }
 .as-shadow button, .as-back { min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; cursor: pointer; touch-action: manipulation; }
 .as-shadow button:focus-visible, .as-back:focus-visible { outline: 2px solid #168577; outline-offset: 3px; }
 .as-shadow button:disabled { opacity: .5; cursor: wait; }
@@ -30,7 +30,7 @@
 .as-approval { margin-top: 16px; padding: 16px; border: 1px solid #be9238; border-radius: 8px; background: #be92380c; font-size: 13px; }
 .as-approval p { margin: 8px 0; }
 .as-turn-status { font-size: 12px; margin: 12px 0; opacity: .7; }
-.as-shadow .as-follow { position: fixed; right: 24px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 20; background: var(--surface-canvas); border: 1px solid #168577; box-shadow: 0 2px 12px #0003; }
+.as-shadow .as-follow { position: fixed; right: 24px; bottom: max(16px, var(--safe-bottom)); z-index: 20; background: var(--surface-canvas); border: 1px solid #168577; box-shadow: 0 2px 12px #0003; }
 .as-placeholder { text-align: center; padding: 90px 20px; }
 .as-placeholder > span { font-size: 44px; color: #168577; }
 .as-placeholder h2 { margin: 12px 0; font-size: 20px; }

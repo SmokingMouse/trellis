@@ -37,7 +37,7 @@ trap 'exit 129' 1
 trap 'exit 130' 2
 trap 'exit 143' 15
 fail() { echo "FAIL: $*" >&2; exit 1; }
-for tool in bun agent-browser curl lsof; do command -v "$tool" >/dev/null || fail "missing $tool"; done
+for tool in bun agent-browser curl lsof sqlite3; do command -v "$tool" >/dev/null || fail "missing $tool"; done
 tries=0
 until mkdir "$LOCK_DIR" 2>/dev/null; do
   tries=$((tries + 1)); [ "$tries" -lt 180 ] || fail "mobile verify lock timeout"
@@ -53,6 +53,11 @@ export no_proxy='*' http_proxy='' https_proxy='' ALL_PROXY=''
 export TRELLIS_DB_PATH="$H/trellis.db" TRELLIS_LARK=off
 export TRELLIS_AS_SOCKET="$H/as.sock" TRELLIS_AS_TOKEN_PATH="$H/.agent-server/token"
 export TRELLIS_AUTH_PASS=as-shadow-pass TRELLIS_AUTH_TOKEN=as-shadow-token
+if [ -n "${TRELLIS_VERIFY_SOURCE_DB:-}" ]; then
+  [ -f "$TRELLIS_VERIFY_SOURCE_DB" ] || fail 'source database missing'
+  sqlite3 "$TRELLIS_VERIFY_SOURCE_DB" ".backup '$TRELLIS_DB_PATH'"
+  echo 'PASS: verification uses a SQLite backup of the source database'
+fi
 
 wait_file() {
   tries=0

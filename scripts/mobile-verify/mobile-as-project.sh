@@ -43,6 +43,11 @@ export no_proxy='*' http_proxy='' https_proxy='' ALL_PROXY=''
 export TRELLIS_DB_PATH="$H/trellis.db" TRELLIS_LARK=off TRELLIS_AS=on TRELLIS_AS_PROJECT=on
 export TRELLIS_AS_SOCKET="$H/as.sock" TRELLIS_AS_TOKEN_PATH="$H/.agent-server/token"
 export TRELLIS_AUTH_PASS=as-project-pass TRELLIS_AUTH_TOKEN=as-project-token
+if [ -n "${TRELLIS_VERIFY_SOURCE_DB:-}" ]; then
+  [ -f "$TRELLIS_VERIFY_SOURCE_DB" ] || fail 'source database missing'
+  sqlite3 "$TRELLIS_VERIFY_SOURCE_DB" ".backup '$TRELLIS_DB_PATH'"
+  echo 'PASS: verification uses a SQLite backup of the source database'
+fi
 wait_file() { tries=0; until [ -s "$1" ]; do tries=$((tries+1)); [ "$tries" -lt 90 ] || fail "missing $1"; sleep 1; done; }
 wait_js() {
   label=$1; expression=$2; tries=0
