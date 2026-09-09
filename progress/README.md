@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-侧栏 IA 收官：工具条+项目树上线，会话内树面板按用户要求原样恢复旧版，地图从画布按钮打开；剩 FJ_RUNNER_DEFAULT、待办层、非 git 项目归属等拍板，观察一天后 AS 切流扩到全部项目。
+侧栏 IA 收官（工具条+项目树、旧树面板原样、地图）、收编、待办层均已上线，默认 runner 已切 codex-tui；观察一天后 AS 切流扩到全部项目，再清 backlog P1。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S169） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S170） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

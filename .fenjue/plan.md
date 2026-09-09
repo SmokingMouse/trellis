@@ -758,3 +758,5 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-structure-floating-panel-7b4f
 - [ ] restore-tree-panel: 树面板原样恢复到波 3 之前（013adb9 的 TreePanel/Outline 逐字恢复），删新结构面板，地图挂回旧画布按钮，逐项 DOM 对照旧截图 | after: structure-floating-panel | kind: codex
   cid: fj-restore-tree-panel-ccd2
+- [ ] pending-bar: 待办层：Header 下跨会话「等你处理」横条（跳转/就地允许拒绝/撤卡），审批卡按钮主次分明，手机复用等待横幅，不新增轮询 | after: ui-audit | kind: codex
+  cid: fj-pending-bar-5cfe
