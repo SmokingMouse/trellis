@@ -8,6 +8,8 @@
 
 ## 已结案
 
+- **波四地图的网格掩盖父子关系，小图标题不可读**（fj-canvas-map-layout-3a3c）→ `resolved`。症状：6 节点链被排成多列网格，边绕到标题栏，默认缩放仍截断小字。可证伪假设：深度优先序号直接映射网格坐标，同时退化阈值 1.15 高于自动适配上限 1。复用 dagre 层级树、层间正交连线，改为真实视口居中适配与 0.9 退化阈值后，指定 6/124 节点快照两端全部入屏，边零交叉零穿卡。判定命令：`bun test lib/canvas-map.test.ts`；生产快照几何证据：`bun /Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-canvas-map-layout-3a3c/out/geometry.ts`。两次 flag 构建、同视口截图与 proof 见同目录 `result.md`。
+
 - **收编事件 E2E 多节点选择器误点与计数范围错误**（fj-as-controls-polish-dfcc）→ `resolved`。症状：点击后目标日志未展开，刷新后全页事件数不等于单节点 5 条。可证伪假设：线性会话的四个节点同时挂载，通用 selector 落到视口外首节点并把四份列表一起计数。改为 nodeId 限定、点击前 scrollIntoView、节点内统计，统一前缀 `sh scripts/mobile-verify/mobile-as-adopt.sh` 完整 exit 0。初轮 exit 1 与诊断轮主动终止 exit 143 日志保留在契约 out/mobile-as-adopt-first.log、mobile-as-adopt-diagnostic.log；最终证据 mobile-as-adopt.log。
 
 ||||||| 0f126ab

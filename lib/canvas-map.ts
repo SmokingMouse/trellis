@@ -1,5 +1,6 @@
 import type { ChatNode } from "./types";
 import { buildStructure } from "./structure-panel";
+import dagre from "@dagrejs/dagre";
 
 // Build-time rollback: keep the old reader for one release.
 export const CANVAS_MAP = process.env.NEXT_PUBLIC_TRELLIS_CANVAS_MAP !== "off" && process.env.NEXT_PUBLIC_TRELLIS_CANVAS_MAP !== "0";
@@ -13,37 +14,78 @@ export function migrateMapUrl(url: URL, enabled = CANVAS_MAP) {
   }
   return url;
 }
-export const MAP_COMPACT_ZOOM = 1.15;
+// Below 0.9 show a colour block + short label; at/above it show a readable title.
+export const MAP_COMPACT_ZOOM = 0.9;
 export const mapCompact = (zoom: number) => zoom < MAP_COMPACT_ZOOM;
-export const MAP_FIT_OPTIONS = { padding: 0.035, minZoom: 0.01, maxZoom: 1, duration: 0 };
+export const MAP_FIT_OPTIONS = { padding: 16, minZoom: 0.01, maxZoom: 1.4, duration: 0 };
 export const shouldFitMap = (ready: boolean, key: string, fitted: string | null) => ready && key !== fitted;
 
-/** Pack complete topics into balanced lanes. Wrap each depth-first sequence;
- * edges retain parentage, numbering retains reading order. Never omit nodes,
- * aggregate them, or use the reader's collapsed state to hide branches.
+export type MapSize = { width: number; height: number };
+export type MapRect = MapSize & { x: number; y: number };
+export const MAP_RANK_GAP = 32;
+export const MAP_SIBLING_GAP = 28;
+export const MAP_TOPIC_HEADER = 44;
+export function mapViewport(bounds: MapRect, viewport: MapSize) {
+  const zoom = Math.max(MAP_FIT_OPTIONS.minZoom, Math.min(MAP_FIT_OPTIONS.maxZoom,
+    Math.max(1, viewport.width - 32) / Math.max(1, bounds.width),
+    Math.max(1, viewport.height - 32) / Math.max(1, bounds.height)));
+  return { x: (viewport.width - bounds.width * zoom) / 2 - bounds.x * zoom,
+    y: (viewport.height - bounds.height * zoom) / 2 - bounds.y * zoom, zoom };
+}
+
+/** Each topic is an independent top-down dagre tree. Shelf packing wraps whole
+ * topics, never nodes. Edges stay in the empty rank corridor below the parent.
  */
-export function layoutMap(nodes: Record<string, ChatNode>, mobile: boolean) {
+export function layoutMap(nodes: Record<string, ChatNode>, mobile: boolean, viewport: MapSize = { width: mobile ? 390 : 1390, height: mobile ? 720 : 770 }) {
   const forest = buildStructure(nodes, null).forest;
-  const lanes = mobile ? 2 : 3, columns = mobile ? 3 : 4;
-  const width = mobile ? 49 : 80, height = mobile ? 22 : 32;
-  const gap = mobile ? 5 : 12, rowGap = mobile ? 5 : 18;
-  const laneWidth = columns * (width + gap) + 12;
-  const bottoms = Array(lanes).fill(0) as number[];
+  // On phones, a large forest uses narrow overview cards so wide branching
+  // topics do not consume the entire width while leaving the height unused.
+  const width = mobile ? (Object.keys(nodes).length > 20 ? 160 : 320) : 420;
+  const height = 80, padding = 16, topicGap = 32;
   const positions = new Map<string, { x: number; y: number; width: number; height: number; topic: number; parentId: string | null }>();
   const topics: { id: string; x: number; y: number; width: number; height: number; topic: number }[] = [];
-  forest.forEach((tree, topic) => {
-    const lane = bottoms.indexOf(Math.min(...bottoms));
-    const x = lane * laneWidth, y = bottoms[lane];
+  const trees = forest.map(tree => {
     const flat: typeof tree[] = [];
     const visit = (t: typeof tree) => { flat.push(t); t.children.forEach(visit); };
     visit(tree);
-    flat.forEach((t, i) => positions.set(t.node.id, {
-      x: x + 5 + (i % columns) * (width + gap), y: y + 26 + Math.floor(i / columns) * (height + rowGap),
-      width, height, topic, parentId: t.node.parentId,
-    }));
-    const boxHeight = 28 + Math.ceil(flat.length / columns) * (height + rowGap);
-    topics.push({ id: tree.node.id, x, y, width: laneWidth - 6, height: boxHeight, topic });
-    bottoms[lane] += boxHeight + 8;
+    const graph = new dagre.graphlib.Graph().setGraph({ rankdir: "TB", nodesep: MAP_SIBLING_GAP, ranksep: MAP_RANK_GAP });
+    graph.setDefaultEdgeLabel(() => ({}));
+    flat.forEach(t => graph.setNode(t.node.id, { width, height }));
+    flat.forEach(t => t.children.forEach(child => graph.setEdge(t.node.id, child.node.id)));
+    dagre.layout(graph);
+    return { tree, flat, graph, width: graph.graph().width! + 2 * padding, height: graph.graph().height! + MAP_TOPIC_HEADER + padding };
   });
-  return { positions, topics };
+  const area = trees.reduce((sum, t) => sum + (t.width + topicGap) * (t.height + topicGap), 0);
+  const wrapWidth = Math.max(viewport.width, ...trees.map(t => t.width), Math.sqrt(area * viewport.width / Math.max(1, viewport.height)));
+  let x = 0, y = 0, rowHeight = 0;
+  trees.forEach((t, topic) => {
+    if (x && x + t.width > wrapWidth) { x = 0; y += rowHeight + topicGap; rowHeight = 0; }
+    t.flat.forEach(({ node }) => positions.set(node.id, {
+      x: x + padding + t.graph.node(node.id).x - width / 2,
+      y: y + MAP_TOPIC_HEADER + t.graph.node(node.id).y - height / 2,
+      width, height, topic, parentId: node.id === t.tree.node.id ? null : node.parentId,
+    }));
+    topics.push({ id: t.tree.node.id, x, y, width: t.width, height: t.height, topic });
+    x += t.width + topicGap;
+    rowHeight = Math.max(rowHeight, t.height);
+  });
+  const bounds = { x: 0, y: 0, width: Math.max(0, ...topics.map(t => t.x + t.width)), height: Math.max(0, ...topics.map(t => t.y + t.height)) };
+  if (topics.length === 1) {
+    const zoom = mapViewport(bounds, viewport).zoom;
+    const extraX = Math.max(0, (viewport.width - 32) / zoom - bounds.width);
+    const extraY = Math.max(0, (viewport.height - 32) / zoom - bounds.height);
+    positions.forEach(p => { p.x += extraX / 2; p.y += extraY / 2; });
+    topics[0].width = bounds.width += extraX;
+    topics[0].height = bounds.height += extraY;
+  }
+  const edges = [...positions].flatMap(([id, p]) => {
+    const parent = p.parentId ? positions.get(p.parentId) : null;
+    if (!parent || parent.topic !== p.topic) return [];
+    const source = { x: parent.x + parent.width / 2, y: parent.y + parent.height };
+    const target = { x: p.x + p.width / 2, y: p.y };
+    return [{ id: `e:${id}`, source: p.parentId!, target: id, points: [source,
+      { x: source.x, y: (source.y + target.y) / 2 },
+      { x: target.x, y: (source.y + target.y) / 2 }, target] }];
+  });
+  return { positions, topics, bounds, edges };
 }

@@ -13,3 +13,13 @@
 证据：`/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-sidebar-wave4-7058/out/result.md`。
 
 Next：主控独立验收；仅本地提交，不 push、不 PR、不部署。
+
+## 地图布局返工（fj-canvas-map-layout-3a3c）
+
+- 生产按用户反馈回滚波三；本次只修改地图布局、渲染与单测。复用现有 dagre，话题内自上而下层级树，层距 32、兄弟间距 28；正交边走父底到子顶的层间空隙，话题按视口比例流式排列，单话题背景铺满可用区域。
+- 基于实际视口与完整边界居中适配，最大缩放 1.4；低于 0.9 才退化为色块与标签，否则显示三行 16px 标题。手机超过 20 节点使用窄概览卡，避免宽分支压缩整个地图。
+- 生产快照指定 6 节点链、124 节点 / 10 话题，两端均全量入屏；6 节点桌面缩放 1.05214、手机 1.01705。两会话两视口的几何检查均零重叠、零跨父连线交叉、零穿卡或标题栏；旧画布 flag-off 对照完成并恢复默认构建。
+- `bunx tsc --noEmit` exit 0；`bun test` 311 pass / 0 fail；契约统一环境前缀下 11 条手机脚本独占串行全部 exit 0。对照截图、浏览器计数、原始验证日志与复现脚本见 `/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-canvas-map-layout-3a3c/out/result.md`。
+- 捕获流程曾因桌面缩为手机后结构面板关闭、旧会话初态已是 canvas 而盲等 linear DOM；最终按各视口真实入口重开，接受旧 canvas 初态，统一清洁环境后全部对照成功，不修改产品来迎合捕获脚本。
+
+Next：主控独立验收、合并与部署；本分支仅本地提交。
