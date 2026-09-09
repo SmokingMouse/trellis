@@ -756,3 +756,5 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-canvas-map-layout-3a3c
 - [ ] structure-floating-panel: 结构面板改回小浮窗+小点形态（用户裁决）：右下角浮动小窗、行首状态圆点、内容模型不变、正文列宽恢复、Composer 不被遮，对照旧截图 | after: canvas-map-layout | kind: codex
   cid: fj-structure-floating-panel-7b4f
+- [ ] restore-tree-panel: 树面板原样恢复到波 3 之前（013adb9 的 TreePanel/Outline 逐字恢复），删新结构面板，地图挂回旧画布按钮，逐项 DOM 对照旧截图 | after: structure-floating-panel | kind: codex
+  cid: fj-restore-tree-panel-ccd2
