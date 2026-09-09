@@ -4,13 +4,14 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 
-PORT=3474
+PORT=${TRELLIS_VERIFY_PORT:-3474}
 BASE="http://127.0.0.1:$PORT"
 H=/tmp/trellis-mv-mobile-followup-approval
 DB="$H/.trellis/data.db"
-SOURCE_DB="$HOME/.trellis/data.db"
+SOURCE_DB=${TRELLIS_VERIFY_SOURCE_DB:-"$HOME/.trellis/data.db"}
 SESSION=mv-mobile-followup-approval
 OUT="$H/out"
+SHOTS=${TRELLIS_VERIFY_SHOTS:-"$OUT/shots"}
 AUTH_PASS=mv-mobile-followup-approval-pass
 AUTH_TOKEN=mv-mobile-followup-approval-token
 SERVER_PID=
@@ -88,9 +89,13 @@ print_page_diagnostics() {
   ab eval --stdin <<'JS' || true
 (() => {
   const body = (document.body?.innerText || document.body?.textContent || '').slice(0, 500);
-  return `location=${location.href}\ntitle=${document.title}\nbody=${body}`;
+  const state = document.querySelector('[data-active-session-id]')?.dataset;
+  return `location=${location.href}\nactiveSessionId=${state?.activeSessionId}\nactiveNodeId=${state?.activeNodeId}\ntitle=${document.title}\nbody=${body}`;
 })()
 JS
+  ab console || true
+  ab errors || true
+  ab network requests --filter /api/sessions/ || true
 }
 
 wait_for_js() {
@@ -174,7 +179,7 @@ if ! grep -R -F "$VERIFY_LITERAL" "$VERIFY_DIST/static/chunks" >/dev/null 2>&1; 
   exit 1
 fi
 
-mkdir -p "$H/.trellis" "$OUT"
+mkdir -p "$H/.trellis" "$OUT" "$SHOTS"
 rm -f "$DB" "$DB-shm" "$DB-wal"
 sqlite3 "$SOURCE_DB" ".backup $DB"
 sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_secret='invalid';"
@@ -187,6 +192,7 @@ sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_s
   export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
   export TRELLIS_DIST_DIR="$VERIFY_DIST"
   export NEXT_PUBLIC_TRELLIS_VERIFY=1
+  export TRELLIS_VERIFY_PENDING=1
   exec bun --bun run start -- -p "$PORT"
 ) >"$H/server.log" 2>&1 &
 SERVER_PID=$!
@@ -214,7 +220,8 @@ INSERT INTO sessions
   (id,title,root_node_id,created_at,updated_at,context_mode,archived,require_approval,kind,title_source)
 VALUES
   ('mv-followup-reading-session','Mobile followup reading fixture','mv-followup-reading',1893456100000,1893456101000,'chat',0,0,'user','default'),
-  ('mv-followup-wait-session','Mobile waiting approval fixture','mv-followup-wait-root',1893456200000,1893456202000,'chat',0,1,'user','default');
+  ('mv-followup-wait-session','工作区检查','mv-followup-wait-root',1893456200000,1893456202000,'chat',0,1,'user','default'),
+  ('mv-followup-other-session','发布前确认','mv-followup-permission-2',1893456200000,1893456203000,'chat',0,1,'user','default');
 
 INSERT INTO nodes
   (id,session_id,parent_id,parent_anchor_text,question,response,status,sibling_index,created_at,read_at,pending_interaction_json)
@@ -222,7 +229,7 @@ VALUES
   ('mv-followup-reading','mv-followup-reading-session',NULL,NULL,'验证手机阅读与追问闭环','placeholder','done',0,1893456100000,NULL,NULL),
   ('mv-followup-wait-root','mv-followup-wait-session',NULL,NULL,'先阅读，再处理审批','等待项横幅应当把人带到待审批卡片。','done',0,1893456200000,NULL,NULL),
   ('mv-followup-permission','mv-followup-wait-session','mv-followup-wait-root',NULL,'运行安全的 fixture 命令','','done',0,1893456202000,NULL,'{"toolUseId":"mv-followup-tool","toolName":"Bash","input":{"command":"echo mobile-followup-fixture","description":"只用于手机审批布局验收"}}'),
-  ('mv-followup-permission-2','mv-followup-wait-session','mv-followup-wait-root',NULL,'检查第二个等待项','','done',1,1893456203000,NULL,'{"toolUseId":"mv-followup-tool-2","toolName":"Bash","input":{"command":"echo mobile-followup-fixture-2","description":"用于等待横幅轮转验收"}}');
+  ('mv-followup-permission-2','mv-followup-other-session',NULL,NULL,'检查第二个等待项','','done',1,1893456203000,NULL,'{"toolUseId":"mv-followup-tool-2","toolName":"Bash","input":{"command":"echo mobile-followup-fixture-2","description":"确认发布目录内容"}}');
 
 UPDATE nodes
 SET response = (
@@ -454,30 +461,38 @@ ab eval --stdin <<'JS'
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   const banner = document.querySelector('[data-mobile-waiting-banner]');
   assert(banner?.textContent.includes('有 2 项等你处理'), `banner=${banner?.textContent}`);
-  assert(banner?.textContent.includes('跳到下一项'), `banner action copy=${banner?.textContent}`);
+  assert(banner?.textContent.includes('查看待办'), `banner action copy=${banner?.textContent}`);
   const rect = banner.getBoundingClientRect();
   assert(rect.height >= 44, `banner height=${rect.height}`);
   return { text: banner.textContent.trim(), height: rect.height };
 })()
 JS
+ab screenshot "$SHOTS/mobile-banner.png"
 ab click '[data-mobile-waiting-banner]'
+wait_for_js "pending sheet opens" "document.querySelector('[data-pending-sheet]')?.open === true"
+ab screenshot "$SHOTS/mobile-sheet.png"
+ab click '[data-pending-sheet] [data-pending-item="mv-followup-permission:mv-followup-tool"] [data-pending-jump]'
 wait_for_js "approval node selected" "Boolean(document.querySelector('[data-thread-node-id=mv-followup-permission] [data-mobile-interaction]'))"
 wait_for_js "approval card in viewport" "(() => { const r=document.querySelector('[data-thread-node-id=mv-followup-permission] [data-mobile-interaction]')?.getBoundingClientRect(); return Boolean(r && r.top >= 0 && r.top < innerHeight && r.bottom > 0); })()"
 ab click '[data-mobile-waiting-banner]'
+wait_for_js "pending sheet reopens" "document.querySelector('[data-pending-sheet]')?.open === true"
+ab click '[data-pending-sheet] [data-pending-item="mv-followup-permission-2:mv-followup-tool-2"] [data-pending-jump]'
 wait_for_js "waiting banner rotates to second item" "Boolean(document.querySelector('[data-thread-node-id=mv-followup-permission-2] [data-mobile-interaction]'))"
 wait_for_js "second approval card in viewport" "(() => { const r=document.querySelector('[data-thread-node-id=mv-followup-permission-2] [data-mobile-interaction]')?.getBoundingClientRect(); return Boolean(r && r.top >= 0 && r.top < innerHeight && r.bottom > 0); })()"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const names = ['permission-allow', 'permission-always', 'permission-deny'];
+  const names = ['permission-allow', 'permission-deny', 'permission-always'];
   const rects = names.map((name) => {
     const button = document.querySelector(`[data-mobile-target="${name}"]`);
     const rect = button?.getBoundingClientRect();
     assert(rect && rect.width >= 44 && rect.height >= 44, `${name} below 44px`);
     return { name, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
   });
-  assert(rects[1].top - rects[0].bottom >= 12, `allow/always gap=${rects[1].top - rects[0].bottom}`);
-  assert(rects[2].top - rects[1].bottom >= 20, `always/deny gap=${rects[2].top - rects[1].bottom}`);
+  assert(rects[1].top > rects[0].bottom, 'deny follows primary action');
+  assert(rects[2].top > rects[1].bottom, 'always is last');
+  assert(rects[2].width < rects[0].width, 'always is narrower than primary');
+  assert(!document.querySelector('[data-mobile-target=permission-always]').className.includes('bg-accent'), 'always has no accent background');
   const rail = document.querySelector('[data-safe-area="linear-composer"]');
   assert(rail?.dataset.composerHidden === 'false', `waiting Composer hidden=${rail?.dataset.composerHidden}`);
   return rects;
@@ -572,17 +587,58 @@ ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   assert(!document.querySelector('[data-mobile-waiting-banner]'), 'waiting banner leaked onto desktop');
-  const specs = [
-    ['permission-allow', 76.39, 34.75],
-    ['permission-always', 128.39, 36.75],
-    ['permission-deny', 78.39, 36.75],
-  ];
-  return specs.map(([target, width, height]) => {
-    const rect = document.querySelector(`[data-mobile-target="${target}"]`)?.getBoundingClientRect();
-    assert(rect && Math.abs(rect.width - width) <= 0.25 && Math.abs(rect.height - height) <= 0.25, `${target}=${rect?.width}x${rect?.height}`);
-    return { target, width: rect.width, height: rect.height };
-  });
+  const primary = document.querySelector('[data-mobile-target=permission-allow]');
+  const always = document.querySelector('[data-mobile-target=permission-always]');
+  assert(primary.textContent.trim() === '允许一次', 'primary copy');
+  assert(primary.getBoundingClientRect().width > always.getBoundingClientRect().width, 'primary is wider');
+  assert(primary.className.includes('bg-accent ') && !always.className.includes('bg-accent'), 'action hierarchy');
+  assert(document.querySelector('[data-pending-bar=desktop]'), 'desktop pending bar missing');
+  return true;
 })()
 JS
+
+echo "== pending cross-session navigation and real run-bus decisions =="
+ab set viewport 1440 900
+ab open "$READ_URL"
+wait_for_js "desktop reading session hydrated before pending actions" "document.querySelector('[data-active-session-id]')?.dataset.activeSessionId === 'mv-followup-reading-session'"
+ab eval --stdin <<'JS'
+(async () => {
+  const measurements = [];
+  for (let i = 0; i < 3; i++) {
+    const url = `/api/sessions/mv-followup-reading-session?timing=${i}`;
+    const response = await fetch(url);
+    await response.json();
+    const timing = performance.getEntriesByName(new URL(url, location.href).href).at(-1);
+    measurements.push({ duration: timing?.duration, serverTiming: response.headers.get('server-timing') });
+  }
+  console.log('pending session timings', JSON.stringify(measurements));
+  if (measurements.some(m => m.duration === undefined || m.duration >= 300)) throw new Error(`session latency >=300ms: ${JSON.stringify(measurements)}`);
+  return measurements;
+})()
+JS
+wait_for_js "desktop multi collapsed" "document.querySelector('[data-pending-toggle]')?.getAttribute('aria-expanded') === 'false'"
+ab screenshot "$SHOTS/desktop-multi-collapsed.png"
+ab click '[data-pending-toggle]'
+wait_for_js "desktop multi expanded" "document.querySelectorAll('[data-pending-item]').length === 2"
+ab screenshot "$SHOTS/desktop-multi-expanded.png"
+ab click '[data-pending-item="mv-followup-permission:mv-followup-tool"] [data-pending-jump]'
+wait_for_js "cross-session jump to approval" "location.search.includes('session=mv-followup-wait-session') && Boolean(document.querySelector('[data-mobile-target=permission-allow]'))"
+wait_for_js "jump focuses approval card" "document.activeElement?.hasAttribute('data-mobile-interaction') === true"
+ab screenshot "$SHOTS/desktop-approval-hierarchy.png"
+
+for node in mv-followup-permission mv-followup-permission-2; do
+  curl --noproxy '*' -fsS -b "trellis_auth=$AUTH_TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"nodeId\":\"$node\"}" "$BASE/api/internal/verify/pending" >/dev/null
+done
+ab click '[data-pending-toggle]'
+wait_for_js "pending expanded for inline approval" "document.querySelectorAll('[data-pending-item]').length === 2"
+ab click '[data-pending-item="mv-followup-permission:mv-followup-tool"] [data-pending-allow]'
+wait_for_js "inline allow removes first request" "document.querySelectorAll('[data-pending-item]').length === 1 && !document.querySelector('[data-pending-item=\"mv-followup-permission:mv-followup-tool\"]')"
+test "$(sqlite3 "$DB" "SELECT pending_interaction_json IS NULL FROM nodes WHERE id='mv-followup-permission'")" = 1
+ab screenshot "$SHOTS/desktop-single.png"
+ab click '[data-pending-allow]'
+wait_for_js "inline allow removes final request" "!document.querySelector('[data-pending-bar]')"
+test "$(sqlite3 "$DB" "SELECT pending_interaction_json IS NULL FROM nodes WHERE id='mv-followup-permission-2'")" = 1
+ab screenshot "$SHOTS/desktop-after-allow.png"
 
 echo "PASS: mobile followup, approval, waiting banner, compact Composer, and desktop baselines"

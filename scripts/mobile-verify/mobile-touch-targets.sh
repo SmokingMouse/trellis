@@ -523,7 +523,7 @@ wait_for_fixture_node
 ab scrollintoview '[data-thread-node-id="mv-touch-done"]'
 wait_for_js "desktop answer actions visible" "Boolean(document.querySelector('[data-thread-node-id=mv-touch-done] [data-mobile-target=node-branch]'))"
 
-echo "== desktop 1280x800: unchanged baseline =="
+echo "== desktop 1280x800: approval hierarchy and unchanged surrounding baseline =="
 ab eval --stdin <<'JS'
 (() => {
   const specs = [
@@ -532,8 +532,7 @@ ab eval --stdin <<'JS'
     ['drawer attach', '[data-mobile-target="drawer-attach"]', 193, 28],
     ['session row', '[data-mobile-target="session-row"]', 201, 26],
     // Chain rows moved to the in-session TreePanel; no desktop sidebar leaf below sessions.
-    ['permission allow', '[data-mobile-target="permission-allow"]', 76.39, 34.75],
-    ['permission always', '[data-mobile-target="permission-always"]', 128.39, 36.75],
+    ['permission allow', '[data-mobile-target="permission-allow"]', 144, 34.75],
     ['permission deny', '[data-mobile-target="permission-deny"]', 78.39, 36.75],
     ['code copy', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="code-copy"]', 38, 19.88],
     ['mark read toggle', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-read-toggle"]', 25, 21],
@@ -545,6 +544,11 @@ ab eval --stdin <<'JS'
     ['new tree entry', '[data-mobile-target="new-tree-open"]', 55.28, 32],
   ];
   const tolerance = 0.25;
+  const allow = document.querySelector('[data-mobile-target="permission-allow"]');
+  const always = document.querySelector('[data-mobile-target="permission-always"]');
+  if (!allow || !always || always.getBoundingClientRect().width >= allow.getBoundingClientRect().width || always.classList.contains('bg-accent')) {
+    throw new Error('always allow must remain a narrower tertiary action');
+  }
   const results = specs.map(([name, selector, expectedWidth, expectedHeight]) => {
     const el = document.querySelector(selector);
     if (!el) throw new Error(`${name}: missing ${selector}`);

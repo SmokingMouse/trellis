@@ -1,8 +1,10 @@
 "use client";
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { bindPageStream } from "@/lib/page-stream";
 
 type CliSyncEvent =
+  | ({ type: "pending_snapshot" } & import("@/lib/pending").PendingSnapshot)
   | { type: "session_updated"; sessionId: string }
   | { type: "ping" };
 
@@ -12,21 +14,22 @@ export function useCliSyncEvents(): void {
   const markSessionLive = useSessionStore((s) => s.markSessionLive);
 
   useEffect(() => {
-    const ctrl = new AbortController();
+    let ctrl = new AbortController();
     let cancelled = false;
     let retryTimer = 0;
 
     async function run() {
+      const signal = ctrl.signal;
       try {
         const res = await fetch("/api/cli-sync/events", {
-          signal: ctrl.signal,
+          signal,
           headers: { Accept: "text/event-stream" },
         });
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        while (!cancelled) {
+        while (!cancelled && !signal.aborted) {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -38,6 +41,7 @@ export function useCliSyncEvents(): void {
               .find((l) => l.startsWith("data: "));
             if (!line) continue;
             const event = JSON.parse(line.slice(6)) as CliSyncEvent;
+            if (event.type === "pending_snapshot") { useSessionStore.getState().ingestPending(event); continue; }
             if (event.type !== "session_updated") continue;
             // live 感知：收到更新 = 该 session 正被实时写（claude 在驱动它）。
             markSessionLive(event.sessionId);
@@ -57,17 +61,23 @@ export function useCliSyncEvents(): void {
       } catch {
         /* transient — retry below while mounted */
       } finally {
-        if (!cancelled) {
+        if (!cancelled && !signal.aborted) {
           retryTimer = window.setTimeout(run, 2000);
         }
       }
     }
 
     void run();
-    return () => {
+    const stop = () => {
       cancelled = true;
       if (retryTimer) window.clearTimeout(retryTimer);
       ctrl.abort();
     };
+    return bindPageStream(window, stop, () => {
+      if (!cancelled) return;
+      cancelled = false;
+      ctrl = new AbortController();
+      void run();
+    });
   }, [bumpSessionsRevision, loadSession, markSessionLive]);
 }

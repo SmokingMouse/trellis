@@ -1,4 +1,5 @@
 import "server-only";
+import { persistPendingInteractions } from "./repo";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
@@ -146,12 +147,12 @@ export function adoptSnapshot(snapshot: AttachResult, turns: Record<string, Turn
         const call = calls.find(c => c.id === item.payload.parentItemId);
         if (call) call.agent = {taskType:item.payload.kind === "agent" ? "local_agent" : item.payload.kind === "bash" ? "local_bash" : "local_workflow",phase:item.payload.phase,summary:item.payload.text};
       }
-      const pending = snapshot.pendingRequests.find(r => r.params.turnId === turn.id);
-      const interaction = pending ? projectInteraction(pending) : null;
+      const pending = snapshot.pendingRequests.filter(r => r.params.turnId === turn.id).map(projectInteraction);
+      const interaction = pending.length ? { ...pending[0], ...(pending.length > 1 ? { additional: pending.slice(1) } : {}) } : null;
       const status = ["queued","inProgress"].includes(turn.status) ? "streaming" : turn.status === "completed" ? "done" : "error";
       if (node.response !== response || JSON.stringify(node.toolCalls) !== JSON.stringify(calls) || node.status !== status || JSON.stringify(node.pendingInteraction) !== JSON.stringify(interaction)) {
         db.prepare("UPDATE nodes SET response=?,tool_calls_json=?,status=?,final_start=? WHERE id=?").run(response,JSON.stringify(calls),status,finalStart,nodeId);
-        if (interaction) persistPendingInteraction(nodeId,interaction); else clearPendingInteraction(nodeId);
+        persistPendingInteractions(nodeId, pending);
         if (status !== "streaming") finalizeNode({nodeId,status,errorMessage:status === "error" ? turn.error?.message ?? turn.status : undefined,
           tokenInput:turn.usage?.inputTokens ?? node.tokenCount.input,tokenOutput:turn.usage?.outputTokens ?? node.tokenCount.output,
           tokenCacheRead:turn.usage?.cachedTokens ?? node.tokenCount.cacheRead,tokenCacheCreation:turn.usage?.cacheCreation ?? node.tokenCount.cacheCreation,
@@ -226,6 +227,13 @@ export class AdoptionService {
             getDB().prepare(`UPDATE as_turns SET resolved_json=? WHERE daemon_id=? AND thread_id=? AND node_id IN
               (SELECT id FROM nodes WHERE json_extract(pending_interaction_json,'$.toolUseId')=?)`)
               .run(JSON.stringify([`已由 ${p.decidedBy.label} 处理`]),daemonIdentity(),p.threadId,p.requestId);
+          }
+          if (method === "serverRequest/resolved" || method === "serverRequest/expired" ||
+              (method === "thread/pendingRequests" && (params as {status:string}).status !== "pending")) {
+            const p = params as {threadId:string;requestId:string};
+            const rows = getDB().prepare("SELECT node_id FROM as_turns WHERE daemon_id=? AND thread_id=?")
+              .all(daemonIdentity(), p.threadId) as {node_id:string}[];
+            for (const row of rows) clearPendingInteraction(row.node_id, p.requestId);
           }
         });
       }

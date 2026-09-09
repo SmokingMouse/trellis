@@ -27,6 +27,7 @@ export function useRunPolling() {
         .then((r) => r.json())
         .then((data) => {
           if (!cancelled) {
+            if (data.pending) useSessionStore.getState().ingestPending(data.pending);
             const runningNodes = Array.isArray(data.runningNodes)
               ? data.runningNodes
               : [];

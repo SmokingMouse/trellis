@@ -26,11 +26,15 @@ export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const started = performance.now();
   const { id } = await ctx.params;
   const session = getSession(id);
+  const sessionAt = performance.now();
   if (!session) return Response.json({ error: "not found" }, { status: 404 });
   const nodes = getSessionNodes(id);
+  const nodesAt = performance.now();
   const notes = listNotesBySession(id);
+  const notesAt = performance.now();
   // 大会话里 toolCalls 能占载荷 98%（实测 10.26MB 里 10.12MB），而首屏只有
   // 卡片角标和动线折叠态需要几个数字。这里剥离完整数组，改发预计算的
   // toolCallStats + generatedFiles；完整数组按需走 GET /api/nodes/[id]/tool-calls。
@@ -61,7 +65,10 @@ export async function GET(
       generatedFiles: generatedFilesFromToolCalls(n.toolCalls),
     };
   });
-  return Response.json({ session, nodes: slimNodes, notes });
+  const projectionAt = performance.now();
+  const response = Response.json({ session, nodes: slimNodes, notes });
+  response.headers.set("Server-Timing", `session;dur=${(sessionAt-started).toFixed(2)}, nodes;dur=${(nodesAt-sessionAt).toFixed(2)}, notes;dur=${(notesAt-nodesAt).toFixed(2)}, projection;dur=${(projectionAt-notesAt).toFixed(2)}, total;dur=${(performance.now()-started).toFixed(2)}`);
+  return response;
 }
 
 export async function PATCH(

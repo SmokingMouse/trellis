@@ -184,6 +184,10 @@ export type GeneratedFile = { absPath: string; name: string };
 // abort. input carries the tool's raw arguments (e.g. AskUserQuestion's
 // { questions: [...] }) so the UI can render the form without re-fetching.
 export type PendingInteraction = {
+  createdAt?: number;
+  // AS can park more than one request on a turn. The first remains the
+  // in-thread form; the pending bar exposes the complete queue.
+  additional?: PendingInteraction[];
   toolUseId: string;
   toolName: string;
   input: unknown;

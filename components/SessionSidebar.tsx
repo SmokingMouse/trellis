@@ -187,6 +187,7 @@ export function SessionSidebar() {
       .then((data) => {
         if (!cancelled) {
           setSessions(data.sessions ?? []);
+          if (data.pending) useSessionStore.getState().ingestPending(data.pending);
           setArchivedCount(data.archivedCount ?? 0);
           setProjects(data.projects ?? []);
         }

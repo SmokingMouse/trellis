@@ -1,4 +1,5 @@
 import "server-only";
+import { persistPendingInteractions, appendPendingInteraction } from "./repo";
 import { randomUUID } from "node:crypto";
 import type { AgentClient } from "@smokingmouse/agent-server/client";
 import { NotificationSchemas, type NotificationMethod, type ServerNotification, type AttachResult, type Turn, type StartTurnParams, type StartThreadParams } from "@smokingmouse/agent-server/protocol";
@@ -50,7 +51,7 @@ export class ProjectRun {
         if (request.params.threadId !== threadId || (this.turnId && request.params.turnId !== this.turnId)) return;
         const interaction = projectInteraction(request);
         if (JSON.stringify(getNode(nodeId)?.pendingInteraction) !== JSON.stringify(interaction)) {
-          persistPendingInteraction(nodeId, interaction);
+          appendPendingInteraction(nodeId, interaction);
           this.emit({ type: "interaction_required", ...interaction });
         }
       });
@@ -115,9 +116,7 @@ export class ProjectRun {
       this.turnId = user?.turnId;
     }
     this.project();
-    const pending = snapshot.pendingRequests.find(r => r.params.turnId === this.turnId);
-    if (pending) persistPendingInteraction(this.nodeId, projectInteraction(pending));
-    else clearPendingInteraction(this.nodeId);
+    persistPendingInteractions(this.nodeId, snapshot.pendingRequests.filter(r => r.params.turnId === this.turnId).map(projectInteraction));
     this.emit(this.catchup());
     if (this.observeOnly) {
       const turn = adoptionTurns(snapshot).find(g => g.turn.id === this.turnId)?.turn;
@@ -133,8 +132,8 @@ export class ProjectRun {
     if (method === "thread/pendingRequests") {
       // The notification supplies lifecycle state; the server request supplies
       // the actionable form. Observers need only the former.
-      if (params.status !== "pending" && getNode(this.nodeId)?.pendingInteraction?.toolUseId === params.requestId) {
-        clearPendingInteraction(this.nodeId);
+      if (params.status !== "pending") {
+        clearPendingInteraction(this.nodeId, params.requestId);
         this.emit({ type: "interaction_resolved", toolUseId: params.requestId });
       }
       return;
@@ -142,7 +141,7 @@ export class ProjectRun {
     if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") this.emit({ type: "thinking", text: params.delta });
     if (method === "serverRequest/resolved" || method === "serverRequest/expired") {
       const wasPending = getNode(this.nodeId)?.pendingInteraction?.toolUseId === params.requestId;
-      if (wasPending) clearPendingInteraction(this.nodeId);
+      clearPendingInteraction(this.nodeId, params.requestId);
       if (method === "serverRequest/resolved") {
         const receipts = [`已由 ${params.decidedBy.label} 处理`];
         if (this.replacing) this.retryResolutions = receipts;
@@ -427,6 +426,7 @@ export async function respondProject(nodeId: string, body: { toolUseId: string; 
       }
     }
     await completion;
+    clearPendingInteraction(nodeId, body.toolUseId);
     return { ok: true };
   }));
 }

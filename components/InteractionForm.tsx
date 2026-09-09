@@ -400,7 +400,7 @@ function PermissionForm({
           {interaction.toolName}
         </span>
         {description && (
-          <span className="text-ui text-ink-muted min-w-0 truncate">
+          <span className="text-ui font-medium text-ink min-w-0 break-words">
             {description}
           </span>
         )}
@@ -439,25 +439,12 @@ function PermissionForm({
               data-mobile-target="permission-allow"
               onClick={() => decide("allow")}
               disabled={submitting !== null}
-              className="px-4 py-2 max-md:min-h-11 max-md:min-w-11 rounded-field bg-accent text-ink-inverse text-ui font-medium hover:bg-accent-strong active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 max-md:w-full max-md:justify-center"
+              className="min-w-36 px-4 py-2 max-md:min-h-11 rounded-field bg-accent text-ink-inverse text-ui font-medium hover:bg-accent-strong active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2 max-md:w-full"
             >
               {submitting === "allow" && (
                 <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               )}
-              ✅ 允许
-            </button>
-            <button
-              type="button"
-              data-mobile-target="permission-always"
-              onClick={() => decide("always")}
-              disabled={submitting !== null}
-              title={`本轮回答内 ${interaction.toolName} 不再逐个确认（下一轮重置）`}
-              className="px-4 py-2 max-md:min-h-11 max-md:min-w-11 rounded-field border border-accent-line bg-accent-muted text-accent-ink text-ui font-medium hover:bg-accent-line/40 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 max-md:w-full max-md:justify-center"
-            >
-              {submitting === "always" && (
-                <span className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-              )}
-              ✅ 本轮总是允许
+              允许一次
             </button>
             {showDeny ? (
               <button
@@ -483,6 +470,16 @@ function PermissionForm({
                 ✋ 拒绝
               </button>
             )}
+            <button
+              type="button"
+              data-mobile-target="permission-always"
+              onClick={() => decide("always")}
+              disabled={submitting !== null}
+              title={`本轮回答内 ${interaction.toolName} 不再逐个确认（下一轮重置）`}
+              className="px-2 py-2 max-md:min-h-11 max-md:self-start rounded-field text-xs text-ink-muted hover:text-ink hover:underline disabled:opacity-50"
+            >
+              {submitting === "always" ? "处理中…" : "本轮总是允许"}
+            </button>
           </div>
         </>
       )}

@@ -1,6 +1,7 @@
 import { listSessions, listTaskSessions, countArchivedSessions } from "@/lib/server/repo";
 import { listProjectTree } from "@/lib/server/workspaces";
 import { listTasks } from "@/lib/server/tasks";
+import { pendingSnapshot, schedulePendingRefresh } from "@/lib/server/pending";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +17,11 @@ export const dynamic = "force-dynamic";
 // S117：tasks + taskSessions 驱动侧栏的「定时任务」分组。行的骨架来自 tasks
 // （任务是常驻实体，会话是懒建的），会话对象用来喂 SidebarRow / tab 条 resolve。
 export async function GET(req: Request) {
+  schedulePendingRefresh();
   const url = new URL(req.url);
   const archived = url.searchParams.get("archived") === "1";
   return Response.json({
+    pending: pendingSnapshot(),
     sessions: listSessions({ archived }),
     archivedCount: countArchivedSessions(),
     projects: archived ? [] : listProjectTree(undefined, {

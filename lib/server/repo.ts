@@ -1,4 +1,5 @@
 import "server-only";
+import { publishPendingChanged } from "./cli-sync-events";
 import { sessionSourcePredicate } from "../session-source";
 import os from "node:os";
 import path from "node:path";
@@ -1414,6 +1415,22 @@ export function getNodeToolCalls(nodeId: string): ToolCall[] {
 }
 
 // A路②: persist the in-flight interactive-tool prompt so a reload / reconnect
+export function persistPendingInteractions(nodeId: string, requests: PendingInteraction[]): void {
+  const previous = getNode(nodeId)?.pendingInteraction;
+  const old = previous ? [previous, ...(previous.additional ?? [])] : [];
+  const dated = requests.map(request => ({ ...request,
+    createdAt: old.find(item => item.toolUseId === request.toolUseId)?.createdAt ?? request.createdAt ?? Date.now() }));
+  if (!dated.length) { clearPendingInteraction(nodeId); return; }
+  const [first, ...additional] = dated;
+  persistPendingInteraction(nodeId, { ...first, ...(additional.length ? { additional } : {}) });
+}
+
+export function appendPendingInteraction(nodeId: string, request: PendingInteraction): void {
+  const current = getNode(nodeId)?.pendingInteraction;
+  const requests = current ? [current, ...(current.additional ?? [])].map(({ additional: _additional, ...item }) => item) : [];
+  persistPendingInteractions(nodeId, [...requests.filter(item => item.toolUseId !== request.toolUseId), request]);
+}
+
 // can re-render the waiting form. Overwrites any prior pending value (only one
 // interaction is in flight per node at a time). No-op if the node vanished.
 export function persistPendingInteraction(
@@ -1421,18 +1438,31 @@ export function persistPendingInteraction(
   pending: PendingInteraction,
 ): void {
   const db = getDB();
+  const previous = getNode(nodeId)?.pendingInteraction;
+  pending = { ...pending, createdAt: previous?.toolUseId === pending.toolUseId
+    ? previous.createdAt ?? pending.createdAt ?? Date.now() : pending.createdAt ?? Date.now() };
   db.prepare(
     "UPDATE nodes SET pending_interaction_json = ? WHERE id = ?",
   ).run(JSON.stringify(pending), nodeId);
+  if (JSON.stringify(previous) !== JSON.stringify(pending)) publishPendingChanged();
 }
 
 // A路②: clear the pending interaction once the user answered (or the run
 // aborted). Idempotent.
-export function clearPendingInteraction(nodeId: string): void {
+export function clearPendingInteraction(nodeId: string, toolUseId?: string): void {
+  if (toolUseId) {
+    const current = getNode(nodeId)?.pendingInteraction;
+    if (!current) return;
+    const requests = [current, ...(current.additional ?? [])].map(({ additional: _additional, ...item }) => item);
+    if (!requests.some(item => item.toolUseId === toolUseId)) return;
+    persistPendingInteractions(nodeId, requests.filter(item => item.toolUseId !== toolUseId));
+    return;
+  }
   const db = getDB();
   db.prepare(
     "UPDATE nodes SET pending_interaction_json = NULL WHERE id = ?",
   ).run(nodeId);
+  publishPendingChanged();
 }
 
 export function appendNodeResponse(nodeId: string, delta: string): void {

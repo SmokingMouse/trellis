@@ -1,4 +1,5 @@
 "use client";
+import { PendingBar } from "./PendingBar";
 import {
   Fragment,
   useCallback,
@@ -124,8 +125,6 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
   const [composerExpanded, setComposerExpanded] = useState(false);
-  const [waitingJumpId, setWaitingJumpId] = useState<string | null>(null);
-  const lastWaitingJumpIdRef = useRef<string | null>(null);
   const {
     isHidden: scrollHidden,
     reveal: revealScrollChrome,
@@ -137,8 +136,6 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     setOpenBranches(new Set());
     setBranchFrom(null);
     setComposerExpanded(false);
-    setWaitingJumpId(null);
-    lastWaitingJumpIdRef.current = null;
   }, [session?.id]);
 
   const threadData = useMemo(() => {
@@ -200,14 +197,22 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     if (branchFrom && !nodes[branchFrom.id]) setBranchFrom(null);
   }, [branchFrom, nodes]);
 
+  const pendingNavigation = useSessionStore(s => s.pendingNavigation);
   useEffect(() => {
-    if (!waitingJumpId || !roundRefs.current.has(waitingJumpId)) return;
-    const id = requestAnimationFrame(() => {
-      roundRefs.current.get(waitingJumpId)?.scrollIntoView({ block: "start" });
-      setWaitingJumpId(null);
+    if (!pendingNavigation) return;
+    const frame = requestAnimationFrame(() => {
+      const card = roundRefs.current.get(pendingNavigation.nodeId)?.querySelector<HTMLElement>("[data-mobile-interaction]");
+      if (!card) return;
+      card.scrollIntoView({ block: "start" });
+      card.tabIndex = -1;
+      card.focus({ preventScroll: true });
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        card.animate([{ boxShadow: "0 0 0 3px var(--accent)" }, { boxShadow: "0 0 0 0px transparent" }], { duration: 1800 });
+      }
+      useSessionStore.setState({ pendingNavigation: null });
     });
-    return () => cancelAnimationFrame(id);
-  }, [waitingJumpId, threadData.anchorId]);
+    return () => cancelAnimationFrame(frame);
+  }, [pendingNavigation, threadData.anchorId]);
 
   // Restore the persisted reading position when landing on a session (tab
   // switch / reload / canvas→linear). The anchor alone can't do this: it
@@ -550,12 +555,15 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     <div
       data-safe-area="linear-thread"
       className="fixed inset-0 pt-[var(--trellis-header-h)] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
+      data-active-session-id={session?.id}
+      data-active-node-id={activeNodeId ?? ""}
       // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
       // 发布，与 --trellis-sb 同一套模式（一个变量、多个消费者）；面板关闭时
       // 是 0px，等于没这回事。
       style={{
         left: "var(--trellis-sb, 0px)",
         bottom: "var(--trellis-term-h, 0px)",
+        paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
     >
       <div
@@ -623,31 +631,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         </div>
       </div>
 
-      {isMobile && waitingNodes.length > 0 && (
-        <button
-          type="button"
-          data-mobile-waiting-banner
-          onClick={() => {
-            const previousIndex = waitingNodes.findIndex(
-              (node) => node.id === lastWaitingJumpIdRef.current,
-            );
-            const target = waitingNodes[(previousIndex + 1) % waitingNodes.length];
-            lastWaitingJumpIdRef.current = target.id;
-            setWaitingJumpId(target.id);
-            setActiveNode(target.id);
-          }}
-          className="z-20 flex h-11 shrink-0 items-center justify-center gap-2 border-b border-warn-line bg-warn-muted px-4 text-sm font-medium text-warn-ink transition-transform duration-200 motion-reduce:transition-none"
-          style={{
-            transform: mobileHeaderHidden
-              ? "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))"
-              : undefined,
-          }}
-        >
-          <span className="h-2 w-2 animate-pulse rounded-full bg-warn" aria-hidden />
-          有 {waitingNodes.length} 项等你处理，点击跳到下一项
-          <span aria-hidden>↓</span>
-        </button>
-      )}
+      {isMobile && <PendingBar mobile hiddenChrome={mobileHeaderHidden} />}
 
       <div
         ref={scrollRef}

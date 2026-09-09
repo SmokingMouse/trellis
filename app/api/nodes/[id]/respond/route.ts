@@ -1,5 +1,6 @@
 import { resolveInteraction } from "@/lib/server/run-bus";
 import { isThreadNode, respondProject } from "@/lib/server/as-project";
+import { pendingSnapshot } from "@/lib/server/pending";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,8 +49,11 @@ export async function POST(
   }
 
   if (isThreadNode(id)) {
-    try { return Response.json(await respondProject(id, { ...body, toolUseId: body.toolUseId, behavior: body.behavior })); }
-    catch (error) { return Response.json({ error: String(error) }, { status: 409 }); }
+    try {
+      const result = await respondProject(id, { ...body, toolUseId: body.toolUseId, behavior: body.behavior });
+      return Response.json({ ...result, pending: pendingSnapshot() });
+    }
+    catch (error) { return Response.json({ error: String(error), pending: pendingSnapshot() }, { status: 409 }); }
   }
   const result = resolveInteraction(
     id,
@@ -64,17 +68,17 @@ export async function POST(
 
   switch (result) {
     case "ok":
-      return Response.json({ ok: true });
+      return Response.json({ ok: true, pending: pendingSnapshot() });
     case "no_run":
-      return Response.json({ error: "no live run for node" }, { status: 404 });
+      return Response.json({ error: "no live run for node", pending: pendingSnapshot() }, { status: 404 });
     case "no_pending":
       return Response.json(
-        { error: "no interaction pending" },
+        { error: "no interaction pending", pending: pendingSnapshot() },
         { status: 409 },
       );
     case "mismatch":
       return Response.json(
-        { error: "toolUseId does not match pending interaction" },
+        { error: "toolUseId does not match pending interaction", pending: pendingSnapshot() },
         { status: 409 },
       );
   }
