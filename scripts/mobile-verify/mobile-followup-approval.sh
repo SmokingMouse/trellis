@@ -503,10 +503,7 @@ ab eval --stdin <<'JS'
     .map((button) => button.getAttribute('aria-label'));
   assert(JSON.stringify(labels) === JSON.stringify(['添加附件', '画个草图', '发送']), `desktop buttons=${JSON.stringify(labels)}`);
   const rr = rail.getBoundingClientRect();
-  // The restored floating panel clears the full-width Composer vertically.
-  const sr = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(near(rr.left, 210) && near(rr.top, 729) && near(rr.width, 1070) && near(rr.height, 71), `desktop Composer floating rect=${JSON.stringify(rr.toJSON())}`);
-  assert([...composer.querySelectorAll('button')].every(button => button.getBoundingClientRect().top >= sr.bottom), 'Composer controls overlap structure');
+  assert(near(rr.left, 210) && near(rr.top, 729) && near(rr.width, 1070) && near(rr.height, 71), `desktop Composer rect=${JSON.stringify(rr.toJSON())}`);
   assert(near(parseFloat(getComputedStyle(input).fontSize), 14), `desktop input font=${getComputedStyle(input).fontSize}`);
   return { rail: { left: rr.left, top: rr.top, width: rr.width, height: rr.height }, labels };
 })()

@@ -174,20 +174,18 @@ open_mobile_drawer() {
   wait_for_js "mobile session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
 }
 
-# Wave 3: the shared structure panel is collapsed by default on desktop.
-# Open its rail before exercising the existing filter/jump workflow.
+# Exercise the original TreePanel filter/jump workflow.
 click_tree_node() {
   needle=$1
   if ab eval 'innerWidth < 768' | grep -q '^true$'; then
     ab eval 'document.querySelector("[role=dialog] [data-mobile-target=drawer-close]")?.click(); true' >/dev/null
     open_mobile_overflow
     ab click '[data-mobile-target="overflow-tree"]'
-    wait_for_js "in-session structure sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open]'))"
+    wait_for_js "in-session tree sheet" "Boolean(document.querySelector('[data-mobile-tree-sheet=open]'))"
   else
     ab eval 'document.querySelector("[aria-label=关闭地图]")?.click(); true' >/dev/null
-    ab eval 'document.querySelector("button[aria-label=展开结构]")?.click(); true' >/dev/null
   fi
-  wait_for_js "structure filter entry" "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
+  wait_for_js "tree filter entry" "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
   ab click 'button[aria-label="过滤跳转"]'
   ab fill 'input[aria-label="过滤节点"]' "$needle"
   ab press Enter
@@ -445,10 +443,9 @@ assert_mobile_landing "$TREE_ID" "new tree active in mobile linear shell"
 wait_for_js "TreePanel remains closed after new tree" "!document.querySelector('[data-mobile-tree-sheet]')"
 [ "$(sqlite3 "$DB" "SELECT coalesce(parent_id,'NULL') FROM nodes WHERE id='$TREE_ID';")" = "NULL" ] || fail "new tree node is not a root"
 
-echo "== 4–5a. structure map selection returns to linear and survives reload =="
+echo "== 4–5a. map selection returns to linear and survives reload =="
 open_mobile_overflow
-ab click '[data-mobile-target="overflow-tree"]'
-ab click '[data-map-open]'
+ab click '[data-mobile-target="overflow-canvas"]'
 wait_for_js "mobile map fitted with linear state" "(() => { const saved=JSON.parse(localStorage.getItem('trellis-view:$SID') || 'null'); return saved?.viewMode === 'linear' && Number(document.querySelector('[data-canvas-map]')?.dataset.mapFitCount)>0; })()"
 ab click "[data-map-node=\"$ROOT2_ID\"]"
 wait_for_js "map selection closes sheet and highlights target" "!document.querySelector('[data-canvas-map]') && !document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('[data-thread-node-id=\"$ROOT2_ID\"][data-map-highlight]'))"
@@ -482,11 +479,9 @@ wait_for_js "linear chrome hidden for H-3" "(() => {
 })()"
 ab eval 'document.querySelector("[data-mobile-header] [aria-label=\"更多功能\"]")?.click(); true' >/dev/null
 wait_for_js "overflow opens from hidden header" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-ab click '[data-mobile-target="overflow-tree"]'
-ab click '[data-map-open]'
+ab click '[data-mobile-target="overflow-canvas"]'
 wait_for_js "map clears hidden header state" "Boolean(document.querySelector('[data-canvas-map]')) && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 ab click '[aria-label="关闭地图"]'
-ab click '[data-mobile-target="tree-sheet-close"]'
 wait_for_js "linear remount chrome visible" "Boolean(document.querySelector('[data-thread-header]')) && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false' && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
 echo "== 7a. desktop anchored edit focuses the re-asked sibling =="

@@ -18,7 +18,6 @@ import { AddNodeFAB } from "./AddNodeFAB";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { Outline } from "./Outline";
-import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 import { TargetChip } from "./TargetChip";
 import {
   useSelectionWithin,
@@ -458,7 +457,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
       )}
       <AddNodeFAB />
       <DockedComposer />
-      {!STRUCTURE_PANEL && <Outline />}
+      <Outline />
     </>
   );
 }
@@ -497,7 +496,6 @@ function DockedComposer() {
       // TerminalPanel 发布；关闭时 0px = 贴底，与原来一致）。
       style={{
         left: "var(--trellis-sb, 0px)",
-        right: 0,
         bottom: "var(--trellis-term-h, 0px)",
       }}
     >

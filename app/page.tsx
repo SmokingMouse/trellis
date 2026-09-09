@@ -1,6 +1,8 @@
 "use client";
 import { CANVAS_MAP, migrateMapUrl } from "@/lib/canvas-map";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { CanvasMap } from "@/components/CanvasMap";
 import {
   isOptimisticNodeId,
   useSessionStore,
@@ -12,8 +14,6 @@ import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { LinearThreadView } from "@/components/LinearThreadView";
 import { TreePanel } from "@/components/TreePanel";
-import { StructurePanel } from "@/components/StructurePanel";
-import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 import { NewQuestionPicker } from "@/components/NewQuestionPicker";
 import { DoneToast } from "@/components/DoneToast";
 import { TaskToast } from "@/components/TaskToast";
@@ -159,7 +159,8 @@ export default function Home() {
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}
-      {session && (STRUCTURE_PANEL || CANVAS_MAP ? <StructurePanel isMobile={isMobile} /> : viewMode === "linear" && <TreePanel />)}
+      {session && viewMode === "linear" && <TreePanel />}
+      {session && <SessionMap isMobile={isMobile} />}
       {session && !CANVAS_MAP && viewMode === "canvas" && (
         <>
           <Canvas
@@ -194,4 +195,12 @@ export default function Home() {
       <KeyboardHelp />
     </ScrollHideProvider>
   );
+}
+
+function SessionMap({ isMobile }: { isMobile: boolean }) {
+  const sessionId = useSessionStore(s => s.session?.id);
+  const mapSessionId = useSessionStore(s => s.mapSessionId);
+  return mapSessionId && mapSessionId === sessionId
+    ? createPortal(<CanvasMap mobile={isMobile} close={() => useSessionStore.setState({ mapSessionId: null })} />, document.body)
+    : null;
 }
