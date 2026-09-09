@@ -1,8 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, ReactFlowProvider, Handle, Position, useNodesInitialized, useNodesState, useReactFlow, useStore, type Node, type NodeProps } from "@xyflow/react";
+import { ReactFlow, ReactFlowProvider, Handle, Position, BaseEdge, useNodesInitialized, useNodesState, useReactFlow, useStore, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { layoutMap, mapCompact, MAP_FIT_OPTIONS, shouldFitMap } from "@/lib/canvas-map";
+import { layoutMap, mapCompact, mapViewport, shouldFitMap } from "@/lib/canvas-map";
 import { isUnreadNode, isWaitingNode, treeLabel } from "@/lib/tree-panel";
 import { buildNodeIndex } from "@/lib/node-index";
 import { useScrollHideState } from "@/hooks/useScrollHide";
@@ -19,8 +19,8 @@ function MapNode({ data: d }: NodeProps<Node<MapData>>) {
       onFocus={() => d.peek(d.node.id)} onBlur={() => d.peek(null)} onMouseEnter={() => d.peek(d.node.id)} onMouseLeave={() => d.peek(null)}
       onClick={() => d.select(d.node.id)}
       className="nodrag nopan relative flex items-center justify-center rounded border text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
-      style={{ width: d.width, height: d.height, background: colors[d.topic % colors.length], borderColor: d.active ? "#1d4ed8" : "#33415555", outline: d.active ? "3px solid #1d4ed8" : undefined, outlineOffset: 1, fontSize: d.width < 60 ? 11 : 12 }}>
-      <span className="truncate px-1">{compact ? treeLabel(d.node, 16) : `#${d.index} ${treeLabel(d.node, 30)}`}</span>
+      style={{ width: d.width, height: d.height, background: colors[d.topic % colors.length], borderColor: d.active ? "#1d4ed8" : "#33415555", outline: d.active ? "3px solid #1d4ed8" : undefined, outlineOffset: 1, fontSize: compact ? 26 : 16 }}>
+      <span className={compact ? "truncate px-3 font-medium" : "line-clamp-3 whitespace-normal break-words px-3 text-left leading-[22px]"}>{compact ? treeLabel(d.node, 16) : `#${d.index} ${treeLabel(d.node, 160)}`}</span>
       {(isWaitingNode(d.node) || isUnreadNode(d.node)) && <span aria-label={isWaitingNode(d.node) ? "等待处理" : "未读"} className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white" style={{ background: isWaitingNode(d.node) ? "#d97706" : "#2563eb" }} />}
     </button>
     <Handle type="source" position={Position.Bottom} className="!opacity-0" />
@@ -28,10 +28,15 @@ function MapNode({ data: d }: NodeProps<Node<MapData>>) {
 }
 function TopicNode({ data }: NodeProps<Node<{ label: string; width: number; height: number; topic: number }>>) {
   return <div className="pointer-events-none rounded-lg border border-line text-ink" style={{ width: data.width, height: data.height, background: "var(--color-surface)" }}>
-    <div className="truncate px-1.5 py-1 text-[11px] font-semibold"><span style={{ color: colors[data.topic % colors.length] }}>■ </span>{data.label}</div>
+    <div className="truncate px-4 py-2 text-[18px] font-semibold"><span style={{ color: colors[data.topic % colors.length] }}>■ </span>{data.label}</div>
   </div>;
 }
 const nodeTypes = { map: MapNode, topic: TopicNode };
+function MapEdge({ id, data, style }: EdgeProps) {
+  const points = data?.points as { x: number; y: number }[];
+  return <BaseEdge id={id} path={points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ")} style={style} />;
+}
+const edgeTypes = { map: MapEdge };
 
 export function CanvasMap(props: { mobile: boolean; close: () => void }) {
   return <ReactFlowProvider><MapInner {...props} /></ReactFlowProvider>;
@@ -50,8 +55,17 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
   const [peekId, setPeekId] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const select = useCallback((id: string) => { jump(id); reveal(); close(); }, [jump, reveal, close]);
-  const model = useMemo(() => layoutMap(nodes, mobile), [nodes, mobile]);
+  const model = useMemo(() => layoutMap(nodes, mobile, size.width ? size : undefined), [nodes, mobile, size]);
   const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const derivedNodes: Node[] = useMemo(() => [
     ...model.topics.map(t => ({ id: `topic:${t.id}`, type: "topic", position: { x: t.x, y: t.y }, zIndex: -1, selectable: false, focusable: false, data: { ...t, label: treeLabel(nodes[t.id], 60) } })),
@@ -59,18 +73,18 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
   ], [model, nodes, indices, activeId, select]);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(derivedNodes);
   useEffect(() => setFlowNodes(derivedNodes), [derivedNodes, setFlowNodes]);
-  const edges = useMemo(() => [...model.positions].filter(([, p]) => p.parentId && model.positions.has(p.parentId)).map(([id, p]) => ({ id: `e:${id}`, source: p.parentId!, target: id, type: "smoothstep", style: { stroke: "#64748b", strokeWidth: 1 }, zIndex: 0 })), [model]);
+  const edges = useMemo(() => model.edges.map(e => ({ ...e, type: "map", data: { points: e.points }, style: { stroke: "#64748b", strokeWidth: 2 }, zIndex: 0 })), [model]);
   const ready = useNodesInitialized();
-  const { fitView } = useReactFlow();
+  const { setViewport } = useReactFlow();
   const fitted = useRef<string | null>(null);
-  const fitKey = `${sessionId}:${mobile}:${[...model.positions.keys()].join(",")}`;
+  const fitKey = `${sessionId}:${mobile}:${size.width}:${size.height}:${JSON.stringify([...model.positions])}`;
   const [fitCount, setFitCount] = useState(0);
-  const fit = useCallback(() => { void fitView(MAP_FIT_OPTIONS).then(() => setFitCount(n => n + 1)); }, [fitView]);
+  const fit = useCallback(() => { if (size.width && size.height) void setViewport(mapViewport(model.bounds, size), { duration: 0 }).then(() => setFitCount(n => n + 1)); }, [setViewport, model.bounds, size]);
   useEffect(() => {
-    if (!shouldFitMap(ready, fitKey, fitted.current)) return;
+    if (!shouldFitMap(ready && size.width > 0, fitKey, fitted.current)) return;
     const frame = requestAnimationFrame(() => { fitted.current = fitKey; fit(); });
     return () => cancelAnimationFrame(frame);
-  }, [ready, fitKey, fit]);
+  }, [ready, fitKey, fit, size.width]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     closeButton.current?.focus(); reveal();
@@ -99,8 +113,8 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
       <button aria-label="地图全貌" onClick={fit} className="min-h-11 px-2 text-xs">全貌</button>
       <button ref={closeButton} aria-label="关闭地图" onClick={close} className="min-h-11 min-w-11 text-xl">×</button>
     </div>
-    <div className="relative min-h-0 flex-1" data-map-viewport style={{ touchAction: "none" }}>
-      <ReactFlow nodes={flowNodes} onNodesChange={onNodesChange} edges={edges} nodeTypes={nodeTypes} minZoom={0.01} maxZoom={2} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} proOptions={{ hideAttribution: true }} />
+    <div ref={viewportRef} className="relative min-h-0 flex-1" data-map-viewport style={{ touchAction: "none" }}>
+      <ReactFlow nodes={flowNodes} onNodesChange={onNodesChange} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.01} maxZoom={2} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} proOptions={{ hideAttribution: true }} />
       {peek && <div data-map-detail className="pointer-events-none absolute bottom-3 left-3 right-3 z-10 max-w-sm rounded-lg border border-line bg-surface p-3 text-sm shadow-raise">
         <div className="mb-1 text-xs text-ink-muted">#{indices[peek.id]} · {treeLabel(peek, 80)}{peek.parentId ? ` · 接续 #${indices[peek.parentId]}` : " · 话题起点"}</div>
         <strong className="line-clamp-2">{peek.question}</strong><p className="mt-2 line-clamp-3 text-xs text-ink-muted">{peek.response || (isWaitingNode(peek) ? "等待你处理" : "尚无回复")}</p>

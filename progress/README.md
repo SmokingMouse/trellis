@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-侧栏 IA 四波与收编、观察页退役、引擎事件人话化均已上线；剩 FJ_RUNNER_DEFAULT 与待办层等用户拍板，观察一天后 AS 切流扩到全部项目。
+侧栏波四地图布局已返工并通过本地验证，待主控合并部署，生产暂用波三；FJ_RUNNER_DEFAULT、待办层与 AS 切流继续按原队列推进。
 
 ## Goals
 
