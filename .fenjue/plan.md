@@ -752,3 +752,5 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-sidebar-wave2-integrate-b80f
 - [ ] as-controls-polish: 收编会话节点视图：引擎事件默认过滤+人话化+可展开原始 JSON，外部会话权限只读，截图验证 | after: as-adopt-ship | kind: codex
   cid: fj-as-controls-polish-dfcc
+- [ ] canvas-map-layout: 返工地图布局：话题块内真树层级布局、边不交叉不穿卡、小会话放大到可读、与旧画布同会话对照截图 | after: sidebar-wave4 | kind: codex
+  cid: fj-canvas-map-layout-3a3c
