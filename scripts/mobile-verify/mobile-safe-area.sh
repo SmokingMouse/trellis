@@ -430,10 +430,9 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   const cr = composer.getBoundingClientRect();
   const desktopComposerFontSize = parseFloat(getComputedStyle(composerTextarea).fontSize);
   assert(near(hr.top, 0) && near(hr.width, 1280) && near(hr.height, 48), `Header 偏离改前基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
-  // Wave 3: the structure rail takes width from the reading column. Safe-area
-  // height/offsets remain fixed; the two horizontal regions must partition it.
+  // Floating structure leaves the full reading width and clears the Composer.
   const sr = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.right, sr.left) && near(cr.width + sr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800), `Composer push 边界不符: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom, panel: sr.toJSON() })}`);
+  assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800) && sr.bottom <= cr.top, `Composer 浮窗边界不符: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom, panel: sr.toJSON() })}`);
   assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;

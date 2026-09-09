@@ -170,7 +170,6 @@ export default function Home() {
             onClick={() => setViewMode("linear")}
             className="fixed top-[60px] md:top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition-transform"
             title="切换到线性 thread"
-            style={{ right: "calc(var(--trellis-structure-w, 0px) + 12px)" }}
           >
             线性
           </button>

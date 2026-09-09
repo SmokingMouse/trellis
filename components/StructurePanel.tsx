@@ -2,15 +2,15 @@
 import { createPortal } from "react-dom";
 import { CANVAS_MAP } from "@/lib/canvas-map";
 import { CanvasMap } from "./CanvasMap";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import { buildNodeIndex } from "@/lib/node-index";
-import { isUnreadNode, treeLabel } from "@/lib/tree-panel";
-import { buildStructure, DEFAULT_STRUCTURE_PREFERENCE, readStructurePreference, writeStructurePreference, structureWidth, structureKey, type StructureNode, type StructureRow } from "@/lib/structure-panel";
+import { isUnreadNode, isWaitingNode, treeLabel } from "@/lib/tree-panel";
+import { buildStructure, DEFAULT_STRUCTURE_PREFERENCE, readStructurePreference, writeStructurePreference, structureKey, type StructureNode, type StructureRow } from "@/lib/structure-panel";
 
 /** One page-level navigation surface shared by linear/canvas and desktop/sheet.
- * The same width reserves space in both content surfaces and their composers.
+ * Desktop floats above the composer without reserving a content column.
  * Keep the sheet outside the thread's stacking context (mobile-shell M2).
  */
 export function StructurePanel({ isMobile }: { isMobile: boolean }) {
@@ -19,8 +19,7 @@ export function StructurePanel({ isMobile }: { isMobile: boolean }) {
   const mobileOpen = useSessionStore(s => s.mobileTreePanelOpen);
   const setMobileOpen = useSessionStore(s => s.setMobileTreePanelOpen);
   const setViewMode = useSessionStore(s => s.setViewMode);
-  // Home mounts this only after hydration, so the first panel paint can use
-  // the stored width without an intermediate collapsed render.
+  // Home mounts this after hydration, so expansion can restore on first paint.
   const [preference, setPreference] = useState(() => {
     try { return readStructurePreference(localStorage); } catch { return DEFAULT_STRUCTURE_PREFERENCE; }
   });
@@ -34,10 +33,6 @@ export function StructurePanel({ isMobile }: { isMobile: boolean }) {
     try { writeStructurePreference(localStorage, next); } catch { /* storage access denied */ }
     return next;
   });
-  useLayoutEffect(() => {
-    document.documentElement.style.setProperty("--trellis-structure-w", isMobile ? "0px" : open ? `min(${preference.width}px, 40vw)` : "36px");
-    return () => { document.documentElement.style.removeProperty("--trellis-structure-w"); };
-  }, [isMobile, open, preference.width]);
   useEffect(() => {
     if (previousSession.current !== sessionId) setMobileOpen(false);
     previousSession.current = sessionId;
@@ -73,8 +68,13 @@ export function StructurePanel({ isMobile }: { isMobile: boolean }) {
     data-mobile-tree-sheet={isMobile ? "open" : undefined} data-keys-yield
     role={isMobile ? "dialog" : "complementary"} aria-modal={isMobile || undefined} aria-label="结构"
     tabIndex={-1}
-    className={isMobile ? "fixed inset-0 z-50 bg-surface text-xs flex flex-col" : "fixed right-0 top-[5.25rem] z-30 border-l border-line bg-surface text-xs flex flex-col"}
-    style={isMobile ? { paddingTop: "var(--safe-top)", paddingBottom: "var(--safe-bottom)" } : { width: "var(--trellis-structure-w, 36px)", bottom: "var(--trellis-term-h, 0px)" }}
+    className={isMobile ? "fixed inset-0 z-50 bg-surface text-xs flex flex-col" : "fixed right-3 z-40 rounded-card border border-line/80 bg-surface/95 shadow-pop backdrop-blur text-xs flex flex-col"}
+    style={isMobile ? { paddingTop: "var(--safe-top)", paddingBottom: "var(--safe-bottom)" } : {
+      width: open ? "290px" : undefined,
+      maxWidth: "calc(100vw - 24px)",
+      maxHeight: "45dvh",
+      bottom: "max(calc(var(--trellis-term-h, 0px) + 6rem), calc(var(--trellis-term-stack, 0px) + 0.5rem))",
+    }}
     onKeyDown={e => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
       if (isMobile && e.key === "Tab") {
@@ -85,20 +85,14 @@ export function StructurePanel({ isMobile }: { isMobile: boolean }) {
       }
     }}>
     {!open ? <button ref={railRef} aria-label="展开结构" title={`${model.forest.length} 话题 · ${model.branchCount} 分支`} onClick={() => update({ expanded: true })}
-      className="flex h-full w-full flex-col items-center gap-3 pt-4 text-ink-muted hover:bg-surface-muted">
-      <span aria-hidden>‹</span><span style={{ writingMode: "vertical-rl" }}>结构</span>
+      className="flex items-center gap-2 rounded-card px-3 py-2 text-ink-muted hover:bg-surface-muted">
+      <span aria-hidden>▸</span><span>结构</span>
       <span data-structure-topic-count className="rounded bg-surface-muted px-1 tabular-nums" aria-label={`${model.forest.length} 话题`}>{model.forest.length}</span>
-      <span data-structure-branch-count className="rounded bg-accent-muted px-1 text-accent-ink tabular-nums" aria-label={`${model.branchCount} 分支`}>{model.branchCount}</span>
+      <span data-structure-unread-count className="rounded bg-unread-muted px-1 text-unread-ink tabular-nums" aria-label={`${Object.values(nodes).filter(isUnreadNode).length} 未读`}>{Object.values(nodes).filter(isUnreadNode).length} 未读</span>
     </button> : <>
-      {!isMobile && <div role="separator" aria-label="结构面板宽度" aria-orientation="vertical" aria-valuemin={240} aria-valuemax={440} aria-valuenow={preference.width} tabIndex={0}
-        className="absolute inset-y-0 -left-1 w-2 cursor-col-resize hover:bg-accent-line focus:bg-accent-line touch-none"
-        onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); update({ width: structureWidth(preference.width + (e.key === "ArrowLeft" ? 20 : -20)) }); } }}
-        onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); }}
-        onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) update({ width: structureWidth(window.innerWidth - e.clientX) }); }}
-        onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} />}
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1">
         <strong className="text-ink">结构</strong><span className="flex-1 text-ink-faint">{model.forest.length > 1 ? `${model.forest.length} 话题 · ` : ""}{Object.keys(nodes).length} 节点</span>
-        <button ref={closeRef} data-mobile-target={isMobile ? "tree-sheet-close" : undefined} aria-label={isMobile ? "关闭结构" : "收起结构"} onClick={close} className="min-h-9 min-w-8 max-md:min-h-11 max-md:min-w-11 text-lg text-ink-muted hover:bg-surface-muted">{isMobile ? "×" : "›"}</button>
+        <button ref={closeRef} data-mobile-target={isMobile ? "tree-sheet-close" : undefined} aria-label={isMobile ? "关闭结构" : "收起结构"} onClick={close} className="min-h-7 min-w-7 max-md:min-h-11 max-md:min-w-11 text-lg text-ink-muted hover:bg-surface-muted">{isMobile ? "×" : "▾"}</button>
       </div>
       <StructureContent key={sessionId} model={model} isMobile={isMobile} close={close} />
       {CANVAS_MAP && <button data-map-open onClick={() => setMapSession(sessionId ?? null)} className="min-h-11 shrink-0 border-t border-line px-3 py-2 text-left font-medium text-accent-ink hover:bg-accent-muted">🗺 地图</button>}
@@ -199,19 +193,19 @@ function StructureContent({ model, isMobile, close }: { model: ReturnType<typeof
             if (row.topic) topicId = row.id;
             const endOfCurrentTopic = topicId === model.current?.node.id && (!rows[index + 1] || rows[index + 1].topic);
             return <div key={row.id} className="group" style={{ paddingLeft: Math.min(row.depth, 8) * 12 }}>
-            <div className={`flex items-center rounded ${activeId === row.id ? "bg-accent-muted text-accent-ink" : model.chain.has(row.id) ? "bg-surface-muted text-ink" : "text-ink-muted"}`}>
-              {row.expanded !== undefined ? <button tabIndex={-1} aria-label={row.expanded ? "折叠" : "展开"} className="w-5 shrink-0 py-2 max-md:min-h-11" onClick={() => row.topic ? toggleTopic(row.id) : toggleCollapse(row.id)}>{row.expanded ? "▾" : "▸"}</button> : <span className="w-5 shrink-0" />}
+            <div className={`flex items-center rounded border-l-2 ${activeId === row.id ? "border-accent bg-accent-muted text-accent-ink" : model.chain.has(row.id) ? "border-transparent bg-surface-muted text-ink" : "border-transparent text-ink-muted"}`}>
+              {row.expanded !== undefined ? <button tabIndex={-1} aria-label={row.expanded ? "折叠" : "展开"} className="w-5 shrink-0 py-2 md:py-1 max-md:min-h-11" onClick={() => row.topic ? toggleTopic(row.id) : toggleCollapse(row.id)}>{row.expanded ? "▾" : "▸"}</button> : <span className="w-5 shrink-0" />}
               <button role="treeitem" aria-level={row.level} aria-expanded={row.expanded} aria-selected={activeId === row.id} aria-current={activeId === row.id ? "location" : undefined}
                 data-structure-node={row.id} data-current-chain={model.chain.has(row.id)} tabIndex={row.id === (rows.some(r => r.id === focused) ? focused : rows[0]?.id) ? 0 : -1}
                 onFocus={() => setFocused(row.id)} onClick={() => jump(row.id)} title={row.t.node.question}
-                className="flex min-w-0 flex-1 items-center gap-1 py-2 pr-1 text-left focus-visible:outline focus-visible:outline-accent max-md:min-h-11">
+                className="flex min-w-0 flex-1 items-center gap-1 py-1 pr-1 text-left focus-visible:outline focus-visible:outline-accent max-md:min-h-11">
+                <span aria-label={isWaitingNode(row.t.node) ? "等待处理" : isUnreadNode(row.t.node) ? "未读" : "已读"} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: isWaitingNode(row.t.node) ? "#d97706" : isUnreadNode(row.t.node) ? "#2563eb" : "var(--color-ink-faint)" }} />
                 <span className="shrink-0 text-nano text-ink-faint">#{indices[row.id]}</span>
-                {isUnreadNode(row.t.node) && <span aria-label="未读" className="h-1.5 w-1.5 shrink-0 rounded-full bg-unread" />}
-                <span className={`truncate ${row.topic && model.forest.length > 1 ? "font-medium" : ""}`}>{treeLabel(row.t.node, 80)}</span>
-                {row.topic && model.forest.length > 1 && <span className="ml-auto text-nano text-ink-faint">{row.t.count}</span>}
+                <span className={`truncate ${row.topic ? "font-semibold" : ""}`}>{treeLabel(row.t.node, 80)}</span>
+                {row.topic && <span className="ml-auto text-nano text-ink-faint">{row.t.count}</span>}
               </button>
               <details data-node-actions className="relative shrink-0">
-                <summary aria-label={`${treeLabel(row.t.node, 16)}操作`} className="cursor-pointer list-none px-1 py-2 max-md:min-h-11 text-ink-faint">⋯</summary>
+                <summary aria-label={`${treeLabel(row.t.node, 16)}操作`} className="cursor-pointer list-none px-1 py-2 md:py-1 max-md:min-h-11 text-ink-faint">⋯</summary>
                 <div className="absolute right-0 top-full z-10 w-36 rounded border border-line bg-surface p-1 shadow-pop" onClick={e => { e.currentTarget.parentElement?.removeAttribute("open"); }}>
                   <button className="block w-full p-2 text-left" onClick={() => isUnreadNode(row.t.node) ? markRead(row.id) : markUnread(row.id)}>{isUnreadNode(row.t.node) ? "标为已读" : "标为未读"}</button>
                   {row.topic && <><button className="block w-full p-2 text-left" onClick={() => { setEditing(row.id); setTitle(row.t.node.topicLabel ?? ""); }}>重命名话题</button>
