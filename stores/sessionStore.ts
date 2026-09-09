@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { NavigationOwner, fetchWithRetry, type NavigationTicket } from "@/lib/client-navigation";
+import { reconcilePending, type PendingSnapshot } from "@/lib/pending";
 import { CANVAS_MAP, normalizeViewMode } from "@/lib/canvas-map";
 import type { Mode, ProviderId, ProviderInfo } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId, PROVIDERS } from "@/lib/llm";
@@ -370,6 +372,11 @@ function apiNodeToChatNode(n: ApiNode): ChatNode {
 }
 
 type State = {
+  pending: PendingSnapshot;
+  pendingSubmissions: Set<string>;
+  ingestPending: (snapshot: PendingSnapshot) => void;
+  pendingNavigation: { nodeId: string; sequence: number } | null;
+  navigationVersion: number;
   session: Session | null;
   nodes: Record<string, ChatNode>;
   activeNodeId: string | null;
@@ -814,6 +821,23 @@ function releaseStreamController(controller: AbortController): void {
 }
 
 export const useSessionStore = create<State & Actions>((set, get) => ({
+  pending: { revision: 0, items: [] },
+  pendingSubmissions: new Set(),
+  pendingNavigation: null,
+  navigationVersion: 0,
+  ingestPending: snapshot => set(s => {
+    const pending = reconcilePending(s.pending, snapshot);
+    if (pending === s.pending) return s;
+    const nodes = { ...s.nodes };
+    for (const [id, node] of Object.entries(nodes)) {
+      if (s.pendingSubmissions.has(id)) continue;
+      const item = pending.items.find(item => item.nodeId === id);
+      if (JSON.stringify(node.pendingInteraction) !== JSON.stringify(item?.interaction ?? null)) {
+        nodes[id] = { ...node, pendingInteraction: item?.interaction ?? null };
+      }
+    }
+    return { pending, nodes };
+  }),
   session: null,
   nodes: {},
   activeNodeId: null,
@@ -909,6 +933,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // previewSession 之后完成、把 preview tab 覆盖回 sessions[0]）。
     if (get().hydrated || hydrateInFlight) return;
     hydrateInFlight = true;
+    const navigation = sessionNavigation.begin();
     set({
       provider: loadProvider(),
       draftMode: loadDraftMode(),
@@ -927,16 +952,17 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     try {
       let targetId = sessionId;
       if (!targetId) {
-        const res = await fetchWithTimeout("/api/sessions", 5000);
+        const res = await fetchWithRetry("/api/sessions", 5000, navigation.signal);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { sessions } = (await res.json()) as { sessions: Session[] };
         targetId = sessions[0]?.id;
       }
       if (!targetId) {
+        if (!navigation.current()) return;
         set({ hydrated: true });
         return;
       }
-      await loadSessionInternal(targetId, set);
+      if (!await loadSessionInternal(targetId, set, navigation)) return;
       // Wave 4: surface the auto-loaded session as a tab. If the user had
       // it pinned across reloads, it's already an open tab; otherwise show
       // it as the (transient) preview tab so the strip isn't empty while a
@@ -954,6 +980,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // reconnect SSE to each so live deltas / terminal events resume.
       get().reconnectStreamingNodes();
     } catch (err) {
+      if (!navigation.current()) return;
       const message = err instanceof Error ? err.message : String(err);
       console.error("[trellis] hydrate failed:", err);
       set({ hydrated: true, hydrateError: message });
@@ -963,7 +990,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   loadSession: async (sessionId) => {
-    await loadSessionInternal(sessionId, set);
+    set(s => ({ navigationVersion: s.navigationVersion + 1 }));
+    if (!await loadSessionInternal(sessionId, set)) return;
     // Wave 4: landing on a session clears its "finished while away" badge.
     set((s) => {
       if (!s.unreadSessionIds.has(sessionId)) return s;
@@ -975,6 +1003,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   newConversation: () => {
+    sessionNavigation.cancel();
     set({
       session: null,
       nodes: {},
@@ -2429,7 +2458,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   respondToInteraction: async (nodeId, toolUseId, decision) => {
     const existing = get().nodes[nodeId];
-    const pending = existing?.pendingInteraction ?? null;
+    const item = get().pending.items.find(i => i.nodeId === nodeId && i.interaction.toolUseId === toolUseId);
+    const pending = item?.interaction ?? existing?.pendingInteraction ?? null;
+    const initialRevision = get().pending.revision;
+    if (get().pendingSubmissions.has(nodeId)) return { ok: false, reason: "error" };
     // Guard: nothing to answer, or the form is already stale against a
     // different toolUseId — treat as stale so the UI dismisses it.
     const dropWaitingToast = (s: State) =>
@@ -2451,9 +2483,16 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
     // Optimistically clear so the form disappears immediately. Stash the
     // prior value to restore on a retryable failure.
+    set(s => ({ pendingSubmissions: new Set(s.pendingSubmissions).add(nodeId) }));
+    const finish = () => set(s => {
+      const submissions = new Set(s.pendingSubmissions); submissions.delete(nodeId);
+      return { pendingSubmissions: submissions };
+    });
+    const remove = () => set(s => ({ pending: { revision: s.pending.revision,
+      items: s.pending.items.filter(i => !(i.nodeId === nodeId && i.interaction.toolUseId === toolUseId)) } }));
     set((s) => {
       const cur = s.nodes[nodeId];
-      if (!cur) return s;
+      if (!cur || cur.pendingInteraction?.toolUseId !== toolUseId) return s;
       return {
         nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: null } },
         doneToasts: dropWaitingToast(s),
@@ -2464,6 +2503,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         const cur = s.nodes[nodeId];
         // Only restore if nothing newer took its place.
         if (!cur || cur.pendingInteraction) return s;
+        if (s.pending.revision > initialRevision && !s.pending.items.some(i => i.nodeId === nodeId && i.interaction.toolUseId === toolUseId)) return s;
         return {
           nodes: { ...s.nodes, [nodeId]: { ...cur, pendingInteraction: pending } },
         };
@@ -2480,18 +2520,24 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...(decision.alwaysAllowTool ? { alwaysAllowTool: true } : {}),
         }),
       });
-      if (res.ok) return { ok: true };
+      const payload = await res.json().catch(() => null);
+      if (payload?.pending) get().ingestPending(payload.pending);
+      if (res.ok) { remove(); finish(); get().ingestPending(get().pending); return { ok: true }; }
       // 404 (no live run) / 409 (no pending / toolUseId mismatch): the run is
       // gone or moved on. Leave the form cleared — retrying won't help.
       if (res.status === 404 || res.status === 409) {
+        remove(); finish();
+        get().ingestPending(get().pending);
         return { ok: false, reason: "stale" };
       }
       // 400 / 5xx / anything else: retryable — put the form back.
       restore();
+      finish();
       return { ok: false, reason: "error" };
     } catch {
       // Network failure — retryable.
       restore();
+      finish();
       return { ok: false, reason: "error" };
     }
   },
@@ -2693,14 +2739,15 @@ function evictSessionFromTabs(
 // a stale slow load (tab switch racing a cli-sync session_updated reload, or
 // two rapid switches) can resolve LAST and flip the view back to the wrong
 // session — the "switched to B but A's running content shows" 串台.
-let loadSeq = 0;
+const sessionNavigation = new NavigationOwner();
 
 // S117: hydrate 防重入（hydrated 变 true 之前的并发双跑，见 hydrate 注释）。
 let hydrateInFlight = false;
 
-async function loadSessionInternal(sessionId: string, set: Setter) {
-  const seq = ++loadSeq;
-  const res = await fetchWithTimeout(`/api/sessions/${sessionId}`, 5000);
+async function loadSessionInternal(sessionId: string, set: Setter, navigation: NavigationTicket = sessionNavigation.begin()): Promise<boolean> {
+  let res: Response;
+  try { res = await fetchWithRetry(`/api/sessions/${sessionId}`, 5000, navigation.signal); }
+  catch (error) { if (!navigation.current()) return false; throw error; }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const { session, nodes, notes } = (await res.json()) as {
     session: Session;
@@ -2708,7 +2755,7 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     notes?: Note[];
   };
   // A newer load superseded this one while we were fetching — drop it.
-  if (seq !== loadSeq) return;
+  if (!navigation.current()) return false;
   const map: Record<string, ChatNode> = {};
   for (const n of nodes) map[n.id] = apiNodeToChatNode(n);
   // Streaming nodes with a live LOCAL subscription need their response
@@ -2813,6 +2860,8 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
   const sessionProvider = isProviderId(session.model) ? session.model : null;
   set({
     session,
+    hydrated: true,
+    hydrateError: null,
     nodes: map,
     activeNodeId: restoredActive,
     viewMode: restoredViewMode,
@@ -2823,12 +2872,11 @@ async function loadSessionInternal(sessionId: string, set: Setter) {
     treeVisits,
     ...(sessionProvider ? { provider: sessionProvider } : {}),
   });
+  return true;
 }
 
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(t));
+  return fetchWithRetry(url, ms);
 }
 
 type ChatRequestBody =

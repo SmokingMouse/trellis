@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ToastShell } from "@/components/ui/Toast";
+import { bindPageStream } from "@/lib/page-stream";
 
 // S88: 任务执行完成 / 失败的站内提醒。
 //
@@ -33,23 +34,24 @@ export function TaskToast() {
   const [items, setItems] = useState<Item[]>([]);
 
   useEffect(() => {
-    const ctrl = new AbortController();
+    let ctrl = new AbortController();
     let cancelled = false;
     let retryTimer = 0;
 
     // 结构照抄 useCliSyncEvents：手写 SSE 读取 + 断线重连。用 EventSource 会
     // 少几行，但它不能带 signal、不好在 unmount 时干净收摊。
     async function run() {
+      const signal = ctrl.signal;
       try {
         const res = await fetch("/api/tasks/events", {
-          signal: ctrl.signal,
+          signal,
           headers: { Accept: "text/event-stream" },
         });
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        while (!cancelled) {
+        while (!cancelled && !signal.aborted) {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -80,16 +82,22 @@ export function TaskToast() {
       } catch {
         /* transient —— 下面重连 */
       } finally {
-        if (!cancelled) retryTimer = window.setTimeout(run, 2000);
+        if (!cancelled && !signal.aborted) retryTimer = window.setTimeout(run, 2000);
       }
     }
 
     void run();
-    return () => {
+    const stop = () => {
       cancelled = true;
       if (retryTimer) window.clearTimeout(retryTimer);
       ctrl.abort();
     };
+    return bindPageStream(window, stop, () => {
+      if (!cancelled) return;
+      cancelled = false;
+      ctrl = new AbortController();
+      void run();
+    });
   }, []);
 
   if (!items.length) return null;

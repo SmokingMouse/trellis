@@ -110,7 +110,7 @@ export function SessionTabs() {
   return (
     <div
       className="hidden md:block fixed top-12 right-0 z-30 h-9 bg-surface-canvas/85 backdrop-blur border-b border-line"
-      style={{ left: "var(--trellis-sb, 0px)" }}
+      style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
       <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (

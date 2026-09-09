@@ -10,6 +10,7 @@ import {
 import { QuestionInput } from "@/components/QuestionInput";
 import { Canvas } from "@/components/Canvas";
 import { Header } from "@/components/Header";
+import { PendingBar } from "@/components/PendingBar";
 import { SessionTabs } from "@/components/SessionTabs";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { LinearThreadView } from "@/components/LinearThreadView";
@@ -81,12 +82,19 @@ export default function Home() {
   const previewDeepSession = useSessionStore((s) => s.previewSession);
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const deepLinkedRef = useRef<string | null>(null);
+  const initialNavigationVersion = useRef(useSessionStore.getState().navigationVersion);
   const [deepLinkApplied, setDeepLinkApplied] = useState(false);
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") return;
     const q = new URLSearchParams(window.location.search);
     const deepSession = q.get("session");
     const deepNode = q.get("node");
+    const currentSession = useSessionStore.getState().session?.id;
+    if (currentSession && currentSession !== deepSession && useSessionStore.getState().navigationVersion !== initialNavigationVersion.current) {
+      setDeepLinkApplied(true);
+      return;
+    }
+    if (useSessionStore.getState().hydrateError && !currentSession) return;
     if (!deepSession) {
       setDeepLinkApplied(true);
       return;
@@ -116,6 +124,7 @@ export default function Home() {
   // requested query while previewDeepSession is still in flight.
   useEffect(() => {
     if (!hydrated || !deepLinkApplied) return;
+    if (!sessionId && useSessionStore.getState().hydrateError) return;
     const url = migrateMapUrl(new URL(window.location.href));
     if (!sessionId) {
       url.searchParams.delete("session");
@@ -148,6 +157,8 @@ export default function Home() {
   return (
     <ScrollHideProvider>
       <Header isMobile={isMobile} />
+      {!isMobile && <PendingBar />}
+      {isMobile && !session && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (

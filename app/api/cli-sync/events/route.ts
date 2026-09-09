@@ -1,9 +1,11 @@
 import { subscribeCliSync } from "@/lib/server/cli-sync-events";
+import { pendingSnapshot, schedulePendingRefresh } from "@/lib/server/pending";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  schedulePendingRefresh();
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
@@ -41,10 +43,11 @@ export async function GET(req: Request) {
       };
 
       unsubscribe = subscribeCliSync({
-        onEvent: send,
+        onEvent: event => send(event.type === "pending_changed" ? { type: "pending_snapshot", ...pendingSnapshot() } : event),
         onClose: close,
       });
       send({ type: "ping" });
+      send({ type: "pending_snapshot", ...pendingSnapshot() });
       keepAlive = setInterval(() => send({ type: "ping" }), 30_000);
 
       const onAbort = () => {
