@@ -245,3 +245,4 @@
 - [fj-sidebar-wave3-8dc6] 侧栏 IA 波 3 · 会话内面板合并：TreePanel + Outline → 右侧 push 式「结构」面板（默认 | accepted | reworks=0 | 2026-09-09T03:51:53+08:00 | c4b885742ac9
 - [fj-sidebar-wave4-7058] 侧栏 IA 波 4 · 画布地图化：画布改为面板里的地图覆盖层，进入必 fitView，选中即关闭落回线性 | accepted | reworks=0 | 2026-09-09T04:29:26+08:00 | 33706c8eda17
 - [fj-canvas-map-layout-3a3c] 返工地图布局：话题块内真树层级布局、边不交叉不穿卡、小会话放大到可读、与旧画布同会话对照截图 | accepted | reworks=0 | 2026-09-09T11:43:50+08:00 | e23813e9df7e
+- [fj-structure-floating-panel-7b4f] 结构面板改回小浮窗+小点形态（用户裁决）：右下角浮动小窗、行首状态圆点、内容模型不变、正文列宽恢复、Composer 不 | accepted | reworks=0 | 2026-09-09T12:32:21+08:00 | 3843e501829b

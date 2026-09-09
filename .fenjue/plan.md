@@ -754,3 +754,5 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-as-controls-polish-dfcc
 - [ ] canvas-map-layout: 返工地图布局：话题块内真树层级布局、边不交叉不穿卡、小会话放大到可读、与旧画布同会话对照截图 | after: sidebar-wave4 | kind: codex
   cid: fj-canvas-map-layout-3a3c
+- [ ] structure-floating-panel: 结构面板改回小浮窗+小点形态（用户裁决）：右下角浮动小窗、行首状态圆点、内容模型不变、正文列宽恢复、Composer 不被遮，对照旧截图 | after: canvas-map-layout | kind: codex
+  cid: fj-structure-floating-panel-7b4f

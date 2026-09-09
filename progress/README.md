@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-侧栏波四地图布局已返工并通过本地验证，待主控合并部署，生产暂用波三；FJ_RUNNER_DEFAULT、待办层与 AS 切流继续按原队列推进。
+侧栏 IA 全部落地（工具条+项目树+右下小浮窗结构面板+地图），收编与观察页退役已上线；剩 FJ_RUNNER_DEFAULT、待办层、非 git 项目归属等用户拍板，观察一天后 AS 切流扩到全部项目。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S167） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S168） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

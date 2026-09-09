@@ -330,3 +330,10 @@ jsonl 文件。集合来自 `nodes.claude_session_id` / `codex_session_id`。
 ## 2026-09-08 ingress 对 TUI 级模型跨后端 override 的容忍
 - **Decision**：官方 TUI 的 `--model` 只在 thread/start 决定后端；对已存在线程（resume / turn/start）带来的跨后端模型 override 视为沿用线程当前模型，并推可见提示，操作继续；同后端 override 照常生效。不静默切引擎、不让整轮或 resume 失败。
 - **Why**：slice 3 再审：TUI 以 `--model sonnet` 启动后切到 Codex 线程 resume 被 -32602 拒绝，混合后端在最自然的启动方式下不可用（fj-tui-ingress-slice3-review2-f820 §P1-1）。
+
+## 2026-09-09 · 结构面板形态改回「小浮窗 + 小点」（推翻方案 A 第 10 条的右侧 push 整列）
+
+- **Decision**：会话内「结构」面板采用旧 TreePanel 的形态——右下角浮动小窗（约 290px 宽、≤45% 视口高）、行首状态圆点（已读/未读/等待处理）、当前行高亮，可收起为小徽标；不再 push 正文列。内容模型（话题森林 / 当前链 / 其它分支 / 地图入口）保留。
+- **Why**：用户在波 3 上线后的原话「我还是感觉原先的那种小浮窗+小点的交互比较合理」；自用工具，用户偏好高于体检 P1-1 的「零重叠」判据。浮窗在「宽」档落在右侧留白，实际遮挡有限。
+- **Alternatives**：保留 push 整列（体检 §6 方向 1 与方案 A 的选择，被用户否决）；两种形态并存加开关（多一套维护面，自用工具不值）。
+- 关联：`progress/sidebar-tree-ia.md` §4 波 3；返工单 fj-structure-floating-panel-7b4f。
