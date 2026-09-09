@@ -448,10 +448,9 @@ ab eval --stdin <<'JS'
   assert(localStorage.getItem('trellis-desktop-mode') === '1', 'desktop marker missing after reload');
   const linear = document.querySelector('[data-safe-area="linear-thread"]');
   const linearRect = linear.getBoundingClientRect();
-  // Forced desktop now reserves the 36px structure rail, just like a wide
-  // desktop. Assert the push partition, not the retired full-width surface.
+  // The floating structure badge must not reserve a desktop content column.
   const structureRect = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(linearRect.left === 0 && Math.abs(linearRect.right - structureRect.left) < 1 && Math.abs(linearRect.width + structureRect.width - innerWidth) < 1, `forced desktop push rects=${JSON.stringify({linear:linearRect.toJSON(),structure:structureRect.toJSON()})}`);
+  assert(linearRect.left === 0 && Math.abs(linearRect.width - innerWidth) < 1 && structureRect.bottom < innerHeight - 70, `forced desktop floating rects=${JSON.stringify({linear:linearRect.toJSON(),structure:structureRect.toJSON()})}`);
   const hamburger = document.querySelector('[data-mobile-target="header-session-drawer"]');
   const hamburgerRect = hamburger.getBoundingClientRect();
   assert(hamburger.offsetParent !== null && hamburgerRect.width >= 44 && hamburgerRect.height >= 44, `forced desktop hamburger=${JSON.stringify(hamburgerRect.toJSON())}`);

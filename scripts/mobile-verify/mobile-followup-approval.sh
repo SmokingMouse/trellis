@@ -503,11 +503,10 @@ ab eval --stdin <<'JS'
     .map((button) => button.getAttribute('aria-label'));
   assert(JSON.stringify(labels) === JSON.stringify(['添加附件', '画个草图', '发送']), `desktop buttons=${JSON.stringify(labels)}`);
   const rr = rail.getBoundingClientRect();
-  // Wave 3 reserves the structure rail; Composer still owns the full reading
-  // column and its three controls must remain left of the panel.
+  // The restored floating panel clears the full-width Composer vertically.
   const sr = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(near(rr.left, 210) && near(rr.top, 729) && near(rr.right, sr.left) && near(rr.width + sr.width, 1070) && near(rr.height, 71), `desktop Composer push rect=${JSON.stringify(rr.toJSON())}`);
-  assert([...composer.querySelectorAll('button')].every(button => button.getBoundingClientRect().right <= sr.left), 'Composer controls overlap structure');
+  assert(near(rr.left, 210) && near(rr.top, 729) && near(rr.width, 1070) && near(rr.height, 71), `desktop Composer floating rect=${JSON.stringify(rr.toJSON())}`);
+  assert([...composer.querySelectorAll('button')].every(button => button.getBoundingClientRect().top >= sr.bottom), 'Composer controls overlap structure');
   assert(near(parseFloat(getComputedStyle(input).fontSize), 14), `desktop input font=${getComputedStyle(input).fontSize}`);
   return { rail: { left: rr.left, top: rr.top, width: rr.width, height: rr.height }, labels };
 })()
