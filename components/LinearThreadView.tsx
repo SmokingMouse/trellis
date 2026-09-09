@@ -1,5 +1,4 @@
 "use client";
-import { CANVAS_MAP } from "@/lib/canvas-map";
 import {
   Fragment,
   useCallback,
@@ -581,7 +580,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             ) : (
               <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
-                {mode.label}{!CANVAS_MAP && " · 线性"}
+                {mode.label} · 线性
               </div>
             )}
             <h1 className="truncate text-sm font-semibold text-ink-strong">
@@ -611,10 +610,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               </button>
             ))}
           </div>
-          {!CANVAS_MAP && !isMobile && !isHerdr && (
+          {!isMobile && !isHerdr && (
             <button
               type="button"
               onClick={() => setViewMode("canvas")}
+              data-map-open
               className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
             >
               🗺 画布

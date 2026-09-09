@@ -424,6 +424,7 @@ type State = {
   // enabled every session reads linearly; map visibility is panel-local.
   viewMode: ViewMode;
   mapNavigation: { nodeId: string; sequence: number } | null;
+  mapSessionId: string | null;
   jumpFromMap: (nodeId: string) => void;
   // #5: stream failures that happen before the server creates a node (fetch
   // refused / non-2xx). There's no node to attach the error to, so it
@@ -858,6 +859,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
   viewMode: defaultViewModeForSession(null),
   mapNavigation: null,
+  mapSessionId: null,
   jumpFromMap: (nodeId) => {
     if (!get().nodes[nodeId]) return;
     get().setActiveNode(nodeId);
@@ -1217,7 +1219,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   setViewMode: (mode) => {
-    if (CANVAS_MAP) { set({ viewMode: "linear" }); return; }
+    if (CANVAS_MAP) {
+      set({ viewMode: "linear", mapSessionId: mode === "canvas" ? get().session?.id ?? null : null, mobileTreePanelOpen: false });
+      return;
+    }
     if (mode === "canvas") {
       // Returning to canvas: pan to the most-recently-edited node so the
       // user lands on the freshest work, not whatever the previous

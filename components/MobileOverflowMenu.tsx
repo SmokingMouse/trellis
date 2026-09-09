@@ -1,6 +1,4 @@
 "use client";
-import { CANVAS_MAP } from "@/lib/canvas-map";
-import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 
 import { useState, type ReactNode } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -202,15 +200,15 @@ export function MobileOverflowMenu({
                   })
                 }
               >
-                {STRUCTURE_PANEL || CANVAS_MAP ? "结构" : "思维树"}
+                思维树
               </MenuButton>
-              {!CANVAS_MAP && <MenuButton
+              <MenuButton
                 target="overflow-canvas"
                 icon="🗺"
                 onClick={() => act(() => setViewMode("canvas"))}
               >
                 画布
-              </MenuButton>}
+              </MenuButton>
               {session.workspacePath && (
                 <MenuButton
                   target="overflow-workspace-files"

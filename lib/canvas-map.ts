@@ -1,9 +1,9 @@
 import type { ChatNode } from "./types";
-import { buildStructure } from "./structure-panel";
+import { childrenIndex, nodeSort } from "./tree-panel";
 import dagre from "@dagrejs/dagre";
 
-// Build-time rollback: keep the old reader for one release.
-export const CANVAS_MAP = process.env.NEXT_PUBLIC_TRELLIS_CANVAS_MAP !== "off" && process.env.NEXT_PUBLIC_TRELLIS_CANVAS_MAP !== "0";
+// The canvas is a map overlay; persisted reading always stays linear.
+export const CANVAS_MAP = true;
 export function normalizeViewMode(value: unknown, enabled = CANVAS_MAP): "linear" | "canvas" | undefined {
   if (enabled) return "linear";
   return value === "linear" || value === "canvas" ? value : undefined;
@@ -37,7 +37,14 @@ export function mapViewport(bounds: MapRect, viewport: MapSize) {
  * topics, never nodes. Edges stay in the empty rank corridor below the parent.
  */
 export function layoutMap(nodes: Record<string, ChatNode>, mobile: boolean, viewport: MapSize = { width: mobile ? 390 : 1390, height: mobile ? 720 : 770 }) {
-  const forest = buildStructure(nodes, null).forest;
+  const children = childrenIndex(nodes);
+  type MapTree = { node: ChatNode; children: MapTree[] };
+  const attach = (node: ChatNode, seen = new Set<string>()): MapTree => {
+    const path = new Set(seen).add(node.id);
+    return { node, children: (children.get(node.id) ?? []).filter(n => !path.has(n.id)).map(n => attach(n, path)) };
+  };
+  const forest = Object.values(nodes).filter(n => !n.parentId || !nodes[n.parentId])
+    .sort((a, b) => a.createdAt - b.createdAt || nodeSort(a, b)).map(n => attach(n));
   // On phones, a large forest uses narrow overview cards so wide branching
   // topics do not consume the entire width while leaving the height unused.
   const width = mobile ? (Object.keys(nodes).length > 20 ? 160 : 320) : 420;

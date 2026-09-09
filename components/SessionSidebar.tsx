@@ -1,5 +1,4 @@
 "use client";
-import { STRUCTURE_PANEL } from "@/lib/structure-panel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -576,7 +575,7 @@ export function SessionSidebar() {
                       className="mx-1 flex items-center text-nano text-ink-faint hover:text-ink"
                       title={
                         r.moreChains > 0
-                          ? `另有 ${r.moreChains} 条更早的链没列出 —— 进会话后在${STRUCTURE_PANEL ? "结构" : "树面板"}里找`
+                          ? `另有 ${r.moreChains} 条更早的链没列出 —— 进会话后在树面板里找`
                           : undefined
                       }
                     >
@@ -1422,7 +1421,7 @@ function SidebarRow({
         </span>
       )}
       {herdr && !editing && <span data-herdr-alive={herdr.alive} title={herdr.alive ? `Herdr 在线 · ${herdr.status}` : "Herdr 离线 · 可阅读历史"} aria-label={herdr.alive ? "Herdr 在线" : "Herdr 离线"} className={`w-1.5 h-1.5 shrink-0 rounded-full ${herdr.alive ? herdr.status === "waiting" || herdr.status === "blocked" ? "bg-warn" : "bg-positive" : "bg-line-strong"}`} />}
-      {SIDEBAR_V2 && !editing && (session.treeCount ?? 0) > 1 && <span title={`${session.treeCount} 个话题，进入会话后在${STRUCTURE_PANEL ? "结构" : "思维树"}切换`} className="shrink-0 text-nano text-ink-faint tabular-nums">{session.treeCount} 话题</span>}
+      {SIDEBAR_V2 && !editing && (session.treeCount ?? 0) > 1 && <span title={`${session.treeCount} 个话题，进入会话后在思维树切换`} className="shrink-0 text-nano text-ink-faint tabular-nums">{session.treeCount} 话题</span>}
       {session.archived && !editing && <span className="shrink-0 text-nano rounded bg-surface-muted px-1 text-ink-faint">归档</span>}
 
       {/* CLI 同步：attach 的会话标来源角标（双向绑定）。正被 CLI 实时驱动时

@@ -322,7 +322,7 @@ sleep 1
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
 agent-browser --session "$SESSION" click 'button[aria-label="过滤跳转"]'
 agent-browser --session "$SESSION" wait 'input[aria-label="过滤节点"]'
-assert_visible_text_fields_at_least_16 "结构过滤输入"
+assert_visible_text_fields_at_least_16 "思维树过滤输入"
 agent-browser --session "$SESSION" click '[data-mobile-target="tree-sheet-close"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-mobile-tree-sheet]')"
 
@@ -430,9 +430,7 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   const cr = composer.getBoundingClientRect();
   const desktopComposerFontSize = parseFloat(getComputedStyle(composerTextarea).fontSize);
   assert(near(hr.top, 0) && near(hr.width, 1280) && near(hr.height, 48), `Header 偏离改前基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
-  // Floating structure leaves the full reading width and clears the Composer.
-  const sr = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800) && sr.bottom <= cr.top, `Composer 浮窗边界不符: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom, panel: sr.toJSON() })}`);
+  assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800), `Composer 偏离改前基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
   assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;

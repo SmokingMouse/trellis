@@ -5,7 +5,7 @@ import { NewQuestionPicker } from "./NewQuestionPicker";
 
 type Picker = "question" | "reference" | null;
 
-// Canvas creation action. Clicking opens a small popover menu with two creation
+// Bottom-right FAB. Clicking opens a small popover menu with two creation
 // flows: 新话题 (fresh-context parallel root in current session) / 参考卡片.
 // Remote triggers (Header B3 prompt, /clear) go through the store's
 // composeRootOpen flag, consumed at page level so it works in both views —
@@ -39,10 +39,10 @@ export function AddNodeFAB() {
 
   return (
     <>
-      {/* Desktop clears the floating panel; mobile retains its original FAB. */}
-      <div ref={wrapRef} className="fixed bottom-24 md:bottom-auto md:top-40 right-3 z-30">
+      {/* bottom-24 clears the docked composer bar (#3) at the viewport foot. */}
+      <div ref={wrapRef} className="fixed bottom-24 right-3 z-30">
         {menuOpen && (
-          <div className="absolute bottom-14 md:bottom-auto md:top-14 right-0 w-56 bg-surface-raised border border-line rounded-lg shadow-pop py-1 text-sm ui-enter-pop">
+          <div className="absolute bottom-14 right-0 w-56 bg-surface-raised border border-line rounded-lg shadow-pop py-1 text-sm ui-enter-pop">
             <MenuItem
               onClick={() => open("question")}
               icon="🧹"

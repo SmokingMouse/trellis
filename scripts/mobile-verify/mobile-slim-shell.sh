@@ -365,9 +365,7 @@ ab eval --stdin <<'JS'
   const menu = document.querySelector('[data-mobile-overflow-menu]');
   assert(menu, 'overflow menu missing');
   const text = menu.textContent || '';
-  // Wave 3 unifies TreePanel/Outline under the same user-facing name.
-  if (document.querySelector('[data-mobile-target="overflow-canvas"]')) throw new Error('retired canvas entry remains');
-  for (const label of ['搜索', '结构', '工作区文件', '笔记', '导出', '模式', '模型', '主题', '任务', '设置', '转桌面版']) {
+  for (const label of ['搜索', '思维树', '画布', '工作区文件', '笔记', '导出', '模式', '模型', '主题', '任务', '设置', '转桌面版']) {
     assert(text.includes(label), `overflow missing ${label}`);
   }
   const targets = [...menu.querySelectorAll('[data-mobile-target]')];
@@ -407,14 +405,13 @@ ab eval --stdin <<'JS'
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 })()
 JS
-ab click 'button[aria-label="关闭结构"]'
+ab click 'button[aria-label="关闭思维树"]'
 wait_for_js "TreePanel closed to linear" "!document.querySelector('[data-mobile-tree-sheet]') && Boolean(document.querySelector('textarea[data-composer-input]'))"
 
-echo "== M11: structure map performs fitView on entry =="
+echo "== M11: original canvas entry opens the fitted map =="
 ab click 'button[aria-label="更多功能"]'
 wait_for_js "overflow reopened" "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-ab click '[data-mobile-target="overflow-tree"]'
-ab click '[data-map-open]'
+ab click '[data-mobile-target="overflow-canvas"]'
 wait_for_js "map mounted and fitted" "Number(document.querySelector('[data-canvas-map]')?.dataset.mapFitCount)>0"
 wait_for_js "mobile map nodes fitted" "(() => { const nodes=[...document.querySelectorAll('[data-map-node]')]; return nodes.length===7 && nodes.every((node) => { const r=node.getBoundingClientRect(); return r.left>=0 && r.right<=innerWidth && r.top>=48 && r.bottom<=innerHeight; }); })()"
 ab eval --stdin <<'JS'
@@ -433,7 +430,6 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab click 'button[aria-label="关闭地图"]'
-ab click '[data-mobile-target="tree-sheet-close"]'
 wait_for_js "linear view restored" "Boolean(document.querySelector('textarea[data-composer-input]'))"
 
 echo "== desktop-mode marker and visible restore entry =="
@@ -448,9 +444,7 @@ ab eval --stdin <<'JS'
   assert(localStorage.getItem('trellis-desktop-mode') === '1', 'desktop marker missing after reload');
   const linear = document.querySelector('[data-safe-area="linear-thread"]');
   const linearRect = linear.getBoundingClientRect();
-  // The floating structure badge must not reserve a desktop content column.
-  const structureRect = document.querySelector('[data-structure-panel]').getBoundingClientRect();
-  assert(linearRect.left === 0 && Math.abs(linearRect.width - innerWidth) < 1 && structureRect.bottom < innerHeight - 70, `forced desktop floating rects=${JSON.stringify({linear:linearRect.toJSON(),structure:structureRect.toJSON()})}`);
+  assert(linearRect.left === 0 && linearRect.width >= 382, `forced desktop linear rect=${JSON.stringify(linearRect.toJSON())}`);
   const hamburger = document.querySelector('[data-mobile-target="header-session-drawer"]');
   const hamburgerRect = hamburger.getBoundingClientRect();
   assert(hamburger.offsetParent !== null && hamburgerRect.width >= 44 && hamburgerRect.height >= 44, `forced desktop hamburger=${JSON.stringify(hamburgerRect.toJSON())}`);
