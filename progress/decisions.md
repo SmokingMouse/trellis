@@ -344,3 +344,10 @@ jsonl 文件。集合来自 `nodes.claude_session_id` / `codex_session_id`。
 - **Why**：用户原话「不能直接和之前的效果对齐吗」——按截图重画的浮窗细节对不上；恢复原组件可逐像素对齐（131950/131950，MAE=0），且零维护面。
 - **Alternatives**：继续微调重画版直到对齐（无穷尽、无判据）；两版并存加开关（自用工具不值）。
 - 关联：S168（重画版，作废）、S169（恢复）、fj-restore-tree-panel-ccd2。
+
+## 2026-09-15 · Claude 官方 TUI 作显示端：两线证伪后结案；不基于泄露源码做任何构建
+
+- **Decision**：Claude 显示端问题结案——继续 Codex 官方 TUI 单一显示端（Claude 线程走 claude-projection）；不基于 `~/python/ai/claude-code` 泄露快照构建或运行任何改版客户端（用户 09-15 提「基于本地源码做个简单测试」，leader 拒绝并改派官方二进制 `claude attach` 线只读 spike）；`claude attach` 伪装层不投（日后若要蹭这个入口，等自研渲染器能跑后再花 0.7 坐席日包一层，不构成排期约束）；盯梢器判据不变，只盯 direct-connect 的 `POST /sessions`，不因 attach 存在而视为路通。
+- **Why**：direct-connect 入口到 2.1.266 仍编译关闭（facts 09-09）；attach 线 spike 证伪——它是 pty 级镜像，官方 TUI 只是终端仿真器、渲染器在服务端，「复用原生 UI」零收益（facts 09-15）；泄露快照是 Anthropic 专有代码、超出许可范围，且比 2.1.258 旧、没有 attach / 登记表，对这件事也已过时。
+- **Alternatives**：基于泄露源码打开 `DIRECT_CONNECT` 宏自行构建（拒绝：许可 + 09-08「只做设计参考」决策 + 过时）；AS 侧先做 direct-connect 服务端当期权（拒绝：入口未开前零收益，09-08 spike §6 同判）；等 Anthropic 打开 DIRECT_CONNECT（保留为盯梢项，一条 grep）。
+- 关联：09-08「单一 TUI 定为 Codex 官方 TUI」条；`.fenjue/archive/fj-cc-native-tui-spike-0e0a/`、`.fenjue/archive/lite-cc-attach-spike-20260909/`、`.fenjue/briefs/lite-cc-attach-spike.md`；S172。
