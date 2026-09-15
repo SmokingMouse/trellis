@@ -358,3 +358,10 @@ jsonl 文件。集合来自 `nodes.claude_session_id` / `codex_session_id`。
 - **Why**：用户 09-15 原话「不能和之前那种动线保持对齐吗」；这块本是第二步的开发者调试口被收编会话带到主页（S165），从未按 TurnCard 的卡片语言做过。两种排版给用户选，选了单行表头。
 - **Alternatives**：两行（来源 + 权限一行、事件一行，结构更稳但多占一行，用户未选）；把权限 select 移到 Composer 条（线程级设置放会话级更对，但要新组件与脚本改动，留作以后）。
 - 关联：PR #60（704ade8）、release `20260915T152559-704ade82a`、`.fenjue/briefs/lite-as-controls-timeline-card.md`、S172 补记 2。
+
+## 2026-09-16 · 侧栏：离线 Herdr 会话按已归档对待（以当前 Herdr 为基准）
+
+- **Decision**：侧栏 v2 里，Herdr 在线且报某会话的 pane 已不存在 → 该会话与 `archived` 同档：默认隐藏，勾「含已归档 / 离线」才显示（灰显 + 「离线」chip）；只剩离线会话的工作区因此变空、折进「其它 N 个工作区」；pane 回来行自动回来。纯前端派生（`lib/sidebar-view.ts` `herdrOffline`），不写库。Herdr 不可用时规则整体不生效。
+- **Why**：用户 09-16 原话「不应该是以当前 herdr 为基准吗」；波 2 并入项目树是为了让死 pane 会话可达（I3），但没有任何一层把离线藏起来，真库 66 个离线 pane 与 16 个在线同权重排列、43 个工作区行只装离线会话。派生方案保住了 I3（勾选即可达）又不引入写库边界。
+- **Alternatives**：pane 关闭时真归档写库（拒绝：与用户手动归档混在一起、重现时要反归档、Herdr 抖动时误伤）；保持现状只清那 43 个工作区（拒绝：治标，且那些检出是别的 leader 的）。
+- 关联：PR #61（c7cdaa5）、release `20260915T181119-c7cdaa581`、`.fenjue/briefs/lite-sidebar-herdr-offline.md`、`progress/sidebar-tree-ia.md` §430-431、S172 补记 3。`mobile-herdr.sh:521` 旧契约断言同步改为新契约。

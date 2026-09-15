@@ -33,3 +33,11 @@
 - 验收：tsc 0 错、`bun test` 312 绿、eslint 零新增、`mobile-as-project.sh` 29 PASS、`mobile-as-adopt.sh` 30 PASS、1440×900 双态截图（`.fenjue/archive/lite-as-controls-timeline-card-20260915/out/`）。leader 目检截图后合并：PR #60 → 704ade8（这次先建 PR 等 6 秒再合，`merged=true`）→ `make deploy` 30 秒，release `20260915T152559-704ade82a` 已上线，线上 chunk 含「🔌 引擎」、旧「Shift+Tab 切换」文本节点 0。坐席确认完成后 pane 关闭、worktree 与分支已删。
 - 遗留：手机 390px 来源文字被 truncate、折叠数在表头看不见（展开行仍有）；权限下拉在真实浏览器里点开是否会误触折叠未用鼠标实测（脚本走 `ab select`），用户使用时留意。
 - 用户又问「Claude Code 不是开源了吗 / anthropics/claude-code 已经开源了」：核实——仓库公开但 LICENSE.md 是「All rights reserved, Commercial Terms」，CLI / TUI 源码不在里面；**但 2026-09 起仓库多了 `mods/`：三个内置插件（sec-default / diff / telemetry）的 TS 源码 + 405 KB 的 `mods/types/claude-code.d.ts` 插件 API 类型**（hooks 覆盖 engine.create / session.* / model.complete / prompt.submit / command.register / render 画 pane 等），`claude --plugin-dir` 可从源码跑。这是官方给的扩展面，可能是「让官方 TUI 显示 AS 线程」的第三条正路，待 spike。
+
+## 补记 3（2026-09-16 00:30–02:15）：侧栏离线 Herdr 会话按归档对待，上线
+
+- 用户问「为啥 Trellis 上还能看到离线的 herdr 工作区，不应该以当前 herdr 为基准吗」。真库只读核查：`herdr_sessions` alive=1 的 16 pane / 23 会话，alive=0 的 66 pane / 67 会话，86 个 herdr 会话无一归档，43 个工作区行里只有离线 Herdr 会话（多为 `~/.herdr/worktrees/{fenjue,dotclaude,herdr-leader}/…`，S171 只清了我自己建的 trellis / sm-toolkit 那批）。根因是波 2 把 Herdr 组并进项目树后没有任何一层藏离线的，只剩行内灰点。
+- 三选一给用户：① 离线即视为已归档、默认隐藏（纯前端派生）② pane 关闭时真归档写库 ③ 保持现状只清工作区。用户选 ①。
+- 坐席 sidebar-offline（Opus，worktree `fix/sidebar-herdr-offline`，brief `.fenjue/briefs/lite-sidebar-herdr-offline.md`，16 分钟）：`lib/sidebar-view.ts` 加 `herdrOffline(s, herdrAvailable, alive)`，`selectSidebarSessions` 第五参 `isOffline` 与 `archived` 同档；`SessionSidebar.tsx` 闭包传入、离线行灰显 + 「离线」chip（`data-session-offline`）、复选框「含已归档 / 离线」；Herdr 不可用时一个都不藏。fleet 确认含死绑定（`listHerdrBindings` 无 `WHERE alive=1`），规则对 `alive:false` 与缺失条目同等处理。坐席中途问过一次路线：`mobile-herdr.sh:521` 断言的是旧契约（关 pane 后行仍在），我裁决改断言为新契约并补桌面证据图。
+- 验收：单测新增 2 test / 6 组断言、全量 314 绿、tsc 0、eslint 零新增、`mobile-herdr.sh` exit 0、两张 1440×900 截图（默认折进「其它 1 个工作区」/ 勾选后灰显带 chip）。leader 目检截图后合并：PR #61 → c7cdaa5 → `make deploy` 30 秒，release `20260915T181119-c7cdaa581`，线上 chunk 含「含已归档 / 离线」。坐席确认完成后 pane、worktree、分支已清。
+- 遗留：上线后侧栏会明显变短（43 个工作区折进「其它 N 个工作区」），用户第一次看可能会愣；复选框文案变长，手机工具条多占一行（44px 已验）。
