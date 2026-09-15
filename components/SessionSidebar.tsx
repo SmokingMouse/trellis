@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
@@ -38,7 +38,7 @@ import { HerdrSidebarGroup } from "@/components/HerdrSidebarGroup";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
-import { SIDEBAR_V2, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
+import { SIDEBAR_V2, herdrOffline, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
 const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "task", "lark", "external"].includes(v as string);
@@ -288,9 +288,16 @@ export function SessionSidebar() {
     };
   }, [archivedOpen, includeArchived, sessionsRevision]);
 
+  // 离线（pane 已不在）的 Herdr 会话按「已归档」对待：默认藏起来，勾选才出现。
+  // 纯前端派生 —— 不写库，pane 回来行就自动回来。
+  const isOfflineHerdr = useCallback(
+    (s: Session) => herdrOffline(s, herdrAvailable, herdrStatus.get(s.id)?.alive),
+    [herdrAvailable, herdrStatus],
+  );
+
   const visibleSessions = useMemo(() => SIDEBAR_V2
-    ? selectSidebarSessions(sessions, archived, source, includeArchived)
-    : sessions, [sessions, archived, source, includeArchived]);
+    ? selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
+    : sessions, [sessions, archived, source, includeArchived, isOfflineHerdr]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -447,6 +454,7 @@ export function SessionSidebar() {
       status={status}
       location={SIDEBAR_V2 && layout === "time" ? sessionLocation(s, projects) : undefined}
       herdr={SIDEBAR_V2 && sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
+      offline={isOfflineHerdr(s)}
       live={liveSessionIds.has(s.id)}
       editing={editingId === s.id}
       onPreview={() => { setMobileNavOpen(false); void previewSession(s.id); }}
@@ -868,7 +876,7 @@ export function SessionSidebar() {
                 <option value="all">全部</option><option value="web">网页</option><option value="herdr">Herdr</option><option value="task">任务</option><option value="lark">飞书</option><option value="external">外部</option>
               </select>
             </label>
-            <label className="flex items-center gap-1 h-7 max-md:h-11 text-ink-muted whitespace-nowrap cursor-pointer"><input type="checkbox" checked={includeArchived} onChange={e => setIncludeArchived(e.target.checked)} />含已归档</label>
+            <label className="flex items-center gap-1 h-7 max-md:h-11 text-ink-muted whitespace-nowrap cursor-pointer"><input type="checkbox" checked={includeArchived} onChange={e => setIncludeArchived(e.target.checked)} /><span title="含已归档的会话，以及 Herdr 里 pane 已不存在的离线会话">含已归档 / 离线</span></label>
           </div>
         </div>
       )}
@@ -1262,6 +1270,7 @@ function SidebarRow({
   status,
   location,
   herdr,
+  offline,
   live,
   editing,
   onPreview,
@@ -1283,6 +1292,8 @@ function SidebarRow({
   status?: RecentChain["status"];
   location?: string;
   herdr?: HerdrSessionStatus;
+  /** Herdr 在线但这个会话的 pane 已不存在 —— 与 archived 同档对待。 */
+  offline?: boolean;
   live: boolean;
   editing: boolean;
   onPreview: () => void;
@@ -1330,7 +1341,7 @@ function SidebarRow({
       data-session-archived={session.archived || undefined}
       data-herdr-pane={herdr?.paneId || undefined}
       data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
-      className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+      className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
         indicatorStatus === "waiting" || indicatorStatus === "streaming"
           ? // Running tint (accent) + left accent bar (added below). Overrides
             // mode/active bg so "in progress" rows are unmistakable.
@@ -1424,6 +1435,7 @@ function SidebarRow({
       {herdr && !editing && <span data-herdr-alive={herdr.alive} title={herdr.alive ? `Herdr 在线 · ${herdr.status}` : "Herdr 离线 · 可阅读历史"} aria-label={herdr.alive ? "Herdr 在线" : "Herdr 离线"} className={`w-1.5 h-1.5 shrink-0 rounded-full ${herdr.alive ? herdr.status === "waiting" || herdr.status === "blocked" ? "bg-warn" : "bg-positive" : "bg-line-strong"}`} />}
       {SIDEBAR_V2 && !editing && (session.treeCount ?? 0) > 1 && <span title={`${session.treeCount} 个话题，进入会话后在思维树切换`} className="shrink-0 text-nano text-ink-faint tabular-nums">{session.treeCount} 话题</span>}
       {session.archived && !editing && <span className="shrink-0 text-nano rounded bg-surface-muted px-1 text-ink-faint">归档</span>}
+      {offline && !editing && <span data-session-offline className="shrink-0 text-nano rounded bg-surface-muted px-1 text-ink-faint" title="Herdr 里的 pane 已不存在，按已归档对待；pane 回来这行自动回来">离线</span>}
 
       {/* CLI 同步：attach 的会话标来源角标（双向绑定）。正被 CLI 实时驱动时
           换成「● live」脉冲（remote-control 式感知）。 */}

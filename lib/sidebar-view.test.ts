@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY, type Session, type WorkspaceSummary, type ProjectSummary } from "./types";
-import { partitionEmptyWorkspaces, projectPresentation, selectSidebarSessions, sessionLocation, sidebarSource } from "./sidebar-view";
+import { herdrOffline, partitionEmptyWorkspaces, projectPresentation, selectSidebarSessions, sessionLocation, sidebarSource } from "./sidebar-view";
 
 const session = (id: string, updatedAt: number, extra: Partial<Session> = {}): Session => ({ id, title: id, rootNodeId: id, createdAt: 0, updatedAt, mode: "chat", workspacePath: null, systemPrompt: null, archived: false, model: null, ...extra });
 const workspace = (id: string): WorkspaceSummary => ({ id, name: id, path: `/${id}`, kind: "plain", gitBranch: null } as WorkspaceSummary);
@@ -43,6 +43,35 @@ test("收编会话保留外部来源、项目归属与跨来源时间排序", ()
   expect(selectSidebarSessions([], [{ ...external, archived: true }], "external", true)).toHaveLength(1);
   const project = { id: "external-project", name: "外部会话", clusterKey: "trellis:external", gitRemote: null, workspaces: [workspace("external-workspace")] } as ProjectSummary;
   expect(sessionLocation(external, [project])).toBe("外部会话 / external-workspace");
+});
+
+// Herdr 在线却报不出 pane 的会话 = 已归档：默认藏起来，勾选才看得到。
+const herdrSessions = [session("alive", 3, { origin: "herdr" }), session("dead", 2, { origin: "herdr" }), session("unbound", 1, { kind: "herdr" }), session("web", 4)];
+const aliveMap = new Map([["alive", true], ["dead", false]]); // "unbound" 缺失条目 —— fleet 连死绑定都没返回
+const offlineBy = (herdrAvailable: boolean) => (s: Session) => herdrOffline(s, herdrAvailable, aliveMap.get(s.id));
+
+test("Herdr 在线时 pane 已消失的会话按归档对待，缺失绑定同样算离线", () => {
+  const isOffline = offlineBy(true);
+  expect(selectSidebarSessions(herdrSessions, [], "all", false, isOffline).map(s => s.id)).toEqual(["web", "alive"]);
+  expect(selectSidebarSessions(herdrSessions, [], "all", true, isOffline).map(s => s.id)).toEqual(["web", "alive", "dead", "unbound"]);
+  expect(selectSidebarSessions(herdrSessions, [], "herdr", false, isOffline).map(s => s.id)).toEqual(["alive"]);
+  expect(selectSidebarSessions(herdrSessions, [], "herdr", true, isOffline).map(s => s.id)).toEqual(["alive", "dead", "unbound"]);
+  // 只剩离线会话的工作区因此变空，自动折进「其它 N 个工作区」。
+  const byWorkspace = new Map([["live", selectSidebarSessions([herdrSessions[0]], [], "all", false, isOffline)], ["dead-only", selectSidebarSessions([herdrSessions[1]], [], "all", false, isOffline)]]);
+  expect(partitionEmptyWorkspaces([workspace("live"), workspace("dead-only")], byWorkspace).empty.map(w => w.id)).toEqual(["dead-only"]);
+});
+
+test("Herdr 不可用时一个都不藏，非 herdr 来源永不受离线规则影响", () => {
+  const down = offlineBy(false);
+  expect(selectSidebarSessions(herdrSessions, [], "all", false, down).map(s => s.id)).toEqual(["web", "alive", "dead", "unbound"]);
+  expect(herdrOffline({ origin: "herdr" }, false, false)).toBe(false);
+  expect(herdrOffline({ origin: "herdr" }, true, true)).toBe(false);
+  expect(herdrOffline({ origin: "herdr" }, true, undefined)).toBe(true);
+  for (const s of [{ kind: "task" }, { kind: "lark" }, { origin: "external" }, { origin: "cli-import" }] as Pick<Session, "kind" | "origin">[]) expect(herdrOffline(s, true, undefined)).toBe(false);
+  // 真归档的非 herdr 会话仍按原规则走，离线谓词不插手。
+  const archive = session("archived-web", 9, { archived: true });
+  expect(selectSidebarSessions(herdrSessions, [archive], "web", false, offlineBy(true)).map(s => s.id)).toEqual(["web"]);
+  expect(selectSidebarSessions(herdrSessions, [archive], "web", true, offlineBy(true)).map(s => s.id)).toEqual(["archived-web", "web"]);
 });
 
 test("伪项目只改展示名，按时间仍可定位项目和工作区", () => {

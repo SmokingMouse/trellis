@@ -518,9 +518,25 @@ ab eval --stdin <<'JS'
 JS
 wait_for_log "pane_closed event" '"event":"pane_closed"'
 ab click 'button[aria-label="会话列表"]'
-wait_for_js "closed pane retains readable session with offline status" "document.querySelector('[role=dialog] [data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'offline'"
+# Herdr 在线却报不出 pane 的会话按「已归档」对待：默认不列，勾「含已归档 / 离线」才回来。
+wait_for_js "closed pane leaves the default drawer list" "!document.querySelector('[role=dialog] [data-herdr-pane=\"pane-codex\"]') && Boolean(document.querySelector('[role=dialog] [data-herdr-pane=\"pane-claude\"]'))"
 ab click '[role="dialog"] [data-herdr-pane="pane-claude"]'
 wait_for_js "return after close event" "!document.querySelector('[role=dialog] [data-sidebar-list]')"
+
+echo "== desktop: offline Herdr session hides by default, returns with an offline chip =="
+ab set viewport 1440 900
+ab open "$BASE/"
+wait_for_js "desktop offline row hidden by default" "Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-claude\"]')) && !document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
+ab screenshot "$OUT/desktop-herdr-offline-hidden.png"
+ab eval "document.querySelector('[data-sidebar-toolbar] input[type=checkbox]').click(); true"
+wait_for_js "offline row returns readable with its chip" "document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'offline' && Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"] [data-session-offline]'))"
+ab screenshot "$OUT/desktop-herdr-offline-chip.png"
+ab eval "document.querySelector('[data-sidebar-toolbar] input[type=checkbox]').click(); true"
+wait_for_js "default list restored" "!document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
+ab set device "iPhone 15"
+ab set viewport 390 844
+ab open "$BASE/?session=$CLAUDE_SESSION"
+wait_for_js "iPhone Herdr session restored" "Boolean(document.querySelector('[data-herdr-badge]'))"
 
 echo "== fake Herdr down becomes read-only =="
 stop_pid "$FAKE_PID"
@@ -539,4 +555,4 @@ JS
 ab screenshot "$OUT/iphone-herdr-offline.png"
 
 echo "mobile-herdr: PASS"
-echo "screenshots: $OUT/desktop-herdr-sidebar.png $OUT/desktop-herdr-session.png $OUT/iphone-herdr-drawer.png $OUT/iphone-herdr-session.png $OUT/iphone-herdr-offline.png"
+echo "screenshots: $OUT/desktop-herdr-sidebar.png $OUT/desktop-herdr-session.png $OUT/desktop-herdr-offline-hidden.png $OUT/desktop-herdr-offline-chip.png $OUT/iphone-herdr-drawer.png $OUT/iphone-herdr-session.png $OUT/iphone-herdr-offline.png"
