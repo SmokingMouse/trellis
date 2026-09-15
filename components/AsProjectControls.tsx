@@ -123,42 +123,64 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   if (!threadBound) return null;
   const debugCount = logs.filter(log => isDebugEngineEvent(log.method, log.payload)).length;
   const visibleLogs = showAll ? logs : logs.filter(log => !isDebugEngineEvent(log.method, log.payload));
-  return <div data-as-project={nodeId} className="my-3 min-w-0 max-w-full space-y-2 text-sm [overflow-wrap:anywhere]">
-    {thread && <p data-as-source className="text-ink-muted">{thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}</p>}
-    {notice && <p role="status" data-as-fallback>{notice}</p>}
-    {thread && (external ? <p className="flex flex-wrap items-center gap-2">权限模式
-      <span data-as-permission className="rounded border border-line bg-surface px-2 py-1">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
-      <span className="text-ink-muted">只读</span>
-    </p> : <label className="flex flex-wrap items-center gap-2">权限模式
-      <select data-as-permission aria-label="权限模式" value={thread.permission ?? "default"} disabled={!supported || busy}
-        onChange={e => void change(e.target.value)} onKeyDown={e => {
-          if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); void change(modes[(modes.indexOf(thread.permission ?? "default") + 1) % modes.length]); }
-        }} className="min-h-11 min-w-11 max-w-full rounded border border-line bg-surface px-3">
-        {!modes.includes(thread.permission ?? "default") && <option value={thread.permission} disabled>{labels[thread.permission!] ?? thread.permission}</option>}
-        {modes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}
-      </select><span className="text-ink-muted">Shift+Tab 切换</span>
-    </label>)}
-    {resolved.map((message, i) => <p data-as-resolved key={i}>{message}</p>)}
-    {thread && <details data-as-system-log className="max-w-full rounded border border-line p-2">
-      <summary className="min-h-11 min-w-11 cursor-pointer py-3">引擎事件（{visibleLogs.length}）{!showAll && debugCount > 0 && <span className="ml-2 text-ink-muted">已折叠 {debugCount} 条调试事件</span>}</summary>
-      <label className="flex min-h-11 cursor-pointer items-center gap-2">
-        <input data-as-show-all type="checkbox" checked={showAll} onChange={e => {
-          setShowAll(e.target.checked);
-          try { localStorage.setItem("trellis-as-events-show-all", String(e.target.checked)); } catch {}
-        }} />显示全部
-      </label>
-      <div className="max-h-64 max-w-full space-y-1 overflow-y-auto">
-        {visibleLogs.map((log, i) => <details data-as-engine-event key={`${log.at}-${i}`} className="rounded border border-line px-2">
-          <summary className="min-h-11 cursor-pointer py-3">
-            <span className="mr-2 text-ink-muted">{relativeEngineEventTime(log.at, now)}</span>
-            <span className="mr-2 font-mono text-xs text-ink-muted">{log.method}</span>
-            <span>{summarizeEngineEvent(log.method, log.payload)}</span>
-          </summary>
-          <pre className="max-w-full whitespace-pre-wrap pb-2 text-xs [overflow-wrap:anywhere]">{JSON.stringify(log.payload, null, 2)}</pre>
-        </details>)}
-        {!visibleLogs.length && <p className="py-2 text-ink-muted">{logs.length ? "暂无需要关注的引擎事件" : "等待引擎事件"}</p>}
+  // 与 ToolTimeline 同一套卡片语言：一行表头（chevron · 标签 · 计数 · 来源 ·
+  // 权限）+ 展开后的分隔线列表。折叠靠原生 <details>，手机验收脚本点的就是
+  // `[data-as-system-log] > summary` 并读 `.open`，所以表头必须是它的直接子元素。
+  // 提示行（fallback / 已处理 / 错误）在折叠态也要能读到，只能落在卡外。
+  return <div data-as-project={nodeId} className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+    {thread && <details data-as-system-log className="group/log mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
+      <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11">
+        <span className="text-ink-faint transition-transform shrink-0 group-open/log:rotate-90" aria-hidden>▸</span>
+        <span className="font-medium text-ink shrink-0">🔌 引擎</span>
+        <span className="text-ink-muted tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
+        <span data-as-source className="flex-1 truncate min-w-0 text-ink-faint">
+          {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}
+          {!showAll && debugCount > 0 ? ` · 已折叠 ${debugCount} 条调试事件` : ""}
+        </span>
+        <span className="text-nano text-ink-faint hidden sm:inline shrink-0">
+          <span className="group-open/log:hidden">展开</span>
+          <span className="hidden group-open/log:inline">收起</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 text-ink-muted">权限
+          {external ? <>
+            <span data-as-permission className="rounded-field border border-line bg-surface px-2 py-0.5 text-ink">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
+            <span className="text-ink-faint">只读</span>
+          </> : <select data-as-permission aria-label="权限模式" title="Shift+Tab 切换权限模式"
+            value={thread.permission ?? "default"} disabled={!supported || busy}
+            onClick={e => e.preventDefault()}
+            onChange={e => void change(e.target.value)} onKeyDown={e => {
+              if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); void change(modes[(modes.indexOf(thread.permission ?? "default") + 1) % modes.length]); }
+            }} className="max-w-full rounded-field border border-line bg-surface px-2 py-0 text-ui text-ink md:-my-0.5 max-md:min-h-11 max-md:min-w-11 max-md:px-3">
+            {!modes.includes(thread.permission ?? "default") && <option value={thread.permission} disabled>{labels[thread.permission!] ?? thread.permission}</option>}
+            {modes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}
+          </select>}
+        </span>
+      </summary>
+      <div className="border-t border-line divide-y divide-line/70">
+        <label className="px-3 py-2 flex items-center gap-2 text-ui text-ink-muted cursor-pointer max-md:min-h-11">
+          <input data-as-show-all type="checkbox" checked={showAll} onChange={e => {
+            setShowAll(e.target.checked);
+            try { localStorage.setItem("trellis-as-events-show-all", String(e.target.checked)); } catch {}
+          }} />显示全部{debugCount > 0 ? `（含 ${debugCount} 条调试）` : ""}
+        </label>
+        <div className="max-h-64 max-w-full overflow-y-auto divide-y divide-line/70">
+          {visibleLogs.map((log, i) => <details data-as-engine-event key={`${log.at}-${i}`} className="group/event">
+            <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11">
+              <span className="text-ink-muted tabular-nums shrink-0">{relativeEngineEventTime(log.at, now)}</span>
+              <span className="font-mono text-nano text-ink-faint truncate shrink-0">{log.method}</span>
+              <span className="flex-1 truncate min-w-0 text-ink">{summarizeEngineEvent(log.method, log.payload)}</span>
+              <span className="text-ink-faint transition-transform shrink-0 group-open/event:rotate-90" aria-hidden>▸</span>
+            </summary>
+            <pre className="max-w-full whitespace-pre-wrap px-3 pb-2 text-nano text-ink-muted [overflow-wrap:anywhere]">{JSON.stringify(log.payload, null, 2)}</pre>
+          </details>)}
+          {!visibleLogs.length && <p className="px-3 py-2 text-ui text-ink-faint">{logs.length ? "暂无需要关注的引擎事件" : "等待引擎事件"}</p>}
+        </div>
       </div>
     </details>}
-    {error && <p role="alert" className="text-warn-ink">{error}</p>}
+    {(notice || error || resolved.length > 0) && <div className="mb-3 space-y-1 px-1 text-ui">
+      {notice && <p role="status" data-as-fallback className="text-ink-muted">{notice}</p>}
+      {resolved.map((message, i) => <p data-as-resolved key={i} className="text-ink-muted">{message}</p>)}
+      {error && <p role="alert" className="text-warn-ink">{error}</p>}
+    </div>}
   </div>;
 }
