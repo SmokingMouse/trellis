@@ -1,0 +1,110 @@
+为啥 agent 的聊天，每次第一条必出现 暂只支持文本
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   The user asked: "为啥 agent 的聊天，每次第一条必出现 暂只支持文本" (Why does the agent's chat always show "暂只支持文本" / "text only supported" on the first message?)
+   
+   From the screenshot, the first message `@中转站接入 给 @陈一民 分配个账号+key` (which @ mentions the bot and another person) receives the reply "暂只支持文本。", while the second message `继续` (no @ mentions) works normally.
+
+2. Key Technical Concepts:
+   - Feishu/Lark bot message handling via WebSocket (WSClient + EventDispatcher)
+   - Feishu message types: `text` (plain text), `post` (rich text), `image`, `file`, etc.
+   - `parseIncomingEvent` in protocol.ts only accepts `message_type === "text"`, rejects all others with "暂只支持文本"
+   - Feishu text messages support @ mentions via `mentions` array field
+   - Feishu post (rich text) messages use `at` elements for @ mentions
+   - The EventDispatcher passes raw events directly to callbacks without modifying `message_type`
+
+3. Files and Code Sections:
+   - `lib/server/lark/handler.ts`
+     - Contains the "暂只支持文本。" reply at line 255-264
+     - `processQueuedMessage` checks `if (message.unsupportedType)` and replies "暂只支持文本。"
+     ```ts
+     if (message.unsupportedType) {
+       await sendLarkText({
+         client,
+         chatId: message.chatId,
+         replyToMessageId: message.messageId,
+         markdown: "暂只支持文本。",
+       });
+       updateLarkInbox(message.messageId, "done");
+       return;
+     }
+     ```
+   
+   - `lib/server/lark/protocol.ts`
+     - `parseIncomingEvent` checks `message.message_type !== "text"` at line 98
+     - Returns `unsupportedType: message.message_type ?? "unknown"` for non-text messages
+     ```ts
+     if (message.message_type !== "text") {
+       return {
+         kind: "message",
+         messageId,
+         chatId: message.chat_id,
+         chatType,
+         text: null,
+         unsupportedType: message.message_type ?? "unknown",
+         senderOpenId,
+       };
+     }
+     ```
+     - For text messages, parses `message.content` as JSON `{ text: string }`
+     - Strips bot mentions from text using `stripBotMention`
+   
+   - `lib/server/lark/manager.ts`
+     - Uses `lark.EventDispatcher` with WSClient, registers `im.message.receive_v1` handler
+     - Events are passed directly to `acceptLarkEvent` without normalization
+   
+   - `scripts/test-lark-bot.ts`
+     - Tests confirm: `message_type: "image"` → `unsupportedType === "image"`
+     - Tests show @ mentions work with text type via `mentions` field
+   
+   - Feishu SDK (`node_modules/@larksuiteoapi/node-sdk/es/index.js`)
+     - `convertText`: parses `{ text: string }` from content
+     - `convertPost`: parses rich text structure with `title`, `content` (array of paragraphs, each array of elements with `tag: 'text'|'at'|'a'|'img'|...`)
+     - `EventDispatcher.invoke` → `RequestHandle.parse` just expands event fields, doesn't modify `message_type`
+
+4. Errors and fixes:
+   No errors encountered. Investigation was in progress.
+
+5. Problem Solving:
+   - Identified that "暂只支持文本" is returned when `message_type !== "text"`
+   - The pattern (first message with @ mentions fails, second without @ works) strongly suggests Feishu sends @-mentioned messages as "post" (rich text) type
+   - Need to confirm whether Feishu sends @-mentioned messages as "post" type
+   - The fix would be to handle "post" type messages in `parseIncomingEvent` by extracting text from the post content structure (similar to `convertPost` in the SDK)
+
+6. All user messages:
+   - "为啥 agent 的聊天，每次第一条必出现 暂只支持文本" (with screenshot showing the conversation)
+
+7. Pending Tasks:
+   - Confirm whether Feishu sends @-mentioned messages as "post" type
+   - If confirmed, modify `parseIncomingEvent` to handle "post" type messages by extracting text content
+   - Update the "暂只支持文本" logic to only reject truly unsupported types (image, file, etc.)
+
+8. Current Work:
+   I was investigating whether Feishu changes `message_type` to "post" when a message contains @ mentions. I confirmed that:
+   - The EventDispatcher passes raw events without modifying `message_type`
+   - Text messages support @ mentions via `mentions` field
+   - The SDK has separate converters for "text" and "post" types
+   
+   The evidence strongly suggests Feishu sends @-mentioned messages as "post" type. I was about to look at the `convertPost` implementation more closely to understand the post content structure so I could implement text extraction for post messages.
+
+9. Optional Next Step:
+   Confirm the root cause and implement the fix. The next step is to modify `parseIncomingEvent` in `lib/server/lark/protocol.ts` to handle "post" (rich text) message type by extracting plain text from the post content structure. The post content format is:
+   ```json
+   {
+     "zh_cn": {
+       "title": "optional title",
+       "content": [
+         [{"tag": "text", "text": "hello "}, {"tag": "at", "user_id": "ou_xxx", "user_name": "name"}]
+       ]
+     }
+   }
+   ```
+   Need to iterate through `content` paragraphs and elements, extracting text from `text` tags and @ names from `at` tags, then strip bot mentions.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /data00/home/zhangpeng.pada/.claude/projects/-data00-home-zhangpeng-pada-trellis/3e476eea-848a-4dbe-b78b-ebe967cbb059.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+我认为合理的修法不应该是这样，而是支持 富文本
