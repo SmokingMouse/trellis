@@ -351,3 +351,10 @@ jsonl 文件。集合来自 `nodes.claude_session_id` / `codex_session_id`。
 - **Why**：direct-connect 入口到 2.1.266 仍编译关闭（facts 09-09）；attach 线 spike 证伪——它是 pty 级镜像，官方 TUI 只是终端仿真器、渲染器在服务端，「复用原生 UI」零收益（facts 09-15）；泄露快照是 Anthropic 专有代码、超出许可范围，且比 2.1.258 旧、没有 attach / 登记表，对这件事也已过时。
 - **Alternatives**：基于泄露源码打开 `DIRECT_CONNECT` 宏自行构建（拒绝：许可 + 09-08「只做设计参考」决策 + 过时）；AS 侧先做 direct-connect 服务端当期权（拒绝：入口未开前零收益，09-08 spike §6 同判）；等 Anthropic 打开 DIRECT_CONNECT（保留为盯梢项，一条 grep）。
 - 关联：09-08「单一 TUI 定为 Codex 官方 TUI」条；`.fenjue/archive/fj-cc-native-tui-spike-0e0a/`、`.fenjue/archive/lite-cc-attach-spike-20260909/`、`.fenjue/briefs/lite-cc-attach-spike.md`；S172。
+
+## 2026-09-15 · AS 控件块采用动线卡语言（单行表头，权限在行尾）
+
+- **Decision**：`AsProjectControls` 不再是独立的三行控件 + 自带边框的 details，而是与「🧰 动线」卡同 chrome 同高的第二张折叠卡：表头一行（▸ 🔌 引擎 · N 条事件 · 来源 · 展开/收起 · 权限 select），展开为分隔线列表；提示行落卡外。DOM 钩子（`data-as-*`、`details > summary`）与手机 44px 断言不变。
+- **Why**：用户 09-15 原话「不能和之前那种动线保持对齐吗」；这块本是第二步的开发者调试口被收编会话带到主页（S165），从未按 TurnCard 的卡片语言做过。两种排版给用户选，选了单行表头。
+- **Alternatives**：两行（来源 + 权限一行、事件一行，结构更稳但多占一行，用户未选）；把权限 select 移到 Composer 条（线程级设置放会话级更对，但要新组件与脚本改动，留作以后）。
+- 关联：PR #60（704ade8）、release `20260915T152559-704ade82a`、`.fenjue/briefs/lite-as-controls-timeline-card.md`、S172 补记 2。
