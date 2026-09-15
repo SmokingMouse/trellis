@@ -2,7 +2,7 @@
   "id": "02fe78af1fec",
   "timestamp": "2026-09-15T21:55:28+08:00",
   "branch": "feat/lark-post-rich-text",
-  "commitHash": "f5b3440a009474523082b6c8247d337e6499b77c",
+  "commitHash": "54ef5cd92e406c2f1edf8d87fe9bb84264dc9b32",
   "commitMessage": "wip(lark): post 富文本收发——升级前存档",
   "filesModified": [
     "lib/server/lark/protocol.ts",
@@ -24,5 +24,6 @@
       "scripts/test-lark-bot.ts"
     ]
   },
-  "reason": "commit"
+  "reason": "commit",
+  "rewrittenFrom": "f5b3440a009474523082b6c8247d337e6499b77c"
 }
