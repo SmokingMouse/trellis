@@ -20,3 +20,8 @@
 - `fix/as-controls-tokens`：用户点头后合 main + 部署，用户在自己浏览器复看同一节点；若仍嫌重，下一步才谈压缩布局（来源行 + 权限行并一行、引擎事件去外框）。
 - 可选守卫：加一条测试扫描 components / app 里未注册的 `(text|bg|border)-*` 颜色类。
 - 盯梢：每次升级 claude 跑 facts 09-09 那条 grep。
+
+## 补记（22:14–22:20）：合并与部署
+
+- 用户拍板「合 main 并部署」。PR #59 → merge commit dbfdbbe（parents 79b2826 + 093dfe9）→ `make deploy`：build + smoke（/login、/、/api/providers、/api/sessions、无 cookie 401、prod ttyd 原样）+ 库快照 `~/.trellis/backups/20260915T141405.db` + 切换 + 验活 `next=ready`，全程 32 秒；release `20260915T141340-dbfdbbe75` 已上线，旧 release d964c3c 被 gc。线上 chunk 核验：`border-border` 0 处、裸 `text-muted` 0 处、`text-ink-muted` 199 处。网关 `trellis-gw` 未重启（改动只在宿主 UI，不涉及门户代码）。build 日志里 turbopack 对 `lib/server/as-adopt.ts` 动态 cwd 的警告上次部署（09-09）就有 7 条，非本次引入。
+- **gh 合并小事故**：`git push origin main`（两条 docs 提交）紧接着 `gh pr merge 59 --merge` → GraphQL「Base branch was modified」；gh 自动重试后 origin/main 的 ref 确实更新为 dbfdbbe，但 GitHub 的 PR 记录停在 open / merged=false（REST 核实）。处置：留言说明后 `gh pr close 59`，删本地与远端分支。下次先 push main、等几秒再 merge，或直接一起 push 后再开 PR。
