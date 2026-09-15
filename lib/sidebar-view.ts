@@ -12,11 +12,18 @@ export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSourc
   return "web";
 }
 
-export function selectSidebarSessions(sessions: Session[], archived: Session[], source: SidebarSource, includeArchived: boolean): Session[] {
+/** A Herdr session whose pane is gone reads as archived: hidden unless asked for.
+ *  Only while Herdr itself answers — when it is down every session looks dead and
+ *  hiding them would break the "already-synced history stays readable" promise. */
+export function herdrOffline(s: Pick<Session, "kind" | "origin">, herdrAvailable: boolean, alive: boolean | undefined): boolean {
+  return SIDEBAR_V2 && herdrAvailable && sidebarSource(s) === "herdr" && !alive;
+}
+
+export function selectSidebarSessions(sessions: Session[], archived: Session[], source: SidebarSource, includeArchived: boolean, isOffline: (s: Session) => boolean = () => false): Session[] {
   // A restored session may briefly remain in the lazy archive response.
   // The active list wins that overlap so a successful restore stays visible.
   return [...new Map([...(includeArchived ? archived : []), ...sessions].map(s => [s.id, s])).values()]
-    .filter(s => (includeArchived || !s.archived) && (source === "all" || sidebarSource(s) === source))
+    .filter(s => (includeArchived || !(s.archived || isOffline(s))) && (source === "all" || sidebarSource(s) === source))
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
 }
 
