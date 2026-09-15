@@ -1,14 +1,14 @@
 {
   "id": "02fe78af1fec",
-  "timestamp": "2026-09-24T14:14:46+08:00",
+  "timestamp": "2026-09-24T14:25:00+08:00",
   "branch": "feat/lark-post-richtext",
-  "commitHash": "2d474094290da9262f08798c8c6d80e6cf7b07ff",
-  "commitMessage": "wip(lark): post 富文本收发——升级前存档",
+  "commitHash": "eccacc4044cdd7ae6bc9bdff5161176c924f0e09",
+  "commitMessage": "feat(lark): 支持 post 富文本入站，群 @bot 的富文本指令可被识别",
   "filesModified": [
     "lib/server/lark/protocol.ts",
     "scripts/test-lark-bot.ts"
   ],
-  "sessions": 2,
+  "sessions": 3,
   "attribution": {
     "agentLines": 0,
     "agentRemoved": 0,
