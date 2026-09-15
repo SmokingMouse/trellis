@@ -124,23 +124,23 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   const debugCount = logs.filter(log => isDebugEngineEvent(log.method, log.payload)).length;
   const visibleLogs = showAll ? logs : logs.filter(log => !isDebugEngineEvent(log.method, log.payload));
   return <div data-as-project={nodeId} className="my-3 min-w-0 max-w-full space-y-2 text-sm [overflow-wrap:anywhere]">
-    {thread && <p data-as-source className="text-muted">{thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}</p>}
+    {thread && <p data-as-source className="text-ink-muted">{thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}</p>}
     {notice && <p role="status" data-as-fallback>{notice}</p>}
     {thread && (external ? <p className="flex flex-wrap items-center gap-2">权限模式
-      <span data-as-permission className="rounded border border-border bg-surface px-2 py-1">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
-      <span className="text-muted">只读</span>
+      <span data-as-permission className="rounded border border-line bg-surface px-2 py-1">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
+      <span className="text-ink-muted">只读</span>
     </p> : <label className="flex flex-wrap items-center gap-2">权限模式
       <select data-as-permission aria-label="权限模式" value={thread.permission ?? "default"} disabled={!supported || busy}
         onChange={e => void change(e.target.value)} onKeyDown={e => {
           if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); void change(modes[(modes.indexOf(thread.permission ?? "default") + 1) % modes.length]); }
-        }} className="min-h-11 min-w-11 max-w-full rounded border border-border bg-surface px-3">
+        }} className="min-h-11 min-w-11 max-w-full rounded border border-line bg-surface px-3">
         {!modes.includes(thread.permission ?? "default") && <option value={thread.permission} disabled>{labels[thread.permission!] ?? thread.permission}</option>}
         {modes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}
-      </select><span className="text-muted">Shift+Tab 切换</span>
+      </select><span className="text-ink-muted">Shift+Tab 切换</span>
     </label>)}
     {resolved.map((message, i) => <p data-as-resolved key={i}>{message}</p>)}
-    {thread && <details data-as-system-log className="max-w-full rounded border border-border p-2">
-      <summary className="min-h-11 min-w-11 cursor-pointer py-3">引擎事件（{visibleLogs.length}）{!showAll && debugCount > 0 && <span className="ml-2 text-muted">已折叠 {debugCount} 条调试事件</span>}</summary>
+    {thread && <details data-as-system-log className="max-w-full rounded border border-line p-2">
+      <summary className="min-h-11 min-w-11 cursor-pointer py-3">引擎事件（{visibleLogs.length}）{!showAll && debugCount > 0 && <span className="ml-2 text-ink-muted">已折叠 {debugCount} 条调试事件</span>}</summary>
       <label className="flex min-h-11 cursor-pointer items-center gap-2">
         <input data-as-show-all type="checkbox" checked={showAll} onChange={e => {
           setShowAll(e.target.checked);
@@ -148,15 +148,15 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         }} />显示全部
       </label>
       <div className="max-h-64 max-w-full space-y-1 overflow-y-auto">
-        {visibleLogs.map((log, i) => <details data-as-engine-event key={`${log.at}-${i}`} className="rounded border border-border px-2">
+        {visibleLogs.map((log, i) => <details data-as-engine-event key={`${log.at}-${i}`} className="rounded border border-line px-2">
           <summary className="min-h-11 cursor-pointer py-3">
-            <span className="mr-2 text-muted">{relativeEngineEventTime(log.at, now)}</span>
-            <span className="mr-2 font-mono text-xs text-muted">{log.method}</span>
+            <span className="mr-2 text-ink-muted">{relativeEngineEventTime(log.at, now)}</span>
+            <span className="mr-2 font-mono text-xs text-ink-muted">{log.method}</span>
             <span>{summarizeEngineEvent(log.method, log.payload)}</span>
           </summary>
           <pre className="max-w-full whitespace-pre-wrap pb-2 text-xs [overflow-wrap:anywhere]">{JSON.stringify(log.payload, null, 2)}</pre>
         </details>)}
-        {!visibleLogs.length && <p className="py-2 text-muted">{logs.length ? "暂无需要关注的引擎事件" : "等待引擎事件"}</p>}
+        {!visibleLogs.length && <p className="py-2 text-ink-muted">{logs.length ? "暂无需要关注的引擎事件" : "等待引擎事件"}</p>}
       </div>
     </details>}
     {error && <p role="alert" className="text-warn-ink">{error}</p>}
