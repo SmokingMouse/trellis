@@ -248,3 +248,4 @@
 - [fj-structure-floating-panel-7b4f] 结构面板改回小浮窗+小点形态（用户裁决）：右下角浮动小窗、行首状态圆点、内容模型不变、正文列宽恢复、Composer 不 | accepted | reworks=0 | 2026-09-09T12:32:21+08:00 | 3843e501829b
 - [fj-restore-tree-panel-ccd2] 树面板原样恢复到波 3 之前（013adb9 的 TreePanel/Outline 逐字恢复），删新结构面板，地图挂回 | accepted | reworks=0 | 2026-09-09T14:38:39+08:00 | 967d634e5e7f
 - [fj-pending-bar-5cfe] 待办层：Header 下跨会话「等你处理」横条（跳转/就地允许拒绝/撤卡），审批卡按钮主次分明，手机复用等待横幅，不新增 | accepted | reworks=0 | 2026-09-09T16:01:05+08:00 | 74beb79c7d9e
+- [fj-cli-as-bridge-0b2e] 调研 apps/cli（llm）与 agent-server 打通：现状链路、三条方案与估算、推荐切片、真机验证网关模型 | accepted | reworks=0 | 2026-09-16T12:12:38+08:00 | 5fa4bb1f8569
