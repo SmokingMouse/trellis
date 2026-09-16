@@ -21,12 +21,15 @@ export async function POST() {
   installing = true;
   try {
     const result = await installTtyd();
-    return Response.json({
-      ok: result.ok,
-      path: result.path,
-      tried: result.tried,
-      error: result.error ?? null,
-    });
+    return Response.json(
+      {
+        ok: result.ok,
+        path: result.path,
+        tried: result.tried,
+        error: result.error ?? null,
+      },
+      { status: result.ok ? 200 : 500 },
+    );
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : "安装过程发生未知异常";
     return Response.json(

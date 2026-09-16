@@ -179,15 +179,18 @@ export function TerminalPanel() {
   // 保持 .then 链而不是 async/await：setState 必须待在回调里，
   // react-hooks/set-state-in-effect 才不会把 effect 里的这次调用判成同步 setState。
   const loadTerminals = useCallback(
-    (signal?: { cancelled: boolean }): Promise<void> => {
-      if (!workspaceId) return Promise.resolve();
+    (
+      signal?: { cancelled: boolean },
+    ): Promise<{ ready: boolean; error: string | null; errorDetail: string | null } | null> => {
+      if (!workspaceId) return Promise.resolve(null);
       return fetch(`/api/terminals?workspaceId=${encodeURIComponent(workspaceId)}`)
         .then((r) => r.json())
         .then((d) => {
-          if (signal?.cancelled) return;
+          if (signal?.cancelled) return null;
           if (d.platform) setPlatform(d.platform);
           if (d.arch) setArch(d.arch);
-          setReady(Boolean(d.ready));
+          const isReady = Boolean(d.ready);
+          setReady(isReady);
           setCwd(d.cwd ?? null);
           setError(d.error ?? null);
           setErrorDetail(d.errorDetail ?? null);
@@ -198,6 +201,11 @@ export function TerminalPanel() {
               ? cur
               : (list[0]?.session ?? null),
           );
+          return {
+            ready: isReady,
+            error: d.error ?? null,
+            errorDetail: d.errorDetail ?? null,
+          };
           // **刻意不自动创建**。原来这里会在列表为空时自动开一个，理由是
           // 「别让用户对着空面板再点一次」—— 那个理由建立在「创建很便宜」上，
           // 而实测**新建一个终端要 588ms**（全新 tmux session 要跑一遍交互式
@@ -207,6 +215,7 @@ export function TerminalPanel() {
         })
         .catch(() => {
           if (!signal?.cancelled) setError("拉取终端列表失败");
+          return null;
         });
     },
     [workspaceId],
@@ -225,8 +234,11 @@ export function TerminalPanel() {
 
   const retryTerminals = useCallback(async () => {
     setRetrying(true);
-    await loadTerminals();
-    setRetrying(false);
+    try {
+      return await loadTerminals();
+    } finally {
+      setRetrying(false);
+    }
   }, [loadTerminals]);
 
   const handleInstallTtyd = useCallback(async () => {
@@ -237,7 +249,15 @@ export function TerminalPanel() {
       const data = await res.json();
       if (data.ok) {
         setInstallMessage("安装成功，正在启动终端…");
-        await retryTerminals();
+        const retryResult = await retryTerminals();
+        if (retryResult?.ready) {
+          setInstallMessage(null);
+          setError(null);
+          setErrorDetail(null);
+        } else {
+          const detail = retryResult?.errorDetail || retryResult?.error || "终端不可用";
+          setInstallMessage(`已安装但终端仍不可用：${detail}`);
+        }
       } else {
         setInstallMessage(`安装失败：${data.error || "未知错误"}`);
       }

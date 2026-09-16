@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   probeExecutable,
+  probeSingleExecutable,
   probeSummary,
   ttydCandidates,
   type ProbeAttempt,
@@ -15,8 +16,12 @@ import {
 // 来源：https://github.com/tsl0922/ttyd/releases/tag/1.7.7 的 SHA256SUMS：
 //   b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165  ttyd.aarch64
 //   8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  ttyd.x86_64
+//   05eac1223914f18c65898d72c8d14e76bbb5435f7762c6dc7f16f041994a8109  ttyd.arm
+//   93e112e19c9c0dcc717e98bdba0f43fc50f0c74ae1ba5b572772c507654ed19c  ttyd.i686
 
 export const TTYD_RELEASE_VERSION = "1.7.7";
+export const MAX_TTYD_DOWNLOAD_BYTES = 20 * 1024 * 1024; // 20MB 上限（ttyd 静态二进制约 1.4MB）
+export const DEFAULT_TTYD_TIMEOUT_MS = 60_000; // 60s 超时
 
 export const TTYD_ARCH_ASSETS: Record<string, { asset: string; sha256: string }> = {
   x64: {
@@ -27,6 +32,14 @@ export const TTYD_ARCH_ASSETS: Record<string, { asset: string; sha256: string }>
     asset: "ttyd.aarch64",
     sha256: "b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165",
   },
+  arm: {
+    asset: "ttyd.arm",
+    sha256: "05eac1223914f18c65898d72c8d14e76bbb5435f7762c6dc7f16f041994a8109",
+  },
+  ia32: {
+    asset: "ttyd.i686",
+    sha256: "93e112e19c9c0dcc717e98bdba0f43fc50f0c74ae1ba5b572772c507654ed19c",
+  },
 };
 
 export function manualInstallCommand(asset: string = "ttyd.x86_64"): string {
@@ -35,7 +48,7 @@ export function manualInstallCommand(asset: string = "ttyd.x86_64"): string {
 
 export type FetchLike = (
   input: RequestInfo | URL | string,
-  init?: RequestInit & { proxy?: string; dispatcher?: unknown },
+  init?: RequestInit & { proxy?: string },
 ) => Promise<Response>;
 
 export type InstallTtydOptions = {
@@ -44,6 +57,7 @@ export type InstallTtydOptions = {
   targetDir?: string;
   fetchFn?: FetchLike;
   expectedSha256?: string;
+  timeoutMs?: number;
 };
 
 export type InstallTtydResult = {
@@ -59,11 +73,12 @@ export type InstallTtydResult = {
  * 在 Linux 上自动下载并安装 ttyd 静态二进制。
  *
  * 1. 仅 linux 生效（macOS 提示 brew install）；
- * 2. 根据 CPU 架构映射 release 资产（x64 / arm64），其余报错；
- * 3. 尊重 https_proxy / HTTPS_PROXY 环境变量；
- * 4. 写入同目录临时文件，sha256 校验不符立即清理，绝不残留半截损坏文件；
- * 5. chmod 755 后原子重命名到目标路径 ~/.trellis/bin/ttyd；
- * 6. 重新执行探测并返回完整结果；任何失败均带可读原因与手动安装命令。
+ * 2. 根据 CPU 架构映射 release 资产（x64 / arm64 / arm / ia32），其余报错；
+ * 3. 尊重 https_proxy / HTTPS_PROXY 环境变量（依赖 Bun 原生 proxy 支持）；
+ * 4. 设置 60s 超时与 20MB 下载上限，防止挂死或内存暴涨；
+ * 5. 写盘前登记临时文件并在 finally 中安全清理，sha256 校验不符立即清理，绝不残留半截损坏文件；
+ * 6. chmod 755 后原子重命名到目标路径 ~/.trellis/bin/ttyd；
+ * 7. 重新探测：先单独验证刚下载的文件能否执行，确认后再进行全表探测。
  */
 export async function installTtyd(options?: InstallTtydOptions): Promise<InstallTtydResult> {
   const platform = options?.platform ?? process.platform;
@@ -86,7 +101,7 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
       ok: false,
       path: null,
       tried: [],
-      error: `不支持的 CPU 架构: ${arch}（自动安装仅支持 x64 和 arm64）。手动安装请下载对应资产到 ~/.trellis/bin/ttyd 并赋予执行权限`,
+      error: `不支持的 CPU 架构: ${arch}（自动安装仅支持 x64, arm64, arm, ia32）。手动安装请下载对应资产到 ~/.trellis/bin/ttyd 并赋予执行权限`,
       platform,
       arch,
     };
@@ -98,33 +113,24 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
   const home = process.env.HOME || os.homedir();
   const targetDir = options?.targetDir ?? path.join(home, ".trellis", "bin");
   const targetPath = path.join(targetDir, "ttyd");
-  const tempPath = path.join(
+  let tempPath: string | null = path.join(
     targetDir,
     `.ttyd.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`,
   );
 
-  let tempFileCreated = false;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TTYD_TIMEOUT_MS;
 
   try {
     fs.mkdirSync(targetDir, { recursive: true });
 
-    // 处理代理（Bun 原生支持 proxy 选项；若在 Node 环境则尝试 undici ProxyAgent）
+    // 处理代理（Bun 原生支持 proxy 选项）
     const proxyUrl = process.env.https_proxy || process.env.HTTPS_PROXY;
     const fetchFn = options?.fetchFn ?? globalThis.fetch;
-    const fetchOpts: RequestInit & { proxy?: string; dispatcher?: unknown } = {};
+    const fetchOpts: RequestInit & { proxy?: string } = {
+      signal: AbortSignal.timeout(timeoutMs),
+    };
     if (proxyUrl) {
       fetchOpts.proxy = proxyUrl;
-      try {
-        const importDynamic = new Function("m", "return import(m)");
-        const undici = (await importDynamic("undici")) as {
-          ProxyAgent?: new (url: string) => unknown;
-        };
-        if (undici?.ProxyAgent) {
-          fetchOpts.dispatcher = new undici.ProxyAgent(proxyUrl);
-        }
-      } catch {
-        /* 忽略，Bun 原生 fetch 已支持 proxy 选项 */
-      }
     }
 
     const res = await fetchFn(downloadUrl, fetchOpts);
@@ -132,16 +138,50 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
       throw new Error(`下载失败: HTTP ${res.status} ${res.statusText}（手动命令：${manualCmd}）`);
     }
 
-    const buffer = Buffer.from(await res.arrayBuffer());
+    // 检查响应头 Content-Length（M1）
+    const contentLength = Number(res.headers.get("content-length"));
+    if (contentLength && contentLength > MAX_TTYD_DOWNLOAD_BYTES) {
+      throw new Error(`下载文件大小超过限制 (Content-Length: ${contentLength} 字节，上限 20MB)`);
+    }
+
+    // 流式读取并限制实际读入字节（M1）
+    let buffer: Buffer;
+    if (res.body && typeof res.body.getReader === "function") {
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            totalBytes += value.length;
+            if (totalBytes > MAX_TTYD_DOWNLOAD_BYTES) {
+              await reader.cancel();
+              throw new Error(`下载文件体积超出限制 (已接收 ${totalBytes} 字节，上限 20MB)`);
+            }
+            chunks.push(value);
+          }
+        }
+      } finally {
+        reader.releaseLock?.();
+      }
+      buffer = Buffer.concat(chunks);
+    } else {
+      const ab = await res.arrayBuffer();
+      if (ab.byteLength > MAX_TTYD_DOWNLOAD_BYTES) {
+        throw new Error(`下载文件体积超出限制 (已接收 ${ab.byteLength} 字节，上限 20MB)`);
+      }
+      buffer = Buffer.from(ab);
+    }
+
+    // 写盘前 tempPath 已登记（M2）
     fs.writeFileSync(tempPath, buffer);
-    tempFileCreated = true;
 
     // 校验 sha256
     const expectedSha256 = options?.expectedSha256 ?? targetAsset.sha256;
     const actualSha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     if (actualSha256 !== expectedSha256) {
-      fs.unlinkSync(tempPath);
-      tempFileCreated = false;
       throw new Error(
         `SHA256 校验失败: 期望 ${expectedSha256}，实际计算得到 ${actualSha256}。手动命令：${manualCmd}`,
       );
@@ -150,37 +190,42 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
     // 赋予执行权限并原子重命名
     fs.chmodSync(tempPath, 0o755);
     fs.renameSync(tempPath, targetPath);
-    tempFileCreated = false;
+    tempPath = null; // 重命名成功后释放，避免 finally 误删目标文件
 
-    // 重新探测
-    const probe = probeExecutable("ttyd", [targetPath, ...ttydCandidates()], "--version");
-    if (!probe.path) {
+    // 重新探测：先单独探 targetPath（只用它自己跑 --version，M3）
+    const singleFailure = probeSingleExecutable(targetPath, "--version");
+    if (singleFailure) {
       return {
         ok: false,
         path: null,
-        tried: probe.tried,
-        error: `ttyd 已下载并保存到 ${targetPath}，但探测启动失败（${probeSummary(probe)}）。手动命令：${manualCmd}`,
+        tried: [singleFailure],
+        error: `已下载到 ${targetPath} 但无法执行：${singleFailure.reason}。手动命令：${manualCmd}`,
         platform,
         arch,
       };
     }
 
+    // targetPath 确认可用后再进行全表探测
+    const probe = probeExecutable("ttyd", [targetPath, ...ttydCandidates()], "--version");
     return {
       ok: true,
-      path: probe.path,
+      path: probe.path ?? targetPath,
       tried: probe.tried,
       platform,
       arch,
     };
   } catch (err: unknown) {
-    if (tempFileCreated) {
-      try {
-        fs.unlinkSync(tempPath);
-      } catch {
-        /* 忽略清理错误 */
-      }
+    let message = err instanceof Error ? err.message : String(err);
+    if (
+      err instanceof Error &&
+      (err.name === "TimeoutError" ||
+        err.name === "AbortError" ||
+        message.includes("timed out") ||
+        message.includes("timeout"))
+    ) {
+      message = `下载超时（${Math.round(timeoutMs / 1000)}s）`;
     }
-    const message = err instanceof Error ? err.message : String(err);
+
     return {
       ok: false,
       path: null,
@@ -189,5 +234,14 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
       platform,
       arch,
     };
+  } finally {
+    // 临时文件清理保证（M2）
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* 忽略清理错误 */
+      }
+    }
   }
 }

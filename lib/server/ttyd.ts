@@ -9,8 +9,8 @@ import {
   probeExecutable,
   probeSummary,
   type ProbeResult,
-  TMUX_CANDIDATES,
-  TTYD_CANDIDATES,
+  tmuxCandidates,
+  ttydCandidates,
   ttydHostDependencyNote,
   ttydMissingMessage,
 } from "@/lib/ttyd-dependency";
@@ -39,14 +39,14 @@ import {
 // 自己跑掉），探不到不是（可能只是那一瞬间 fork 不出来）。
 let _tmux: string | null = null;
 export function tmuxBin(): string | null {
-  if (!_tmux) _tmux = probeExecutable("tmux", TMUX_CANDIDATES, "-V").path;
+  if (!_tmux) _tmux = probeExecutable("tmux", tmuxCandidates(), "-V").path;
   return _tmux;
 }
 
 let _ttyd: string | null = null;
 function ttydProbe(): ProbeResult {
   if (_ttyd) return { path: _ttyd, tried: [] };
-  const r = probeExecutable("ttyd", TTYD_CANDIDATES, "--version");
+  const r = probeExecutable("ttyd", ttydCandidates(), "--version");
   if (r.path) _ttyd = r.path;
   return r;
 }
