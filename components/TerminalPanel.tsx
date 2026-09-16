@@ -66,7 +66,11 @@ export function TerminalPanel() {
   // 探测证据（探了哪些路径、各自为什么不行）。跟 error 分开显示：主行一句话，
   // 细节收进折叠区 —— 平时不碍眼，真出事时不用去翻服务端日志。
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string | null>(null);
+  const [arch, setArch] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installMessage, setInstallMessage] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   const open = Boolean(workspaceId && openSet.has(workspaceId));
@@ -154,6 +158,8 @@ export function TerminalPanel() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workspaceId }),
     }).then((x) => x.json());
+    if (r.platform) setPlatform(r.platform);
+    if (r.arch) setArch(r.arch);
     if (r.error && !r.ready) {
       setError(r.error);
       setErrorDetail(r.errorDetail ?? null);
@@ -179,6 +185,8 @@ export function TerminalPanel() {
         .then((r) => r.json())
         .then((d) => {
           if (signal?.cancelled) return;
+          if (d.platform) setPlatform(d.platform);
+          if (d.arch) setArch(d.arch);
           setReady(Boolean(d.ready));
           setCwd(d.cwd ?? null);
           setError(d.error ?? null);
@@ -220,6 +228,25 @@ export function TerminalPanel() {
     await loadTerminals();
     setRetrying(false);
   }, [loadTerminals]);
+
+  const handleInstallTtyd = useCallback(async () => {
+    setInstalling(true);
+    setInstallMessage("正在下载并安装 ttyd 1.7.7…");
+    try {
+      const res = await fetch("/api/terminals/install", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setInstallMessage("安装成功，正在启动终端…");
+        await retryTerminals();
+      } else {
+        setInstallMessage(`安装失败：${data.error || "未知错误"}`);
+      }
+    } catch {
+      setInstallMessage("安装请求失败，请检查网络连接");
+    } finally {
+      setInstalling(false);
+    }
+  }, [retryTerminals]);
 
   const closeTerminal = useCallback(
     async (s: string) => {
@@ -399,13 +426,29 @@ export function TerminalPanel() {
                 </div>
               </details>
             )}
-            <button
-              onClick={retryTerminals}
-              disabled={retrying}
-              className="h-7 px-2.5 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
-            >
-              {retrying ? "重试中…" : "重试"}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={retryTerminals}
+                disabled={retrying || installing}
+                className="h-7 px-2.5 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
+              >
+                {retrying ? "重试中…" : "重试"}
+              </button>
+              {platform === "linux" && (
+                <button
+                  onClick={handleInstallTtyd}
+                  disabled={retrying || installing}
+                  className="h-7 px-2.5 rounded-md bg-accent text-ink-inverse text-label font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {installing ? "正在安装…" : arch ? `自动安装 ttyd (${arch})` : "自动安装 ttyd"}
+                </button>
+              )}
+            </div>
+            {installMessage && (
+              <div className="text-nano text-ink-muted">
+                {installMessage}
+              </div>
+            )}
           </div>
         ) : terminals === null ? (
           <div className="p-3 text-label text-ink-faint italic">准备中…</div>

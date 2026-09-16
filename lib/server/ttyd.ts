@@ -9,9 +9,10 @@ import {
   probeExecutable,
   probeSummary,
   type ProbeResult,
+  TMUX_CANDIDATES,
   TTYD_CANDIDATES,
-  TTYD_HOST_DEPENDENCY_NOTE,
-  TTYD_MISSING_MESSAGE,
+  ttydHostDependencyNote,
+  ttydMissingMessage,
 } from "@/lib/ttyd-dependency";
 
 // S1 P1（progress/project-workspace-layer.md）：工作区终端的后端进程。
@@ -28,7 +29,8 @@ import {
 // tmux 在交互 shell 里会被 oh-my-zsh 的插件函数遮蔽
 // （`_zsh_tmux_plugin_run: command not found`），所以一律走绝对路径，
 // 不依赖 PATH 解析。
-const TMUX_CANDIDATES = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"];
+// TMUX_CANDIDATES 来自 lib/ttyd-dependency，包含 $TRELLIS_TMUX_BIN、~/.local/bin/tmux、
+// /opt/homebrew/bin/tmux、/usr/local/bin/tmux、/usr/bin/tmux。
 
 // **只缓存成功，不缓存失败**。原来是 `if (_x === undefined) _x = probe()`，
 // 把 null 也一并记住了 —— 一次瞬时探测失败（fork EAGAIN / 4s 超时）就把
@@ -263,9 +265,9 @@ export function startTtyd(): Promise<number | null> {
     const tmux = tmuxBin();
     if (!ttyd) {
       const detail = probeSummary(probe);
-      state.error = TTYD_MISSING_MESSAGE;
+      state.error = ttydMissingMessage();
       state.errorDetail = detail;
-      console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}｜探测：${detail}`);
+      console.warn(`[trellis] ${ttydHostDependencyNote()}｜探测：${detail}`);
       return null;
     }
     if (!tmux) {
@@ -353,8 +355,16 @@ export function ttydStatus(): {
   port: number | null;
   error: string | null;
   errorDetail: string | null;
+  platform: string;
+  arch: string;
 } {
-  return { port: state.port, error: state.error, errorDetail: state.errorDetail };
+  return {
+    port: state.port,
+    error: state.error,
+    errorDetail: state.errorDetail,
+    platform: process.platform,
+    arch: process.arch,
+  };
 }
 
 export function stopTtyd(): void {

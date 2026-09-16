@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // 宿主机外部依赖（ttyd / tmux）的探测层。**不带 server-only** —— 大门
@@ -12,7 +13,26 @@ import path from "node:path";
 
 /** 按平台给安装提示 —— 这行字也会出现在 Linux（systemd 实例）的日志里，别只会说 brew。 */
 export function installHint(pkg: string): string {
-  return process.platform === "darwin" ? `brew install ${pkg}` : `apt install ${pkg}`;
+  if (process.platform === "darwin") {
+    return `brew install ${pkg}`;
+  }
+  if (pkg === "ttyd") {
+    const asset = process.arch === "arm64" ? "ttyd.aarch64" : "ttyd.x86_64";
+    return `点击下方『自动安装』或手动下载静态二进制到 ~/.trellis/bin/ttyd（mkdir -p ~/.trellis/bin && curl -fsSL -o ~/.trellis/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/${asset} && chmod +x ~/.trellis/bin/ttyd）`;
+  }
+  return `apt install ${pkg}`;
+}
+
+export function ttydInstallCommand(): string {
+  return installHint("ttyd");
+}
+
+export function ttydMissingMessage(): string {
+  return `未找到 ttyd（安装：${installHint("ttyd")}）`;
+}
+
+export function ttydHostDependencyNote(): string {
+  return `Web 终端依赖宿主机安装 ttyd（安装：${installHint("ttyd")}）`;
 }
 
 export const TTYD_INSTALL_COMMAND = installHint("ttyd");
@@ -20,11 +40,61 @@ export const TTYD_MISSING_MESSAGE = `未找到 ttyd（安装：${TTYD_INSTALL_CO
 export const TTYD_HOST_DEPENDENCY_NOTE =
   `Web 终端依赖宿主机安装 ttyd（安装：${TTYD_INSTALL_COMMAND}）`;
 
-export const TTYD_CANDIDATES = [
-  "/opt/homebrew/bin/ttyd",
-  "/usr/local/bin/ttyd",
-  "/usr/bin/ttyd",
-];
+/** 获取当前环境下的 ttyd 候选路径列表（按优先级从高到低） */
+export function ttydCandidates(): string[] {
+  const list: string[] = [];
+  if (process.env.TRELLIS_TTYD_BIN) {
+    list.push(process.env.TRELLIS_TTYD_BIN);
+  }
+  const home = process.env.HOME || os.homedir();
+  if (home) {
+    list.push(path.join(home, ".trellis", "bin", "ttyd"));
+    list.push(path.join(home, ".local", "bin", "ttyd"));
+  }
+  list.push(
+    "/opt/homebrew/bin/ttyd",
+    "/usr/local/bin/ttyd",
+    "/usr/bin/ttyd",
+    "/snap/bin/ttyd",
+  );
+  return list;
+}
+
+/** 获取当前环境下的 tmux 候选路径列表（按优先级从高到低） */
+export function tmuxCandidates(): string[] {
+  const list: string[] = [];
+  if (process.env.TRELLIS_TMUX_BIN) {
+    list.push(process.env.TRELLIS_TMUX_BIN);
+  }
+  const home = process.env.HOME || os.homedir();
+  if (home) {
+    list.push(path.join(home, ".local", "bin", "tmux"));
+  }
+  list.push(
+    "/opt/homebrew/bin/tmux",
+    "/usr/local/bin/tmux",
+    "/usr/bin/tmux",
+  );
+  return list;
+}
+
+function createCandidatesProxy(fn: () => string[]): string[] {
+  return new Proxy([] as string[], {
+    get(_target, prop) {
+      const arr = fn();
+      if (prop === "length") return arr.length;
+      if (prop === Symbol.iterator) return arr[Symbol.iterator].bind(arr);
+      if (typeof prop === "string" && !isNaN(Number(prop))) {
+        return arr[Number(prop)];
+      }
+      const val = Reflect.get(arr, prop);
+      return typeof val === "function" ? val.bind(arr) : val;
+    },
+  });
+}
+
+export const TTYD_CANDIDATES: string[] = createCandidatesProxy(ttydCandidates);
+export const TMUX_CANDIDATES: string[] = createCandidatesProxy(tmuxCandidates);
 
 const PROBE_TIMEOUT_MS = 4000;
 
@@ -34,6 +104,8 @@ export type ProbeResult = {
   path: string | null;
   /** 每个候选各自为什么没用上（成功那个不入列） */
   tried: ProbeAttempt[];
+  platform?: string;
+  arch?: string;
 };
 
 function isFile(p: string): boolean {
@@ -47,9 +119,9 @@ function isFile(p: string): boolean {
 /**
  * 候选绝对路径之外，再把 PATH 扫一遍。
  *
- * 三个写死的候选覆盖 Homebrew(arm/intel) 和系统目录，但 asdf / nix / 自己
- * 编译的 ttyd 不在其中 —— 那种情况下「明明 which ttyd 有」却报未找到，
- * 是最让人上火的一类假阴性。
+ * 候选覆盖 $TRELLIS_TTYD_BIN、~/.trellis/bin、~/.local/bin、Homebrew(arm/intel)、
+ * 系统目录及 snap，但 asdf / nix / 自己编译的 ttyd 不在其中 —— 那种情况下
+ * 「明明 which ttyd 有」却报未找到，是最让人上火的一类假阴性。
  */
 function fromPath(name: string): string[] {
   return (process.env.PATH ?? "")
@@ -82,20 +154,19 @@ export function probeExecutable(
     }
     const r = spawnSync(p, [probeArg], { encoding: "utf8", timeout: PROBE_TIMEOUT_MS });
     // 只看「跑没跑起来」，不看退出码 —— 探测参数的退出码不是我们关心的事。
-    if (!r.error) return { path: p, tried };
+    if (!r.error) {
+      return { path: p, tried, platform: process.platform, arch: process.arch };
+    }
     const e = r.error as NodeJS.ErrnoException;
     tried.push({ path: p, reason: e.code ?? e.message ?? "未知错误" });
   }
-  return { path: null, tried };
+  return { path: null, tried, platform: process.platform, arch: process.arch };
 }
 
-/** 把探测过程压成一行给日志/界面看：`/opt/homebrew/bin/ttyd: ENOENT; …` */
+/** 把探测过程压成一行给日志/界面看：列出所有尝试过的路径及原因 */
 export function probeSummary(r: ProbeResult): string {
   if (r.tried.length === 0) return "没有候选路径";
-  // 全是「不存在」时说人话，别刷一屏路径。
-  const real = r.tried.filter((t) => t.reason !== "不存在");
-  if (real.length === 0) return `探过 ${r.tried.length} 个路径，都不存在`;
-  return real.map((t) => `${t.path}: ${t.reason}`).join("; ");
+  return r.tried.map((t) => `${t.path}: ${t.reason}`).join("; ");
 }
 
 export function firstWorkingExecutable(paths: string[], probeArg: string): string | null {
@@ -103,5 +174,5 @@ export function firstWorkingExecutable(paths: string[], probeArg: string): strin
 }
 
 export function hasTtyd(): boolean {
-  return probeExecutable("ttyd", TTYD_CANDIDATES, "--version").path !== null;
+  return probeExecutable("ttyd", ttydCandidates(), "--version").path !== null;
 }
