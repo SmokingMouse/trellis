@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-AS 切流已扩到全部项目；颜色守卫已上线、B2 已关；llm --as 已合入 sm-toolkit main 待发版；网关 codex 恢复后补跑 interrupt 真机脚本。
+AS 切流已扩到全部项目；颜色守卫已上线、B2 已关；llm --as 已发版 cli 0.6.0 并装到本机；网关 codex 恢复后补跑 interrupt 真机脚本。
 
 ## Goals
 
