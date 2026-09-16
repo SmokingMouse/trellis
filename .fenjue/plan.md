@@ -95,8 +95,7 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   ⑥ card-image 根因证据是否成立（console 原文 vs 修法是否对症；修后四类回答都出图）；
   ⑦ 各 worktree 里 bunx tsc --noEmit、bun test、bun --bun run build 实跑。
   waiver: {"at":"2026-09-16T11:19:53.578Z","reason":"三条 fail（SN-1/PM-1/CI-1）已由 review-ui2（fj-review-ui2-26c7）独立复审确认真修，verdict pass","cid":"fj-review-ui-0559","settlement":"[\"420bd38ab36828ee3fd24c7503cae4fb97c699a2c74ae32c972f6becbcb5f269\",0,[\"2026-09-16T10:02:16.823Z\",\"420bd38ab36828ee3fd24c7503cae4fb97c699a2c74ae32c972f6becbcb5f269\",\"ad76a1fe0be6ca0f99931cb82fbb01bc6df919c5ded9d1a7091dac557f292943\",5,0,\"fail\",\"befc144d3c5240b91f95f6f0aebf8c9843401dae3ad6b4cbdece6e0aca97b39a\"]]"}
-- [ ] ship: 起位前问用户：五条已验收分支合入 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review-lark,review-ttyd,review-ui,review-lark2,review-ttyd2,review-ui2,ui-polish | gate: review-lark,review-ttyd,review-ui,review-lark2,review-ttyd2,review-ui2 | seat: reviewer
-  cid: fj-ship-3f07
+- [x] ship: 起位前问用户：五条已验收分支合入 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review-lark,review-ttyd,review-ui,review-lark2,review-ttyd2,review-ui2,ui-polish | gate: review-lark,review-ttyd,review-ui,review-lark2,review-ttyd2,review-ui2 | seat: reviewer
   起位前问用户（授权卡：动生产环境必须问）。把五条已验收分支合入 main：建议顺序 ttyd-linux → lark-card → card-image → panel-menu → sidebar-nest（按 review-ui 报告的冲突建议调整），逐条 PR 合并或一条集成 PR；每次合并后在主仓 bunx tsc --noEmit、bun test、bun --bun run build 与全部 scripts/mobile-verify/*.sh 实跑；然后 make deploy 上线（scripts/deploy.ts 自带 smoke 与备份），验活失败立即回退上一版；上线后 prod 冒烟各截一张：侧栏嵌套树 / 右键菜单 / 卡片图导出 / 终端面板。把 release 号、合并 commit、冒烟截图写进 out/ship.md。
 - [ ] lark-fix: 返工 lark-card：按异源 review 修 M1 字节预算 / M2 stripInvalidImageKeys / M3 图片来源白名单+超时 / M4 状态透传 / M5 push 双截断 / M6 占位符 nonce + 十条 minor | after: lark-card | seat: gemini | keep-seat
   cid: fj-lark-fix-6c8f
