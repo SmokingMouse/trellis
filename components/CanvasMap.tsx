@@ -11,6 +11,7 @@ import {
   ContextMenu,
   useContextMenuWithTarget,
   type ContextMenuItem,
+  type ContextMenuTriggerBindings,
 } from "@/components/ui/ContextMenu";
 import type { ChatNode } from "@/lib/types";
 
@@ -24,7 +25,7 @@ type MapData = {
   height: number;
   peek: (id: string | null) => void;
   select: (id: string) => void;
-  bindTrigger: (node: ChatNode) => Record<string, any>;
+  bindTrigger: (node: ChatNode) => ContextMenuTriggerBindings;
 };
 function MapNode({ data: d }: NodeProps<Node<MapData>>) {
   const compact = useStore(s => mapCompact(s.transform[2]));

@@ -11,6 +11,7 @@ import {
   ContextMenu,
   useContextMenuWithTarget,
   type ContextMenuItem,
+  type ContextMenuTriggerBindings,
 } from "@/components/ui/ContextMenu";
 
 // Recursive: a tree node passes the "has any unread descendant or self" test
@@ -246,7 +247,7 @@ function TreeRow({
   isBranch: boolean;
   indices: Record<string, number>;
   unreadOnly: boolean;
-  bindTrigger: (node: TreeNode) => Record<string, any>;
+  bindTrigger: (node: TreeNode) => ContextMenuTriggerBindings;
 }) {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);

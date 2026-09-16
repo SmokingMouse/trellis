@@ -3,9 +3,11 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -42,6 +44,15 @@ export type ContextMenuAction = {
 export type ContextMenuItem = ContextMenuAction | "separator";
 export type ContextMenuPoint = { x: number; y: number };
 
+export type ContextMenuTriggerBindings<TargetElement extends Element = HTMLElement> = {
+  onContextMenu: (e: ReactMouseEvent<TargetElement>) => void;
+  onTouchStart: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchMove: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchEnd: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchCancel: () => void;
+  onClickCapture: (e: ReactMouseEvent<TargetElement>) => void;
+};
+
 const EDGE_MARGIN = 8;
 
 export function useContextMenu() {
@@ -53,14 +64,18 @@ export function useContextMenu() {
   }, []);
   const openAt = useCallback((p: ContextMenuPoint) => setPoint(p), []);
   const close = useCallback(() => setPoint(null), []);
-  return {
-    open: point !== null,
-    point,
-    onContextMenu,
-    openAt,
-    close,
-    props: { point, onClose: close },
-  };
+  const props = useMemo(() => ({ point, onClose: close }), [point, close]);
+  return useMemo(
+    () => ({
+      open: point !== null,
+      point,
+      onContextMenu,
+      openAt,
+      close,
+      props,
+    }),
+    [point, onContextMenu, openAt, close, props],
+  );
 }
 
 /**
@@ -68,7 +83,7 @@ export function useContextMenu() {
  * 1. 桌面右键菜单（onContextMenu，阻止默认行为）
  * 2. 移动端 500ms 长按（onTouchStart/Move/End，允许自然滚动，>10px 判定为滚动并取消长按，长按触发后抑制 click）
  */
-export function useContextMenuWithTarget<T>() {
+export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>() {
   const menu = useContextMenu();
   const [target, setTarget] = useState<T | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,20 +96,25 @@ export function useContextMenuWithTarget<T>() {
     };
   }, []);
 
+  const menuClose = menu.close;
+  const menuOpenAt = menu.openAt;
+
   const close = useCallback(() => {
-    menu.close();
+    menuClose();
     setTarget(null);
-  }, [menu]);
+  }, [menuClose]);
 
   const bindTrigger = useCallback(
-    (item: T) => ({
-      onContextMenu: (e: ReactMouseEvent<any>) => {
+    <TargetElement extends Element = E>(
+      item: T,
+    ): ContextMenuTriggerBindings<TargetElement> => ({
+      onContextMenu: (e: ReactMouseEvent<TargetElement>) => {
         e.preventDefault();
         e.stopPropagation();
         setTarget(item);
-        menu.openAt({ x: e.clientX, y: e.clientY });
+        menuOpenAt({ x: e.clientX, y: e.clientY });
       },
-      onTouchStart: (e: React.TouchEvent<any>) => {
+      onTouchStart: (e: ReactTouchEvent<TargetElement>) => {
         const touch = e.touches[0];
         if (!touch) return;
         startPosRef.current = { x: touch.clientX, y: touch.clientY };
@@ -102,11 +122,11 @@ export function useContextMenuWithTarget<T>() {
         timerRef.current = setTimeout(() => {
           if (!startPosRef.current) return;
           setTarget(item);
-          menu.openAt(startPosRef.current);
+          menuOpenAt(startPosRef.current);
           suppressClickUntilRef.current = Date.now() + 600;
         }, 500);
       },
-      onTouchMove: (e: React.TouchEvent<any>) => {
+      onTouchMove: (e: ReactTouchEvent<TargetElement>) => {
         if (!startPosRef.current || !timerRef.current) return;
         const touch = e.touches[0];
         if (!touch) return;
@@ -117,7 +137,7 @@ export function useContextMenuWithTarget<T>() {
           timerRef.current = null;
         }
       },
-      onTouchEnd: (e: React.TouchEvent<any>) => {
+      onTouchEnd: (e: ReactTouchEvent<TargetElement>) => {
         if (timerRef.current) {
           clearTimeout(timerRef.current);
           timerRef.current = null;
@@ -135,26 +155,47 @@ export function useContextMenuWithTarget<T>() {
         }
         startPosRef.current = null;
       },
-      onClickCapture: (e: ReactMouseEvent<any>) => {
+      onClickCapture: (e: ReactMouseEvent<TargetElement>) => {
         if (Date.now() < suppressClickUntilRef.current) {
           e.preventDefault();
           e.stopPropagation();
         }
       },
     }),
-    [menu],
+    [menuOpenAt],
   );
 
-  return {
-    ...menu,
-    target,
-    setTarget,
-    bindTrigger,
-    props: {
+  const props = useMemo(
+    () => ({
       point: menu.point,
       onClose: close,
-    },
-  };
+    }),
+    [menu.point, close],
+  );
+
+  return useMemo(
+    () => ({
+      open: menu.open,
+      point: menu.point,
+      onContextMenu: menu.onContextMenu,
+      openAt: menu.openAt,
+      close,
+      target,
+      setTarget,
+      bindTrigger,
+      props,
+    }),
+    [
+      menu.open,
+      menu.point,
+      menu.onContextMenu,
+      menu.openAt,
+      close,
+      target,
+      bindTrigger,
+      props,
+    ],
+  );
 }
 
 function isAction(it: ContextMenuItem): it is ContextMenuAction {

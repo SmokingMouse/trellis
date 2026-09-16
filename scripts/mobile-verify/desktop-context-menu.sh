@@ -14,7 +14,7 @@ SESSION=desktop-context-menu
 AUTH_PASS=desktop-context-menu-pass
 AUTH_TOKEN=desktop-context-menu-token
 SERVER_PID=
-OUT_DIR="${FENJUE_TASK_OUT:-/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-panel-menu-ecba/out}"
+OUT_DIR="${FENJUE_TASK_OUT:-/tmp/trellis-verify/context-menu}"
 
 fail() {
   echo "desktop-context-menu: $*" >&2
@@ -153,8 +153,11 @@ rm -f "$DB" "$DB-shm" "$DB-wal" "$LOG"
 sqlite3 "$SOURCE_DB" ".backup '$DB'"
 sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_secret='invalid';"
 
-# Pick a session with at least 2 nodes
-SID=$(sqlite3 "$DB" "SELECT session_id FROM nodes WHERE session_id IN (SELECT id FROM sessions WHERE archived=0 AND kind='user') GROUP BY session_id HAVING count(*) >= 2 ORDER BY count(*) ASC LIMIT 1;")
+# Pick a session with substantial content so scrolling and multi-node tests work
+SID=$(sqlite3 "$DB" "SELECT s.id FROM sessions s JOIN nodes n ON s.id = n.session_id WHERE s.archived=0 AND s.kind='user' GROUP BY s.id HAVING count(n.id) >= 10 ORDER BY sum(length(n.question) + length(coalesce(n.response, ''))) DESC LIMIT 1;")
+if [ -z "$SID" ]; then
+  SID=$(sqlite3 "$DB" "SELECT session_id FROM nodes WHERE session_id IN (SELECT id FROM sessions WHERE archived=0 AND kind='user') GROUP BY session_id HAVING count(*) >= 2 ORDER BY count(*) ASC LIMIT 1;")
+fi
 if [ -z "$SID" ]; then
   SID=$(sqlite3 "$DB" "SELECT session_id FROM nodes GROUP BY session_id HAVING count(*) >= 2 ORDER BY count(*) ASC LIMIT 1;")
 fi
@@ -284,5 +287,239 @@ wait_for_js "active node changed to target" "(() => {
   const url = new URL(location.href);
   return url.searchParams.get('node') === '$TARGET_NODE';
 })()"
+
+echo "== desktop: open CanvasMap, right click node, verify delete, close with Esc =="
+ab click 'button[data-map-open]'
+wait_for_js "canvas map dialog opened" "Boolean(document.querySelector('[data-canvas-map]'))"
+wait_for_js "map nodes rendered" "Boolean(document.querySelector('[data-map-node]'))"
+
+ab eval --stdin <<'JS'
+(() => {
+  const node = document.querySelector('[data-map-node]');
+  if (!node) throw new Error('no map node found');
+  const r = node.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+  node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+  return { triggered: true, nodeId: node.getAttribute('data-map-node') };
+})()
+JS
+
+wait_for_js "context-menu opened on map node" "Boolean(document.querySelector('[data-testid=\"context-menu\"]'))"
+
+ab eval --stdin <<'JS'
+(() => {
+  const menu = document.querySelector('[data-testid="context-menu"]');
+  if (!menu) throw new Error('context-menu not found');
+  const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(el => el.textContent?.trim());
+  const hasDelete = items.some(t => t && t.includes('删除'));
+  if (!hasDelete) throw new Error('map context-menu does not contain delete item: ' + JSON.stringify(items));
+  return true;
+})()
+JS
+
+ab screenshot "$OUT_DIR/desktop-context-menu-map.png"
+echo "✓ saved map context-menu screenshot to $OUT_DIR/desktop-context-menu-map.png"
+
+ab press Escape
+wait_for_js "map context-menu closed via Escape" "!document.querySelector('[data-testid=\"context-menu\"]')"
+wait_for_js "canvas map still open after menu escape" "Boolean(document.querySelector('[data-canvas-map]'))"
+
+ab click 'button[aria-label="关闭地图"]'
+wait_for_js "canvas map closed" "!document.querySelector('[data-canvas-map]')"
+
+echo "== desktop: open canvas outline, right click row, verify delete, close with Esc =="
+ab eval --stdin <<'JS'
+(() => {
+  if (window.__sessionStore) {
+    window.__sessionStore.setState({ viewMode: "canvas", mapSessionId: null });
+  } else {
+    throw new Error('__sessionStore not found on window');
+  }
+  return true;
+})()
+JS
+
+wait_for_js "outline rows rendered in canvas" "Boolean(document.querySelector('[data-outline-node-id]'))"
+
+ab eval --stdin <<'JS'
+(() => {
+  const row = document.querySelector('[data-outline-node-id]');
+  if (!row) throw new Error('no outline row found');
+  const r = row.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+  return { triggered: true, nodeId: row.getAttribute('data-outline-node-id') };
+})()
+JS
+
+wait_for_js "context-menu opened on outline row" "Boolean(document.querySelector('[data-testid=\"context-menu\"]'))"
+
+ab eval --stdin <<'JS'
+(() => {
+  const menu = document.querySelector('[data-testid="context-menu"]');
+  if (!menu) throw new Error('context-menu not found');
+  const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(el => el.textContent?.trim());
+  const hasDelete = items.some(t => t && t.includes('删除'));
+  if (!hasDelete) throw new Error('outline context-menu does not contain delete item: ' + JSON.stringify(items));
+  return true;
+})()
+JS
+
+ab screenshot "$OUT_DIR/desktop-context-menu-outline.png"
+echo "✓ saved outline context-menu screenshot to $OUT_DIR/desktop-context-menu-outline.png"
+
+ab press Escape
+wait_for_js "outline context-menu closed via Escape" "!document.querySelector('[data-testid=\"context-menu\"]')"
+
+ab eval --stdin <<'JS'
+(() => {
+  window.__sessionStore.setState({ viewMode: "linear" });
+  return true;
+})()
+JS
+wait_for_js "restored to linear thread view" "Boolean(document.querySelector('[data-node-id]'))"
+
+echo "== mobile: set viewport 390x844, test scroll before, long-press 600ms, test scroll after =="
+ab set viewport 390 844
+
+# 1. Test page scrolling before long-press
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  if (!scroll) throw new Error('thread scroll container not found');
+  scroll.scrollTop = 0;
+  scroll.scrollTop = 120;
+  scroll.dispatchEvent(new Event('scroll'));
+  if (scroll.scrollTop === 0) throw new Error('page scroll position did not change before long press');
+  const topBefore = scroll.scrollTop;
+  scroll.scrollTop = 0;
+  scroll.dispatchEvent(new Event('scroll'));
+  return { scrollWorkedBefore: true, topBefore };
+})()
+JS
+
+# Open mobile TreePanel sheet
+ab eval --stdin <<'JS'
+(() => {
+  if (window.__sessionStore) {
+    window.__sessionStore.setState({ mobileTreePanelOpen: true });
+  } else {
+    throw new Error('__sessionStore not found on window');
+  }
+  return true;
+})()
+JS
+wait_for_js "mobile TreePanel sheet opened" "Boolean(document.querySelector('[data-mobile-tree-sheet=\"open\"]'))"
+wait_for_js "mobile TreePanel nodes rendered" "Boolean(document.querySelector('[data-node-id]'))"
+
+# Verify panel scrolling before long-press
+ab eval --stdin <<'JS'
+(() => {
+  const panelScroll = document.querySelector('[data-node-id]')?.closest('div[class*="overflow-y-auto"]');
+  if (panelScroll && panelScroll.scrollHeight > panelScroll.clientHeight) {
+    panelScroll.scrollTop = 0;
+    panelScroll.scrollTop = 60;
+    panelScroll.dispatchEvent(new Event('scroll'));
+    if (panelScroll.scrollTop === 0) throw new Error('panel scroll did not change before long press');
+    panelScroll.scrollTop = 0;
+    panelScroll.dispatchEvent(new Event('scroll'));
+  }
+  return true;
+})()
+JS
+
+# 2. Long-press 600ms on a structure panel node
+ab eval --stdin <<'JS'
+(async () => {
+  const el = document.querySelector('[data-node-id]');
+  if (!el) throw new Error('no node row found in TreePanel sheet');
+  const r = el.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+
+  const touch = new Touch({
+    identifier: Date.now(),
+    target: el,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    pageX: x,
+    pageY: y,
+  });
+
+  el.dispatchEvent(new TouchEvent('touchstart', {
+    bubbles: true,
+    cancelable: true,
+    touches: [touch],
+    targetTouches: [touch],
+    changedTouches: [touch],
+  }));
+
+  // Wait 600ms (timer is 500ms)
+  await new Promise(r => setTimeout(r, 600));
+
+  el.dispatchEvent(new TouchEvent('touchend', {
+    bubbles: true,
+    cancelable: true,
+    touches: [],
+    targetTouches: [],
+    changedTouches: [touch],
+  }));
+  return { longPressed: true, x, y };
+})()
+JS
+
+wait_for_js "context-menu opened via mobile long-press" "Boolean(document.querySelector('[data-testid=\"context-menu\"]'))"
+
+ab eval --stdin <<'JS'
+(() => {
+  const menu = document.querySelector('[data-testid="context-menu"]');
+  if (!menu) throw new Error('context-menu not found');
+  const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(el => el.textContent?.trim());
+  const hasDelete = items.some(t => t && t.includes('删除'));
+  if (!hasDelete) throw new Error('mobile context-menu does not contain delete item: ' + JSON.stringify(items));
+  return true;
+})()
+JS
+
+ab screenshot "$OUT_DIR/mobile-context-menu-longpress.png"
+echo "✓ saved mobile long-press context-menu screenshot to $OUT_DIR/mobile-context-menu-longpress.png"
+
+ab press Escape
+wait_for_js "mobile context-menu closed via Escape" "!document.querySelector('[data-testid=\"context-menu\"]')"
+
+# Verify panel scrolling after long-press
+ab eval --stdin <<'JS'
+(() => {
+  const panelScroll = document.querySelector('[data-node-id]')?.closest('div[class*="overflow-y-auto"]');
+  if (panelScroll && panelScroll.scrollHeight > panelScroll.clientHeight) {
+    panelScroll.scrollTop = 0;
+    panelScroll.scrollTop = 60;
+    panelScroll.dispatchEvent(new Event('scroll'));
+    if (panelScroll.scrollTop === 0) throw new Error('panel scroll did not change after long press');
+  }
+  return true;
+})()
+JS
+
+# Close TreePanel sheet
+ab click 'button[aria-label="关闭思维树"]'
+wait_for_js "mobile TreePanel sheet closed" "!document.querySelector('[data-mobile-tree-sheet]')"
+
+# 3. Test page scrolling after long-press
+ab eval --stdin <<'JS'
+(() => {
+  const scroll = document.querySelector('[data-thread-scroll]');
+  if (!scroll) throw new Error('thread scroll container not found');
+  scroll.scrollTop = 0;
+  scroll.scrollTop = 120;
+  scroll.dispatchEvent(new Event('scroll'));
+  if (scroll.scrollTop === 0) throw new Error('page scroll position did not change after long press');
+  return { scrollWorkedAfter: true, topAfter: scroll.scrollTop };
+})()
+JS
 
 echo "== ALL CHECKS PASSED: desktop-context-menu =="
