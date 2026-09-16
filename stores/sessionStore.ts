@@ -2589,7 +2589,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 }));
 
-if (typeof window !== "undefined") {
+if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_TRELLIS_VERIFY === "1") {
   (window as unknown as { __sessionStore?: typeof useSessionStore }).__sessionStore = useSessionStore;
 }
 

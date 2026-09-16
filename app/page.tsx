@@ -172,7 +172,7 @@ export default function Home() {
       )}
       {session && viewMode === "linear" && <TreePanel />}
       {session && <SessionMap isMobile={isMobile} />}
-      {session && viewMode === "canvas" && (
+      {session && !CANVAS_MAP && viewMode === "canvas" && (
         <>
           <Canvas
             onNodeFocus={isMobile ? () => setViewMode("linear") : undefined}

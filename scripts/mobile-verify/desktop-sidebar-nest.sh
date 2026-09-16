@@ -15,7 +15,7 @@ AUTH_PASS=mv-sidebar-nest-pass
 AUTH_TOKEN=mv-sidebar-nest-token
 SERVER_PID=
 
-# SN-6: 不得出现 .fenjue 路径
+# SN-6: 产物路径不得写死治理目录，走 FENJUE_TASK_OUT
 OUT_DIR="${FENJUE_TASK_OUT:-/tmp/trellis-verify/sidebar-nest}"
 LOCAL_OUT="$ROOT/out"
 mkdir -p "$OUT_DIR" "$LOCAL_OUT"
@@ -122,7 +122,7 @@ if curl --noproxy '*' -sS --connect-timeout 1 --max-time 1 "$BASE/" >/dev/null 2
 fi
 
 echo "== 构建默认 V2 模式 =="
-bun --bun run build > /tmp/build-v2.log 2>&1 || (cat /tmp/build-v2.log && exit 1)
+NEXT_PUBLIC_TRELLIS_VERIFY=1 bun --bun run build > /tmp/build-v2.log 2>&1 || (cat /tmp/build-v2.log && exit 1)
 
 mkdir -p "$H/.trellis"
 rm -f "$DB" "$DB-shm" "$DB-wal" "$LOG"
@@ -450,7 +450,7 @@ SERVER_PID=
 sleep 1
 
 echo "== 构建并启动 NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off 实例 =="
-NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off bun --bun run build > /tmp/build-legacy.log 2>&1 || (cat /tmp/build-legacy.log && exit 1)
+NEXT_PUBLIC_TRELLIS_VERIFY=1 NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off bun --bun run build > /tmp/build-legacy.log 2>&1 || (cat /tmp/build-legacy.log && exit 1)
 
 (
   export HOME="$H"

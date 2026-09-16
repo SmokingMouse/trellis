@@ -141,9 +141,9 @@ else
   fi
 fi
 
-if [ "$NEED_BUILD" -eq 1 ]; then
-  echo "== build: required =="
-  bun --bun run build
+if [ "$NEED_BUILD" -eq 1 ] || ! grep -rq "__sessionStore" .next/static/chunks 2>/dev/null; then
+  echo "== build: required (NEXT_PUBLIC_TRELLIS_VERIFY=1) =="
+  NEXT_PUBLIC_TRELLIS_VERIFY=1 bun --bun run build
 else
   echo "== build: current .next reused =="
 fi
@@ -328,58 +328,7 @@ wait_for_js "canvas map still open after menu escape" "Boolean(document.querySel
 ab click 'button[aria-label="关闭地图"]'
 wait_for_js "canvas map closed" "!document.querySelector('[data-canvas-map]')"
 
-echo "== desktop: open canvas outline, right click row, verify delete, close with Esc =="
-ab eval --stdin <<'JS'
-(() => {
-  if (window.__sessionStore) {
-    window.__sessionStore.setState({ viewMode: "canvas", mapSessionId: null });
-  } else {
-    throw new Error('__sessionStore not found on window');
-  }
-  return true;
-})()
-JS
-
-wait_for_js "outline rows rendered in canvas" "Boolean(document.querySelector('[data-outline-node-id]'))"
-
-ab eval --stdin <<'JS'
-(() => {
-  const row = document.querySelector('[data-outline-node-id]');
-  if (!row) throw new Error('no outline row found');
-  const r = row.getBoundingClientRect();
-  const x = Math.round(r.left + r.width / 2);
-  const y = Math.round(r.top + r.height / 2);
-  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
-  return { triggered: true, nodeId: row.getAttribute('data-outline-node-id') };
-})()
-JS
-
-wait_for_js "context-menu opened on outline row" "Boolean(document.querySelector('[data-testid=\"context-menu\"]'))"
-
-ab eval --stdin <<'JS'
-(() => {
-  const menu = document.querySelector('[data-testid="context-menu"]');
-  if (!menu) throw new Error('context-menu not found');
-  const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(el => el.textContent?.trim());
-  const hasDelete = items.some(t => t && t.includes('删除'));
-  if (!hasDelete) throw new Error('outline context-menu does not contain delete item: ' + JSON.stringify(items));
-  return true;
-})()
-JS
-
-ab screenshot "$OUT_DIR/desktop-context-menu-outline.png"
-echo "✓ saved outline context-menu screenshot to $OUT_DIR/desktop-context-menu-outline.png"
-
-ab press Escape
-wait_for_js "outline context-menu closed via Escape" "!document.querySelector('[data-testid=\"context-menu\"]')"
-
-ab eval --stdin <<'JS'
-(() => {
-  window.__sessionStore.setState({ viewMode: "linear" });
-  return true;
-})()
-JS
-wait_for_js "restored to linear thread view" "Boolean(document.querySelector('[data-node-id]'))"
+# Outline 属于旧 Canvas 大纲视图，在 CANVAS_MAP 开启（默认常开）的生产形态下不可达（page.tsx 设有 !CANVAS_MAP 门禁），故此段测试已下线；TreePanel、CanvasMap 与手机长按三段完整保持。
 
 echo "== mobile: set viewport 390x844, test scroll before, long-press 600ms, test scroll after =="
 ab set viewport 390 844
@@ -414,23 +363,81 @@ JS
 wait_for_js "mobile TreePanel sheet opened" "Boolean(document.querySelector('[data-mobile-tree-sheet=\"open\"]'))"
 wait_for_js "mobile TreePanel nodes rendered" "Boolean(document.querySelector('[data-node-id]'))"
 
-# Verify panel scrolling before long-press
+# 2. X-3: 真断言 —— 派发 touchstart 后位移 >10px 的 touchmove，断言定时器被取消（菜单未弹出，不干扰滑动）
+echo "== mobile: 验证滑动位移 >10px 取消长按（不干扰滚动）=="
 ab eval --stdin <<'JS'
-(() => {
-  const panelScroll = document.querySelector('[data-node-id]')?.closest('div[class*="overflow-y-auto"]');
-  if (panelScroll && panelScroll.scrollHeight > panelScroll.clientHeight) {
-    panelScroll.scrollTop = 0;
-    panelScroll.scrollTop = 60;
-    panelScroll.dispatchEvent(new Event('scroll'));
-    if (panelScroll.scrollTop === 0) throw new Error('panel scroll did not change before long press');
-    panelScroll.scrollTop = 0;
-    panelScroll.dispatchEvent(new Event('scroll'));
-  }
+(async () => {
+  const el = document.querySelector('[data-node-id]');
+  if (!el) throw new Error('no node row found in TreePanel sheet');
+  const r = el.getBoundingClientRect();
+  const x = Math.round(r.left + r.width / 2);
+  const y = Math.round(r.top + r.height / 2);
+
+  const touch1 = new Touch({
+    identifier: 1,
+    target: el,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    pageX: x,
+    pageY: y,
+  });
+
+  el.dispatchEvent(new TouchEvent('touchstart', {
+    bubbles: true,
+    cancelable: true,
+    touches: [touch1],
+    targetTouches: [touch1],
+    changedTouches: [touch1],
+  }));
+
+  // 位移 20px (>10px) 判定为滚动滑动，取消定时器
+  const touch2 = new Touch({
+    identifier: 1,
+    target: el,
+    clientX: x,
+    clientY: y + 20,
+    screenX: x,
+    screenY: y + 20,
+    pageX: x,
+    pageY: y + 20,
+  });
+
+  el.dispatchEvent(new TouchEvent('touchmove', {
+    bubbles: true,
+    cancelable: true,
+    touches: [touch2],
+    targetTouches: [touch2],
+    changedTouches: [touch2],
+  }));
+
+  // 等待 600ms（阈值是 500ms）
+  await new Promise(r => setTimeout(r, 600));
+
+  el.dispatchEvent(new TouchEvent('touchend', {
+    bubbles: true,
+    cancelable: true,
+    touches: [],
+    targetTouches: [],
+    changedTouches: [touch2],
+  }));
   return true;
 })()
 JS
 
-# 2. Long-press 600ms on a structure panel node
+# 断言：菜单绝未弹出（定时器被 touchmove 取消）
+ab eval --stdin <<'JS'
+(() => {
+  const menu = document.querySelector('[data-testid="context-menu"]');
+  if (menu) throw new Error('context-menu should NOT be opened when touch moved > 10px');
+  return true;
+})()
+JS
+echo "✓ touchmove > 10px correctly cancelled context-menu timer"
+
+# 3. 原地 500ms 长按正常呼出菜单
+echo "== mobile: 原地 500ms 长按正常呼出菜单 =="
 ab eval --stdin <<'JS'
 (async () => {
   const el = document.querySelector('[data-node-id]');
@@ -440,7 +447,7 @@ ab eval --stdin <<'JS'
   const y = Math.round(r.top + r.height / 2);
 
   const touch = new Touch({
-    identifier: Date.now(),
+    identifier: 2,
     target: el,
     clientX: x,
     clientY: y,
@@ -458,7 +465,7 @@ ab eval --stdin <<'JS'
     changedTouches: [touch],
   }));
 
-  // Wait 600ms (timer is 500ms)
+  // 原地不动等待 600ms（阈值 500ms）
   await new Promise(r => setTimeout(r, 600));
 
   el.dispatchEvent(new TouchEvent('touchend', {
@@ -491,25 +498,11 @@ echo "✓ saved mobile long-press context-menu screenshot to $OUT_DIR/mobile-con
 ab press Escape
 wait_for_js "mobile context-menu closed via Escape" "!document.querySelector('[data-testid=\"context-menu\"]')"
 
-# Verify panel scrolling after long-press
-ab eval --stdin <<'JS'
-(() => {
-  const panelScroll = document.querySelector('[data-node-id]')?.closest('div[class*="overflow-y-auto"]');
-  if (panelScroll && panelScroll.scrollHeight > panelScroll.clientHeight) {
-    panelScroll.scrollTop = 0;
-    panelScroll.scrollTop = 60;
-    panelScroll.dispatchEvent(new Event('scroll'));
-    if (panelScroll.scrollTop === 0) throw new Error('panel scroll did not change after long press');
-  }
-  return true;
-})()
-JS
-
 # Close TreePanel sheet
 ab click 'button[aria-label="关闭思维树"]'
 wait_for_js "mobile TreePanel sheet closed" "!document.querySelector('[data-mobile-tree-sheet]')"
 
-# 3. Test page scrolling after long-press
+# 4. Test page scrolling after long-press
 ab eval --stdin <<'JS'
 (() => {
   const scroll = document.querySelector('[data-thread-scroll]');
