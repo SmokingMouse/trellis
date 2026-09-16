@@ -17,6 +17,8 @@ type PushBot = {
   appId: string;
   appSecret: string;
   enabled: boolean;
+  /** 该机器人绑定的工作区目录；卡片里的本机图片只允许来自它或 ~/.trellis */
+  workspacePath?: string | null;
 };
 
 type PushChat = {
@@ -121,6 +123,8 @@ export async function pushTaskRunToLark(
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",
       sessionUrl,
+      // 不传的话 workspace 里的图片一律进不了白名单、只能降级成文本（复审 n2）。
+      workspacePath: bot.workspacePath ?? undefined,
     });
     if (!sent.messageId) {
       console.error(`[lark] task push returned no message_id bot=${args.botId} chat=${args.chatId}`);

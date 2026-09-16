@@ -165,12 +165,14 @@ export async function uploadLarkImage(options: UploadLarkImageOptions): Promise<
       return src;
     }
 
-    if (src.startsWith("http://")) {
+    // scheme 判断不分大小写：`HTTPS://…` 是合规 URL，落到本机路径分支会被白名单无声拒掉（复审 n5）。
+    const scheme = src.toLowerCase();
+    if (scheme.startsWith("http://")) {
       console.warn("[lark] 拒绝上传明文 http 图片:", src);
       return "";
     }
 
-    if (src.startsWith("https://")) {
+    if (scheme.startsWith("https://")) {
       let parsed: URL;
       try {
         parsed = new URL(src);
@@ -218,12 +220,27 @@ export async function uploadLarkImage(options: UploadLarkImageOptions): Promise<
       }
     } else {
       // 本机路径安全校验
-      const rawPath = src.startsWith("file://") ? new URL(src).pathname : src;
-      const resolvedPath = path.resolve(rawPath);
-      const trellisHome = path.resolve(os.homedir(), ".trellis");
-      const allowedRoots: string[] = [trellisHome];
+      const rawPath = scheme.startsWith("file://") ? new URL(src).pathname : src;
+      // 先解 symlink 再比对白名单：workspace 里一个指向外部的软链接不能把任意文件带出去
+      // （复审 n1 实测能读到白名单外的 secret）。realpath 失败（不存在 / 无权限）直接拒。
+      let resolvedPath: string;
+      try {
+        resolvedPath = await fsPromises.realpath(path.resolve(rawPath));
+      } catch (realpathError) {
+        const msg = realpathError instanceof Error ? realpathError.message : String(realpathError);
+        console.warn(`[lark] 本机图片路径无法解析 (${msg}): ${rawPath}`);
+        return "";
+      }
+      const realRoot = async (p: string): Promise<string> => {
+        try {
+          return await fsPromises.realpath(p);
+        } catch {
+          return path.resolve(p);
+        }
+      };
+      const allowedRoots: string[] = [await realRoot(path.resolve(os.homedir(), ".trellis"))];
       if (workspacePath) {
-        allowedRoots.push(path.resolve(workspacePath));
+        allowedRoots.push(await realRoot(path.resolve(workspacePath)));
       }
 
       const isAllowed = allowedRoots.some(

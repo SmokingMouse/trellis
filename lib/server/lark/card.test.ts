@@ -1,5 +1,6 @@
 import { describe, expect, test, mock } from "bun:test";
 import * as os from "node:os";
+import { promises as fsP } from "node:fs";
 import * as path from "node:path";
 import {
   buildLarkCard,
@@ -462,6 +463,42 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
 
       expect(key).toBe("img_valid_local");
       expect(uploaded ? Buffer.from(uploaded as any).toString() : "").toBe("FAKE_PNG_BYTES");
+    });
+
+    test("workspace 内指向外部的 symlink 被拒（realpath 后再比对白名单）", async () => {
+      let uploadCalls = 0;
+      const fakeClient = {
+        im: { v1: { image: { create: async () => { uploadCalls++; return { code: 0, image_key: "img_leak" }; } } } },
+      } as any;
+      const tmpDir = os.tmpdir();
+      const outside = path.join(tmpDir, "trellis-test-outside-" + Math.random().toString(36).slice(2));
+      const ws = path.join(tmpDir, "trellis-test-ws-" + Math.random().toString(36).slice(2));
+      await Bun.write(path.join(outside, "secret.txt"), "SECRET_TOKEN_ABC123");
+      await fsP.mkdir(ws, { recursive: true });
+      await fsP.symlink(path.join(outside, "secret.txt"), path.join(ws, "leak.png"));
+
+      const key = await uploadLarkImage({ client: fakeClient, image: path.join(ws, "leak.png"), workspacePath: ws });
+      expect(key).toBe("");
+      expect(uploadCalls).toBe(0);
+    });
+
+    test("大写 HTTPS:// 按 URL 处理，不落到本机路径分支", async () => {
+      const origFetch = globalThis.fetch;
+      let fetched = 0;
+      globalThis.fetch = (async () => {
+        fetched++;
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } });
+      }) as any;
+      try {
+        const fakeClient = {
+          im: { v1: { image: { create: async () => ({ code: 0, image_key: "img_upper" }) } } },
+        } as any;
+        const key = await uploadLarkImage({ client: fakeClient, image: "HTTPS://example.com/a.png" });
+        expect(fetched).toBe(1);
+        expect(key).toBe("img_upper");
+      } finally {
+        globalThis.fetch = origFetch;
+      }
     });
   });
 
