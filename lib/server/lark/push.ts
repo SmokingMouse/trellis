@@ -36,6 +36,8 @@ export type TaskLarkPushDeps = {
     markdown: string;
     mode: "plain";
     sessionUrl?: string;
+    textFallback?: string;
+    workspacePath?: string;
   }) => Promise<LarkSentMessage>;
   recordOutbox: typeof recordLarkOutbox;
   advanceChat: typeof advanceLarkChat;
@@ -107,14 +109,14 @@ export async function pushTaskRunToLark(
 
     const link = args.sessionId && args.nodeId
       ? `/?session=${args.sessionId}&node=${args.nodeId}`
-      : "/";
-    const sessionUrl = deps.publicUrl()
-      ? `${deps.publicUrl()!.replace(/\/+$/, "")}${link}`
-      : link;
+      : null;
+    const base = deps.publicUrl()?.trim().replace(/\/+$/, "");
+    const sessionUrl = link && base ? `${base}${link}` : undefined;
     const sent = await deps.sendText({
       client: deps.createClient(bot.appId, bot.appSecret),
       chatId: args.chatId,
-      markdown: taskLarkMarkdown(args.markdown, link, deps.publicUrl()),
+      markdown: args.markdown,
+      textFallback: taskLarkMarkdown(args.markdown, link ?? "/", deps.publicUrl()),
       // 任务消息没有可引用的入站锚点；群聊必须顶层发送以成为话题根，私聊同样用
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",

@@ -1,9 +1,14 @@
 import { describe, expect, test, mock } from "bun:test";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   buildLarkCard,
   optimizeMarkdownStyle,
   splitIntoBodySections,
   truncateMarkdown,
+  stripInvalidImageKeys,
+  nextMarkdownFence,
+  CARD_MAX_BYTES,
   SECTION_SOFT_LIMIT,
   SECTION_HARD_LIMIT,
   MAX_SECTIONS,
@@ -11,7 +16,18 @@ import {
 } from "./card";
 
 mock.module("server-only", () => ({}));
-const { sendLarkText, uploadLarkImage } = await import("./sdk");
+const { sendLarkText, uploadLarkImage, isPrivateOrLoopbackHost } = await import("./sdk");
+const { pushTaskRunToLark, taskLarkMarkdown } = await import("./push");
+
+function bytes(o: unknown): number {
+  return Buffer.byteLength(JSON.stringify(o), "utf8");
+}
+
+function fenceBalanced(s: string): boolean {
+  const t = (s.match(/^```/gm) || []).length;
+  const w = (s.match(/^~~~/gm) || []).length;
+  return t % 2 === 0 && w % 2 === 0;
+}
 
 describe("Lark Interactive Card Schema 2.0 Builder", () => {
   describe("1. Markdown 方言优化与卡片形状", () => {
@@ -130,11 +146,10 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
   });
 
   describe("2. 超长文本截断与代码块围栏保护", () => {
-    test("超长文本在代码块中截断时，不切坏代码块围栏，尾部带「详情见 Trellis 会话」链接", async () => {
-      // 构造包含超长代码块的 markdown 文本（> SECTION_HARD_LIMIT = 4000）
+    test("超长代码块撑破 24KB 预算被截断时，不切坏围栏，尾部带「详情见 Trellis 会话」链接", async () => {
       const longLines = Array.from(
-        { length: 300 },
-        (_, i) => `  const value_${i} = computeHash("entry_${i}_payload_data");`,
+        { length: 650 },
+        (_, i) => `  const value_${i} = computeHash("entry_${i}_payload_data_long_string");`,
       );
       const longMarkdown = [
         "# 超长代码示例",
@@ -145,48 +160,43 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
         "```",
       ].join("\n");
 
-      expect(longMarkdown.length).toBeGreaterThan(SECTION_HARD_LIMIT);
-
       const sessionUrl = "https://trellis.example.com/?session=s1&node=n2";
       const card = await buildLarkCard(longMarkdown, { sessionUrl });
 
       expect(card.schema).toBe("2.0");
-      expect(card.body.elements.length).toBeLessThanOrEqual(MAX_SECTIONS);
+      expect(bytes(card)).toBeLessThanOrEqual(CARD_MAX_BYTES);
 
       const lastElement = card.body.elements[card.body.elements.length - 1];
       expect(lastElement.tag).toBe("markdown");
 
       const content = String(lastElement.content);
-      // 必须包含「详情见 Trellis 会话」链接
       expect(content).toContain(`[详情见 Trellis 会话](${sessionUrl})`);
       expect(content).toContain("…（内容已截断，");
 
-      // 验证围栏平衡：检查开闭 ``` 数量
-      const matches = content.match(/```/g);
-      // 如果代码块被截断，应有开有闭（成对出现，保证围栏不坏）
-      if (matches) {
-        expect(matches.length % 2).toBe(0);
-      }
+      // 验证围栏平衡
+      expect(fenceBalanced(content)).toBe(true);
 
-      // 截断提示链接必须在代码块闭合之后，而不是被代码块包裹吞噬
+      // 截断提示链接必须在代码块闭合之后
       const lastCodeFenceIndex = content.lastIndexOf("```");
       const linkIndex = content.indexOf("[详情见 Trellis 会话]");
       expect(linkIndex).toBeGreaterThan(lastCodeFenceIndex);
     });
 
-    test("超长多段落文本不超过 MAX_SECTIONS，尾部带默认 Trellis 会话链接", async () => {
+    test("超长多段落文本不超过 MAX_SECTIONS，尾部带 Trellis 会话链接（有 sessionUrl 时）", async () => {
       const paragraphs = Array.from(
         { length: 8 },
         (_, i) => `段落 ${i + 1}：` + "超长分析内容描述。".repeat(300),
       );
       const longText = paragraphs.join("\n\n");
+      const sessionUrl = "https://trellis.example.com/?session=s1";
 
-      const card = await buildLarkCard(longText);
+      const card = await buildLarkCard(longText, { sessionUrl });
       expect(card.body.elements.length).toBeLessThanOrEqual(MAX_SECTIONS);
+      expect(bytes(card)).toBeLessThanOrEqual(CARD_MAX_BYTES);
 
       const lastElement = card.body.elements[card.body.elements.length - 1];
       const content = String(lastElement.content);
-      expect(content).toContain("[详情见 Trellis 会话]");
+      expect(content).toContain(`[详情见 Trellis 会话](${sessionUrl})`);
     });
   });
 
@@ -240,29 +250,13 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
       const card = await buildLarkCard(markdown, { uploadImage: failingUpload });
       const elements = card.body.elements;
 
-      // 没有 img 元素，退化为文本
       const imgElements = elements.filter((e) => e.tag === "img");
       expect(imgElements).toHaveLength(0);
 
-      // 文本中包含退化的「[图片] alt: link」
       const fullText = elements.map((e) => e.content).join("\n");
       expect(fullText).toContain("[图片] 错误图片演示: https://example.com/images/fail.png");
       expect(fullText).toContain("前置文字说明");
       expect(fullText).toContain("后置文字说明");
-    });
-
-    test("本机绝对路径图片与无 alt 图片支持", async () => {
-      const markdown = "![](/tmp/chart.png)";
-      const mockUpload = async (src: string) => {
-        expect(src).toBe("/tmp/chart.png");
-        return "img_v3_chart_key";
-      };
-
-      const card = await buildLarkCard(markdown, { uploadImage: mockUpload });
-      expect(card.body.elements).toHaveLength(1);
-      expect(card.body.elements[0].tag).toBe("img");
-      expect(card.body.elements[0].img_key).toBe("img_v3_chart_key");
-      expect(card.body.elements[0].alt).toEqual({ tag: "plain_text", content: "" });
     });
 
     test("代码块内的图片语法不应被提取为图片元素", async () => {
@@ -305,9 +299,10 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
     });
   });
 
-  describe("5. 可选 Header 与状态主题", () => {
-    test("传入 title 与 status 时生成对应 header", async () => {
-      const card = await buildLarkCard("完成任务", {
+  describe("5. 可选 Header 与状态主题 (M4)", () => {
+    test("传入 title 与 status 时生成对应 header，且默认生成 60 字符 summary", async () => {
+      const longText = "这是一段非常详细的 Agent 分析报告正文内容。".repeat(10);
+      const card = await buildLarkCard(longText, {
         title: "执行报告",
         status: "error",
       });
@@ -315,10 +310,258 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
       expect(card.header).toBeDefined();
       expect(card.header!.title).toEqual({ tag: "plain_text", content: "执行报告" });
       expect(card.header!.template).toBe("red");
+      expect(card.config.summary).toBeDefined();
+      expect(card.config.summary!.content.length).toBeLessThanOrEqual(60);
+      expect(card.config.summary!.content).toBe(longText.slice(0, 60));
+    });
+
+    test("未传入 title 时无 header", async () => {
+      const card = await buildLarkCard("正文内容", { status: "error" });
+      expect(card.header).toBeUndefined();
     });
   });
 
-  describe("6. sdk.ts: 互动卡片发送、thread 语义与降级路径", () => {
+  describe("6. M1: 长度预算改按 UTF-8 字节 <= 24KB", () => {
+    test("15886 个中文字符输入 -> 卡片 JSON 字节 <= 24KB 且尾链在", async () => {
+      const sessionUrl = "https://trellis.example.com/?session=s1&node=n1";
+      // 8 段，每段 ~2000 字符，总计 ~16000 字符
+      const md = Array.from(
+        { length: 8 },
+        (_, i) => `段落${i}：` + "中文压测内容反复出现。".repeat(180),
+      ).join("\n\n");
+
+      expect(md.length).toBeGreaterThanOrEqual(15886);
+      const card = await buildLarkCard(md, { sessionUrl });
+      const totalBytes = bytes(card);
+
+      expect(totalBytes).toBeLessThanOrEqual(CARD_MAX_BYTES);
+      expect(totalBytes).toBeLessThanOrEqual(24 * 1024);
+
+      const lastElem = card.body.elements[card.body.elements.length - 1];
+      expect(lastElem.tag).toBe("markdown");
+      expect(String(lastElem.content)).toContain(`[详情见 Trellis 会话](${sessionUrl})`);
+    });
+  });
+
+  describe("7. M2: stripInvalidImageKeys 剔除非 img_ 图片引用 (CardKit 200570)", () => {
+    test("带 title、含空格 URL、尖括号 URL 的图片均被清洗，不残留非 img_ 图片语法", async () => {
+      const cases = [
+        '![标题图](https://e.com/a.png "图注")',
+        "![空格图](https://e.com/a b.png)",
+        "![尖括号](<https://e.com/a.png>)",
+      ];
+      for (const md of cases) {
+        const card = await buildLarkCard(md, { uploadImage: async () => "img_k" });
+        const txt = card.body.elements.map((e: any) => e.content ?? "").join("\n");
+        const leaked = /!\[[^\]]*\]\((?!img_)/.test(txt);
+        expect(leaked).toBe(false);
+      }
+    });
+
+    test("代码块内的图片语法受占位符保护，不被 strip 误伤", () => {
+      const md = "```markdown\n![example](https://foo.bar/pic.png)\n```";
+      const optimized = optimizeMarkdownStyle(md);
+      expect(optimized).toContain("![example](https://foo.bar/pic.png)");
+    });
+  });
+
+  describe("8. M3: 图片来源收紧与本地路径白名单", () => {
+    test("私网/环回地址过滤识别", () => {
+      expect(isPrivateOrLoopbackHost("127.0.0.1")).toBe(true);
+      expect(isPrivateOrLoopbackHost("localhost")).toBe(true);
+      expect(isPrivateOrLoopbackHost("10.0.0.1")).toBe(true);
+      expect(isPrivateOrLoopbackHost("172.16.0.1")).toBe(true);
+      expect(isPrivateOrLoopbackHost("172.31.255.255")).toBe(true);
+      expect(isPrivateOrLoopbackHost("192.168.1.1")).toBe(true);
+      expect(isPrivateOrLoopbackHost("169.254.169.254")).toBe(true);
+      expect(isPrivateOrLoopbackHost("::1")).toBe(true);
+      expect(isPrivateOrLoopbackHost("example.com")).toBe(false);
+      expect(isPrivateOrLoopbackHost("github.com")).toBe(false);
+    });
+
+    test("/tmp 文件、http:// 明文、169.254 地址、超时桩 四种均被拦截且正文照发", async () => {
+      let uploadCalls = 0;
+      const fakeClient = {
+        im: {
+          v1: {
+            image: {
+              create: async () => {
+                uploadCalls++;
+                return { code: 0, image_key: "img_test" };
+              },
+            },
+          },
+        },
+      } as any;
+
+      // 1. /tmp 文件不在白名单
+      const resTmp = await uploadLarkImage({ client: fakeClient, image: "/tmp/secret.txt" });
+      expect(resTmp).toBe("");
+
+      // 2. http:// 明文被拒绝
+      const resHttp = await uploadLarkImage({ client: fakeClient, image: "http://example.com/pic.png" });
+      expect(resHttp).toBe("");
+
+      // 3. 169.254 link-local SSRF 被拒绝
+      const resSsrf = await uploadLarkImage({ client: fakeClient, image: "https://169.254.169.254/latest/meta-data/" });
+      expect(resSsrf).toBe("");
+
+      // 4. 超时桩
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      }) as unknown as typeof fetch;
+      try {
+        const resTimeout = await uploadLarkImage({ client: fakeClient, image: "https://example.com/slow.png" });
+        expect(resTimeout).toBe("");
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+
+      expect(uploadCalls).toBe(0);
+
+      // 正文照发验证：经 buildLarkCard 降级为文本，正文不丢
+      const card = await buildLarkCard(
+        "正文开头\n\n![tmp](/tmp/secret.txt)\n\n![http](http://example.com/pic.png)\n\n正文结尾",
+        {
+          uploadImage: (src) => uploadLarkImage({ client: fakeClient, image: src }),
+        },
+      );
+      const fullText = card.body.elements.map((e: any) => e.content ?? "").join("\n");
+      expect(fullText).toContain("正文开头");
+      expect(fullText).toContain("正文结尾");
+      expect(fullText).toContain("[图片] tmp: /tmp/secret.txt");
+      expect(fullText).toContain("[图片] http: http://example.com/pic.png");
+      expect(card.body.elements.filter((e: any) => e.tag === "img")).toHaveLength(0);
+    });
+
+    test("允许 ~/.trellis/ 与 workspacePath 内的本地图片", async () => {
+      let uploaded: Buffer | null = null;
+      const fakeClient = {
+        im: {
+          v1: {
+            image: {
+              create: async (p: any) => {
+                uploaded = p.data.image;
+                return { code: 0, image_key: "img_valid_local" };
+              },
+            },
+          },
+        },
+      } as any;
+
+      const tmpDir = os.tmpdir();
+      const testWorkspace = path.join(tmpDir, "trellis-test-ws-" + Math.random().toString(36).slice(2));
+      await Bun.write(path.join(testWorkspace, "diagram.png"), "FAKE_PNG_BYTES");
+
+      const key = await uploadLarkImage({
+        client: fakeClient,
+        image: path.join(testWorkspace, "diagram.png"),
+        workspacePath: testWorkspace,
+      });
+
+      expect(key).toBe("img_valid_local");
+      expect(uploaded ? Buffer.from(uploaded as any).toString() : "").toBe("FAKE_PNG_BYTES");
+    });
+  });
+
+  describe("9. M5: push.ts 定时任务推送与 dual truncation 解耦", () => {
+    test("卡片路径传入完整原文，textFallback 采用 taskLarkMarkdown", async () => {
+      const calls: Array<{ msgType: string; markdown: string; textFallback?: string }> = [];
+      const fakeClient = {
+        im: {
+          v1: {
+            message: {
+              create: async (a: any) => ({ code: 0, data: { message_id: "om_push_test" } }),
+            },
+          },
+        },
+      } as any;
+
+      const longMd = "这是定时任务长分析报告内容。".repeat(500); // ~7000 字
+      const res = await pushTaskRunToLark(
+        { botId: "b1", chatId: "oc_1", sessionId: "s1", nodeId: "n1", markdown: longMd },
+        {
+          enabled: () => true,
+          publicUrl: () => "https://trellis.example.com",
+          getBot: () => ({ appId: "a", appSecret: "s", enabled: true }),
+          getChat: () => ({ id: "row1", chatType: "group" }),
+          createClient: () => fakeClient,
+          sendText: async (args) => {
+            calls.push({
+              msgType: "interactive",
+              markdown: args.markdown,
+              textFallback: args.textFallback,
+            });
+            return { messageId: "om_push_test", threadId: null };
+          },
+          recordOutbox: () => {},
+          advanceChat: () => {},
+        },
+      );
+
+      expect(res.status).toBe("sent");
+      expect(calls).toHaveLength(1);
+      // 卡片路径收到完整原文
+      expect(calls[0].markdown).toBe(longMd);
+      // 纯文本 fallback 经过 4000 字截断
+      expect(calls[0].textFallback).toBeDefined();
+      expect(calls[0].textFallback!.length).toBeLessThanOrEqual(4000);
+      expect(calls[0].textFallback!).toContain("…（内容已截断，完整内容见 Trellis：https://trellis.example.com/?session=s1&node=n1）");
+    });
+  });
+
+  describe("10. M6: 占位符带随机 nonce 防正文碰撞 (P8 fixture)", () => {
+    test("正文含既有占位符 ___TRELLIS_CB_0___ 时不导致代码块错位", async () => {
+      const md = "用户正文含占位符 ___TRELLIS_CB_0___ 请注意\n\n```ts\nconst a = 1;\n```";
+      const card = await buildLarkCard(md);
+      const txt = card.body.elements.map((e: any) => String(e.content)).join("\n");
+
+      expect(txt).toContain("用户正文含占位符 ___TRELLIS_CB_0___ 请注意");
+      expect(txt).toContain("const a = 1;");
+      // 代码块没有被搬移到用户假占位符位置
+      const fakePlaceholderIdx = txt.indexOf("用户正文含占位符 ___TRELLIS_CB_0___");
+      const codeIdx = txt.indexOf("const a = 1;");
+      expect(codeIdx).toBeGreaterThan(fakePlaceholderIdx);
+    });
+  });
+
+  describe("11. Minor 优化与边界防护 (m1–m10)", () => {
+    test("m1: truncateMarkdown 严格不超 maxLen 且围栏平衡", () => {
+      for (const maxLen of [4000, 200, 60, 40]) {
+        const r = truncateMarkdown("```ts\n" + "x".repeat(20000), maxLen, "https://t.example/?session=s&node=n");
+        expect(r.length).toBeLessThanOrEqual(maxLen);
+        expect(fenceBalanced(r)).toBe(true);
+      }
+    });
+
+    test("m8: nextMarkdownFence 对单行 ``` inline ``` 不误判为未闭合围栏", () => {
+      const fence = nextMarkdownFence("这是一行行内代码：``` inline ``` 正常文本", null);
+      expect(fence).toBeNull();
+      const f1 = nextMarkdownFence("```ts", null);
+      expect(f1).not.toBeNull();
+      const f2 = nextMarkdownFence("```", f1);
+      expect(f2).toBeNull();
+    });
+
+    test("m9: 代码块内的一级标题 # comment 不误触发全文标题降级", async () => {
+      const md = "```python\n# This is a comment\nx = 1\n```\n\n正文的一级标题：\n# 真实标题";
+      const card = await buildLarkCard(md);
+      const content = String(card.body.elements[0].content);
+      // 真实标题依然降级为 H4
+      expect(content).toContain("#### 真实标题");
+      // 代码块内的 # This is a comment 保持原样，不变成 ####
+      expect(content).toContain("# This is a comment");
+    });
+
+    test("m10: 无 sessionUrl 时截断不渲染无意义的相对路径链接", () => {
+      const truncated = truncateMarkdown("a".repeat(10000), 100);
+      expect(truncated).not.toContain("[详情见 Trellis 会话]");
+      expect(truncated).toContain("…（内容已截断）");
+    });
+  });
+
+  describe("12. sdk.ts: 互动卡片发送、thread 语义与降级路径", () => {
     test("正常发送走 msg_type interactive 互动卡片", async () => {
       let replyPayload: unknown = null;
       const fakeClient = {
@@ -365,7 +608,6 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
               reply: async (args: { path: { message_id: string }; data: { msg_type: string; content: string } }) => {
                 calls.push({ msgType: args.data.msg_type, content: args.data.content });
                 if (args.data.msg_type === "interactive") {
-                  // 模拟飞书校验卡片失败
                   return { code: 230001, msg: "Card validation failed" };
                 }
                 return { code: 0, data: { message_id: "om_text_fallback", thread_id: null } };
@@ -393,7 +635,6 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
       });
 
       expect(sent.messageId).toBe("om_text_fallback");
-      // 确认先尝试了 interactive，失败后降级调用了 text
       expect(calls.some((c) => c.msgType === "interactive")).toBe(true);
       expect(calls.some((c) => c.msgType === "text")).toBe(true);
       const textCall = calls.find((c) => c.msgType === "text");

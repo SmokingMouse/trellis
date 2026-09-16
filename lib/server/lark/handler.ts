@@ -209,8 +209,8 @@ type Turn = {
 function sessionUrlFor(turn: Turn | null | undefined): string | undefined {
   if (!turn) return undefined;
   const base = process.env.TRELLIS_PUBLIC_URL?.trim().replace(/\/+$/, "");
-  const path = `/?session=${turn.sessionId}&node=${turn.nodeId}`;
-  return base ? `${base}${path}` : path;
+  if (!base) return undefined;
+  return `${base}/?session=${turn.sessionId}&node=${turn.nodeId}`;
 }
 
 function sessionOfNode(nodeId: string): string | null {
@@ -386,6 +386,7 @@ async function runAgentTurn(args: {
                 markdown: node.response,
                 mode: sendModeFor(bot, message),
                 sessionUrl: sessionUrlFor(turn),
+                workspacePath: bot.workspacePath ?? undefined,
               });
               registerSent({ bot, message, turn, sent, now });
               updateLarkInbox(message.messageId, "done", turn.nodeId);
@@ -398,6 +399,9 @@ async function runAgentTurn(args: {
                 markdown: `Agent 执行失败：${reason}。详情见 Trellis 会话。`,
                 mode: sendModeFor(bot, message),
                 sessionUrl: sessionUrlFor(turn),
+                title: "执行失败",
+                status: "error",
+                workspacePath: bot.workspacePath ?? undefined,
               });
               registerSent({ bot, message, turn, sent, now });
               updateLarkInbox(message.messageId, "error", turn.nodeId);
@@ -488,6 +492,9 @@ async function processQueuedMessage(
       markdown: `Agent 执行失败：${reason}。详情见 Trellis 会话。`,
       mode: sendModeFor(bot, message),
       sessionUrl: sessionUrlFor(turn),
+      title: "执行失败",
+      status: "error",
+      workspacePath: bot.workspacePath ?? undefined,
     });
   }
 }
