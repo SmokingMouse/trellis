@@ -120,6 +120,6 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
         <strong className="line-clamp-2">{peek.question}</strong><p className="mt-2 line-clamp-3 text-xs text-ink-muted">{peek.response || (isWaitingNode(peek) ? "等待你处理" : "尚无回复")}</p>
       </div>}
     </div>
-    <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">选节点回到正文 · 蓝框：当前位置 · <span className="text-blue-600">● 未读</span> · <span className="text-amber-600">● 等待处理</span></p>
+    <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">选节点回到正文 · 蓝框：当前位置 · <span className="text-blue-600">● 未读</span> · <span className="text-warn">● 等待处理</span></p>
   </div>;
 }

@@ -129,11 +129,11 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   // 提示行（fallback / 已处理 / 错误）在折叠态也要能读到，只能落在卡外。
   return <div data-as-project={nodeId} className="min-w-0 max-w-full [overflow-wrap:anywhere]">
     {thread && <details data-as-system-log className="group/log mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
-      <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11">
+      <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11 max-md:flex-wrap">
         <span className="text-ink-faint transition-transform shrink-0 group-open/log:rotate-90" aria-hidden>▸</span>
         <span className="font-medium text-ink shrink-0">🔌 引擎</span>
         <span className="text-ink-muted tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
-        <span data-as-source className="flex-1 truncate min-w-0 text-ink-faint">
+        <span data-as-source className="flex-1 min-w-0 text-ink-faint truncate max-md:basis-full max-md:order-last max-md:pl-5 max-md:whitespace-normal max-md:line-clamp-2">
           {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}
           {!showAll && debugCount > 0 ? ` · 已折叠 ${debugCount} 条调试事件` : ""}
         </span>
@@ -141,7 +141,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
           <span className="group-open/log:hidden">展开</span>
           <span className="hidden group-open/log:inline">收起</span>
         </span>
-        <span className="flex shrink-0 items-center gap-1.5 text-ink-muted">权限
+        <span className="flex shrink-0 items-center gap-1.5 text-ink-muted max-md:ml-auto">权限
           {external ? <>
             <span data-as-permission className="rounded-field border border-line bg-surface px-2 py-0.5 text-ink">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
             <span className="text-ink-faint">只读</span>

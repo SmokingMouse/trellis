@@ -49,7 +49,7 @@ export default function MachineResourcesPage() {
       </div>
 
       {error && (
-        <div role="alert" className="rounded-md border border-danger-line bg-danger-surface px-3 py-2 text-ui">
+        <div role="alert" className="rounded-md border border-danger-line bg-danger-muted px-3 py-2 text-ui">
           <div className="font-medium">资源状态不可用</div>
           <div className="mt-1 text-label">{error}，正在自动重试。</div>
         </div>
