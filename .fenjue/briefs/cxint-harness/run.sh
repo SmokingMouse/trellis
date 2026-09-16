@@ -29,6 +29,14 @@ for l in open(sys.argv[1]):
     try: d=json.loads(l)
     except Exception: continue
     tags[d.get("tag")]=d.get("data")
+execs=[]
+for l in open(sys.argv[1]):
+    try: d=json.loads(l)
+    except Exception: continue
+    if d.get("tag")=="item/started" and (d.get("data") or {}).get("type")=="commandExecution":
+        execs.append(((d["data"].get("payload") or {}).get("command") or ""))
+if not any("sleep 600" in c for c in execs): print("missing:exec(sleep 600 never started)"); sys.exit(0)
+if "interrupt:ack" not in tags: print("missing:interrupt:ack"); sys.exit(0)
 missing=[t for t in ("pgrep@10s","pgrep@after-close") if t not in tags]
 if missing: print("missing:"+",".join(missing)); sys.exit(0)
 leak=[t for t in ("pgrep@10s","pgrep@after-close") if (tags[t] or {}).get("out")]

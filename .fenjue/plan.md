@@ -764,8 +764,10 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-cxint-fix-5e70
 - [ ] cxint-review: 独立复核 fix/codex-interrupt-exec：隔离 daemon 真机复跑 interrupt、三条反例、测试真红、证据可复现 | after: cxint-fix | mode: readonly | kind: claude
   cid: fj-cxint-review-f43c
+  waiver: {"at":"2026-09-16T06:54:06.417Z","reason":"复核 fail 成立且已由 cxint-fix3（进程收割 + fake 进程树集成测试）承接；用户裁决本轮不用 GPT，真机脚本退出验收","cid":"fj-cxint-review-f43c","settlement":"[\"9622001be27192dc10a2ea31822ce51f55c407501484366e8452c958bc45e412\",0,[\"2026-09-16T04:51:56.553Z\",\"9622001be27192dc10a2ea31822ce51f55c407501484366e8452c958bc45e412\",\"b53bafe01e9f987a40ce6e4191e7d2a2868f321e2e76e2ff70265b2fcd0a1e0b\",5,0,\"fail\",\"d5ed58af31c0b833c8bf82e1b90c7a0e3d11f3d0ba96a14259d2c522ab4487a8\"]]"}
 - [ ] cli-as-bridge: 调研 apps/cli（llm）与 agent-server 打通：现状链路、三条方案与估算、推荐切片、真机验证网关模型经 as/1 起线程 | mode: readonly | kind: claude
   cid: fj-cli-as-bridge-0b2e
 - [ ] cxint-fix3: 第三轮：Codex 线程 interrupt 后真正终止命令子进程（AS 侧快照后代 pid 并收割 + close/退出连坐进程组），撤掉无效的 mapper 记账改动，用复核坐席的隔离 daemon 复现脚本当硬验收 | after: cxint-review
-  cid: fj-cxint-fix3-5ed2
+  cid: fj-cxint-fix3-3d62
 - [ ] cxint-review3: 第三轮异源复核（Codex）：用 cxint-harness 脚本 A/C/D 自己复跑、回退核心改动看单测是否变红、检查 detached 进程组不伤 daemon 与其它线程、逐条核对对上一轮 P0/P1/P2 的处置 | after: cxint-fix3 | mode: readonly | kind: codex
+  cid: fj-cxint-review3-47a0

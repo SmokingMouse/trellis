@@ -16,3 +16,14 @@
 3. 真实引擎证据：`bash …/cxint-harness/run.sh A <worktree>` 修前一次（应 `leak`）、修后 A / C / D 各一次（应 `clean`），把每次的 `BASE=` 目录里的 `events.jsonl` 复制到 `out/evidence/` 并在 `out/interrupt-proof.md` 里列出命令、exit、verdict 行。
 4. `bun run typecheck` 与 `packages/agent-server` 下 `bun test` 全绿；提交到当前分支 `fix/codex-interrupt-exec`，工作树干净。不 push、不 PR、不部署、不重启常驻 daemon、不碰常驻 daemon（`~/.sm-toolkit/agent-server.sock`）上的任何线程；自己起的隔离 daemon 与 codex 进程结束后全部关掉，收尾时 `pgrep -fx "sleep 600"` 为空。
 5. `out/result.md`：根因一句话、机制与取舍、改动清单（含测试文件）、每条命令与 exit、证据路径、对复核报告 P0-1 / P0-2 / P1-1 / P1-2 / P2-1 / P2-2 的逐条处置、未覆盖项（若有，写清为什么）。
+
+## 环境提示（2026-09-16 14:30 主控补记）
+
+codex 模型走 cpa 网关（`~/.codex/config.toml` 的 cliproxyapi，responses WebSocket）。14:00 起隔离 daemon 里的 codex 线程反复 `Reconnecting… x/5 · stream disconnected before completion: WebSocket protocol error: Connection reset without closing handshake` 然后 systemError，脚本会打印 `verdict=missing:exec(sleep 600 never started)`。这是基础设施问题，与你的改动无关：遇到就把该次 `BASE/events.jsonl` 留档到 `out/evidence/`，先做代码与单测，每 15 分钟重试一次脚本；连续失败超过 1 小时发 blocker（fallback：交付代码 + 单测 + 修前基线引用复核报告 `out/evidence/run-A-123738.jsonl` 的证据，result 用 `--status partial` 并写明真机证据缺失原因）。不要伪造 clean，不要改脚本的判定逻辑。
+
+## 契约变更（2026-09-16 15:0x 用户裁决：本轮不用任何 GPT / codex 模型）
+
+- 真机脚本 `cxint-harness/run.sh` 退出验收项，不必重试，不要为它发 blocker。
+- 新增硬验收：`packages/agent-server/src/engines/codex-interrupt-reap.test.ts` 必须存在并通过。内容：用 fake codex app-server 进程（沿用 `codex.test.ts` 的 `spawnProcess` 注入，或一个独立可执行脚本）真实 spawn 一棵进程树——fake 收到 `turn/interrupt` 只杀直接子进程、故意留下孙进程 `sleep`——断言 interrupt 后 ≤10 秒孙进程死亡、`thread/close` 后无残留；回退核心改动该测试必须变红。
+- `out/interrupt-proof.md` 改为：该集成测试的运行记录 + 复核报告 `archive/fj-cxint-review-f43c/out/evidence/run-A-123738.jsonl` 的修前真机证据引用；真机修后证据标「待网关恢复后补跑」。
+- 其余要求（撤掉 interruptIncomplete、单测、typecheck、全量 bun test、工作树干净、不 push）不变。
