@@ -35,6 +35,7 @@ export type TaskLarkPushDeps = {
     chatId: string;
     markdown: string;
     mode: "plain";
+    sessionUrl?: string;
   }) => Promise<LarkSentMessage>;
   recordOutbox: typeof recordLarkOutbox;
   advanceChat: typeof advanceLarkChat;
@@ -107,6 +108,9 @@ export async function pushTaskRunToLark(
     const link = args.sessionId && args.nodeId
       ? `/?session=${args.sessionId}&node=${args.nodeId}`
       : "/";
+    const sessionUrl = deps.publicUrl()
+      ? `${deps.publicUrl()!.replace(/\/+$/, "")}${link}`
+      : link;
     const sent = await deps.sendText({
       client: deps.createClient(bot.appId, bot.appSecret),
       chatId: args.chatId,
@@ -114,6 +118,7 @@ export async function pushTaskRunToLark(
       // 任务消息没有可引用的入站锚点；群聊必须顶层发送以成为话题根，私聊同样用
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",
+      sessionUrl,
     });
     if (!sent.messageId) {
       console.error(`[lark] task push returned no message_id bot=${args.botId} chat=${args.chatId}`);
