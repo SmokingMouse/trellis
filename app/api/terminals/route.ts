@@ -38,7 +38,7 @@ export async function GET(req: Request) {
   }
   // 懒启动：第一次有人真要终端时才拉起 ttyd，纯 chat 用户永远不会多一个进程。
   await startTtyd();
-  const { port, error, errorDetail } = ttydStatus();
+  const { port, error, errorDetail, platform, arch } = ttydStatus();
   return Response.json({
     ready: port !== null,
     error,
@@ -46,6 +46,8 @@ export async function GET(req: Request) {
     // 不含凭证或会话数据，所以可以照直给到界面 —— 「未找到 ttyd」这句话
     // 单独出现时分不清是真没装还是探测抖了一下，那才是真正的坑。
     errorDetail,
+    platform,
+    arch,
     cwd,
     terminals: listTerminals(workspaceId),
   });
@@ -67,11 +69,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "workspace not found" }, { status: 404 });
   }
   await startTtyd();
-  const { port, error, errorDetail } = ttydStatus();
+  const { port, error, errorDetail, platform, arch } = ttydStatus();
   return Response.json({
     ready: port !== null,
     error,
     errorDetail,
+    platform,
+    arch,
     cwd,
     session: nextTerminalSession(workspaceId),
   });
