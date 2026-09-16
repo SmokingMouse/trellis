@@ -1,4 +1,5 @@
 import type { RecentChain, RecentChainStatus, RecentSession } from "./types";
+export type { RecentChain, RecentChainStatus, RecentSession };
 
 // 侧栏「最近」分组（S133）的纯数据层：把服务端算好的「叶子 = 链」行按会话
 // 归组、截断、打标签。API 路由与测试共用；不 import 任何 server-only 模块。
@@ -78,7 +79,7 @@ export function chainStatus(
   return "done";
 }
 
-const STATUS_PRIORITY: Record<RecentChainStatus, number> = {
+export const STATUS_PRIORITY: Record<RecentChainStatus, number> = {
   done: 0,
   unread: 1,
   error: 2,
@@ -228,4 +229,232 @@ export function groupRecentChains(
       moreChains: Math.max(0, allChains.length - maxChains),
     };
   });
+}
+
+export type SessionTreeChain = {
+  tipId: string;
+  rootId: string;
+  label: string;
+  activityAt: number;
+  status: RecentChainStatus;
+  nodeIds: string[];
+  depth: number;
+};
+
+export type SessionTree = {
+  rootId: string;
+  treeLabel: string;
+  nodeCount: number;
+  activityAt: number;
+  status: RecentChainStatus;
+  chains: SessionTreeChain[];
+};
+
+export type SessionStructure = {
+  sessionId: string;
+  trees: SessionTree[];
+};
+
+/**
+ * 把按会话取出的链（叶子）行按树归组。
+ * 树与链都按最近活动降序排序；树状态为该树下所有链最高紧急度。
+ * 节点数为该树下所有链 nodeIds 的去重并集大小。
+ */
+export function groupSessionStructure(
+  rows: RecentChainRow[],
+  opts?: {
+    runningNodeIds?: ReadonlySet<string>;
+    waitingNodeIds?: ReadonlySet<string>;
+  },
+): SessionTree[] {
+  const runningNodeIds = opts?.runningNodeIds ?? new Set<string>();
+  const waitingNodeIds = opts?.waitingNodeIds ?? new Set<string>();
+
+  const byRoot = new Map<
+    string,
+    {
+      rootRow: RecentChainRow;
+      chains: SessionTreeChain[];
+      nodeIds: Set<string>;
+    }
+  >();
+
+  for (const row of rows) {
+    let entry = byRoot.get(row.rootId);
+    if (!entry) {
+      entry = {
+        rootRow: row,
+        chains: [],
+        nodeIds: new Set<string>(),
+      };
+      byRoot.set(row.rootId, entry);
+    }
+    for (const nid of row.nodeIds) {
+      entry.nodeIds.add(nid);
+    }
+    const chain: SessionTreeChain = {
+      tipId: row.tipId,
+      rootId: row.rootId,
+      label: nodeLabel({
+        question: row.tipQuestion,
+        topicLabel: row.tipTopicLabel,
+        kind: row.tipKind,
+        refTitle: row.tipRefTitle,
+      }),
+      activityAt: row.activityAt,
+      status: deriveRecentChainStatus(
+        { nodeIds: row.nodeIds, status: chainStatus(row) },
+        runningNodeIds,
+        waitingNodeIds,
+      ),
+      nodeIds: row.nodeIds,
+      depth: row.depth,
+    };
+    entry.chains.push(chain);
+  }
+
+  const trees: SessionTree[] = [];
+  for (const entry of byRoot.values()) {
+    // 链按最近活动降序排序
+    entry.chains.sort((a, b) => b.activityAt - a.activityAt || a.tipId.localeCompare(b.tipId));
+
+    // 树的最近活动时间 = 链中最大 activityAt
+    const maxActivity = entry.chains.length > 0 ? entry.chains[0].activityAt : entry.rootRow.activityAt;
+
+    // 树状态 = 聚合所有链的状态
+    let treeStatus: RecentChainStatus = "done";
+    for (const c of entry.chains) {
+      if (STATUS_PRIORITY[c.status] > STATUS_PRIORITY[treeStatus]) {
+        treeStatus = c.status;
+      }
+    }
+
+    trees.push({
+      rootId: entry.rootRow.rootId,
+      treeLabel: nodeLabel({
+        question: entry.rootRow.rootQuestion,
+        topicLabel: entry.rootRow.rootTopicLabel,
+        kind: entry.rootRow.rootKind,
+        refTitle: entry.rootRow.rootRefTitle,
+      }),
+      nodeCount: entry.nodeIds.size,
+      activityAt: maxActivity,
+      status: treeStatus,
+      chains: entry.chains,
+    });
+  }
+
+  // 树列表按最近活动降序排序
+  trees.sort((a, b) => b.activityAt - a.activityAt || a.rootId.localeCompare(b.rootId));
+
+  return trees;
+}
+
+/**
+ * 决定会话在侧栏的折叠状态（SN-1）：
+ * - 显式折叠 key: `session:collapsed:${sessionId}` 或旧 key `session:${sessionId}`
+ * - 显式展开 key: `session:expanded:${sessionId}`
+ * - 默认状态由树数决定：多树会话（treeCount > 1）默认展开到树行（返回 false）；
+ *   单树会话（treeCount <= 1）默认折叠（返回 true）。
+ */
+export function resolveSessionCollapsed(
+  sessionId: string,
+  treeCount: number,
+  collapsedKeys: ReadonlySet<string>,
+): boolean {
+  if (
+    collapsedKeys.has(`session:collapsed:${sessionId}`) ||
+    collapsedKeys.has(`session:${sessionId}`)
+  ) {
+    return true;
+  }
+  if (collapsedKeys.has(`session:expanded:${sessionId}`)) {
+    return false;
+  }
+  return treeCount <= 1;
+}
+
+/**
+ * 决定树在会话下的展开状态（SN-1）：
+ * - 显式展开 key: `tree:expanded:${sessionId}:${rootId}`
+ * - 显式折叠 key: `tree:collapsed:${sessionId}:${rootId}` 或旧 key `tree:${sessionId}:${rootId}` 或 `tree:${rootId}`
+ * - 树默认自身折叠（返回 false）
+ */
+export function resolveTreeExpanded(
+  sessionId: string,
+  rootId: string,
+  collapsedKeys: ReadonlySet<string>,
+): boolean {
+  if (collapsedKeys.has(`tree:expanded:${sessionId}:${rootId}`)) {
+    return true;
+  }
+  if (
+    collapsedKeys.has(`tree:collapsed:${sessionId}:${rootId}`) ||
+    collapsedKeys.has(`tree:${sessionId}:${rootId}`) ||
+    collapsedKeys.has(`tree:${rootId}`)
+  ) {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 切换会话折叠状态：
+ * 从当前计算出的 currentCollapsed 翻转为 targetCollapsed = !currentCollapsed。
+ * 显式存入 `session:collapsed:${sessionId}` 或 `session:expanded:${sessionId}`，
+ * 并清理对立 key 与 legacy key。
+ */
+export function toggleSessionCollapsedState(
+  sessionId: string,
+  currentCollapsed: boolean,
+  prevKeys: Iterable<string>,
+): string[] {
+  const nextSet = new Set(prevKeys);
+  const targetCollapsed = !currentCollapsed;
+  const colKey = `session:collapsed:${sessionId}`;
+  const expKey = `session:expanded:${sessionId}`;
+  const legKey = `session:${sessionId}`;
+
+  nextSet.delete(colKey);
+  nextSet.delete(expKey);
+  nextSet.delete(legKey);
+
+  if (targetCollapsed) {
+    nextSet.add(colKey);
+  } else {
+    nextSet.add(expKey);
+  }
+  return [...nextSet];
+}
+
+/**
+ * 切换树折叠状态：
+ * 从当前计算出的 currentExpanded 翻转为 targetExpanded = !currentExpanded。
+ * 显式存入 `tree:expanded:${sessionId}:${rootId}` 或 `tree:collapsed:${sessionId}:${rootId}`，
+ * 并清理对立 key 与 legacy key。
+ */
+export function toggleTreeExpandedState(
+  sessionId: string,
+  rootId: string,
+  currentExpanded: boolean,
+  prevKeys: Iterable<string>,
+): string[] {
+  const nextSet = new Set(prevKeys);
+  const targetExpanded = !currentExpanded;
+  const expKey = `tree:expanded:${sessionId}:${rootId}`;
+  const colKey = `tree:collapsed:${sessionId}:${rootId}`;
+  const legKey1 = `tree:${sessionId}:${rootId}`;
+  const legKey2 = `tree:${rootId}`;
+
+  nextSet.delete(expKey);
+  nextSet.delete(colKey);
+  nextSet.delete(legKey1);
+  nextSet.delete(legKey2);
+
+  if (targetExpanded) {
+    nextSet.add(expKey);
+  } else {
+    nextSet.add(colKey);
+  }
+  return [...nextSet];
 }

@@ -15,11 +15,20 @@ import {
 } from "@/lib/workbench-layout";
 import { useIsDesktopViewport } from "@/hooks/useIsMobile";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
+import { ContextMenu, useContextMenu, useContextMenuWithTarget, type ContextMenuItem } from "@/components/ui/ContextMenu";
 import {
   RECENT_CHAINS_SHOWN,
+  STATUS_PRIORITY,
   deriveRecentChainStatus,
   orderRecentChains,
   recentSessionStatus,
+  resolveSessionCollapsed,
+  resolveTreeExpanded,
+  toggleSessionCollapsedState,
+  toggleTreeExpandedState,
+  type RecentChainStatus,
+  type SessionTree,
+  type SessionTreeChain,
 } from "@/lib/recent";
 import {
   HOME_CLUSTER_KEY,
@@ -71,6 +80,8 @@ export function SessionSidebar() {
   const previewId = useSessionStore((s) => s.previewSessionId);
   const previewSession = useSessionStore((s) => s.previewSession);
   const pinSession = useSessionStore((s) => s.pinSession);
+  const unpinSession = useSessionStore((s) => s.unpinSession);
+  const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const newConversation = useSessionStore((s) => s.newConversation);
   const renameSession = useSessionStore((s) => s.renameSession);
   const archiveSession = useSessionStore((s) => s.archiveSession);
@@ -171,6 +182,71 @@ export function SessionSidebar() {
       return [...next];
     });
   };
+
+  // 会话结构（树与链）缓存与刷新
+  const [structures, setStructures] = useState<Map<string, SessionTree[]>>(() => new Map());
+  const structuresRef = useRef(structures);
+  structuresRef.current = structures;
+  const [structureNonce, setStructureNonce] = useState(0);
+  const fetchingStructureRef = useRef<Set<string>>(new Set());
+
+  const fetchStructure = useCallback(async (sessionId: string, force = false) => {
+    if (fetchingStructureRef.current.has(sessionId)) return;
+    if (!force && structuresRef.current.has(sessionId)) return;
+    fetchingStructureRef.current.add(sessionId);
+    try {
+      const r = await fetch(`/api/sessions/${sessionId}/structure`);
+      if (r.ok) {
+        const data = await r.json();
+        setStructures((prev) => {
+          const next = new Map(prev);
+          next.set(sessionId, (data.trees ?? []) as SessionTree[]);
+          return next;
+        });
+      }
+    } catch {
+      /* 静默处理 */
+    } finally {
+      fetchingStructureRef.current.delete(sessionId);
+    }
+  }, []);
+
+  // 默认折叠状态由树数决定（SN-1）：多树展开到树行（collapsed=false），单树折叠（collapsed=true）
+  const isSessionCollapsed = useCallback(
+    (sessionId: string, treeCount: number) =>
+      resolveSessionCollapsed(sessionId, treeCount, collapsed),
+    [collapsed],
+  );
+
+  const toggleSessionCollapsed = useCallback(
+    (sessionId: string, treeCount: number) => {
+      const isCurrentCollapsed = resolveSessionCollapsed(sessionId, treeCount, collapsed);
+      setCollapsedIds((prev) =>
+        toggleSessionCollapsedState(sessionId, isCurrentCollapsed, prev),
+      );
+      // 展开时立即拉取该会话结构
+      if (isCurrentCollapsed) {
+        void fetchStructure(sessionId);
+      }
+    },
+    [collapsed, setCollapsedIds, fetchStructure],
+  );
+
+  const isTreeExpanded = useCallback(
+    (sessionId: string, rootId: string) =>
+      resolveTreeExpanded(sessionId, rootId, collapsed),
+    [collapsed],
+  );
+
+  const toggleTreeCollapsed = useCallback(
+    (sessionId: string, rootId: string) => {
+      const isCurrentExpanded = resolveTreeExpanded(sessionId, rootId, collapsed);
+      setCollapsedIds((prev) =>
+        toggleTreeExpandedState(sessionId, rootId, isCurrentExpanded, prev),
+      );
+    },
+    [collapsed, setCollapsedIds],
+  );
   // Archived view (replaces SessionPicker's "显示已归档" toggle). Count comes
   // free from the main list response; the archived rows are fetched lazily
   // only when the footer is expanded.
@@ -263,10 +339,12 @@ export function SessionSidebar() {
   // 切回浏览器时刷一次 —— git 状态几乎总是在**别处**（终端里）被改变的，
   // 而「从终端切回来」正是它可能已经变了的那一刻。比定时轮询精准且省。
   // S133：最近分组同一时机刷新 —— 活动可能刚在 CLI / 别的 tab 里发生。
+  // 会话嵌套结构同样在切回时刷新。
   useEffect(() => {
     const onFocus = () => {
       setGitNonce((n) => n + 1);
       setRecentNonce((n) => n + 1);
+      setStructureNonce((n) => n + 1);
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
@@ -298,6 +376,31 @@ export function SessionSidebar() {
   const visibleSessions = useMemo(() => SIDEBAR_V2
     ? selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
     : sessions, [sessions, archived, source, includeArchived, isOfflineHerdr]);
+
+  // 会话结构（树与链）懒加载与刷新（SN-2）：
+  // 只对当前展开的会话发结构请求；sessionsRevision 变化、运行集合变化、窗口聚焦时刷新已展开会话
+  const lastRefreshTriggerRef = useRef("");
+  useEffect(() => {
+    const currentRefreshTrigger = `${sessionsRevision}:${recentRunKey}:${structureNonce}`;
+    const isExplicitRefresh =
+      lastRefreshTriggerRef.current !== "" &&
+      lastRefreshTriggerRef.current !== currentRefreshTrigger;
+    lastRefreshTriggerRef.current = currentRefreshTrigger;
+
+    for (const s of visibleSessions) {
+      const treeCount = s.treeCount ?? structuresRef.current.get(s.id)?.length ?? 1;
+      if (!isSessionCollapsed(s.id, treeCount)) {
+        void fetchStructure(s.id, isExplicitRefresh);
+      }
+    }
+  }, [
+    visibleSessions,
+    isSessionCollapsed,
+    sessionsRevision,
+    recentRunKey,
+    structureNonce,
+    fetchStructure,
+  ]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -436,45 +539,146 @@ export function SessionSidebar() {
     setMobileNavOpen(false);
   };
 
-  // 单行渲染。indent 让它能在 Chat（平铺）与 Project→Workspace（缩两级）
-  // 两种上下文里复用同一个组件，缩进不进 SidebarRow 内部。
+  // 会话行及其嵌套「树 → 链」两层渲染。
+  // 会话行可折叠：多树会话默认展开到树行（树行折叠），单树会话默认折叠；
+  // 传 allowNest=false（例如在 legacy 侧栏最近分组）时不嵌套铺链，避免重复（SN-3）。
   const renderRow = (
     s: Session,
     indent = 0,
     status?: RecentChain["status"],
-  ) => (
-    <SidebarRow
-      key={s.id}
-      session={s}
-      indent={indent}
-      active={s.id === activeId}
-      preview={s.id === previewId}
-      running={isRunning(s.id)}
-      unread={unreadIds.has(s.id)}
-      status={status}
-      location={SIDEBAR_V2 && layout === "time" ? sessionLocation(s, projects) : undefined}
-      herdr={SIDEBAR_V2 && sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
-      offline={isOfflineHerdr(s)}
-      live={liveSessionIds.has(s.id)}
-      editing={editingId === s.id}
-      onPreview={() => { setMobileNavOpen(false); void previewSession(s.id); }}
-      onPin={() => pinSession(s.id)}
-      onStartEdit={() => setEditingId(s.id)}
-      onCancelEdit={() => setEditingId(null)}
-      onCommit={async (next) => {
-        setEditingId(null);
-        if (next.trim() && next.trim() !== s.title) {
-          await renameSession(s.id, next);
-        }
-      }}
-      onArchive={() => s.archived ? unarchiveSession(s.id) : archiveSession(s.id)}
-      onDelete={() => {
-        if (confirm("永久删除这个对话？\n（节点不可恢复）")) {
-          deleteSession(s.id);
-        }
-      }}
-    />
-  );
+    allowNest = true,
+  ) => {
+    const treeCount = s.treeCount ?? structures.get(s.id)?.length ?? 1;
+    const isCollapsed = isSessionCollapsed(s.id, treeCount);
+    const sessionTrees = structures.get(s.id);
+
+    return (
+      <div key={s.id} data-sidebar-session-item={s.id}>
+        <SidebarRow
+          session={s}
+          indent={indent}
+          active={s.id === activeId}
+          preview={s.id === previewId}
+          running={isRunning(s.id)}
+          unread={unreadIds.has(s.id)}
+          status={status}
+          collapsible={allowNest}
+          collapsed={isCollapsed}
+          isPinned={pinnedIds.includes(s.id)}
+          onToggle={() => toggleSessionCollapsed(s.id, treeCount)}
+          location={SIDEBAR_V2 && layout === "time" ? sessionLocation(s, projects) : undefined}
+          herdr={SIDEBAR_V2 && sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
+          offline={isOfflineHerdr(s)}
+          live={liveSessionIds.has(s.id)}
+          editing={editingId === s.id}
+          onPreview={() => { setMobileNavOpen(false); void previewSession(s.id); }}
+          onPin={() => pinSession(s.id)}
+          onUnpin={() => unpinSession(s.id)}
+          onStartEdit={() => setEditingId(s.id)}
+          onCancelEdit={() => setEditingId(null)}
+          onCommit={async (next) => {
+            setEditingId(null);
+            if (next.trim() && next.trim() !== s.title) {
+              await renameSession(s.id, next);
+            }
+          }}
+          onArchive={() => s.archived ? unarchiveSession(s.id) : archiveSession(s.id)}
+          onDelete={() => {
+            if (confirm("永久删除这个对话？\n（节点不可恢复）")) {
+              deleteSession(s.id);
+            }
+          }}
+        />
+        {allowNest && !isCollapsed && sessionTrees && sessionTrees.length > 0 && (
+          sessionTrees.length === 1 ? (
+            // 只有一棵树的会话不画树行，展开直接列出它的链
+            <div data-session-single-tree={s.id}>
+              <IndentGuide level={indent}>
+                {sessionTrees[0].chains.map((chain) => {
+                  const chainLiveStatus = deriveRecentChainStatus(chain, runningNodeIds, waitingNodeIds);
+                  return (
+                    <ChainRow
+                      key={chain.tipId}
+                      chain={chain}
+                      status={chainLiveStatus}
+                      showTree={false}
+                      indent={indent + 1}
+                      active={s.id === activeId && chain.tipId === activeNodeId}
+                      onOpen={() => {
+                        setEditingId(null);
+                        if (mobileNavOpen) setViewMode("linear");
+                        setMobileNavOpen(false);
+                        void openNodeInSession(s.id, chain.tipId).catch(() => {});
+                      }}
+                    />
+                  );
+                })}
+              </IndentGuide>
+            </div>
+          ) : (
+            // 多树会话：列出树行，树行展开下列出链
+            <div data-session-trees={s.id}>
+              <IndentGuide level={indent}>
+                {sessionTrees.map((tree) => {
+                  const isTreeOpen = isTreeExpanded(s.id, tree.rootId);
+                  let treeLiveStatus: RecentChainStatus = "done";
+                  for (const c of tree.chains) {
+                    const st = deriveRecentChainStatus(c, runningNodeIds, waitingNodeIds);
+                    if (STATUS_PRIORITY[st] > STATUS_PRIORITY[treeLiveStatus]) {
+                      treeLiveStatus = st;
+                    }
+                  }
+                  return (
+                    <div key={tree.rootId} data-sidebar-tree={tree.rootId}>
+                      <TreeRow
+                        tree={tree}
+                        status={treeLiveStatus}
+                        indent={indent + 1}
+                        collapsed={!isTreeOpen}
+                        active={s.id === activeId && tree.chains.some((c) => c.tipId === activeNodeId)}
+                        onToggle={() => toggleTreeCollapsed(s.id, tree.rootId)}
+                        onOpen={() => {
+                          setEditingId(null);
+                          if (mobileNavOpen) setViewMode("linear");
+                          setMobileNavOpen(false);
+                          if (tree.chains.length > 0) {
+                            void openNodeInSession(s.id, tree.chains[0].tipId).catch(() => {});
+                          }
+                        }}
+                      />
+                      {isTreeOpen && (
+                        <IndentGuide level={indent + 1}>
+                          {tree.chains.map((chain) => {
+                            const chainLiveStatus = deriveRecentChainStatus(chain, runningNodeIds, waitingNodeIds);
+                            return (
+                              <ChainRow
+                                key={chain.tipId}
+                                chain={chain}
+                                status={chainLiveStatus}
+                                showTree={false}
+                                indent={indent + 2}
+                                active={s.id === activeId && chain.tipId === activeNodeId}
+                                onOpen={() => {
+                                  setEditingId(null);
+                                  if (mobileNavOpen) setViewMode("linear");
+                                  setMobileNavOpen(false);
+                                  void openNodeInSession(s.id, chain.tipId).catch(() => {});
+                                }}
+                              />
+                            );
+                          })}
+                        </IndentGuide>
+                      )}
+                    </div>
+                  );
+                })}
+              </IndentGuide>
+            </div>
+          )
+        )}
+      </div>
+    );
+  };
 
   // Chat 也可折叠。用合成 id 走 projects 那套同一个 collapsed 集合，
   // 复用扁平分组状态。
@@ -552,7 +756,7 @@ export function SessionSidebar() {
               const folded = orderedChains.length - shown.length;
               return (
                 <div key={r.id}>
-                  {renderRow(s, 1, status)}
+                  {renderRow(s, 1, status, false)}
                   {shown.map((c) => (
                     <ChainRow
                       key={c.tipId}
@@ -717,6 +921,7 @@ export function SessionSidebar() {
             }${pCount} 个会话`}
             badge={pCollapsed && pCount > 0 ? String(pCount) : null}
             onToggle={() => toggleCollapsed(p.id)}
+            addTitle="新建工作区"
             // 只有 git 项目能开 worktree（暂存区 / 主目录这类 plain 项目不行）
             onAdd={
               p.workspaces.some((w) => w.kind !== "plain")
@@ -1180,83 +1385,127 @@ function GroupRow({
   onRemove?: () => void;
   removeTitle?: string;
 }) {
+  const menu = useContextMenuWithTarget<string>();
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    const items: ContextMenuItem[] = [];
+    if (toggleable && onToggle) {
+      items.push({
+        label: collapsed ? "展开" : "收起",
+        onSelect: onToggle,
+      });
+    }
+    if (onAdd) {
+      items.push({
+        label: addTitle,
+        onSelect: onAdd,
+      });
+    }
+    if (onInspectDiff) {
+      items.push({
+        label: diffTitle,
+        onSelect: onInspectDiff,
+      });
+    }
+    if (onBatchClean) {
+      items.push({
+        label: batchCleanTitle,
+        danger: true,
+        onSelect: onBatchClean,
+      });
+    }
+    if (onRemove) {
+      items.push({
+        label: removeTitle ? removeTitle.split("（")[0] : "删除工作区",
+        danger: true,
+        onSelect: onRemove,
+      });
+    }
+    return items;
+  }, [toggleable, onToggle, collapsed, onAdd, addTitle, onInspectDiff, diffTitle, onBatchClean, batchCleanTitle, onRemove, removeTitle]);
+
   return (
-    <div
-      data-sidebar-group
-      className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
-        toggleable ? "hover:bg-surface-muted" : ""
-      } ${muted ? "opacity-75" : ""}`}
-    >
-      <button
-        onClick={toggleable ? onToggle : undefined}
-        aria-expanded={toggleable ? !collapsed : undefined}
-        title={title}
-        style={{ paddingLeft: PAD(level) }}
-        className={`flex-1 min-w-0 flex items-center gap-1 h-full text-left text-ui ${
-          toggleable ? "" : "cursor-default"
-        } ${
-          level === 0
-            ? "font-semibold text-ink-strong"
-            : "font-medium text-ink"
-        }`}
+    <>
+      <div
+        data-sidebar-group
+        {...(menuItems.length > 0 ? menu.bindTrigger(label) : {})}
+        className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
+          toggleable ? "hover:bg-surface-muted" : ""
+        } ${muted ? "opacity-75" : ""}`}
       >
-        <span
-          aria-hidden
-          className={`w-2.5 shrink-0 text-nano text-ink-faint transition-transform ${
-            collapsed ? "" : "rotate-90"
-          } ${toggleable ? "" : "opacity-0"}`}
+        <button
+          onClick={toggleable ? onToggle : undefined}
+          aria-expanded={toggleable ? !collapsed : undefined}
+          title={title}
+          style={{ paddingLeft: PAD(level) }}
+          className={`flex-1 min-w-0 flex items-center gap-1 h-full text-left text-ui ${
+            toggleable ? "" : "cursor-default"
+          } ${
+            level === 0
+              ? "font-semibold text-ink-strong"
+              : "font-medium text-ink"
+          }`}
         >
-          ▸
-        </span>
-        <span className="flex-1 min-w-0 truncate">{label}</span>
-      </button>
-      {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 */}
-      {tag && (
-        <span className={`shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}>
-          {tag}
-        </span>
+          <span
+            aria-hidden
+            className={`w-2.5 shrink-0 text-nano text-ink-faint transition-transform ${
+              collapsed ? "" : "rotate-90"
+            } ${toggleable ? "" : "opacity-0"}`}
+          >
+            ▸
+          </span>
+          <span className="flex-1 min-w-0 truncate">{label}</span>
+        </button>
+        {/* tag / badge 让位给操作按钮，但只在真能 hover 的设备上 */}
+        {tag && (
+          <span className={`shrink-0 text-nano px-1 rounded bg-surface-muted text-ink-faint ${SIDEBAR_V2 ? "" : "group-hover:hidden"}`}>
+            {tag}
+          </span>
+        )}
+        {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
+        {badge && (
+          <span className={`shrink-0 text-nano tabular-nums text-ink-faint ${!SIDEBAR_V2 && (onAdd || onInspectDiff || onBatchClean || onRemove) ? "group-hover:hidden" : ""}`}>
+            {badge}
+          </span>
+        )}
+        {(onAdd || onInspectDiff || onBatchClean || onRemove) && (
+          <div className="shrink-0 hidden group-hover:flex pointer-coarse:flex items-center gap-0.5">
+            {onInspectDiff && (
+              <RowIconButton title={diffTitle} onClick={onInspectDiff}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="9" y1="13" x2="15" y2="13" />
+                <line x1="9" y1="17" x2="15" y2="17" />
+              </RowIconButton>
+            )}
+            {onBatchClean && (
+              <RowIconButton title={batchCleanTitle} onClick={onBatchClean}>
+                <path d="M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z" />
+                <path d="M5 21h14" />
+              </RowIconButton>
+            )}
+            {onAdd && (
+              <RowIconButton title={addTitle} onClick={onAdd}>
+                <path d="M12 5v14M5 12h14" />
+              </RowIconButton>
+            )}
+            {onRemove && (
+              <RowIconButton
+                title={removeTitle}
+                danger
+                onClick={onRemove}
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+              </RowIconButton>
+            )}
+          </div>
+        )}
+      </div>
+      {menuItems.length > 0 && (
+        <ContextMenu {...menu.props} items={menuItems} label={`${label} 菜单`} />
       )}
-      {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
-      {badge && (
-        <span className={`shrink-0 text-nano tabular-nums text-ink-faint ${!SIDEBAR_V2 && (onAdd || onInspectDiff || onBatchClean || onRemove) ? "group-hover:hidden" : ""}`}>
-          {badge}
-        </span>
-      )}
-      {(onAdd || onInspectDiff || onBatchClean || onRemove) && (
-        <div className="shrink-0 hidden group-hover:flex pointer-coarse:flex items-center gap-0.5">
-          {onInspectDiff && (
-            <RowIconButton title={diffTitle} onClick={onInspectDiff}>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="9" y1="13" x2="15" y2="13" />
-              <line x1="9" y1="17" x2="15" y2="17" />
-            </RowIconButton>
-          )}
-          {onBatchClean && (
-            <RowIconButton title={batchCleanTitle} onClick={onBatchClean}>
-              <path d="M19 11l-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11z" />
-              <path d="M5 21h14" />
-            </RowIconButton>
-          )}
-          {onAdd && (
-            <RowIconButton title={addTitle} onClick={onAdd}>
-              <path d="M12 5v14M5 12h14" />
-            </RowIconButton>
-          )}
-          {onRemove && (
-            <RowIconButton
-              title={removeTitle}
-              danger
-              onClick={onRemove}
-            >
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6M14 11v6" />
-            </RowIconButton>
-          )}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -1268,6 +1517,10 @@ function SidebarRow({
   running,
   unread,
   status,
+  collapsible = true,
+  collapsed,
+  isPinned,
+  onToggle,
   location,
   herdr,
   offline,
@@ -1275,6 +1528,7 @@ function SidebarRow({
   editing,
   onPreview,
   onPin,
+  onUnpin,
   onStartEdit,
   onCancelEdit,
   onCommit,
@@ -1290,6 +1544,10 @@ function SidebarRow({
   unread: boolean;
   /** 最近分组传入整会话链聚合；其他分组缺省时维持原 running/unread 语义。 */
   status?: RecentChain["status"];
+  collapsible?: boolean;
+  collapsed?: boolean;
+  isPinned?: boolean;
+  onToggle?: () => void;
   location?: string;
   herdr?: HerdrSessionStatus;
   /** Herdr 在线但这个会话的 pane 已不存在 —— 与 archived 同档对待。 */
@@ -1298,6 +1556,7 @@ function SidebarRow({
   editing: boolean;
   onPreview: () => void;
   onPin: () => void;
+  onUnpin?: () => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onCommit: (title: string) => void | Promise<void>;
@@ -1321,6 +1580,27 @@ function SidebarRow({
             ? "完成·未读"
             : "";
 
+  const menu = useContextMenuWithTarget<Session>();
+  const menuItems = useMemo<ContextMenuItem[]>(() => [
+    {
+      label: isPinned ? "取消固定" : "固定会话",
+      onSelect: isPinned ? (onUnpin ?? onPin) : onPin,
+    },
+    {
+      label: "重命名",
+      onSelect: onStartEdit,
+    },
+    {
+      label: session.archived ? "恢复（取消归档）" : "归档",
+      onSelect: onArchive,
+    },
+    {
+      label: "删除",
+      danger: true,
+      onSelect: onDelete,
+    },
+  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onDelete]);
+
   useEffect(() => {
     if (editing) {
       setDraft(session.title);
@@ -1333,40 +1613,61 @@ function SidebarRow({
   }, [editing, session.title]);
 
   return (
-    <div
-      style={{ paddingLeft: PAD(indent) }}
-      data-mobile-target="session-row"
-      data-session-id={session.id}
-      data-session-source={sidebarSource(session)}
-      data-session-archived={session.archived || undefined}
-      data-herdr-pane={herdr?.paneId || undefined}
-      data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
-      className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
-        indicatorStatus === "waiting" || indicatorStatus === "streaming"
-          ? // Running tint (accent) + left accent bar (added below). Overrides
-            // mode/active bg so "in progress" rows are unmistakable.
-            "bg-accent-muted text-accent-ink font-medium"
-          : indicatorStatus === "error"
-            ? "bg-danger-muted text-danger-ink font-medium"
-            : indicatorStatus === "unread"
-              ? // Finished-unread tint (unread hue), loud but static.
-                "bg-unread-muted text-unread-ink font-medium"
-              : active
-                ? `${style.activeBg} ${style.text} font-medium`
-                : "text-ink-muted hover:bg-surface-muted"
-      }`}
-      onClick={editing ? undefined : onPreview}
-      onDoubleClick={editing ? undefined : onPin}
-      title={`${style.label} · ${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击固定`}
-    >
-      {/* Left accent bar for the running row (solid accent; the spinner +
-          「生成中」 carry the motion). */}
-      {(indicatorStatus === "waiting" || indicatorStatus === "streaming") && (
-        <span
-          className="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"
-          aria-hidden
-        />
-      )}
+    <>
+      <div
+        style={{ paddingLeft: PAD(indent) }}
+        data-mobile-target="session-row"
+        data-session-id={session.id}
+        data-session-source={sidebarSource(session)}
+        data-session-archived={session.archived || undefined}
+        data-herdr-pane={herdr?.paneId || undefined}
+        data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
+        {...(editing ? {} : menu.bindTrigger(session))}
+        className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
+          indicatorStatus === "waiting" || indicatorStatus === "streaming"
+            ? // Running tint (accent) + left accent bar (added below). Overrides
+              // mode/active bg so "in progress" rows are unmistakable.
+              "bg-accent-muted text-accent-ink font-medium"
+            : indicatorStatus === "error"
+              ? "bg-danger-muted text-danger-ink font-medium"
+              : indicatorStatus === "unread"
+                ? // Finished-unread tint (unread hue), loud but static.
+                  "bg-unread-muted text-unread-ink font-medium"
+                : active
+                  ? `${style.activeBg} ${style.text} font-medium`
+                  : "text-ink-muted hover:bg-surface-muted"
+        }`}
+        onClick={editing ? undefined : onPreview}
+        onDoubleClick={editing ? undefined : onPin}
+        title={`${style.label} · ${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击固定`}
+      >
+        {/* Left accent bar for the running row (solid accent; the spinner +
+            「生成中」 carry the motion). */}
+        {(indicatorStatus === "waiting" || indicatorStatus === "streaming") && (
+          <span
+            className="absolute left-0 top-0 bottom-0 w-[3px] bg-accent"
+            aria-hidden
+          />
+        )}
+        {collapsible && (
+          <button
+            type="button"
+            data-testid="session-collapse-toggle"
+            aria-label={collapsed ? "展开会话结构" : "收起会话结构"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle?.();
+            }}
+            className="w-3.5 h-3.5 -ml-1 shrink-0 flex items-center justify-center text-nano text-ink-faint hover:text-ink transition-transform"
+          >
+            <span
+              aria-hidden
+              className={`transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
+            >
+              ▸
+            </span>
+          </button>
+        )}
       {/* Leading indicator: spinner while running, else the mode color dot. */}
       {indicatorStatus === "waiting" ? (
         <span
@@ -1504,6 +1805,100 @@ function SidebarRow({
         </div>
       )}
     </div>
+    {!editing && (
+      <ContextMenu {...menu.props} items={menuItems} label={`${session.title} 菜单`} />
+    )}
+  </>
+  );
+}
+
+function TreeRow({
+  tree,
+  status,
+  indent = 2,
+  collapsed,
+  active,
+  onToggle,
+  onOpen,
+}: {
+  tree: SessionTree;
+  status: RecentChain["status"];
+  indent?: number;
+  collapsed: boolean;
+  active: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+}) {
+  const time = formatRelativeTimeShort(tree.activityAt);
+  const menu = useContextMenuWithTarget<SessionTree>();
+  const menuItems = useMemo<ContextMenuItem[]>(() => [
+    {
+      label: "打开该树",
+      onSelect: onOpen,
+    },
+    {
+      label: collapsed ? "展开树分支" : "收起树分支",
+      onSelect: onToggle,
+    },
+  ], [collapsed, onOpen, onToggle]);
+
+  return (
+    <>
+      <div
+        data-sidebar-tree-row
+        data-root-id={tree.rootId}
+        {...menu.bindTrigger(tree)}
+        onClick={onOpen}
+        style={{ paddingLeft: PAD(indent) }}
+        className={`${ROW_HEIGHT_CLASS} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1.5 cursor-pointer transition-colors overflow-hidden ${
+          active
+            ? "bg-surface-muted text-ink font-medium"
+            : "text-ink-muted hover:bg-surface-muted"
+        }`}
+        title={`${tree.treeLabel}\n${tree.nodeCount} 个节点 · ${time}\n点击打开该树最近链尾`}
+      >
+        <button
+          type="button"
+          data-testid="tree-collapse-toggle"
+          aria-label={collapsed ? "展开树分支" : "收起树分支"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="w-3.5 h-3.5 -ml-1 shrink-0 flex items-center justify-center text-nano text-ink-faint hover:text-ink transition-transform"
+        >
+          <span
+            aria-hidden
+            className={`transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
+          >
+            ▸
+          </span>
+        </button>
+        {status === "waiting" ? (
+          <span className="shrink-0 text-[10px] animate-pulse" aria-label="等你回答">
+            🙋
+          </span>
+        ) : status === "streaming" ? (
+          <Dots />
+        ) : status === "error" ? (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger" aria-label="出错" />
+        ) : status === "unread" ? (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-unread" aria-label="未读" />
+        ) : (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-line-strong opacity-60" />
+        )}
+        <span className="flex-1 min-w-0 truncate text-ui font-medium text-ink">
+          {tree.treeLabel}
+        </span>
+        <span className="shrink-0 text-nano tabular-nums text-ink-faint">
+          {tree.nodeCount} 节
+        </span>
+        <span className="shrink-0 text-nano tabular-nums text-ink-faint">
+          {time}
+        </span>
+      </div>
+      <ContextMenu {...menu.props} items={menuItems} label={`${tree.treeLabel} 菜单`} />
+    </>
   );
 }
 
@@ -1532,12 +1927,14 @@ function ChainRow({
   status,
   showTree,
   active,
+  indent = 2,
   onOpen,
 }: {
-  chain: RecentChain;
+  chain: RecentChain | SessionTreeChain;
   status: RecentChain["status"];
   showTree: boolean;
   active: boolean;
+  indent?: number;
   onOpen: () => void;
 }) {
   const time = formatRelativeTimeShort(chain.activityAt);
@@ -1553,45 +1950,59 @@ function ChainRow({
           : status === "unread"
             ? " · 未读"
             : "";
+
+  const menu = useContextMenuWithTarget<RecentChain | SessionTreeChain>();
+  const menuItems = useMemo<ContextMenuItem[]>(() => [
+    {
+      label: "打开此链",
+      onSelect: onOpen,
+    },
+  ], [onOpen]);
+
   return (
-    <button
-      type="button"
-      data-mobile-target="session-chain-row"
-      onClick={onOpen}
-      style={{ paddingLeft: PAD(2) }}
-      // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
-      // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
-      className={`${ROW_HEIGHT_CLASS} mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
-        active
-          ? "bg-surface-muted text-ink font-medium"
-          : "text-ink-muted hover:bg-surface-muted"
-      }`}
-      title={`${withTree ? `${chain.treeLabel} › ` : ""}${chain.label}\n${chain.depth} 轮${statusNote} · ${time}\n点击落到这条链的链尾`}
-    >
-      <span aria-hidden className="shrink-0 text-nano text-ink-faint">
-        ↳
-      </span>
-      {status === "waiting" ? (
-        <span className="shrink-0 text-[10px] animate-pulse" aria-label="等你回答">
-          🙋
+    <>
+      <button
+        type="button"
+        data-mobile-target="session-chain-row"
+        data-tip-id={chain.tipId}
+        onClick={onOpen}
+        {...menu.bindTrigger(chain)}
+        style={{ paddingLeft: PAD(indent) }}
+        // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
+        // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
+        className={`${ROW_HEIGHT_CLASS} mx-1 w-[calc(100%-0.5rem)] rounded-md flex items-center gap-1.5 pr-1.5 text-left transition-colors ${
+          active
+            ? "bg-surface-muted text-ink font-medium"
+            : "text-ink-muted hover:bg-surface-muted"
+        }`}
+        title={`${withTree && "treeLabel" in chain ? `${chain.treeLabel} › ` : ""}${chain.label}\n${chain.depth} 轮${statusNote} · ${time}\n点击落到这条链的链尾`}
+      >
+        <span aria-hidden className="shrink-0 text-nano text-ink-faint">
+          ↳
         </span>
-      ) : status === "streaming" ? (
-        <Dots />
-      ) : status === "error" ? (
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger" aria-label="出错" />
-      ) : status === "unread" ? (
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-unread" aria-label="未读" />
-      ) : null}
-      <span className="flex-1 min-w-0 truncate text-ui">
-        {withTree && (
-          <span className="text-ink-faint">{chain.treeLabel} › </span>
-        )}
-        {chain.label}
-      </span>
-      <span className="shrink-0 text-nano tabular-nums text-ink-faint">
-        {time}
-      </span>
-    </button>
+        {status === "waiting" ? (
+          <span className="shrink-0 text-[10px] animate-pulse" aria-label="等你回答">
+            🙋
+          </span>
+        ) : status === "streaming" ? (
+          <Dots />
+        ) : status === "error" ? (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-danger" aria-label="出错" />
+        ) : status === "unread" ? (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-unread" aria-label="未读" />
+        ) : null}
+        <span className="flex-1 min-w-0 truncate text-ui">
+          {withTree && "treeLabel" in chain && (
+            <span className="text-ink-faint">{chain.treeLabel} › </span>
+          )}
+          {chain.label}
+        </span>
+        <span className="shrink-0 text-nano tabular-nums text-ink-faint">
+          {time}
+        </span>
+      </button>
+      <ContextMenu {...menu.props} items={menuItems} label={`${chain.label} 菜单`} />
+    </>
   );
 }
 

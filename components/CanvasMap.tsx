@@ -3,21 +3,40 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlow, ReactFlowProvider, Handle, Position, BaseEdge, useNodesInitialized, useNodesState, useReactFlow, useStore, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { layoutMap, mapCompact, mapViewport, shouldFitMap } from "@/lib/canvas-map";
-import { isUnreadNode, isWaitingNode, treeLabel } from "@/lib/tree-panel";
+import { childrenIndex, isUnreadNode, isWaitingNode, treeLabel } from "@/lib/tree-panel";
 import { buildNodeIndex } from "@/lib/node-index";
 import { useScrollHideState } from "@/hooks/useScrollHide";
+import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import {
+  ContextMenu,
+  useContextMenuWithTarget,
+  type ContextMenuItem,
+  type ContextMenuTriggerBindings,
+} from "@/components/ui/ContextMenu";
 import type { ChatNode } from "@/lib/types";
 
 const colors = ["#bfdbfe", "#a7f3d0", "#fde68a", "#fecdd3", "#ddd6fe", "#a5f3fc", "#fed7aa", "#d9f99d", "#f5d0fe", "#cbd5e1"];
-type MapData = { node: ChatNode; index: number; active: boolean; topic: number; width: number; height: number; peek: (id: string | null) => void; select: (id: string) => void };
+type MapData = {
+  node: ChatNode;
+  index: number;
+  active: boolean;
+  topic: number;
+  width: number;
+  height: number;
+  peek: (id: string | null) => void;
+  select: (id: string) => void;
+  bindTrigger: (node: ChatNode) => ContextMenuTriggerBindings;
+};
 function MapNode({ data: d }: NodeProps<Node<MapData>>) {
   const compact = useStore(s => mapCompact(s.transform[2]));
+  const trigger = d.bindTrigger(d.node);
   return <>
     <Handle type="target" position={Position.Top} className="!opacity-0" />
     <button data-map-node={d.node.id} data-map-current={d.active || undefined} data-map-compact={compact}
       aria-label={`#${d.index} ${treeLabel(d.node, 100)}${d.active ? "，当前位置" : ""}`} aria-current={d.active ? "location" : undefined}
       onFocus={() => d.peek(d.node.id)} onBlur={() => d.peek(null)} onMouseEnter={() => d.peek(d.node.id)} onMouseLeave={() => d.peek(null)}
       onClick={() => d.select(d.node.id)}
+      {...trigger}
       className="nodrag nopan relative flex items-center justify-center rounded border text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
       style={{ width: d.width, height: d.height, background: colors[d.topic % colors.length], borderColor: d.active ? "#1d4ed8" : "#33415555", outline: d.active ? "3px solid #1d4ed8" : undefined, outlineOffset: 1, fontSize: compact ? 26 : 16 }}>
       <span className={compact ? "truncate px-3 font-medium" : "line-clamp-3 whitespace-normal break-words px-3 text-left leading-[22px]"}>{compact ? treeLabel(d.node, 16) : `#${d.index} ${treeLabel(d.node, 160)}`}</span>
@@ -43,6 +62,21 @@ export function CanvasMap(props: { mobile: boolean; close: () => void }) {
 }
 function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
   const nodes = useSessionStore(s => s.nodes);
+  const sessionRootId = useSessionStore(s => s.session?.rootNodeId);
+  const collapsedNodeIds = useSessionStore(s => s.collapsedNodeIds);
+  const toggleCollapse = useSessionStore(s => s.toggleCollapse);
+  const markNodeRead = useSessionStore(s => s.markNodeRead);
+  const markNodeUnread = useSessionStore(s => s.markNodeUnread);
+  const toggleBookmark = useSessionStore(s => s.toggleBookmark);
+  const confirmDelete = useConfirmDelete();
+  const byParent = useMemo(() => childrenIndex(nodes), [nodes]);
+
+  const {
+    target: menuTarget,
+    bindTrigger,
+    props: menuProps,
+  } = useContextMenuWithTarget<ChatNode>();
+
   // Freeze the location on entry: background read tracking must not move the
   // marker, and a newly opened session still has a root reading position.
   const [activeId] = useState(() => {
@@ -65,12 +99,79 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
     return () => observer.disconnect();
   }, []);
   const select = useCallback((id: string) => { jump(id); reveal(); close(); }, [jump, reveal, close]);
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menuTarget) return [];
+    const isSessionRoot = sessionRootId === menuTarget.id;
+    const hasChildren = (byParent.get(menuTarget.id)?.length ?? 0) > 0;
+    const isCollapsed = hasChildren && collapsedNodeIds.has(menuTarget.id);
+    const unread = isUnreadNode(menuTarget);
+    const isBookmarked = menuTarget.bookmarkedAt !== null;
+
+    const navItems: ContextMenuItem[] = [
+      {
+        label: "跳转到此节点",
+        onSelect: () => select(menuTarget.id),
+      },
+    ];
+    if (hasChildren) {
+      navItems.push({
+        label: isCollapsed ? "展开子树" : "折叠子树",
+        onSelect: () => toggleCollapse(menuTarget.id),
+      });
+    }
+
+    const editItems: ContextMenuItem[] = [];
+    if (menuTarget.status === "done") {
+      editItems.push({
+        label: unread ? "标为已读" : "标为未读",
+        onSelect: () =>
+          void (unread ? markNodeRead(menuTarget.id) : markNodeUnread(menuTarget.id)),
+      });
+    }
+    editItems.push({
+      label: isBookmarked ? "移出稍后再读" : "加入稍后再读",
+      onSelect: () => void toggleBookmark(menuTarget.id),
+    });
+    if (menuTarget.question?.trim()) {
+      editItems.push({
+        label: "复制问题内容",
+        onSelect: () => void navigator.clipboard?.writeText(menuTarget.question),
+      });
+    }
+
+    return [
+      ...navItems,
+      "separator",
+      ...editItems,
+      "separator",
+      {
+        label: "删除节点（含子树）",
+        danger: true,
+        disabled: isSessionRoot,
+        hint: isSessionRoot ? "会话主根" : undefined,
+        onSelect: () => confirmDelete(menuTarget.id),
+      },
+    ];
+  }, [
+    menuTarget,
+    sessionRootId,
+    byParent,
+    collapsedNodeIds,
+    select,
+    toggleCollapse,
+    markNodeRead,
+    markNodeUnread,
+    toggleBookmark,
+    confirmDelete,
+  ]);
+
   const model = useMemo(() => layoutMap(nodes, mobile, size.width ? size : undefined), [nodes, mobile, size]);
   const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const derivedNodes: Node[] = useMemo(() => [
     ...model.topics.map(t => ({ id: `topic:${t.id}`, type: "topic", position: { x: t.x, y: t.y }, zIndex: -1, selectable: false, focusable: false, data: { ...t, label: treeLabel(nodes[t.id], 60) } })),
-    ...[...model.positions].map(([id, p]) => ({ id, type: "map", position: { x: p.x, y: p.y }, style: { pointerEvents: "all" as const }, focusable: false, data: { node: nodes[id], index: indices[id], active: id === activeId, ...p, peek: setPeekId, select } })),
-  ], [model, nodes, indices, activeId, select]);
+    ...[...model.positions].map(([id, p]) => ({ id, type: "map", position: { x: p.x, y: p.y }, style: { pointerEvents: "all" as const }, focusable: false, data: { node: nodes[id], index: indices[id], active: id === activeId, ...p, peek: setPeekId, select, bindTrigger } })),
+  ], [model, nodes, indices, activeId, select, bindTrigger]);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(derivedNodes);
   useEffect(() => setFlowNodes(derivedNodes), [derivedNodes, setFlowNodes]);
   const edges = useMemo(() => model.edges.map(e => ({ ...e, type: "map", data: { points: e.points }, style: { stroke: "#64748b", strokeWidth: 2 }, zIndex: 0 })), [model]);
@@ -121,5 +222,10 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
       </div>}
     </div>
     <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">选节点回到正文 · 蓝框：当前位置 · <span className="text-blue-600">● 未读</span> · <span className="text-warn">● 等待处理</span></p>
+    <ContextMenu
+      {...menuProps}
+      label="地图节点菜单"
+      items={menuItems}
+    />
   </div>;
 }

@@ -11,6 +11,19 @@ takeover: false                      # 队列空了从 backlog.md 取下一单�
 max_parallel_seats: 8
 herdr_check_interval_ms: 15000
 archive_window_hours: 24
+setup_cmd: bun install
+seats:
+  gemini:
+    kind: claude
+    runner: native
+    permission: full
+    env_file: ~/.config/herdr-leader/presets/gemini-flash.env
+  reviewer:
+    kind: codex
+    runner: codex-tui
+    model: gpt-6-astra
+    permission: full
+    service_tier: default
 agent_tui_bin: /Users/smokingmouse/.herdr/worktrees/sm-toolkit/feat-tui-display-quickwin/apps/agent-tui/bin/agent-tui   # 过渡期：急救版（feat/tui-display-quickwin e54fd64+），终审通过 2026-09-08 16:15；ingress 落地后退役
 codex_bin: /Users/smokingmouse/.nvm/versions/node/v24.14.1/bin/codex   # codex-tui runner（官方 TUI 0.153.4）；ingress URL 从 endpoint.json 读，token env 默认 FJ_CODEX_INGRESS_TOKEN
 ---

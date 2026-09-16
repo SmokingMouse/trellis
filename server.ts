@@ -18,7 +18,7 @@
 
 import { spawn, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
-import { hasTtyd, TTYD_HOST_DEPENDENCY_NOTE } from "./lib/ttyd-dependency";
+import { hasTtyd, ttydHostDependencyNote } from "./lib/ttyd-dependency";
 import {
   deployPaths,
   isDeployStateFresh,
@@ -39,7 +39,7 @@ const NEXT_PORT = Number(process.env.TRELLIS_NEXT_PORT) || PORT + 99;
 const NEXT_UP = `http://127.0.0.1:${NEXT_PORT}`;
 
 if (!hasTtyd()) {
-  console.warn(`[trellis] ${TTYD_HOST_DEPENDENCY_NOTE}`);
+  console.warn(`[trellis] ${ttydHostDependencyNote()}`);
 }
 
 // 转发给上游时**必须换掉 Host**（S79 花了很久才钉死的一个坑）。

@@ -17,6 +17,8 @@ type PushBot = {
   appId: string;
   appSecret: string;
   enabled: boolean;
+  /** 该机器人绑定的工作区目录；卡片里的本机图片只允许来自它或 ~/.trellis */
+  workspacePath?: string | null;
 };
 
 type PushChat = {
@@ -35,6 +37,9 @@ export type TaskLarkPushDeps = {
     chatId: string;
     markdown: string;
     mode: "plain";
+    sessionUrl?: string;
+    textFallback?: string;
+    workspacePath?: string;
   }) => Promise<LarkSentMessage>;
   recordOutbox: typeof recordLarkOutbox;
   advanceChat: typeof advanceLarkChat;
@@ -106,14 +111,20 @@ export async function pushTaskRunToLark(
 
     const link = args.sessionId && args.nodeId
       ? `/?session=${args.sessionId}&node=${args.nodeId}`
-      : "/";
+      : null;
+    const base = deps.publicUrl()?.trim().replace(/\/+$/, "");
+    const sessionUrl = link && base ? `${base}${link}` : undefined;
     const sent = await deps.sendText({
       client: deps.createClient(bot.appId, bot.appSecret),
       chatId: args.chatId,
-      markdown: taskLarkMarkdown(args.markdown, link, deps.publicUrl()),
+      markdown: args.markdown,
+      textFallback: taskLarkMarkdown(args.markdown, link ?? "/", deps.publicUrl()),
       // 任务消息没有可引用的入站锚点；群聊必须顶层发送以成为话题根，私聊同样用
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",
+      sessionUrl,
+      // 不传的话 workspace 里的图片一律进不了白名单、只能降级成文本（复审 n2）。
+      workspacePath: bot.workspacePath ?? undefined,
     });
     if (!sent.messageId) {
       console.error(`[lark] task push returned no message_id bot=${args.botId} chat=${args.chatId}`);

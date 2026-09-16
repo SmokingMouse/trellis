@@ -3,9 +3,14 @@ import {
   chainStatus,
   deriveRecentChainStatus,
   groupRecentChains,
+  groupSessionStructure,
   nodeLabel,
   orderRecentChains,
   recentSessionStatus,
+  resolveSessionCollapsed,
+  resolveTreeExpanded,
+  toggleSessionCollapsedState,
+  toggleTreeExpandedState,
   type RecentChainRow,
 } from "./recent";
 
@@ -252,5 +257,133 @@ describe("groupRecentChains", () => {
       depth: 4,
       status: "unread",
     });
+  });
+});
+
+describe("groupSessionStructure", () => {
+  it("returns empty array for empty rows", () => {
+    expect(groupSessionStructure([])).toEqual([]);
+  });
+
+  it("groups chains into trees and sorts trees & chains by activityAt DESC", () => {
+    const rows = [
+      // 树 1: 有两条链，较热链 activityAt=500，较冷链 activityAt=300
+      row({ tipId: "t1-tip1", rootId: "r1", rootTopicLabel: "树1", activityAt: 500, nodeIds: ["r1", "n1", "t1-tip1"] }),
+      row({ tipId: "t1-tip2", rootId: "r1", rootTopicLabel: "树1", activityAt: 300, nodeIds: ["r1", "n1", "t1-tip2"] }),
+      // 树 2: 有一条链，activityAt=800
+      row({ tipId: "t2-tip1", rootId: "r2", rootTopicLabel: "树2", activityAt: 800, nodeIds: ["r2", "t2-tip1"] }),
+    ];
+
+    const trees = groupSessionStructure(rows);
+    // 树按 activity 降序：树 2 (800) 在前，树 1 (500) 在后
+    expect(trees.map((t) => t.rootId)).toEqual(["r2", "r1"]);
+    expect(trees[0].activityAt).toBe(800);
+    expect(trees[1].activityAt).toBe(500);
+
+    // 树 1 下的链按 activity 降序
+    expect(trees[1].chains.map((c) => c.tipId)).toEqual(["t1-tip1", "t1-tip2"]);
+    expect(trees[1].chains[0].activityAt).toBe(500);
+    expect(trees[1].chains[1].activityAt).toBe(300);
+  });
+
+  it("accurately calculates nodeCount by deduplicating shared nodeIds", () => {
+    const rows = [
+      // r1 下有分支：["r1", "mid1", "leaf1"] 和 ["r1", "mid1", "leaf2"] 共 4 个节点
+      row({ tipId: "leaf1", rootId: "r1", nodeIds: ["r1", "mid1", "leaf1"] }),
+      row({ tipId: "leaf2", rootId: "r1", nodeIds: ["r1", "mid1", "leaf2"] }),
+    ];
+    const trees = groupSessionStructure(rows);
+    expect(trees[0].nodeCount).toBe(4);
+  });
+
+  it("aggregates tree status by highest priority: waiting > streaming > error > unread > done", () => {
+    const rows = [
+      row({ tipId: "c-done", rootId: "r1", tipStatus: "done", tipReadAt: 10 }),
+      row({ tipId: "c-unread", rootId: "r1", tipStatus: "done", tipReadAt: null }),
+      row({ tipId: "c-err", rootId: "r1", tipStatus: "error" }),
+    ];
+    const trees = groupSessionStructure(rows);
+    // 链包括 done, unread, error -> 树状态应为 error
+    expect(trees[0].status).toBe("error");
+  });
+
+  it("derives live running and waiting statuses", () => {
+    const rows = [
+      row({ tipId: "c1", rootId: "r1", nodeIds: ["r1", "wait-node", "c1"] }),
+      row({ tipId: "c2", rootId: "r2", nodeIds: ["r2", "run-node", "c2"] }),
+    ];
+    const trees = groupSessionStructure(rows, {
+      waitingNodeIds: new Set(["wait-node"]),
+      runningNodeIds: new Set(["run-node"]),
+    });
+    const t1 = trees.find((t) => t.rootId === "r1");
+    const t2 = trees.find((t) => t.rootId === "r2");
+    expect(t1?.status).toBe("waiting");
+    expect(t1?.chains[0].status).toBe("waiting");
+    expect(t2?.status).toBe("streaming");
+    expect(t2?.chains[0].status).toBe("streaming");
+  });
+});
+
+describe("resolveSessionCollapsed and resolveTreeExpanded (SN-1)", () => {
+  it("defaults by tree count: multi-tree sessions expand to trees, single-tree collapse", () => {
+    const emptyKeys = new Set<string>();
+    // 多树会话 (treeCount > 1): 默认展开到树 (collapsed = false)
+    expect(resolveSessionCollapsed("s-multi", 2, emptyKeys)).toBe(false);
+    expect(resolveSessionCollapsed("s-multi", 5, emptyKeys)).toBe(false);
+
+    // 单树会话 (treeCount <= 1): 默认折叠 (collapsed = true)
+    expect(resolveSessionCollapsed("s-single", 1, emptyKeys)).toBe(true);
+    expect(resolveSessionCollapsed("s-single", 0, emptyKeys)).toBe(true);
+
+    // 树行自身默认折叠 (expanded = false)
+    expect(resolveTreeExpanded("s-multi", "root1", emptyKeys)).toBe(false);
+  });
+
+  it("respects explicit expanded / collapsed preferences over treeCount default", () => {
+    // 单树会话被显式展开
+    const singleExpandedKeys = new Set(["session:expanded:s-single"]);
+    expect(resolveSessionCollapsed("s-single", 1, singleExpandedKeys)).toBe(false);
+
+    // 多树会话被显式折叠
+    const multiCollapsedKeys = new Set(["session:collapsed:s-multi"]);
+    expect(resolveSessionCollapsed("s-multi", 3, multiCollapsedKeys)).toBe(true);
+
+    // 兼容 legacy session:id 键（视为折叠）
+    const legacyKeys = new Set(["session:s-multi"]);
+    expect(resolveSessionCollapsed("s-multi", 3, legacyKeys)).toBe(true);
+
+    // 树行被显式展开
+    const treeExpandedKeys = new Set(["tree:expanded:s-multi:root1"]);
+    expect(resolveTreeExpanded("s-multi", "root1", treeExpandedKeys)).toBe(true);
+
+    // 树行被显式折叠
+    const treeCollapsedKeys = new Set(["tree:collapsed:s-multi:root1"]);
+    expect(resolveTreeExpanded("s-multi", "root1", treeCollapsedKeys)).toBe(false);
+  });
+
+  it("toggles session collapsed state correctly and cleanly replaces opposite keys", () => {
+    // 初始状态为折叠（比如单树默认折叠），toggle 后目标为展开 (collapsed=false)
+    const afterExpand = toggleSessionCollapsedState("s1", true, ["other-key"]);
+    expect(afterExpand).toContain("session:expanded:s1");
+    expect(afterExpand).not.toContain("session:collapsed:s1");
+
+    // 再次 toggle 后目标为折叠 (collapsed=true)
+    const afterCollapse = toggleSessionCollapsedState("s1", false, afterExpand);
+    expect(afterCollapse).toContain("session:collapsed:s1");
+    expect(afterCollapse).not.toContain("session:expanded:s1");
+    expect(afterCollapse).toContain("other-key");
+  });
+
+  it("toggles tree expanded state correctly and cleanly replaces opposite keys", () => {
+    // 初始状态为折叠 (expanded=false)，toggle 后展开
+    const afterExpand = toggleTreeExpandedState("s1", "r1", false, ["tree:collapsed:s1:r1"]);
+    expect(afterExpand).toContain("tree:expanded:s1:r1");
+    expect(afterExpand).not.toContain("tree:collapsed:s1:r1");
+
+    // 再次 toggle 后折叠
+    const afterCollapse = toggleTreeExpandedState("s1", "r1", true, afterExpand);
+    expect(afterCollapse).toContain("tree:collapsed:s1:r1");
+    expect(afterCollapse).not.toContain("tree:expanded:s1:r1");
   });
 });
