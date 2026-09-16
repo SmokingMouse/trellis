@@ -254,3 +254,4 @@
 - [fj-cxint-review-f43c] 独立复核 fix/codex-interrupt-exec：隔离 daemon 真机复跑 interrupt、三条反例、 | accepted | reworks=0 | 2026-09-16T12:51:56+08:00 | b53bafe01e9f
 - [fj-cxint-fix3-3d62] 第三轮：Codex 线程 interrupt 后真正终止命令子进程（AS 侧快照后代 pid 并收割 + close/退 | accepted | reworks=0 | 2026-09-16T15:03:00+08:00 | dcb638d27997
 - [fj-cxint-review3-47a0] 第三轮异源复核（Codex）：用 cxint-harness 脚本 A/C/D 自己复跑、回退核心改动看单测是否变红、检 | accepted | reworks=0 | 2026-09-16T15:12:27+08:00 | 12bb533b179b
+- [fj-cli-as-impl-25db] 目标：给 `llm`（apps/cli）加一条可选的 agent-server 路线——`llm <model> --a | accepted | reworks=0 | 2026-09-16T15:46:49+08:00 | 6d853ca4865e
