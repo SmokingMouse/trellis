@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-AS 切流已扩到全部项目；颜色守卫已上线、B2 已关；llm --as 已发版 cli 0.6.0 并装到本机；网关 codex 恢复后补跑 interrupt 真机脚本。
+体验优化五件（飞书互动卡片、Linux ttyd 自愈、卡片图导出、右键菜单、侧栏嵌套树链）已上线 d048752；待用户在飞书实发一条带图消息验卡片；网关 codex 号池 auth_unavailable 待恢复。
 
 ## Goals
 

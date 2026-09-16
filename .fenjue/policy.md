@@ -18,7 +18,12 @@ seats:
     runner: native
     permission: full
     env_file: ~/.config/herdr-leader/presets/gemini-flash.env
-  reviewer:
+  reviewer:                     # 2026-09-16 17:30 改成 Claude 官方 opus：cpa 的 codex 号池 auth_unavailable（gpt-6-astra / 5.6 全挂），与 gemini 仍异源
+    kind: claude
+    runner: codex-tui
+    model: opus
+    permission: full
+  reviewer-codex:               # 网关 codex 恢复后可切回
     kind: codex
     runner: codex-tui
     model: gpt-6-astra
