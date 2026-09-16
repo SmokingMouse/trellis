@@ -19,8 +19,8 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="h-dvh overflow-y-auto bg-canvas text-ink">
-      <header className="sticky top-0 z-10 border-b border-line bg-canvas px-4 py-3 flex items-center gap-3">
+    <div className="h-dvh overflow-y-auto bg-surface-canvas text-ink">
+      <header className="sticky top-0 z-10 border-b border-line bg-surface-canvas px-4 py-3 flex items-center gap-3">
         {/* 返回用 <Link>（三张页原本就都是 Link）。「用 <a> 硬导航」那条规矩只管**出去**
             的方向 —— Header 上点设置时要让浏览器真换一页，别背着一整棵 React Flow 走；
             回来时画布本来就没在跑，没有东西要丢，用不着再赔一次整页加载。 */}

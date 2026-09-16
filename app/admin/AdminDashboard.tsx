@@ -232,8 +232,8 @@ export function AdminDashboard() {
   };
 
   return (
-    <div className="h-dvh overflow-y-auto bg-canvas text-ink">
-      <header className="sticky top-0 z-10 border-b border-line bg-canvas px-4 py-3 flex items-center justify-between">
+    <div className="h-dvh overflow-y-auto bg-surface-canvas text-ink">
+      <header className="sticky top-0 z-10 border-b border-line bg-surface-canvas px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-ui text-ink-muted hover:text-ink">
             ← 返回

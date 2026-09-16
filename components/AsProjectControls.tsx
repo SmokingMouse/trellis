@@ -133,7 +133,7 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
         <span className="text-ink-faint transition-transform shrink-0 group-open/log:rotate-90" aria-hidden>▸</span>
         <span className="font-medium text-ink shrink-0">🔌 引擎</span>
         <span className="text-ink-muted tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
-        <span data-as-source className="flex-1 truncate min-w-0 text-ink-faint">
+        <span data-as-source className="flex-1 min-w-0 text-ink-faint truncate max-md:whitespace-normal max-md:line-clamp-2">
           {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}
           {!showAll && debugCount > 0 ? ` · 已折叠 ${debugCount} 条调试事件` : ""}
         </span>

@@ -675,7 +675,7 @@ const SELECT =
 function StatusDot({ status }: { status?: string }) {
   const color =
     status === "done"
-      ? "bg-ok"
+      ? "bg-positive"
       : status === "running" || status === "pending"
         ? "bg-accent animate-pulse"
         : status === "skipped"

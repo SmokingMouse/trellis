@@ -253,7 +253,7 @@ export default function AgentsSettingsPage() {
         ) : (
           <div className="flex flex-col gap-4">
             {error && (
-              <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-surface text-ui">
+              <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-ui">
                 {error}
               </div>
             )}
