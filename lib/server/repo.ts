@@ -2458,8 +2458,14 @@ export function reapInterruptedStreams(): number {
 // = 链尾。
 //
 // 归组 / 截断 / 打标签在 lib/recent.ts（纯函数，可测）；这里只负责取行。
-export function listRecentChains(limit = 200): RecentChainRow[] {
+function queryChainRows(
+  whereClause: string,
+  params: (string | number)[] = [],
+  limit?: number,
+): RecentChainRow[] {
   const db = getDB();
+  const limitClause = limit !== undefined ? "LIMIT ?" : "";
+  const allParams = limit !== undefined ? [...params, limit] : params;
   const rows = db
     .prepare(
       `WITH RECURSIVE chain(
@@ -2469,7 +2475,7 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
                 n.id
            FROM nodes n JOIN sessions s ON s.id = n.session_id
           WHERE n.parent_id IS NULL AND n.hidden_at IS NULL
-            AND s.archived = 0 AND ${sessionSourcePredicate("s.kind")}
+            AND ${whereClause}
          UNION ALL
          SELECT n.id, c.root_id, c.depth + 1,
                 max(c.activity, n.created_at, coalesce(n.read_at, 0)),
@@ -2492,9 +2498,9 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
          JOIN sessions s ON s.id = t.session_id
         WHERE NOT EXISTS (SELECT 1 FROM nodes k WHERE k.parent_id = c.id)
         ORDER BY c.activity DESC, c.id
-        LIMIT ?`,
+        ${limitClause}`,
     )
-    .all(limit) as Array<{
+    .all(...allParams) as Array<{
     tip_id: string;
     root_id: string;
     node_ids: string;
@@ -2538,6 +2544,18 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
     rootKind: r.root_kind ?? "qa",
     rootRefTitle: refTitleOf(r.root_ref_meta_json),
   }));
+}
+
+export function listRecentChains(limit = 200): RecentChainRow[] {
+  return queryChainRows(
+    `s.archived = 0 AND ${sessionSourcePredicate("s.kind")}`,
+    [],
+    limit,
+  );
+}
+
+export function listSessionChains(sessionId: string): RecentChainRow[] {
+  return queryChainRows("s.id = ?", [sessionId]);
 }
 
 // 会话内未雪藏的树数 —— 最近分组据此决定链行要不要带树名前缀（单树会话

@@ -1,4 +1,5 @@
 import type { RecentChain, RecentChainStatus, RecentSession } from "./types";
+export type { RecentChain, RecentChainStatus, RecentSession };
 
 // 侧栏「最近」分组（S133）的纯数据层：把服务端算好的「叶子 = 链」行按会话
 // 归组、截断、打标签。API 路由与测试共用；不 import 任何 server-only 模块。
@@ -78,7 +79,7 @@ export function chainStatus(
   return "done";
 }
 
-const STATUS_PRIORITY: Record<RecentChainStatus, number> = {
+export const STATUS_PRIORITY: Record<RecentChainStatus, number> = {
   done: 0,
   unread: 1,
   error: 2,
@@ -228,4 +229,123 @@ export function groupRecentChains(
       moreChains: Math.max(0, allChains.length - maxChains),
     };
   });
+}
+
+export type SessionTreeChain = {
+  tipId: string;
+  rootId: string;
+  label: string;
+  activityAt: number;
+  status: RecentChainStatus;
+  nodeIds: string[];
+  depth: number;
+};
+
+export type SessionTree = {
+  rootId: string;
+  treeLabel: string;
+  nodeCount: number;
+  activityAt: number;
+  status: RecentChainStatus;
+  chains: SessionTreeChain[];
+};
+
+export type SessionStructure = {
+  sessionId: string;
+  trees: SessionTree[];
+};
+
+/**
+ * 把按会话取出的链（叶子）行按树归组。
+ * 树与链都按最近活动降序排序；树状态为该树下所有链最高紧急度。
+ * 节点数为该树下所有链 nodeIds 的去重并集大小。
+ */
+export function groupSessionStructure(
+  rows: RecentChainRow[],
+  opts?: {
+    runningNodeIds?: ReadonlySet<string>;
+    waitingNodeIds?: ReadonlySet<string>;
+  },
+): SessionTree[] {
+  const runningNodeIds = opts?.runningNodeIds ?? new Set<string>();
+  const waitingNodeIds = opts?.waitingNodeIds ?? new Set<string>();
+
+  const byRoot = new Map<
+    string,
+    {
+      rootRow: RecentChainRow;
+      chains: SessionTreeChain[];
+      nodeIds: Set<string>;
+    }
+  >();
+
+  for (const row of rows) {
+    let entry = byRoot.get(row.rootId);
+    if (!entry) {
+      entry = {
+        rootRow: row,
+        chains: [],
+        nodeIds: new Set<string>(),
+      };
+      byRoot.set(row.rootId, entry);
+    }
+    for (const nid of row.nodeIds) {
+      entry.nodeIds.add(nid);
+    }
+    const chain: SessionTreeChain = {
+      tipId: row.tipId,
+      rootId: row.rootId,
+      label: nodeLabel({
+        question: row.tipQuestion,
+        topicLabel: row.tipTopicLabel,
+        kind: row.tipKind,
+        refTitle: row.tipRefTitle,
+      }),
+      activityAt: row.activityAt,
+      status: deriveRecentChainStatus(
+        { nodeIds: row.nodeIds, status: chainStatus(row) },
+        runningNodeIds,
+        waitingNodeIds,
+      ),
+      nodeIds: row.nodeIds,
+      depth: row.depth,
+    };
+    entry.chains.push(chain);
+  }
+
+  const trees: SessionTree[] = [];
+  for (const entry of byRoot.values()) {
+    // 链按最近活动降序排序
+    entry.chains.sort((a, b) => b.activityAt - a.activityAt || a.tipId.localeCompare(b.tipId));
+
+    // 树的最近活动时间 = 链中最大 activityAt
+    const maxActivity = entry.chains.length > 0 ? entry.chains[0].activityAt : entry.rootRow.activityAt;
+
+    // 树状态 = 聚合所有链的状态
+    let treeStatus: RecentChainStatus = "done";
+    for (const c of entry.chains) {
+      if (STATUS_PRIORITY[c.status] > STATUS_PRIORITY[treeStatus]) {
+        treeStatus = c.status;
+      }
+    }
+
+    trees.push({
+      rootId: entry.rootRow.rootId,
+      treeLabel: nodeLabel({
+        question: entry.rootRow.rootQuestion,
+        topicLabel: entry.rootRow.rootTopicLabel,
+        kind: entry.rootRow.rootKind,
+        refTitle: entry.rootRow.rootRefTitle,
+      }),
+      nodeCount: entry.nodeIds.size,
+      activityAt: maxActivity,
+      status: treeStatus,
+      chains: entry.chains,
+    });
+  }
+
+  // 树列表按最近活动降序排序
+  trees.sort((a, b) => b.activityAt - a.activityAt || a.rootId.localeCompare(b.rootId));
+
+  return trees;
 }
