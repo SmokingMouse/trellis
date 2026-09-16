@@ -63,6 +63,100 @@ export function useContextMenu() {
   };
 }
 
+/**
+ * 带目标对象的上下文菜单 Hook，同时支持：
+ * 1. 桌面右键菜单（onContextMenu，阻止默认行为）
+ * 2. 移动端 500ms 长按（onTouchStart/Move/End，允许自然滚动，>10px 判定为滚动并取消长按，长按触发后抑制 click）
+ */
+export function useContextMenuWithTarget<T>() {
+  const menu = useContextMenu();
+  const [target, setTarget] = useState<T | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPosRef = useRef<ContextMenuPoint | null>(null);
+  const suppressClickUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const close = useCallback(() => {
+    menu.close();
+    setTarget(null);
+  }, [menu]);
+
+  const bindTrigger = useCallback(
+    (item: T) => ({
+      onContextMenu: (e: ReactMouseEvent<any>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setTarget(item);
+        menu.openAt({ x: e.clientX, y: e.clientY });
+      },
+      onTouchStart: (e: React.TouchEvent<any>) => {
+        const touch = e.touches[0];
+        if (!touch) return;
+        startPosRef.current = { x: touch.clientX, y: touch.clientY };
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+          if (!startPosRef.current) return;
+          setTarget(item);
+          menu.openAt(startPosRef.current);
+          suppressClickUntilRef.current = Date.now() + 600;
+        }, 500);
+      },
+      onTouchMove: (e: React.TouchEvent<any>) => {
+        if (!startPosRef.current || !timerRef.current) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = Math.abs(touch.clientX - startPosRef.current.x);
+        const dy = Math.abs(touch.clientY - startPosRef.current.y);
+        if (dx > 10 || dy > 10) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      },
+      onTouchEnd: (e: React.TouchEvent<any>) => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        if (Date.now() < suppressClickUntilRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        startPosRef.current = null;
+      },
+      onTouchCancel: () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        startPosRef.current = null;
+      },
+      onClickCapture: (e: ReactMouseEvent<any>) => {
+        if (Date.now() < suppressClickUntilRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      },
+    }),
+    [menu],
+  );
+
+  return {
+    ...menu,
+    target,
+    setTarget,
+    bindTrigger,
+    props: {
+      point: menu.point,
+      onClose: close,
+    },
+  };
+}
+
 function isAction(it: ContextMenuItem): it is ContextMenuAction {
   return it !== "separator";
 }
@@ -132,6 +226,7 @@ function MenuPanel({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
         return;
       }
@@ -143,6 +238,7 @@ function MenuPanel({
       if (buttons.length === 0) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        e.stopPropagation();
         const cur = buttons.findIndex((b) => b.dataset.active === "true");
         const step = e.key === "ArrowDown" ? 1 : -1;
         const next =
@@ -158,17 +254,18 @@ function MenuPanel({
         const cur = buttons.find((b) => b.dataset.active === "true");
         if (cur) {
           e.preventDefault();
+          e.stopPropagation();
           cur.click();
         }
       }
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
@@ -180,7 +277,7 @@ function MenuPanel({
       role="menu"
       aria-label={label}
       data-testid="context-menu"
-      className="fixed z-50 min-w-40 max-w-64 py-1 bg-surface-raised border border-line rounded-lg shadow-pop ui-enter-pop text-ui"
+      className="fixed z-[80] min-w-40 max-w-64 py-1 bg-surface-raised border border-line rounded-lg shadow-pop ui-enter-pop text-ui"
       style={{ left: point.x, top: point.y, visibility: "hidden" }}
       onContextMenu={(e) => e.preventDefault()}
     >

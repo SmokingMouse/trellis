@@ -7,6 +7,12 @@ import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
 import { layoutNodes } from "@/lib/layout";
 import { refIcon } from "@/lib/ref-icon";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import {
+  ContextMenu,
+  useContextMenuWithTarget,
+  type ContextMenuItem,
+} from "@/components/ui/ContextMenu";
 import {
   buildTreeEntries,
   childrenIndex,
@@ -82,6 +88,9 @@ export function TreePanel() {
   const mobileOpen = useSessionStore((s) => s.mobileTreePanelOpen);
   const setMobileOpen = useSessionStore((s) => s.setMobileTreePanelOpen);
   const setViewMode = useSessionStore((s) => s.setViewMode);
+  const sessionRootId = useSessionStore((s) => s.session?.rootNodeId);
+  const toggleBookmark = useSessionStore((s) => s.toggleBookmark);
+  const confirmDelete = useConfirmDelete();
 
   const [collapsed, setCollapsed] = useState(false);
   const [coldOpen, setColdOpen] = useSidebarPreference("tree-earlier-open", false, isBoolean);
@@ -92,6 +101,15 @@ export function TreePanel() {
   const [filter, setFilter] = useState<string | null>(null);
   const [filterSel, setFilterSel] = useState(0);
   const [hover, setHover] = useState<Hover>(null);
+
+  const {
+    target: menuTarget,
+    bindTrigger,
+    props: menuProps,
+  } = useContextMenuWithTarget<
+    | { type: "tree"; entry: TreeEntry }
+    | { type: "node"; node: ChatNode }
+  >();
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const filterInputRef = useRef<HTMLInputElement>(null);
@@ -306,6 +324,141 @@ export function TreePanel() {
     }
   };
 
+  const toggleTreeHidden = (entry: TreeEntry) => {
+    const willHide = !entry.hidden;
+    if (willHide) {
+      if (entry.root.id === activeRootId) {
+        const nextVisible = entries.find(
+          (e) => !e.hidden && e.root.id !== entry.root.id,
+        );
+        if (nextVisible) {
+          jumpToNode(nextVisible.latestNodeId);
+        }
+      }
+    } else {
+      const curActiveIsVisible = entries.some(
+        (e) => !e.hidden && e.root.id === activeRootId,
+      );
+      if (!curActiveIsVisible) {
+        jumpToNode(entry.latestNodeId);
+      }
+    }
+    void setTreeHidden(entry.root.id, willHide);
+  };
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menuTarget) return [];
+    if (menuTarget.type === "tree") {
+      const entry = menuTarget.entry;
+      const isSessionRoot = sessionRootId === entry.root.id;
+      return [
+        {
+          label: "跳转到最新节点",
+          onSelect: () => jumpToNode(entry.latestNodeId),
+        },
+        "separator",
+        {
+          label: "重命名这棵树",
+          onSelect: () => startEdit(entry.root),
+        },
+        {
+          label: entry.hidden ? "恢复显示" : "隐藏这棵树",
+          onSelect: () => toggleTreeHidden(entry),
+        },
+        {
+          label: "复制树名称",
+          onSelect: () => {
+            void navigator.clipboard?.writeText(treeLabel(entry.root));
+          },
+        },
+        "separator",
+        {
+          label: "删除这棵树（含子树）",
+          danger: true,
+          disabled: isSessionRoot,
+          hint: isSessionRoot ? "会话主根" : undefined,
+          onSelect: () => confirmDelete(entry.root.id),
+        },
+      ];
+    }
+
+    const node = menuTarget.node;
+    const isSessionRoot = sessionRootId === node.id;
+    const hasChildren = (byParent.get(node.id)?.length ?? 0) > 0;
+    const isCollapsed = hasChildren && collapsedNodeIds.has(node.id);
+    const unread = isUnreadNode(node);
+    const isBookmarked = node.bookmarkedAt !== null;
+
+    const navItems: ContextMenuItem[] = [
+      {
+        label: "跳转到此节点",
+        onSelect: () => jumpToNode(node.id),
+      },
+    ];
+    if (hasChildren) {
+      navItems.push({
+        label: isCollapsed ? "展开子树" : "折叠子树",
+        onSelect: () => {
+          toggleCollapse(node.id);
+          setHover(null);
+        },
+      });
+    }
+
+    const editItems: ContextMenuItem[] = [];
+    if (node.status === "done") {
+      editItems.push({
+        label: unread ? "标为已读" : "标为未读",
+        onSelect: () =>
+          void (unread ? markNodeRead(node.id) : markNodeUnread(node.id)),
+      });
+    }
+    editItems.push({
+      label: isBookmarked ? "移出稍后再读" : "加入稍后再读",
+      onSelect: () => void toggleBookmark(node.id),
+    });
+    if (node.question?.trim()) {
+      editItems.push({
+        label: "复制问题内容",
+        onSelect: () => void navigator.clipboard?.writeText(node.question),
+      });
+    }
+    if (!node.parentId) {
+      const isHidden = node.hiddenAt !== null;
+      editItems.push({
+        label: isHidden ? "恢复显示" : "隐藏这棵树",
+        onSelect: () => void setTreeHidden(node.id, !isHidden),
+      });
+    }
+
+    return [
+      ...navItems,
+      "separator",
+      ...editItems,
+      "separator",
+      {
+        label: "删除节点（含子树）",
+        danger: true,
+        disabled: isSessionRoot,
+        hint: isSessionRoot ? "会话主根" : undefined,
+        onSelect: () => confirmDelete(node.id),
+      },
+    ];
+  }, [
+    menuTarget,
+    sessionRootId,
+    byParent,
+    collapsedNodeIds,
+    entries,
+    activeRootId,
+    toggleCollapse,
+    markNodeRead,
+    markNodeUnread,
+    toggleBookmark,
+    setTreeHidden,
+    confirmDelete,
+  ]);
+
   const onFilterKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -367,6 +520,7 @@ export function TreePanel() {
     return (
       <div
         key={entry.root.id}
+        {...bindTrigger({ type: "tree", entry })}
         className={`group flex items-center rounded ${
           isActive ? "bg-surface-muted/60" : "hover:bg-surface-muted"
         }`}
@@ -553,9 +707,11 @@ export function TreePanel() {
             <g
               key={n.id}
               className="group"
+              data-graph-node-id={n.id}
               data-graph-active={isActive ? "" : undefined}
               onMouseEnter={hoverRow(n.id)}
               onMouseLeave={leaveRow(n.id)}
+              {...bindTrigger({ type: "node", node: n })}
             >
               <g
                 role="button"
@@ -699,7 +855,10 @@ export function TreePanel() {
             />
           </div>
         ) : (
-          <div className="group flex items-center rounded bg-surface-muted/60">
+          <div
+            {...bindTrigger({ type: "tree", entry })}
+            className="group flex items-center rounded bg-surface-muted/60"
+          >
             <div
               className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 cursor-pointer"
               onDoubleClick={() => startEdit(entry.root)}
@@ -764,6 +923,8 @@ export function TreePanel() {
           return (
             <div
               key={node.id}
+              data-node-id={node.id}
+              {...bindTrigger({ type: "node", node })}
               className={`group flex items-center rounded transition-colors ${
                 isActive ? "bg-accent-muted" : "hover:bg-surface-muted"
               }`}
@@ -1174,6 +1335,11 @@ export function TreePanel() {
           </div>
         )}
       </div>
+      <ContextMenu
+        {...menuProps}
+        label="结构面板上下文菜单"
+        items={menuItems}
+      />
     </div>
   );
 }
