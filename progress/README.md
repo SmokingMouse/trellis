@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-AS 切流已扩到全部项目；颜色守卫已上线、B2 已关；llm CLI 接 agent-server（方案 A，--as opt-in）实现中；网关 codex 恢复后补跑 interrupt 真机脚本。
+AS 切流已扩到全部项目；颜色守卫已上线、B2 已关；llm --as 已合入 sm-toolkit main 待发版；网关 codex 恢复后补跑 interrupt 真机脚本。
 
 ## Goals
 
