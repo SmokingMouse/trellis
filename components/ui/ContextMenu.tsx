@@ -3,9 +3,11 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -42,6 +44,15 @@ export type ContextMenuAction = {
 export type ContextMenuItem = ContextMenuAction | "separator";
 export type ContextMenuPoint = { x: number; y: number };
 
+export type ContextMenuTriggerBindings<TargetElement extends Element = HTMLElement> = {
+  onContextMenu: (e: ReactMouseEvent<TargetElement>) => void;
+  onTouchStart: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchMove: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchEnd: (e: ReactTouchEvent<TargetElement>) => void;
+  onTouchCancel: () => void;
+  onClickCapture: (e: ReactMouseEvent<TargetElement>) => void;
+};
+
 const EDGE_MARGIN = 8;
 
 export function useContextMenu() {
@@ -53,14 +64,138 @@ export function useContextMenu() {
   }, []);
   const openAt = useCallback((p: ContextMenuPoint) => setPoint(p), []);
   const close = useCallback(() => setPoint(null), []);
-  return {
-    open: point !== null,
-    point,
-    onContextMenu,
-    openAt,
-    close,
-    props: { point, onClose: close },
-  };
+  const props = useMemo(() => ({ point, onClose: close }), [point, close]);
+  return useMemo(
+    () => ({
+      open: point !== null,
+      point,
+      onContextMenu,
+      openAt,
+      close,
+      props,
+    }),
+    [point, onContextMenu, openAt, close, props],
+  );
+}
+
+/**
+ * 带目标对象的上下文菜单 Hook，同时支持：
+ * 1. 桌面右键菜单（onContextMenu，阻止默认行为）
+ * 2. 移动端 500ms 长按（onTouchStart/Move/End，允许自然滚动，>10px 判定为滚动并取消长按，长按触发后抑制 click）
+ */
+export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>() {
+  const menu = useContextMenu();
+  const [target, setTarget] = useState<T | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPosRef = useRef<ContextMenuPoint | null>(null);
+  const suppressClickUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const menuClose = menu.close;
+  const menuOpenAt = menu.openAt;
+
+  const close = useCallback(() => {
+    menuClose();
+    setTarget(null);
+  }, [menuClose]);
+
+  const bindTrigger = useCallback(
+    <TargetElement extends Element = E>(
+      item: T,
+    ): ContextMenuTriggerBindings<TargetElement> => ({
+      onContextMenu: (e: ReactMouseEvent<TargetElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setTarget(item);
+        menuOpenAt({ x: e.clientX, y: e.clientY });
+      },
+      onTouchStart: (e: ReactTouchEvent<TargetElement>) => {
+        const touch = e.touches[0];
+        if (!touch) return;
+        startPosRef.current = { x: touch.clientX, y: touch.clientY };
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+          if (!startPosRef.current) return;
+          setTarget(item);
+          menuOpenAt(startPosRef.current);
+          suppressClickUntilRef.current = Date.now() + 600;
+        }, 500);
+      },
+      onTouchMove: (e: ReactTouchEvent<TargetElement>) => {
+        if (!startPosRef.current || !timerRef.current) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = Math.abs(touch.clientX - startPosRef.current.x);
+        const dy = Math.abs(touch.clientY - startPosRef.current.y);
+        if (dx > 10 || dy > 10) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      },
+      onTouchEnd: (e: ReactTouchEvent<TargetElement>) => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        if (Date.now() < suppressClickUntilRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        startPosRef.current = null;
+      },
+      onTouchCancel: () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        startPosRef.current = null;
+      },
+      onClickCapture: (e: ReactMouseEvent<TargetElement>) => {
+        if (Date.now() < suppressClickUntilRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      },
+    }),
+    [menuOpenAt],
+  );
+
+  const props = useMemo(
+    () => ({
+      point: menu.point,
+      onClose: close,
+    }),
+    [menu.point, close],
+  );
+
+  return useMemo(
+    () => ({
+      open: menu.open,
+      point: menu.point,
+      onContextMenu: menu.onContextMenu,
+      openAt: menu.openAt,
+      close,
+      target,
+      setTarget,
+      bindTrigger,
+      props,
+    }),
+    [
+      menu.open,
+      menu.point,
+      menu.onContextMenu,
+      menu.openAt,
+      close,
+      target,
+      bindTrigger,
+      props,
+    ],
+  );
 }
 
 function isAction(it: ContextMenuItem): it is ContextMenuAction {
@@ -132,6 +267,7 @@ function MenuPanel({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
         return;
       }
@@ -143,6 +279,7 @@ function MenuPanel({
       if (buttons.length === 0) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        e.stopPropagation();
         const cur = buttons.findIndex((b) => b.dataset.active === "true");
         const step = e.key === "ArrowDown" ? 1 : -1;
         const next =
@@ -158,17 +295,18 @@ function MenuPanel({
         const cur = buttons.find((b) => b.dataset.active === "true");
         if (cur) {
           e.preventDefault();
+          e.stopPropagation();
           cur.click();
         }
       }
     };
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
@@ -180,7 +318,7 @@ function MenuPanel({
       role="menu"
       aria-label={label}
       data-testid="context-menu"
-      className="fixed z-50 min-w-40 max-w-64 py-1 bg-surface-raised border border-line rounded-lg shadow-pop ui-enter-pop text-ui"
+      className="fixed z-[80] min-w-40 max-w-64 py-1 bg-surface-raised border border-line rounded-lg shadow-pop ui-enter-pop text-ui"
       style={{ left: point.x, top: point.y, visibility: "hidden" }}
       onContextMenu={(e) => e.preventDefault()}
     >

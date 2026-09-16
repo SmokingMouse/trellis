@@ -2578,6 +2578,10 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 }));
 
+if (typeof window !== "undefined") {
+  (window as unknown as { __sessionStore?: typeof useSessionStore }).__sessionStore = useSessionStore;
+}
+
 // ---------------------------------------------------------------------------
 
 type Setter = (

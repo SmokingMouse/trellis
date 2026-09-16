@@ -7,6 +7,12 @@ import { childrenIndex, isUnreadNode } from "@/lib/tree-panel";
 import { ancestorsOf } from "@/lib/collapsed";
 import type { ChatNode } from "@/lib/types";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import {
+  ContextMenu,
+  useContextMenuWithTarget,
+  type ContextMenuItem,
+  type ContextMenuTriggerBindings,
+} from "@/components/ui/ContextMenu";
 
 // Recursive: a tree node passes the "has any unread descendant or self" test
 // when filtering — keeps the parent visible even if it's been read, so the
@@ -51,6 +57,23 @@ function buildForest(
 export function Outline() {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
+  const sessionRootId = useSessionStore((s) => s.session?.rootNodeId);
+  const setActiveNode = useSessionStore((s) => s.setActiveNode);
+  const setOutlineOpen = useSessionStore((s) => s.setOutlineOpen);
+  const collapsedNodeIds = useSessionStore((s) => s.collapsedNodeIds);
+  const toggleCollapse = useSessionStore((s) => s.toggleCollapse);
+  const setTreeHidden = useSessionStore((s) => s.setTreeHidden);
+  const markNodeRead = useSessionStore((s) => s.markNodeRead);
+  const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
+  const toggleBookmark = useSessionStore((s) => s.toggleBookmark);
+  const confirmDelete = useConfirmDelete();
+
+  const {
+    target: menuTarget,
+    bindTrigger,
+    props: menuProps,
+  } = useContextMenuWithTarget<TreeNode>();
+
   const forest = useMemo(
     () => (session ? buildForest(nodes, session.rootNodeId) : []),
     [session, nodes],
@@ -61,6 +84,83 @@ export function Outline() {
     [nodes],
   );
   const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (!menuTarget) return [];
+    const isSessionRoot = sessionRootId === menuTarget.id;
+    const hasChildren = menuTarget.children.length > 0;
+    const isCollapsed = hasChildren && collapsedNodeIds.has(menuTarget.id);
+    const unread = isUnreadNode(menuTarget);
+    const isBookmarked = menuTarget.bookmarkedAt !== null;
+
+    const navItems: ContextMenuItem[] = [
+      {
+        label: "跳转到此节点",
+        onSelect: () => {
+          setActiveNode(menuTarget.id);
+          setOutlineOpen(false);
+        },
+      },
+    ];
+    if (hasChildren) {
+      navItems.push({
+        label: isCollapsed ? "展开子树" : "折叠子树",
+        onSelect: () => toggleCollapse(menuTarget.id),
+      });
+    }
+
+    const editItems: ContextMenuItem[] = [];
+    if (menuTarget.status === "done") {
+      editItems.push({
+        label: unread ? "标为已读" : "标为未读",
+        onSelect: () =>
+          void (unread ? markNodeRead(menuTarget.id) : markNodeUnread(menuTarget.id)),
+      });
+    }
+    editItems.push({
+      label: isBookmarked ? "移出稍后再读" : "加入稍后再读",
+      onSelect: () => void toggleBookmark(menuTarget.id),
+    });
+    if (menuTarget.question?.trim()) {
+      editItems.push({
+        label: "复制问题内容",
+        onSelect: () => void navigator.clipboard?.writeText(menuTarget.question),
+      });
+    }
+    if (!menuTarget.parentId) {
+      const isHidden = menuTarget.hiddenAt !== null;
+      editItems.push({
+        label: isHidden ? "恢复显示" : "隐藏这棵树",
+        onSelect: () => void setTreeHidden(menuTarget.id, !isHidden),
+      });
+    }
+
+    return [
+      ...navItems,
+      "separator",
+      ...editItems,
+      "separator",
+      {
+        label: "删除节点（含子树）",
+        danger: true,
+        disabled: isSessionRoot,
+        hint: isSessionRoot ? "会话主根" : undefined,
+        onSelect: () => confirmDelete(menuTarget.id),
+      },
+    ];
+  }, [
+    menuTarget,
+    sessionRootId,
+    collapsedNodeIds,
+    setActiveNode,
+    setOutlineOpen,
+    toggleCollapse,
+    markNodeRead,
+    markNodeUnread,
+    toggleBookmark,
+    setTreeHidden,
+    confirmDelete,
+  ]);
 
   const visibleForest = useMemo(
     () => forest.filter((t) => t.hiddenAt === null),
@@ -98,7 +198,14 @@ export function Outline() {
             i > 0 ? "mt-1.5 pt-1.5 border-t border-line-faint" : undefined
           }
         >
-          <TreeRow node={t} branchDepth={0} isBranch={false} indices={indices} unreadOnly={unreadOnly} />
+          <TreeRow
+            node={t}
+            branchDepth={0}
+            isBranch={false}
+            indices={indices}
+            unreadOnly={unreadOnly}
+            bindTrigger={bindTrigger}
+          />
         </div>
       ))}
     </>
@@ -108,12 +215,19 @@ export function Outline() {
   // shift right of the explorer sidebar when it's open (var from page.tsx;
   // falls back to 0 so the rail sits at its original left-3 = 12px).
   return (
-    <aside
-      className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100dvh-108px)] overflow-y-auto"
-      style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
-    >
-      {body}
-    </aside>
+    <>
+      <aside
+        className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100dvh-108px)] overflow-y-auto"
+        style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
+      >
+        {body}
+      </aside>
+      <ContextMenu
+        {...menuProps}
+        label="大纲节点菜单"
+        items={menuItems}
+      />
+    </>
   );
 }
 
@@ -123,6 +237,7 @@ function TreeRow({
   isBranch,
   indices,
   unreadOnly,
+  bindTrigger,
 }: {
   node: TreeNode;
   // 缩进按「祖先分叉点个数」而非「轮数」——线性段全部平铺(branchDepth 不变)，
@@ -132,6 +247,7 @@ function TreeRow({
   isBranch: boolean;
   indices: Record<string, number>;
   unreadOnly: boolean;
+  bindTrigger: (node: TreeNode) => ContextMenuTriggerBindings;
 }) {
   const setActiveNode = useSessionStore((s) => s.setActiveNode);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
@@ -161,6 +277,8 @@ function TreeRow({
   return (
     <div>
       <div
+        data-outline-node-id={node.id}
+        {...bindTrigger(node)}
         className={`group w-full rounded transition-colors flex items-center ${
           isActive
             ? "bg-accent-muted"
@@ -321,6 +439,7 @@ function TreeRow({
             isBranch={node.children.length > 1}
             indices={indices}
             unreadOnly={unreadOnly}
+            bindTrigger={bindTrigger}
           />
         ))}
     </div>
