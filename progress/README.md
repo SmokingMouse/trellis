@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-侧栏 IA 收官（工具条+项目树、旧树面板原样、地图）、收编、待办层均已上线，默认 runner 已切 codex-tui；观察一天后 AS 切流扩到全部项目，再清 backlog P1。
+AS 切流已扩到全部项目；在修 Codex interrupt 残留进程（backlog P1）并复核，调研 llm CLI 接 agent-server；颜色 token 守卫 + 五处类名修复待合并部署。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S171） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S173） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

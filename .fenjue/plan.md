@@ -760,3 +760,8 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-restore-tree-panel-ccd2
 - [ ] pending-bar: 待办层：Header 下跨会话「等你处理」横条（跳转/就地允许拒绝/撤卡），审批卡按钮主次分明，手机复用等待横幅，不新增轮询 | after: ui-audit | kind: codex
   cid: fj-pending-bar-5cfe
+- [ ] cxint-fix: 修 Codex 线程 turn/interrupt 后命令子进程仍活着：interrupt 时结束 exec 会话、补 item/completed、线程回 idle 可 close（sm-toolkit packages/agent-server） | kind: codex
+  cid: fj-cxint-fix-5e70
+- [ ] cxint-review: 独立复核 fix/codex-interrupt-exec：隔离 daemon 真机复跑 interrupt、三条反例、测试真红、证据可复现 | after: cxint-fix | mode: readonly | kind: claude
+- [ ] cli-as-bridge: 调研 apps/cli（llm）与 agent-server 打通：现状链路、三条方案与估算、推荐切片、真机验证网关模型经 as/1 起线程 | mode: readonly | kind: claude
+  cid: fj-cli-as-bridge-0b2e
