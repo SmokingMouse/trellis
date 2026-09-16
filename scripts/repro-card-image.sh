@@ -13,8 +13,31 @@ LOG="$H/server.log"
 SESSION=ci-repro
 AUTH_PASS=card-image-pass
 AUTH_TOKEN=card-image-token
-OUT_DIR="/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-card-image-8404/out"
+OUT_DIR="${FENJUE_TASK_OUT:-/tmp/trellis-verify/card-image}"
 mkdir -p "$OUT_DIR"
+
+TRELLIS_REPRO_REF="${TRELLIS_REPRO_REF:-}"
+APP_DIR="$ROOT"
+if [ -n "$TRELLIS_REPRO_REF" ]; then
+  REF_TAG="${TRELLIS_REPRO_TAG:-baseline}"
+  TMP_REPO="/tmp/trellis-repro-baseline-${TRELLIS_REPRO_REF//\//_}"
+  echo "Using baseline ref: $TRELLIS_REPRO_REF in $TMP_REPO"
+  if [ ! -d "$TMP_REPO/.git" ]; then
+    rm -rf "$TMP_REPO"
+    git clone -s "$ROOT" "$TMP_REPO"
+  fi
+  (
+    cd "$TMP_REPO"
+    git fetch origin "$TRELLIS_REPRO_REF" 2>/dev/null || true
+    git checkout "$TRELLIS_REPRO_REF"
+    bun install
+    bun --bun run build
+  )
+  APP_DIR="$TMP_REPO"
+else
+  REF_TAG="${TRELLIS_REPRO_TAG:-postfix}"
+  echo "Using current branch code at $ROOT"
+fi
 
 SERVER_PID=
 
@@ -57,6 +80,7 @@ sqlite3 "$DB" "UPDATE tasks SET enabled=0; UPDATE lark_bots SET enabled=0, app_s
 
 # Launch server
 (
+  cd "$APP_DIR"
   export HOME="$H"
   export TRELLIS_DB_PATH="$DB"
   export TRELLIS_LARK=off
@@ -82,28 +106,37 @@ until curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$BASE/__gate/hea
 done
 echo "Trellis is ready!"
 
-# Log in
-ab set viewport 1280 900
-ab cookies clear
-ab open "$BASE/login"
-sleep 1
-ab eval 'localStorage.clear(); sessionStorage.clear(); "storage cleared"'
-ab fill '#pw' "$AUTH_PASS"
-ab click 'button[type="submit"]'
-sleep 2
+login_if_needed() {
+  ab open "$BASE/login"
+  sleep 1
+  ab eval 'localStorage.clear(); sessionStorage.clear(); "storage cleared"'
+  ab fill '#pw' "$AUTH_PASS"
+  ab click 'button[type="submit"]'
+  sleep 2
+}
 
-test_case() {
-  local name="$1"
-  local sid="$2"
-  local nid="$3"
+run_test() {
+  local mode="$1" # desktop or mobile
+  local name="$2"
+  local sid="$3"
+  local nid="$4"
+  local prefix="${REF_TAG}_${mode}_${name}"
+
   echo "========================================="
-  echo "Testing $name (session=$sid, node=$nid)"
+  echo "Testing [$REF_TAG] $prefix (mode=$mode, name=$name)"
   echo "========================================="
+
+  if [ "$mode" = "mobile" ]; then
+    ab set device "iPhone 12" || true
+    ab set viewport 390 844
+  else
+    ab set viewport 1280 900
+  fi
 
   ab open "$BASE/?session=$sid&node=$nid"
   sleep 3
 
-  # Scroll to response so useNearViewport mounts buttons
+  # Scroll target node into view
   ab eval "(() => {
     const el = document.querySelector('[data-chat-node-id=\"$nid\"]') || document.querySelector('[data-thread-node-id=\"$nid\"]');
     if (el) {
@@ -114,50 +147,85 @@ test_case() {
   })()"
   sleep 2
 
-  # Check if CardImageButton exists
-  local btn_found=$(ab eval "Boolean(document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]') || document.querySelector('[data-mobile-target=\"response-card-image\"]'))")
-  echo "CardImageButton found: $btn_found"
-
-  # Clear console before clicking
   ab console --clear || true
 
-  # Click card image button
-  ab eval "(() => {
-    const btn = document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]') || document.querySelector('[data-mobile-target=\"response-card-image\"]');
-    if (btn) {
-      btn.click();
-      return 'clicked';
-    }
-    return 'not found';
-  })()"
+  # Trigger card image button
+  if [ "$mode" = "mobile" ]; then
+    echo "Triggering on mobile..."
+    ab eval "(() => {
+      const moreBtn = document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-more\"]')
+        || document.querySelector('[data-chat-node-id=\"$nid\"] button[aria-label*=\"更多回答操作\"]')
+        || document.querySelector('[data-mobile-target=\"response-more\"]');
+      if (moreBtn) moreBtn.click();
+      return Boolean(moreBtn);
+    })()"
+    sleep 1
+    ab eval "(() => {
+      const cardBtn = document.querySelector('[data-mobile-response-menu] [data-mobile-target=\"response-card-image\"]')
+        || document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]')
+        || document.querySelector('[data-mobile-target=\"response-card-image\"]');
+      if (cardBtn) {
+        cardBtn.click();
+        return 'mobile button clicked';
+      }
+      return 'mobile button not found';
+    })()"
+  else
+    echo "Triggering on desktop..."
+    ab eval "(() => {
+      const btn = document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]')
+        || document.querySelector('[data-mobile-target=\"response-card-image\"]');
+      if (btn) {
+        btn.click();
+        return 'desktop button clicked';
+      }
+      return 'desktop button not found';
+    })()"
+  fi
 
-  # Wait for rendering to settle (either preview dialog opens, or button shows error)
-  sleep 4
+  # Wait for rendering to complete or fail
+  local state="waiting"
+  for i in $(seq 1 10); do
+    sleep 1
+    state=$(ab eval "(() => {
+      const img = document.querySelector('img[alt*=\"卡片图预览\"]');
+      if (img && img.src && img.complete && img.naturalWidth > 0) {
+        return 'modal_ready';
+      }
+      const errEl = document.querySelector('[data-safe-area=\"modal-shell\"] .text-warn-ink');
+      if (errEl) {
+        return 'modal_error: ' + errEl.textContent.trim();
+      }
+      const btn = document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]')
+        || document.querySelector('[data-mobile-target=\"response-card-image\"]');
+      if (btn && btn.textContent && btn.textContent.includes('失败')) {
+        return 'button_error';
+      }
+      return 'waiting';
+    })()")
+    echo "Wait step $i: $state"
+    if [ "$state" != "waiting" ]; then
+      break
+    fi
+  done
+  sleep 1
 
-  # Capture console logs
-  echo "--- Console output ---"
-  ab console > "$OUT_DIR/repro_${name}_console.txt" 2>&1 || true
-  cat "$OUT_DIR/repro_${name}_console.txt"
-  echo "--- Page errors ---"
-  ab errors > "$OUT_DIR/repro_${name}_errors.txt" 2>&1 || true
-  cat "$OUT_DIR/repro_${name}_errors.txt"
+  # Capture console logs and page errors
+  ab console > "$OUT_DIR/${prefix}_console.txt" 2>&1 || true
+  ab errors > "$OUT_DIR/${prefix}_errors.txt" 2>&1 || true
+  ab screenshot "$OUT_DIR/${prefix}.png" 2>&1 || true
 
-  # Check button state and modal state
-  ab eval "(() => {
-    const btn = document.querySelector('[data-chat-node-id=\"$nid\"] [data-mobile-target=\"response-card-image\"]') || document.querySelector('[data-mobile-target=\"response-card-image\"]');
-    const modal = document.querySelector('img[alt*=\"卡片图预览\"]');
-    return {
-      buttonText: btn ? btn.textContent.trim() : null,
-      modalOpened: Boolean(modal),
-      modalImgSrc: modal ? modal.src.slice(0, 100) : null
-    };
-  })()"
+  # Also write repro_${REF_TAG}_... alias for backward compatibility
+  cp "$OUT_DIR/${prefix}_console.txt" "$OUT_DIR/repro_${prefix}_console.txt" 2>/dev/null || true
+  cp "$OUT_DIR/${prefix}_errors.txt" "$OUT_DIR/repro_${prefix}_errors.txt" 2>/dev/null || true
+  cp "$OUT_DIR/${prefix}.png" "$OUT_DIR/repro_${prefix}.png" 2>/dev/null || true
 
-  # Take screenshot of page
-  ab screenshot "$OUT_DIR/repro_${name}.png"
-  echo "Screenshot saved to $OUT_DIR/repro_${name}.png"
+  echo "Result: state=$state"
+  echo "Console log saved: $OUT_DIR/${prefix}_console.txt ($(wc -c < "$OUT_DIR/${prefix}_console.txt" | tr -d ' ') bytes)"
+  echo "Errors log saved:  $OUT_DIR/${prefix}_errors.txt ($(wc -c < "$OUT_DIR/${prefix}_errors.txt" | tr -d ' ') bytes)"
+  echo "Screenshot saved:  $OUT_DIR/${prefix}.png"
 
-  # If modal opened, close it
+  # Close dialog if opened
   ab eval "(() => {
     const closeBtn = document.querySelector('button[aria-label=\"关闭\"]') || [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '✕');
     if (closeBtn) closeBtn.click();
@@ -166,17 +234,20 @@ test_case() {
   sleep 1
 }
 
-# Run 4 test cases
-# 1. codeblock
-test_case "codeblock" "9df10952-c973-4f4d-a95f-5c7b077bb8b1" "2ea70e51-de6f-4bea-8fa0-c41814976c6a"
+# Initial login
+ab set viewport 1280 900
+login_if_needed
 
-# 2. mermaid
-test_case "mermaid" "f9c005ed-7217-4941-b617-8b8fbf56bf2d" "2f4e614c-f2d6-4548-9401-05f63da7ebf0"
+# Run Desktop verification for all 4 types
+run_test "desktop" "codeblock" "9df10952-c973-4f4d-a95f-5c7b077bb8b1" "2ea70e51-de6f-4bea-8fa0-c41814976c6a"
+run_test "desktop" "mermaid" "f9c005ed-7217-4941-b617-8b8fbf56bf2d" "2f4e614c-f2d6-4548-9401-05f63da7ebf0"
+run_test "desktop" "math" "b3333f44-003a-4409-9bd5-5e9b90e922e6" "c21fd5e6-d172-4974-a5ee-8c1c6945c0cd"
+run_test "desktop" "image" "fe6739be-6bbd-414d-9a8b-2c540a14c640" "d819d3e1-0a5a-4f34-a935-280c5e4f4df8"
 
-# 3. math (KaTeX)
-test_case "math" "b3333f44-003a-4409-9bd5-5e9b90e922e6" "c21fd5e6-d172-4974-a5ee-8c1c6945c0cd"
+# Run Mobile verification for all 4 types
+run_test "mobile" "codeblock" "9df10952-c973-4f4d-a95f-5c7b077bb8b1" "2ea70e51-de6f-4bea-8fa0-c41814976c6a"
+run_test "mobile" "mermaid" "f9c005ed-7217-4941-b617-8b8fbf56bf2d" "2f4e614c-f2d6-4548-9401-05f63da7ebf0"
+run_test "mobile" "math" "b3333f44-003a-4409-9bd5-5e9b90e922e6" "c21fd5e6-d172-4974-a5ee-8c1c6945c0cd"
+run_test "mobile" "image" "fe6739be-6bbd-414d-9a8b-2c540a14c640" "d819d3e1-0a5a-4f34-a935-280c5e4f4df8"
 
-# 4. image
-test_case "image" "fe6739be-6bbd-414d-9a8b-2c540a14c640" "d819d3e1-0a5a-4f34-a935-280c5e4f4df8"
-
-echo "Reproduction script completed!"
+echo "Reproduction run for [$REF_TAG] completed successfully!"

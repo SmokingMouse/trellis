@@ -13,7 +13,7 @@ LOG="$H/server.log"
 SESSION=ci-verify
 AUTH_PASS=card-image-pass
 AUTH_TOKEN=card-image-token
-OUT_DIR="/Users/smokingmouse/python/learning/trellis/.fenjue/tasks/fj-card-image-8404/out"
+OUT_DIR="${FENJUE_TASK_OUT:-/tmp/trellis-verify/card-image}"
 mkdir -p "$OUT_DIR"
 
 SERVER_PID=
