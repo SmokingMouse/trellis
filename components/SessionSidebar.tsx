@@ -15,13 +15,17 @@ import {
 } from "@/lib/workbench-layout";
 import { useIsDesktopViewport } from "@/hooks/useIsMobile";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
-import { ContextMenu, useContextMenu, type ContextMenuItem } from "@/components/ui/ContextMenu";
+import { ContextMenu, useContextMenu, useContextMenuWithTarget, type ContextMenuItem } from "@/components/ui/ContextMenu";
 import {
   RECENT_CHAINS_SHOWN,
   STATUS_PRIORITY,
   deriveRecentChainStatus,
   orderRecentChains,
   recentSessionStatus,
+  resolveSessionCollapsed,
+  resolveTreeExpanded,
+  toggleSessionCollapsedState,
+  toggleTreeExpandedState,
   type RecentChainStatus,
   type SessionTree,
   type SessionTreeChain,
@@ -76,6 +80,8 @@ export function SessionSidebar() {
   const previewId = useSessionStore((s) => s.previewSessionId);
   const previewSession = useSessionStore((s) => s.previewSession);
   const pinSession = useSessionStore((s) => s.pinSession);
+  const unpinSession = useSessionStore((s) => s.unpinSession);
+  const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const newConversation = useSessionStore((s) => s.newConversation);
   const renameSession = useSessionStore((s) => s.renameSession);
   const archiveSession = useSessionStore((s) => s.archiveSession);
@@ -179,59 +185,14 @@ export function SessionSidebar() {
 
   // 会话结构（树与链）缓存与刷新
   const [structures, setStructures] = useState<Map<string, SessionTree[]>>(() => new Map());
+  const structuresRef = useRef(structures);
+  structuresRef.current = structures;
   const [structureNonce, setStructureNonce] = useState(0);
   const fetchingStructureRef = useRef<Set<string>>(new Set());
 
-  const isSessionCollapsed = useCallback(
-    (sessionId: string) => collapsed.has(`session:${sessionId}`) || collapsed.has(sessionId),
-    [collapsed],
-  );
-
-  const toggleSessionCollapsed = useCallback(
-    (sessionId: string) => {
-      const key = `session:${sessionId}`;
-      setCollapsedIds((prev) => {
-        const s = new Set(prev);
-        const isCurrentlyCollapsed = s.has(key) || s.has(sessionId);
-        if (isCurrentlyCollapsed) {
-          s.delete(key);
-          s.delete(sessionId);
-        } else {
-          s.add(key);
-        }
-        return [...s];
-      });
-    },
-    [setCollapsedIds],
-  );
-
-  const isTreeExpanded = useCallback(
-    (sessionId: string, rootId: string) =>
-      collapsed.has(`tree:${sessionId}:${rootId}`) || collapsed.has(`tree:${rootId}`),
-    [collapsed],
-  );
-
-  const toggleTreeCollapsed = useCallback(
-    (sessionId: string, rootId: string) => {
-      const key = `tree:${sessionId}:${rootId}`;
-      const legacyKey = `tree:${rootId}`;
-      setCollapsedIds((prev) => {
-        const s = new Set(prev);
-        const isCurrentlyOpen = s.has(key) || s.has(legacyKey);
-        if (isCurrentlyOpen) {
-          s.delete(key);
-          s.delete(legacyKey);
-        } else {
-          s.add(key);
-        }
-        return [...s];
-      });
-    },
-    [setCollapsedIds],
-  );
-
-  const fetchStructure = useCallback(async (sessionId: string) => {
+  const fetchStructure = useCallback(async (sessionId: string, force = false) => {
     if (fetchingStructureRef.current.has(sessionId)) return;
+    if (!force && structuresRef.current.has(sessionId)) return;
     fetchingStructureRef.current.add(sessionId);
     try {
       const r = await fetch(`/api/sessions/${sessionId}/structure`);
@@ -249,6 +210,43 @@ export function SessionSidebar() {
       fetchingStructureRef.current.delete(sessionId);
     }
   }, []);
+
+  // 默认折叠状态由树数决定（SN-1）：多树展开到树行（collapsed=false），单树折叠（collapsed=true）
+  const isSessionCollapsed = useCallback(
+    (sessionId: string, treeCount: number) =>
+      resolveSessionCollapsed(sessionId, treeCount, collapsed),
+    [collapsed],
+  );
+
+  const toggleSessionCollapsed = useCallback(
+    (sessionId: string, treeCount: number) => {
+      const isCurrentCollapsed = resolveSessionCollapsed(sessionId, treeCount, collapsed);
+      setCollapsedIds((prev) =>
+        toggleSessionCollapsedState(sessionId, isCurrentCollapsed, prev),
+      );
+      // 展开时立即拉取该会话结构
+      if (isCurrentCollapsed) {
+        void fetchStructure(sessionId);
+      }
+    },
+    [collapsed, setCollapsedIds, fetchStructure],
+  );
+
+  const isTreeExpanded = useCallback(
+    (sessionId: string, rootId: string) =>
+      resolveTreeExpanded(sessionId, rootId, collapsed),
+    [collapsed],
+  );
+
+  const toggleTreeCollapsed = useCallback(
+    (sessionId: string, rootId: string) => {
+      const isCurrentExpanded = resolveTreeExpanded(sessionId, rootId, collapsed);
+      setCollapsedIds((prev) =>
+        toggleTreeExpandedState(sessionId, rootId, isCurrentExpanded, prev),
+      );
+    },
+    [collapsed, setCollapsedIds],
+  );
   // Archived view (replaces SessionPicker's "显示已归档" toggle). Count comes
   // free from the main list response; the archived rows are fetched lazily
   // only when the footer is expanded.
@@ -379,12 +377,20 @@ export function SessionSidebar() {
     ? selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
     : sessions, [sessions, archived, source, includeArchived, isOfflineHerdr]);
 
-  // 会话结构（树与链）懒加载与刷新：
-  // 首次展开时拉取并缓存；sessionsRevision 变化、运行集合变化、窗口聚焦时刷新已展开会话
+  // 会话结构（树与链）懒加载与刷新（SN-2）：
+  // 只对当前展开的会话发结构请求；sessionsRevision 变化、运行集合变化、窗口聚焦时刷新已展开会话
+  const lastRefreshTriggerRef = useRef("");
   useEffect(() => {
+    const currentRefreshTrigger = `${sessionsRevision}:${recentRunKey}:${structureNonce}`;
+    const isExplicitRefresh =
+      lastRefreshTriggerRef.current !== "" &&
+      lastRefreshTriggerRef.current !== currentRefreshTrigger;
+    lastRefreshTriggerRef.current = currentRefreshTrigger;
+
     for (const s of visibleSessions) {
-      if (!isSessionCollapsed(s.id)) {
-        void fetchStructure(s.id);
+      const treeCount = s.treeCount ?? structuresRef.current.get(s.id)?.length ?? 1;
+      if (!isSessionCollapsed(s.id, treeCount)) {
+        void fetchStructure(s.id, isExplicitRefresh);
       }
     }
   }, [
@@ -534,13 +540,16 @@ export function SessionSidebar() {
   };
 
   // 会话行及其嵌套「树 → 链」两层渲染。
-  // 会话行可折叠，默认展开；单树会话不画树行直接展开链；多树会话列出树行，树行默认折叠。
+  // 会话行可折叠：多树会话默认展开到树行（树行折叠），单树会话默认折叠；
+  // 传 allowNest=false（例如在 legacy 侧栏最近分组）时不嵌套铺链，避免重复（SN-3）。
   const renderRow = (
     s: Session,
     indent = 0,
     status?: RecentChain["status"],
+    allowNest = true,
   ) => {
-    const isCollapsed = isSessionCollapsed(s.id);
+    const treeCount = s.treeCount ?? structures.get(s.id)?.length ?? 1;
+    const isCollapsed = isSessionCollapsed(s.id, treeCount);
     const sessionTrees = structures.get(s.id);
 
     return (
@@ -553,8 +562,10 @@ export function SessionSidebar() {
           running={isRunning(s.id)}
           unread={unreadIds.has(s.id)}
           status={status}
+          collapsible={allowNest}
           collapsed={isCollapsed}
-          onToggle={() => toggleSessionCollapsed(s.id)}
+          isPinned={pinnedIds.includes(s.id)}
+          onToggle={() => toggleSessionCollapsed(s.id, treeCount)}
           location={SIDEBAR_V2 && layout === "time" ? sessionLocation(s, projects) : undefined}
           herdr={SIDEBAR_V2 && sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
           offline={isOfflineHerdr(s)}
@@ -562,6 +573,7 @@ export function SessionSidebar() {
           editing={editingId === s.id}
           onPreview={() => { setMobileNavOpen(false); void previewSession(s.id); }}
           onPin={() => pinSession(s.id)}
+          onUnpin={() => unpinSession(s.id)}
           onStartEdit={() => setEditingId(s.id)}
           onCancelEdit={() => setEditingId(null)}
           onCommit={async (next) => {
@@ -577,7 +589,7 @@ export function SessionSidebar() {
             }
           }}
         />
-        {!isCollapsed && sessionTrees && sessionTrees.length > 0 && (
+        {allowNest && !isCollapsed && sessionTrees && sessionTrees.length > 0 && (
           sessionTrees.length === 1 ? (
             // 只有一棵树的会话不画树行，展开直接列出它的链
             <div data-session-single-tree={s.id}>
@@ -744,7 +756,7 @@ export function SessionSidebar() {
               const folded = orderedChains.length - shown.length;
               return (
                 <div key={r.id}>
-                  {renderRow(s, 1, status)}
+                  {renderRow(s, 1, status, false)}
                   {shown.map((c) => (
                     <ChainRow
                       key={c.tipId}
@@ -1373,7 +1385,7 @@ function GroupRow({
   onRemove?: () => void;
   removeTitle?: string;
 }) {
-  const menu = useContextMenu();
+  const menu = useContextMenuWithTarget<string>();
   const menuItems = useMemo<ContextMenuItem[]>(() => {
     const items: ContextMenuItem[] = [];
     if (toggleable && onToggle) {
@@ -1415,7 +1427,7 @@ function GroupRow({
     <>
       <div
         data-sidebar-group
-        onContextMenu={menuItems.length > 0 ? menu.onContextMenu : undefined}
+        {...(menuItems.length > 0 ? menu.bindTrigger(label) : {})}
         className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 pr-1 rounded-md ${
           toggleable ? "hover:bg-surface-muted" : ""
         } ${muted ? "opacity-75" : ""}`}
@@ -1507,6 +1519,7 @@ function SidebarRow({
   status,
   collapsible = true,
   collapsed,
+  isPinned,
   onToggle,
   location,
   herdr,
@@ -1515,6 +1528,7 @@ function SidebarRow({
   editing,
   onPreview,
   onPin,
+  onUnpin,
   onStartEdit,
   onCancelEdit,
   onCommit,
@@ -1532,6 +1546,7 @@ function SidebarRow({
   status?: RecentChain["status"];
   collapsible?: boolean;
   collapsed?: boolean;
+  isPinned?: boolean;
   onToggle?: () => void;
   location?: string;
   herdr?: HerdrSessionStatus;
@@ -1541,6 +1556,7 @@ function SidebarRow({
   editing: boolean;
   onPreview: () => void;
   onPin: () => void;
+  onUnpin?: () => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onCommit: (title: string) => void | Promise<void>;
@@ -1564,8 +1580,12 @@ function SidebarRow({
             ? "完成·未读"
             : "";
 
-  const menu = useContextMenu();
+  const menu = useContextMenuWithTarget<Session>();
   const menuItems = useMemo<ContextMenuItem[]>(() => [
+    {
+      label: isPinned ? "取消固定" : "固定会话",
+      onSelect: isPinned ? (onUnpin ?? onPin) : onPin,
+    },
     {
       label: "重命名",
       onSelect: onStartEdit,
@@ -1579,7 +1599,7 @@ function SidebarRow({
       danger: true,
       onSelect: onDelete,
     },
-  ], [session.archived, onStartEdit, onArchive, onDelete]);
+  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onDelete]);
 
   useEffect(() => {
     if (editing) {
@@ -1602,7 +1622,7 @@ function SidebarRow({
         data-session-archived={session.archived || undefined}
         data-herdr-pane={herdr?.paneId || undefined}
         data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
-        onContextMenu={editing ? undefined : menu.onContextMenu}
+        {...(editing ? {} : menu.bindTrigger(session))}
         className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1 cursor-pointer transition-colors overflow-hidden ${
           indicatorStatus === "waiting" || indicatorStatus === "streaming"
             ? // Running tint (accent) + left accent bar (added below). Overrides
@@ -1810,7 +1830,7 @@ function TreeRow({
   onOpen: () => void;
 }) {
   const time = formatRelativeTimeShort(tree.activityAt);
-  const menu = useContextMenu();
+  const menu = useContextMenuWithTarget<SessionTree>();
   const menuItems = useMemo<ContextMenuItem[]>(() => [
     {
       label: "打开该树",
@@ -1827,7 +1847,7 @@ function TreeRow({
       <div
         data-sidebar-tree-row
         data-root-id={tree.rootId}
-        onContextMenu={menu.onContextMenu}
+        {...menu.bindTrigger(tree)}
         onClick={onOpen}
         style={{ paddingLeft: PAD(indent) }}
         className={`${ROW_HEIGHT_CLASS} group relative mx-1 rounded-md flex items-center gap-1.5 pr-1.5 cursor-pointer transition-colors overflow-hidden ${
@@ -1931,7 +1951,7 @@ function ChainRow({
             ? " · 未读"
             : "";
 
-  const menu = useContextMenu();
+  const menu = useContextMenuWithTarget<RecentChain | SessionTreeChain>();
   const menuItems = useMemo<ContextMenuItem[]>(() => [
     {
       label: "打开此链",
@@ -1946,7 +1966,7 @@ function ChainRow({
         data-mobile-target="session-chain-row"
         data-tip-id={chain.tipId}
         onClick={onOpen}
-        onContextMenu={menu.onContextMenu}
+        {...menu.bindTrigger(chain)}
         style={{ paddingLeft: PAD(indent) }}
         // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
         // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。

@@ -2554,8 +2554,8 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
   );
 }
 
-export function listSessionChains(sessionId: string): RecentChainRow[] {
-  return queryChainRows("s.id = ?", [sessionId]);
+export function listSessionChains(sessionId: string, limit = 200): RecentChainRow[] {
+  return queryChainRows("s.id = ?", [sessionId], limit);
 }
 
 // 会话内未雪藏的树数 —— 最近分组据此决定链行要不要带树名前缀（单树会话

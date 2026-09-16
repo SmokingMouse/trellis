@@ -586,6 +586,8 @@ type Actions = {
   // Double-click / "keep open": move into pinned (deduped, appended) +
   // clear preview if it was previewing this id + load it.
   pinSession: (sessionId: string) => Promise<void>;
+  // Remove from pinned tabs without closing or switching the active tab.
+  unpinSession: (sessionId: string) => void;
   // Close a tab (the × on a tab). If pinned → remove from pinned. If it was
   // the preview → clear preview. If we closed the active session, switch to
   // an adjacent still-open tab, else drop to the new-conversation screen.
@@ -1057,6 +1059,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // would reset node positions to (0,0) without changing layoutKey, leaving
     // every node stacked at the origin. Only switch when it's a different one.
     if (get().session?.id !== sessionId) await get().loadSession(sessionId);
+  },
+
+  unpinSession: (sessionId) => {
+    const { pinnedSessionIds } = get();
+    const nextPinned = pinnedSessionIds.filter((id) => id !== sessionId);
+    if (nextPinned.length !== pinnedSessionIds.length) {
+      persistPinned(nextPinned);
+      set({ pinnedSessionIds: nextPinned });
+    }
   },
 
   closeTab: (sessionId) => {
