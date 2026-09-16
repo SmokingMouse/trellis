@@ -77,7 +77,7 @@ describe("lib/ttyd-dependency", () => {
       expect(summary).not.toContain("/non-existent-bin/ttyd: 不存在");
     });
 
-    it("当有路径存在但无法执行时，展开列出所有尝试过的路径及具体原因", () => {
+    it("当有路径存在但无法执行时，只展开真正失败的条目，不把「不存在」的路径刷出来", () => {
       const mockResult = {
         path: null,
         tried: [
@@ -86,7 +86,7 @@ describe("lib/ttyd-dependency", () => {
         ],
       };
       const summary = probeSummary(mockResult);
-      expect(summary).toBe("/bin/mock-ttyd-1: 不存在; /bin/mock-ttyd-2: EACCES");
+      expect(summary).toBe("/bin/mock-ttyd-2: EACCES");
     });
   });
 

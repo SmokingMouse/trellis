@@ -195,11 +195,18 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
     // 重新探测：先单独探 targetPath（只用它自己跑 --version，M3）
     const singleFailure = probeSingleExecutable(targetPath, "--version");
     if (singleFailure) {
+      // 跑不起来的二进制不能留在 ~/.trellis/bin：它是候选表第一条，留着会让此后每次探测
+      // 都先撞上 ENOEXEC，探测详情随之刷满整个 PATH（复审 n1）。删掉，回到「未安装」态。
+      try {
+        fs.unlinkSync(targetPath);
+      } catch {
+        // 删不掉也只是多一条探测失败记录，不影响返回
+      }
       return {
         ok: false,
         path: null,
         tried: [singleFailure],
-        error: `已下载到 ${targetPath} 但无法执行：${singleFailure.reason}。手动命令：${manualCmd}`,
+        error: `已下载到 ${targetPath} 但无法执行（${singleFailure.reason}），已删除。手动命令：${manualCmd}`,
         platform,
         arch,
       };
@@ -216,13 +223,9 @@ export async function installTtyd(options?: InstallTtydOptions): Promise<Install
     };
   } catch (err: unknown) {
     let message = err instanceof Error ? err.message : String(err);
-    if (
-      err instanceof Error &&
-      (err.name === "TimeoutError" ||
-        err.name === "AbortError" ||
-        message.includes("timed out") ||
-        message.includes("timeout"))
-    ) {
+    // 只认 AbortSignal.timeout 抛出的错误名，不按文案猜：网关返回的任何带 "timeout" 字样的
+    // 错误都不该被改写成「下载超时」而吞掉真实原因（复审 n2）。
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
       message = `下载超时（${Math.round(timeoutMs / 1000)}s）`;
     }
 

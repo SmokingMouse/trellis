@@ -58,8 +58,6 @@ export function ttydHostDependencyNote(): string {
   return `Web 终端依赖宿主机安装 ttyd（${serverTtydInstallHint()}）`;
 }
 
-export const TTYD_HOST_DEPENDENCY_NOTE = ttydHostDependencyNote();
-
 /** 获取当前环境下的 ttyd 候选路径列表（按优先级从高到低） */
 export function ttydCandidates(): string[] {
   const list: string[] = [];
@@ -203,11 +201,10 @@ export function probeExecutable(
 /** 把探测过程压成一行给日志/界面看：列出所有尝试过的路径及原因。若所有路径都不存在，则折叠输出。 */
 export function probeSummary(r: ProbeResult): string {
   if (r.tried.length === 0) return "没有候选路径";
-  const nonExistent = r.tried.filter((t) => t.reason === "不存在");
-  if (nonExistent.length === r.tried.length) {
-    return `探过 ${r.tried.length} 个路径，都不存在`;
-  }
-  return r.tried.map((t) => `${t.path}: ${t.reason}`).join("; ");
+  // 全是「不存在」时说人话；混合态只展开真正失败的那几条，别把整段 PATH 刷进界面。
+  const real = r.tried.filter((t) => t.reason !== "不存在");
+  if (real.length === 0) return `探过 ${r.tried.length} 个路径，都不存在`;
+  return real.map((t) => `${t.path}: ${t.reason}`).join("; ");
 }
 
 export function firstWorkingExecutable(paths: string[], probeArg: string): string | null {
