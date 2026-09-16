@@ -763,5 +763,9 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
 - [ ] cxint-fix: 修 Codex 线程 turn/interrupt 后命令子进程仍活着：interrupt 时结束 exec 会话、补 item/completed、线程回 idle 可 close（sm-toolkit packages/agent-server） | kind: codex
   cid: fj-cxint-fix-5e70
 - [ ] cxint-review: 独立复核 fix/codex-interrupt-exec：隔离 daemon 真机复跑 interrupt、三条反例、测试真红、证据可复现 | after: cxint-fix | mode: readonly | kind: claude
+  cid: fj-cxint-review-f43c
 - [ ] cli-as-bridge: 调研 apps/cli（llm）与 agent-server 打通：现状链路、三条方案与估算、推荐切片、真机验证网关模型经 as/1 起线程 | mode: readonly | kind: claude
   cid: fj-cli-as-bridge-0b2e
+- [ ] cxint-fix3: 第三轮：Codex 线程 interrupt 后真正终止命令子进程（AS 侧快照后代 pid 并收割 + close/退出连坐进程组），撤掉无效的 mapper 记账改动，用复核坐席的隔离 daemon 复现脚本当硬验收 | after: cxint-review
+  cid: fj-cxint-fix3-5ed2
+- [ ] cxint-review3: 第三轮异源复核（Codex）：用 cxint-harness 脚本 A/C/D 自己复跑、回退核心改动看单测是否变红、检查 detached 进程组不伤 daemon 与其它线程、逐条核对对上一轮 P0/P1/P2 的处置 | after: cxint-fix3 | mode: readonly | kind: codex
