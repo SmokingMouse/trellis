@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-体验优化五件（飞书互动卡片、Linux ttyd 自愈、卡片图导出、右键菜单、侧栏嵌套树链）已上线 d048752；待用户在飞书实发一条带图消息验卡片；网关 codex 号池 auth_unavailable 待恢复。
+动线优化已上线 3a57be2（PR #64）：Workflow 行按参考稿重做 + 动线行安静化，两轮异源 review 全过；待用户在真实 Workflow 运行里看一次运行中态；网关 codex 号池已恢复。
 
 ## Goals
 
@@ -20,7 +20,7 @@
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S174） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S176） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块

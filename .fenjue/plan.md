@@ -14,7 +14,7 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
 - [ ] review: 异源 review impl：参考稿对齐度、降级铁律（视图不匹配回 RawView、error 永远全显）、桌面零回归、手机 44px、脚本实跑 | after: impl | mode: readonly | keep-seat
   cid: fj-review-f461
   以 impl 的 worktree 为输入；fail 只认结论/行为错、伪造、凭证泄露、破坏现有测试。
-- [ ] release: 起位前问用户：impl 分支合 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review2 | gate: review2
+- [x] release: 起位前问用户：impl 分支合 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review2 | gate: review2
   动生产，起位前必须问用户（授权卡）。
 - [ ] fix1: 按 review M1/M2/m1 返工：畸形快照回 RawView 不抛错、错误行渲染 stderr、折叠预算按实际列数；脚本端口/锁可覆盖 | seat: worker
   cid: fj-fix1-0af4
