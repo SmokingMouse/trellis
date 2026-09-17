@@ -9,8 +9,15 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-baseline-3a12
   交付 out/baseline.md 与 out/shots/*.png；只读、不改源码；供 impl 做 before/after 对照。不依赖参考稿，可立即起。
 - [ ] impl: 按参考稿重做动线卡（ToolTimeline/ToolRow）与 WorkflowView：单一时间线 + dynamic workflow 进度面板对齐参考效果，桌面与手机各验一遍
+  cid: fj-impl-c36d
   阻塞：等用户提供 final.html（10.37.126.170 内网，本机不可达）；拿到后由 leader 读稿写具体目标再起。参考 progress/agent-flow-rendering.md 与 facts.md 第 45–47 条（workflow_progress 全量快照字段）。不依赖 baseline 的代码，只把它的截图当输入，故不写 after。
 - [ ] review: 异源 review impl：参考稿对齐度、降级铁律（视图不匹配回 RawView、error 永远全显）、桌面零回归、手机 44px、脚本实跑 | after: impl | mode: readonly | keep-seat
+  cid: fj-review-f461
   以 impl 的 worktree 为输入；fail 只认结论/行为错、伪造、凭证泄露、破坏现有测试。
-- [ ] release: 起位前问用户：impl 分支合 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review | gate: review
+- [ ] release: 起位前问用户：impl 分支合 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | after: review2 | gate: review2
   动生产，起位前必须问用户（授权卡）。
+- [ ] fix1: 按 review M1/M2/m1 返工：畸形快照回 RawView 不抛错、错误行渲染 stderr、折叠预算按实际列数；脚本端口/锁可覆盖 | seat: worker
+  cid: fj-fix1-0af4
+  输入 /tmp/flow-review-r1/（review.md + 两个探针）；不写 after：review 的 M1/M2 结论已在手，其余动态项与本单无关。
+- [ ] review2: 复审 fix1：用同一探针重打 M1/M2/m1，复跑四条 verify 与 workflow-card.sh，浅色截图，生产 chunk 无 store 把手 | after: fix1 | mode: readonly | seat: reviewer-codex | keep-seat
+  以 fix1 后的分支 tip 为输入；fail 只认四种。

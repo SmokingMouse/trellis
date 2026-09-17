@@ -276,3 +276,6 @@
 - [fj-ui-polish-3b86] 合入前收尾（sidebar-nest 分支，含 panel-menu）：X-1 store 调试钩子只在验证构建暴露、X | accepted | reworks=0 | 2026-09-16T19:39:49+08:00 | c0bfff068bfb
 - [fj-ship-3f07] 起位前问用户：五条已验收分支合入 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | accepted | reworks=0 | 2026-09-16T20:32:19+08:00 | e9b3c8dad38e
 - [fj-baseline-3a12] 现状记录：隔离实例 + 真库副本，截图桌面/手机的动线卡、Workflow 面板、子 agent 卡、长跑 Bash 行 | accepted | reworks=0 | 2026-09-17T18:04:02+08:00 | 3dcfa2111270
+- [fj-impl-c36d] 按参考稿重做动线卡（ToolTimeline/ToolRow）与 WorkflowView：单一时间线 + dynami | accepted | reworks=0 | 2026-09-17T20:27:34+08:00 | 5ab90ff0faaf
+- [fj-review-f461] 异源 review impl：参考稿对齐度、降级铁律（视图不匹配回 RawView、error 永远全显）、桌面零回归、 | accepted | reworks=1 | 2026-09-17T20:46:08+08:00 | cd267492ae7c
+- [fj-fix1-0af4] 按 review M1/M2/m1 返工：畸形快照回 RawView 不抛错、错误行渲染 stderr、折叠预算按实际列 | accepted | reworks=0 | 2026-09-17T20:56:16+08:00 | 90d861ca6be3
