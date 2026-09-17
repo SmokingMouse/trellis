@@ -10,7 +10,15 @@ import type { ToolNode } from "@/lib/tool-tree";
 
 const MAX_OUTPUT_LINES = 200;
 
-export function RawView({ node }: { node: ToolNode }) {
+// 形参签名与 ToolViewProps 对齐（不 import，避免和 views/index 成环）：
+// ToolRow 把同一组 props 喂给 RawView 和任意自定义 view。
+export function RawView({
+  node,
+}: {
+  node: ToolNode;
+  live?: boolean;
+  children?: React.ReactNode;
+}) {
   const { call } = node;
   return (
     <>

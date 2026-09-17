@@ -10,6 +10,7 @@ import {
   type ToolNode,
 } from "@/lib/tool-tree";
 import type { ToolCall, ToolCallStats, WorkflowAgentEntry } from "@/lib/types";
+import { agentStateOf } from "@/lib/workflow-view";
 import { useSessionStore } from "@/stores/sessionStore";
 import { TimelineList, useElapsed } from "./ToolRow";
 
@@ -59,11 +60,15 @@ export function ToolTimeline({
   const chain = live ? runningChain(tree) : [];
 
   return (
-    <div className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
+    <div
+      className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60"
+      data-tool-timeline={nodeId}
+    >
       <button
         type="button"
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
+        data-tool-timeline-head=""
         className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted transition-colors"
       >
         <span
@@ -206,7 +211,9 @@ function leafStep(leaf: ToolNode): string | null {
     const agents = (leaf.meta.workflowProgress ?? []).filter(
       (e): e is WorkflowAgentEntry => e.type === "workflow_agent",
     );
-    const running = agents.filter((a) => a.state !== "done");
+    // 「没跑完」不等于「在跑」—— 排队中的 agent 挤进来的话，面包屑会指着一个
+    // 还没开始的名字说它正在跑。
+    const running = agents.filter((a) => agentStateOf(a.state) === "running");
     return running.length > 0 ? running[running.length - 1].label : null;
   }
   return null;

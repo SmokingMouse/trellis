@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useElapsed } from "@/hooks/useElapsed";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import { defaultOpen, toolIcon, toolSummary, toolTitle } from "@/lib/tool-registry";
@@ -10,9 +11,11 @@ import {
   type TimelineEntry,
   type ToolNode,
 } from "@/lib/tool-tree";
+import { workflowStatusOf } from "@/lib/workflow-view";
 import { Pill } from "../ui/Pill";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
+import { WorkflowHead } from "./views/WorkflowChrome";
 
 // The timeline's rendering layer, three pieces in one file (they're mutually
 // recursive — a sub-agent's body renders a TimelineList of its own):
@@ -189,44 +192,61 @@ export function ToolRow({
   const elapsed = useElapsed(live && node.running ? node.call.startedAt : null);
   const nestedErrors = node.kind === "tool" ? 0 : nestedErrorCount(node);
 
+  const workflow = node.kind === "workflow";
+
   return (
-    <div className="bg-surface/60">
+    <div
+      className="bg-surface/60"
+      data-tool-row={node.kind}
+      data-workflow-card={
+        workflow ? workflowStatusOf(node, live) : undefined
+      }
+    >
       <button
         type="button"
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
-        className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted/60 transition-colors"
+        data-workflow-head={workflow ? "" : undefined}
+        className={`w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted/60 transition-colors ${
+          workflow ? "flex-wrap pointer-coarse:min-h-[44px]" : ""
+        }`}
       >
         <span
-          className="text-ink-faint transition-transform shrink-0"
+          className="text-ink-faint transition-transform motion-reduce:transition-none shrink-0"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
           ▸
         </span>
-        <StatusPill node={node} live={live} />
-        <span className="shrink-0 select-none text-ink-faint" aria-hidden>
-          {rowIcon(node)}
-        </span>
-        <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
-        <span className="text-ink-muted truncate min-w-0">
-          {rowSummary(node) ?? ""}
-        </span>
-        <span className="flex-1" />
-        {nestedErrors > 0 && (
-          // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
-          <span className="text-nano text-danger-ink shrink-0">
-            {nestedErrors} 失败
-          </span>
+        {workflow ? (
+          <WorkflowHead node={node} live={live} elapsed={elapsed} />
+        ) : (
+          <>
+            <StatusPill node={node} live={live} />
+            <span className="shrink-0 select-none text-ink-faint" aria-hidden>
+              {rowIcon(node)}
+            </span>
+            <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
+            <span className="text-ink-muted truncate min-w-0">
+              {rowSummary(node) ?? ""}
+            </span>
+            <span className="flex-1" />
+            {nestedErrors > 0 && (
+              // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
+              <span className="text-nano text-danger-ink shrink-0">
+                {nestedErrors} 失败
+              </span>
+            )}
+            <span className="text-nano tabular-nums text-ink-faint shrink-0">
+              {statLine(node, elapsed)}
+            </span>
+          </>
         )}
-        <span className="text-nano tabular-nums text-ink-faint shrink-0">
-          {statLine(node, elapsed)}
-        </span>
       </button>
 
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-2">
-          <Body node={node}>
+          <Body node={node} live={live}>
             <TimelineList nodes={node.children} live={live} depth={depth + 1} />
           </Body>
           {/* A custom view owns its own body, but children still have to land
@@ -270,7 +290,9 @@ export function rowAutoOpen(
   live: boolean,
   currentTodo = false,
 ): boolean {
-  if (node.call.status === "error") return true;
+  // 工具本身报错，或者委派的任务回报 failed（task_updated）—— 两种都是失败，
+  // 只认前一种的话，一个跑挂的 Workflow 会安静地收成一行「已失败」。
+  if (node.call.status === "error" || node.meta.status === "failed") return true;
   if (live && node.running && node.kind !== "tool") return true;
   if (currentTodo) return true;
   if (live) return false;
@@ -342,17 +364,6 @@ function statLine(node: ToolNode, elapsed: number | null): string {
   return parts.join(" · ");
 }
 
-// Ticking elapsed time for a running call. task_progress only lands between
-// tool calls, so leaning on its duration_ms leaves the counter frozen through
-// a long Bash — the one moment the user most wants to see it moving.
-// Returns null when not running (callers fall back to the recorded duration).
-export function useElapsed(startedAt: number | null): number | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (startedAt === null) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [startedAt]);
-  if (startedAt === null) return null;
-  return Math.max(0, now - startedAt);
-}
+// 秒表搬去了 hooks/useElapsed（Workflow 表头与面板都要用，留在这里会成环）。
+// 这里保留出口，调用点不必改。
+export { useElapsed };

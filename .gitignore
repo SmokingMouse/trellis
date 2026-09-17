@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-mobile-followup-verify/
+/.next-workflow-card-verify/
 /out/
 
 # production
