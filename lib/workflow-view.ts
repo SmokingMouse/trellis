@@ -52,10 +52,27 @@ export const WORKFLOW_STATUS_LABEL: Record<WorkflowStatus, string> = {
   killed: "已终止",
 };
 
-/** 超过这个数量的阶段自动分栏（两栏 grid，保持 index 顺序）。 */
+/** 超过这个数量的阶段自动分栏（auto-fill grid，保持 index 顺序）。 */
 export const GRID_THRESHOLD = 8;
 /** 分栏之后仍然超过这么多行，尾部连续的安静行折起来。 */
 export const MAX_ROWS = 12;
+/** 一栏的最小宽与栏间距 —— 和 WorkflowView 里那条 auto-fill grid 是同一组数。 */
+export const AGENT_COL_MIN = 280;
+export const AGENT_COL_GAP = 16;
+
+/**
+ * 容器宽 → CSS `auto-fill, minmax(280px, 1fr)` 实际排得出几栏。
+ *
+ * 量不到（SSR、还没挂载、宽度是 0）按 2 栏 —— 桌面是常态，先按它铺，
+ * ResizeObserver 一量到真宽度就会纠正。
+ */
+export function columnsForWidth(width: number | null | undefined): number {
+  if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) return 2;
+  return Math.max(
+    1,
+    Math.floor((width + AGENT_COL_GAP) / (AGENT_COL_MIN + AGENT_COL_GAP)),
+  );
+}
 
 export type WorkflowAgentVM = {
   entry: WorkflowAgentEntry;
@@ -95,16 +112,66 @@ export type WorkflowVM = {
   hasDetail: boolean;
 };
 
-export function phasesOf(node: ToolNode): WorkflowPhaseEntry[] {
-  return (node.meta.workflowProgress ?? []).filter(
-    (e): e is WorkflowPhaseEntry => e.type === "workflow_phase",
+// ── 快照形状守卫 ──────────────────────────────────────────────────────────
+//
+// `workflow_progress` 是 CLI 直接塞进来、原样落库的 JSON，没人替我们校过形状。
+// 类型声明说它是数组，运行时不保证：一个非数组的值会让 `.filter is not a
+// function` 把整条动线炸成空白页 —— 比「这一行看不懂」坏得多。
+//
+// 纪律是「一处不合规，整份快照作废」，而不是把坏条目筛掉接着画：半份快照算出
+// 来的 4/11 是骗人的数字，退回 RawView 至少把原始 JSON 摆在眼前，能排查。
+//
+// 唯一的例外是**将来新增的 entry 类型**：type 不是这两种的条目照旧忽略
+// （types.ts 上那条约定），那不是畸形，是前向兼容。
+
+function isPhaseEntry(e: unknown): e is WorkflowPhaseEntry {
+  if (typeof e !== "object" || e === null) return false;
+  const p = e as Partial<WorkflowPhaseEntry>;
+  return (
+    p.type === "workflow_phase" &&
+    typeof p.title === "string" &&
+    typeof p.index === "number"
   );
 }
 
+function isAgentEntry(e: unknown): e is WorkflowAgentEntry {
+  if (typeof e !== "object" || e === null) return false;
+  const a = e as Partial<WorkflowAgentEntry>;
+  return a.type === "workflow_agent" && typeof a.label === "string";
+}
+
+function entryShapeOk(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
+  const type = (e as { type?: unknown }).type;
+  if (type === "workflow_phase") return isPhaseEntry(e);
+  if (type === "workflow_agent") return isAgentEntry(e);
+  return true;
+}
+
+/**
+ * 这份快照能不能信。**表头、正文、面包屑共用的那一个守卫** —— 三处各读各的
+ * 快照，只守其中一处等于没守。
+ *
+ * 没有快照（undefined / null）不算畸形：那是「还没来」或者「老 daemon 不发」，
+ * 表头会照常出现并注明「暂无阶段明细」。
+ */
+export function hasValidWorkflowProgress(node: ToolNode): boolean {
+  const raw: unknown = node.meta.workflowProgress;
+  if (raw === undefined || raw === null) return true;
+  return Array.isArray(raw) && raw.every(entryShapeOk);
+}
+
+function entriesOf(node: ToolNode): unknown[] {
+  const raw: unknown = node.meta.workflowProgress;
+  return Array.isArray(raw) ? raw : [];
+}
+
+export function phasesOf(node: ToolNode): WorkflowPhaseEntry[] {
+  return entriesOf(node).filter(isPhaseEntry);
+}
+
 export function agentsOf(node: ToolNode): WorkflowAgentEntry[] {
-  return (node.meta.workflowProgress ?? []).filter(
-    (e): e is WorkflowAgentEntry => e.type === "workflow_agent",
-  );
+  return entriesOf(node).filter(isAgentEntry);
 }
 
 export function hasWorkflowDetail(node: ToolNode): boolean {
@@ -244,7 +311,7 @@ function quiet(a: WorkflowAgentVM): boolean {
 }
 
 export type AgentLayout = {
-  /** 两栏 grid（minmax(280px,1fr)），保持 index 顺序。 */
+  /** 分栏 grid（auto-fill minmax(280px,1fr)），保持 index 顺序。 */
   grid: boolean;
   visible: WorkflowAgentVM[];
   folded: WorkflowAgentVM[];
@@ -253,13 +320,25 @@ export type AgentLayout = {
   lessLabel: string;
 };
 
-export function layoutAgents(agents: WorkflowAgentVM[]): AgentLayout {
+/**
+ * @param columns 容器**实际**排得出的栏数（columnsForWidth 量出来的）。
+ *   12 行预算说的是屏幕上的行，不是「假装永远两栏」算出来的行：同样 24 个
+ *   agent，桌面两栏是 12 行该全铺，手机一栏是 24 行该折尾。缺省 2 = SSR 与
+ *   首帧的桌面假设。
+ */
+export function layoutAgents(
+  agents: WorkflowAgentVM[],
+  columns = 2,
+): AgentLayout {
   const grid = agents.length > GRID_THRESHOLD;
-  const rows = (n: number) => (grid ? Math.ceil(n / 2) : n);
+  const cols = grid
+    ? Math.max(1, Math.floor(Number.isFinite(columns) ? columns : 2))
+    : 1;
+  const rows = (n: number) => Math.ceil(n / cols);
   let fold = 0;
   if (rows(agents.length) > MAX_ROWS) {
     // 折叠按钮自己也占一整行 —— 预算因此是 MAX_ROWS - 1 行。
-    const budget = (MAX_ROWS - 1) * (grid ? 2 : 1);
+    const budget = (MAX_ROWS - 1) * cols;
     let tail = 0;
     while (tail < agents.length && quiet(agents[agents.length - 1 - tail])) {
       tail++;

@@ -1,18 +1,20 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import type { ToolNode } from "@/lib/tool-tree";
 import {
   agentDetailRows,
   buildWorkflowVM,
+  columnsForWidth,
+  hasValidWorkflowProgress,
   hasWorkflowDetail,
   layoutAgents,
   shortModelName,
   type WorkflowAgentVM,
   type WorkflowPhaseVM,
 } from "@/lib/workflow-view";
-import { OutputView, Section } from "../RawView";
+import { OutputView, Section, StderrView } from "../RawView";
 import { AgentStateIcon } from "./WorkflowChrome";
 
 // The Workflow tool's phase tree — 那条工具行展开后的正文。
@@ -29,7 +31,10 @@ export function canRenderWorkflow(node: ToolNode): boolean {
   // A resumed / instantly-failed run can finish before any snapshot arrives.
   // With no phases and no agents there is nothing this view can say that the
   // raw body doesn't say better —— 表头会补一句「暂无阶段明细」，不留空壳。
-  return hasWorkflowDetail(node);
+  //
+  // 形状不对的快照走同一条降级路：宁可把原始 JSON 摆出来，也不拿一份自己都
+  // 校不过的数据算进度。表头那边的守卫在 ToolRow —— 同一个 helper。
+  return hasValidWorkflowProgress(node) && hasWorkflowDetail(node);
 }
 
 export function WorkflowView({
@@ -84,6 +89,11 @@ export function WorkflowView({
           <OutputView text={node.call.output} />
         </Section>
       )}
+
+      {/* 接管 body 就得连错误输出一起接管：一个有合法阶段明细的失败 Workflow
+          以前只画 output，stderr 唯一的渲染路径是「明细缺失退回 RawView」——
+          等于越是画得出漂亮进度树的失败行，越看不到它为什么挂。 */}
+      {node.call.stderr && <StderrView text={node.call.stderr} />}
     </>
   );
 }
@@ -110,8 +120,25 @@ function PhaseBlock({ phase }: { phase: WorkflowPhaseVM }) {
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? phase.defaultOpen;
   const toggleable = phase.total > 0;
-  const layout = layoutAgents(phase.agents);
   const [showAll, setShowAll] = useState(false);
+
+  // 「12 行」得是屏幕上真的 12 行。栏数由 CSS auto-fill 决定（桌面 2–4 栏、
+  // 手机 1 栏），所以这里量容器宽再反算 —— 写死两栏的话，手机上 24 个 agent
+  // 会当成 12 行原样铺开，正好是最需要折叠的那一屏。
+  const [columns, setColumns] = useState(2);
+  const observer = useRef<ResizeObserver | null>(null);
+  // 回调 ref：列表只在展开时进 DOM，unmount 会带着 null 回来，顺手断开。
+  const listRef = useCallback((el: HTMLUListElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      setColumns(columnsForWidth(entry.contentRect.width));
+    });
+    ro.observe(el);
+    observer.current = ro;
+  }, []);
+  const layout = layoutAgents(phase.agents, columns);
 
   return (
     <div className="mt-px first:mt-0" data-workflow-phase={phase.title}>
@@ -138,17 +165,19 @@ function PhaseBlock({ phase }: { phase: WorkflowPhaseVM }) {
           {phase.countText}
         </span>
         {phase.metaText && (
-          <span className="ml-auto shrink-0 font-mono text-nano tabular-nums text-ink-faint max-[560px]:ml-0">
+          <span className="ml-auto shrink-0 font-mono text-nano tabular-nums text-ink-faint narrow:ml-0">
             {phase.metaText}
           </span>
         )}
       </button>
       {toggleable && open && (
         <ul
+          ref={listRef}
           className={`list-none m-0 mb-0.5 p-0 pl-4 ${
             layout.grid ? "grid gap-x-4" : ""
           }`}
           data-workflow-agents={layout.grid ? "grid" : "rows"}
+          data-workflow-columns={layout.grid ? columns : 1}
           style={
             layout.grid
               ? {
@@ -232,11 +261,16 @@ function AgentRow({
             </span>
           )}
         </span>
-        <span className="flex flex-wrap items-center justify-end gap-x-2 font-mono text-nano leading-4 tabular-nums text-ink-faint">
+        {/* 模型短名 / 耗时 / token 都是要读的数值，浅色下 ink-faint 配 nano
+            字号偏淡，提一档到 ink-muted。排队行例外 —— 它还没有数值可读，
+            那一行本来就该弱下去。 */}
+        <span
+          className={`flex flex-wrap items-center justify-end gap-x-2 font-mono text-nano leading-4 tabular-nums ${META_TONE[agent.state]}`}
+        >
           {model && (
             // 窄屏第一个让位的就是它 —— 保住「一个 agent 一行」。
             <span
-              className="inline-block max-[560px]:hidden max-w-36 truncate px-1.5 rounded border border-line bg-surface-muted text-nano leading-[15px] font-medium text-ink-faint"
+              className="inline-block narrow:hidden max-w-36 truncate px-1.5 rounded border border-line bg-surface-muted text-nano leading-[15px] font-medium"
               data-workflow-model
               title={
                 a.fallbackModel ? `降级自 ${a.model ?? "—"}` : (a.model ?? "")
@@ -246,14 +280,10 @@ function AgentRow({
             </span>
           )}
           {a.durationMs !== undefined && (
-            <b className="font-normal text-ink-faint">
-              {formatDuration(a.durationMs)}
-            </b>
+            <b className="font-normal">{formatDuration(a.durationMs)}</b>
           )}
           {a.tokens !== undefined && (
-            <b className="font-normal text-ink-faint">
-              {formatTokens(a.tokens)}
-            </b>
+            <b className="font-normal">{formatTokens(a.tokens)}</b>
           )}
         </span>
       </li>
@@ -298,6 +328,16 @@ const LABEL_TONE: Record<WorkflowAgentVM["state"], string> = {
   queued: "text-ink-faint",
   failed: "text-danger-ink",
   killed: "text-ink-faint",
+};
+
+// 右侧数值区的墨色。只有排队行弱化 —— 它那一栏是空的（没耗时、没 token），
+// 弱下去正好；已终止的行标签虽然也弱，但它手里是真跑出来的数字，该读得清。
+const META_TONE: Record<WorkflowAgentVM["state"], string> = {
+  done: "text-ink-muted",
+  running: "text-ink-muted",
+  queued: "text-ink-faint",
+  failed: "text-ink-muted",
+  killed: "text-ink-muted",
 };
 
 function Preview({ label, text }: { label: string; text: string }) {

@@ -170,8 +170,12 @@ export function WorkflowHead({
         {node.meta.workflowName ?? "Workflow"}
       </span>
       <WorkflowChip status={vm.status} />
+      {/* 这一行全是要**读**的数值（进度、用时、token、次调用），浅色下
+          ink-faint（stone-400 on #fff）配 nano 字号偏淡 —— 数值提一档到
+          ink-muted，单位词留在 faint 当注脚。深色不回退：ink-muted 在暗色是
+          stone-400，比 ink-faint 的 stone-500 更亮，对比只增不减。 */}
       <span
-        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 ml-auto font-mono text-nano leading-4 tabular-nums text-ink-faint max-[560px]:ml-0 max-[560px]:w-full max-[560px]:pl-5 max-[560px]:justify-start"
+        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 ml-auto font-mono text-nano leading-4 tabular-nums text-ink-muted narrow:ml-0 narrow:w-full narrow:pl-5 narrow:justify-start"
         data-workflow-meta
       >
         {vm.hasDetail && (
@@ -186,16 +190,14 @@ export function WorkflowHead({
         {ms !== null && <span>{formatDuration(ms)}</span>}
         {node.meta.totalTokens ? (
           <span>
-            <i className="not-italic text-ink-faint">
-              {formatTokens(node.meta.totalTokens)}
-            </i>{" "}
-            tokens
+            {formatTokens(node.meta.totalTokens)}{" "}
+            <i className="not-italic text-ink-faint">tokens</i>
           </span>
         ) : null}
         {node.meta.toolUses ? (
           <span>
-            <i className="not-italic text-ink-faint">{node.meta.toolUses}</i>{" "}
-            次调用
+            {node.meta.toolUses}{" "}
+            <i className="not-italic text-ink-faint">次调用</i>
           </span>
         ) : null}
         {!vm.hasDetail && <span className="text-ink-faint">暂无阶段明细</span>}

@@ -5,7 +5,9 @@ import {
   agentDetailRows,
   agentStateOf,
   buildWorkflowVM,
+  columnsForWidth,
   GRID_THRESHOLD,
+  hasValidWorkflowProgress,
   layoutAgents,
   MAX_ROWS,
   shortModelName,
@@ -206,6 +208,127 @@ describe("layoutAgents", () => {
       vms([...Array(22).fill("done"), ...Array(4).fill("done"), ...Array(4).fill("queued")]),
     );
     expect(l.moreLabel).toBe("… 还有 8 个（4 已完成 / 4 排队中）");
+  });
+
+  // 12 行预算说的是**屏幕上**的 12 行。栏数由 CSS auto-fill 决定，写死两栏的
+  // 后果是：手机一栏时 24 个 agent 当成 12 行原样铺开（实际 24 行），桌面四栏
+  // 时 30 个当成 15 行去折（实际 8 行，根本不该折）。
+  describe(`预算按实际列数算（恰好 ${MAX_ROWS} 行不折、再多一行才折）`, () => {
+    for (const columns of [1, 2, 3]) {
+      const exact = MAX_ROWS * columns;
+      test(`${columns} 栏：${exact} 个正好 ${MAX_ROWS} 行，不折`, () => {
+        const l = layoutAgents(vms(Array(exact).fill("done")), columns);
+        expect(l.folded).toHaveLength(0);
+        expect(l.visible).toHaveLength(exact);
+      });
+
+      test(`${columns} 栏：${exact + 1} 个多出一行，折尾`, () => {
+        const l = layoutAgents(vms(Array(exact + 1).fill("done")), columns);
+        expect(l.folded.length).toBeGreaterThan(0);
+        // 折叠按钮自己占一行，可见行数加上它仍在预算内。
+        expect(Math.ceil(l.visible.length / columns) + 1).toBeLessThanOrEqual(MAX_ROWS);
+      });
+    }
+
+    test("缺省仍是两栏 —— SSR 与首帧量不到宽度时的桌面假设", () => {
+      expect(layoutAgents(vms(Array(25).fill("done"))).folded).toHaveLength(
+        layoutAgents(vms(Array(25).fill("done")), 2).folded.length,
+      );
+      expect(layoutAgents(vms(Array(24).fill("done"))).folded).toHaveLength(0);
+    });
+
+    test("单栏时 running / failed 尾巴照样不折", () => {
+      const l = layoutAgents(vms([...Array(20).fill("done"), "running"]), 1);
+      expect(l.folded).toHaveLength(0);
+    });
+
+    test("栏数是脏值时不算出 NaN 行（NaN 退回 2 栏，0 夹到 1 栏）", () => {
+      const dirty = layoutAgents(vms(Array(25).fill("done")), Number.NaN);
+      expect(dirty.visible).toHaveLength(22);
+      expect(layoutAgents(vms(Array(25).fill("done")), 0).visible).toHaveLength(11);
+    });
+  });
+});
+
+describe("columnsForWidth", () => {
+  test("按 280px 最小栏宽 + 16px 间距反算 auto-fill 的栏数", () => {
+    expect(columnsForWidth(390)).toBe(1);
+    expect(columnsForWidth(279)).toBe(1);
+    expect(columnsForWidth(280)).toBe(1);
+    expect(columnsForWidth(576)).toBe(2);
+    expect(columnsForWidth(575)).toBe(1);
+    expect(columnsForWidth(872)).toBe(3);
+    expect(columnsForWidth(1200)).toBe(4);
+  });
+
+  test("量不到宽度（SSR / 未挂载 / 0）按两栏", () => {
+    expect(columnsForWidth(null)).toBe(2);
+    expect(columnsForWidth(undefined)).toBe(2);
+    expect(columnsForWidth(0)).toBe(2);
+    expect(columnsForWidth(Number.NaN)).toBe(2);
+  });
+});
+
+// 快照是 CLI 原样落库的 JSON，形状不由我们保证。一处不合规整份作废 ——
+// 表头 / 正文 / 面包屑共用这一个守卫，半份快照算出来的进度是骗人的。
+describe("hasValidWorkflowProgress", () => {
+  const raw = (progress: unknown) =>
+    buildToolTree([
+      call({
+        agent: {
+          taskType: "local_workflow",
+          workflowName: "wf",
+          workflowProgress: progress as never,
+        },
+      }),
+    ])[0];
+
+  test("没有快照不算畸形 —— 那是老 daemon / 还没来", () => {
+    expect(hasValidWorkflowProgress(raw(undefined))).toBe(true);
+    expect(hasValidWorkflowProgress(raw(null))).toBe(true);
+    expect(hasValidWorkflowProgress(raw([]))).toBe(true);
+  });
+
+  test("非数组一律作废，且取阶段 / agent 不抛", () => {
+    for (const bad of [{}, "progress", 42, true]) {
+      expect(hasValidWorkflowProgress(raw(bad))).toBe(false);
+      expect(() => buildWorkflowVM(raw(bad), false)).not.toThrow();
+      expect(buildWorkflowVM(raw(bad), false).hasDetail).toBe(false);
+    }
+  });
+
+  test("缺 title 的阶段 / 缺 label 的 agent 作废", () => {
+    expect(hasValidWorkflowProgress(raw([{ type: "workflow_phase", index: 1 }]))).toBe(false);
+    expect(
+      hasValidWorkflowProgress(raw([{ type: "workflow_phase", index: 1, title: 7 }])),
+    ).toBe(false);
+    expect(
+      hasValidWorkflowProgress(raw([{ type: "workflow_phase", title: "Alpha" }])),
+    ).toBe(false);
+    expect(
+      hasValidWorkflowProgress(raw([{ type: "workflow_agent", index: 1, state: "running" }])),
+    ).toBe(false);
+    expect(hasValidWorkflowProgress(raw([null]))).toBe(false);
+  });
+
+  test("形状对的快照照旧放行", () => {
+    expect(
+      hasValidWorkflowProgress(
+        raw([
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_agent", index: 2, phaseIndex: 1, label: "a-1", state: "done" },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  test("将来新增的 entry 类型只是被忽略，不算畸形", () => {
+    const n = raw([
+      { type: "workflow_phase", index: 1, title: "Alpha" },
+      { type: "workflow_checkpoint", index: 9 },
+    ]);
+    expect(hasValidWorkflowProgress(n)).toBe(true);
+    expect(buildWorkflowVM(n, false).phases).toHaveLength(1);
   });
 });
 

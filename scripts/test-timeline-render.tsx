@@ -389,6 +389,90 @@ console.log("\n── 降级与铁律");
   check("stderr 不被 resultPolicy 吞掉", withStderr.includes("command not found"));
 }
 
+// ── 畸形 workflow_progress：整行不许抛，一律回 RawView ────────────────────
+//
+// 这三个反例来自异源 review（fj-review-f461）的 probe-malformed：workflowProgress
+// 是 CLI 原样落库的 JSON，形状不由我们保证。非数组那条当时直接
+// `.filter is not a function` 把整行炸了，另外两条更阴 —— 不抛，但拿缺 title /
+// 缺 label 的条目照画，表头上是一份没人校过的进度。钉死在这里，别再回去。
+console.log("\n── 畸形快照：不抛、回 RawView、表头退成普通行头");
+{
+  const malformed = (id: string, progress: unknown) =>
+    renderRow([
+      base({
+        id,
+        name: "Workflow",
+        status: "error",
+        input: { marker: "RAW_INPUT_SENTINEL" },
+        output: "ERROR_OUTPUT_SENTINEL",
+        agent: {
+          taskType: "local_workflow",
+          workflowName: "malformed-wf",
+          // 运行时真来过这种值；类型声明挡不住 CLI。
+          workflowProgress: progress as never,
+        },
+      }),
+    ]);
+
+  for (const [label, progress] of [
+    ["progress-not-array", {}],
+    ["phase-missing-title", [{ type: "workflow_phase", index: 1 }]],
+    ["agent-missing-label", [{ type: "workflow_agent", index: 1, state: "running" }]],
+  ] as const) {
+    let html = "";
+    let threw: unknown = null;
+    try {
+      html = malformed(label, progress);
+    } catch (err) {
+      threw = err;
+    }
+    check(`${label}：整行不抛`, threw === null, threw === null ? undefined : String(threw));
+    check(`${label}：正文回 RawView`, html.includes("RAW_INPUT_SENTINEL"));
+    check(`${label}：表头退回普通行头（不画进度轨）`, !html.includes("data-workflow-rail"));
+  }
+
+  // 未来新增的 entry 类型不算畸形 —— 两个 filter 都不认，忽略即可（types.ts）。
+  const forward = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      status: "error",
+      input: {},
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "forward-wf",
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_agent", index: 2, phaseIndex: 1, label: "alpha-1", state: "done" },
+          { type: "workflow_checkpoint", index: 9 },
+        ] as never,
+      },
+    }),
+  ]);
+  check("将来新增的 entry 类型只是被忽略，不触发降级", forward.includes("data-workflow-phase"));
+
+  // 有合法明细的失败行：专用 view 接管 body 之后，stderr 仍然得有渲染路径。
+  const validError = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      status: "error",
+      input: {},
+      output: Array.from({ length: 205 }, (_, i) => `ERROR_LINE_${i}`).join("\n"),
+      stderr: "STDERR_SENTINEL",
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "valid-error",
+        workflowProgress: [{ type: "workflow_phase", index: 1, title: "Alpha" }],
+      },
+    }),
+  ]);
+  check("有合法明细时仍然走 WorkflowView（没有被误降级）", validError.includes("data-workflow-phase"));
+  check("有合法明细的失败 Workflow 能看到 stderr", validError.includes("STDERR_SENTINEL"));
+  check("长 output 先铺前 200 行", validError.includes("ERROR_LINE_0"));
+  check("长 output 留着展开到末行的按钮", validError.includes("展开剩余 5 行"));
+}
+
 // ── 冷热分段 ─────────────────────────────────────────────────────────────
 // 本次重排的核心：已完成的普通工具连跑折成一枚段落 chip（冷），委派骨架、
 // 失败、正在跑的行、当前计划常驻（热）。

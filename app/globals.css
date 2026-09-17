@@ -8,6 +8,12 @@
    layout.tsx sets it before paint to avoid FOUC. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* 参考稿的窄屏断点是「≤560px」，**含** 560。Tailwind 的 max-[560px] 编出来
+   是 `width < 560px`，正好把 560 这一点漏在宽屏那侧（559 收窄、560 却还是宽
+   版）。自定义一个包含边界的 variant，别用 max-[560.5px] 这种把意图藏进小数
+   里的写法。用法：narrow:hidden / narrow:w-full。 */
+@custom-variant narrow (@media (width <= 560px));
+
 /* Highlight.js：只装 dark 一套 —— 「代码块恒暗」是设计决策（原来的
    light 层因 layer 顺序恒被 dark 覆盖，本就是死代码，已删）。
    要让某个主题用浅色代码块，覆盖 --code-* 变量并手写 ~20 行 hljs

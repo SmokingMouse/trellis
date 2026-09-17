@@ -1,6 +1,6 @@
-// Fixture 生成器：把 Workflow 动线卡的五种状态写成 SQL，喂给隔离实例的库副本。
+// Fixture 生成器：把 Workflow 动线卡的六种状态写成 SQL，喂给隔离实例的库副本。
 //
-//   运行中 / 已完成 / 已失败 / 无阶段明细 / 53 个 agent 的规模态
+//   运行中 / 已完成 / 已失败 / 失败带 stderr / 无阶段明细 / 53 个 agent 的规模态
 //   外加一个普通动线节点（普通行 + 子 Agent + 长跑 Bash 同框，给 P1 行语言拍照）
 //
 // 用法：bun scripts/mobile-verify/workflow-card-fixture.ts > fixture.sql
@@ -215,6 +215,53 @@ const failedCalls: ToolCall[] = [
   }),
 ];
 
+// ── 3b · 工具本身报错 + 有合法明细 + stderr ───────────────────────────────
+//
+// 这一态专治「专用 view 接管 body 就把错误输出弄丢了」：明细画得越漂亮，越该
+// 看得到它究竟往 stderr 吐了什么。output 故意超过 200 行，顺带证明长输出只是
+// 折叠、不是丢失（末行留在「展开剩余 n 行」后面）。
+
+const STDERR_TEXT = [
+  "Error: workflow aborted after phase Review",
+  "    at pipeline (workflow://review-changes:42:11)",
+  "    at agent review:security (workflow://review-changes:58:7)",
+  "caused by: agent exited with code 1 (attempt 2/2)",
+  "WORKFLOW_STDERR_SENTINEL",
+].join("\n");
+
+const stderrCalls: ToolCall[] = [
+  call({ id: "e0", name: "Read", input: { file_path: "/repo/lib/workflow-view.ts" } }),
+  call({
+    id: "e1",
+    name: "Workflow",
+    status: "error",
+    durationMs: 361000,
+    endedAt: T0 + 361000,
+    input: { script: SCRIPT },
+    output: [
+      ...Array.from(
+        { length: 204 },
+        (_, i) => `[review-changes] step ${String(i + 1).padStart(3, "0")} … ok`,
+      ),
+      "WORKFLOW_OUTPUT_LAST_LINE",
+    ].join("\n"),
+    stderr: STDERR_TEXT,
+    agent: {
+      taskType: "local_workflow",
+      taskId: "wl2zl75gq",
+      phase: "completed",
+      status: "failed",
+      workflowName: "review-changes",
+      prompt: SCRIPT,
+      summary: 'Dynamic workflow "review-changes" failed',
+      totalTokens: 388000,
+      toolUses: 94,
+      durationMs: 361000,
+      workflowProgress: progress(WF_PHASES, failedAgents),
+    },
+  }),
+];
+
 // ── 4 · 无阶段明细（旧 daemon / 秒挂的 resume） ───────────────────────────
 
 const bareCalls: ToolCall[] = [
@@ -385,6 +432,7 @@ const fixtures: Fixture[] = [
   { key: "running", title: "Workflow 运行中", question: "跑一轮 review", response: "我先看一下事件定义，然后跑一轮 review。", calls: runningCalls, streaming: true },
   { key: "completed", title: "Workflow 已完成", question: "跑一轮 review", response: "跑完了，四个确认发现都写进 out/review.md 了。", calls: completedCalls },
   { key: "failed", title: "Workflow 已失败", question: "跑一轮 review", response: "review:security 这一路挂了，重试一次仍然退出码 1。", calls: failedCalls },
+  { key: "stderr", title: "Workflow 失败带 stderr", question: "跑一轮 review", response: "挂在 review:security 上了，stderr 里是完整堆栈。", calls: stderrCalls },
   { key: "bare", title: "Workflow 无阶段明细", question: "resume 那个 workflow", response: "这次是 resume 跑的，daemon 没回进度快照。", calls: bareCalls },
   { key: "scale", title: "Workflow 53 个 agent", question: "跑 kb-eval", response: "53 个 agent 正在按阶段推进。", calls: scaleCalls, streaming: true },
   { key: "p1", title: "动线行语言", question: "改一下 ToolRow", response: "改完了，测试全绿，tsc 那条我马上修。", calls: p1Calls },

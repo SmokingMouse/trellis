@@ -11,7 +11,7 @@ import {
   type TimelineEntry,
   type ToolNode,
 } from "@/lib/tool-tree";
-import { workflowStatusOf } from "@/lib/workflow-view";
+import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
 import { Pill } from "../ui/Pill";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
@@ -192,7 +192,10 @@ export function ToolRow({
   const elapsed = useElapsed(live && node.running ? node.call.startedAt : null);
   const nestedErrors = node.kind === "tool" ? 0 : nestedErrorCount(node);
 
-  const workflow = node.kind === "workflow";
+  // 表头自己也读快照（WorkflowHead → buildWorkflowVM），所以只给 body 装
+  // canRender 守卫是不够的 —— 畸形快照会从表头这一侧把整行炸掉。同一个守卫，
+  // 不合规就退回普通行头：名称、图标、状态胶囊都还在，只是不画进度轨。
+  const workflow = node.kind === "workflow" && hasValidWorkflowProgress(node);
 
   return (
     <div
