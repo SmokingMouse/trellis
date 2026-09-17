@@ -275,3 +275,4 @@
 - [fj-review-ui2-26c7] 复审三条 UI 返工：SN-1 默认行数 222、PM-1 地图不崩、mobile-branch-chain 隔离复跑、 | accepted | reworks=0 | 2026-09-16T19:19:25+08:00 | 2c04241ab452
 - [fj-ui-polish-3b86] 合入前收尾（sidebar-nest 分支，含 panel-menu）：X-1 store 调试钩子只在验证构建暴露、X | accepted | reworks=0 | 2026-09-16T19:39:49+08:00 | c0bfff068bfb
 - [fj-ship-3f07] 起位前问用户：五条已验收分支合入 main、全套脚本实跑、make deploy 上线并验活，失败即回退 | accepted | reworks=0 | 2026-09-16T20:32:19+08:00 | e9b3c8dad38e
+- [fj-baseline-3a12] 现状记录：隔离实例 + 真库副本，截图桌面/手机的动线卡、Workflow 面板、子 agent 卡、长跑 Bash 行 | accepted | reworks=0 | 2026-09-17T18:04:02+08:00 | 3dcfa2111270
