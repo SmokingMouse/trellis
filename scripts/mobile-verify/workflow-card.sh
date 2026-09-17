@@ -64,9 +64,16 @@ close_browser_session() {
   return 0
 }
 
+SCRIPT_DONE=0
+
 cleanup() {
   cleanup_status=$?
   trap - 0
+  # 早退防假绿：没走到末尾的 PASS 标记就一律非零（bash 3.2 下 set -u 报错进 trap 时 $? 可能仍是 0）
+  if [ "$cleanup_status" -eq 0 ] && [ "${SCRIPT_DONE:-0}" != "1" ]; then
+    echo "FAIL: workflow card 脚本在到达最终 PASS 前退出（假绿拦截）" >&2
+    cleanup_status=1
+  fi
   close_browser_session
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
@@ -469,7 +476,7 @@ SCALE_FOLD=$(ab eval --stdin <<'JS'
 })()
 JS
 )
-echo "✓ desktop scale: $SCALE_FOLD（按实际列数算的预算）"
+echo "✓ desktop scale: ${SCALE_FOLD}（按实际列数算的预算）"
 if [ "$SCALE_FOLD" = "fold" ]; then
   ab click '[data-workflow-phase="Gate3"] [data-workflow-more]'
   wait_for_js "folded rows expanded" "document.querySelector('[data-workflow-phase=\"Gate3\"] [data-workflow-more]')?.getAttribute('aria-expanded') === 'true'"
@@ -634,7 +641,7 @@ for want in 559 560 561; do
 JS
 )
   case "$bp" in
-    *"$want|"*) echo "✓ ${want}px → $bp（宽|模型隐藏|表头换行）" ;;
+    *"$want|"*) echo "✓ ${want}px → ${bp}（宽|模型隐藏|表头换行）" ;;
     *) echo "FAIL: ${want}px 没量准，实得 $bp"; exit 1 ;;
   esac
 done
@@ -753,5 +760,6 @@ ab eval --stdin <<'JS'
 JS
 ab screenshot "$SHOTS/mobile-workflow-scale.png" >/dev/null
 
+SCRIPT_DONE=1
 echo "PASS: workflow card — 折叠规则 / 阶段规则 / 元信息面板 / 分栏与折叠 / 窄屏与 44px 全部通过"
 echo "shots: $SHOTS"
