@@ -10,7 +10,15 @@ import type { ToolNode } from "@/lib/tool-tree";
 
 const MAX_OUTPUT_LINES = 200;
 
-export function RawView({ node }: { node: ToolNode }) {
+// 形参签名与 ToolViewProps 对齐（不 import，避免和 views/index 成环）：
+// ToolRow 把同一组 props 喂给 RawView 和任意自定义 view。
+export function RawView({
+  node,
+}: {
+  node: ToolNode;
+  live?: boolean;
+  children?: React.ReactNode;
+}) {
   const { call } = node;
   return (
     <>
@@ -24,14 +32,21 @@ export function RawView({ node }: { node: ToolNode }) {
           <OutputView text={call.output} />
         </Section>
       )}
-      {call.stderr && (
-        <Section label="stderr">
-          <pre className="text-label font-mono whitespace-pre-wrap break-words bg-danger-muted border border-danger-line rounded px-2 py-1.5 max-h-48 overflow-auto text-danger-ink">
-            {call.stderr}
-          </pre>
-        </Section>
-      )}
+      {call.stderr && <StderrView text={call.stderr} />}
     </>
+  );
+}
+
+// 单独成件是因为它不止 RawView 要用：任何自定义 view 一旦接管了 body，就同时
+// 接管了「错误输出不许消失」这条铁律（WorkflowView 曾经只画 output，失败行的
+// stderr 因此无处可达）。同一个组件，不是同一套 class 抄两遍。
+export function StderrView({ text }: { text: string }) {
+  return (
+    <Section label="stderr">
+      <pre className="text-label font-mono whitespace-pre-wrap break-words bg-danger-muted border border-danger-line rounded px-2 py-1.5 max-h-48 overflow-auto text-danger-ink">
+        {text}
+      </pre>
+    </Section>
   );
 }
 

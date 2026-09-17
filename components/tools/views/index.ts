@@ -16,7 +16,12 @@ import { canRenderWorkflow, WorkflowView } from "./WorkflowView";
 // silently renders a blank card is worse than the raw JSON it replaced. When
 // canRender says no, ToolRow falls back to RawView.
 
-export type ToolViewProps = { node: ToolNode; children?: ReactNode };
+export type ToolViewProps = {
+  node: ToolNode;
+  /** 这一轮还在流式中。只有需要区分「正在发生 / 已经发生」的 view 会用。 */
+  live?: boolean;
+  children?: ReactNode;
+};
 
 export type ToolView = {
   Component: ComponentType<ToolViewProps>;

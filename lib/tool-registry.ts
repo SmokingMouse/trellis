@@ -107,7 +107,9 @@ const REGISTRY: Record<string, ToolMeta> = {
     // The input is a multi-KB script; JSON-stringifying it (the old fallback)
     // produced an unreadable blob as the summary line.
     summary: () => null,
-    defaultOpen: true,
+    // 没有 defaultOpen 是有意的：跑着的时候 rowAutoOpen 已经让它保持展开并随
+    // 快照刷新，跑完就该收成一行摘要 —— 表头本身说得完（名称 · 状态 · 进度 ·
+    // agents · 用时 · token），再摊开一整棵已经凉了的阶段树只是占屏。
   },
 
   // ── planning / interaction ─────────────────────────────────────────────

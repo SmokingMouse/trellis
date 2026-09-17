@@ -30,7 +30,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     ".next-mobile-followup-verify/types/**/*.ts",
-    ".next-mobile-followup-verify/dev/types/**/*.ts"
+    ".next-mobile-followup-verify/dev/types/**/*.ts",
+    ".next-workflow-card-verify/types/**/*.ts",
+    ".next-workflow-card-verify/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

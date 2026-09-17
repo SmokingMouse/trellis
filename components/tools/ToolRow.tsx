@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useElapsed } from "@/hooks/useElapsed";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import { defaultOpen, toolIcon, toolSummary, toolTitle } from "@/lib/tool-registry";
@@ -10,9 +11,11 @@ import {
   type TimelineEntry,
   type ToolNode,
 } from "@/lib/tool-tree";
+import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
 import { Pill } from "../ui/Pill";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
+import { WorkflowHead } from "./views/WorkflowChrome";
 
 // The timeline's rendering layer, three pieces in one file (they're mutually
 // recursive — a sub-agent's body renders a TimelineList of its own):
@@ -107,10 +110,10 @@ function SegmentRow({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
-        className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:text-ink-muted transition-colors group"
+        className="w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:text-ink-muted transition-colors group pointer-coarse:min-h-[44px]"
       >
         <span
-          className="transition-transform shrink-0"
+          className="transition-transform motion-reduce:transition-none shrink-0"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
@@ -127,7 +130,7 @@ function SegmentRow({
           {open ? "已展开" : "已自动收起"}
         </span>
         <span className="flex-1" />
-        <span className="text-nano tabular-nums shrink-0">
+        <span className="font-mono text-nano tabular-nums shrink-0">
           {segmentDuration(nodes)}
         </span>
       </button>
@@ -189,44 +192,66 @@ export function ToolRow({
   const elapsed = useElapsed(live && node.running ? node.call.startedAt : null);
   const nestedErrors = node.kind === "tool" ? 0 : nestedErrorCount(node);
 
+  // 表头自己也读快照（WorkflowHead → buildWorkflowVM），所以只给 body 装
+  // canRender 守卫是不够的 —— 畸形快照会从表头这一侧把整行炸掉。同一个守卫，
+  // 不合规就退回普通行头：名称、图标、状态胶囊都还在，只是不画进度轨。
+  const workflow = node.kind === "workflow" && hasValidWorkflowProgress(node);
+
   return (
-    <div className="bg-surface/60">
+    <div
+      className="bg-surface/60"
+      data-tool-row={node.kind}
+      data-workflow-card={
+        workflow ? workflowStatusOf(node, live) : undefined
+      }
+    >
       <button
         type="button"
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
-        className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted/60 transition-colors"
+        data-workflow-head={workflow ? "" : undefined}
+        className={`w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:bg-surface-muted/60 transition-colors ${
+          workflow
+            ? "flex-wrap pointer-coarse:min-h-[44px]"
+            : ""
+        }`}
       >
         <span
-          className="text-ink-faint transition-transform shrink-0"
+          className="text-ink-faint transition-transform motion-reduce:transition-none shrink-0"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
           ▸
         </span>
-        <StatusPill node={node} live={live} />
-        <span className="shrink-0 select-none text-ink-faint" aria-hidden>
-          {rowIcon(node)}
-        </span>
-        <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
-        <span className="text-ink-muted truncate min-w-0">
-          {rowSummary(node) ?? ""}
-        </span>
-        <span className="flex-1" />
-        {nestedErrors > 0 && (
-          // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
-          <span className="text-nano text-danger-ink shrink-0">
-            {nestedErrors} 失败
-          </span>
+        {workflow ? (
+          <WorkflowHead node={node} live={live} elapsed={elapsed} />
+        ) : (
+          <>
+            <StatusPill node={node} live={live} />
+            <span className="shrink-0 select-none text-ink-faint" aria-hidden>
+              {rowIcon(node)}
+            </span>
+            <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
+            <span className="text-ink-muted truncate min-w-0">
+              {rowSummary(node) ?? ""}
+            </span>
+            <span className="flex-1" />
+            {nestedErrors > 0 && (
+              // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
+              <span className="text-nano text-danger-ink shrink-0">
+                {nestedErrors} 失败
+              </span>
+            )}
+            <span className="font-mono text-nano tabular-nums text-ink-faint shrink-0">
+              {statLine(node, elapsed)}
+            </span>
+          </>
         )}
-        <span className="text-nano tabular-nums text-ink-faint shrink-0">
-          {statLine(node, elapsed)}
-        </span>
       </button>
 
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-2">
-          <Body node={node}>
+          <Body node={node} live={live}>
             <TimelineList nodes={node.children} live={live} depth={depth + 1} />
           </Body>
           {/* A custom view owns its own body, but children still have to land
@@ -270,7 +295,9 @@ export function rowAutoOpen(
   live: boolean,
   currentTodo = false,
 ): boolean {
-  if (node.call.status === "error") return true;
+  // 工具本身报错，或者委派的任务回报 failed（task_updated）—— 两种都是失败，
+  // 只认前一种的话，一个跑挂的 Workflow 会安静地收成一行「已失败」。
+  if (node.call.status === "error" || node.meta.status === "failed") return true;
   if (live && node.running && node.kind !== "tool") return true;
   if (currentTodo) return true;
   if (live) return false;
@@ -299,6 +326,12 @@ function rowSummary(node: ToolNode): string | null {
   return toolSummary(node.call);
 }
 
+/**
+ * 行首状态胶囊 —— 只在有话要说的时候出现。
+ *
+ * 跑完的普通行不再挂「完成」：一屏 40 行绿胶囊，等于没有胶囊，还把真正要人
+ * 看的失败 / 运行中挤没了。失败、运行中、已中断三种仍然显示。
+ */
 export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
   if (node.running) {
     return live ? (
@@ -320,11 +353,7 @@ export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
       </Pill>
     );
   }
-  return (
-    <Pill tone="positive" className="shrink-0">
-      完成
-    </Pill>
-  );
+  return null;
 }
 
 // "3 工具 · 12.4k · 8s". Counts come from the CLI's own task_progress usage
@@ -342,17 +371,6 @@ function statLine(node: ToolNode, elapsed: number | null): string {
   return parts.join(" · ");
 }
 
-// Ticking elapsed time for a running call. task_progress only lands between
-// tool calls, so leaning on its duration_ms leaves the counter frozen through
-// a long Bash — the one moment the user most wants to see it moving.
-// Returns null when not running (callers fall back to the recorded duration).
-export function useElapsed(startedAt: number | null): number | null {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (startedAt === null) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [startedAt]);
-  if (startedAt === null) return null;
-  return Math.max(0, now - startedAt);
-}
+// 秒表搬去了 hooks/useElapsed（Workflow 表头与面板都要用，留在这里会成环）。
+// 这里保留出口，调用点不必改。
+export { useElapsed };

@@ -9,7 +9,12 @@ import {
   subagentLabel,
   type ToolNode,
 } from "@/lib/tool-tree";
-import type { ToolCall, ToolCallStats, WorkflowAgentEntry } from "@/lib/types";
+import type { ToolCall, ToolCallStats } from "@/lib/types";
+import {
+  agentStateOf,
+  agentsOf,
+  hasValidWorkflowProgress,
+} from "@/lib/workflow-view";
 import { useSessionStore } from "@/stores/sessionStore";
 import { TimelineList, useElapsed } from "./ToolRow";
 
@@ -59,11 +64,15 @@ export function ToolTimeline({
   const chain = live ? runningChain(tree) : [];
 
   return (
-    <div className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
+    <div
+      className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60"
+      data-tool-timeline={nodeId}
+    >
       <button
         type="button"
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
+        data-tool-timeline-head=""
         className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted transition-colors"
       >
         <span
@@ -203,10 +212,15 @@ function crumbLabel(n: ToolNode): string {
 function leafStep(leaf: ToolNode): string | null {
   if (leaf.kind === "subagent") return leaf.meta.lastToolName ?? null;
   if (leaf.kind === "workflow") {
-    const agents = (leaf.meta.workflowProgress ?? []).filter(
-      (e): e is WorkflowAgentEntry => e.type === "workflow_agent",
+    // 快照形状不对就整份作废（和表头 / 正文同一个守卫）：面包屑宁可少说一格，
+    // 也不能拿一份自己都校不过的数据指着谁说它正在跑 —— 何况直接 filter 一个
+    // 非数组会把整条动线炸掉。
+    if (!hasValidWorkflowProgress(leaf)) return null;
+    // 「没跑完」不等于「在跑」—— 排队中的 agent 挤进来的话，面包屑会指着一个
+    // 还没开始的名字说它正在跑。
+    const running = agentsOf(leaf).filter(
+      (a) => agentStateOf(a.state) === "running",
     );
-    const running = agents.filter((a) => a.state !== "done");
     return running.length > 0 ? running[running.length - 1].label : null;
   }
   return null;

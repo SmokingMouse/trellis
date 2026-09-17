@@ -12,6 +12,7 @@ import { buildToolTree, type ToolNode } from "@/lib/tool-tree";
 import type { ToolCall } from "@/lib/types";
 import { ToolTimeline } from "@/components/tools/ToolTimeline";
 import { rowAutoOpen, TimelineList, ToolRow } from "@/components/tools/ToolRow";
+import { WorkflowView } from "@/components/tools/views/WorkflowView";
 
 let failures = 0;
 function check(label: string, ok: boolean, got?: unknown) {
@@ -140,7 +141,76 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
   check("子调用本身渲染出来", sub.includes("x.ts"));
   check("交给它的任务可见", sub.includes("去查一下"));
 
-  const wf = renderRow([
+  const wf = renderRow(
+    [
+      base({
+        id: "1",
+        name: "Workflow",
+        status: "running",
+        input: { script: "export const meta = {}" },
+        agent: {
+          taskType: "local_workflow",
+          workflowName: "probe-wf",
+          totalTokens: 312000,
+          toolUses: 87,
+          workflowProgress: [
+            { type: "workflow_phase", index: 1, title: "Alpha" },
+            { type: "workflow_phase", index: 2, title: "Beta" },
+            {
+              type: "workflow_agent",
+              index: 1,
+              label: "alpha-1",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              model: "claude-opus-5[1m]",
+              state: "done",
+              tokens: 25175,
+              durationMs: 8855,
+              resultPreview: "ALPHA_OK",
+            },
+            // 还没跑完的 agent 让 Alpha 保持活跃 —— 活跃 phase 才铺开 agent 行。
+            {
+              type: "workflow_agent",
+              index: 2,
+              label: "alpha-2",
+              phaseIndex: 1,
+              phaseTitle: "Alpha",
+              model: "claude-haiku-4-5-20251001",
+              attempt: 2,
+              state: "start",
+            },
+            {
+              type: "workflow_agent",
+              index: 3,
+              label: "beta-1",
+              phaseIndex: 2,
+              phaseTitle: "Beta",
+              state: "queued",
+            },
+          ],
+        },
+      }),
+    ],
+    true,
+  );
+  check("Workflow 表头点名工作流", wf.includes("probe-wf") && wf.includes("Workflow"));
+  check("表头挂运行中胶囊", wf.includes("运行中"));
+  check("表头报 n/m agents", wf.includes("1/3 agents"));
+  check("表头报 token 与次调用", wf.includes("312k") && wf.includes("87"));
+  check("表头带进度轨", wf.includes("data-workflow-rail"));
+  check("运行中露出「当前 阶段: agent」", wf.includes("当前") && wf.includes("Alpha: alpha-2"));
+  check("Workflow 渲染出 phase 树", wf.includes("Alpha") && wf.includes("Beta"));
+  check("活跃 phase 铺开 agent 行", wf.includes("alpha-1") && wf.includes("alpha-2"));
+  check("phase 头部带完成计数", wf.includes("1/2"));
+  check("phase 头部报运行中数量", wf.includes("1 运行中"));
+  check("全部排队的 phase 默认收起且写明", wf.includes("全部排队中") && !wf.includes("beta-1"));
+  check("模型短名去掉厂商前缀与日期", wf.includes("opus-5[1m]") && wf.includes("haiku-4-5"));
+  check("重试次数挂在 label 上", wf.includes("×2"));
+  check("agent 元信息面板默认不进 DOM（点行才展开）", !wf.includes("最近活动"));
+  check("Workflow 脚本收进折叠区而不是摘要行", wf.includes("工作流脚本"));
+
+  // 跑完就收成一行：表头自己是摘要，阶段树是冷数据。
+  const doneWorkflowCalls = [
     base({
       id: "1",
       name: "Workflow",
@@ -148,9 +218,9 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
       agent: {
         taskType: "local_workflow",
         workflowName: "probe-wf",
+        summary: 'Dynamic workflow "probe-wf" completed',
         workflowProgress: [
           { type: "workflow_phase", index: 1, title: "Alpha" },
-          { type: "workflow_phase", index: 2, title: "Beta" },
           {
             type: "workflow_agent",
             index: 1,
@@ -158,58 +228,78 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
             phaseIndex: 1,
             phaseTitle: "Alpha",
             state: "done",
-            tokens: 25175,
-            durationMs: 8855,
             resultPreview: "ALPHA_OK",
           },
-          // 还没跑完的 agent 让 Alpha 保持活跃 —— 活跃 phase 才铺开 agent 行。
+        ],
+      },
+    }),
+  ];
+  const wfDone = renderRow(doneWorkflowCalls);
+  check("跑完的 Workflow 收成一行（阶段树不进 DOM）", !wfDone.includes("Alpha"));
+  check("收起态的表头仍然是完整摘要", wfDone.includes("probe-wf") && wfDone.includes("已完成") && wfDone.includes("1/1 agents"));
+  check("跑完的 Workflow 不再默认展开", !rowAutoOpen(nodeOf(doneWorkflowCalls), false));
+
+  // 展开后：结果行露出 task_notification.summary（当摘要读没问题，facts #46）
+  const wfDoneOpen = renderToStaticMarkup(
+    <WorkflowView node={nodeOf(doneWorkflowCalls)} live={false} />,
+  );
+  check(
+    "展开后露出结果摘要",
+    wfDoneOpen.includes("结果") &&
+      wfDoneOpen.includes("Dynamic workflow") &&
+      wfDoneOpen.includes("completed"),
+  );
+  check("跑完的 phase 收成一行标题 + 计数", wfDoneOpen.includes("1/1 完成") && !wfDoneOpen.includes("alpha-1"));
+
+  // 失败：胶囊转 danger，失败的 agent 行永不被折叠，阶段默认铺开。
+  const wfFailed = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      input: { script: "export const meta = {}" },
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "probe-wf",
+        status: "failed",
+        summary: 'Dynamic workflow "probe-wf" failed',
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          {
+            type: "workflow_agent",
+            index: 1,
+            label: "alpha-1",
+            phaseIndex: 1,
+            state: "done",
+          },
           {
             type: "workflow_agent",
             index: 2,
             label: "alpha-2",
             phaseIndex: 1,
-            phaseTitle: "Alpha",
-            state: "start",
+            state: "failed",
           },
         ],
       },
     }),
   ]);
-  check("Workflow 渲染出 phase 树", wf.includes("Alpha") && wf.includes("Beta") && wf.includes("2 阶段"));
-  check("活跃 phase 铺开 agent 行", wf.includes("alpha-1") && wf.includes("alpha-2"));
-  check("Workflow agent 的结果预览可见", wf.includes("ALPHA_OK"));
-  check("phase 头部带完成计数", wf.includes("1/2"));
-  check("统计行报出运行中数量", wf.includes("1 运行中"));
-  check("Workflow 脚本收进折叠区而不是摘要行", wf.includes("工作流脚本"));
+  check("失败的 Workflow 表头挂已失败胶囊", wfFailed.includes("已失败"));
+  check("失败数量写进表头", wfFailed.includes("1/2 agents · 1 个已失败"));
+  check("失败的 Workflow 不收起（铁律：失败永不藏）", wfFailed.includes("data-workflow-phase"));
+  check("有失败的阶段默认铺开，失败行可见", wfFailed.includes("alpha-2"));
 
-  // 全部跑完的 phase 收成一行标题 + 计数 —— agent 行是冷数据，点击才回来。
-  const wfDone = renderRow([
+  // 无阶段明细：表头照常 + 注记，正文退化成 RawView（脚本与输出还在）。
+  const wfBare = renderRow([
     base({
       id: "1",
       name: "Workflow",
-      input: { script: "export const meta = {}" },
-      agent: {
-        taskType: "local_workflow",
-        workflowName: "probe-wf",
-        workflowProgress: [
-          { type: "workflow_phase", index: 1, title: "Alpha" },
-          {
-            type: "workflow_agent",
-            index: 1,
-            label: "alpha-1",
-            phaseIndex: 1,
-            phaseTitle: "Alpha",
-            state: "done",
-            resultPreview: "ALPHA_OK",
-          },
-        ],
-      },
+      input: { scriptPath: "/tmp/x.js" },
+      output: "workflow finished",
+      agent: { taskType: "local_workflow", workflowName: "bare-wf" },
     }),
   ]);
-  check(
-    "跑完的 phase 收成一行（agent 行不进 DOM）",
-    wfDone.includes("Alpha") && wfDone.includes("1/1") && !wfDone.includes("alpha-1"),
-  );
+  check("无明细时表头仍在并注明原因", wfBare.includes("bare-wf") && wfBare.includes("暂无阶段明细"));
+  check("无明细时不画空的阶段列表", !wfBare.includes("data-workflow-phase"));
+  check("无明细时没有进度轨（别画 0/0）", !wfBare.includes("data-workflow-rail"));
 
   const todo = renderRow([
     base({
@@ -238,10 +328,12 @@ console.log("\n── 降级与铁律");
   ]);
   check("Edit 输入不合规时降级到原始 JSON", brokenEdit.includes("old_string"));
 
+  // 失败行永远展开 —— 正好用来看没有快照时 body 有没有降级到原始视图。
   const emptyWorkflow = renderRow([
     base({
       id: "1",
       name: "Workflow",
+      status: "error",
       input: { scriptPath: "/tmp/x.js" },
       agent: { taskType: "local_workflow" },
     }),
@@ -266,6 +358,17 @@ console.log("\n── 降级与铁律");
   check("失败的 Read 仍然显示输出（resultPolicy 拦不住错误）", failedRead.includes("ENOENT"));
   check("失败的行打上失败徽章", failedRead.includes("失败"));
 
+  // 行语言：跑完的普通行安静下来，只有失败 / 运行中 / 已中断才挂徽章。
+  const quietRow = renderRow([
+    base({ id: "1", name: "Bash", input: { command: "ls" }, output: "a" }),
+  ]);
+  check("跑完的普通行不再挂「完成」胶囊", !quietRow.includes("完成"));
+  check(
+    "运行中 / 已中断仍然挂徽章",
+    renderRow([base({ id: "1", name: "Bash", status: "running" })], true).includes("运行中") &&
+      renderRow([base({ id: "1", name: "Bash", status: "running" })], false).includes("已中断"),
+  );
+
   const okRead = renderRow([
     base({ id: "1", name: "Read", input: { file_path: "/x" }, output: "整个文件内容".repeat(50) }),
   ]);
@@ -284,6 +387,90 @@ console.log("\n── 降级与铁律");
     }),
   ]);
   check("stderr 不被 resultPolicy 吞掉", withStderr.includes("command not found"));
+}
+
+// ── 畸形 workflow_progress：整行不许抛，一律回 RawView ────────────────────
+//
+// 这三个反例来自异源 review（fj-review-f461）的 probe-malformed：workflowProgress
+// 是 CLI 原样落库的 JSON，形状不由我们保证。非数组那条当时直接
+// `.filter is not a function` 把整行炸了，另外两条更阴 —— 不抛，但拿缺 title /
+// 缺 label 的条目照画，表头上是一份没人校过的进度。钉死在这里，别再回去。
+console.log("\n── 畸形快照：不抛、回 RawView、表头退成普通行头");
+{
+  const malformed = (id: string, progress: unknown) =>
+    renderRow([
+      base({
+        id,
+        name: "Workflow",
+        status: "error",
+        input: { marker: "RAW_INPUT_SENTINEL" },
+        output: "ERROR_OUTPUT_SENTINEL",
+        agent: {
+          taskType: "local_workflow",
+          workflowName: "malformed-wf",
+          // 运行时真来过这种值；类型声明挡不住 CLI。
+          workflowProgress: progress as never,
+        },
+      }),
+    ]);
+
+  for (const [label, progress] of [
+    ["progress-not-array", {}],
+    ["phase-missing-title", [{ type: "workflow_phase", index: 1 }]],
+    ["agent-missing-label", [{ type: "workflow_agent", index: 1, state: "running" }]],
+  ] as const) {
+    let html = "";
+    let threw: unknown = null;
+    try {
+      html = malformed(label, progress);
+    } catch (err) {
+      threw = err;
+    }
+    check(`${label}：整行不抛`, threw === null, threw === null ? undefined : String(threw));
+    check(`${label}：正文回 RawView`, html.includes("RAW_INPUT_SENTINEL"));
+    check(`${label}：表头退回普通行头（不画进度轨）`, !html.includes("data-workflow-rail"));
+  }
+
+  // 未来新增的 entry 类型不算畸形 —— 两个 filter 都不认，忽略即可（types.ts）。
+  const forward = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      status: "error",
+      input: {},
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "forward-wf",
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Alpha" },
+          { type: "workflow_agent", index: 2, phaseIndex: 1, label: "alpha-1", state: "done" },
+          { type: "workflow_checkpoint", index: 9 },
+        ] as never,
+      },
+    }),
+  ]);
+  check("将来新增的 entry 类型只是被忽略，不触发降级", forward.includes("data-workflow-phase"));
+
+  // 有合法明细的失败行：专用 view 接管 body 之后，stderr 仍然得有渲染路径。
+  const validError = renderRow([
+    base({
+      id: "1",
+      name: "Workflow",
+      status: "error",
+      input: {},
+      output: Array.from({ length: 205 }, (_, i) => `ERROR_LINE_${i}`).join("\n"),
+      stderr: "STDERR_SENTINEL",
+      agent: {
+        taskType: "local_workflow",
+        workflowName: "valid-error",
+        workflowProgress: [{ type: "workflow_phase", index: 1, title: "Alpha" }],
+      },
+    }),
+  ]);
+  check("有合法明细时仍然走 WorkflowView（没有被误降级）", validError.includes("data-workflow-phase"));
+  check("有合法明细的失败 Workflow 能看到 stderr", validError.includes("STDERR_SENTINEL"));
+  check("长 output 先铺前 200 行", validError.includes("ERROR_LINE_0"));
+  check("长 output 留着展开到末行的按钮", validError.includes("展开剩余 5 行"));
 }
 
 // ── 冷热分段 ─────────────────────────────────────────────────────────────
