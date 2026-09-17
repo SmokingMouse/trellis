@@ -463,6 +463,32 @@ ab click '[data-workflow-phase="Gate3"] [data-workflow-more]'
 wait_for_js "folded rows expanded for shot" "document.querySelectorAll('[data-workflow-phase=\"Gate3\"] [data-workflow-agent]').length === 30"
 ab screenshot "$SHOTS/desktop-workflow-scale.png" >/dev/null
 
+# ── 桌面：P1 行语言同框 ──────────────────────────────────────────────────
+echo "== desktop 1440x900: 普通行 + 子 Agent + 长跑 Bash 同框 =="
+open_node p1
+wait_for_js "p1 timeline" "document.querySelectorAll('[data-tool-row]').length > 0"
+ab eval --stdin <<'JS'
+(() => {
+  const rows = [...document.querySelectorAll('[data-tool-row]')];
+  const kinds = rows.map((r) => r.getAttribute('data-tool-row'));
+  for (const want of ['subagent', 'longRunning']) {
+    if (!kinds.includes(want)) throw new Error(`同框缺 ${want}: ${kinds.join(',')}`);
+  }
+  // 跑完的普通行不再挂「完成」胶囊；失败行仍然要有徽章。
+  const done = rows.find((r) => r.getAttribute('data-tool-row') === 'tool' && !r.textContent.includes('失败'));
+  if (done && done.querySelector('button').textContent.includes('完成')) {
+    throw new Error('已完成的普通行不该再挂「完成」胶囊');
+  }
+  const failed = rows.find((r) => r.textContent.includes('tsc --noEmit'));
+  if (!failed || !failed.textContent.includes('失败')) throw new Error('失败行仍然要有状态徽章');
+  const head = rows[0].querySelector('button');
+  const h = head.getBoundingClientRect().height;
+  if (h > 32) throw new Error(`普通行太高了：${h}px`);
+  return JSON.stringify({ kinds, rowHeight: +h.toFixed(2) });
+})()
+JS
+ab screenshot "$SHOTS/desktop-timeline-p1.png" >/dev/null
+
 # ── 手机 390×844 ─────────────────────────────────────────────────────────
 ab set device "iPhone 15"
 ab set viewport 390 844

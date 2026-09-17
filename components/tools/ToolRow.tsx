@@ -110,10 +110,10 @@ function SegmentRow({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
-        className="w-full px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-faint hover:text-ink-muted transition-colors group"
+        className="w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:text-ink-muted transition-colors group pointer-coarse:min-h-[44px]"
       >
         <span
-          className="transition-transform shrink-0"
+          className="transition-transform motion-reduce:transition-none shrink-0"
           style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
           aria-hidden
         >
@@ -130,7 +130,7 @@ function SegmentRow({
           {open ? "已展开" : "已自动收起"}
         </span>
         <span className="flex-1" />
-        <span className="text-nano tabular-nums shrink-0">
+        <span className="font-mono text-nano tabular-nums shrink-0">
           {segmentDuration(nodes)}
         </span>
       </button>
@@ -207,8 +207,10 @@ export function ToolRow({
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-workflow-head={workflow ? "" : undefined}
-        className={`w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted/60 transition-colors ${
-          workflow ? "flex-wrap pointer-coarse:min-h-[44px]" : ""
+        className={`w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:bg-surface-muted/60 transition-colors ${
+          workflow
+            ? "flex-wrap pointer-coarse:min-h-[44px]"
+            : ""
         }`}
       >
         <span
@@ -237,7 +239,7 @@ export function ToolRow({
                 {nestedErrors} 失败
               </span>
             )}
-            <span className="text-nano tabular-nums text-ink-faint shrink-0">
+            <span className="font-mono text-nano tabular-nums text-ink-faint shrink-0">
               {statLine(node, elapsed)}
             </span>
           </>
@@ -321,6 +323,12 @@ function rowSummary(node: ToolNode): string | null {
   return toolSummary(node.call);
 }
 
+/**
+ * 行首状态胶囊 —— 只在有话要说的时候出现。
+ *
+ * 跑完的普通行不再挂「完成」：一屏 40 行绿胶囊，等于没有胶囊，还把真正要人
+ * 看的失败 / 运行中挤没了。失败、运行中、已中断三种仍然显示。
+ */
 export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
   if (node.running) {
     return live ? (
@@ -342,11 +350,7 @@ export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
       </Pill>
     );
   }
-  return (
-    <Pill tone="positive" className="shrink-0">
-      完成
-    </Pill>
-  );
+  return null;
 }
 
 // "3 工具 · 12.4k · 8s". Counts come from the CLI's own task_progress usage

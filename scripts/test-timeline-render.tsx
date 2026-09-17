@@ -358,6 +358,17 @@ console.log("\n── 降级与铁律");
   check("失败的 Read 仍然显示输出（resultPolicy 拦不住错误）", failedRead.includes("ENOENT"));
   check("失败的行打上失败徽章", failedRead.includes("失败"));
 
+  // 行语言：跑完的普通行安静下来，只有失败 / 运行中 / 已中断才挂徽章。
+  const quietRow = renderRow([
+    base({ id: "1", name: "Bash", input: { command: "ls" }, output: "a" }),
+  ]);
+  check("跑完的普通行不再挂「完成」胶囊", !quietRow.includes("完成"));
+  check(
+    "运行中 / 已中断仍然挂徽章",
+    renderRow([base({ id: "1", name: "Bash", status: "running" })], true).includes("运行中") &&
+      renderRow([base({ id: "1", name: "Bash", status: "running" })], false).includes("已中断"),
+  );
+
   const okRead = renderRow([
     base({ id: "1", name: "Read", input: { file_path: "/x" }, output: "整个文件内容".repeat(50) }),
   ]);
