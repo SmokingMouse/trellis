@@ -20,4 +20,6 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-fix1-0af4
   输入 /tmp/flow-review-r1/（review.md + 两个探针）；不写 after：review 的 M1/M2 结论已在手，其余动态项与本单无关。
 - [ ] review2: 复审 fix1：用同一探针重打 M1/M2/m1，复跑四条 verify 与 workflow-card.sh，浅色截图，生产 chunk 无 store 把手 | after: fix1 | mode: readonly | seat: reviewer-codex | keep-seat
+  cid: fj-review2-6ef7
   以 fix1 后的分支 tip 为输入；fail 只认四种。
+  waiver: {"at":"2026-09-17T13:21:02.942Z","reason":"review2 五项 UI 修复全部复测通过，唯一 fail 项是返工带入验收脚本的假绿（bash 3.2 下 $VAR（ 吞全角字符早退、trap 返回 0）。leader 轻档自修：全部变量加花括号 + EXIT trap 拦早退，默认 locale 完整复跑到末尾 PASS（/tmp/flow-fix2-run.log，含 559/560/561 与手机规模段），提交在 feat/flow-redesign。","cid":"fj-review2-6ef7","settlement":"[\"f46037b7637e294842f94aa61e2e40705f6da1e6bac7f7de8fcf453cfa69f283\",0,[\"2026-09-17T13:17:22.351Z\",\"f46037b7637e294842f94aa61e2e40705f6da1e6bac7f7de8fcf453cfa69f283\",\"f843175729e67a063baaa9ee4da427a54dcbf51b5341348bc2e88e977fe3ca79\",7,0,\"fail\",\"5a1465686f7f797a2da4d7374bcd7c8e812ff85e06cdf67c594c3ce393febde7\"]]"}

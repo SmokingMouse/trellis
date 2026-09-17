@@ -279,3 +279,4 @@
 - [fj-impl-c36d] 按参考稿重做动线卡（ToolTimeline/ToolRow）与 WorkflowView：单一时间线 + dynami | accepted | reworks=0 | 2026-09-17T20:27:34+08:00 | 5ab90ff0faaf
 - [fj-review-f461] 异源 review impl：参考稿对齐度、降级铁律（视图不匹配回 RawView、error 永远全显）、桌面零回归、 | accepted | reworks=1 | 2026-09-17T20:46:08+08:00 | cd267492ae7c
 - [fj-fix1-0af4] 按 review M1/M2/m1 返工：畸形快照回 RawView 不抛错、错误行渲染 stderr、折叠预算按实际列 | accepted | reworks=0 | 2026-09-17T20:56:16+08:00 | 90d861ca6be3
+- [fj-review2-6ef7] 复审 fix1：用同一探针重打 M1/M2/m1，复跑四条 verify 与 workflow-card.sh，浅色截图 | accepted | reworks=0 | 2026-09-17T21:17:22+08:00 | f843175729e6
