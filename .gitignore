@@ -51,3 +51,6 @@ next-env.d.ts
 # env
 .env.local
 .env
+
+# 参考稿截图只留本机，不入库
+progress/refs/**/shots/

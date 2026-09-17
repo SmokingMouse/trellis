@@ -1,0 +1,2088 @@
+<!--
+  参考稿：Workflow 时间线卡片 · final（用户 2026-09-17 提供，原稿来自公司内网 10.37.126.170:18080/final.html）
+  本文件由 leader 抄录：CSS / SVG symbols / 「对齐要点」8 条 / A+B+D+E(failed)+F 段 / JS 全部逐字保留；
+  C 段（53 个 agent）与 E 段的 killed / paused 两卡、G 段（/workflow 提示条）只保留结构骨架，重复的 agent 行以注释说明。
+  注意：原稿的 token 名（--x-color-*）与「daemon / Run 列表 / /workflow」是另一产品的语境；trellis 实现时映射到自己的 Tailwind 语义 token，
+  挂载点是会话页 🧰 动线卡里那条 Workflow 工具行。
+-->
+<meta charset="utf-8">
+<title>Workflow 时间线卡片</title>
+<style>
+    /* ─────────────────────────────────────────────────────────────
+   Tokens — 与 app/web/src/ui/theme.css 一致（RGB 通道写法）
+   ───────────────────────────────────────────────────────────── */
+    :root {
+        --x-color-ink: 29 29 31;
+        --x-color-ink-2: 110 110 115;
+        --x-color-ink-3: 118 118 123;
+        --x-color-ink-4: 150 150 155;
+        --x-color-ink-5: 184 184 189;
+        --x-color-line: 0 0 0 / 0.06;
+        --x-color-line-2: 0 0 0 / 0.08;
+        --x-color-line-3: 0 0 0 / 0.12;
+        --x-color-tint: 0 0 0 / 0.04;
+        --x-color-tint-2: 0 0 0 / 0.06;
+        --x-color-tint-3: 0 0 0 / 0.09;
+        --x-color-canvas: 251 251 251;
+        --x-color-surface: 255 255 255;
+        --x-color-success: 92 199 145;
+        --x-color-danger: 241 125 125;
+        --x-color-warn: 243 173 90;
+        --x-color-info: 107 184 255;
+        --x-color-accent: 2 133 255;
+        --x-color-focus-ring: 107 184 255;
+        --x-color-interaction-focus: 29 29 31 / 0.1;
+        --x-color-shadow-pop: 0 0 0 / 0.08;
+        --text-3xs: 10px;
+        --text-2xs: 11px;
+        --text-xs: 12px;
+        --text-sm: 13px;
+        --text-base: 14px;
+        --shadow-card: 0 1px 2px rgb(var(--x-color-shadow-pop));
+        --shadow-sm: 0 2px 12px rgb(var(--x-color-shadow-pop));
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        color-scheme: light;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --x-color-ink: 245 245 247;
+            --x-color-ink-2: 190 190 195;
+            --x-color-ink-3: 172 172 177;
+            --x-color-ink-4: 158 158 163;
+            --x-color-ink-5: 148 148 153;
+            --x-color-line: 255 255 255 / 0.08;
+            --x-color-line-2: 255 255 255 / 0.1;
+            --x-color-line-3: 255 255 255 / 0.14;
+            --x-color-tint: 255 255 255 / 0.05;
+            --x-color-tint-2: 255 255 255 / 0.08;
+            --x-color-tint-3: 255 255 255 / 0.12;
+            --x-color-canvas: 28 28 30;
+            --x-color-surface: 44 44 46;
+            --x-color-success: 98 206 152;
+            --x-color-danger: 255 156 150;
+            --x-color-warn: 243 173 90;
+            --x-color-info: 115 190 255;
+            --x-color-accent: 125 190 255;
+            --x-color-focus-ring: 115 190 255;
+            --x-color-interaction-focus: 115 190 255;
+            --x-color-shadow-pop: 0 0 0 / 0.32;
+            color-scheme: dark;
+        }
+    }
+
+    :root[data-theme="dark"] {
+        --x-color-ink: 245 245 247;
+        --x-color-ink-2: 190 190 195;
+        --x-color-ink-3: 172 172 177;
+        --x-color-ink-4: 158 158 163;
+        --x-color-ink-5: 148 148 153;
+        --x-color-line: 255 255 255 / 0.08;
+        --x-color-line-2: 255 255 255 / 0.1;
+        --x-color-line-3: 255 255 255 / 0.14;
+        --x-color-tint: 255 255 255 / 0.05;
+        --x-color-tint-2: 255 255 255 / 0.08;
+        --x-color-tint-3: 255 255 255 / 0.12;
+        --x-color-canvas: 28 28 30;
+        --x-color-surface: 44 44 46;
+        --x-color-success: 98 206 152;
+        --x-color-danger: 255 156 150;
+        --x-color-warn: 243 173 90;
+        --x-color-info: 115 190 255;
+        --x-color-accent: 125 190 255;
+        --x-color-focus-ring: 115 190 255;
+        --x-color-interaction-focus: 115 190 255;
+        --x-color-shadow-pop: 0 0 0 / 0.32;
+        color-scheme: dark;
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+   评审页外壳（不属于组件）
+   ───────────────────────────────────────────────────────────── */
+    * {
+        box-sizing: border-box;
+    }
+
+    [hidden] {
+        display: none !important;
+    }
+
+    body {
+        margin: 0;
+        padding-inline: 16px; padding-block: 20px 64px; background: rgb(var(--x-color-canvas));
+        color: rgb(var(--x-color-ink));
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+        font-size: var(--text-sm);
+        line-height: 20px;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .pg {
+        max-width: 880px;
+        margin-inline: auto; }
+
+    .pg__bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .pg__brand {
+        font-size: var(--text-base);
+        font-weight: 600;
+    }
+
+    .pg__brand span {
+        color: rgb(var(--x-color-ink-4));
+        font-weight: 400;
+    }
+
+    .seg {
+        display: inline-flex;
+        margin-left: auto;
+        padding: 2px;
+        gap: 2px;
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 9999px;
+        background: rgb(var(--x-color-surface));
+    }
+
+    .seg button {
+        border: 0;
+        background: none;
+        cursor: pointer;
+        font: inherit;
+        font-size: var(--text-2xs);
+        padding: 5px 10px;
+        border-radius: 9999px;
+        color: rgb(var(--x-color-ink-3));
+        transition: background-color 120ms ease, color 120ms ease;
+    }
+
+    .seg button[aria-pressed="true"] {
+        background: rgb(var(--x-color-tint-2));
+        color: rgb(var(--x-color-ink));
+    }
+
+    .seg button:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgb(var(--x-color-interaction-focus));
+    }
+
+    /* 对齐要点 */
+    .align {
+        margin: 0 0 26px;
+        padding: 12px 14px;
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 12px;
+        background: rgb(var(--x-color-tint));
+        color: rgb(var(--x-color-ink-2));
+    }
+
+    .align h2 {
+        margin: 0 0 6px;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: rgb(var(--x-color-ink));
+    }
+
+    .align ol {
+        margin: 0;
+        padding-inline-start: 20px; font-size: var(--text-xs);
+        line-height: 19px;
+    }
+
+    .align li {
+        margin-block: 3px; }
+
+    .align b {
+        color: rgb(var(--x-color-ink));
+        font-weight: 600;
+    }
+
+    .align code {
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+    }
+
+    .cap {
+        margin: 28px 0 8px;
+        font-size: var(--text-2xs);
+        line-height: 17px;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .cap b {
+        color: rgb(var(--x-color-ink-2));
+        font-weight: 600;
+    }
+
+    .cap code {
+        font-family: var(--font-mono);
+    }
+
+    .cap--tight {
+        margin-top: 14px;
+    }
+
+    /* 模拟对话面：时间线行就落在这上面 */
+    .tl {
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 12px;
+        background: rgb(var(--x-color-surface));
+        box-shadow: var(--shadow-card);
+        padding: 10px 12px;
+    }
+
+    .tl__msg {
+        font-size: var(--text-base);
+        line-height: 1.5;
+        margin: 2px 0 8px;
+        color: rgb(var(--x-color-ink));
+    }
+
+    /* 普通 tool 行，做比例参照：leading-6 */
+    .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 3px 0;
+        font-size: var(--text-sm);
+        line-height: 24px;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .row__label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .row__label em {
+        font-style: normal;
+        color: rgb(var(--x-color-ink-3));
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+   .wf-card — Workflow 时间线卡片
+   只有一套结构；状态走 data-status，行状态走 data-state
+   ───────────────────────────────────────────────────────────── */
+    .wf-card {
+        --wf-accent: rgb(var(--x-color-ink));
+        padding: 2px 0;
+        font-size: var(--text-sm);
+        line-height: 24px;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-card[data-status="failed"] {
+        --wf-accent: rgb(var(--x-color-danger));
+    }
+
+    .wf-card[data-status="killed"] {
+        --wf-accent: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-card[data-status="paused"] {
+        --wf-accent: rgb(var(--x-color-warn));
+    }
+
+    /* 表头 = 那条 Workflow tool 行本身，收起时它就是一行摘要 */
+    .wf-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-width: 0;
+        padding: 3px 4px 3px 0;
+        border: 0;
+        background: none;
+        cursor: pointer;
+        font: inherit;
+        line-height: 24px;
+        color: rgb(var(--x-color-ink-5));
+        text-align: left;
+        border-radius: 6px;
+        transition: color 120ms ease;
+    }
+
+    .wf-head:hover {
+        color: rgb(var(--x-color-ink));
+    }
+
+    .wf-head:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgb(var(--x-color-interaction-focus));
+    }
+
+    .wf-head__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgb(var(--x-color-ink-2));
+        font-weight: 500;
+    }
+
+    .wf-head__name em {
+        font-style: normal;
+        font-weight: 400;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-head__meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 8px;
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        line-height: 16px;
+        font-variant-numeric: tabular-nums;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-head__meta i {
+        font-style: normal;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    /* 实时描述 / 结果摘要：一行安静的等宽小字 */
+    .wf-live {
+        display: flex;
+        gap: 6px;
+        min-width: 0;
+        margin: 0;
+        padding: 0 0 4px 20px;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        line-height: 16px;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-live b {
+        font-weight: 400;
+        color: rgb(var(--x-color-ink-5));
+        flex: none;
+    }
+
+    .wf-live span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* 正文缩进轨：沿用时间线的 ml-3 border-l border-line pl-3 */
+    .wf-body {
+        margin: 2px 0 4px 7px;
+        border-left: 1px solid rgb(var(--x-color-line));
+        padding-left: 12px;
+    }
+
+    .wf-phase + .wf-phase {
+        margin-top: 1px;
+    }
+
+    .wf-phase__head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 8px;
+        width: 100%;
+        min-width: 0;
+        padding: 3px 4px 3px 0;
+        border: 0;
+        background: none;
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
+        font-size: var(--text-xs);
+        line-height: 18px;
+        color: rgb(var(--x-color-ink-4));
+        border-radius: 6px;
+        transition: color 120ms ease;
+    }
+
+    .wf-phase__head:hover {
+        color: rgb(var(--x-color-ink-2));
+    }
+
+    .wf-phase__head:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgb(var(--x-color-interaction-focus));
+    }
+
+    .wf-phase__title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgb(var(--x-color-ink-2));
+        font-weight: 500;
+    }
+
+    .wf-phase__count {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-size: var(--text-2xs);
+        color: rgb(var(--x-color-ink-3));
+    }
+
+    .wf-phase__meta {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-size: var(--text-2xs);
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    /* agent 列表：行模式与分栏模式共用同一套行 */
+    .wf-agents {
+        list-style: none;
+        margin: 0 0 2px;
+        padding: 0 0 0 18px;
+    }
+
+    .wf-agents--grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+        column-gap: 16px;
+    }
+
+    .wf-agents--grid .wf-more {
+        grid-column: 1 / -1;
+    }
+
+    .wf-agent {
+        display: grid;
+        grid-template-columns: 12px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0 8px;
+        padding: 2px 0;
+        min-height: 22px;
+        font-size: var(--text-xs);
+        line-height: 18px;
+    }
+
+    .wf-agent__state {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .wf-agent__label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        color: rgb(var(--x-color-ink-3));
+    }
+
+    .wf-agent__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .wf-agent[data-state="running"] .wf-agent__label {
+        color: rgb(var(--x-color-ink));
+    }
+
+    .wf-agent[data-state="failed"] .wf-agent__label {
+        color: rgb(var(--x-color-danger));
+    }
+
+    .wf-agent[data-state="queued"] .wf-agent__label {
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-agent[data-state="killed"] .wf-agent__label {
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-agent__meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0 8px;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        line-height: 16px;
+        font-variant-numeric: tabular-nums;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-agent__meta b {
+        font-weight: 400;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    /* 模型短名：与时间线 ActionMeta 的 chip 同一套类 */
+    .wf-m-model {
+        max-width: 144px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 0 6px;
+        border: 1px solid rgb(var(--x-color-line));
+        border-radius: 6px;
+        background: rgb(var(--x-color-tint));
+        font-size: var(--text-3xs);
+        line-height: 15px;
+        font-weight: 500;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-m-tool {
+        max-width: 96px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* 重试标记（attempt > 1） */
+    .wf-retry {
+        flex: none;
+        padding: 0 4px;
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 6px;
+        background: rgb(var(--x-color-tint));
+        font-family: var(--font-mono);
+        font-size: var(--text-3xs);
+        line-height: 15px;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    /* agent 详情：点行展开一块键值面板（第 1 档：只有元信息，没有 prompt / 结果） */
+    .wf-agent {
+        cursor: pointer;
+        border-radius: 6px;
+    }
+
+    .wf-agent:hover .wf-agent__name {
+        color: rgb(var(--x-color-ink));
+    }
+
+    .wf-agent:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgb(var(--x-color-interaction-focus));
+    }
+
+    .wf-agent[aria-expanded="true"] {
+        background: rgb(var(--x-color-tint));
+        margin-inline: -6px; padding-inline: 6px; }
+
+    .wf-detail {
+        list-style: none;
+        margin: 0 0 6px 20px;
+        padding: 6px 0 4px 10px;
+        border-left: 1px solid rgb(var(--x-color-line));
+    }
+
+    .wf-detail dl {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr));
+        gap: 2px 14px;
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        line-height: 16px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .wf-detail dl > div {
+        display: flex;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .wf-detail dt {
+        flex: none;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-detail dd {
+        margin: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgb(var(--x-color-ink-2));
+    }
+
+    .wf-agents--grid .wf-detail {
+        grid-column: 1 / -1;
+    }
+
+    /* 「… 还有 n 个」：就地折叠，可反复展开收起 */
+    .wf-more {
+        padding: 1px 0;
+    }
+
+    .wf-more button {
+        border: 0;
+        background: none;
+        cursor: pointer;
+        padding: 2px 0;
+        font: inherit;
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+        line-height: 18px;
+        color: rgb(var(--x-color-ink-4));
+        border-radius: 6px;
+        transition: color 120ms ease;
+    }
+
+    .wf-more button:hover {
+        color: rgb(var(--x-color-ink-2));
+        text-decoration: underline;
+    }
+
+    .wf-more button:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgb(var(--x-color-interaction-focus));
+    }
+
+    /* 状态胶囊：availability-chip 的 h-5 尺寸与 tone 词汇 */
+    .wf-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        flex: none;
+        height: 20px;
+        padding-inline: 7px; border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 9999px;
+        background: rgb(var(--x-color-tint));
+        font-size: var(--text-3xs);
+        line-height: 16px;
+        font-weight: 500;
+        color: rgb(var(--x-color-ink-2));
+    }
+
+    .wf-chip__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 9999px;
+        background: rgb(var(--x-color-ink-3));
+    }
+
+    .wf-card[data-status="completed"] .wf-chip {
+        border-color: rgb(var(--x-color-success) / 0.25);
+        background: rgb(var(--x-color-success) / 0.1);
+        color: rgb(var(--x-color-success));
+    }
+
+    .wf-card[data-status="completed"] .wf-chip__dot {
+        background: rgb(var(--x-color-success));
+    }
+
+    .wf-card[data-status="failed"] .wf-chip {
+        border-color: rgb(var(--x-color-danger) / 0.25);
+        background: rgb(var(--x-color-danger) / 0.1);
+        color: rgb(var(--x-color-danger));
+    }
+
+    .wf-card[data-status="failed"] .wf-chip__dot {
+        background: rgb(var(--x-color-danger));
+    }
+
+    .wf-card[data-status="paused"] .wf-chip {
+        border-color: rgb(var(--x-color-warn) / 0.25);
+        background: rgb(var(--x-color-warn) / 0.1);
+        color: rgb(var(--x-color-warn));
+    }
+
+    .wf-card[data-status="paused"] .wf-chip__dot {
+        background: rgb(var(--x-color-warn));
+    }
+
+    .wf-card[data-status="killed"] .wf-chip {
+        background: none;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-card[data-status="killed"] .wf-chip__dot {
+        background: rgb(var(--x-color-ink-4));
+    }
+
+    /* 进度轨：WorkflowProgressRail 的点阵 + 11px 刻度，h-[10px] */
+    .wf-rail {
+        position: relative;
+        display: block;
+        flex: none;
+        width: 72px;
+        max-width: 100%;
+        height: 10px;
+        overflow: hidden;
+        border: 1px solid rgb(var(--x-color-line));
+        border-radius: 2px;
+        background-color: rgb(var(--x-color-surface));
+        background-image: radial-gradient(circle, rgb(var(--x-color-ink-4)) 1px, transparent 1.35px);
+        background-size: 4px 4px;
+    }
+
+    .wf-rail__fill {
+        display: block;
+        height: 100%;
+        background-color: var(--wf-accent);
+        background-image: linear-gradient(90deg, transparent 0 10px, rgb(var(--x-color-surface) / 0.16) 10px 11px);
+        background-size: 11px 100%;
+        transition: width 240ms ease;
+    }
+
+    /* 图标 */
+    .wf-i {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-chev {
+        transition: transform 140ms ease;
+    }
+
+    [aria-expanded="true"] > .wf-chev {
+        transform: rotate(90deg);
+    }
+
+    .wf-ico {
+        width: 12px;
+        height: 12px;
+        flex: none;
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-ico--done {
+        color: rgb(var(--x-color-success));
+    }
+
+    .wf-ico--queued {
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-ico--failed {
+        color: rgb(var(--x-color-danger));
+    }
+
+    .wf-ico--killed {
+        color: rgb(var(--x-color-ink-4));
+    }
+
+    .wf-spin {
+        color: rgb(var(--x-color-ink-2));
+        animation: wf-spin 1s linear infinite;
+        transform-origin: 50% 50%;
+    }
+
+    .wf-chip .wf-spin {
+        width: 12px;
+        height: 12px;
+    }
+
+    @keyframes wf-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .wf-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    /* 旧 daemon 兜底：一条普通 tool 行，没有箭头、点不开 */
+    .wf-card--flat .wf-head {
+        cursor: default;
+    }
+
+    .wf-card--flat .wf-head:hover {
+        color: rgb(var(--x-color-ink-5));
+    }
+
+    .wf-note {
+        color: rgb(var(--x-color-ink-4));
+        font-family: var(--font-mono);
+        font-size: var(--text-2xs);
+    }
+
+    /* /workflow 输入框提示条 */
+    .wf-dock {
+        margin-bottom: 8px;
+        padding: 10px 12px;
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 12px;
+        background: rgb(var(--x-color-surface));
+        box-shadow: var(--shadow-card);
+    }
+
+    .wf-dock__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 4px;
+    }
+
+    .wf-dock__title {
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: rgb(var(--x-color-ink));
+    }
+
+    .wf-dock__close {
+        flex: none;
+        border: 0;
+        background: none;
+        cursor: pointer;
+        font: inherit;
+        font-size: var(--text-2xs);
+        padding: 4px 8px;
+        border-radius: 6px;
+        color: rgb(var(--x-color-ink-3));
+        transition: background-color 120ms ease, color 120ms ease;
+    }
+
+    .wf-dock__close:hover {
+        background: rgb(var(--x-color-tint));
+        color: rgb(var(--x-color-ink));
+    }
+
+    .wf-card--dock {
+        max-height: 220px;
+        overflow-y: auto;
+    }
+
+    .wf-card--dock .wf-head {
+        padding-top: 0;
+    }
+
+    .wf-card--dock .wf-agent {
+        min-height: 20px;
+        padding: 1px 0;
+    }
+
+    .wf-card--dock .wf-m-model {
+        display: none;
+    }
+
+    .wf-card--dock .wf-live {
+        padding-bottom: 2px;
+    }
+
+    .composer {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid rgb(var(--x-color-line-2));
+        border-radius: 12px;
+        background: rgb(var(--x-color-surface));
+        box-shadow: var(--shadow-sm);
+        color: rgb(var(--x-color-ink-5));
+        font-size: var(--text-base);
+    }
+
+    .composer span {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+    }
+
+    .composer b {
+        flex: none;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        background: rgb(var(--x-color-tint-2));
+        color: rgb(var(--x-color-ink-3));
+        font-size: var(--text-2xs);
+        font-weight: 500;
+    }
+
+    /* 窄屏：agent 行保持一行，先让出模型短名和最近工具 */
+    @media (max-width: 560px) {
+        .wf-soft {
+            display: none;
+        }
+
+        .wf-head__meta {
+            margin-left: 0;
+            width: 100%;
+            padding-left: 20px;
+            justify-content: flex-start;
+        }
+
+        .wf-phase__meta {
+            margin-left: 0;
+        }
+    }
+
+    /* 触屏：可点区域不低于 44px */
+    @media (pointer: coarse) {
+        .wf-head, .wf-phase__head {
+            min-height: 44px;
+        }
+
+        .wf-more button, .wf-dock__close, .seg button {
+            min-height: 44px;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .wf-spin {
+            animation: none;
+        }
+
+        .wf-chev, .wf-rail__fill {
+            transition: none;
+        }
+    }
+</style>
+<svg style="display:none" aria-hidden="true" focusable="false">
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m9 18 6-6-6-6"/>
+    </symbol>
+    <symbol id="i-wf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="8" height="8" x="3" y="3" rx="2"/>
+        <path d="M7 11v4a2 2 0 0 0 2 2h4"/>
+        <rect width="8" height="8" x="13" y="13" rx="2"/>
+    </symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m7 11 2-2-2-2"/>
+        <path d="M11 13h4"/>
+        <rect width="18" height="18" x="3" y="3" rx="2"/>
+    </symbol>
+    <symbol id="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="m8.5 12 2.5 2.5 4.5-4.5"/>
+    </symbol>
+    <symbol id="i-queued" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 7v5h3.5"/>
+    </symbol>
+    <symbol id="i-failed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="m14.5 9.5-5 5"/>
+        <path d="m9.5 9.5 5 5"/>
+    </symbol>
+    <symbol id="i-killed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="m5.6 5.6 12.8 12.8"/>
+    </symbol>
+    <symbol id="i-run" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9" stroke-opacity="0.24"/>
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </symbol>
+</svg>
+<div class="pg">
+    <div class="pg__bar">
+        <div class="pg__brand">
+            Workflow 时间线卡片 <span>· final</span>
+        </div>
+        <div class="seg" role="group" aria-label="主题切换">
+            <button type="button" data-theme-set="light" aria-pressed="false">浅色</button>
+            <button type="button" data-theme-set="dark" aria-pressed="false">深色</button>
+            <button type="button" data-theme-set="system" aria-pressed="true">跟随系统</button>
+        </div>
+    </div>
+    <div class="align">
+        <h2>对齐要点 · 请确认这 8 条产品决定</h2>
+        <ol>
+            <li>
+                <b>挂载点</b>
+                ：卡片直接长在时间线里那条 <code>Workflow</code>
+                tool 行上，默认可见，不需要 <code>/workflow</code>
+                ，也不加卡片外框和阴影
+            </li>
+            <li>
+                <b>折叠规则</b>
+                ：运行中保持展开并实时刷新；结束后自动收成一行摘要（名称 · 状态 · agents · 用时 · token），点一下展开。表头本身就是摘要，只有一套结构
+            </li>
+            <li>
+                <b>agent 行字段</b>
+                ：状态字形、label、模型短名、最近一个工具、用时、token，attempt &gt;1 时加重试标记；<b>点一下 agent 行</b>
+                展开元信息面板（阶段、模型、尝试、状态、排队 / 开始 / 最近活动时刻、耗时、token、工具调用、最近工具），B 卡里的行有完整示例数据；v1 不给 prompt / 结果 / 命令预览
+            </li>
+            <li>
+                <b>窄屏取舍</b>
+                ：≤560px 隐藏模型短名和最近工具，保证每个 agent 仍是一行；表头数字整体换到第二行
+            </li>
+            <li>
+                <b>50+ agent</b>
+                ：超过 8 个 agent 的阶段自动分栏，16 个 agent 占 8 行；分栏后仍超过 12 行时，尾部连续的安静行折进可反复展开收起的「… 还有 n 个」；运行中和已失败的行永不被折叠
+            </li>
+            <li>
+                <b>旧 daemon 兜底</b>
+                ：退化成一条普通 tool 行，并补一句「daemon 版本较旧，暂无阶段明细」，不留空壳卡片
+            </li>
+            <li>
+                <b>killed 的中文</b>
+                ：当前写「已终止」；若要和 Run 列表完全一致可改成「已取消」
+            </li>
+            <li>
+                <b>不在范围内</b>
+                ：单个 agent 的暂停 / 停止、远程 workflow、prompt 与结果预览、脚本正文，以及「只看活跃」这类额外筛选
+            </li>
+        </ol>
+    </div>
+    <p class="cap">
+        <b>A · 时间线上下文</b>
+        卡片活在普通 tool 行之间：同样的行高、同样的折叠箭头、同样的左侧缩进轨。它比一条普通 tool 行高，但没有外框、没有阴影，不会盖过对话本身
+    </p>
+    <div class="tl">
+        <p class="tl__msg">我先看一下事件定义，然后跑一轮 review。</p>
+        <div class="row">
+            <svg class="wf-i " aria-hidden="true">
+                <use href="#i-chev"/>
+            </svg>
+            <svg class="wf-i" aria-hidden="true">
+                <use href="#i-tool"/>
+            </svg>
+            <span class="row__label">
+                Read <em>docs/events.md</em>
+            </span>
+        </div>
+        <div class="row">
+            <svg class="wf-i " aria-hidden="true">
+                <use href="#i-chev"/>
+            </svg>
+            <svg class="wf-i" aria-hidden="true">
+                <use href="#i-tool"/>
+            </svg>
+            <span class="row__label">
+                Bash <em>git status</em>
+            </span>
+        </div>
+        <div class="wf-card" data-status="running" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="true" aria-controls="b-body">
+                <svg class="wf-i wf-chev" aria-hidden="true">
+                    <use href="#i-chev"/>
+                </svg>
+                <svg class="wf-i" aria-hidden="true">
+                    <use href="#i-wf"/>
+                </svg>
+                <span class="wf-head__name">
+                    <em>Workflow</em>
+                    review-changes
+                </span>
+                <span class="wf-chip">
+                    <svg class="wf-i wf-spin" aria-hidden="true">
+                        <use href="#i-run"/>
+                    </svg>
+                    运行中
+                </span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true">
+                        <span class="wf-rail__fill" style="width:36%"></span>
+                    </span>
+                    <span>4/11 agents</span>
+                    <span data-wf-tick="222">3m 42s</span>
+                    <span>
+                        <i>312k</i>
+                        tokens
+                    </span>
+                    <span>
+                        <i>87</i>
+                        次调用
+                    </span>
+                </span>
+            </button>
+            <div id="b-body">
+                <p class="wf-live">
+                    <b>当前</b>
+                    <span>Review: review:security</span>
+                </p>
+                <div class="wf-body">
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="true" aria-controls="b-p1">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Review</span>
+                            <span class="wf-phase__count">2/4</span>
+                            <span class="wf-phase__meta">1 运行中 · 3m 42s</span>
+                        </button>
+                        <ul class="wf-agents" id="b-p1">
+                            <li class="wf-agent" data-queued="14:02:11" data-started="14:02:11" data-last="14:04:21" data-tool-calls="14" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:bugs">
+                                    <span class="wf-agent__name">review:bugs</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>2m 10s</b>
+                                    <b>48k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:02:11" data-started="14:02:11" data-last="14:03:59" data-tool-calls="11" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:perf">
+                                    <span class="wf-agent__name">review:perf</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Grep</span>
+                                    <b>1m 48s</b>
+                                    <b>39k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:02:11" data-started="14:04:51" data-last="14:05:52" data-tool-calls="9" data-state="running">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-spin" aria-hidden="true">
+                                        <use href="#i-run"/>
+                                    </svg>
+                                    <span class="wf-sr">运行中</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:security">
+                                    <span class="wf-agent__name">review:security</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Grep</span>
+                                    <b data-wf-tick="62">1m 02s</b>
+                                    <b>21k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:02:11" data-state="queued">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--queued" aria-hidden="true">
+                                        <use href="#i-queued"/>
+                                    </svg>
+                                    <span class="wf-sr">排队中</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:tests">
+                                    <span class="wf-agent__name">review:tests</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="true" aria-controls="b-p2">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Verify</span>
+                            <span class="wf-phase__count">2/6</span>
+                            <span class="wf-phase__meta">1 运行中 · 2m 08s</span>
+                        </button>
+                        <ul class="wf-agents" id="b-p2">
+                            <li class="wf-agent" data-queued="14:04:21" data-started="14:04:21" data-last="14:05:41" data-tool-calls="6" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:auth.ts">
+                                    <span class="wf-agent__name">verify:auth.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b>1m 20s</b>
+                                    <b>31k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:03:59" data-started="14:03:59" data-last="14:05:04" data-tool-calls="5" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:api.ts">
+                                    <span class="wf-agent__name">verify:api.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>1m 05s</b>
+                                    <b>27k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-attempt="2" data-queued="14:04:21" data-started="14:05:12" data-last="14:05:53" data-tool-calls="3" data-state="running">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-spin" aria-hidden="true">
+                                        <use href="#i-run"/>
+                                    </svg>
+                                    <span class="wf-sr">运行中</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:db.ts">
+                                    <span class="wf-agent__name">verify:db.ts</span>
+                                    <span class="wf-retry" title="第 2 次尝试">×2</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b data-wf-tick="41">0m 41s</b>
+                                    <b>12k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:05:41" data-state="queued">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--queued" aria-hidden="true">
+                                        <use href="#i-queued"/>
+                                    </svg>
+                                    <span class="wf-sr">排队中</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:ui.ts">
+                                    <span class="wf-agent__name">verify:ui.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:05:04" data-state="queued">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--queued" aria-hidden="true">
+                                        <use href="#i-queued"/>
+                                    </svg>
+                                    <span class="wf-sr">排队中</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:cli.ts">
+                                    <span class="wf-agent__name">verify:cli.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-queued="14:05:52" data-state="queued">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--queued" aria-hidden="true">
+                                        <use href="#i-queued"/>
+                                    </svg>
+                                    <span class="wf-sr">排队中</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:docs.ts">
+                                    <span class="wf-agent__name">verify:docs.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="b-p3">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Synthesize</span>
+                            <span class="wf-phase__count">0/1</span>
+                            <span class="wf-phase__meta">全部排队中</span>
+                        </button>
+                        <ul class="wf-agents" id="b-p3" hidden>
+                            <li class="wf-agent" data-state="queued">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--queued" aria-hidden="true">
+                                        <use href="#i-queued"/>
+                                    </svg>
+                                    <span class="wf-sr">排队中</span>
+                                </span>
+                                <span class="wf-agent__label" title="synthesize:report">
+                                    <span class="wf-agent__name">synthesize:report</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <svg class="wf-i " aria-hidden="true">
+                <use href="#i-chev"/>
+            </svg>
+            <svg class="wf-i" aria-hidden="true">
+                <use href="#i-tool"/>
+            </svg>
+            <span class="row__label">
+                Read <em>app/web/src/lib/run-workflow-summary.ts</em>
+            </span>
+        </div>
+    </div>
+    <p class="cap cap--tight">
+        <b>B · 运行中（上面那张卡）</b>
+        11 个 agent、4 个已完成。表头一行装下 名称 / 状态 / 进度轨 / 4-11 / 用时 / token / 调用次数，下面一行等宽小字是实时描述。阶段可以各自折叠，Synthesize 因为全部排队中默认收起
+    </p>
+    <p class="cap">
+        <b>C · 53 个 agent 的规模</b>
+        两道阈值：agent 超过 8 个的阶段自动分栏，16 个 agent 占 8 行且保持 index 顺序；分栏后仍超过 12 行时，尾部连续的安静行再折进「… 还有 n 个」（见 D / E / G）。全程用真实 agent，没有任何合并行。已完成的阶段收成一行，默认高度 ≈ 14 行
+    </p>
+    <!-- C 段骨架（原稿 53 个 agent：Gen 5 完成 / Gate2 16（9 完成 4 运行 3 排队，分栏）/ Gate3 16 排队（分栏，收起）/ Judge 16 排队（分栏，收起）；每行结构与 B 段完全相同，此处只保留骨架） -->
+    <div class="tl">
+        <div class="wf-card" data-status="running" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="true" aria-controls="c-body">
+                <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="wf-i" aria-hidden="true"><use href="#i-wf"/></svg>
+                <span class="wf-head__name"><em>Workflow</em> kb-eval-afs-question-gen</span>
+                <span class="wf-chip"><svg class="wf-i wf-spin" aria-hidden="true"><use href="#i-run"/></svg> 运行中</span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true"><span class="wf-rail__fill" style="width:26%"></span></span>
+                    <span>14/53 agents</span>
+                    <span data-wf-tick="1094">18m 14s</span>
+                    <span><i>2.4M</i> tokens</span>
+                    <span><i>612</i> 次调用</span>
+                </span>
+            </button>
+            <div id="c-body">
+                <p class="wf-live"><b>当前</b><span>Gate2: gate2:q-0012</span></p>
+                <div class="wf-body">
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="c-p1">
+                            <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                            <span class="wf-phase__title">Gen</span>
+                            <span class="wf-phase__count">5/5 完成</span>
+                            <span class="wf-phase__meta">6m 31s</span>
+                        </button>
+                        <ul class="wf-agents" id="c-p1" hidden>
+                            <!-- gen:batch-01 … gen:batch-05，全部 data-state="done"，opus-5[1m] · Write · 1m 09s–1m 30s · 53k–64k -->
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="true" aria-controls="c-p2">
+                            <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                            <span class="wf-phase__title">Gate2</span>
+                            <span class="wf-phase__count">9/16</span>
+                            <span class="wf-phase__meta">4 运行中 · 11m 43s</span>
+                        </button>
+                        <ul class="wf-agents wf-agents--grid" id="c-p2">
+                            <!-- gate2:q-0001 … q-0009 done（q-0003 带 ×2 重试标记）、q-0010 … q-0013 running（data-wf-tick 计时）、q-0014 … q-0016 queued；模型 haiku-4.5；保持 index 顺序，两栏 -->
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state"><svg class="wf-ico wf-ico--done" aria-hidden="true"><use href="#i-done"/></svg><span class="wf-sr">已完成</span></span>
+                                <span class="wf-agent__label" title="gate2:q-0001"><span class="wf-agent__name">gate2:q-0001</span></span>
+                                <span class="wf-agent__meta"><span class="wf-m-model wf-soft">haiku-4.5</span><span class="wf-m-tool wf-soft">Read</span><b>0m 38s</b><b>9.1k</b></span>
+                            </li>
+                            <li class="wf-agent" data-state="running">
+                                <span class="wf-agent__state"><svg class="wf-ico wf-spin" aria-hidden="true"><use href="#i-run"/></svg><span class="wf-sr">运行中</span></span>
+                                <span class="wf-agent__label" title="gate2:q-0010"><span class="wf-agent__name">gate2:q-0010</span></span>
+                                <span class="wf-agent__meta"><span class="wf-m-model wf-soft">haiku-4.5</span><span class="wf-m-tool wf-soft">Grep</span><b data-wf-tick="49">0m 49s</b><b>7.2k</b></span>
+                            </li>
+                            <li class="wf-agent" data-state="queued">
+                                <span class="wf-agent__state"><svg class="wf-ico wf-ico--queued" aria-hidden="true"><use href="#i-queued"/></svg><span class="wf-sr">排队中</span></span>
+                                <span class="wf-agent__label" title="gate2:q-0014"><span class="wf-agent__name">gate2:q-0014</span></span>
+                                <span class="wf-agent__meta"><span class="wf-m-model wf-soft">haiku-4.5</span></span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="c-p3">
+                            <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                            <span class="wf-phase__title">Gate3</span>
+                            <span class="wf-phase__count">0/16</span>
+                            <span class="wf-phase__meta">全部排队中</span>
+                        </button>
+                        <ul class="wf-agents wf-agents--grid" id="c-p3" hidden><!-- gate3:q-0001 … q-0016 全部 queued，haiku-4.5 --></ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="c-p4">
+                            <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                            <span class="wf-phase__title">Judge</span>
+                            <span class="wf-phase__count">0/16</span>
+                            <span class="wf-phase__meta">全部排队中</span>
+                        </button>
+                        <ul class="wf-agents wf-agents--grid" id="c-p4" hidden><!-- judge:q-0001 … q-0016 全部 queued，opus-5[1m] --></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <p class="cap">
+        <b>D · 已完成</b>
+        跑完后自动收成一行：名称 · 状态 · agents · 用时 · token。点一下展开，阶段都已完成所以每个阶段也各占一行，展开态一共 5 行
+    </p>
+    <div class="tl">
+        <div class="wf-card" data-status="completed" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="false" aria-controls="d-body">
+                <svg class="wf-i wf-chev" aria-hidden="true">
+                    <use href="#i-chev"/>
+                </svg>
+                <svg class="wf-i" aria-hidden="true">
+                    <use href="#i-wf"/>
+                </svg>
+                <span class="wf-head__name">
+                    <em>Workflow</em>
+                    review-changes
+                </span>
+                <span class="wf-chip">
+                    <span class="wf-chip__dot"></span>
+                    已完成
+                </span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true">
+                        <span class="wf-rail__fill" style="width:100%"></span>
+                    </span>
+                    <span>11/11 agents</span>
+                    <span>4m 58s</span>
+                    <span>
+                        <i>412k</i>
+                        tokens
+                    </span>
+                    <span>
+                        <i>106</i>
+                        次调用
+                    </span>
+                </span>
+            </button>
+            <div id="d-body" hidden>
+                <p class="wf-live">
+                    <b>结果</b>
+                    <span>Dynamic workflow "review-changes" completed</span>
+                </p>
+                <div class="wf-body">
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="d-p1">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Review</span>
+                            <span class="wf-phase__count">4/4 完成</span>
+                            <span class="wf-phase__meta">2m 12s</span>
+                        </button>
+                        <ul class="wf-agents" id="d-p1" hidden>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:bugs">
+                                    <span class="wf-agent__name">review:bugs</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>2m 10s</b>
+                                    <b>48k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:perf">
+                                    <span class="wf-agent__name">review:perf</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Grep</span>
+                                    <b>1m 48s</b>
+                                    <b>39k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:security">
+                                    <span class="wf-agent__name">review:security</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Grep</span>
+                                    <b>2m 02s</b>
+                                    <b>44k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:tests">
+                                    <span class="wf-agent__name">review:tests</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>1m 39s</b>
+                                    <b>36k</b>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="d-p2">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Verify</span>
+                            <span class="wf-phase__count">6/6 完成</span>
+                            <span class="wf-phase__meta">2m 05s</span>
+                        </button>
+                        <ul class="wf-agents" id="d-p2" hidden>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:auth.ts">
+                                    <span class="wf-agent__name">verify:auth.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b>1m 20s</b>
+                                    <b>31k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:db.ts">
+                                    <span class="wf-agent__name">verify:db.ts</span>
+                                    <span class="wf-retry" title="第 2 次尝试">×2</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b>1m 58s</b>
+                                    <b>29k</b>
+                                </span>
+                            </li>
+                            <li class="wf-more">
+                                <button type="button" data-wf-toggle aria-expanded="false" aria-controls="d-p2-x1 d-p2-x2 d-p2-x3 d-p2-x4" data-label-more="… 还有 4 个已完成" data-label-less="收起 4 个已完成">… 还有 4 个已完成</button>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="d-p2-x1" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:api.ts">
+                                    <span class="wf-agent__name">verify:api.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>1m 05s</b>
+                                    <b>27k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="d-p2-x2" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:ui.ts">
+                                    <span class="wf-agent__name">verify:ui.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>0m 58s</b>
+                                    <b>24k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="d-p2-x3" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:cli.ts">
+                                    <span class="wf-agent__name">verify:cli.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b>1m 12s</b>
+                                    <b>26k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="d-p2-x4" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="verify:docs.ts">
+                                    <span class="wf-agent__name">verify:docs.ts</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">haiku-4.5</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>0m 44s</b>
+                                    <b>19k</b>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="d-p3">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Synthesize</span>
+                            <span class="wf-phase__count">1/1 完成</span>
+                            <span class="wf-phase__meta">0m 41s</span>
+                        </button>
+                        <ul class="wf-agents" id="d-p3" hidden>
+                            <li class="wf-agent" data-state="done">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="synthesize:report">
+                                    <span class="wf-agent__name">synthesize:report</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Write</span>
+                                    <b>0m 41s</b>
+                                    <b>18k</b>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <p class="cap">
+        <b>E · 已失败 / 已终止 / 暂停</b>
+        失败时状态胶囊和进度轨转红，失败的 agent 保持红色标签并且永不被折叠；用户主动停止用中性灰加禁止字形，暂停用警告色。三种状态都只改 <code>data-status</code>
+    </p>
+    <div class="tl">
+        <div class="wf-card" data-status="failed" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="true" aria-controls="e1-body">
+                <svg class="wf-i wf-chev" aria-hidden="true">
+                    <use href="#i-chev"/>
+                </svg>
+                <svg class="wf-i" aria-hidden="true">
+                    <use href="#i-wf"/>
+                </svg>
+                <span class="wf-head__name">
+                    <em>Workflow</em>
+                    review-changes
+                </span>
+                <span class="wf-chip">
+                    <span class="wf-chip__dot"></span>
+                    已失败
+                </span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true">
+                        <span class="wf-rail__fill" style="width:82%"></span>
+                    </span>
+                    <span>9/11 agents · 1 个已失败</span>
+                    <span>6m 01s</span>
+                    <span>
+                        <i>388k</i>
+                        tokens
+                    </span>
+                    <span>
+                        <i>94</i>
+                        次调用
+                    </span>
+                </span>
+            </button>
+            <div id="e1-body">
+                <p class="wf-live">
+                    <b>结果</b>
+                    <span>Dynamic workflow "review-changes" failed</span>
+                </p>
+                <div class="wf-body">
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="true" aria-controls="e1-p1">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Review</span>
+                            <span class="wf-phase__count">3/4</span>
+                            <span class="wf-phase__meta">1 已失败 · 3m 06s</span>
+                        </button>
+                        <ul class="wf-agents" id="e1-p1">
+                            <li class="wf-agent" data-state="failed">
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--failed" aria-hidden="true">
+                                        <use href="#i-failed"/>
+                                    </svg>
+                                    <span class="wf-sr">已失败</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:security">
+                                    <span class="wf-agent__name">review:security</span>
+                                    <span class="wf-retry" title="第 2 次尝试">×2</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Bash</span>
+                                    <b>1m 12s</b>
+                                    <b>22k</b>
+                                </span>
+                            </li>
+                            <li class="wf-more">
+                                <button type="button" data-wf-toggle aria-expanded="false" aria-controls="e1-p1-x1 e1-p1-x2 e1-p1-x3" data-label-more="… 还有 3 个已完成" data-label-less="收起 3 个已完成">… 还有 3 个已完成</button>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="e1-p1-x1" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:bugs">
+                                    <span class="wf-agent__name">review:bugs</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>2m 10s</b>
+                                    <b>48k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="e1-p1-x2" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:perf">
+                                    <span class="wf-agent__name">review:perf</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Grep</span>
+                                    <b>1m 48s</b>
+                                    <b>39k</b>
+                                </span>
+                            </li>
+                            <li class="wf-agent" data-state="done" id="e1-p1-x3" hidden>
+                                <span class="wf-agent__state">
+                                    <svg class="wf-ico wf-ico--done" aria-hidden="true">
+                                        <use href="#i-done"/>
+                                    </svg>
+                                    <span class="wf-sr">已完成</span>
+                                </span>
+                                <span class="wf-agent__label" title="review:tests">
+                                    <span class="wf-agent__name">review:tests</span>
+                                </span>
+                                <span class="wf-agent__meta">
+                                    <span class="wf-m-model wf-soft">opus-5[1m]</span>
+                                    <span class="wf-m-tool wf-soft">Read</span>
+                                    <b>1m 39s</b>
+                                    <b>36k</b>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="e1-p2">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Verify</span>
+                            <span class="wf-phase__count">6/6 完成</span>
+                            <span class="wf-phase__meta">2m 05s</span>
+                        </button>
+                        <ul class="wf-agents" id="e1-p2" hidden><!-- verify:auth.ts / api.ts / db.ts(×2) / ui.ts / cli.ts / docs.ts 全部 done，haiku-4.5 --></ul>
+                    </div>
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="false" aria-controls="e1-p3">
+                            <svg class="wf-i wf-chev" aria-hidden="true">
+                                <use href="#i-chev"/>
+                            </svg>
+                            <span class="wf-phase__title">Synthesize</span>
+                            <span class="wf-phase__count">0/1</span>
+                            <span class="wf-phase__meta">全部排队中</span>
+                        </button>
+                        <ul class="wf-agents" id="e1-p3" hidden><!-- synthesize:report queued，opus-5[1m] --></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- killed 卡（骨架）：data-status="killed"，胶囊「已终止」（中性灰 + 禁止字形），进度轨 55%，meta「6/11 agents · 用户已停止 · 2m 05s · 168k tokens」；
+             body 默认 hidden，结果行「Dynamic workflow "review-changes" killed」；Verify 阶段 2/6，「2 已终止 · 2 排队中」：
+             两行 data-state="killed"（verify:db.ts 0m 33s 8.1k、verify:ui.ts 0m 29s 6.4k），其后「… 还有 4 个（2 已完成 / 2 排队中）」折叠 -->
+        <div class="wf-card" data-status="killed" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="false" aria-controls="e2-body">
+                <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="wf-i" aria-hidden="true"><use href="#i-wf"/></svg>
+                <span class="wf-head__name"><em>Workflow</em> review-changes</span>
+                <span class="wf-chip"><span class="wf-chip__dot"></span> 已终止</span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true"><span class="wf-rail__fill" style="width:55%"></span></span>
+                    <span>6/11 agents · 用户已停止</span>
+                    <span>2m 05s</span>
+                    <span><i>168k</i> tokens</span>
+                </span>
+            </button>
+            <div id="e2-body" hidden>
+                <p class="wf-live"><b>结果</b><span>Dynamic workflow "review-changes" killed</span></p>
+                <div class="wf-body">
+                    <div class="wf-phase">
+                        <button class="wf-phase__head" type="button" data-wf-toggle aria-expanded="true" aria-controls="e2-p1">
+                            <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                            <span class="wf-phase__title">Verify</span>
+                            <span class="wf-phase__count">2/6</span>
+                            <span class="wf-phase__meta">2 已终止 · 2 排队中</span>
+                        </button>
+                        <ul class="wf-agents" id="e2-p1">
+                            <li class="wf-agent" data-state="killed">
+                                <span class="wf-agent__state"><svg class="wf-ico wf-ico--killed" aria-hidden="true"><use href="#i-killed"/></svg><span class="wf-sr">已终止</span></span>
+                                <span class="wf-agent__label" title="verify:db.ts"><span class="wf-agent__name">verify:db.ts</span></span>
+                                <span class="wf-agent__meta"><span class="wf-m-model wf-soft">haiku-4.5</span><span class="wf-m-tool wf-soft">Bash</span><b>0m 33s</b><b>8.1k</b></span>
+                            </li>
+                            <li class="wf-more">
+                                <button type="button" data-wf-toggle aria-expanded="false" aria-controls="e2-p1-x1" data-label-more="… 还有 4 个（2 已完成 / 2 排队中）" data-label-less="收起 4 个">… 还有 4 个（2 已完成 / 2 排队中）</button>
+                            </li>
+                            <li class="wf-agent" data-state="queued" id="e2-p1-x1" hidden>
+                                <span class="wf-agent__state"><svg class="wf-ico wf-ico--queued" aria-hidden="true"><use href="#i-queued"/></svg><span class="wf-sr">排队中</span></span>
+                                <span class="wf-agent__label" title="verify:cli.ts"><span class="wf-agent__name">verify:cli.ts</span></span>
+                                <span class="wf-agent__meta"><span class="wf-m-model wf-soft">haiku-4.5</span></span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- paused 卡（骨架）：data-status="paused"，胶囊「暂停」（警告色），进度轨 45%，meta「5/11 agents · 4m 12s · 205k tokens · 61 次调用」；
+             body hidden，「当前 Verify: verify:auth.ts」；Review 4/4 完成（收起）、Verify 1/6「5 排队中」（收起） -->
+        <div class="wf-card" data-status="paused" data-x-ui="workflow-card">
+            <button class="wf-head" type="button" data-wf-toggle aria-expanded="false" aria-controls="e3-body">
+                <svg class="wf-i wf-chev" aria-hidden="true"><use href="#i-chev"/></svg>
+                <svg class="wf-i" aria-hidden="true"><use href="#i-wf"/></svg>
+                <span class="wf-head__name"><em>Workflow</em> review-changes</span>
+                <span class="wf-chip"><span class="wf-chip__dot"></span> 暂停</span>
+                <span class="wf-head__meta">
+                    <span class="wf-rail" aria-hidden="true"><span class="wf-rail__fill" style="width:45%"></span></span>
+                    <span>5/11 agents</span>
+                    <span>4m 12s</span>
+                    <span><i>205k</i> tokens</span>
+                    <span><i>61</i> 次调用</span>
+                </span>
+            </button>
+            <div id="e3-body" hidden>
+                <p class="wf-live"><b>当前</b><span>Verify: verify:auth.ts</span></p>
+                <div class="wf-body"><!-- Review 4/4 完成 · 2m 12s（收起）；Verify 1/6 · 5 排队中（收起） --></div>
+            </div>
+        </div>
+    </div>
+    <p class="cap">
+        <b>F · 旧 daemon 兜底</b>
+        只拿得到名称、状态和用时时退化成一条普通 tool 行：没有箭头、点不开、不留空壳，并直接说清为什么没有明细
+    </p>
+    <div class="tl">
+        <div class="row">
+            <svg class="wf-i " aria-hidden="true">
+                <use href="#i-chev"/>
+            </svg>
+            <svg class="wf-i" aria-hidden="true">
+                <use href="#i-tool"/>
+            </svg>
+            <span class="row__label">
+                Bash <em>npm --prefix app/web run build</em>
+            </span>
+        </div>
+        <div class="wf-card wf-card--flat" data-status="running" data-x-ui="workflow-card">
+            <div class="wf-head" role="group" aria-label="Workflow review-changes 运行中">
+                <span class="wf-i" aria-hidden="true"></span>
+                <svg class="wf-i" aria-hidden="true">
+                    <use href="#i-wf"/>
+                </svg>
+                <span class="wf-head__name">
+                    <em>Workflow</em>
+                    review-changes
+                </span>
+                <span class="wf-chip">
+                    <svg class="wf-i wf-spin" aria-hidden="true">
+                        <use href="#i-run"/>
+                    </svg>
+                    运行中
+                </span>
+                <span class="wf-head__meta">
+                    <span data-wf-tick="133">2m 13s</span>
+                    <span class="wf-note">daemon 版本较旧，暂无阶段明细</span>
+                </span>
+            </div>
+        </div>
+    </div>
+    <p class="cap">
+        <b>G · /workflow 输入框上方提示条</b>
+        同一套阶段 / agent 列表的压缩版：隐藏模型短名、行高更紧、超过 220px 内部滚动。卡片本体还是 <code>.wf-card</code>
+        ，只多一个 <code>--dock</code>
+    </p>
+    <!-- G 段（骨架）：<div class="wf-dock" role="status"> 内含 .wf-dock__head（标题 Workflow + 关闭钮）与 .wf-card.wf-card--dock（同 B 卡结构，
+         已完成行折进「… 还有 n 个」，模型短名隐藏），下方 .composer 里是「/workflow」。trellis 没有 /workflow 输入框，本段不在实现范围 -->
+</div>
+<script>
+    (function() {
+        // 主题：浅色 / 深色 / 跟随系统
+        var seg = document.querySelectorAll("[data-theme-set]");
+        function applyTheme(mode) {
+            if (mode === "system")
+                delete document.documentElement.dataset.theme;
+            else
+                document.documentElement.dataset.theme = mode;
+            seg.forEach(function(b) {
+                b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === mode));
+            });
+        }
+        seg.forEach(function(b) {
+            b.addEventListener("click", function() {
+                applyTheme(b.getAttribute("data-theme-set"));
+            });
+        });
+
+        // 一套折叠：卡片、阶段、「… 还有 n 个」都靠 aria-controls 找目标
+        document.addEventListener("click", function(e) {
+            var btn = e.target.closest("[data-wf-toggle]");
+            if (!btn)
+                return;
+            var open = btn.getAttribute("aria-expanded") === "true";
+            var ids = (btn.getAttribute("aria-controls") || "").split(/\s+/).filter(Boolean);
+            ids.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el)
+                    el.hidden = open;
+            });
+            btn.setAttribute("aria-expanded", String(!open));
+            var label = btn.getAttribute(open ? "data-label-more" : "data-label-less");
+            if (label)
+                btn.textContent = label;
+        });
+
+        // agent 行：点开看元信息。阶段从所在 .wf-phase 取，其余从行内文本和 data-* 取
+        var DETAIL_KEYS = [["phase", "阶段"], ["model", "模型"], ["attempt", "尝试"], ["state", "状态"], ["queued", "排队于"], ["started", "开始于"], ["last", "最近活动"], ["duration", "耗时"], ["tokens", "token"], ["toolCalls", "工具调用"], ["tool", "最近工具"]];
+        Array.prototype.forEach.call(document.querySelectorAll(".wf-agent"), function(li) {
+            li.setAttribute("tabindex", "0");
+            li.setAttribute("role", "button");
+            li.setAttribute("aria-expanded", "false");
+        });
+        function text(el) {
+            return el ? el.textContent.trim() : "—";
+        }
+        function agentDetail(li) {
+            var d = li.dataset;
+            var phase = li.closest(".wf-phase");
+            var nums = li.querySelectorAll(".wf-agent__meta > b");
+            var v = {
+                phase: text(phase && phase.querySelector(".wf-phase__title")),
+                model: text(li.querySelector(".wf-m-model")),
+                attempt: "第 " + (d.attempt || "1") + " 次",
+                state: text(li.querySelector(".wf-sr")),
+                queued: d.queued || "—",
+                started: d.started || "—",
+                last: d.last || "—",
+                duration: text(nums[0]),
+                tokens: text(nums[1]),
+                toolCalls: d.toolCalls || "—",
+                tool: text(li.querySelector(".wf-m-tool"))
+            };
+            var dl = document.createElement("dl");
+            DETAIL_KEYS.forEach(function(k) {
+                var w = document.createElement("div");
+                var dt = document.createElement("dt");
+                dt.textContent = k[1];
+                var dd = document.createElement("dd");
+                dd.textContent = v[k[0]];
+                w.appendChild(dt);
+                w.appendChild(dd);
+                dl.appendChild(w);
+            });
+            var row = document.createElement("li");
+            row.className = "wf-detail";
+            row.appendChild(dl);
+            return row;
+        }
+        function toggleAgent(li) {
+            var open = li.getAttribute("aria-expanded") === "true";
+            var next = li.nextElementSibling;
+            if (open) {
+                if (next && next.classList.contains("wf-detail"))
+                    next.remove();
+                li.setAttribute("aria-expanded", "false");
+            } else {
+                li.insertAdjacentElement("afterend", agentDetail(li));
+                li.setAttribute("aria-expanded", "true");
+            }
+        }
+        document.addEventListener("click", function(e) {
+            var li = e.target.closest(".wf-agent");
+            if (li)
+                toggleAgent(li);
+        });
+        document.addEventListener("keydown", function(e) {
+            if (e.key !== "Enter" && e.key !== " ")
+                return;
+            var li = e.target.closest(".wf-agent");
+            if (!li)
+                return;
+            e.preventDefault();
+            toggleAgent(li);
+        });
+
+        // 运行中的用时每秒前进一格
+        var ticks = Array.prototype.slice.call(document.querySelectorAll("[data-wf-tick]"));
+        function fmt(s) {
+            var m = Math.floor(s / 60);
+            var r = s % 60;
+            return m + "m " + (r < 10 ? "0" : "") + r + "s";
+        }
+        setInterval(function() {
+            ticks.forEach(function(el) {
+                var next = Number(el.getAttribute("data-wf-tick")) + 1;
+                el.setAttribute("data-wf-tick", String(next));
+                el.textContent = fmt(next);
+            });
+        }, 1000);
+    }
+    )();
+</script>
