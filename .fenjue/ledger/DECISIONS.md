@@ -284,3 +284,12 @@
 - [fj-fix-b-facc] cli-sync reimport：mtime/size 短路 + 增量 parse（只读新增字节），大文件不再阻塞事件 | accepted | reworks=0 | 2026-09-18T15:55:43+08:00 | 17583c406544
 - [fj-fix-c-19ee] SQLite 写失败前端明确报错（不再静默转圈）+ 磁盘水位告警与健康端点字段 | accepted | reworks=0 | 2026-09-18T16:08:36+08:00 | 88719937e828
 - [fj-review-ab-2c36] 异源 review fix-a + fix-b 的集成分支：重试语义、增量 parse 正确性与基准可复现、合并后零回归 | accepted | reworks=0 | 2026-09-18T16:10:55+08:00 | 646f886f98bf
+- [fj-review-c-b117] 异源 review fix-c：写失败分类与传播、不留半截状态、水位告警去重、健康端点字段；与已合入的 A/B 无冲突 | aborted | reworks=0 | 2026-09-18T16:15:46+08:00
+- [fj-review-c-0911] 异源 review fix-c：写失败分类与传播、不留半截状态、水位告警去重、健康端点字段；与已合入的 A/B 无冲突 | accepted | reworks=0 | 2026-09-18T16:28:47+08:00 | 6253374f6796
+- [fj-fix-d1-3a3b] fix-c 返工：F2 写成功后再更新 committedText（失败内容不得经重连快照回流）+ M1 BUSY 总等 | accepted | reworks=0 | 2026-09-18T16:48:21+08:00 | 0d100f502adf
+- [fj-fix-d2-c01d] 存量 F1（EACCES/EIO 等读失败被判 anyUnreadable=false → 删已有 fork 节点）+  | accepted | reworks=0 | 2026-09-18T16:49:13+08:00 | 6520bfb4ace3
+- [fj-merge-c-83b8] 把 fix-c/d1/d2 合到含 A/B 的 main 上（解 6 处冲突，cli-sync-watcher 有 15 | accepted | reworks=0 | 2026-09-18T17:13:16+08:00 | c4466e1d310c
+- [fj-fix-gitstatus-f873] 根因 E：git 角标接口每请求 N×M 全量重扫 + 同步 spawn git，占满主线程（devbox 实锤，her | accepted | reworks=0 | 2026-09-18T17:32:11+08:00 | 4764205c1c75
+- [fj-fix-e-3591] 根因 D：herdr 首次 attach 仍同步全量 parse（attachSession→importCliLine | accepted | reworks=0 | 2026-09-18T17:48:33+08:00 | 5c97ffbddc39
+- [fj-review-cde-4573] 异源 review C+D+E 集成分支：符号链接收口、首次 attach 异步化、git 角标节流，三者互不架空且零回 | accepted | reworks=0 | 2026-09-18T18:06:59+08:00 | cb4d6be706f5
+- [fj-fix-g-d5e9] 返工 review-cde 的 F1（canonical 回退让越界 symlink 通过包含判断，安全闸 fail-o | accepted | reworks=0 | 2026-09-18T18:20:20+08:00 | be816b4cf2a9
