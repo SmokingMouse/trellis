@@ -27,6 +27,7 @@ import {
 } from "./cli-transcript";
 import { findCodexRolloutPath } from "./codex-transcript-index";
 import { deleteSession } from "./repo";
+import { canonicalPath } from "./canonical-path";
 import {
   publishCliSessionUpdated,
   publishCliSyncFailed,
@@ -570,7 +571,9 @@ export function attachSession(
   provider: CliProvider = "claude",
   options: { origin?: MirrorOrigin } = {},
 ): ImportResult {
-  const resolved = path.resolve(jsonlPath);
+  // canonical，不是 path.resolve：attach 入口拿到的可能是 herdr 侧 realpath 过的
+  // 物理路径，也可能是 $HOME 符号前缀的路径，往下要和枚举侧比串（根因 C）。
+  const resolved = canonicalPath(jsonlPath);
   const state = classifyRootTranscript(provider, resolved);
   if (state.kind === "unreadable") {
     throw new CliTranscriptUnreadableError(resolved);
@@ -580,7 +583,7 @@ export function attachSession(
   if (state.kind === "empty") {
     return { sessionId: state.sessionId, status: "empty", turns: 0 };
   }
-  const lineage = discoverLineage(jsonlPath, provider);
+  const lineage = discoverLineage(resolved, provider);
   seedLineage(lineage, provider, lineage.rootSid, options.origin ?? "cli-import");
   const res = importCliLineage(lineage.rootSid);
   refreshWatches();

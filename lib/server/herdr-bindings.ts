@@ -6,6 +6,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { HerdrAgent, HerdrPane } from "./herdr-types";
 import type { CliAttachOutcome } from "./cli-attach";
+import { canonicalPath } from "./canonical-path";
 import { getDB } from "./sqlite";
 
 export type HerdrSessionBinding = {
@@ -186,7 +187,10 @@ export function resolveTranscriptPath(
   const recordedCwd = transcriptCwd(agentKind, candidate);
   if (pane.cwd && recordedCwd !== pane.cwd) return miss();
   transcriptMisses.delete(key);
-  return candidate;
+  // 出口收口成物理路径（根因 C）：这条路径会进 herdr_sessions.transcript_path、
+  // 进 attach、最后和 cli-discover 枚举出来的路径做串比较。$HOME 是符号链接时
+  // os.homedir() 拼出来的是符号形，与枚举侧的物理形对不上。见 ./canonical-path。
+  return canonicalPath(candidate);
 }
 
 function rowToBinding(row: BindingRow): HerdrSessionBinding {

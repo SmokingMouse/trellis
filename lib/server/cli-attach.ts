@@ -16,6 +16,23 @@ export class CliTranscriptUnreadableError extends Error {
   }
 }
 
+/**
+ * 选中的 jsonl 在 lineage 发现阶段解析不出任何轮次（cli-lineage.ts）。
+ *
+ * prod 事故（根因 C）：这里原本抛的是**裸 Error**，herdr-fleet 的分类闸认不出来，
+ * 于是每轮 snapshot 都重排一次 attach，一条 197MB 的 codex rollout 把
+ * /api/providers 拖到 7–16s。触发它的是符号链接 $HOME 让路径比较失配 —— 那个
+ * 已经在 canonical-path 那层收口了，但「选中文件解析为空」还有别的走法
+ * （文件在发现窗口内被换掉、被别的进程截断重写…），一律是确定性的：
+ * 同样的字节重跑不会变好，文件指纹变了 herdr-fleet 自会再试一次。
+ */
+export class CliTranscriptNoTurnsError extends Error {
+  constructor(readonly transcriptPath: string) {
+    super(`selected CLI jsonl has no parseable turns: ${transcriptPath}`);
+    this.name = "CliTranscriptNoTurnsError";
+  }
+}
+
 /** trellis 自己的 native session 撞了同一个 id —— 换多少次时机都还是撞。 */
 export class NativeSessionConflictError extends Error {
   constructor(readonly sessionId: string) {
@@ -26,7 +43,10 @@ export class NativeSessionConflictError extends Error {
 
 /** true = 重试不会有任何不同的结果，调用方不该再排下一轮。 */
 export function isDeterministicAttachFailure(error: unknown): boolean {
-  return error instanceof NativeSessionConflictError;
+  return (
+    error instanceof NativeSessionConflictError ||
+    error instanceof CliTranscriptNoTurnsError
+  );
 }
 
 // attach 的正常出口。"empty" 不是错误：用户刚开一个 CLI pane、还没说第一句话时，

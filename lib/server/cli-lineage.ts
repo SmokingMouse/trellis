@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
+import { canonicalPath } from "./canonical-path";
+import { CliTranscriptNoTurnsError } from "./cli-attach";
 
 export type CliLineageMember = {
   sid: string;
@@ -46,7 +48,10 @@ export function discoverLineageWithParser(
   parse: (path: string) => ParsedCliSession | null,
   siblingFiles?: (selectedPath: string) => string[],
 ): DiscoveredLineage {
-  const selected = path.resolve(transcriptPath);
+  // selected 与下面每个 full 都走 canonicalPath：这里是靠**精确串比较**认选中
+  // 文件的（`file.full === selected`），一边物理路径一边 $HOME 符号路径就永远
+  // 对不上，结果是把「明明有 turn 的文件」判成没有 —— 根因 C。
+  const selected = canonicalPath(transcriptPath);
   let files: string[];
   try {
     files = siblingFiles
@@ -61,7 +66,7 @@ export function discoverLineageWithParser(
 
   const parsedFiles: ParsedFile[] = [];
   for (const file of files) {
-    const full = path.resolve(file);
+    const full = canonicalPath(file);
     const parsed = parse(full);
     if (!parsed || parsed.turns.length === 0) continue;
     parsedFiles.push({
@@ -72,7 +77,10 @@ export function discoverLineageWithParser(
   }
 
   const selectedFile = parsedFiles.find((file) => file.full === selected);
-  if (!selectedFile) throw new Error("selected CLI jsonl has no parseable turns");
+  // 确定性错误类型，不是裸 Error：调用链尽头是 herdr-fleet 的重试闸，裸 Error 会
+  // 被当成「可重试」无限重排（根因 C 的放大器）。同样的字节重跑一万次还是同样的
+  // 结果，指纹变了才值得再试 —— 正是 isDeterministicAttachFailure 的语义。
+  if (!selectedFile) throw new CliTranscriptNoTurnsError(selected);
 
   const parent = new Map<string, string>();
   const find = (value: string): string => {

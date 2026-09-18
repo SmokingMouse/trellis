@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { CODEX_SESSIONS_DIR } from "./codex-paths";
+import { canonicalPath } from "./canonical-path";
 import { parseCliSessionJsonl, type ParsedCliSession } from "./cli-import";
 import { parseCodexSessionJsonl } from "./codex-import";
 import { parseCliTranscript, type CliProvider } from "./cli-transcript";
@@ -20,17 +21,23 @@ export type { CliLineageMember, DiscoveredLineage } from "./cli-lineage";
 export { parseCliTranscript } from "./cli-transcript";
 export type { CliProvider } from "./cli-transcript";
 
-export const PROJECTS_DIR = path.join(os.homedir(), ".claude", "projects");
+// canonicalPath 同 CODEX_HOME_DIR：$HOME 可能是符号链接，两边必须是同一套判据
+// （根因 C，见 ./canonical-path）。
+export const PROJECTS_DIR = canonicalPath(
+  path.join(os.homedir(), ".claude", "projects"),
+);
 export { CODEX_SESSIONS_DIR } from "./codex-paths";
 
 // 路径安全：只允许 PROJECTS_DIR 下的目录（防越权读任意目录）。
+// 候选先 canonical 再比：闸门两侧都用物理路径，符号前缀的合法路径不会被误拒，
+// 指向禁区外的符号链接也不会被放行。
 export function isWithinProjects(dir: string): boolean {
-  const rel = path.relative(PROJECTS_DIR, dir);
+  const rel = path.relative(PROJECTS_DIR, canonicalPath(dir));
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 export function isWithinCodexSessions(candidate: string): boolean {
-  const rel = path.relative(CODEX_SESSIONS_DIR, candidate);
+  const rel = path.relative(CODEX_SESSIONS_DIR, canonicalPath(candidate));
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
@@ -57,7 +64,10 @@ export function discoverLineage(
   provider: CliProvider = "claude",
 ): DiscoveredLineage {
   if (provider === "codex") {
-    const selected = path.resolve(jsonlPath);
+    // canonical，不是 path.resolve：调用方给的可能是 realpath 过的物理路径
+    // （herdr-fleet），而 codexFiles() 枚举出来的是 $HOME 符号前缀的路径。
+    // 两边不统一就会在 cli-lineage 的 full === selected 处对不上 —— 根因 C。
+    const selected = canonicalPath(jsonlPath);
     const selectedParsed = parseCodexSessionJsonl(selected);
     const rootTurnId = selectedParsed?.turns[0]?.id;
     const selectedCwd = sampleCodexMeta(selected)?.cwd ?? null;
@@ -67,7 +77,7 @@ export function discoverLineage(
     return discoverLineageWithParser(
       selected,
       (file) => {
-        const resolved = path.resolve(file);
+        const resolved = canonicalPath(file);
         if (!parseCache.has(resolved)) {
           parseCache.set(resolved, parseCodexSessionJsonl(resolved));
         }
@@ -81,8 +91,9 @@ export function discoverLineage(
         ),
     );
   }
+  // claude 侧同样收口：~/.claude/projects 走的是同一个可能带符号链接的 $HOME。
   return discoverLineageWithParser(
-    jsonlPath,
+    canonicalPath(jsonlPath),
     (file) => parseCliTranscript(provider, file),
   );
 }
@@ -294,7 +305,11 @@ function codexFiles(): string[] {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) out.push(full);
+      // 根已经是 canonical，但中途任意一层仍可能是符号链接（日期目录被挪到别的
+      // 盘就会这样），所以每个文件再收口一次 —— 枚举结果必须与 selected 同形。
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        out.push(canonicalPath(full));
+      }
     }
   };
   walk(CODEX_SESSIONS_DIR);
