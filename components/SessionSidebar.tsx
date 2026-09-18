@@ -308,13 +308,18 @@ export function SessionSidebar() {
   // 不并进 /api/sessions 是刻意的 —— 那条在流式期间是 ~1.6 次/秒的热循环，
   // 把 spawn git 塞进去会拖垮 SSE；而角标晚一百毫秒出现没人在意。
   //
-  // 这一路还顺带触发服务端重扫兄弟 worktree，所以它也是「CLI 里新建的
-  // worktree 出现在侧栏」的通道。重扫真有增删时 bump 一次让骨架重拉；
-  // 重扫幂等，第二趟 added/pruned 归零，不会反复触发。
+  // 重扫兄弟 worktree 已经**不在**这个请求里跑了（根因 E：它曾经是每请求
+  // 48 次同步 spawn git）。服务端按 repo 节流在后台扫，这里只读它的账。
+  //
+  // `generation` 是「有净变化的扫描轮次号」。只在它**变化时**才 bump 一次 ——
+  // 否则 bump → sessionsRevision 变 → 这个 effect 重跑 → 又拿到同一份
+  // added/pruned → 再 bump，「扫到变化 → 刷新 → 再扫」就自己咬住自己了。
+  // 首次挂载（seen < 0）不 bump：骨架本来就是刚拉的，没必要再拉一遍。
   const [gitStatus, setGitStatus] = useState<Map<string, WorkspaceGitStatus>>(
     () => new Map(),
   );
   const [gitNonce, setGitNonce] = useState(0);
+  const seenRescanGen = useRef(-1);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/workspaces/git-status")
@@ -326,7 +331,14 @@ export function SessionSidebar() {
             ((data.statuses ?? []) as WorkspaceGitStatus[]).map((s) => [s.id, s]),
           ),
         );
-        if (data.rescan?.added || data.rescan?.pruned) bumpSessionsRevision();
+        const gen = Number(data.rescan?.generation ?? 0);
+        const seen = seenRescanGen.current;
+        if (gen !== seen) {
+          seenRescanGen.current = gen;
+          if (seen >= 0 && (data.rescan?.added || data.rescan?.pruned)) {
+            bumpSessionsRevision();
+          }
+        }
       })
       .catch(() => {
         /* 角标是锦上添花，拉不到就不显示 */

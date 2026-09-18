@@ -38,9 +38,16 @@ export function invalidateGitStatus(id?: string): void {
   else cache.clear();
 }
 
+/**
+ * `--no-optional-locks`：角标这一路全是只读查询，却会被 git 顺手拿去刷新
+ * index 的 stat 缓存 —— 也就是取 `.git/index.lock`。侧栏是高频轮询，等于
+ * 反过来给用户正在敲命令的大仓加锁。全局选项，必须排在子命令前面。
+ */
+const GIT_READONLY = ["--no-optional-locks"];
+
 async function git(cwd: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await run("git", args, {
+    const { stdout } = await run("git", [...GIT_READONLY, ...args], {
       cwd,
       timeout: 10_000,
       env: { ...process.env, http_proxy: "", https_proxy: "", ALL_PROXY: "" },
@@ -154,6 +161,44 @@ async function statusOf(row: {
 }
 
 /**
+ * 未命中缓存的行同时最多跑几个。
+ *
+ * 根因 E 的第二半：原来是无上限的 `Promise.all`，一个 48 个 workspace 的
+ * 机器在缓存冷的那一刻会一口气 spawn 48 条 `git status`（每条还要再跟
+ * 3–4 次 rev-parse / merge-base），把 CPU 和 fd 一起打满。git status 在大仓上
+ * 是 IO 密集的，6 条并发已经能吃满盘；再多只是互相排队还顺带饿死 next 主线程。
+ */
+const DEFAULT_CONCURRENCY = 6;
+
+function concurrency(): number {
+  const raw = Number(process.env.TRELLIS_GIT_STATUS_CONCURRENCY);
+  return Number.isFinite(raw) && raw >= 1
+    ? Math.floor(raw)
+    : DEFAULT_CONCURRENCY;
+}
+
+/** 固定 worker 数的 map —— 结果按输入顺序回填。 */
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return out;
+}
+
+/**
  * 批量取状态。只碰 git 工作区且目录还在的行 —— 实测 13 个 workspace 里
  * 有 6 个是 plain（scratch / 家目录 / tmp），给它们 spawn git 是纯浪费。
  */
@@ -172,15 +217,13 @@ export async function collectGitStatus(
     else todo.push(row);
   }
 
-  const fresh = await Promise.all(
-    todo.map((row) =>
-      statusOf(row).catch(() => ({
-        id: row.id,
-        branch: null,
-        dirty: 0,
-        reclaimable: false,
-      })),
-    ),
+  const fresh = await mapWithLimit(todo, concurrency(), (row) =>
+    statusOf(row).catch(() => ({
+      id: row.id,
+      branch: null,
+      dirty: 0,
+      reclaimable: false,
+    })),
   );
   for (const value of fresh) {
     cache.set(value.id, { at: now, value });
