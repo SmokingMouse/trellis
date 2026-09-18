@@ -10,7 +10,9 @@ mock.module("server-only", () => ({}));
 const { ensureHerdrSchema } = await import("./sqlite");
 const { HerdrClient } = await import("./herdr-client");
 const { HerdrFleetService } = await import("./herdr-fleet");
+const { classifyRootTranscript } = await import("./cli-sync-watcher");
 import type { HerdrPane, HerdrWorkspace } from "./herdr-types";
+import type { CliAttachOutcome } from "./cli-attach";
 
 type RequestEnvelope = {
   id: string;
@@ -24,7 +26,12 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-function createHarness(waitDelayMs = 0, options: { resolveBranch?: (checkout: string) => Promise<string | null>; branchNow?: () => number } = {}) {
+function createHarness(waitDelayMs = 0, options: {
+  resolveBranch?: (checkout: string) => Promise<string | null>;
+  branchNow?: () => number;
+  attachClaude?: ((transcriptPath: string) => void) | undefined;
+  attachHerdr?: (transcriptPath: string, agentKind: string) => Promise<CliAttachOutcome>;
+} = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-fleet-"));
   const socketPath = path.join(home, "herdr.sock");
   const sessionId = "44444444-4444-4444-8444-444444444444";
@@ -137,10 +144,10 @@ function createHarness(waitDelayMs = 0, options: { resolveBranch?: (checkout: st
     healthIntervalMs: 60_000,
   });
   const service = new HerdrFleetService(client, {
+    attachClaude: (file) => attached.push(file),
     ...options,
     db,
     home,
-    attachClaude: (file) => attached.push(file),
   });
   cleanups.push(() => {
     service.stop();
@@ -151,7 +158,92 @@ function createHarness(waitDelayMs = 0, options: { resolveBranch?: (checkout: st
   return { service, client, requests, attached, transcript, sessionId, basePane, snapshotPanes, snapshotWorkspaces, db, home, emit };
 }
 
+// 一个合法但零轮次的 CLI 会话（devbox 上 20–30s 一轮无限重试的那种文件形状）。
+function emptySessionJsonl(sessionId: string, cwd: string): string {
+  return [
+    { type: "mode", mode: "default", sessionId, cwd, timestamp: "2026-09-17T02:00:00.000Z" },
+    { type: "file-history-snapshot", messageId: "m1", snapshot: { trackedFileBackups: {} }, sessionId },
+    { type: "user", uuid: "u-login", parentUuid: null, isMeta: true, sessionId, cwd, timestamp: "2026-09-17T02:00:01.000Z", message: { role: "user", content: "<command-message>login</command-message>\n<command-name>/login</command-name>" } },
+    { type: "user", uuid: "u-out", parentUuid: "u-login", isMeta: true, sessionId, cwd, timestamp: "2026-09-17T02:00:02.000Z", message: { role: "user", content: "<local-command-stdout>ok</local-command-stdout>" } },
+    { type: "system", subtype: "local_command", uuid: "s1", parentUuid: "u-out", sessionId, cwd, timestamp: "2026-09-17T02:00:03.000Z", content: "/login" },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+}
+
+function conversationJsonl(sessionId: string, cwd: string): string {
+  return [
+    { type: "user", uuid: "u1", parentUuid: null, sessionId, cwd, timestamp: "2026-09-17T03:00:00.000Z", message: { role: "user", content: "question" } },
+    { type: "assistant", uuid: "a1", parentUuid: "u1", sessionId, cwd, timestamp: "2026-09-17T03:00:01.000Z", message: { role: "assistant", content: [{ type: "text", text: "answer" }], usage: { input_tokens: 1, output_tokens: 1 } } },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+}
+
 describe("HerdrFleetService", () => {
+  // 根因 A：0 turn 的 transcript attach 失败后 key 被删 → 每次 snapshot / pane 事件
+  // 重来一轮，24h 46 条同样的 console.error，主线程 100% CPU。
+  test("P0 an empty transcript attaches once, then N snapshots/pane events retry nothing", async () => {
+    const calls: [string, string][] = [];
+    const warnings: unknown[][] = [];
+    const errors: unknown[][] = [];
+    const h = createHarness(0, {
+      attachClaude: undefined,
+      attachHerdr: async (transcriptPath, agentKind) => {
+        calls.push([transcriptPath, agentKind]);
+        const state = classifyRootTranscript(agentKind as "claude", transcriptPath);
+        if (state.kind === "unreadable") throw new Error("transcript unreadable");
+        return state.kind === "empty" ? "empty" : "attached";
+      },
+    });
+    fs.writeFileSync(h.transcript, emptySessionJsonl(h.sessionId, "/tmp/fleet-project"));
+    const realWarn = console.warn;
+    const realError = console.error;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    cleanups.push(() => { console.warn = realWarn; console.error = realError; });
+
+    await h.service.ensureStarted();
+    await Bun.sleep(20);
+    expect(calls).toEqual([[h.transcript, "claude"]]);
+
+    for (let i = 0; i < 3; i++) {
+      h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 2 + i, agent_status: i % 2 ? "idle" : "working" } } });
+      await Bun.sleep(20);
+      await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+      await Bun.sleep(20);
+    }
+    expect(calls).toHaveLength(1);
+    expect(errors).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][2])).toContain("no conversation turns");
+
+    // 但不是永久黑名单：文件长出真对话 → 下一个事件就把它接回来。
+    fs.writeFileSync(h.transcript, conversationJsonl(h.sessionId, "/tmp/fleet-project"));
+    h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 9, agent_status: "blocked" } } });
+    await Bun.sleep(30);
+    expect(calls).toHaveLength(2);
+    expect(errors).toEqual([]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("P0 retryable attach failures keep retrying and keep logging the error", async () => {
+    const calls: string[] = [];
+    const errors: unknown[][] = [];
+    const h = createHarness(0, {
+      attachClaude: undefined,
+      attachHerdr: async (transcriptPath) => {
+        calls.push(transcriptPath);
+        throw new Error("EBUSY: transcript locked");
+      },
+    });
+    const realError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    cleanups.push(() => { console.error = realError; });
+    await h.service.ensureStarted();
+    await Bun.sleep(20);
+    h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 2, agent_status: "working" } } });
+    await Bun.sleep(30);
+    expect(calls.length).toBeGreaterThan(1);
+    expect(errors).toHaveLength(calls.length);
+  });
+
   test("P2-4 slow failed branch lookup never blocks events, deduplicates and retries only after failure TTL", async () => {
     let now = 0;
     let calls = 0;

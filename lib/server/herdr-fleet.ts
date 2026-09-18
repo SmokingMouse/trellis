@@ -11,7 +11,11 @@ import {
 import { HerdrClient } from "./herdr-client";
 import type { HerdrPane } from "./herdr-types";
 import type { HerdrInputDelivery } from "../herdr-input";
-import { realpathSync } from "node:fs";
+import {
+  isDeterministicAttachFailure,
+  type CliAttachOutcome,
+} from "./cli-attach";
+import { realpathSync, statSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { getDB } from "./sqlite";
 import type { HerdrWorktree } from "../herdr-ui";
@@ -32,12 +36,18 @@ function resolveGitBranch(checkout: string): Promise<string | null> {
 
 export const HERDR_BRANCH_TTL_MS = 60_000;
 export const HERDR_BRANCH_FAILURE_TTL_MS = 10_000;
+// 确定性跳过的 transcript 上限（和 resolveTranscriptPath 的 miss 缓存同量级）。
+export const HERDR_SKIPPED_TRANSCRIPT_MAX = 1024;
 
 type FleetOptions = {
   db?: Database;
   home?: string;
   attachClaude?: (transcriptPath: string) => void;
   attachTranscript?: (transcriptPath: string, agentKind: string) => void;
+  attachHerdr?: (
+    transcriptPath: string,
+    agentKind: string,
+  ) => Promise<CliAttachOutcome>;
   resolveBranch?: (checkout: string) => Promise<string | null>;
   branchNow?: () => number;
 };
@@ -51,6 +61,9 @@ export class HerdrFleetService {
   private readonly listeners = new Set<() => void>();
   private readonly branchCache = new Map<string, { branch: string | null; expiresAt: number; pending: boolean }>();
   private readonly attachedTranscriptKeys = new Set<string>();
+  // 确定性跳过的 transcript → 跳过时的文件指纹。同样的字节重试永远是同样的结果，
+  // 所以只有文件真的变了才值得再试一次（空会话长出第一轮对话就是这么被接回来的）。
+  private readonly skippedTranscripts = new Map<string, string | null>();
   private readonly detach: () => void;
 
   constructor(
@@ -149,12 +162,47 @@ export class HerdrFleetService {
     for (const checkout of this.branchCache.keys()) if (!activeCheckouts.has(checkout)) this.branchCache.delete(checkout);
   }
 
+  private transcriptSignature(transcriptPath: string): string | null {
+    try {
+      const stat = statSync(transcriptPath);
+      return `${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return null;
+    }
+  }
+
+  // 确定性失败 / 空会话：去掉 attach 去重 key（文件变了还要再试），转记进跳过表。
+  // 日志只在**首次**记一条 —— 每 snapshot 一条 console.error 正是这个 bug 在
+  // 运维侧的样子（24h 46 条同一行）。
+  private skipTranscript(
+    key: string,
+    transcriptPath: string,
+    signature: string | null,
+    reason: string,
+  ): void {
+    this.attachedTranscriptKeys.delete(key);
+    if (!this.skippedTranscripts.has(key)) {
+      console.warn("[trellis] skipping Herdr transcript", transcriptPath, reason);
+    }
+    if (this.skippedTranscripts.size >= HERDR_SKIPPED_TRANSCRIPT_MAX) {
+      this.skippedTranscripts.delete(this.skippedTranscripts.keys().next().value!);
+    }
+    this.skippedTranscripts.set(key, signature);
+  }
+
   private readonly attachTranscript = (
     transcriptPath: string,
     agentKind: string,
   ): void => {
     const key = `${agentKind}:${transcriptPath}`;
     if (this.attachedTranscriptKeys.has(key)) return;
+    // 每次 fleet snapshot（60s）和每个 pane 事件都会把同一批 transcript 重放一遍。
+    // 上一轮已确定性失败且文件一个字节没变 → 直接返回，不 attach、不打日志。
+    const signature = this.transcriptSignature(transcriptPath);
+    if (this.skippedTranscripts.has(key)) {
+      if (this.skippedTranscripts.get(key) === signature) return;
+      this.skippedTranscripts.delete(key);
+    }
     this.attachedTranscriptKeys.add(key);
     if (this.options.attachTranscript) {
       this.options.attachTranscript(transcriptPath, agentKind);
@@ -164,10 +212,26 @@ export class HerdrFleetService {
       this.options.attachClaude(transcriptPath);
       return;
     }
-    void attachHerdrTranscript(transcriptPath, agentKind).catch((error) => {
-      this.attachedTranscriptKeys.delete(key);
-      console.error("[trellis] failed to attach Herdr transcript", transcriptPath, error);
-    });
+    const attach = this.options.attachHerdr ?? attachHerdrTranscript;
+    void attach(transcriptPath, agentKind)
+      .then((outcome) => {
+        if (outcome !== "empty") return;
+        this.skipTranscript(
+          key,
+          transcriptPath,
+          signature,
+          "CLI session has no conversation turns yet",
+        );
+      })
+      .catch((error) => {
+        if (isDeterministicAttachFailure(error)) {
+          this.skipTranscript(key, transcriptPath, signature, String(error));
+          return;
+        }
+        // 可重试失败（读不到 / 被截断 / 锁）保持原行为：放开 key，下一轮再试。
+        this.attachedTranscriptKeys.delete(key);
+        console.error("[trellis] failed to attach Herdr transcript", transcriptPath, error);
+      });
   };
 
   ensureStarted(): Promise<void> {
@@ -183,6 +247,7 @@ export class HerdrFleetService {
     this.stopped = true;
     this.listeners.clear();
     this.branchCache.clear();
+    this.skippedTranscripts.clear();
     this.detach();
     this.client.stop();
   }
