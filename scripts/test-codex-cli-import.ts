@@ -305,7 +305,7 @@ try {
   );
   const crossDateLineage = discoverLineage(movedForkPath, "codex");
   check("跨日期现有 fork attach 时同组", crossDateLineage.members.length, 2);
-  reimport(movedForkPath);
+  await reimport(movedForkPath);
   const forkLineages = db
     .prepare(
       "SELECT cli_session_id, provider_family, fork_point_uuid FROM cli_lineages WHERE trellis_session_id = ? ORDER BY is_root DESC",

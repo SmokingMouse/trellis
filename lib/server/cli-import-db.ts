@@ -5,7 +5,7 @@
 import "server-only";
 import { existsSync } from "node:fs";
 import { getDB } from "./sqlite";
-import { parseCliTranscript } from "./cli-transcript";
+import { parseCliTranscript, parseCliTranscriptAsync } from "./cli-transcript";
 import { ensureWorkspaceForPath } from "./workspaces";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
 
@@ -73,6 +73,12 @@ function parseLineages(rows: LineageRow[]): ParsedLineage[] {
 // turn 集合**一无所知** —— 拿这种残缺集合去做「不在集合里就删」的清理，会把整条
 // lineage 的节点全剥掉（CLI transcript 过期 / 用户清理 / fork jsonl 被删都会走
 // 到这里，不是理论风险）。所以解析失败必须能被调用方看见。
+//
+// 关于 stat 短路与增量缓存（./cli-transcript）对这条不变量的影响：缓存**只**在
+// 文件仍然存在、inode 未变、且长度单调增长时才复用。文件一旦消失，
+// parseCliTranscript 会先作废缓存再返回 null —— 于是这里照样走
+// 「parsed 为空 + existsSync 为 false → anyUnreadable」。缓存不会把「读不到」
+// 悄悄变成「读到了但没内容」。
 function parseLineagesChecked(rows: LineageRow[]): {
   parsed: ParsedLineage[];
   anyUnreadable: boolean;
@@ -81,6 +87,27 @@ function parseLineagesChecked(rows: LineageRow[]): {
   let anyUnreadable = false;
   for (const row of rows) {
     const parsed = parseCliTranscript(row.provider_family, row.jsonl_path);
+    if (!parsed || parsed.turns.length === 0) {
+      if (!existsSync(row.jsonl_path)) anyUnreadable = true;
+      continue;
+    }
+    out.push({ row, parsed });
+  }
+  return { parsed: out, anyUnreadable };
+}
+
+// 同上，但解析分片让出事件循环（watcher / 启动补齐走这条）。判据逐字相同。
+async function parseLineagesCheckedAsync(rows: LineageRow[]): Promise<{
+  parsed: ParsedLineage[];
+  anyUnreadable: boolean;
+}> {
+  const out: ParsedLineage[] = [];
+  let anyUnreadable = false;
+  for (const row of rows) {
+    const parsed = await parseCliTranscriptAsync(
+      row.provider_family,
+      row.jsonl_path,
+    );
     if (!parsed || parsed.turns.length === 0) {
       if (!existsSync(row.jsonl_path)) anyUnreadable = true;
       continue;
@@ -143,13 +170,14 @@ function lineageNewestTurn(trellisSessionId: string): ParsedTurn | null {
   return turns.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0] ?? null;
 }
 
-// 把一个 attached CLI lineage 组 union 镜像/更新进同一个 trellis session。
-// 返回状态供调用方决定是否提示。
-export function importCliLineage(trellisSessionId: string): ImportResult {
+// 解析前的纯 DB 前置检查。同步/异步两个入口共用，保证两条路的短路判据一致。
+function importPrelude(
+  trellisSessionId: string,
+): { rows: LineageRow[] } | { done: ImportResult } {
   const db = getDB();
   const rows = lineageRows(trellisSessionId);
   if (rows.length === 0) {
-    return { sessionId: trellisSessionId, status: "empty", turns: 0 };
+    return { done: { sessionId: trellisSessionId, status: "empty", turns: 0 } };
   }
 
   // 既有 native session 撞 id → 不碰（那是 trellis 自己的，绝不覆盖）。
@@ -157,10 +185,43 @@ export function importCliLineage(trellisSessionId: string): ImportResult {
     .prepare("SELECT origin FROM sessions WHERE id = ?")
     .get(trellisSessionId) as { origin: string } | undefined;
   if (existing && existing.origin !== "cli-import" && existing.origin !== "herdr") {
-    return { sessionId: trellisSessionId, status: "skipped-native", turns: 0 };
+    return {
+      done: { sessionId: trellisSessionId, status: "skipped-native", turns: 0 },
+    };
   }
+  return { rows };
+}
 
-  const { parsed: parsedRows, anyUnreadable } = parseLineagesChecked(rows);
+// 把一个 attached CLI lineage 组 union 镜像/更新进同一个 trellis session。
+// 返回状态供调用方决定是否提示。
+export function importCliLineage(trellisSessionId: string): ImportResult {
+  const pre = importPrelude(trellisSessionId);
+  if ("done" in pre) return pre.done;
+  const { parsed, anyUnreadable } = parseLineagesChecked(pre.rows);
+  return commitCliLineage(trellisSessionId, pre.rows, parsed, anyUnreadable);
+}
+
+/**
+ * importCliLineage 的非阻塞版：解析阶段分片让出事件循环，DB 落地阶段与同步版
+ * 是同一段代码（SQLite 写本来就是同步的，也不是 CPU 尖峰的来源）。
+ * watcher 与启动补齐走这条。
+ */
+export async function importCliLineageAsync(
+  trellisSessionId: string,
+): Promise<ImportResult> {
+  const pre = importPrelude(trellisSessionId);
+  if ("done" in pre) return pre.done;
+  const { parsed, anyUnreadable } = await parseLineagesCheckedAsync(pre.rows);
+  return commitCliLineage(trellisSessionId, pre.rows, parsed, anyUnreadable);
+}
+
+function commitCliLineage(
+  trellisSessionId: string,
+  rows: LineageRow[],
+  parsedRows: ParsedLineage[],
+  anyUnreadable: boolean,
+): ImportResult {
+  const db = getDB();
   if (parsedRows.length === 0) {
     return { sessionId: trellisSessionId, status: "empty", turns: 0 };
   }

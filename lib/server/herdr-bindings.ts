@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { HerdrAgent, HerdrPane } from "./herdr-types";
+import type { CliAttachOutcome } from "./cli-attach";
 import { getDB } from "./sqlite";
 
 export type HerdrSessionBinding = {
@@ -356,11 +357,15 @@ export function reconcileHerdrSnapshot(
   return listHerdrBindings(db);
 }
 
+// 返回值是 attach 的**出口种类**（见 ./cli-attach）。调用方靠它区分「成功」与
+// 「合法但还没有对话轮次，跳过」—— 后者不是错误，但也不能当成功一直去重掉，
+// 否则会话长出真内容后就永远镜像不进来。
 export async function attachHerdrTranscript(
   transcriptPath: string,
   agentKind: string,
-): Promise<void> {
-  if (agentKind !== "claude" && agentKind !== "codex") return;
+): Promise<CliAttachOutcome> {
+  if (agentKind !== "claude" && agentKind !== "codex") return "ignored";
   const { attachSession } = await import("./cli-sync-watcher");
-  attachSession(transcriptPath, agentKind, { origin: "herdr" });
+  const result = attachSession(transcriptPath, agentKind, { origin: "herdr" });
+  return result.status === "empty" ? "empty" : "attached";
 }

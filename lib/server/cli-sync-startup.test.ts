@@ -14,7 +14,9 @@ test("startup serves HTTP during offline catchup and retains all mirror sessions
     const original = await import(${JSON.stringify(path.resolve("lib/server/cli-import-db.ts"))});
     mock.module(${JSON.stringify(path.resolve("lib/server/cli-import-db.ts"))}, () => ({
       ...original,
-      importCliLineage(id) {
+      // Startup catchup goes through the non-blocking entry point now; the
+      // busy wait still models a transcript parse that costs real CPU.
+      async importCliLineageAsync(id) {
         const until = performance.now() + 15;
         while (performance.now() < until) {}
         attempts.push(id);

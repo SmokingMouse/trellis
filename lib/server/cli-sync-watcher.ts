@@ -7,7 +7,11 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 import { getDB } from "./sqlite";
-import { importCliLineage, type ImportResult } from "./cli-import-db";
+import {
+  importCliLineage,
+  importCliLineageAsync,
+  type ImportResult,
+} from "./cli-import-db";
 import { ensureWorkspaceForPath } from "./workspaces";
 import {
   CODEX_SESSIONS_DIR,
@@ -15,10 +19,19 @@ import {
   isWithinCodexSessions,
   type DiscoveredLineage,
 } from "./cli-discover";
-import { parseCliTranscript, type CliProvider } from "./cli-transcript";
+import {
+  parseCliTranscript,
+  parseCliTranscriptAsync,
+  type CliProvider,
+} from "./cli-transcript";
+import type { ParsedCliSession } from "./cli-import";
 import { findCodexRolloutPath } from "./codex-transcript-index";
 import { deleteSession } from "./repo";
 import { publishCliSessionUpdated } from "./cli-sync-events";
+import {
+  CliTranscriptUnreadableError,
+  NativeSessionConflictError,
+} from "./cli-attach";
 
 // 当前 attached 会话的源 jsonl 绝对路径集合（每次实时查 DB，保持权威）。
 type AttachedPath = { sid: string; provider: CliProvider };
@@ -88,6 +101,55 @@ function attachedSessions(): {
   return rows;
 }
 
+// 一个根 transcript 的三种状态。「读不到」和「读到了但没内容」必须分开 ——
+// 同一条不变量在 cli-import-db.ts:72-75 有完整说明（拿残缺集合做「不在集合里就删」
+// 的清理会把整条 lineage 的节点剥掉），这里是它在 attach 侧的对应面。
+export type RootTranscriptState =
+  | { kind: "ready"; parsed: ParsedCliSession }
+  | { kind: "empty"; sessionId: string }
+  | { kind: "unreadable" };
+
+// 「格式合法」= 打得开，且每一非空行都是合法 JSON。坏行说明文件被截断 / 损坏
+// （CLI 可能正写到一半），那是**临时**状态，值得下一轮再试。
+// 注意不能拿 parseCliTranscript 返回 null 当「读不到」的判据：合法的空会话
+// （只有 mode / file-history-snapshot / slash-command 噪声行）同样返回 null
+// （cli-import.ts:131 与 :328），两者必须靠文件本身分开。
+function readsAsJsonLines(file: string): boolean {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return false;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      JSON.parse(line);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 分类判据（全部看文件结构，不看 error message 字符串）：
+//   有可解析轮次            → ready
+//   0 轮次 + 全是合法 JSON  → empty：合法的空会话，确定性结果，重试一万次也一样
+//   0 轮次 + 读不到/有坏行  → unreadable：可重试
+export function classifyRootTranscript(
+  provider: CliProvider,
+  file: string,
+): RootTranscriptState {
+  const parsed = parseCliTranscript(provider, file);
+  if (parsed && parsed.turns.length > 0) return { kind: "ready", parsed };
+  if (!readsAsJsonLines(file)) return { kind: "unreadable" };
+  return {
+    kind: "empty",
+    sessionId:
+      parsed?.sessionId ?? path.basename(file).replace(/\.jsonl$/, ""),
+  };
+}
+
 function seedLineage(
   discovered: DiscoveredLineage,
   provider: CliProvider,
@@ -96,15 +158,19 @@ function seedLineage(
 ): void {
   const db = getDB();
   const root = discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
-  const parsed = parseCliTranscript(provider, root.path);
-  if (!parsed || parsed.turns.length === 0) {
-    throw new Error("root CLI jsonl has no parseable turns");
+  const state = classifyRootTranscript(provider, root.path);
+  // 0 turn 不是错误：安静跳过（不建 session 行、不动既有节点）。读不到才是错误 ——
+  // 调用方必须看得见，否则镜像会话会停在旧快照上而没人知道。
+  if (state.kind === "unreadable") {
+    throw new CliTranscriptUnreadableError(root.path);
   }
+  if (state.kind === "empty") return;
+  const parsed = state.parsed;
   const existing = db
     .prepare("SELECT origin FROM sessions WHERE id = ?")
     .get(trellisSessionId) as { origin: string } | undefined;
   if (existing && !isMirrorOrigin(existing.origin)) {
-    throw new Error(`session id ${trellisSessionId} already exists as native session`);
+    throw new NativeSessionConflictError(trellisSessionId);
   }
 
   const roots = parsed.turns
@@ -188,31 +254,42 @@ function seedLineage(
 }
 
 const watchers = new Map<string, fs.FSWatcher>(); // dir → watcher
-const debounce = new Map<string, NodeJS.Timeout>(); // file → timer
 const DEBOUNCE_MS = 600; // CLI 高频 append 合并窗口
+// 去抖的封顶：持续写入的 transcript（存活的 codex rollout 每 10s 就 +60KB）会让
+// 纯 trailing 去抖要么每个窗口都触发一次解析、要么被无限延后。封顶 = 从**第一次**
+// 事件算起最多等这么久就一定解析一次，之后重新计窗。
+const MAX_DEBOUNCE_WAIT_MS = 5000;
 
-function turnIdsForSession(
+type PendingSync = {
+  timer: NodeJS.Timeout | null;
+  firstEventAt: number;
+  running: boolean;
+  dirtyWhileRunning: boolean;
+};
+const pending = new Map<string, PendingSync>(); // file → 去抖状态
+
+async function turnIdsForSession(
   trellisSessionId: string,
   provider: CliProvider,
-): Set<string> {
+): Promise<Set<string>> {
   const db = getDB();
   const rows = db
     .prepare("SELECT jsonl_path AS p FROM cli_lineages WHERE trellis_session_id = ?")
     .all(trellisSessionId) as { p: string }[];
   const ids = new Set<string>();
   for (const r of rows) {
-    const parsed = parseCliTranscript(provider, r.p);
+    const parsed = await parseCliTranscriptAsync(provider, r.p);
     if (!parsed) continue;
     for (const t of parsed.turns) ids.add(t.id);
   }
   return ids;
 }
 
-function attachNewForkIfMatched(
+async function attachNewForkIfMatched(
   full: string,
   provider: CliProvider,
-): ImportResult | null {
-  const parsed = parseCliTranscript(provider, full);
+): Promise<ImportResult | null> {
+  const parsed = await parseCliTranscriptAsync(provider, full);
   if (!parsed || parsed.turns.length === 0) return null;
   const candidateIds = new Set(parsed.turns.map((t) => t.id));
   const sessionIds = attachedSessions().filter(
@@ -222,7 +299,7 @@ function attachNewForkIfMatched(
   );
   let best: { sid: string; shared: number; ids: Set<string> } | null = null;
   for (const session of sessionIds) {
-    const ids = turnIdsForSession(session.id, provider);
+    const ids = await turnIdsForSession(session.id, provider);
     let shared = 0;
     for (const id of candidateIds) if (ids.has(id)) shared++;
     if (shared > 0 && (!best || shared > best.shared)) {
@@ -246,10 +323,10 @@ function attachNewForkIfMatched(
        jsonl_path = excluded.jsonl_path,
        fork_point_uuid = excluded.fork_point_uuid`,
   ).run(best.sid, parsed.sessionId, provider, full, forkPointUuid);
-  return importCliLineage(best.sid);
+  return importCliLineageAsync(best.sid);
 }
 
-export function reimport(full: string): void {
+export async function reimport(full: string): Promise<void> {
   if (!fs.existsSync(full)) return; // 被删/改名
   const pathMap = attachedPathMap();
   const attached = pathMap.get(full);
@@ -257,8 +334,8 @@ export function reimport(full: string): void {
     attached?.provider ?? (isWithinCodexSessions(full) ? "codex" : "claude");
   try {
     const res = attached
-      ? importCliLineage(attached.sid)
-      : attachNewForkIfMatched(full, provider);
+      ? await importCliLineageAsync(attached.sid)
+      : await attachNewForkIfMatched(full, provider);
     if (res && (res.status === "updated" || res.status === "imported")) {
       publishCliSessionUpdated(res.sessionId);
     }
@@ -270,22 +347,60 @@ export function reimport(full: string): void {
   }
 }
 
+// 去抖 + 合流。对**持续写入**的文件，纯 trailing 去抖（每次事件重置计时器）有两
+// 个坏结局：写入不停时窗口被无限延后（界面永远不更新），或者窗口刚好够触发时
+// 每隔 600ms 就重解析一次（就是这次要修的 CPU 尖峰）。所以：
+//   · trailing-only —— 事件流里不解析，安静下来才解析一次；
+//   · 封顶 MAX_DEBOUNCE_WAIT_MS —— 再吵也保证这个周期内解析一次，不饿死 UI；
+//   · 解析进行中到来的事件只标脏，等这次跑完再排一次，绝不并发叠加。
+function scheduleReimport(full: string): void {
+  let state = pending.get(full);
+  if (!state) {
+    state = {
+      timer: null,
+      firstEventAt: Date.now(),
+      running: false,
+      dirtyWhileRunning: false,
+    };
+    pending.set(full, state);
+  }
+  if (state.running) {
+    state.dirtyWhileRunning = true;
+    return;
+  }
+  const waited = Date.now() - state.firstEventAt;
+  const delay = Math.max(0, Math.min(DEBOUNCE_MS, MAX_DEBOUNCE_WAIT_MS - waited));
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = setTimeout(() => void runPendingReimport(full), delay);
+}
+
+async function runPendingReimport(full: string): Promise<void> {
+  const state = pending.get(full);
+  if (!state) return;
+  state.timer = null;
+  state.running = true;
+  state.dirtyWhileRunning = false;
+  try {
+    await reimport(full);
+  } finally {
+    state.running = false;
+    if (state.dirtyWhileRunning) {
+      state.dirtyWhileRunning = false;
+      state.firstEventAt = Date.now();
+      scheduleReimport(full);
+    } else {
+      pending.delete(full);
+    }
+  }
+}
+
 function watchDir(dir: string, recursive = false): void {
   if (watchers.has(dir)) return;
   let w: fs.FSWatcher;
   try {
     w = fs.watch(dir, { recursive }, (_event, filename) => {
       if (!filename || !filename.toString().endsWith(".jsonl")) return;
-      const full = path.join(dir, filename.toString());
-      const prev = debounce.get(full);
-      if (prev) clearTimeout(prev);
-      debounce.set(
-        full,
-        setTimeout(() => {
-          debounce.delete(full);
-          reimport(full);
-        }, DEBOUNCE_MS),
-      );
+      scheduleReimport(path.join(dir, filename.toString()));
     });
   } catch {
     return; // 目录不可 watch
@@ -324,7 +439,17 @@ export function attachSession(
   jsonlPath: string,
   provider: CliProvider = "claude",
   options: { origin?: MirrorOrigin } = {},
-) {
+): ImportResult {
+  const resolved = path.resolve(jsonlPath);
+  const state = classifyRootTranscript(provider, resolved);
+  if (state.kind === "unreadable") {
+    throw new CliTranscriptUnreadableError(resolved);
+  }
+  // 空会话在这里短路。往下 discoverLineage 会把同目录所有 jsonl 解析一遍 ——
+  // 那正是「永久重试空会话」把 prod 主线程烧到 100% CPU 的地方。
+  if (state.kind === "empty") {
+    return { sessionId: state.sessionId, status: "empty", turns: 0 };
+  }
   const lineage = discoverLineage(jsonlPath, provider);
   seedLineage(lineage, provider, lineage.rootSid, options.origin ?? "cli-import");
   const res = importCliLineage(lineage.rootSid);
@@ -357,9 +482,11 @@ async function catchUpAttachedSessions(): Promise<void> {
     refreshWatches();
     // 启动时补齐进程离线期间的变更，监听先建立以免漏掉补齐期间的新写入。
     for (const session of attachedSessions()) {
-      // Yield between synchronous per-session imports, including before the
-      // first one. A single deferred callback around the whole loop still
-      // blocks the event loop for the sum of all transcript parsing times.
+      // Yield between per-session imports, including before the first one.
+      // A single deferred callback around the whole loop still blocks the
+      // event loop for the sum of all transcript parsing times. (The parse
+      // inside importCliLineageAsync yields too, but seedLineage below is
+      // still synchronous — this stays load-bearing.)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       try {
         const db = getDB();
@@ -378,7 +505,7 @@ async function catchUpAttachedSessions(): Promise<void> {
             session.id,
           );
         }
-        const res = importCliLineage(session.id);
+        const res = await importCliLineageAsync(session.id);
         if (res.status === "updated" || res.status === "imported") {
           publishCliSessionUpdated(res.sessionId);
         }
