@@ -280,3 +280,7 @@
 - [fj-review-f461] 异源 review impl：参考稿对齐度、降级铁律（视图不匹配回 RawView、error 永远全显）、桌面零回归、 | accepted | reworks=1 | 2026-09-17T20:46:08+08:00 | cd267492ae7c
 - [fj-fix1-0af4] 按 review M1/M2/m1 返工：畸形快照回 RawView 不抛错、错误行渲染 stderr、折叠预算按实际列 | accepted | reworks=0 | 2026-09-17T20:56:16+08:00 | 90d861ca6be3
 - [fj-review2-6ef7] 复审 fix1：用同一探针重打 M1/M2/m1，复跑四条 verify 与 workflow-card.sh，浅色截图 | accepted | reworks=0 | 2026-09-17T21:17:22+08:00 | f843175729e6
+- [fj-fix-a-ce8d] herdr-fleet：0-turn transcript 判为 empty 不报错；attach 失败区分可重试与确定 | accepted | reworks=0 | 2026-09-18T15:37:02+08:00 | b52fba92c61f
+- [fj-fix-b-facc] cli-sync reimport：mtime/size 短路 + 增量 parse（只读新增字节），大文件不再阻塞事件 | accepted | reworks=0 | 2026-09-18T15:55:43+08:00 | 17583c406544
+- [fj-fix-c-19ee] SQLite 写失败前端明确报错（不再静默转圈）+ 磁盘水位告警与健康端点字段 | accepted | reworks=0 | 2026-09-18T16:08:36+08:00 | 88719937e828
+- [fj-review-ab-2c36] 异源 review fix-a + fix-b 的集成分支：重试语义、增量 parse 正确性与基准可复现、合并后零回归 | accepted | reworks=0 | 2026-09-18T16:10:55+08:00 | 646f886f98bf
