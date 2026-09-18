@@ -15,7 +15,9 @@ import {
 import {
   persistPendingInteraction,
   clearPendingInteraction,
+  markNodeInterrupted,
 } from "./repo";
+import { DbWriteError } from "./db-error";
 import type { ToolCall, TaskMeta, PendingInteraction } from "@/lib/types";
 import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
@@ -410,6 +412,32 @@ async function runLoop(
   let stoppedWith: "done" | "error" = "done";
   let errorMessage: string | undefined;
 
+  // S176：DB 写失败不再被吞。
+  //
+  // 事故里（BOE 2026-09-18，SQLITE_FULL ×3）下面每个 `appendNodeResponse` /
+  // `finalizeNode` 的 catch 都是空的 —— 结果是：这一轮的字一个都没存下来、
+  // 行永远停在 status='streaming'、而用户那边只是一直转圈。**落不了盘的流不该
+  // 继续跑**：第一次写失败就停下、把人话报到前端、让节点落 error 态。
+  //
+  // 对象盒而不是裸 let：闭包里赋值 + 外层判真，裸 let 会被 TS 的控制流收敛成 null。
+  const fail: { err: DbWriteError | null } = { err: null };
+  const onDbFailure = (err: unknown): boolean => {
+    if (!(err instanceof DbWriteError)) return false;
+    if (!fail.err) {
+      fail.err = err;
+      stoppedWith = "error";
+      errorMessage = err.userMessage;
+      console.error(
+        `[run-bus] ${args.nodeId} 落库失败（${err.label} / ${err.code ?? err.kind}），中止本轮：`,
+        err.cause ?? err,
+      );
+      broadcast(state, { type: "error", message: err.userMessage });
+      // 停掉 spawn：它继续生成也没有地方存，只是白烧 token。
+      state.controller.abort();
+    }
+    return true;
+  };
+
   // A路②: build the interaction dispatcher once per run. Only claude-family
   // runs (args.interactive) get a live callback; others pass undefined so the
   // provider never opens the stdio permission protocol.
@@ -502,9 +530,12 @@ async function runLoop(
             aggregated += sep;
             try {
               appendNodeResponse(args.nodeId, sep);
-            } catch {
-              /* best-effort，同下 */
+            } catch (err) {
+              if (!onDbFailure(err)) {
+                /* 非 DB 故障：best-effort，同下 */
+              }
             }
+            if (fail.err) break;
             broadcast(state, { type: "delta", text: sep });
           }
           state.finalStart = state.committedText.length;
@@ -518,9 +549,12 @@ async function runLoop(
         aggregated += event.text;
         try {
           appendNodeResponse(args.nodeId, event.text);
-        } catch {
-          // best-effort; DB hiccup shouldn't kill the stream
+        } catch (err) {
+          if (!onDbFailure(err)) {
+            // 非 DB 故障（理论上不该有）：保持旧的 best-effort 行为
+          }
         }
+        if (fail.err) break;
         broadcast(state, { type: "delta", text: event.text });
       } else if (event.type === "thinking") {
         // 结构性中断：这段思考之前说的话都是过程叙述（interleaved thinking
@@ -592,9 +626,12 @@ async function runLoop(
           state.committedToolCalls.push(tc);
           try {
             appendToolCallStart({ nodeId: args.nodeId, call: tc });
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            if (!onDbFailure(err)) {
+              /* best-effort */
+            }
           }
+          if (fail.err) break;
           broadcast(state, {
             type: "tool_call_start",
             id: tc.id,
@@ -633,9 +670,12 @@ async function runLoop(
               status: event.isError ? "error" : "done",
               endedAt: event.endedAt,
             });
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            if (!onDbFailure(err)) {
+              /* best-effort */
+            }
           }
+          if (fail.err) break;
           broadcast(state, {
             type: "tool_call_done",
             id: event.id,
@@ -720,8 +760,29 @@ async function runLoop(
         durationMs,
         now: Date.now(),
       });
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      // S176：终态写不进去，就是「永远转圈」的最后一环 —— 行留在 streaming，
+      // 而开机 reap 要等到下次重启才会看见它。所以这里：
+      //   ① 把失败原因换成人话，当成本轮的终态错误（下面的广播会用到）；
+      //   ② 补一次**最小写**（只动 status/error_message，不带事务和 FTS）——
+      //      SQLITE_FULL 常是瞬时的（事故当天三次都自愈了），小事务往往能过；
+      //   ③ 真的还是写不进去就认了，留给开机 reap 与 /api/nodes/[id]/stream
+      //      的重连补写（那条路径同样调 markNodeInterrupted）。
+      const dbErr = err instanceof DbWriteError ? err : null;
+      const msg = dbErr?.userMessage ?? (err instanceof Error ? err.message : String(err));
+      console.error(`[run-bus] ${args.nodeId} 终态落库失败：`, err);
+      if (stoppedWith === "done") {
+        stoppedWith = "error";
+        errorMessage = msg;
+        broadcast(state, { type: "error", message: msg });
+      } else if (!fail.err) {
+        errorMessage = errorMessage ?? msg;
+      }
+      try {
+        markNodeInterrupted(args.nodeId, errorMessage ?? msg);
+      } catch (repairErr) {
+        console.error(`[run-bus] ${args.nodeId} 兜底收尸也失败：`, repairErr);
+      }
     }
 
     // S88：见 startRun 的 onSettled 注释 —— 位置是刻意的，别往下挪。

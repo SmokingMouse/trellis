@@ -26,6 +26,7 @@ import {
   setNodeResumeId,
   setNodeAgent,
   finalizeNode,
+  markNodeInterrupted,
 } from "@/lib/server/repo";
 import {
   attachedLineageForNode,
@@ -45,6 +46,7 @@ import { startProjectRun, projectSSE, DaemonUnavailable, hasActiveProjectRun } f
 import { getAdoption } from "@/lib/server/as-adopt";
 import { isAgentServerEnabled } from "@/lib/as-config";
 import { getDB } from "@/lib/server/sqlite";
+import { DbWriteError } from "@/lib/server/db-error";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
   resolveBlobPath,
@@ -469,6 +471,16 @@ export async function POST(req: Request) {
       return Response.json({ error: "unknown kind" }, { status: 400 });
     }
   } catch (err) {
+    // S176：建行失败（磁盘满 / IO / 锁）要说人话。DbWriteError 的 message 本身
+    // 就是给人看的那句，另外带上 code 便于运维对日志。507 = Insufficient Storage，
+    // 让监控能和普通 500 分开；其余仍是 500。事务保证这里不会留半截行。
+    if (err instanceof DbWriteError) {
+      console.error("[trellis/chat] 建行失败：", err.cause ?? err);
+      return Response.json(
+        { error: err.userMessage, code: err.code ?? err.kind },
+        { status: err.kind === "full" ? 507 : 500 },
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 500 });
   }
@@ -825,8 +837,26 @@ export async function POST(req: Request) {
     : null;
   // 每轮落一份「谁答的」。会话级也记 —— agent 定义是 live 引用（改了老会话跟着变），
   // 这一列是事后唯一能追溯「当时哪个 agent 答的」的线索。
-  if (agentRecord) {
-    setNodeAgent(nodeId, agentRecord.id, mentionActive ? "mention" : "session");
+  // S176：节点行此刻已经是 status='streaming' 了。从这里到 startRun 之间任何一次
+  // 抛错（setNodeAgent 也是一次 DB 写）如果直接 500 回去，那一行就会永远挂在
+  // 「进行中」—— 那正是事故里「提问转圈、永远不回」的形状。所以先收尸再回错。
+  try {
+    if (agentRecord) {
+      setNodeAgent(nodeId, agentRecord.id, mentionActive ? "mention" : "session");
+    }
+  } catch (err) {
+    const dbErr = err instanceof DbWriteError ? err : null;
+    const message = dbErr?.userMessage ?? (err instanceof Error ? err.message : String(err));
+    console.error("[trellis/chat] 起跑前写入失败：", err);
+    try {
+      markNodeInterrupted(nodeId, message);
+    } catch {
+      /* 兜底失败就留给开机 reap / 重连补写 */
+    }
+    return Response.json(
+      { error: message, code: dbErr?.code ?? dbErr?.kind ?? null },
+      { status: dbErr?.kind === "full" ? 507 : 500 },
+    );
   }
   startRun({
     nodeId,

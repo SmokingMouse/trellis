@@ -1,4 +1,4 @@
-import { getNode } from "@/lib/server/repo";
+import { getNode, markNodeInterrupted } from "@/lib/server/repo";
 import { subscribe } from "@/lib/server/run-bus";
 import { isThreadNode, getProjectRun, projectSSE } from "@/lib/server/as-project";
 
@@ -89,6 +89,18 @@ export async function GET(
           : dbStatus === "error"
             ? "error"
             : "error";
+      // S176：不只是「对这次连接报个错」—— 把行也改对。否则每次刷新都要先转一圈
+      // 再报错，而状态一直是 streaming（未读角标、pending 面板、上游对账全跟着错）。
+      // 判据与开机 reap 同一套（markNodeInterrupted 内含 as_turns 排除），
+      // 上面的 isThreadNode 分支已经把 AS 驱动的节点先接走了。
+      if (dbStatus === "streaming") {
+        try {
+          markNodeInterrupted(id, node.errorMessage ?? "interrupted");
+        } catch (err) {
+          // 磁盘还满着就还是写不进去 —— 本次连接照样报错，行留给开机 reap。
+          console.error(`[trellis] ${id} 收尸写入失败：`, err);
+        }
+      }
       send({
         type: "catchup",
         response: node.response,

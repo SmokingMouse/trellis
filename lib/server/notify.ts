@@ -10,7 +10,13 @@ import fs from "node:fs";
 export type NotifyEvent = {
   // S95 加 auth_alert（CLI 授权预警，见 lib/server/auth-health.ts）——系统级事件
   // 没有 task/run 语境，taskId/runId 因此放宽为可选。
-  kind: "task_run_done" | "task_run_error" | "task_run_timeout" | "auth_alert";
+  // S176 加 disk_alert（DB 分区水位，见 lib/server/disk-watch.ts）——同一性质。
+  kind:
+    | "task_run_done"
+    | "task_run_error"
+    | "task_run_timeout"
+    | "auth_alert"
+    | "disk_alert";
   title: string;
   body: string;
   /** 站内深链，形如 /?session=<sid>&node=<nid> */

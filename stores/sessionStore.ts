@@ -3584,7 +3584,17 @@ async function runStream(
     return;
   }
   if (!res.ok || !res.body) {
-    onEvent({ type: "error", message: `HTTP ${res.status}` });
+    // S176：服务端已经把「磁盘满 / 数据库写入失败」这类原因写在 body 的 error
+    // 字段里了（app/api/chat/route.ts）。只报 `HTTP 500` 等于把它扔掉，用户得到
+    // 的仍是一句没法行动的话。读不出 body 才退回状态码。
+    const detail = await res
+      .json()
+      .then((b) => (b && typeof b.error === "string" ? b.error : null))
+      .catch(() => null);
+    onEvent({
+      type: "error",
+      message: detail ?? `HTTP ${res.status}`,
+    });
     return;
   }
   const reader = res.body.getReader();
