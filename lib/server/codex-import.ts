@@ -4,6 +4,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import type { ToolCall } from "@/lib/types";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
+import { runToCompletion, YIELD_STRIDE } from "./cooperative";
 
 type JsonObject = Record<string, unknown>;
 type RolloutEntry = {
@@ -162,7 +163,29 @@ export function parseCodexSessionJsonl(
       // Codex appends while running; an incomplete final line is expected.
     }
   }
-  const meta = entries.find((entry) => entry.type === "session_meta")?.payload;
+  return runToCompletion(
+    reduceCodexEntries(entries, jsonlPath, Buffer.byteLength(raw)),
+  );
+}
+
+/**
+ * rollout entry 数组 → ParsedCliSession，写成 generator。见 ./cooperative 与
+ * ./cli-import 的 reduceCliEntries：增量解析复用这一层，协作驱动器在 yield 点
+ * 让出事件循环。`rawByteLength` 是**整个文件**的字节数（lastUuid 游标的一半）。
+ */
+export function* reduceCodexEntries(
+  entries: RolloutEntry[],
+  jsonlPath: string,
+  rawByteLength: number,
+): Generator<void, ParsedCliSession | null> {
+  let meta: JsonObject | undefined;
+  for (let i = 0; i < entries.length; i++) {
+    if (i % YIELD_STRIDE === 0) yield;
+    if (entries[i].type === "session_meta") {
+      meta = entries[i].payload;
+      break;
+    }
+  }
   const fallbackSid = jsonlPath.match(
     /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
   )?.[1];
@@ -224,7 +247,9 @@ export function parseCodexSessionJsonl(
     return turn;
   };
 
-  for (const entry of entries) {
+  for (let ei = 0; ei < entries.length; ei++) {
+    if (ei % YIELD_STRIDE === 0) yield;
+    const entry = entries[ei];
     const payload = entry.payload;
     const at = ms(entry.timestamp ?? payload?.timestamp);
     if (at > latestTimestamp) latestTimestamp = at;
@@ -371,7 +396,10 @@ export function parseCodexSessionJsonl(
   }
 
   if (drafts.length === 0) return null;
-  const turns = drafts.map((draft) => {
+  const turns: ParsedTurn[] = [];
+  for (let di = 0; di < drafts.length; di++) {
+    if (di % 256 === 0) yield;
+    const draft = drafts[di];
     const responseText = draft.responseParts.map((part) => part.text);
     draft.response = (responseText.length > 0 ? responseText : draft.eventText).join(
       "\n\n",
@@ -396,8 +424,8 @@ export function parseCodexSessionJsonl(
       createdAt: draft.createdAt,
       turnOrdinal: draft.turnOrdinal,
     };
-    return turn;
-  });
+    turns.push(turn);
+  }
   const created = turns.map((turn) => turn.createdAt).filter((value) => value > 0);
   const title = turns[0].question.replace(/\s+/g, " ").trim().slice(0, 60) || "未命名会话";
   return {
@@ -408,7 +436,7 @@ export function parseCodexSessionJsonl(
     createdAt: created.length ? Math.min(...created) : latestTimestamp,
     updatedAt: latestTimestamp || (created.length ? Math.max(...created) : 0),
     // The field name is legacy. For Codex this is an append cursor, not a UUID.
-    lastUuid: `${Buffer.byteLength(raw)}:${entries.length}`,
+    lastUuid: `${rawByteLength}:${entries.length}`,
     entryUuids: turns.map((turn) => turn.id),
     turns,
   };
