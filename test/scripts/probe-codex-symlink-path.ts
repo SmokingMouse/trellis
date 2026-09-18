@@ -41,10 +41,29 @@ const symAlias =
     ? path.join(os.homedir(), physical.slice(realHome.length + 1))
     : physical;
 
-function probe(p: string): { ok: boolean; detail: string } {
+// **只比 ok 是不具区分力的**：cli-lineage 现在无条件先把 selected 放进结果
+// （根因 D），所以「两形都没抛」在 canonical 失效时照样成立 —— 失效的表现是
+// 符号形多出一个同一文件的第二身份（members=2），身份而非成败才是判据。
+type Identity = {
+  ok: boolean;
+  detail: string;
+  rootSid?: string;
+  members?: string[];
+};
+
+function probe(p: string): Identity {
   try {
     const d = discoverLineage(p, "codex");
-    return { ok: true, detail: `rootSid=${d.rootSid.slice(0, 12)} members=${d.members.length}` };
+    // 动态 import 的返回是 any（路径是运行期拼的），这里显式标一下成员形状。
+    const members = (d.members as { path: string }[])
+      .map((m) => m.path)
+      .sort();
+    return {
+      ok: true,
+      detail: `rootSid=${d.rootSid.slice(0, 12)} members=${members.length} ${members.join(",")}`,
+      rootSid: d.rootSid,
+      members,
+    };
   } catch (e) {
     return { ok: false, detail: (e as Error).message };
   }
@@ -61,6 +80,23 @@ if (a.ok !== b.ok) {
 }
 if (!a.ok) {
   console.error("两形都失败——夹具本身无 parseable turn，或存在别的问题");
+  process.exit(1);
+}
+if (a.rootSid !== b.rootSid) {
+  console.error(`MISMATCH rootSid: ${a.rootSid} vs ${b.rootSid}`);
+  process.exit(1);
+}
+if (JSON.stringify(a.members) !== JSON.stringify(b.members)) {
+  console.error(
+    `MISMATCH members: ${JSON.stringify(a.members)} vs ${JSON.stringify(b.members)}`,
+  );
+  process.exit(1);
+}
+// 同一个文件只能有一个身份，且必须是物理形。
+if (a.members?.length !== 1 || a.members[0] !== physical) {
+  console.error(
+    `MISMATCH identity: 期望单一成员 ${physical}，实得 ${JSON.stringify(a.members)}`,
+  );
   process.exit(1);
 }
 console.log("PASS: 物理/符号路径等价");

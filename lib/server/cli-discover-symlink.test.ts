@@ -110,6 +110,40 @@ test("C 探针：符号链接 HOME 下物理路径与符号路径的 codex disco
   expect(run.stdout).toContain("PASS: 物理/符号路径等价");
 });
 
+// 强身份回归（M1）：上面那条探针用例曾经**假绿** —— 它只比了「两形都没抛」，
+// 而 cli-lineage 现在无条件先把 selected 放进 parsedFiles（根因 D），于是
+// canonicalPath 即使退成 path.resolve，两形也都能「至少找到 selected」。
+// 真正的失效表现是身份分裂：符号形把同一个文件当成两个成员（members=2）。
+// 所以这里逐字比 rootSid / 成员数 / 每个成员的 path，并钉死成员必须是物理形。
+test("符号链接 HOME：物理形与符号形的 discoverLineage 结果必须逐字相同", () => {
+  const fixture = buildSymlinkedHome("identity");
+  const symbolic = path.join(
+    fixture.aliasHome,
+    path.relative(fs.realpathSync(fixture.aliasHome), fixture.codexPhysical),
+  );
+  const script = `
+    import { mock } from "bun:test";
+    mock.module("server-only", () => ({}));
+    import assert from "node:assert/strict";
+    import fs from "node:fs";
+    import os from "node:os";
+    const { discoverLineage } = await import(${JSON.stringify(path.join(repoRoot, "lib/server/cli-discover.ts"))});
+    assert.notEqual(os.homedir(), fs.realpathSync(os.homedir()), "夹具的 HOME 不是符号链接");
+    const physical = discoverLineage(${JSON.stringify(fixture.codexPhysical)}, "codex");
+    const symbolic = discoverLineage(${JSON.stringify(symbolic)}, "codex");
+    console.log(JSON.stringify({ physical, symbolic }));
+    assert.deepEqual(symbolic, physical, "两形必须给出同一个 root、同一批成员身份与同样的基数");
+    assert.equal(physical.rootSid, symbolic.rootSid);
+    assert.equal(physical.members.length, 1, "同一个文件不能有两个成员身份");
+    assert.equal(physical.members[0].path, ${JSON.stringify(fixture.codexPhysical)}, "成员路径必须是物理形");
+    assert.equal(symbolic.members[0].path, ${JSON.stringify(fixture.codexPhysical)}, "成员路径必须是物理形");
+    console.log("OK");
+  `;
+  const run = runWithSymlinkedHome(fixture.aliasHome, ["-"], script);
+  expect(run.exitCode, run.stderr + run.stdout).toBe(0);
+  expect(run.stdout).toContain("OK");
+});
+
 test("符号链接 HOME + 物理路径：codex / claude 的 discoverLineage 都必须成功", () => {
   const fixture = buildSymlinkedHome("direct");
   const script = `

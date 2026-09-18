@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { CODEX_SESSIONS_DIR } from "./codex-paths";
-import { canonicalPath } from "./canonical-path";
+import { canonicalPath, isWithinRoot } from "./canonical-path";
 import { parseCliSessionJsonl } from "./cli-import";
 import { parseCodexSessionJsonl } from "./codex-import";
 import {
@@ -34,17 +34,19 @@ export const PROJECTS_DIR = canonicalPath(
 );
 export { CODEX_SESSIONS_DIR } from "./codex-paths";
 
-// 路径安全：只允许 PROJECTS_DIR 下的目录（防越权读任意目录）。
-// 候选先 canonical 再比：闸门两侧都用物理路径，符号前缀的合法路径不会被误拒，
-// 指向禁区外的符号链接也不会被放行。
+// 路径安全：只允许 PROJECTS_DIR / CODEX_SESSIONS_DIR 下的路径（防越权读任意目录）。
+//
+// 判据走 isWithinRoot 的**逐段解析**，不是 canonicalPath —— canonicalPath 解不动
+// 时会把尾段原样拼回，而「拼回去的那一段」完全可能是一个指向根外的符号链接：
+// 一个 broken 的、或目标目录 chmod 000 的越界 symlink 就这样被拼成了根内路径，
+// 闸门放行（F1，fail-open）。isWithinRoot 按 symlink 的**目标**定性，所以
+// 符号前缀的合法路径、还没落盘的尾段、根内合法 EACCES 仍旧全部通过。
 export function isWithinProjects(dir: string): boolean {
-  const rel = path.relative(PROJECTS_DIR, canonicalPath(dir));
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return isWithinRoot(PROJECTS_DIR, dir);
 }
 
 export function isWithinCodexSessions(candidate: string): boolean {
-  const rel = path.relative(CODEX_SESSIONS_DIR, canonicalPath(candidate));
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return isWithinRoot(CODEX_SESSIONS_DIR, candidate);
 }
 
 export function isAllowedCliPath(provider: CliProvider, candidate: string): boolean {
