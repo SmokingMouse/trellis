@@ -34,8 +34,19 @@ export type DiskWatermark = DiskSpace & {
   thresholds: { minFreeRatio: number; minFreeBytes: number };
 };
 
-/** 默认阈值。理由见 out/README.md：BOE 现场 /data00 剩 31G / 6% 时已经在抛
- * SQLITE_FULL，5% + 2GiB 这对值能在「还来得及人工清理」的时候响。 */
+/**
+ * 默认阈值：**低水位兜底**，不是「能提前预警本次事故」的保证。
+ *
+ * 说清楚这条（fix-d1 修正）：BOE 现场 /data00 是剩 31GiB / 6% 的形状，用这对默认
+ * 值算 `low=false` —— 6% > 5%，31GiB > 2GiB，两条判据都不触发。也就是说这次事故
+ * **不会**被默认阈值提前预警。SQLITE_FULL 也不总是「盘真的写满了」：配额、inode、
+ * 单分区突发写入都能在水位看着还行的时候把写打死。
+ *
+ * 默认值的实际用途是「盘确实快见底了给个提醒」，覆盖不到的场景靠两条 env 按实际
+ * 分区/配额调（TRELLIS_DISK_MIN_FREE_PCT / TRELLIS_DISK_MIN_FREE_BYTES）。大盘
+ * 建议配置示例见本单 out/README.md 的「m1」一节（devbox 那种 500GiB 起步的盘，
+ * 5% 太晚，建议把 PCT 抬到 10–15）。
+ */
 export const DEFAULT_MIN_FREE_RATIO = 0.05;
 export const DEFAULT_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 

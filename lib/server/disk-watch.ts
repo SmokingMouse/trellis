@@ -16,13 +16,34 @@ import { notify } from "./notify";
 // 只是把文件换成 disk-alerts.json（auth-alerts.json 是授权面的账本，两件事的
 // 恢复条件完全不同，混在一个文件里迟早互相踩）。
 //
-// 去重是**边沿触发**的：跌破阈值报一次，之后每轮沉默；水位回到阈值以上就把 key
-// 删掉，于是下一次再跌破可以重新报。同时留一条 6h 冷却 —— 一直不清盘的话，
-// 每 6 小时提醒一次比彻底噤声好（磁盘满是会真的让服务写不进去的）。
+// 告警语义（S176 返工 fix-d1 明示版，README 与这里同一套说法）：
+//
+//   **首次跌破阈值立即报一次；之后每 <重报间隔> 重报一次；水位回到阈值以上即
+//   解除锁存（删掉 state 里的 key），于是下一次再跌破会立即重新报。**
+//
+// 重报而不是永久噤声是刻意的：磁盘持续告急会真的让服务写不进去，每 6h 提醒一次
+// 是合理的运维行为，不是刷屏。间隔由 TRELLIS_DISK_REALERT_MS（毫秒）覆盖；
+// 设成 0 就退化成「只报一次，直到恢复」的纯边沿触发（想要绝对安静的部署可以用）。
+//
+// 实现形状照抄 auth-health.ts 的 checkAuthAlerts —— 同样的「硬条件 → notify →
+// 状态落盘去重」三段式、同样的 Record<key, ts>，只是把文件换成 disk-alerts.json
+// （auth-alerts.json 是授权面的账本，两件事的恢复条件完全不同，混在一个文件里
+// 迟早互相踩）。
 
 const ALERT_STATE_PATH = path.join(os.homedir(), ".trellis", "disk-alerts.json");
 const ALERT_KEY = "disk-low";
-const REALERT_MS = 6 * 3600_000;
+
+/** 默认重报间隔：6 小时。 */
+export const DEFAULT_REALERT_MS = 6 * 3600_000;
+
+/** 重报间隔。每次检查现读 env —— 改配置不必重启，测试也不用重新 import 模块。
+ * 0（或负数 / 非法值以外的合法 0）= 关掉周期重报，只在恢复后再跌破时才报。 */
+export function realertMs(): number {
+  const raw = process.env.TRELLIS_DISK_REALERT_MS;
+  if (raw === undefined || !raw.trim()) return DEFAULT_REALERT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_REALERT_MS;
+}
 
 function readAlertState(): Record<string, number> {
   try {
@@ -54,6 +75,8 @@ export type DiskAlertDeps = {
   statfs?: StatfsFn;
   dbPath?: string;
   now?: () => number;
+  /** 重报间隔覆盖（毫秒，0 = 只报一次直到恢复）。缺省走 realertMs()/env。 */
+  realertMs?: number;
   readState?: () => Record<string, number>;
   writeState?: (s: Record<string, number>) => void;
   send?: (e: { title: string; body: string }) => Promise<void> | void;
@@ -62,6 +85,9 @@ export type DiskAlertDeps = {
 /**
  * 查一次水位，必要时告警。scheduler 启动时 + 每 5 分钟调一次。
  * 自兜异常 —— 监控本身出问题绝不能连累调度 tick。
+ *
+ * 语义（见文件头）：首次跌破立即报 → 之后每 realertMs() 重报一次 →
+ * 回到阈值以上解除锁存 → 再跌破立即重新报。
  *
  * 返回这一轮的水位（读不出来为 null），方便调用方顺手做日志 / 断言。
  */
@@ -78,14 +104,19 @@ export async function checkDiskAlert(
     const lastAt = state[ALERT_KEY];
 
     if (!w.low) {
-      // 恢复：清掉 key，下次再跌破可以重新报（这就是「边沿」）。
+      // 恢复到阈值以上：解除锁存，下次再跌破立即重新报。
       if (lastAt !== undefined) {
         delete state[ALERT_KEY];
         writeState(state);
       }
       return w;
     }
-    if (lastAt !== undefined && now - lastAt < REALERT_MS) return w;
+    // 还在低水位：首次（lastAt 未定义）立即报；之后满一个重报间隔才再报。
+    // 间隔为 0 表示关掉周期重报 —— 一直低就一直沉默，直到恢复解除锁存。
+    if (lastAt !== undefined) {
+      const interval = deps.realertMs ?? realertMs();
+      if (interval <= 0 || now - lastAt < interval) return w;
+    }
 
     const title = "trellis：数据库分区空间不足";
     const body = alertBody(w);

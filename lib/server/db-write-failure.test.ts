@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -276,6 +277,57 @@ test("POST /api/chat 建行遇 SQLITE_FULL → 507 + 人话 error 字段 + 错�
   expect(body.error).toContain("重试");
   // 不是 SSE：请求当场结束，前端不会挂在那儿等永远不来的事件
   expect(res.headers.get("content-type")).toContain("application/json");
+});
+
+// ---------------------------------------------------------------------------
+// ④ fix-d1：真实写锁下的总等待预算（异源复核实测旧实现单次 append 阻塞 42033ms）
+// ---------------------------------------------------------------------------
+
+test("真实持锁：单次写的总阻塞收敛在预算内，而不是 busy_timeout × 重试无界叠加", () => {
+  const BUDGET_MS = 300;
+  const previousBudget = process.env.TRELLIS_DB_WAIT_BUDGET_MS;
+  process.env.TRELLIS_DB_WAIT_BUDGET_MS = String(BUDGET_MS);
+  // busy_timeout 在建连接时按预算设，所以得重开一次连接才生效。
+  sqlite.resetDBForTests();
+  try {
+    seedSession("s-lock");
+    // busy_timeout 按预算反推（budget/40，下限 20ms）—— 见 sqlite.ts 里的实测表。
+    expect(
+      (sqlite.getDB().query("PRAGMA busy_timeout").get() as { timeout: number })
+        .timeout,
+    ).toBe(20);
+
+    // 第二个真实连接持写锁 —— 不是 mock，SQLite 会让主连接同步阻塞到超时。
+    const locker = new Database(process.env.TRELLIS_DB_PATH!);
+    locker.exec("BEGIN IMMEDIATE");
+    let caught: unknown;
+    const startedAt = performance.now();
+    try {
+      appendNodeResponse("s-lock-root", "拿不到写锁的这一段");
+    } catch (e) {
+      caught = e;
+    }
+    const elapsed = performance.now() - startedAt;
+    locker.exec("ROLLBACK");
+    locker.close();
+
+    expect(caught).toBeInstanceOf(DbWriteError);
+    expect((caught as InstanceType<typeof DbWriteError>).kind).toBe("busy");
+    // 预算 + 容差。容差 = 最后一次 attempt 还没超预算就发起、它自己那一轮
+    // SQLite 等待落在预算外的部分（见 sqlite.ts：真实阻塞是 busy_timeout 的
+    // 数倍，不可能卡到毫秒）。旧实现在这里是 4 × busy_timeout(5s) + 退避，
+    // 异源复核实测 42033ms —— 现在同一场景约 0.5s。
+    expect(elapsed).toBeLessThan(BUDGET_MS + 900);
+    // 失败的这一段也没有半截落库
+    expect(getNode("s-lock-root")?.response).toBe("");
+  } finally {
+    if (previousBudget === undefined) {
+      delete process.env.TRELLIS_DB_WAIT_BUDGET_MS;
+    } else {
+      process.env.TRELLIS_DB_WAIT_BUDGET_MS = previousBudget;
+    }
+    sqlite.resetDBForTests();
+  }
 });
 
 test("markNodeInterrupted 不碰 Agent daemon 驱动的节点（与开机 reap 同判据）", () => {
