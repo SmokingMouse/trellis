@@ -129,10 +129,37 @@ export class DbWriteError extends Error {
   }
 }
 
-/** 默认尝试次数（含第一次）与退避表。上限刻意小：一次提问最多被拖住约 0.26s，
- * 再久用户宁可看到明确报错也不愿意继续盯着转圈。 */
+/** 默认尝试次数（含第一次）与退避表。 */
 export const DB_RETRY_ATTEMPTS = 4;
 const BACKOFF_MS = [20, 60, 180];
+
+/**
+ * 一次写的**总等待预算**（毫秒）。fix-d1 返工新增。
+ *
+ * 之前这层只有「最多重试 4 次、退避加起来约 0.26s」这个说法 —— 不成立：退避表只
+ * 管应用层自己睡了多久，**没算 SQLite 自己等锁的时间**。sqlite.ts 开着
+ * `PRAGMA busy_timeout`，每一次 attempt 在真实写锁下都会先同步阻塞到超时才抛
+ * BUSY；异源复核用第二个连接 `BEGIN IMMEDIATE` 持锁实测：一次 append 阻塞
+ * **42033ms**，而且是同步阻塞（期间连 1ms 的 timer 都跑不了，事件循环整个停摆）。
+ *
+ * 所以改成「数据库等待 + 应用重试」共用一个总预算：
+ *   · busy_timeout 由 sqlite.ts 设成同一个预算值 —— 单次 SQLite 等锁不会超过它；
+ *   · dbWrite 每次要退避前先看预算还剩多少，剩余 ≤0 就当场按失败返回，不再发起
+ *     新的 attempt，退避本身也被剩余量截断。
+ * 于是一次写卡在锁上的总时长收敛到 ≈ 预算（最坏情况下多一次尚未超时的 attempt），
+ * 而不是「4 × busy_timeout + 退避」那样无界叠加。
+ *
+ * 默认 2s：比一次提问的感知延迟略长、比事件循环停摆几十秒可接受得多；写密集的
+ * 部署可以用 TRELLIS_DB_WAIT_BUDGET_MS 调大（0 = 不设预算，退回纯次数上限）。
+ */
+export const DEFAULT_DB_WAIT_BUDGET_MS = 2000;
+
+export function dbWaitBudgetMs(): number {
+  const raw = process.env.TRELLIS_DB_WAIT_BUDGET_MS;
+  if (raw === undefined || !raw.trim()) return DEFAULT_DB_WAIT_BUDGET_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DB_WAIT_BUDGET_MS;
+}
 
 function sleepSync(ms: number): void {
   if (ms <= 0) return;
@@ -172,16 +199,27 @@ function takeFault(): Error | null {
 
 /**
  * 包住一次 DB 写。瞬时错误（BUSY/LOCKED）短退避重试，其余立刻抛 DbWriteError。
+ * 重试受**总等待预算**约束（见 DEFAULT_DB_WAIT_BUDGET_MS）：预算耗尽即按失败返回。
  *
  * 注意**不要**把读也包进来：读失败不该拖慢路径，也不该被当成「这轮没存下」。
  */
 export function dbWrite<T>(
   label: string,
   fn: () => T,
-  opts?: { attempts?: number; sleep?: (ms: number) => void },
+  opts?: {
+    attempts?: number;
+    sleep?: (ms: number) => void;
+    /** 总等待预算覆盖（毫秒，0 = 不设预算）。缺省走 dbWaitBudgetMs()/env。 */
+    budgetMs?: number;
+    /** 计时钟（测试用）。 */
+    now?: () => number;
+  },
 ): T {
   const attempts = Math.max(1, opts?.attempts ?? DB_RETRY_ATTEMPTS);
   const sleep = opts?.sleep ?? sleepSync;
+  const now = opts?.now ?? Date.now;
+  const budget = opts?.budgetMs ?? dbWaitBudgetMs();
+  const startedAt = now();
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -195,7 +233,13 @@ export function dbWrite<T>(
       if (!isTransientKind(kind) || i === attempts - 1) {
         throw new DbWriteError(label, err, i + 1);
       }
-      sleep(BACKOFF_MS[Math.min(i, BACKOFF_MS.length - 1)]);
+      // 预算闸：这次 attempt 已经把预算烧光（典型形状是 SQLite 自己等锁等满
+      // busy_timeout），就别再起新的一轮 —— 用户宁可现在看到明确报错。
+      const remaining = budget > 0 ? budget - (now() - startedAt) : Infinity;
+      if (remaining <= 0) {
+        throw new DbWriteError(label, err, i + 1);
+      }
+      sleep(Math.min(BACKOFF_MS[Math.min(i, BACKOFF_MS.length - 1)], remaining));
     }
   }
   // 不可达（循环要么 return 要么 throw），留给类型收敛。

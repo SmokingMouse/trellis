@@ -2,8 +2,10 @@ import { expect, mock, test } from "bun:test";
 
 mock.module("server-only", () => ({}));
 const {
+  DEFAULT_DB_WAIT_BUDGET_MS,
   DbWriteError,
   classifyDbError,
+  dbWaitBudgetMs,
   dbWrite,
   isDbFailure,
   isTransientKind,
@@ -114,6 +116,95 @@ test("SQLITE_BUSY 超过次数上限才报错，文案交代重试过", () => {
     expect(err.userMessage).toContain("重试 4 次");
   }
   expect(calls).toBe(4);
+});
+
+// fix-d1：BUSY 的「数据库等待 + 应用重试」共用一个总预算，预算耗尽即按失败返回。
+// 这几条是纯逻辑闸；真实持锁的端到端计时在 db-write-failure.test.ts。
+test("总等待预算耗尽后不再发起新 attempt（不靠次数上限硬扛）", () => {
+  let calls = 0;
+  let clock = 0;
+  const slept: number[] = [];
+  try {
+    dbWrite(
+      "t",
+      () => {
+        calls++;
+        clock += 900; // 每次 attempt 自己就把预算烧掉一大截（≈ 等满 busy_timeout）
+        throw sqliteErr("SQLITE_BUSY", "database is locked");
+      },
+      {
+        attempts: 4,
+        budgetMs: 1000,
+        now: () => clock,
+        sleep: (ms) => {
+          slept.push(ms);
+          clock += ms;
+        },
+      },
+    );
+    throw new Error("should have thrown");
+  } catch (e) {
+    const err = e as InstanceType<typeof DbWriteError>;
+    expect(err).toBeInstanceOf(DbWriteError);
+    expect(err.kind).toBe("busy");
+    expect(err.attempts).toBe(2); // 次数上限是 4，但预算只够两次
+  }
+  expect(calls).toBe(2);
+  expect(slept).toEqual([20]); // 第一次退避还在预算内，第二次就没预算了
+});
+
+test("退避被剩余预算截断，总等待不超过预算", () => {
+  let clock = 0;
+  const slept: number[] = [];
+  expect(() =>
+    dbWrite(
+      "t",
+      () => {
+        clock += 40;
+        throw sqliteErr("SQLITE_BUSY", "database is locked");
+      },
+      {
+        attempts: 4,
+        budgetMs: 150,
+        now: () => clock,
+        sleep: (ms) => {
+          slept.push(ms);
+          clock += ms;
+        },
+      },
+    ),
+  ).toThrow(DbWriteError);
+  // 40 +20 → 40 +50(截断自 60，剩余只有 50) → 40 → 预算耗尽
+  expect(slept).toEqual([20, 50]);
+  expect(slept.reduce((a, b) => a + b, 0) + 3 * 40).toBeLessThanOrEqual(150 + 40);
+});
+
+test("预算可被 TRELLIS_DB_WAIT_BUDGET_MS 覆盖；0 = 不设预算（退回纯次数上限）", () => {
+  expect(dbWaitBudgetMs()).toBe(DEFAULT_DB_WAIT_BUDGET_MS);
+  expect(DEFAULT_DB_WAIT_BUDGET_MS).toBe(2000);
+  process.env.TRELLIS_DB_WAIT_BUDGET_MS = "500";
+  expect(dbWaitBudgetMs()).toBe(500);
+  process.env.TRELLIS_DB_WAIT_BUDGET_MS = "0";
+  expect(dbWaitBudgetMs()).toBe(0);
+  process.env.TRELLIS_DB_WAIT_BUDGET_MS = "abc";
+  expect(dbWaitBudgetMs()).toBe(DEFAULT_DB_WAIT_BUDGET_MS); // 非法值不至于配瞎
+  delete process.env.TRELLIS_DB_WAIT_BUDGET_MS;
+
+  // budgetMs: 0 → 只受次数上限约束，退避表照旧跑满
+  let calls = 0;
+  const slept: number[] = [];
+  expect(() =>
+    dbWrite(
+      "t",
+      () => {
+        calls++;
+        throw sqliteErr("SQLITE_BUSY", "database is locked");
+      },
+      { attempts: 4, budgetMs: 0, now: () => 10_000_000, sleep: (ms) => slept.push(ms) },
+    ),
+  ).toThrow(DbWriteError);
+  expect(calls).toBe(4);
+  expect(slept).toEqual([20, 60, 180]);
 });
 
 test("嵌套 dbWrite 不重复包装，label/code 保持最内层的", () => {
