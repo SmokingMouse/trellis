@@ -12,12 +12,13 @@ import type { ToolCall } from "@/lib/types";
 import {
   type CliRawEntry,
   type CliUsage,
-  indexByUuid,
-  makeTurnOwnership,
+  indexByUuidGen,
+  makeTurnOwnershipGen,
   ms,
   slashCommandQuestion,
   userText,
 } from "./cli-jsonl";
+import { runToCompletion, YIELD_STRIDE } from "./cooperative";
 
 // entry 形状与 turn-start 判据都住在 ./cli-jsonl —— cli-fork 从同一份取，两边对
 // 「一个 turn 从哪开始」的答案不允许分家（那次漂移事故记在该文件头部）。
@@ -112,37 +113,71 @@ export function parseCliSessionJsonl(
     }
   }
 
-  // 会话级元数据：sessionId（兜底用文件名）/ cwd / gitBranch / ai-title。
-  const sessionId =
-    all.find((e) => e.sessionId)?.sessionId ??
-    jsonlPath.replace(/^.*\//, "").replace(/\.jsonl$/, "");
-  const cwd = all.find((e) => e.cwd)?.cwd ?? null;
-  const gitBranch = all.find((e) => e.gitBranch)?.gitBranch ?? null;
-  const aiTitle =
-    [...all].reverse().find((e) => e.type === "ai-title")?.aiTitle ?? null;
+  return runToCompletion(reduceCliEntries(all, jsonlPath));
+}
 
+/**
+ * entry 数组 → ParsedCliSession 的**全部**语义，写成 generator。
+ *
+ * 拆出来有两个用处：
+ *   1. 增量解析（./cli-transcript）只重跑这一层，不重读、不重 JSON.parse 前缀；
+ *   2. 片间可让出事件循环（./cooperative 的 runCooperatively 驱动）。
+ * 同步驱动（parseCliSessionJsonl）与协作驱动跑的是同一份代码，结果按构造恒等。
+ */
+export function* reduceCliEntries(
+  all: RawEntry[],
+  jsonlPath: string,
+): Generator<void, ParsedCliSession | null> {
+  // 会话级元数据 + 对话行筛选 + entryUuids/lastUuid 合并成**一趟**扫描。
+  // 原先是 8 趟（4 个 find、1 个 filter、2 个 reverse 拷贝、1 个 map+filter），
+  // 对 185MB 的 rollout 那是 8 次全表遍历加两份 5 万元素的数组拷贝。
+  let sessionId: string | undefined;
+  let cwd: string | null = null;
+  let gitBranch: string | null = null;
+  let aiTitleEntry: RawEntry | undefined;
+  let lastUuid: string | null = null;
+  const entryUuids: string[] = [];
   // 对话行：turn-start / member 只认 user/assistant；v1 丢弃 sidechain。
-  const entries = all.filter(
-    (e) =>
+  const entries: RawEntry[] = [];
+  for (let i = 0; i < all.length; i++) {
+    if (i % YIELD_STRIDE === 0) yield;
+    const e = all[i];
+    if (sessionId === undefined && e.sessionId) sessionId = e.sessionId;
+    if (cwd === null && e.cwd) cwd = e.cwd;
+    if (gitBranch === null && e.gitBranch) gitBranch = e.gitBranch;
+    if (e.type === "ai-title") aiTitleEntry = e;
+    if (typeof e.uuid === "string") {
+      lastUuid = e.uuid;
+      entryUuids.push(e.uuid);
+    }
+    if (
       e.uuid &&
       (e.type === "user" || e.type === "assistant") &&
-      e.isSidechain !== true,
-  );
+      e.isSidechain !== true
+    ) {
+      entries.push(e);
+    }
+  }
+  sessionId ??= jsonlPath.replace(/^.*\//, "").replace(/\.jsonl$/, "");
+  const aiTitle = aiTitleEntry?.aiTitle ?? null;
+
   if (entries.length === 0) return null;
 
   // byUuid 要收全部带 uuid 的 entry（含 type:"system" 的 compact/边界标记）——
   // 理由与两级归属（严格 → 宽松兜底）的取舍都记在 ./cli-jsonl；cli-fork 截前缀
   // 时走的是同一份 makeTurnOwnership，两边的 turn 边界因此恒等。
-  const byUuid = indexByUuid(all);
+  const byUuid = yield* indexByUuidGen(all);
   const { resolveOwner, fallbackStartIds, isStrictStart } =
-    makeTurnOwnership(byUuid);
+    yield* makeTurnOwnershipGen(byUuid);
 
   // 全局 tool_result 索引：tool_use_id → { 输出文本, is_error, stderr }。
   const resultById = new Map<
     string,
     { output: string | null; isError: boolean; stderr: string | null }
   >();
-  for (const e of entries) {
+  for (let i = 0; i < entries.length; i++) {
+    if (i % YIELD_STRIDE === 0) yield;
+    const e = entries[i];
     if (e.type !== "user") continue;
     const c = e.message?.content;
     if (!Array.isArray(c)) continue;
@@ -160,7 +195,9 @@ export function parseCliSessionJsonl(
 
   // 先归属、后收集 turn-start —— 归属过程会往 fallbackStartIds 里补兜底起点。
   const membersByTurn = new Map<string, RawEntry[]>();
-  for (const e of entries) {
+  for (let i = 0; i < entries.length; i++) {
+    if (i % YIELD_STRIDE === 0) yield;
+    const e = entries[i];
     if (e.type !== "assistant") continue;
     const owner = resolveOwner(e.uuid as string);
     if (!owner) continue;
@@ -177,14 +214,21 @@ export function parseCliSessionJsonl(
   let claimed = -1;
   while (claimed !== fallbackStartIds.size) {
     claimed = fallbackStartIds.size;
-    starts = entries.filter(
-      (e) => isStrictStart(e) || fallbackStartIds.has(e.uuid as string),
-    );
+    starts = [];
+    for (let i = 0; i < entries.length; i++) {
+      if (i % YIELD_STRIDE === 0) yield;
+      const e = entries[i];
+      if (isStrictStart(e) || fallbackStartIds.has(e.uuid as string)) {
+        starts.push(e);
+      }
+    }
     for (const s of starts) if (s.parentUuid) resolveOwner(s.parentUuid);
   }
 
   const turns: ParsedTurn[] = [];
-  for (const start of starts) {
+  for (let si = 0; si < starts.length; si++) {
+    if (si % 256 === 0) yield;
+    const start = starts[si];
     const id = start.uuid as string;
     const members = (membersByTurn.get(id) ?? []).sort(
       (a, b) => ms(a.timestamp) - ms(b.timestamp),
@@ -208,7 +252,9 @@ export function parseCliSessionJsonl(
       }
       textParts.push(t);
     };
-    for (const m of members) {
+    for (let mi = 0; mi < members.length; mi++) {
+      if (mi > 0 && mi % YIELD_STRIDE === 0) yield;
+      const m = members[mi];
       const startedAt = ms(m.timestamp);
       const c = m.message?.content;
       if (m.message?.usage) {
@@ -332,12 +378,7 @@ export function parseCliSessionJsonl(
     aiTitle ??
     (kept[0].question.replace(/\s+/g, " ").trim().slice(0, 60) || "未命名会话");
 
-  const lastUuid =
-    [...all].reverse().find((e) => typeof e.uuid === "string")?.uuid ?? null;
-  const entryUuids = all
-    .map((e) => e.uuid)
-    .filter((u): u is string => typeof u === "string");
-
+  // lastUuid / entryUuids 在上面那趟合并扫描里已经收好（原先是又两趟全表遍历）。
   return {
     sessionId,
     entryUuids,

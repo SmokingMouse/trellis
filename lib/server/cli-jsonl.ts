@@ -14,6 +14,7 @@
 // 所以这两侧必须走同一份实现。执行者是编译器（两边都从这里 import），不是注释；
 // 一致性由 scripts/test-cli-jsonl.ts 在真 jsonl 上回归。
 import fs from "node:fs";
+import { runToCompletion, YIELD_STRIDE } from "./cooperative";
 
 // ── jsonl entry 形状（只声明用到的字段，其余忽略）────────────────────────────
 
@@ -203,11 +204,23 @@ export function looseTurnStart(e: CliRawEntry): boolean {
 export function indexByUuid(
   entries: Iterable<CliRawEntry>,
 ): Map<string, CliRawEntry> {
+  return runToCompletion(indexByUuidGen(entries));
+}
+
+// 分片版（语义与 indexByUuid 完全一致，只是允许在片间让出事件循环）。
+export function* indexByUuidGen(
+  entries: Iterable<CliRawEntry>,
+): Generator<void, Map<string, CliRawEntry>> {
   const byUuid = new Map<string, CliRawEntry>();
   const list = Array.isArray(entries) ? entries : Array.from(entries);
-  for (const e of list) if (typeof e.uuid === "string") byUuid.set(e.uuid, e);
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (typeof e.uuid === "string") byUuid.set(e.uuid, e);
+    if (i % YIELD_STRIDE === 0) yield;
+  }
 
   for (let i = 0; i < list.length; i++) {
+    if (i % YIELD_STRIDE === 0) yield;
     const e = list[i];
     if (!e || typeof e.uuid !== "string") continue;
     const isCompactRoot =
@@ -269,8 +282,16 @@ export function makeOwnerResolver(
 export function commandTurnStartIds(
   byUuid: Map<string, CliRawEntry>,
 ): Set<string> {
+  return runToCompletion(commandTurnStartIdsGen(byUuid));
+}
+
+export function* commandTurnStartIdsGen(
+  byUuid: Map<string, CliRawEntry>,
+): Generator<void, Set<string>> {
   const childrenOf = new Map<string, CliRawEntry[]>();
+  let seenCount = 0;
   for (const e of byUuid.values()) {
+    if (seenCount++ % YIELD_STRIDE === 0) yield;
     if (typeof e.parentUuid !== "string") continue;
     (
       childrenOf.get(e.parentUuid) ??
@@ -279,7 +300,9 @@ export function commandTurnStartIds(
   }
 
   const out = new Set<string>();
+  seenCount = 0;
   for (const e of byUuid.values()) {
+    if (seenCount++ % YIELD_STRIDE === 0) yield;
     if (e.type !== "user" || typeof e.uuid !== "string") continue;
     if (e.isSidechain === true || isToolResultEntry(e)) continue;
     const text = userText(e);
@@ -337,7 +360,13 @@ export type TurnOwnership = {
 export function makeTurnOwnership(
   byUuid: Map<string, CliRawEntry>,
 ): TurnOwnership {
-  const commandStarts = commandTurnStartIds(byUuid);
+  return runToCompletion(makeTurnOwnershipGen(byUuid));
+}
+
+export function* makeTurnOwnershipGen(
+  byUuid: Map<string, CliRawEntry>,
+): Generator<void, TurnOwnership> {
+  const commandStarts = yield* commandTurnStartIdsGen(byUuid);
   const isStrictStart = (e: CliRawEntry): boolean =>
     isTurnStart(e) ||
     (typeof e.uuid === "string" && commandStarts.has(e.uuid));
