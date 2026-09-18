@@ -16,11 +16,13 @@ import { ensureWorkspaceForPath } from "./workspaces";
 import {
   CODEX_SESSIONS_DIR,
   discoverLineage,
+  discoverLineageAsync,
   isWithinCodexSessions,
   type DiscoveredLineage,
 } from "./cli-discover";
 import {
   classifyCliTranscript,
+  classifyCliTranscriptAsync,
   parseCliTranscriptAsync,
   type CliProvider,
   type CliTranscriptState,
@@ -130,15 +132,57 @@ export function classifyRootTranscript(
   return classifyCliTranscript(provider, file);
 }
 
+function rootMember(discovered: DiscoveredLineage) {
+  return discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
+}
+
 function seedLineage(
   discovered: DiscoveredLineage,
   provider: CliProvider,
   trellisSessionId = discovered.rootSid,
   origin: MirrorOrigin = "cli-import",
 ): void {
+  const root = rootMember(discovered);
+  seedLineageFrom(
+    discovered,
+    provider,
+    classifyRootTranscript(provider, root.path),
+    trellisSessionId,
+    origin,
+  );
+}
+
+/**
+ * seedLineage 的非阻塞版：唯一的差别是根 transcript 的定性走分片解析
+ * （classifyCliTranscriptAsync）。DB 落地那段与同步版**是同一段代码**
+ * （seedLineageFrom）—— 两份各写一遍迟早会漂，而这里的失败语义
+ * （unreadable→可重试、native 撞 id→确定性）是 herdr-fleet 重试闸的输入。
+ */
+async function seedLineageAsync(
+  discovered: DiscoveredLineage,
+  provider: CliProvider,
+  trellisSessionId = discovered.rootSid,
+  origin: MirrorOrigin = "cli-import",
+): Promise<void> {
+  const root = rootMember(discovered);
+  seedLineageFrom(
+    discovered,
+    provider,
+    await classifyCliTranscriptAsync(provider, root.path),
+    trellisSessionId,
+    origin,
+  );
+}
+
+function seedLineageFrom(
+  discovered: DiscoveredLineage,
+  provider: CliProvider,
+  state: RootTranscriptState,
+  trellisSessionId: string,
+  origin: MirrorOrigin,
+): void {
   const db = getDB();
-  const root = discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
-  const state = classifyRootTranscript(provider, root.path);
+  const root = rootMember(discovered);
   // 0 turn 不是错误：安静跳过（不建 session 行、不动既有节点）。读不到才是错误 ——
   // 调用方必须看得见，否则镜像会话会停在旧快照上而没人知道。
   if (state.kind === "unreadable") {
@@ -566,6 +610,9 @@ export function refreshWatches(): void {
 
 // ── 对外操作 ─────────────────────────────────────────────────────────────────
 
+// 同步形态。**只剩用户在界面上手点 attach 这一条调用方**（app/api/cli-sync/attach）：
+// 那是一次交互式请求，用户就在等这个响应，占一会儿主线程是可接受的代价。
+// herdr 的自动 attach 走下面的异步形态 —— 它是后台批量重放，不能占住事件循环。
 export function attachSession(
   jsonlPath: string,
   provider: CliProvider = "claude",
@@ -586,6 +633,50 @@ export function attachSession(
   const lineage = discoverLineage(resolved, provider);
   seedLineage(lineage, provider, lineage.rootSid, options.origin ?? "cli-import");
   const res = importCliLineage(lineage.rootSid);
+  refreshWatches();
+  return res;
+}
+
+/**
+ * attachSession 的非阻塞形态 —— **herdr-fleet 的自动 attach 走这条**（根因 D）。
+ *
+ * 现场：fix-b 的异步化只覆盖了启动补齐与 watcher 的 reimport，herdr 首次 attach
+ * 仍是同步全量 parse。devbox 上单个 rollout 最大 1.28GB，首次 attach 一次阻塞
+ * 主线程数十秒；而 fleet 每 60s snapshot 都会把同一批 transcript 重放一遍。
+ *
+ * 四段全部换成让出路径：
+ *   classify  classifyCliTranscriptAsync（分片解析 + 分片定性）
+ *   discover  discoverLineageAsync（分片解析 + 枚举缓存 + 兄弟循环让出）
+ *   seed      seedLineageAsync（定性分片；DB 落地与同步版同一段代码）
+ *   import    importCliLineageAsync（fix-b 已有）
+ *
+ * **失败语义与同步版逐字相同**，这是硬要求：链尾是 herdr-fleet 的重试闸，它按
+ * 错误**类型**分流（isDeterministicAttachFailure），换成 Promise 只是换了传递
+ * 方式 —— reject 的还是 CliTranscriptUnreadableError（可重试）/
+ * CliTranscriptNoTurnsError、NativeSessionConflictError（确定性，按指纹跳过），
+ * 绝不能退化成裸 Error 或被吞掉。
+ */
+export async function attachSessionAsync(
+  jsonlPath: string,
+  provider: CliProvider = "claude",
+  options: { origin?: MirrorOrigin } = {},
+): Promise<ImportResult> {
+  const resolved = canonicalPath(jsonlPath);
+  const state = await classifyCliTranscriptAsync(provider, resolved);
+  if (state.kind === "unreadable") {
+    throw new CliTranscriptUnreadableError(resolved);
+  }
+  if (state.kind === "empty") {
+    return { sessionId: state.sessionId, status: "empty", turns: 0 };
+  }
+  const lineage = await discoverLineageAsync(resolved, provider);
+  await seedLineageAsync(
+    lineage,
+    provider,
+    lineage.rootSid,
+    options.origin ?? "cli-import",
+  );
+  const res = await importCliLineageAsync(lineage.rootSid);
   refreshWatches();
   return res;
 }
@@ -617,9 +708,9 @@ async function catchUpAttachedSessions(): Promise<void> {
     for (const session of attachedSessions()) {
       // Yield between per-session imports, including before the first one.
       // A single deferred callback around the whole loop still blocks the
-      // event loop for the sum of all transcript parsing times. (The parse
-      // inside importCliLineageAsync yields too, but seedLineage below is
-      // still synchronous — this stays load-bearing.)
+      // event loop for the sum of all transcript parsing times. (每段解析自己
+      // 也分片让出了，但每个会话之间仍要让一次：discover / seed / import 三段之
+      // 间还有纯同步的 DB 工作。)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       let rootPath = "";
       try {
@@ -634,8 +725,10 @@ async function catchUpAttachedSessions(): Promise<void> {
           .get(session.id) as { p: string } | undefined;
         if (root?.p) {
           rootPath = root.p;
-          seedLineage(
-            discoverLineage(root.p, session.provider),
+          // 发现与 seed 也走让出路径：光把 import 异步化，整轮补齐仍会被
+          // 「N 个会话 × 一次同步全树发现 + 一次同步全量定性」占住（根因 D）。
+          await seedLineageAsync(
+            await discoverLineageAsync(root.p, session.provider),
             session.provider,
             session.id,
           );

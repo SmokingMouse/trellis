@@ -33,6 +33,7 @@ import { reduceCodexEntries } from "./codex-import";
 import type { CliRawEntry } from "./cli-jsonl";
 import {
   DEFAULT_SLICE_MS,
+  makeSlicer,
   runCooperatively,
   runToCompletion,
 } from "./cooperative";
@@ -538,6 +539,66 @@ export function readsAsJsonLines(file: string): boolean {
 }
 
 /**
+ * readsAsJsonLines 的分片版：逐片读、逐行试解析，片间让出事件循环。
+ *
+ * 为什么需要它：同步版是 `readFileSync(file, "utf8")` —— 对一个 197MB 的
+ * rollout 就是一次几十秒的同步阻塞外加同样大小的字符串分配。而它正好落在
+ * **attach 的必经之路**上（classify 每次都调，parse 出不来 turn 就进这一支），
+ * 首次 attach 异步化之后它会是链上唯一剩下的巨型同步读。
+ *
+ * 判据与同步版逐字相同：打不开 → false；任何非空行不是合法 JSON → false；
+ * 末尾没有换行的那一截照样当一行判。唯一的差别是同步版会被
+ * 「文件大于最大字符串长度」直接 throw 成 false（= unreadable = 值得重试），
+ * 这边读得完就照常定性 —— 那正是我们要的：巨大但合法的零轮次文件是**确定性**的
+ * empty，不该被当成临时故障无限重试。
+ */
+export async function readsAsJsonLinesAsync(
+  file: string,
+  sliceMs: number = DEFAULT_SLICE_MS,
+): Promise<boolean> {
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fs.promises.open(file, "r");
+  } catch {
+    return false; // ENOENT / EACCES / EISDIR …：读不到
+  }
+  const buf = Buffer.allocUnsafe(CHUNK_BYTES);
+  let residue = Buffer.alloc(0);
+  const yieldSlice = makeSlicer(sliceMs);
+  try {
+    for (;;) {
+      const { bytesRead } = await handle.read(buf, 0, buf.length, null);
+      if (bytesRead <= 0) break;
+      const split = splitLines(buf.subarray(0, bytesRead), residue);
+      for (const line of split.lines) {
+        if (!line.trim()) continue;
+        try {
+          JSON.parse(line);
+        } catch {
+          return false;
+        }
+      }
+      // subarray 是视图，下一轮 read 会覆盖同一块内存 —— 残片必须拷出来。
+      residue = Buffer.from(split.residue);
+      await yieldSlice();
+    }
+  } catch {
+    return false; // EIO / EISDIR：与同步版一视同仁
+  } finally {
+    await handle.close().catch(() => {});
+  }
+  const tail = residue.toString("utf8");
+  if (tail.trim()) {
+    try {
+      JSON.parse(tail);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * 分类一次**已经拿到**的解析结果。拆成这个形状是为了让异步解析路径
  * （watcher / 启动补齐的分片解析）能复用同一套判据而不必重新解析一遍。
  */
@@ -559,4 +620,34 @@ export function classifyCliTranscript(
   file: string,
 ): CliTranscriptState {
   return classifyParsedTranscript(file, parseCliTranscript(provider, file));
+}
+
+/**
+ * classifyParsedTranscript 的分片版。三态判据**同一套**，只是把
+ * 「定性时要重读一遍文件」那一步换成分片读（见 readsAsJsonLinesAsync）。
+ */
+export async function classifyParsedTranscriptAsync(
+  file: string,
+  parsed: ParsedCliSession | null,
+  sliceMs: number = DEFAULT_SLICE_MS,
+): Promise<CliTranscriptState> {
+  if (parsed && parsed.turns.length > 0) return { kind: "ready", parsed };
+  if (!(await readsAsJsonLinesAsync(file, sliceMs))) return { kind: "unreadable" };
+  return {
+    kind: "empty",
+    sessionId: parsed?.sessionId ?? path.basename(file).replace(/\.jsonl$/, ""),
+  };
+}
+
+/** 解析 + 分类的一步到位版本（异步路径用：attach / watcher / 启动补齐）。 */
+export async function classifyCliTranscriptAsync(
+  provider: CliProvider,
+  file: string,
+  sliceMs: number = DEFAULT_SLICE_MS,
+): Promise<CliTranscriptState> {
+  return classifyParsedTranscriptAsync(
+    file,
+    await parseCliTranscriptAsync(provider, file, sliceMs),
+    sliceMs,
+  );
 }

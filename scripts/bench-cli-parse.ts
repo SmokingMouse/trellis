@@ -130,6 +130,131 @@ export function writeSyntheticClaudeJsonl(
   };
 }
 
+/**
+ * 合成一个形状贴近真实 codex rollout 的 jsonl：首行 session_meta（cwd / id 都在
+ * 这里，cli-discover 的 meta 采样只读这一行），之后每个 turn = turn_context +
+ * user message + function_call + function_call_output + final_answer。
+ *
+ * 用于根因 D 的回归：首次 attach 一个大 rollout 时事件循环不许被占住，以及
+ * 几百个 rollout 的兄弟枚举不许每轮重扫 meta。
+ */
+export function writeSyntheticCodexRollout(
+  target: string,
+  turns: number,
+  options: {
+    sessionId: string;
+    cwd: string;
+    /** 兄弟 fork 用：让两个文件共享同一套 turn_id。默认用自己的 sessionId。 */
+    turnPrefix?: string;
+    /**
+     * 每个 turn 的填充字节数（默认 400B×4 ≈ 一个小 turn）。调大它可以做出
+     * 「turn 不多但每个都很肥」的文件 —— devbox 上那个 1.28GB 的 rollout 就是
+     * 这个形状（一个长跑会话、工具输出巨大），而不是几百万个小 turn。
+     */
+    fillerBytes?: number;
+    /**
+     * 提问 / 最终答复的填充字节数（默认跟随 fillerBytes）。单独拎出来是因为这两
+     * 段会进 search_index 做全文索引，而工具调用与其输出不会 —— 想把「解析成本」
+     * 和「DB 落地成本」分开量的时候，把这个压小、fillerBytes 放大即可。
+     */
+    textFillerBytes?: number;
+    /**
+     * 每个 turn 额外附带的「噪声」字节：解析器**认得但会丢弃**的 event_msg
+     * （真实 rollout 里 agent_reasoning_delta 这类占了绝大多数体积）。它照样要被
+     * 按行切开、JSON.parse、走一遍 reduce，但一个字节都不会进 node —— 用来做出
+     * 「解析成本很大、DB 落地成本很小」的文件，把事件循环阻塞的来源钉死在解析上。
+     */
+    noiseBytes?: number;
+  },
+): { bytes: number } {
+  const ts = (i: number) => new Date(1750000000000 + i * 1000).toISOString();
+  const prefix = options.turnPrefix ?? options.sessionId;
+  const repeats = (bytes: number) =>
+    FILLER.repeat(Math.max(1, Math.round(bytes / FILLER.length)));
+  const pad = repeats(options.fillerBytes ?? 400);
+  const textPad = repeats(options.textFillerBytes ?? options.fillerBytes ?? 400);
+  const noisePad = options.noiseBytes ? repeats(options.noiseBytes) : null;
+  const chunks: string[] = [
+    JSON.stringify({
+      timestamp: ts(0),
+      type: "session_meta",
+      payload: {
+        id: options.sessionId,
+        cwd: options.cwd,
+        git: { branch: "main" },
+        // 真实 rollout 的首行带 base_instructions，能有几百 KB —— meta 采样的
+        // 代价（以及缓存的收益）都在这一行上。
+        base_instructions: FILLER.repeat(8),
+      },
+    }),
+  ];
+  for (let t = 0; t < turns; t++) {
+    const tid = `${prefix}-turn-${t}`;
+    const meta = { internal_chat_message_metadata_passthrough: { turn_id: tid } };
+    chunks.push(
+      JSON.stringify({
+        timestamp: ts(t * 10 + 1),
+        type: "turn_context",
+        payload: { turn_id: tid },
+      }),
+      JSON.stringify({
+        timestamp: ts(t * 10 + 2),
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: `question ${t} ${textPad}` }],
+          ...meta,
+        },
+      }),
+      JSON.stringify({
+        timestamp: ts(t * 10 + 3),
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: `call-${tid}`,
+          name: "shell",
+          arguments: JSON.stringify({ cmd: `ls ${pad}` }),
+          ...meta,
+        },
+      }),
+      JSON.stringify({
+        timestamp: ts(t * 10 + 4),
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: `call-${tid}`,
+          output: pad + pad,
+          ...meta,
+        },
+      }),
+      JSON.stringify({
+        timestamp: ts(t * 10 + 5),
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: `answer ${t} ${textPad}` }],
+          ...meta,
+        },
+      }),
+    );
+    if (noisePad) {
+      chunks.push(
+        JSON.stringify({
+          timestamp: ts(t * 10 + 6),
+          type: "event_msg",
+          payload: { type: "agent_reasoning_delta", delta: noisePad, ...meta },
+        }),
+      );
+    }
+  }
+  const text = `${chunks.join("\n")}\n`;
+  fs.writeFileSync(target, text);
+  return { bytes: Buffer.byteLength(text) };
+}
+
 /** 事件循环阻塞探针：记录相邻两次 1ms 定时器之间的实际间隔。 */
 function startLagProbe() {
   let max = 0;

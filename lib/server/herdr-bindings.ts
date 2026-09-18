@@ -364,12 +364,19 @@ export function reconcileHerdrSnapshot(
 // 返回值是 attach 的**出口种类**（见 ./cli-attach）。调用方靠它区分「成功」与
 // 「合法但还没有对话轮次，跳过」—— 后者不是错误，但也不能当成功一直去重掉，
 // 否则会话长出真内容后就永远镜像不进来。
+//
+// 走 attachSessionAsync 而不是同步的 attachSession（根因 D）：这是 herdr-fleet 的
+// **自动**路径，每次 snapshot / pane 事件都会把一批 transcript 重放一遍，没有任何
+// 人在等它的返回值。同步版在 devbox 的 1.28GB rollout 上一次就把主线程占住数十秒。
+// 失败仍以原来的错误类型 reject —— fleet 的重试闸按类型分流，见 ./cli-attach。
 export async function attachHerdrTranscript(
   transcriptPath: string,
   agentKind: string,
 ): Promise<CliAttachOutcome> {
   if (agentKind !== "claude" && agentKind !== "codex") return "ignored";
-  const { attachSession } = await import("./cli-sync-watcher");
-  const result = attachSession(transcriptPath, agentKind, { origin: "herdr" });
+  const { attachSessionAsync } = await import("./cli-sync-watcher");
+  const result = await attachSessionAsync(transcriptPath, agentKind, {
+    origin: "herdr",
+  });
   return result.status === "empty" ? "empty" : "attached";
 }
