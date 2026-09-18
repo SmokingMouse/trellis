@@ -2,18 +2,18 @@ import "server-only";
 import { AGENT_HOOK_TABLES_SQL } from "@/lib/server/agent-hooks/types";
 import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
-import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { BUILTIN_AGENT_SEEDS } from "@/lib/agent-presets";
-
-const DB_DIR = path.join(os.homedir(), ".trellis");
-const DB_PATH = path.join(DB_DIR, "data.db");
+import { trellisDbPath } from "@/lib/disk-space";
+import { dbWaitBudgetMs } from "./db-error";
 
 let _db: Database | null = null;
 
+/** DB 路径的真源在 lib/disk-space.ts —— 水位监控必须和实际写库查同一个分区，
+ * 各自算一份路径迟早会在 TRELLIS_DB_PATH 指向别的盘时分叉成假绿。 */
 function dbPath(): string {
-  return process.env.TRELLIS_DB_PATH || DB_PATH;
+  return trellisDbPath();
 }
 
 export function getDB(): Database {
@@ -22,6 +22,25 @@ export function getDB(): Database {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
   db.exec("PRAGMA journal_mode = WAL");
+  // S176 / fix-d1：写锁被占时先让 SQLite 自己等一小会儿（比在应用层重试便宜，
+  // 也覆盖了 dbWrite 管不到的路径 —— 纯读、原生 statement），等不到才抛
+  // SQLITE_BUSY 交给 db-error.ts 的 dbWrite 按**总预算**退避。
+  //
+  // 为什么不是直接把 busy_timeout 设成预算：busy_timeout 根本不是「这条语句最多
+  // 阻塞这么久」。WAL 下一次写要连着取好几把锁，bun:sqlite 每一把都重新走一轮
+  // busy handler，实测（本机 Bun 1.3.14，第二个连接 BEGIN IMMEDIATE 持锁）单条
+  // INSERT 的真实阻塞是 busy_timeout 的 3–9 倍：
+  //     20ms→115ms  50ms→441ms  100ms→786ms  300ms→1537ms  2000ms→5672ms
+  // 原来这里写死 5s、上面再叠 4 次重试，异源复核实测单次 append 同步阻塞
+  // **42033ms**（期间连 1ms 的 timer 都不执行，事件循环整个停摆）。
+  //
+  // 所以反过来定：先有总预算，再按预算反推一个够小的 busy_timeout，让
+  // 「DB_RETRY_ATTEMPTS 次 attempt 的真实阻塞 + 应用退避」正好落在预算里。
+  // 预算 2000ms → 50ms（4 × 441 + 260 ≈ 2.0s）。预算 0（不设预算）退回旧的 5s。
+  const budget = dbWaitBudgetMs();
+  const busyTimeout =
+    budget > 0 ? Math.min(Math.max(Math.round(budget / 40), 20), 500) : 5000;
+  db.exec(`PRAGMA busy_timeout = ${busyTimeout}`);
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   _db = db;

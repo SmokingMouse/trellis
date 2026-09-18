@@ -15,14 +15,19 @@ import {
   isDeterministicAttachFailure,
   type CliAttachOutcome,
 } from "./cli-attach";
-import { realpathSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { canonicalPath } from "./canonical-path";
 import { getDB } from "./sqlite";
 import type { HerdrWorktree } from "../herdr-ui";
 import { normalizeHerdrPath } from "../herdr-ui";
 
-function canonicalPath(value: string): string {
-  try { return realpathSync(value); } catch { return normalizeHerdrPath(value); }
+// 路径规范化只此一家（./canonical-path）：fleet 这边 realpath、discover 那边
+// os.homedir() 原样，正是根因 C 的形状。差别只在 fallback —— herdr 报上来的路径
+// 可能带尾斜杠，解不出来时仍走 normalizeHerdrPath 削掉它。
+function canonicalWorktreePath(value: string): string {
+  const normalized = normalizeHerdrPath(value);
+  return canonicalPath(normalized) || normalized;
 }
 
 function resolveGitBranch(checkout: string): Promise<string | null> {
@@ -142,18 +147,18 @@ export class HerdrFleetService {
       // Older isolated databases may not have the project/workspace schema.
       if (db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='workspaces'").get()) {
         const rows = db.query("SELECT path, git_branch FROM workspaces WHERE git_branch IS NOT NULL").all() as { path: string; git_branch: string }[];
-        for (const row of rows) branches.set(canonicalPath(row.path), row.git_branch);
+        for (const row of rows) branches.set(canonicalWorktreePath(row.path), row.git_branch);
         if (db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get()) {
           const names = db.query("SELECT w.path, p.name FROM workspaces w JOIN projects p ON p.id = w.project_id").all() as { path: string; name: string }[];
-          for (const row of names) projectNames.set(canonicalPath(row.path), row.name);
+          for (const row of names) projectNames.set(canonicalWorktreePath(row.path), row.name);
         }
       }
       for (const workspace of metadata) {
         const wt = workspace.worktree!;
-        const checkout = canonicalPath(wt.checkout_path);
+        const checkout = canonicalWorktreePath(wt.checkout_path);
         activeCheckouts.add(checkout);
         const branch = branches.get(checkout) || this.cachedBranch(checkout);
-        const root = canonicalPath(wt.repo_root);
+        const root = canonicalWorktreePath(wt.repo_root);
         next.set(workspace.workspace_id, { ...wt, repo_root: root, repo_name: projectNames.get(root) || wt.repo_name, checkout_path: checkout, git_branch: branch });
       }
     }

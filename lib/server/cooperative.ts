@@ -49,3 +49,25 @@ export async function runCooperatively<T>(
 
 /** 循环里的让出节奏：每 N 次迭代给驱动器一次打断机会。 */
 export const YIELD_STRIDE = 2048;
+
+/**
+ * 给「不是 generator、但同样 CPU-bound 的 async 循环」用的时间片闸。
+ *
+ * 场景是 runCooperatively 覆盖不到的那些循环：枚举上千个兄弟 jsonl 并逐个采样
+ * meta、逐个解析（cli-discover / cli-lineage）。这些循环里的 await 大多会命中
+ * stat 短路或进程内缓存 —— 全是已 resolve 的 promise，只走 microtask，
+ * **不会**把控制权交回宏任务队列，于是几百次迭代照样能把事件循环占住。
+ *
+ * 返回的函数每次调用检查一下本片是否跑满：没跑满立刻返回（零代价，可以撒得很
+ * 密），跑满了才真的 setImmediate 让出一次。
+ */
+export function makeSlicer(
+  sliceMs: number = DEFAULT_SLICE_MS,
+): () => Promise<void> {
+  let sliceStart = performance.now();
+  return async () => {
+    if (performance.now() - sliceStart < sliceMs) return;
+    await yieldToEventLoop();
+    sliceStart = performance.now();
+  };
+}

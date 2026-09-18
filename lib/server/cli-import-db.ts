@@ -3,9 +3,12 @@
 // 幂等：节点 id = CLI turn 的 uuid（确定性），重复同步走 ON CONFLICT 更新、不产重复行。
 // 详见 progress/cli-sync.md。
 import "server-only";
-import { existsSync } from "node:fs";
 import { getDB } from "./sqlite";
-import { parseCliTranscript, parseCliTranscriptAsync } from "./cli-transcript";
+import {
+  classifyParsedTranscript,
+  parseCliTranscript,
+  parseCliTranscriptAsync,
+} from "./cli-transcript";
 import { ensureWorkspaceForPath } from "./workspaces";
 import type { ParsedCliSession, ParsedTurn } from "./cli-import";
 
@@ -74,11 +77,19 @@ function parseLineages(rows: LineageRow[]): ParsedLineage[] {
 // lineage 的节点全剥掉（CLI transcript 过期 / 用户清理 / fork jsonl 被删都会走
 // 到这里，不是理论风险）。所以解析失败必须能被调用方看见。
 //
+// 判据是 cli-transcript.ts 的三态 classifyParsedTranscript，与 attach 侧同一套：
+// **不能只看 existsSync**。文件在、但 EACCES / EIO / EISDIR / 写到一半坏行时，
+// 解析同样返回 null 而 existsSync 为 true —— 旧判据把这种残缺当成「读到了，
+// 这条 lineage 就是没内容」，于是清理照常开跑，把 fork lineage 已有的节点整片
+// 剥掉（fj-review-ab-2c36 F1：chmod 000 实测 forkNodePreserved=false）。
+// 反过来也不能把所有 null 都算 unreadable：合法的零轮次会话本来就返回 null，
+// 那是确定性的 empty，不该因此永久禁掉清理。
+//
 // 关于 stat 短路与增量缓存（./cli-transcript）对这条不变量的影响：缓存**只**在
 // 文件仍然存在、inode 未变、且长度单调增长时才复用。文件一旦消失，
-// parseCliTranscript 会先作废缓存再返回 null —— 于是这里照样走
-// 「parsed 为空 + existsSync 为 false → anyUnreadable」。缓存不会把「读不到」
-// 悄悄变成「读到了但没内容」。
+// parseCliTranscript / parseCliTranscriptAsync 会先作废缓存再返回 null，随后
+// classifyParsedTranscript 重新读一次文件定性 —— 缓存不会把「读不到」悄悄变成
+// 「读到了但没内容」。
 function parseLineagesChecked(rows: LineageRow[]): {
   parsed: ParsedLineage[];
   anyUnreadable: boolean;
@@ -87,11 +98,13 @@ function parseLineagesChecked(rows: LineageRow[]): {
   let anyUnreadable = false;
   for (const row of rows) {
     const parsed = parseCliTranscript(row.provider_family, row.jsonl_path);
-    if (!parsed || parsed.turns.length === 0) {
-      if (!existsSync(row.jsonl_path)) anyUnreadable = true;
+    const state = classifyParsedTranscript(row.jsonl_path, parsed);
+    if (state.kind === "unreadable") {
+      anyUnreadable = true;
       continue;
     }
-    out.push({ row, parsed });
+    if (state.kind === "empty") continue;
+    out.push({ row, parsed: state.parsed });
   }
   return { parsed: out, anyUnreadable };
 }
@@ -108,11 +121,13 @@ async function parseLineagesCheckedAsync(rows: LineageRow[]): Promise<{
       row.provider_family,
       row.jsonl_path,
     );
-    if (!parsed || parsed.turns.length === 0) {
-      if (!existsSync(row.jsonl_path)) anyUnreadable = true;
+    const state = classifyParsedTranscript(row.jsonl_path, parsed);
+    if (state.kind === "unreadable") {
+      anyUnreadable = true;
       continue;
     }
-    out.push({ row, parsed });
+    if (state.kind === "empty") continue;
+    out.push({ row, parsed: state.parsed });
   }
   return { parsed: out, anyUnreadable };
 }
@@ -390,7 +405,10 @@ function commitCliLineage(
     //     在它上面分叉过，保守放过
     //   !anyUnreadable —— 有 lineage 的 jsonl 读不到时，turnIdSet 是残缺的，
     //     「不在集合里就删」会把那条 lineage 的节点整片剥掉。transcript 过期 / 用户
-    //     清理 jsonl 都会走到这儿，而 v1 迁移作废游标后每个 attached 会话都要重导
+    //     清理 jsonl / 权限与 IO 失败（EACCES、EIO、EISDIR）/ CLI 正写到一半的坏行
+    //     都会走到这儿 —— 后面这几种文件**还在**，光看 existsSync 看不出来，
+    //     判据因此是 parseLineagesChecked 里的三态分类。而 v1 迁移作废游标后
+    //     每个 attached 会话都要重导
     //     一次 —— 没这道闸，升级后第一次启动就是一次批量销毁。
     if (!anyUnreadable) {
       const turnIdSet = new Set(turns.map((t) => t.id));

@@ -11,6 +11,7 @@ const { ensureHerdrSchema } = await import("./sqlite");
 const { HerdrClient } = await import("./herdr-client");
 const { HerdrFleetService } = await import("./herdr-fleet");
 const { classifyRootTranscript } = await import("./cli-sync-watcher");
+const { CliTranscriptNoTurnsError } = await import("./cli-attach");
 import type { HerdrPane, HerdrWorkspace } from "./herdr-types";
 import type { CliAttachOutcome } from "./cli-attach";
 
@@ -32,7 +33,11 @@ function createHarness(waitDelayMs = 0, options: {
   attachClaude?: ((transcriptPath: string) => void) | undefined;
   attachHerdr?: (transcriptPath: string, agentKind: string) => Promise<CliAttachOutcome>;
 } = {}) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-fleet-"));
+  // realpath：macOS 的 os.tmpdir() 走 /var → /private/var 这条符号链接，而
+  // transcript 路径现在按物理形收口（根因 C）。夹具跟着用物理形。
+  const home = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-fleet-")),
+  );
   const socketPath = path.join(home, "herdr.sock");
   const sessionId = "44444444-4444-4444-8444-444444444444";
   const cwd = "/tmp/fleet-project";
@@ -242,6 +247,46 @@ describe("HerdrFleetService", () => {
     await Bun.sleep(30);
     expect(calls.length).toBeGreaterThan(1);
     expect(errors).toHaveLength(calls.length);
+  });
+
+  // 根因 C：「选中文件解析不出轮次」原先抛裸 Error，落进上面那条「可重试」分支
+  // 无限重排。改成确定性类型后必须和空会话一样只试一次，文件变了才再试。
+  test("C attach 抛 CliTranscriptNoTurnsError → 跳过而非重试，文件变了才再来一次", async () => {
+    const calls: string[] = [];
+    const errors: unknown[][] = [];
+    const warnings: unknown[][] = [];
+    const h = createHarness(0, {
+      attachClaude: undefined,
+      attachHerdr: async (transcriptPath) => {
+        calls.push(transcriptPath);
+        throw new CliTranscriptNoTurnsError(transcriptPath);
+      },
+    });
+    const realError = console.error;
+    const realWarn = console.warn;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    cleanups.push(() => { console.error = realError; console.warn = realWarn; });
+
+    await h.service.ensureStarted();
+    await Bun.sleep(20);
+    expect(calls).toHaveLength(1);
+    for (let i = 0; i < 3; i++) {
+      h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 2 + i, agent_status: i % 2 ? "idle" : "working" } } });
+      await Bun.sleep(20);
+      await (h.client as unknown as { resync(): Promise<boolean> }).resync();
+      await Bun.sleep(20);
+    }
+    expect(calls).toHaveLength(1);
+    expect(errors).toEqual([]); // 每 snapshot 一条 console.error 正是要治的病
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][2])).toContain("no parseable turns");
+
+    // 指纹变了 → 再试一次（不是永久黑名单）。
+    fs.writeFileSync(h.transcript, conversationJsonl(h.sessionId, "/tmp/fleet-project"));
+    h.emit({ event: "pane_updated", data: { pane: { ...h.basePane, revision: 9, agent_status: "blocked" } } });
+    await Bun.sleep(30);
+    expect(calls).toHaveLength(2);
   });
 
   test("P2-4 slow failed branch lookup never blocks events, deduplicates and retries only after failure TTL", async () => {

@@ -15,7 +15,9 @@ import {
 import {
   persistPendingInteraction,
   clearPendingInteraction,
+  markNodeInterrupted,
 } from "./repo";
+import { DbWriteError } from "./db-error";
 import type { ToolCall, TaskMeta, PendingInteraction } from "@/lib/types";
 import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
@@ -175,14 +177,19 @@ type RunState = {
   controller: AbortController;
   status: "streaming" | "done" | "error";
   // Live mirror of the DB's response column for this run. Snapshotted
-  // and shipped as the catchup payload to new subscribers; ALSO grown
-  // before each delta broadcast so the snapshot can't lag a delta the
-  // subscriber would otherwise miss.
+  // and shipped as the catchup payload to new subscribers.
+  //
+  // S176 返工（fix-d1）：写序是 **persist → commit → broadcast**。名字里的
+  // "committed" 是字面意思 —— 只有真的落了库的字才进这里。旧序（先 commit 后
+  // 写 DB）在 SQLITE_FULL 下会让一段从没落库的文本留在快照里，重连的客户端
+  // 拿 catchup 把 response 覆盖回去，错误虽然报了、失败的内容却又活了过来。
+  // 「先提交快照、后 broadcast」的订阅一致性照旧成立：DB 写成功之后仍然是先
+  // 改快照再广播，所以并发的 subscribe() 不会既漏 catchup 又漏 broadcast。
   committedText: string;
   // Stage 17: in-memory mirror of the tool_calls_json column. Same
-  // commit-before-broadcast discipline as committedText — a tool event
-  // updates this BEFORE going to subscribers, so a racing subscribe()
-  // snapshot can't miss a tool call that's already been persisted.
+  // persist → commit → broadcast discipline as committedText — 落库成功后才
+  // 进这个数组，再广播，所以并发 subscribe() 的快照不会漏掉已持久化的工具调用，
+  // 也不会捡到一个没落库的。
   committedToolCalls: ToolCall[];
   // Stage 22: sub-agent patches whose target tool call hasn't been seen yet.
   // A single generator emits in order (the Agent tool_use always precedes its
@@ -410,6 +417,32 @@ async function runLoop(
   let stoppedWith: "done" | "error" = "done";
   let errorMessage: string | undefined;
 
+  // S176：DB 写失败不再被吞。
+  //
+  // 事故里（BOE 2026-09-18，SQLITE_FULL ×3）下面每个 `appendNodeResponse` /
+  // `finalizeNode` 的 catch 都是空的 —— 结果是：这一轮的字一个都没存下来、
+  // 行永远停在 status='streaming'、而用户那边只是一直转圈。**落不了盘的流不该
+  // 继续跑**：第一次写失败就停下、把人话报到前端、让节点落 error 态。
+  //
+  // 对象盒而不是裸 let：闭包里赋值 + 外层判真，裸 let 会被 TS 的控制流收敛成 null。
+  const fail: { err: DbWriteError | null } = { err: null };
+  const onDbFailure = (err: unknown): boolean => {
+    if (!(err instanceof DbWriteError)) return false;
+    if (!fail.err) {
+      fail.err = err;
+      stoppedWith = "error";
+      errorMessage = err.userMessage;
+      console.error(
+        `[run-bus] ${args.nodeId} 落库失败（${err.label} / ${err.code ?? err.kind}），中止本轮：`,
+        err.cause ?? err,
+      );
+      broadcast(state, { type: "error", message: err.userMessage });
+      // 停掉 spawn：它继续生成也没有地方存，只是白烧 token。
+      state.controller.abort();
+    }
+    return true;
+  };
+
   // A路②: build the interaction dispatcher once per run. Only claude-family
   // runs (args.interactive) get a live callback; others pass undefined so the
   // provider never opens the stdio permission protocol.
@@ -498,29 +531,35 @@ async function runLoop(
           const t = state.committedText;
           const sep = !t || t.endsWith("\n\n") ? "" : t.endsWith("\n") ? "\n" : "\n\n";
           if (sep) {
-            state.committedText += sep;
-            aggregated += sep;
+            // persist → commit → broadcast（见 RunState.committedText 注释）。
             try {
               appendNodeResponse(args.nodeId, sep);
-            } catch {
-              /* best-effort，同下 */
+            } catch (err) {
+              if (!onDbFailure(err)) {
+                /* 非 DB 故障：best-effort，同下 */
+              }
             }
+            if (fail.err) break;
+            state.committedText += sep;
+            aggregated += sep;
             broadcast(state, { type: "delta", text: sep });
           }
           state.finalStart = state.committedText.length;
         }
-        // Order matters: grow committedText BEFORE broadcasting, so a
-        // subscriber that races in concurrently can't snapshot pre-delta
-        // and then also miss the broadcast (JS is single-threaded so
-        // subscribe() can't interleave with this block, but committing
-        // first is the invariant readers rely on).
-        state.committedText += event.text;
-        aggregated += event.text;
+        // Order matters: 先落库，落成了再改 committedText，最后才广播。前两步
+        // 之间没有 await，JS 单线程保证 subscribe() 不会插进来看到「库里有、
+        // 快照里没有」的中间态；而写失败时快照原样不动，重连的 catchup 不会
+        // 复活一段从没存下来的正文（S176 返工的核心不变式）。
         try {
           appendNodeResponse(args.nodeId, event.text);
-        } catch {
-          // best-effort; DB hiccup shouldn't kill the stream
+        } catch (err) {
+          if (!onDbFailure(err)) {
+            // 非 DB 故障（理论上不该有）：保持旧的 best-effort 行为
+          }
         }
+        if (fail.err) break;
+        state.committedText += event.text;
+        aggregated += event.text;
         broadcast(state, { type: "delta", text: event.text });
       } else if (event.type === "thinking") {
         // 结构性中断：这段思考之前说的话都是过程叙述（interleaved thinking
@@ -563,9 +602,9 @@ async function runLoop(
         if (state.committedText.length > state.finalStart) {
           state.pendingBreak = true;
         }
-        // Mirror to committedToolCalls + DB BEFORE broadcasting, same
-        // discipline as the delta path so a concurrent subscribe() can't
-        // catchup-snapshot pre-event then miss the broadcast.
+        // persist → commit → broadcast，同 delta 路径：写进 DB 成功之后才进
+        // committedToolCalls，再广播。并发的 subscribe() 要么在 catchup 里看到
+        // 它、要么收到后面的 broadcast；写失败则两边都看不到。
         const tc: ToolCall = {
           id: event.id,
           name: event.name,
@@ -587,14 +626,17 @@ async function runLoop(
           const early = state.pendingAgentPatches.get(tc.id);
           if (early) {
             tc.agent = mergeAgentMeta(undefined, early);
-            state.pendingAgentPatches.delete(tc.id);
           }
-          state.committedToolCalls.push(tc);
           try {
             appendToolCallStart({ nodeId: args.nodeId, call: tc });
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            if (!onDbFailure(err)) {
+              /* best-effort */
+            }
           }
+          if (fail.err) break;
+          if (early) state.pendingAgentPatches.delete(tc.id);
+          state.committedToolCalls.push(tc);
           broadcast(state, {
             type: "tool_call_start",
             id: tc.id,
@@ -623,7 +665,7 @@ async function runLoop(
             endedAt: event.endedAt,
             durationMs: Math.max(0, event.endedAt - cur.startedAt),
           };
-          state.committedToolCalls[idx] = next;
+          // persist → commit → broadcast（同上）。
           try {
             markToolCallDone({
               nodeId: args.nodeId,
@@ -633,9 +675,13 @@ async function runLoop(
               status: event.isError ? "error" : "done",
               endedAt: event.endedAt,
             });
-          } catch {
-            /* best-effort */
+          } catch (err) {
+            if (!onDbFailure(err)) {
+              /* best-effort */
+            }
           }
+          if (fail.err) break;
+          state.committedToolCalls[idx] = next;
           broadcast(state, {
             type: "tool_call_done",
             id: event.id,
@@ -647,10 +693,10 @@ async function runLoop(
         }
       } else if (event.type === "tool_call_update") {
         // Background-task progress/report — sub-agent, long-running Bash, or
-        // Workflow; `agent.taskType` says which. Same commit-before-broadcast
-        // discipline as the two above. The merged meta is a fresh object —
-        // catchup ships a shallow copy of each call, so mutating in place
-        // would retroactively edit snapshots already handed to subscribers.
+        // Workflow; `agent.taskType` says which. Same persist → commit →
+        // broadcast discipline as the two above. The merged meta is a fresh
+        // object — catchup ships a shallow copy of each call, so mutating in
+        // place would retroactively edit snapshots already handed to subscribers.
         const idx = state.committedToolCalls.findIndex((c) => c.id === event.id);
         if (idx === -1) {
           state.pendingAgentPatches.set(
@@ -660,7 +706,10 @@ async function runLoop(
         } else {
           const cur = state.committedToolCalls[idx];
           const agent = mergeAgentMeta(cur.agent, event.agent);
-          state.committedToolCalls[idx] = { ...cur, agent };
+          // 这条是进度注解，写不进去不终止本轮（保持 best-effort）；但落库失败
+          // 就整条丢掉 —— 宁可少一次进度刷新，也不让没落库的 meta 留在快照里
+          // 被重连的 catchup 当成真值。
+          let patched = true;
           try {
             patchToolCallAgent({
               nodeId: args.nodeId,
@@ -668,9 +717,12 @@ async function runLoop(
               patch: event.agent,
             });
           } catch {
-            /* best-effort */
+            patched = false;
           }
-          broadcast(state, { type: "tool_call_update", id: event.id, agent });
+          if (patched) {
+            state.committedToolCalls[idx] = { ...cur, agent };
+            broadcast(state, { type: "tool_call_update", id: event.id, agent });
+          }
         }
       }
     }
@@ -720,8 +772,29 @@ async function runLoop(
         durationMs,
         now: Date.now(),
       });
-    } catch {
-      /* best-effort */
+    } catch (err) {
+      // S176：终态写不进去，就是「永远转圈」的最后一环 —— 行留在 streaming，
+      // 而开机 reap 要等到下次重启才会看见它。所以这里：
+      //   ① 把失败原因换成人话，当成本轮的终态错误（下面的广播会用到）；
+      //   ② 补一次**最小写**（只动 status/error_message，不带事务和 FTS）——
+      //      SQLITE_FULL 常是瞬时的（事故当天三次都自愈了），小事务往往能过；
+      //   ③ 真的还是写不进去就认了，留给开机 reap 与 /api/nodes/[id]/stream
+      //      的重连补写（那条路径同样调 markNodeInterrupted）。
+      const dbErr = err instanceof DbWriteError ? err : null;
+      const msg = dbErr?.userMessage ?? (err instanceof Error ? err.message : String(err));
+      console.error(`[run-bus] ${args.nodeId} 终态落库失败：`, err);
+      if (stoppedWith === "done") {
+        stoppedWith = "error";
+        errorMessage = msg;
+        broadcast(state, { type: "error", message: msg });
+      } else if (!fail.err) {
+        errorMessage = errorMessage ?? msg;
+      }
+      try {
+        markNodeInterrupted(args.nodeId, errorMessage ?? msg);
+      } catch (repairErr) {
+        console.error(`[run-bus] ${args.nodeId} 兜底收尸也失败：`, repairErr);
+      }
     }
 
     // S88：见 startRun 的 onSettled 注释 —— 位置是刻意的，别往下挪。

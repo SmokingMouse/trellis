@@ -6,7 +6,11 @@ import path from "node:path";
 
 mock.module("server-only", () => ({}));
 
-const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-bindings-"));
+// realpath：macOS 的 os.tmpdir() 是 /var → /private/var 这条符号链接，而
+// resolveTranscriptPath 现在按物理路径出口（根因 C）。夹具跟着用物理形。
+const testHome = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-bindings-")),
+);
 
 const { ensureHerdrSchema: ensureBindingSchema } = await import("./sqlite");
 function ensureHerdrSchema(db: Database) {

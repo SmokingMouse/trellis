@@ -16,22 +16,36 @@ import { ensureWorkspaceForPath } from "./workspaces";
 import {
   CODEX_SESSIONS_DIR,
   discoverLineage,
+  discoverLineageAsync,
   isWithinCodexSessions,
   type DiscoveredLineage,
 } from "./cli-discover";
 import {
-  parseCliTranscript,
+  classifyCliTranscript,
+  classifyCliTranscriptAsync,
   parseCliTranscriptAsync,
   type CliProvider,
+  type CliTranscriptState,
 } from "./cli-transcript";
-import type { ParsedCliSession } from "./cli-import";
 import { findCodexRolloutPath } from "./codex-transcript-index";
 import { deleteSession } from "./repo";
-import { publishCliSessionUpdated } from "./cli-sync-events";
+import { canonicalPath } from "./canonical-path";
+import {
+  publishCliSessionUpdated,
+  publishCliSyncFailed,
+  type CliSyncFailure,
+} from "./cli-sync-events";
 import {
   CliTranscriptUnreadableError,
   NativeSessionConflictError,
 } from "./cli-attach";
+import {
+  classifyDbError,
+  isDbFailure,
+  isTransientKind,
+  type SqliteFailureKind,
+} from "./db-error";
+import { notify } from "./notify";
 
 // 当前 attached 会话的源 jsonl 绝对路径集合（每次实时查 DB，保持权威）。
 type AttachedPath = { sid: string; provider: CliProvider };
@@ -102,52 +116,24 @@ function attachedSessions(): {
 }
 
 // 一个根 transcript 的三种状态。「读不到」和「读到了但没内容」必须分开 ——
-// 同一条不变量在 cli-import-db.ts:72-75 有完整说明（拿残缺集合做「不在集合里就删」
-// 的清理会把整条 lineage 的节点剥掉），这里是它在 attach 侧的对应面。
-export type RootTranscriptState =
-  | { kind: "ready"; parsed: ParsedCliSession }
-  | { kind: "empty"; sessionId: string }
-  | { kind: "unreadable" };
+// 同一条不变量在 cli-import-db.ts:parseLineagesChecked 有完整说明（拿残缺集合做
+// 「不在集合里就删」的清理会把整条 lineage 的节点剥掉），这里是它在 attach 侧的
+// 对应面。
+//
+// 判据本体住在 ./cli-transcript（classifyParsedTranscript / classifyCliTranscript）：
+// attach 侧（这里）和清理侧（cli-import-db）必须是**同一套**判据，各留一份迟早
+// 会漂。这里只保留 attach 侧的名字与类型别名，行为完全委托过去。
+export type RootTranscriptState = CliTranscriptState;
 
-// 「格式合法」= 打得开，且每一非空行都是合法 JSON。坏行说明文件被截断 / 损坏
-// （CLI 可能正写到一半），那是**临时**状态，值得下一轮再试。
-// 注意不能拿 parseCliTranscript 返回 null 当「读不到」的判据：合法的空会话
-// （只有 mode / file-history-snapshot / slash-command 噪声行）同样返回 null
-// （cli-import.ts:131 与 :328），两者必须靠文件本身分开。
-function readsAsJsonLines(file: string): boolean {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return false;
-  }
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      JSON.parse(line);
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
-
-// 分类判据（全部看文件结构，不看 error message 字符串）：
-//   有可解析轮次            → ready
-//   0 轮次 + 全是合法 JSON  → empty：合法的空会话，确定性结果，重试一万次也一样
-//   0 轮次 + 读不到/有坏行  → unreadable：可重试
 export function classifyRootTranscript(
   provider: CliProvider,
   file: string,
 ): RootTranscriptState {
-  const parsed = parseCliTranscript(provider, file);
-  if (parsed && parsed.turns.length > 0) return { kind: "ready", parsed };
-  if (!readsAsJsonLines(file)) return { kind: "unreadable" };
-  return {
-    kind: "empty",
-    sessionId:
-      parsed?.sessionId ?? path.basename(file).replace(/\.jsonl$/, ""),
-  };
+  return classifyCliTranscript(provider, file);
+}
+
+function rootMember(discovered: DiscoveredLineage) {
+  return discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
 }
 
 function seedLineage(
@@ -156,9 +142,47 @@ function seedLineage(
   trellisSessionId = discovered.rootSid,
   origin: MirrorOrigin = "cli-import",
 ): void {
+  const root = rootMember(discovered);
+  seedLineageFrom(
+    discovered,
+    provider,
+    classifyRootTranscript(provider, root.path),
+    trellisSessionId,
+    origin,
+  );
+}
+
+/**
+ * seedLineage 的非阻塞版：唯一的差别是根 transcript 的定性走分片解析
+ * （classifyCliTranscriptAsync）。DB 落地那段与同步版**是同一段代码**
+ * （seedLineageFrom）—— 两份各写一遍迟早会漂，而这里的失败语义
+ * （unreadable→可重试、native 撞 id→确定性）是 herdr-fleet 重试闸的输入。
+ */
+async function seedLineageAsync(
+  discovered: DiscoveredLineage,
+  provider: CliProvider,
+  trellisSessionId = discovered.rootSid,
+  origin: MirrorOrigin = "cli-import",
+): Promise<void> {
+  const root = rootMember(discovered);
+  seedLineageFrom(
+    discovered,
+    provider,
+    await classifyCliTranscriptAsync(provider, root.path),
+    trellisSessionId,
+    origin,
+  );
+}
+
+function seedLineageFrom(
+  discovered: DiscoveredLineage,
+  provider: CliProvider,
+  state: RootTranscriptState,
+  trellisSessionId: string,
+  origin: MirrorOrigin,
+): void {
   const db = getDB();
-  const root = discovered.members.find((m) => m.isRoot) ?? discovered.members[0];
-  const state = classifyRootTranscript(provider, root.path);
+  const root = rootMember(discovered);
   // 0 turn 不是错误：安静跳过（不建 session 行、不动既有节点）。读不到才是错误 ——
   // 调用方必须看得见，否则镜像会话会停在旧快照上而没人知道。
   if (state.kind === "unreadable") {
@@ -326,6 +350,156 @@ async function attachNewForkIfMatched(
   return importCliLineageAsync(best.sid);
 }
 
+// ── reimport 失败的出口分流（S177 P1）────────────────────────────────────────
+//
+// 单文件失败不掀翻 watcher —— 但绝不能连声都不吭。reimport 是镜像会话唯一的更新
+// 通道，它一失败界面就永久停在旧快照上，用户看到的只是一个不再动的 turn，
+// 无从判断「是 CLI 还没写」还是「同步早就死了」。
+//
+// 出口按**错误类别**分，不按「有没有异常」分：
+//   busy（含 LOCKED）  瞬时争用，下一轮 debounce 自然重来 → 只 warn。绝不告警：
+//                      多个 CLI 同时写 jsonl 时 BUSY 是常态，每次都推等于自造噪声。
+//   full / io /        盘满、IO 错、只读挂载、库损坏 —— 重试一百次也是同一个结果，
+//   readonly / corrupt 必须惊动人 → 告警通道（notify）+ cli-sync 事件。
+//   unknown / other    其它 DB 错（约束冲突等）与非 DB 异常（解析、发现阶段）——
+//                      是 bug 不是环境事故，推事件让界面能显示「同步失败」，
+//                      但不 notify。
+//
+// 判据用 db-error 的 classifyDbError / isDbFailure：**不能只判 instanceof
+// DbWriteError**。importCliLineage 的事务还没纳入 dbWrite（P2 待办），禁区里原始的
+// SQLiteError 会直接抛上来，`instanceof` 那种判据会整个漏掉。
+const FAILURE_ALERT_KINDS = new Set<SqliteFailureKind>([
+  "full",
+  "io",
+  "readonly",
+  "corrupt",
+]);
+
+// 去重形状照抄 disk-watch.ts 的 checkDiskAlert：Record<key, ts> + 冷却 + **边沿**
+// （恢复一次就清账，下次再坏可以重新报）。差别只在存储：这是 600ms 级的热路径，
+// 每次失败都读写一个 json 文件不划算，状态因此留在进程内存里 —— cli-sync 失败
+// 本来就是 watcher 进程的运行期状态，重启后重新评估正是我们要的。
+const ALERT_COOLDOWN_MS = 6 * 3600_000; // 同 disk-watch：一直不修就每 6h 再提醒一次
+const EVENT_COOLDOWN_MS = 30_000; // 事件比告警灵敏，只压掉一阵子里的同类重复
+const alertState: Record<string, number> = {};
+const eventState: Record<string, number> = {};
+
+/** 过闸则记账返回 true；冷却期内返回 false。 */
+function passesGate(
+  state: Record<string, number>,
+  key: string,
+  now: number,
+  cooldownMs: number,
+): boolean {
+  const last = state[key];
+  if (last !== undefined && now - last < cooldownMs) return false;
+  state[key] = now;
+  return true;
+}
+
+function clearGate(state: Record<string, number>): void {
+  for (const key of Object.keys(state)) delete state[key];
+}
+
+function failureMessage(kind: SqliteFailureKind | "other", err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  switch (kind) {
+    case "full":
+      return `CLI 会话同步失败：数据库磁盘空间不足。${raw}`;
+    case "io":
+      return `CLI 会话同步失败：磁盘 I/O 错误。${raw}`;
+    case "readonly":
+      return `CLI 会话同步失败：数据库当前不可写。${raw}`;
+    case "corrupt":
+      return `CLI 会话同步失败：数据库文件可能已损坏。${raw}`;
+    default:
+      return `CLI 会话同步失败：${raw}`;
+  }
+}
+
+export type CliSyncFailureDeps = {
+  now?: () => number;
+  alertState?: Record<string, number>;
+  eventState?: Record<string, number>;
+  send?: (e: { title: string; body: string }) => Promise<void> | void;
+  publish?: (failure: CliSyncFailure) => void;
+  log?: (message: string, ...rest: unknown[]) => void;
+};
+
+export type ReimportFailureOutcome = {
+  kind: SqliteFailureKind | "other";
+  /** retry = 瞬时，等下一轮；surfaced = 已推事件（alerted 再叠加了告警通道）。 */
+  exit: "retry" | "surfaced";
+  alerted: boolean;
+  published: boolean;
+};
+
+/** 把一次 reimport 失败送到它该去的出口。自兜异常 —— 汇报本身绝不能再掀翻 watcher。 */
+export async function reportReimportFailure(
+  full: string,
+  sessionId: string | null,
+  err: unknown,
+  deps: CliSyncFailureDeps = {},
+): Promise<ReimportFailureOutcome> {
+  const kind: SqliteFailureKind | "other" = isDbFailure(err)
+    ? classifyDbError(err)
+    : "other";
+  const log = deps.log ?? ((m: string, ...rest: unknown[]) => console.error(m, ...rest));
+
+  if (kind !== "other" && isTransientKind(kind)) {
+    log(`[trellis] cli-sync reimport busy (${full})，下一轮重试：`, err);
+    return { kind, exit: "retry", alerted: false, published: false };
+  }
+
+  const now = (deps.now ?? Date.now)();
+  const message = failureMessage(kind, err);
+  log(`[trellis] cli-sync reimport failed (${kind}): ${full}`, err);
+
+  let published = false;
+  const events = deps.eventState ?? eventState;
+  if (passesGate(events, `${sessionId ?? full}:${kind}`, now, EVENT_COOLDOWN_MS)) {
+    try {
+      (deps.publish ?? publishCliSyncFailed)({ path: full, sessionId, kind, message });
+      published = true;
+    } catch (e) {
+      log("[trellis] cli-sync 失败事件推送失败：", e);
+    }
+  }
+
+  let alerted = false;
+  const alerts = deps.alertState ?? alertState;
+  // 告警按**类别**去重，不按文件：盘一满，几十个 attached 文件会同时失败，
+  // 按文件去重等于给用户发几十条一模一样的告警。
+  if (
+    kind !== "other" &&
+    FAILURE_ALERT_KINDS.has(kind) &&
+    passesGate(alerts, kind, now, ALERT_COOLDOWN_MS)
+  ) {
+    const title = "trellis：CLI 会话同步失败";
+    const body =
+      `${message}\n源文件：${full}` +
+      (sessionId ? `\n镜像会话：${sessionId}` : "") +
+      `\n同步已停在旧快照上，修好前界面不会再更新。`;
+    try {
+      if (deps.send) await deps.send({ title, body });
+      else await notify({ kind: "disk_alert", title, body });
+      alerted = true;
+    } catch (e) {
+      log("[trellis] cli-sync 告警发送失败：", e);
+    }
+  }
+
+  return { kind, exit: "surfaced", alerted, published };
+}
+
+/** 一次**真的写进去了**的 reimport = 故障已恢复，清账让下次失败重新报（边沿）。 */
+export function noteReimportSuccess(deps: CliSyncFailureDeps = {}): void {
+  clearGate(deps.alertState ?? alertState);
+  clearGate(deps.eventState ?? eventState);
+}
+
+// 异步：解析走 importCliLineageAsync / parseCliTranscriptAsync 的分片让出路径
+// （fix-b），失败出口走上面的分流（d2）。两者互不相干，都保留。
 export async function reimport(full: string): Promise<void> {
   if (!fs.existsSync(full)) return; // 被删/改名
   const pathMap = attachedPathMap();
@@ -336,14 +510,15 @@ export async function reimport(full: string): Promise<void> {
     const res = attached
       ? await importCliLineageAsync(attached.sid)
       : await attachNewForkIfMatched(full, provider);
+    // 只有真的落了盘才算「故障已恢复」。null（没匹配上任何 attached 会话）、
+    // unchanged / empty / skipped-native 都在事务之前就返回了，一个字节没写，
+    // 证明不了 DB 还写得进去，不能拿来清告警账。
     if (res && (res.status === "updated" || res.status === "imported")) {
+      noteReimportSuccess();
       publishCliSessionUpdated(res.sessionId);
     }
   } catch (err) {
-    // 单文件失败不掀翻 watcher —— 但绝不能连声都不吭。这是镜像会话唯一的更新
-    // 通道，它一失败界面就永久停在旧快照上，而用户看到的只是一个不再动的 turn。
-    // 无日志的话根本无从判断「是 CLI 还没写」还是「同步早就死了」。
-    console.error("[trellis] cli-sync reimport failed:", full, err);
+    void reportReimportFailure(full, attached?.sid ?? null, err).catch(() => {});
   }
 }
 
@@ -435,12 +610,17 @@ export function refreshWatches(): void {
 
 // ── 对外操作 ─────────────────────────────────────────────────────────────────
 
+// 同步形态。**只剩用户在界面上手点 attach 这一条调用方**（app/api/cli-sync/attach）：
+// 那是一次交互式请求，用户就在等这个响应，占一会儿主线程是可接受的代价。
+// herdr 的自动 attach 走下面的异步形态 —— 它是后台批量重放，不能占住事件循环。
 export function attachSession(
   jsonlPath: string,
   provider: CliProvider = "claude",
   options: { origin?: MirrorOrigin } = {},
 ): ImportResult {
-  const resolved = path.resolve(jsonlPath);
+  // canonical，不是 path.resolve：attach 入口拿到的可能是 herdr 侧 realpath 过的
+  // 物理路径，也可能是 $HOME 符号前缀的路径，往下要和枚举侧比串（根因 C）。
+  const resolved = canonicalPath(jsonlPath);
   const state = classifyRootTranscript(provider, resolved);
   if (state.kind === "unreadable") {
     throw new CliTranscriptUnreadableError(resolved);
@@ -450,9 +630,53 @@ export function attachSession(
   if (state.kind === "empty") {
     return { sessionId: state.sessionId, status: "empty", turns: 0 };
   }
-  const lineage = discoverLineage(jsonlPath, provider);
+  const lineage = discoverLineage(resolved, provider);
   seedLineage(lineage, provider, lineage.rootSid, options.origin ?? "cli-import");
   const res = importCliLineage(lineage.rootSid);
+  refreshWatches();
+  return res;
+}
+
+/**
+ * attachSession 的非阻塞形态 —— **herdr-fleet 的自动 attach 走这条**（根因 D）。
+ *
+ * 现场：fix-b 的异步化只覆盖了启动补齐与 watcher 的 reimport，herdr 首次 attach
+ * 仍是同步全量 parse。devbox 上单个 rollout 最大 1.28GB，首次 attach 一次阻塞
+ * 主线程数十秒；而 fleet 每 60s snapshot 都会把同一批 transcript 重放一遍。
+ *
+ * 四段全部换成让出路径：
+ *   classify  classifyCliTranscriptAsync（分片解析 + 分片定性）
+ *   discover  discoverLineageAsync（分片解析 + 枚举缓存 + 兄弟循环让出）
+ *   seed      seedLineageAsync（定性分片；DB 落地与同步版同一段代码）
+ *   import    importCliLineageAsync（fix-b 已有）
+ *
+ * **失败语义与同步版逐字相同**，这是硬要求：链尾是 herdr-fleet 的重试闸，它按
+ * 错误**类型**分流（isDeterministicAttachFailure），换成 Promise 只是换了传递
+ * 方式 —— reject 的还是 CliTranscriptUnreadableError（可重试）/
+ * CliTranscriptNoTurnsError、NativeSessionConflictError（确定性，按指纹跳过），
+ * 绝不能退化成裸 Error 或被吞掉。
+ */
+export async function attachSessionAsync(
+  jsonlPath: string,
+  provider: CliProvider = "claude",
+  options: { origin?: MirrorOrigin } = {},
+): Promise<ImportResult> {
+  const resolved = canonicalPath(jsonlPath);
+  const state = await classifyCliTranscriptAsync(provider, resolved);
+  if (state.kind === "unreadable") {
+    throw new CliTranscriptUnreadableError(resolved);
+  }
+  if (state.kind === "empty") {
+    return { sessionId: state.sessionId, status: "empty", turns: 0 };
+  }
+  const lineage = await discoverLineageAsync(resolved, provider);
+  await seedLineageAsync(
+    lineage,
+    provider,
+    lineage.rootSid,
+    options.origin ?? "cli-import",
+  );
+  const res = await importCliLineageAsync(lineage.rootSid);
   refreshWatches();
   return res;
 }
@@ -484,10 +708,11 @@ async function catchUpAttachedSessions(): Promise<void> {
     for (const session of attachedSessions()) {
       // Yield between per-session imports, including before the first one.
       // A single deferred callback around the whole loop still blocks the
-      // event loop for the sum of all transcript parsing times. (The parse
-      // inside importCliLineageAsync yields too, but seedLineage below is
-      // still synchronous — this stays load-bearing.)
+      // event loop for the sum of all transcript parsing times. (每段解析自己
+      // 也分片让出了，但每个会话之间仍要让一次：discover / seed / import 三段之
+      // 间还有纯同步的 DB 工作。)
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      let rootPath = "";
       try {
         const db = getDB();
         const root = db
@@ -499,18 +724,24 @@ async function catchUpAttachedSessions(): Promise<void> {
           )
           .get(session.id) as { p: string } | undefined;
         if (root?.p) {
-          seedLineage(
-            discoverLineage(root.p, session.provider),
+          rootPath = root.p;
+          // 发现与 seed 也走让出路径：光把 import 异步化，整轮补齐仍会被
+          // 「N 个会话 × 一次同步全树发现 + 一次同步全量定性」占住（根因 D）。
+          await seedLineageAsync(
+            await discoverLineageAsync(root.p, session.provider),
             session.provider,
             session.id,
           );
         }
         const res = await importCliLineageAsync(session.id);
         if (res.status === "updated" || res.status === "imported") {
+          noteReimportSuccess();
           publishCliSessionUpdated(res.sessionId);
         }
-      } catch {
-        /* 单文件失败不影响其余 */
+      } catch (err) {
+        // 单文件失败不影响其余 —— 但同样要走出口分流。启动补齐撞上盘满时
+        // 原先是彻底静默的，整轮镜像停在旧快照而没有任何痕迹。
+        await reportReimportFailure(rootPath, session.id, err).catch(() => {});
       }
     }
     refreshWatches();
