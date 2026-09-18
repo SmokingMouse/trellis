@@ -18,7 +18,18 @@ import {
 import { parseCliTranscript, type CliProvider } from "./cli-transcript";
 import { findCodexRolloutPath } from "./codex-transcript-index";
 import { deleteSession } from "./repo";
-import { publishCliSessionUpdated } from "./cli-sync-events";
+import {
+  publishCliSessionUpdated,
+  publishCliSyncFailed,
+  type CliSyncFailure,
+} from "./cli-sync-events";
+import {
+  classifyDbError,
+  isDbFailure,
+  isTransientKind,
+  type SqliteFailureKind,
+} from "./db-error";
+import { notify } from "./notify";
 
 // 当前 attached 会话的源 jsonl 绝对路径集合（每次实时查 DB，保持权威）。
 type AttachedPath = { sid: string; provider: CliProvider };
@@ -249,6 +260,154 @@ function attachNewForkIfMatched(
   return importCliLineage(best.sid);
 }
 
+// ── reimport 失败的出口分流（S177 P1）────────────────────────────────────────
+//
+// 单文件失败不掀翻 watcher —— 但绝不能连声都不吭。reimport 是镜像会话唯一的更新
+// 通道，它一失败界面就永久停在旧快照上，用户看到的只是一个不再动的 turn，
+// 无从判断「是 CLI 还没写」还是「同步早就死了」。
+//
+// 出口按**错误类别**分，不按「有没有异常」分：
+//   busy（含 LOCKED）  瞬时争用，下一轮 debounce 自然重来 → 只 warn。绝不告警：
+//                      多个 CLI 同时写 jsonl 时 BUSY 是常态，每次都推等于自造噪声。
+//   full / io /        盘满、IO 错、只读挂载、库损坏 —— 重试一百次也是同一个结果，
+//   readonly / corrupt 必须惊动人 → 告警通道（notify）+ cli-sync 事件。
+//   unknown / other    其它 DB 错（约束冲突等）与非 DB 异常（解析、发现阶段）——
+//                      是 bug 不是环境事故，推事件让界面能显示「同步失败」，
+//                      但不 notify。
+//
+// 判据用 db-error 的 classifyDbError / isDbFailure：**不能只判 instanceof
+// DbWriteError**。importCliLineage 的事务还没纳入 dbWrite（P2 待办），禁区里原始的
+// SQLiteError 会直接抛上来，`instanceof` 那种判据会整个漏掉。
+const FAILURE_ALERT_KINDS = new Set<SqliteFailureKind>([
+  "full",
+  "io",
+  "readonly",
+  "corrupt",
+]);
+
+// 去重形状照抄 disk-watch.ts 的 checkDiskAlert：Record<key, ts> + 冷却 + **边沿**
+// （恢复一次就清账，下次再坏可以重新报）。差别只在存储：这是 600ms 级的热路径，
+// 每次失败都读写一个 json 文件不划算，状态因此留在进程内存里 —— cli-sync 失败
+// 本来就是 watcher 进程的运行期状态，重启后重新评估正是我们要的。
+const ALERT_COOLDOWN_MS = 6 * 3600_000; // 同 disk-watch：一直不修就每 6h 再提醒一次
+const EVENT_COOLDOWN_MS = 30_000; // 事件比告警灵敏，只压掉一阵子里的同类重复
+const alertState: Record<string, number> = {};
+const eventState: Record<string, number> = {};
+
+/** 过闸则记账返回 true；冷却期内返回 false。 */
+function passesGate(
+  state: Record<string, number>,
+  key: string,
+  now: number,
+  cooldownMs: number,
+): boolean {
+  const last = state[key];
+  if (last !== undefined && now - last < cooldownMs) return false;
+  state[key] = now;
+  return true;
+}
+
+function clearGate(state: Record<string, number>): void {
+  for (const key of Object.keys(state)) delete state[key];
+}
+
+function failureMessage(kind: SqliteFailureKind | "other", err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  switch (kind) {
+    case "full":
+      return `CLI 会话同步失败：数据库磁盘空间不足。${raw}`;
+    case "io":
+      return `CLI 会话同步失败：磁盘 I/O 错误。${raw}`;
+    case "readonly":
+      return `CLI 会话同步失败：数据库当前不可写。${raw}`;
+    case "corrupt":
+      return `CLI 会话同步失败：数据库文件可能已损坏。${raw}`;
+    default:
+      return `CLI 会话同步失败：${raw}`;
+  }
+}
+
+export type CliSyncFailureDeps = {
+  now?: () => number;
+  alertState?: Record<string, number>;
+  eventState?: Record<string, number>;
+  send?: (e: { title: string; body: string }) => Promise<void> | void;
+  publish?: (failure: CliSyncFailure) => void;
+  log?: (message: string, ...rest: unknown[]) => void;
+};
+
+export type ReimportFailureOutcome = {
+  kind: SqliteFailureKind | "other";
+  /** retry = 瞬时，等下一轮；surfaced = 已推事件（alerted 再叠加了告警通道）。 */
+  exit: "retry" | "surfaced";
+  alerted: boolean;
+  published: boolean;
+};
+
+/** 把一次 reimport 失败送到它该去的出口。自兜异常 —— 汇报本身绝不能再掀翻 watcher。 */
+export async function reportReimportFailure(
+  full: string,
+  sessionId: string | null,
+  err: unknown,
+  deps: CliSyncFailureDeps = {},
+): Promise<ReimportFailureOutcome> {
+  const kind: SqliteFailureKind | "other" = isDbFailure(err)
+    ? classifyDbError(err)
+    : "other";
+  const log = deps.log ?? ((m: string, ...rest: unknown[]) => console.error(m, ...rest));
+
+  if (kind !== "other" && isTransientKind(kind)) {
+    log(`[trellis] cli-sync reimport busy (${full})，下一轮重试：`, err);
+    return { kind, exit: "retry", alerted: false, published: false };
+  }
+
+  const now = (deps.now ?? Date.now)();
+  const message = failureMessage(kind, err);
+  log(`[trellis] cli-sync reimport failed (${kind}): ${full}`, err);
+
+  let published = false;
+  const events = deps.eventState ?? eventState;
+  if (passesGate(events, `${sessionId ?? full}:${kind}`, now, EVENT_COOLDOWN_MS)) {
+    try {
+      (deps.publish ?? publishCliSyncFailed)({ path: full, sessionId, kind, message });
+      published = true;
+    } catch (e) {
+      log("[trellis] cli-sync 失败事件推送失败：", e);
+    }
+  }
+
+  let alerted = false;
+  const alerts = deps.alertState ?? alertState;
+  // 告警按**类别**去重，不按文件：盘一满，几十个 attached 文件会同时失败，
+  // 按文件去重等于给用户发几十条一模一样的告警。
+  if (
+    kind !== "other" &&
+    FAILURE_ALERT_KINDS.has(kind) &&
+    passesGate(alerts, kind, now, ALERT_COOLDOWN_MS)
+  ) {
+    const title = "trellis：CLI 会话同步失败";
+    const body =
+      `${message}\n源文件：${full}` +
+      (sessionId ? `\n镜像会话：${sessionId}` : "") +
+      `\n同步已停在旧快照上，修好前界面不会再更新。`;
+    try {
+      if (deps.send) await deps.send({ title, body });
+      else await notify({ kind: "disk_alert", title, body });
+      alerted = true;
+    } catch (e) {
+      log("[trellis] cli-sync 告警发送失败：", e);
+    }
+  }
+
+  return { kind, exit: "surfaced", alerted, published };
+}
+
+/** 一次**真的写进去了**的 reimport = 故障已恢复，清账让下次失败重新报（边沿）。 */
+export function noteReimportSuccess(deps: CliSyncFailureDeps = {}): void {
+  clearGate(deps.alertState ?? alertState);
+  clearGate(deps.eventState ?? eventState);
+}
+
 export function reimport(full: string): void {
   if (!fs.existsSync(full)) return; // 被删/改名
   const pathMap = attachedPathMap();
@@ -259,14 +418,15 @@ export function reimport(full: string): void {
     const res = attached
       ? importCliLineage(attached.sid)
       : attachNewForkIfMatched(full, provider);
+    // 只有真的落了盘才算「故障已恢复」。null（没匹配上任何 attached 会话）、
+    // unchanged / empty / skipped-native 都在事务之前就返回了，一个字节没写，
+    // 证明不了 DB 还写得进去，不能拿来清告警账。
     if (res && (res.status === "updated" || res.status === "imported")) {
+      noteReimportSuccess();
       publishCliSessionUpdated(res.sessionId);
     }
   } catch (err) {
-    // 单文件失败不掀翻 watcher —— 但绝不能连声都不吭。这是镜像会话唯一的更新
-    // 通道，它一失败界面就永久停在旧快照上，而用户看到的只是一个不再动的 turn。
-    // 无日志的话根本无从判断「是 CLI 还没写」还是「同步早就死了」。
-    console.error("[trellis] cli-sync reimport failed:", full, err);
+    void reportReimportFailure(full, attached?.sid ?? null, err).catch(() => {});
   }
 }
 
@@ -361,6 +521,7 @@ async function catchUpAttachedSessions(): Promise<void> {
       // first one. A single deferred callback around the whole loop still
       // blocks the event loop for the sum of all transcript parsing times.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      let rootPath = "";
       try {
         const db = getDB();
         const root = db
@@ -372,6 +533,7 @@ async function catchUpAttachedSessions(): Promise<void> {
           )
           .get(session.id) as { p: string } | undefined;
         if (root?.p) {
+          rootPath = root.p;
           seedLineage(
             discoverLineage(root.p, session.provider),
             session.provider,
@@ -380,10 +542,13 @@ async function catchUpAttachedSessions(): Promise<void> {
         }
         const res = importCliLineage(session.id);
         if (res.status === "updated" || res.status === "imported") {
+          noteReimportSuccess();
           publishCliSessionUpdated(res.sessionId);
         }
-      } catch {
-        /* 单文件失败不影响其余 */
+      } catch (err) {
+        // 单文件失败不影响其余 —— 但同样要走出口分流。启动补齐撞上盘满时
+        // 原先是彻底静默的，整轮镜像停在旧快照而没有任何痕迹。
+        await reportReimportFailure(rootPath, session.id, err).catch(() => {});
       }
     }
     refreshWatches();
