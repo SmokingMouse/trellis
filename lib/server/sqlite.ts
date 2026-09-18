@@ -2,18 +2,17 @@ import "server-only";
 import { AGENT_HOOK_TABLES_SQL } from "@/lib/server/agent-hooks/types";
 import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
-import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { BUILTIN_AGENT_SEEDS } from "@/lib/agent-presets";
-
-const DB_DIR = path.join(os.homedir(), ".trellis");
-const DB_PATH = path.join(DB_DIR, "data.db");
+import { trellisDbPath } from "@/lib/disk-space";
 
 let _db: Database | null = null;
 
+/** DB 路径的真源在 lib/disk-space.ts —— 水位监控必须和实际写库查同一个分区，
+ * 各自算一份路径迟早会在 TRELLIS_DB_PATH 指向别的盘时分叉成假绿。 */
 function dbPath(): string {
-  return process.env.TRELLIS_DB_PATH || DB_PATH;
+  return trellisDbPath();
 }
 
 export function getDB(): Database {
@@ -22,6 +21,9 @@ export function getDB(): Database {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
   db.exec("PRAGMA journal_mode = WAL");
+  // S176：写锁被占时先让 SQLite 自己等 5s（比在应用层重试便宜得多，也覆盖了
+  // 进程内并发）。真的等不到才会抛 SQLITE_BUSY，由 db-error.ts 的 dbWrite 再退避。
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   _db = db;

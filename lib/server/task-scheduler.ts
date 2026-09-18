@@ -12,6 +12,7 @@ import {
   type TaskTrigger,
 } from "./tasks";
 import { checkAuthAlerts } from "./auth-health";
+import { checkDiskAlert } from "./disk-watch";
 
 // S88: 定时调度器。挂在 instrumentation.ts（进程唯一的启动钩子）。
 //
@@ -54,6 +55,9 @@ export function startTaskScheduler(): void {
   // 自兜异常 + 24h 去重都在 checkAuthAlerts 里。跟着 TRELLIS_SCHEDULER 闸走 ——
   // smoke 实例不该发真预警。
   void checkAuthAlerts();
+  // S176: 磁盘水位同理 —— 起服务时先看一眼。写满盘的症状是「提问当场失败」，
+  // 越早知道越好。去重（边沿触发 + 6h 冷却）在 checkDiskAlert 里。
+  void checkDiskAlert();
 
   // 首次对齐到整分钟边界 +2s，之后每分钟一次。
   const now = new Date();
@@ -186,6 +190,9 @@ async function tick(): Promise<void> {
     await pollGitTriggers(now.getTime());
     // S95: 每小时（:07，避开整点的 cron 高峰）复查授权健康。
     if (now.getMinutes() === 7) void checkAuthAlerts();
+    // S176: 每 5 分钟一次水位。statfs 是一次 syscall，比授权探测（spawn CLI）
+    // 便宜几个数量级，所以敢查得密一些；刷屏由告警侧的去重挡住，不靠降频。
+    if (now.getMinutes() % 5 === 0) void checkDiskAlert();
     writeLastTick(now.getTime());
   } catch (e) {
     console.error("[scheduler] tick 失败：", e);

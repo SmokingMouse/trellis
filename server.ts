@@ -19,6 +19,7 @@
 import { spawn, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
 import { hasTtyd, ttydHostDependencyNote } from "./lib/ttyd-dependency";
+import { diskHealthField } from "./lib/disk-space";
 import {
   deployPaths,
   isDeployStateFresh,
@@ -381,6 +382,11 @@ Bun.serve<TermSocket>({
         // 「切换前后闸状态不许 on→off」的断言 —— 凭证来自 .env.local 这类
         // 未跟踪文件，一旦没被带进 release，闸会静默关掉。
         auth: gateOn ? "on" : "off",
+        // S176：DB 分区水位。放在公开段而不是 authed 段 —— 它的用途就是
+        // 「运维不登机器也能看到快满了」，藏在认证后面等于没有；内容也只是
+        // 一个分区的剩余空间，不含任何业务信息。statfs 每次现读（一次 syscall，
+        // 缓存只会让告警滞后）。读不出来时 freePct/low = null，别当成 0。
+        disk: diskHealthField(),
       };
       if (authed(req)) {
         const st = readDeployState();

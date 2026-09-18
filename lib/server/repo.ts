@@ -6,6 +6,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
+import { dbWrite } from "./db-error";
 import { codexRolloutExists, deleteCodexRollout } from "./codex-fork";
 import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
@@ -1115,7 +1116,10 @@ export function createSessionWithRoot(args: {
     // here, indexed later by finalizeNode.
     ftsUpsert(db, "node_question", args.nodeId, args.sessionId, args.question);
   });
-  tx();
+  // S176：整段在一个事务里，写失败（磁盘满 / IO / 锁）自动回滚 —— DB 里不会留下
+  // 「有 session 没 root」的半截。dbWrite 把错误归一成带人话文案的 DbWriteError，
+  // 由 /api/chat 直接回给前端（见 app/api/chat/route.ts 的 catch）。
+  dbWrite("createSessionWithRoot", tx);
   return {
     session: getSession(args.sessionId)!,
     node: getNode(args.nodeId)!,
@@ -1161,7 +1165,7 @@ export function createRootInSession(args: {
     );
     ftsUpsert(db, "node_question", args.nodeId, args.sessionId, args.question);
   });
-  tx();
+  dbWrite("createRootInSession", tx);
   return getNode(args.nodeId)!;
 }
 
@@ -1216,7 +1220,7 @@ export function createBranchNode(args: {
     // 写即复活：在雪藏树里继续提问 = 这棵树重新活了。
     reviveTreeForNode(db, args.parentId);
   });
-  tx();
+  dbWrite("createBranchNode", tx);
   return getNode(args.nodeId)!;
 }
 
@@ -1235,29 +1239,34 @@ export function resetNodeForRetry(
     | { question: string; parent_anchor_text: string | null }
     | undefined;
   if (!row) return null;
-  db.prepare(
-    `UPDATE nodes
-     SET response = '', status = 'streaming',
-         error_message = NULL,
-         token_input = 0, token_output = 0,
-         token_cache_read = 0, token_cache_creation = 0,
-         token_context = NULL,
-         duration_ms = NULL,
-         tool_calls_json = NULL,
-         pending_interaction_json = NULL,
-         final_start = NULL,
-         codex_turn_ordinal = NULL
-     WHERE id = ?`,
-  ).run(nodeId);
-  // The old response is gone; remove it from FTS so stale text doesn't
-  // surface in searches during the retry window. node_question survives
-  // (question text is preserved across retry). tool_calls cleared above
-  // so the retried run starts with an empty panel.
-  db.prepare(
-    "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'node_response'",
-  ).run(nodeId);
-  // 写即复活：重试也算「写」。
-  reviveTreeForNode(db, nodeId);
+  // S176：三条写合进一个事务 —— 半截重置（回答清了但 status 没回 streaming，
+  // 或反过来）比整条失败更难查。
+  const tx = db.transaction(() => {
+    db.prepare(
+      `UPDATE nodes
+       SET response = '', status = 'streaming',
+           error_message = NULL,
+           token_input = 0, token_output = 0,
+           token_cache_read = 0, token_cache_creation = 0,
+           token_context = NULL,
+           duration_ms = NULL,
+           tool_calls_json = NULL,
+           pending_interaction_json = NULL,
+           final_start = NULL,
+           codex_turn_ordinal = NULL
+       WHERE id = ?`,
+    ).run(nodeId);
+    // The old response is gone; remove it from FTS so stale text doesn't
+    // surface in searches during the retry window. node_question survives
+    // (question text is preserved across retry). tool_calls cleared above
+    // so the retried run starts with an empty panel.
+    db.prepare(
+      "DELETE FROM search_index WHERE source_id = ? AND source_kind = 'node_response'",
+    ).run(nodeId);
+    // 写即复活：重试也算「写」。
+    reviveTreeForNode(db, nodeId);
+  });
+  dbWrite("resetNodeForRetry", tx);
   return {
     question: row.question,
     parentAnchor: row.parent_anchor_text
@@ -1311,9 +1320,10 @@ export function appendToolCallStart(args: {
   // id (e.g. provider replays), keep the first entry.
   if (list.some((c) => c.id === args.call.id)) return;
   list.push(args.call);
-  db.prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?").run(
-    JSON.stringify(list),
-    args.nodeId,
+  dbWrite("appendToolCallStart", () =>
+    db
+      .prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?")
+      .run(JSON.stringify(list), args.nodeId),
   );
 }
 
@@ -1349,9 +1359,10 @@ export function markToolCallDone(args: {
     endedAt: args.endedAt,
     durationMs: Math.max(0, args.endedAt - cur.startedAt),
   };
-  db.prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?").run(
-    JSON.stringify(list),
-    args.nodeId,
+  dbWrite("markToolCallDone", () =>
+    db
+      .prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?")
+      .run(JSON.stringify(list), args.nodeId),
   );
 }
 
@@ -1467,9 +1478,10 @@ export function clearPendingInteraction(nodeId: string, toolUseId?: string): voi
 
 export function appendNodeResponse(nodeId: string, delta: string): void {
   const db = getDB();
-  db.prepare("UPDATE nodes SET response = response || ? WHERE id = ?").run(
-    delta,
-    nodeId,
+  dbWrite("appendNodeResponse", () =>
+    db
+      .prepare("UPDATE nodes SET response = response || ? WHERE id = ?")
+      .run(delta, nodeId),
   );
 }
 
@@ -1537,7 +1549,36 @@ export function finalizeNode(args: {
       ).run(args.nodeId);
     }
   });
-  tx();
+  dbWrite("finalizeNode", tx);
+}
+
+/**
+ * 单节点版的「收尸」：DB 说 streaming、但已经没有活着的 run 在驱动它。
+ *
+ * 判据与 sqlite.ts migrate() 里那条开机 reap **完全一致**（同 status、同
+ * error_message='interrupted'、同样排除 as_turns —— 那些节点由 Agent daemon 驱动，
+ * 不归本进程判生死），只是把作用域收窄到一个节点，好让「重连时发现它已经死了」
+ * 这一刻就把行改对，而不是干等下次进程启动。
+ *
+ * 返回是否真的改了行（false = 它已经是终态，或它归 AS 管）。
+ * 本身也可能写失败（磁盘还满着）—— 调用方按 best-effort 处理，开机 reap 兜底。
+ */
+export function markNodeInterrupted(
+  nodeId: string,
+  message = "interrupted",
+): boolean {
+  const db = getDB();
+  const r = dbWrite("markNodeInterrupted", () =>
+    db
+      .prepare(
+        `UPDATE nodes SET status = 'error', error_message = ?,
+                pending_interaction_json = NULL
+         WHERE id = ? AND status = 'streaming'
+           AND id NOT IN (SELECT node_id FROM as_turns)`,
+      )
+      .run(message, nodeId),
+  );
+  return r.changes > 0;
 }
 
 // Walk parent chain of a node (excluding the node itself) to build the
@@ -2438,6 +2479,10 @@ export function findRelated(
 
 // Cleanup leftover streaming nodes — call on server start. If the process
 // crashed mid-stream, those nodes get marked as errored.
+//
+// ⚠️ 真正在开机跑的是 sqlite.ts migrate() 里那条同义 SQL（getDB() 首次调用即执行）；
+// 本函数至今没有调用方（progress/facts.md 已点名）。单节点版见 markNodeInterrupted，
+// 三处判据必须保持一致：status='streaming' + error_message='interrupted' + 排除 as_turns。
 export function reapInterruptedStreams(): number {
   const db = getDB();
   const result = db
