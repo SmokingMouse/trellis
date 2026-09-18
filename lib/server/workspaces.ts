@@ -1,10 +1,16 @@
 import "server-only";
 import { sessionSourcePredicate } from "../session-source";
 import fs from "node:fs";
+import path from "node:path";
 import type { Database } from "bun:sqlite";
 import { getDB } from "./sqlite";
 import { uuid } from "@/lib/uuid";
-import { clusterPath, listSiblingWorktrees } from "./project-cluster";
+import {
+  clusterPath,
+  gitCommonDirOf,
+  listSiblingWorktrees,
+  listSiblingWorktreesAsync,
+} from "./project-cluster";
 
 // S1（progress/project-workspace-layer.md）：Project → Workspace 的读写层。
 //
@@ -287,31 +293,80 @@ export function registerSiblingWorktrees(
   absPath: string,
   db: Database = getDB(),
 ): { added: number; pruned: number } {
-  const live = Array.from(
-    new Set(listSiblingWorktrees(absPath).map(canonicalWorkspacePath)),
-  );
+  return registerWorktreeList(listSiblingWorktrees(absPath), db);
+}
+
+/** 登记 + 清理的 DB 部分，与「怎么拿到 live 列表」解耦（同步版 / 异步版共用）。 */
+function registerWorktreeList(
+  rawLive: string[],
+  db: Database,
+): { added: number; pruned: number } {
+  const live = normalizeLive(rawLive);
   let added = 0;
   for (const p of live) {
-    const existed = db
-      .prepare("SELECT 1 FROM workspaces WHERE path = ?")
-      .get(p);
-    if (existed) continue;
+    if (isRegistered(p, db)) continue;
     if (ensureWorkspaceForPath(p, "worktree-scan", db)) added++;
   }
+  return { added, pruned: pruneVanishedWorktrees(live, db) };
+}
 
-  // 反向清理。这张表原来**只进不出** —— 用户在 CLI 里 `git worktree remove`
-  // 之后，扫描登记的那行会永久留着，这正是「侧栏显示一堆已不存在的工作区」
-  // 的根因（不是漏了清理代码，是压根没有出口）。
-  //
-  // 两个条件缺一不可：只看「不在 git 的 worktree 列表里」的话，
-  // listSiblingWorktrees 一旦失败会返回空数组（git 不可用 / repo 读不到），
-  // 那就会把好行全部清空。加上「目录确实不存在」这条，失败场景下一行也不会动。
-  //
-  // 只清 kind='worktree'（不限 created_by —— trellis 自己建的目录被用户在 CLI
-  // 里删掉，同样是僵尸）。main / plain 不碰：主 checkout 消失是另一回事，
-  // plain 行可能还挂着会话历史。
-  // 这里刻意用**未缓存**的 existsSync —— 删除不可逆，不能让一条过期的
-  // 「不存在」把还在的目录清掉。
+/**
+ * `registerWorktreeList` 的异步版：每登记一个**新**路径就让出一次事件循环。
+ *
+ * 为什么需要：登记走 `ensureWorkspaceForPath` → `clusterPath`，那条链至今仍是
+ * 同步的（rev-parse / branch / remote 各一次 spawnSync）。它只对「DB 里还没有
+ * 的路径」发生，但一个上百 worktree 的大仓第一次扫起来就是上百次 × 4 —— 连着
+ * 跑就是几秒的事件循环钉死。逐个让出把它摊成一串 <30ms 的小块。
+ *
+ * 稳态下这个循环一次 spawn 都不发生（全部命中 isRegistered 的纯 SELECT）。
+ */
+async function registerWorktreeListAsync(
+  rawLive: string[],
+  db: Database,
+): Promise<{ added: number; pruned: number }> {
+  const live = normalizeLive(rawLive);
+  let added = 0;
+  for (const p of live) {
+    if (isRegistered(p, db)) continue;
+    if (ensureWorkspaceForPath(p, "worktree-scan", db)) added++;
+    await yieldToEventLoop();
+  }
+  return { added, pruned: pruneVanishedWorktrees(live, db) };
+}
+
+function normalizeLive(rawLive: string[]): string[] {
+  return Array.from(new Set(rawLive.map(canonicalWorkspacePath)));
+}
+
+function isRegistered(canonicalPath: string, db: Database): boolean {
+  return (
+    db.prepare("SELECT 1 FROM workspaces WHERE path = ?").get(canonicalPath) !=
+    null
+  );
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * 反向清理。这张表原来**只进不出** —— 用户在 CLI 里 `git worktree remove`
+ * 之后，扫描登记的那行会永久留着，这正是「侧栏显示一堆已不存在的工作区」
+ * 的根因（不是漏了清理代码，是压根没有出口）。
+ *
+ * 两个条件缺一不可：只看「不在 git 的 worktree 列表里」的话，
+ * listSiblingWorktrees 一旦失败会返回空数组（git 不可用 / repo 读不到），
+ * 那就会把好行全部清空。加上「目录确实不存在」这条，失败场景下一行也不会动。
+ * （同理，重扫命中 mtime 短路、复用上一轮缓存的 live 时也是安全的：能删的
+ * 只有目录确确实实不在了的行。）
+ *
+ * 只清 kind='worktree'（不限 created_by —— trellis 自己建的目录被用户在 CLI
+ * 里删掉，同样是僵尸）。main / plain 不碰：主 checkout 消失是另一回事，
+ * plain 行可能还挂着会话历史。
+ * 这里刻意用**未缓存**的 existsSync —— 删除不可逆，不能让一条过期的
+ * 「不存在」把还在的目录清掉。
+ */
+function pruneVanishedWorktrees(live: string[], db: Database): number {
   const liveSet = new Set(live);
   let pruned = 0;
   for (const row of db
@@ -325,7 +380,7 @@ export function registerSiblingWorktrees(
     db.prepare("DELETE FROM workspaces WHERE id = ?").run(row.id);
     pruned++;
   }
-  return { added, pruned };
+  return pruned;
 }
 
 export function touchWorkspace(
@@ -424,17 +479,97 @@ export function listProjectTree(db: Database = getDB(), options: { includeEmpty?
     .sort((a, b) => projRecency(b) - projRecency(a));
 }
 
+// ───────────────────────── worktree 重扫 ─────────────────────────
+//
+// 根因 E。这段以前是 `/api/workspaces/git-status` 的**每请求**同步开销：
+// 对 workspaces 表里每条 distinct path 各跑一次 `git worktree list --porcelain`
+// 的 spawnSync。BOE devbox 上 48 条路径全指向同一个上百 worktree 的大仓，
+// 于是每次侧栏角标请求 = 48 次同步 spawn + 48 遍整仓枚举（N×M），next 主线程
+// 被占满，/login 从 5ms 掉到 2–10s；同一个 gitdir 文件在一次请求里被 stat 48 次。
+//
+// 现在的形状，三道闸：
+//   1. **按 repo 去重**：用纯 fs 的 gitCommonDirOf 把 N 条路径折成 M 个 repo，
+//      每个 repo 只跑一次 git。48 → 1。
+//   2. **mtime 短路**：`<common>/.git/worktrees` 的 mtime 没变 = 没人增删
+//      worktree，直接复用上一轮的 live 列表，**一个 git 子进程都不 spawn**。
+//   3. **只在后台跑**：定时（默认 60s）+ `fs.watch` 加速；请求路径只读结果。
+//      请求路径上不再有任何同步 spawn。
+
+type RepoScanState = { worktreesMtimeMs: number; live: string[] };
+
+/** repo 键（`git:<common dir>` 或 `path:<dir>`）→ 上一轮扫描的结果。 */
+const repoScanState = new Map<string, RepoScanState>();
+
+/** 每次**有净变化**的后台扫描 +1。前端据此判断「这份 rescan 结果我看过没」。 */
+let rescanGeneration = 0;
+let lastRescanResult = { added: 0, pruned: 0 };
+let lastRescanAt = 0;
+let rescanInFlight: Promise<{ added: number; pruned: number }> | null = null;
+/** 已排队的补扫（最多一轮），见 triggerWorktreeRescan。 */
+let rescanFollowUp: Promise<{ added: number; pruned: number }> | null = null;
+let rescanTimer: ReturnType<typeof setInterval> | null = null;
+let watchDebounce: ReturnType<typeof setTimeout> | null = null;
+const repoWatchers = new Map<string, fs.FSWatcher>();
+
+/** 一台机器上同时盯的 repo 数上限 —— fs.watch 吃 fd，别为了加速把 fd 耗光。 */
+const MAX_REPO_WATCHERS = 32;
+
+function envMs(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+}
+
+/** 后台重扫周期。0 = 不起定时器（单测里手动驱动）。 */
+function rescanIntervalMs(): number {
+  return envMs("TRELLIS_WORKTREE_RESCAN_MS", 60_000);
+}
+
+/** fs.watch 事件的去抖窗口 —— `git worktree add` 会连着触发好几次。 */
+function watchDebounceMs(): number {
+  return envMs("TRELLIS_WORKTREE_WATCH_MS", 1_000);
+}
+
 /**
- * 重扫所有已知 git 工作区的兄弟 worktree：登记新增的 + 清理已消失的。
+ * 把「DB 里的 workspace 路径」按 repo 折叠：每个 repo 只留一条代表路径。
  *
- * 从 backfillWorkspaces 里提出来，是因为它现在有第二个调用方（git 状态接口）。
- * boot-only 的时代，在 CLI 里 `git worktree add` 出来的目录要等 trellis 重启
- * 才会现身 —— 而「在 CLI 里开 worktree、在 trellis 里干活」恰恰是这个功能
- * 要承接的工作流，等重启等于不可用。
+ * 归不出 common dir 的（非 git / 已消失）各算一个 repo —— 它们跑 git 也只会
+ * 得到空列表，多跑几次的代价可忽略。
+ */
+function groupPathsByRepo(paths: string[]): Map<string, string> {
+  const groups = new Map<string, string>();
+  for (const p of paths) {
+    const common = gitCommonDirOf(p);
+    const key = common
+      ? `git:${canonicalWorkspacePath(common)}`
+      : `path:${canonicalWorkspacePath(p)}`;
+    if (!groups.has(key)) groups.set(key, p);
+  }
+  return groups;
+}
+
+/** repo 键 → 它的 `worktrees` 元数据目录（非 git 键返回 null）。 */
+function worktreesDirOf(repoKey: string): string | null {
+  return repoKey.startsWith("git:")
+    ? path.join(repoKey.slice("git:".length), "worktrees")
+    : null;
+}
+
+/** 目录不存在（该 repo 还没有任何 linked worktree）算 0，与 stat 失败同值。 */
+function worktreesMtimeMs(dir: string | null): number {
+  if (!dir) return -1;
+  try {
+    return fs.statSync(dir).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 重扫所有已知 git 工作区的兄弟 worktree：登记新增的 + 清理已消失的。**同步版**。
  *
- * **不要挂到 `/api/sessions` 上**：那条路径在流式期间是 ~1.6 次/秒
- * （侧栏 fetch 依赖 sessionsRevision ← cli-sync 的 600ms 合并窗口），
- * 在那里为每个 repo spawn `git worktree list` 会把 SSE 拖垮。
+ * 只留给启动期的 `backfillWorkspaces` —— 那一刻还没有请求要服务，阻塞无所谓，
+ * 而且必须同步跑完才能接着刷分支缓存。**任何请求路径都不准调它**，
+ * 要重扫走 `rescanWorktreesAsync` / `triggerWorktreeRescan`。
  */
 export function rescanWorktrees(db: Database = getDB()): {
   added: number;
@@ -442,13 +577,13 @@ export function rescanWorktrees(db: Database = getDB()): {
 } {
   let added = 0;
   let pruned = 0;
-  for (const { p } of db
-    .prepare(
-      `SELECT DISTINCT path AS p FROM workspaces WHERE kind IN ('main','worktree')`,
-    )
-    .all() as { p: string }[]) {
+  for (const [key, p] of groupPathsByRepo(scannablePaths(db))) {
     try {
-      const r = registerSiblingWorktrees(p, db);
+      // mtime 先于 git 读：扫描期间发生的变动宁可下一轮重扫，也不能被当成已扫过。
+      const mtime = worktreesMtimeMs(worktreesDirOf(key));
+      const live = listSiblingWorktrees(p);
+      repoScanState.set(key, { worktreesMtimeMs: mtime, live });
+      const r = registerWorktreeList(live, db);
       added += r.added;
       pruned += r.pruned;
     } catch (e) {
@@ -458,6 +593,197 @@ export function rescanWorktrees(db: Database = getDB()): {
   // 表变了，缓存的存在性判断立刻作废。
   if (added || pruned) invalidatePathExists();
   return { added, pruned };
+}
+
+function scannablePaths(db: Database): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT DISTINCT path AS p FROM workspaces WHERE kind IN ('main','worktree')`,
+      )
+      .all() as { p: string }[]
+  ).map((r) => r.p);
+}
+
+/**
+ * 重扫的异步版 —— 后台定时 / fs.watch 唯一调用的那个。
+ *
+ * 与同步版的差别只在两点：git 走 execFile 的 promise 版；且命中 mtime 短路时
+ * 直接复用上一轮的 live 列表，连 git 都不 spawn（清理仍照跑，只删目录确实
+ * 已经不存在的行）。
+ */
+export async function rescanWorktreesAsync(db: Database = getDB()): Promise<{
+  added: number;
+  pruned: number;
+}> {
+  let added = 0;
+  let pruned = 0;
+  for (const [key, p] of groupPathsByRepo(scannablePaths(db))) {
+    try {
+      const dir = worktreesDirOf(key);
+      const mtime = worktreesMtimeMs(dir);
+      const prev = repoScanState.get(key);
+      let live: string[];
+      if (prev && prev.worktreesMtimeMs === mtime) {
+        live = prev.live;
+      } else {
+        live = await listSiblingWorktreesAsync(p);
+        repoScanState.set(key, { worktreesMtimeMs: mtime, live });
+      }
+      if (dir) watchRepoWorktrees(dir);
+      const r = await registerWorktreeListAsync(live, db);
+      added += r.added;
+      pruned += r.pruned;
+    } catch (e) {
+      console.warn(`[trellis] worktree scan skipped ${p}:`, e);
+    }
+  }
+  if (added || pruned) invalidatePathExists();
+  return { added, pruned };
+}
+
+/**
+ * `fs.watch` 盯住 `<repo>/.git/worktrees` —— CLI 里 `git worktree add/remove`
+ * 一定会动这个目录，这样新 worktree 的可见延迟从「一个定时周期」压到去抖窗口。
+ *
+ * `persistent: false`：watcher 不该把进程吊着不退（单测里尤其致命）。
+ * 平台不支持 / fd 耗尽一律静默降级到定时器 —— 加速是锦上添花。
+ */
+function watchRepoWorktrees(dir: string): void {
+  if (repoWatchers.has(dir) || repoWatchers.size >= MAX_REPO_WATCHERS) return;
+  try {
+    const w = fs.watch(dir, { persistent: false }, () => {
+      scheduleWatchRescan();
+    });
+    w.on("error", () => {
+      try {
+        w.close();
+      } catch {
+        /* 已经关了 */
+      }
+      repoWatchers.delete(dir);
+    });
+    repoWatchers.set(dir, w);
+  } catch {
+    /* 盯不上就算了，定时器兜底 */
+  }
+}
+
+function scheduleWatchRescan(): void {
+  if (watchDebounce) return;
+  watchDebounce = setTimeout(() => {
+    watchDebounce = null;
+    void triggerWorktreeRescan();
+  }, watchDebounceMs());
+  watchDebounce.unref?.();
+}
+
+/**
+ * 触发一次后台重扫。
+ *
+ * 并发折叠 + **一轮补扫**：正在跑的那一轮可能是在这次变化**之前**起的
+ * （它早就把 `.git/worktrees` 的 mtime 读过了），直接把新的触发折进去就会
+ * 永久漏掉这次变化。所以在跑时最多再排一轮，保证「变化之后一定还会再扫一次」。
+ * 排队上限是 1 —— fs.watch 抖动十次也只会多扫一次。
+ */
+export function triggerWorktreeRescan(
+  db: Database = getDB(),
+): Promise<{ added: number; pruned: number }> {
+  if (!rescanInFlight) {
+    rescanInFlight = runRescanOnce(db);
+    return rescanInFlight;
+  }
+  if (rescanFollowUp) return rescanFollowUp;
+  rescanFollowUp = rescanInFlight.then(() => {
+    rescanFollowUp = null;
+    rescanInFlight = runRescanOnce(db);
+    return rescanInFlight;
+  });
+  return rescanFollowUp;
+}
+
+async function runRescanOnce(
+  db: Database,
+): Promise<{ added: number; pruned: number }> {
+  try {
+    const r = await rescanWorktreesAsync(db);
+    lastRescanAt = Date.now();
+    // 只有真有净变化才推进 generation —— 前端靠它决定要不要重拉骨架，
+    // 每轮都推就等于把「重扫 → 刷新 → 重扫」的自激链接回去了。
+    if (r.added || r.pruned) {
+      rescanGeneration++;
+      lastRescanResult = r;
+    }
+    return r;
+  } catch (e) {
+    console.warn("[trellis] worktree rescan failed:", e);
+    return { added: 0, pruned: 0 };
+  } finally {
+    rescanInFlight = null;
+  }
+}
+
+/** 后台重扫的定时器就位（幂等、纯内存，随便调）。 */
+export function ensureWorktreeRescanScheduled(): void {
+  if (rescanTimer) return;
+  const interval = rescanIntervalMs();
+  if (interval <= 0) return;
+  rescanTimer = setInterval(() => {
+    void triggerWorktreeRescan();
+  }, interval);
+  rescanTimer.unref?.();
+  // 别让第一棵在 CLI 里刚建好的 worktree 等满一个周期才现身。
+  void triggerWorktreeRescan();
+}
+
+export type WorktreeRescanReport = {
+  added: number;
+  pruned: number;
+  /** 恒为 true：请求路径**不重扫**，只读后台结果。语义保留给前端做兼容判断。 */
+  skipped: true;
+  /** 有净变化的扫描轮次号；前端只在它变化时才刷新骨架。 */
+  generation: number;
+  /** 最近一次后台扫描完成的时刻（epoch ms），0 = 还没扫过。 */
+  at: number;
+};
+
+/**
+ * 请求路径读重扫结果的唯一入口：保证后台扫描在跑，然后原样返回上一轮的账。
+ * **纯内存 + 一个 setInterval，零 IO、零子进程。**
+ */
+export function observeWorktreeRescan(): WorktreeRescanReport {
+  ensureWorktreeRescanScheduled();
+  return {
+    added: lastRescanResult.added,
+    pruned: lastRescanResult.pruned,
+    skipped: true,
+    generation: rescanGeneration,
+    at: lastRescanAt,
+  };
+}
+
+/** 单测复位闸：停表、撤 watcher、清扫描缓存。 */
+export function stopWorktreeRescan(): void {
+  if (rescanTimer) {
+    clearInterval(rescanTimer);
+    rescanTimer = null;
+  }
+  if (watchDebounce) {
+    clearTimeout(watchDebounce);
+    watchDebounce = null;
+  }
+  for (const w of repoWatchers.values()) {
+    try {
+      w.close();
+    } catch {
+      /* 已经关了 */
+    }
+  }
+  repoWatchers.clear();
+  repoScanState.clear();
+  rescanGeneration = 0;
+  lastRescanResult = { added: 0, pruned: 0 };
+  lastRescanAt = 0;
 }
 
 /**

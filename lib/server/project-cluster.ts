@@ -1,9 +1,12 @@
 import "server-only";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY } from "@/lib/types";
+
+const runFile = promisify(execFile);
 
 // S1（progress/project-workspace-layer.md）：把一个绝对路径归到某个「项目」下。
 //
@@ -34,14 +37,26 @@ export interface ClusterResult {
 
 const SCRATCH_ROOT = path.join(os.homedir(), ".trellis");
 
+// git 不该继承 clash 的代理变量：remote get-url 是纯本地读 config，
+// 但 http_proxy 污染会让某些 git 子命令莫名变慢/报错。
+function gitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, http_proxy: "", https_proxy: "", ALL_PROXY: "" };
+}
+
+/**
+ * `--no-optional-locks`：这些调用全是**只读**的（worktree list / rev-parse /
+ * remote get-url），没有任何理由去动 `.git/index.lock`。默认行为下 git 会为了
+ * 刷新 index 的 stat 缓存而取锁，于是高频轮询的角标接口反过来给用户正在
+ * 敲命令的大仓加锁。必须放在子命令**前面** —— 它是 git 的全局选项。
+ */
+const GIT_READONLY = ["--no-optional-locks"];
+
 function git(cwd: string, args: string[]): string | null {
-  const r = spawnSync("git", args, {
+  const r = spawnSync("git", [...GIT_READONLY, ...args], {
     cwd,
     encoding: "utf8",
     timeout: 5000,
-    // git 不该继承 clash 的代理变量：remote get-url 是纯本地读 config，
-    // 但 http_proxy 污染会让某些 git 子命令莫名变慢/报错。
-    env: { ...process.env, http_proxy: "", https_proxy: "", ALL_PROXY: "" },
+    env: gitEnv(),
   });
   if (r.error || r.status !== 0) return null;
   const out = r.stdout.trim();
@@ -101,6 +116,10 @@ function isEphemeralWorktree(p: string): boolean {
 export function listSiblingWorktrees(absPath: string): string[] {
   const out = git(absPath, ["worktree", "list", "--porcelain"]);
   if (!out) return [];
+  return parseWorktreeList(out);
+}
+
+function parseWorktreeList(out: string): string[] {
   const paths: string[] = [];
   for (const line of out.split("\n")) {
     if (!line.startsWith("worktree ")) continue;
@@ -111,6 +130,76 @@ export function listSiblingWorktrees(absPath: string): string[] {
     paths.push(p);
   }
   return paths;
+}
+
+/**
+ * `listSiblingWorktrees` 的异步版 —— **请求路径上只准用这一个**。
+ *
+ * 根因 E：同步版每调一次就把事件循环钉住一个 git 进程的时长；侧栏角标接口
+ * 曾对 DB 里每条 workspace 路径各调一次（48 条路径 = 48 次同步 spawn），
+ * 直接把 next 主线程占满，/login 被拖到 2–10s。重扫现在只在后台跑，
+ * 且只走这个 promise 版。
+ */
+export async function listSiblingWorktreesAsync(
+  absPath: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await runFile(
+      "git",
+      [...GIT_READONLY, "worktree", "list", "--porcelain"],
+      {
+        cwd: absPath,
+        timeout: 10_000,
+        env: gitEnv(),
+        // 上百个 worktree 的大仓，porcelain 输出能到几百 KB；默认 1MB 太紧。
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    return parseWorktreeList(stdout.trim());
+  } catch {
+    // 非 git / git 不可用 / 超时 → 空数组。调用方把「空」当作「不知道」，
+    // 绝不据此删行（registerSiblingWorktrees 的 prune 还要目录确实不存在）。
+    return [];
+  }
+}
+
+/**
+ * 求一个目录所属 repo 的 git common dir，**纯 fs、零子进程**。
+ *
+ * 用途只有一个：把「DB 里几十条路径」按 repo 分组，好让重扫对每个 repo 只跑
+ * 一次 `git worktree list`。用 `git rev-parse --git-common-dir` 也能得到同样
+ * 的答案，但那要先 spawn 一次 git —— 正是要消掉的东西，鸡生蛋。
+ *
+ *   main checkout    → `<repo>/.git` 是目录，它就是 common dir
+ *   linked worktree  → `<wt>/.git` 是文件，内容 `gitdir: <repo>/.git/worktrees/<name>`
+ *
+ * 归不出来（非 git / bare / GIT_DIR 环境变量式布局）返回 null，调用方按
+ * 「各算一个 repo」降级 —— 分组只是省 spawn 的优化，错了也只是多扫几次。
+ */
+export function gitCommonDirOf(absPath: string): string | null {
+  const dotGit = path.join(absPath, ".git");
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(dotGit);
+  } catch {
+    return null;
+  }
+  if (st.isDirectory()) return dotGit;
+  if (!st.isFile()) return null;
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(dotGit, "utf8");
+  } catch {
+    return null;
+  }
+  const m = /^gitdir:\s*(.+)$/m.exec(raw.trim());
+  if (!m) return null;
+  const gitDir = path.resolve(absPath, m[1].trim());
+  // <common>/worktrees/<name> → <common>。其它布局（submodule 的
+  // <super>/.git/modules/<name>）原样返回：它同样是个稳定的 repo 键。
+  const parent = path.dirname(gitDir);
+  return path.basename(parent) === "worktrees" ? path.dirname(parent) : gitDir;
 }
 
 /**

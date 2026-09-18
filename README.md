@@ -438,6 +438,23 @@ CLI 的单条会话是线性的，Trellis 的是树。统一模型：**一棵 Tr
 - **`/clear`**（CLI 抹掉上下文、开新 session id）→ 那是另一份不共享 uuid 的 jsonl，trellis **不会**自动并进当前树（它是「不相关的新对话」），而是作为一条独立可 attach 的会话出现。等价物 = trellis 的「🧹 新话题」（同树里加一个全新上下文的根）
 - **`/compact`**（同 session 摘要压缩、不换 jsonl）→ 在原 jsonl 追加一个 `type:"system"` 边界节点，对话继续。trellis 读全量 jsonl，**边界前后所有原始轮都完整显示**（compact 只压缩「模型那侧的窗口」，不动存储）——解析器专门桥接这个 system 边界节点，保证父链不在 compact 处断裂
 
+### CLI 里新建的 worktree 多久出现在侧栏
+
+在终端 `git worktree add` 出来的目录不用重启 trellis 就会自己现身，但**不是实时**——扫描是后台节流跑的，不再挂在侧栏角标请求上（挂上去的代价：一个几十条 workspace 路径都指向同一个大仓的机器上，每次角标请求都要为每条路径同步 spawn 一次 `git worktree list`，主线程被占满，登录页能被拖到秒级）。
+
+| 通道 | 可见延迟上界 |
+|---|---|
+| `fs.watch` 盯住 `<repo>/.git/worktrees`（默认，最多同时盯 32 个 repo） | 去抖窗口 + 一轮扫描，通常 **1–2 秒** |
+| 后台定时兜底（watch 不可用 / 超过 32 个 repo / 该 repo 还没有任何 linked worktree） | **一个扫描周期，默认 60 秒** |
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `TRELLIS_WORKTREE_RESCAN_MS` | `60000` | 后台重扫周期。`0` = 不起定时器（只剩 `fs.watch`） |
+| `TRELLIS_WORKTREE_WATCH_MS` | `1000` | `fs.watch` 事件去抖窗口——`git worktree add` 会连着触发好几次 |
+| `TRELLIS_GIT_STATUS_CONCURRENCY` | `6` | 角标接口同时跑几个 `git status`。大仓上 6 条并发已经能吃满盘 |
+
+扫描本身按 repo 去重（几十条同仓路径只跑一次 `git worktree list`），且 `<repo>/.git/worktrees` 的 mtime 没变时直接复用上一轮结果，一个 git 子进程都不起。侧栏角标请求只读扫描结果，`rescan.skipped` 恒为 `true` 明示「本次请求没有重扫」。
+
 ---
 
 ## 两种上下文模式（详解）
