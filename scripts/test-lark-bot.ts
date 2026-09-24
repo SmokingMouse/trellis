@@ -77,6 +77,39 @@ const image = parseIncomingEvent(event({
 }), "ou_bot");
 ok(image.kind === "message" && image.unsupportedType === "image" && image.text === null, "非文本进入统一提示分支");
 
+// post（富文本）消息：飞书客户端在 @ 人时会发 post 类型，需提取纯文本并剥离 bot @。
+const postContent = JSON.stringify({
+  zh_cn: {
+    title: "",
+    content: [
+      [
+        { tag: "at", user_id: "ou_bot", user_name: "中转站接入" },
+        { tag: "text", text: " 给 " },
+        { tag: "at", user_id: "ou_other", user_name: "陈一民" },
+        { tag: "text", text: " 分配个账号+key" },
+      ],
+    ],
+  },
+});
+const postMentioned = parseIncomingEvent(event({
+  message: {
+    ...event().message!,
+    chat_type: "group",
+    message_type: "post",
+    content: postContent,
+    mentions: [
+      { key: "@_user_1", name: "中转站接入", id: { open_id: "ou_bot" } },
+      { key: "@_user_2", name: "陈一民", id: { open_id: "ou_other" } },
+    ],
+  },
+}), "ou_bot");
+ok(
+  postMentioned.kind === "message"
+    && postMentioned.text === "给 @陈一民 分配个账号+key"
+    && postMentioned.unsupportedType === null,
+  "群 @bot 的 post 消息提取文本并剥离 bot @，保留其他 @",
+);
+
 const db = new Database(":memory:");
 db.exec(`CREATE TABLE lark_inbox (
   message_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, status TEXT NOT NULL,

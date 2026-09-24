@@ -86,6 +86,89 @@ function stripBotMention(
  * 触发）。「群里要不要理这条消息」不在这里决定 —— 那是 im/policy.ts 的事，这里只把
  * 事实（@ 了没有、在哪个话题、引用了谁）如实归一化。
  */
+/** 从飞书 post（富文本）content 中提取 markdown 文本，保留格式信息。 */
+function extractPostMarkdown(contentJson: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return "";
+  }
+  if (parsed == null || typeof parsed !== "object") return "";
+  const body = unwrapPostLocale(parsed as Record<string, unknown>);
+  if (!body) return "";
+  const content = body.content;
+  if (!Array.isArray(content)) return "";
+  const lines: string[] = [];
+  if (typeof body.title === "string" && body.title.trim()) {
+    lines.push(`**${body.title}**`);
+    lines.push("");
+  }
+  for (const paragraph of content) {
+    if (!Array.isArray(paragraph)) continue;
+    let line = "";
+    for (const el of paragraph) {
+      line += renderPostElement(el as Record<string, unknown>);
+    }
+    lines.push(line);
+  }
+  return lines.join("\n").trim();
+}
+
+const POST_LOCALES = ["zh_cn", "en_us", "ja_jp", "zh_hk", "zh_tw"];
+
+function unwrapPostLocale(parsed: Record<string, unknown>): { title?: unknown; content?: unknown } | null {
+  if ("title" in parsed || "content" in parsed) {
+    return parsed as { title?: unknown; content?: unknown };
+  }
+  for (const loc of POST_LOCALES) {
+    const hit = parsed[loc];
+    if (hit != null && typeof hit === "object") {
+      return hit as { title?: unknown; content?: unknown };
+    }
+  }
+  const firstKey = Object.keys(parsed)[0];
+  if (firstKey) {
+    const first = parsed[firstKey];
+    if (first != null && typeof first === "object") {
+      return first as { title?: unknown; content?: unknown };
+    }
+  }
+  return null;
+}
+
+function renderPostElement(el: Record<string, unknown>): string {
+  const tag = el.tag;
+  switch (tag) {
+    case "text":
+      return typeof el.text === "string" ? el.text : "";
+    case "md":
+      // 飞书 post 支持 md 标签直接承载 markdown，原样保留。
+      return typeof el.text === "string" ? el.text : "";
+    case "at": {
+      const name = typeof el.user_name === "string" ? el.user_name : "";
+      return name ? `@${name}` : "";
+    }
+    case "a": {
+      const text = typeof el.text === "string" ? el.text : "";
+      const href = typeof el.href === "string" ? el.href : "";
+      return href ? `[${text || href}](${href})` : text;
+    }
+    case "img": {
+      const imageKey = typeof el.image_key === "string" ? el.image_key : "";
+      return imageKey ? `![image](${imageKey})` : "";
+    }
+    case "code_block": {
+      const lang = typeof el.language === "string" ? el.language : "";
+      const code = typeof el.text === "string" ? el.text : "";
+      return `\n\`\`\`${lang}\n${code}\n\`\`\`\n`;
+    }
+    case "hr":
+      return "\n---\n";
+    default:
+      return typeof el.text === "string" ? el.text : "";
+  }
+}
 export function parseIncomingEvent(
   event: LarkMessageEvent,
   botOpenId: string | null,
@@ -118,7 +201,18 @@ export function parseIncomingEvent(
     parentId: message.parent_id || null,
   };
 
-  if (message.message_type !== "text") {
+  // text 与 post（富文本，含 @ 提及）都走文本通道；其余类型提示不支持。
+  let text = "";
+  if (message.message_type === "text") {
+    try {
+      const content = JSON.parse(message.content ?? "{}") as { text?: unknown };
+      text = typeof content.text === "string" ? content.text : "";
+    } catch {
+      return { kind: "ignore", messageId, reason: "invalid_text_content" };
+    }
+  } else if (message.message_type === "post") {
+    text = extractPostMarkdown(message.content ?? "{}");
+  } else {
     return {
       kind: "message",
       ...base,
@@ -127,13 +221,6 @@ export function parseIncomingEvent(
     };
   }
 
-  let text = "";
-  try {
-    const content = JSON.parse(message.content ?? "{}") as { text?: unknown };
-    text = typeof content.text === "string" ? content.text : "";
-  } catch {
-    return { kind: "ignore", messageId, reason: "invalid_text_content" };
-  }
   if (chatType === "group" && botOpenId) {
     text = stripBotMention(text, botOpenId, message.mentions);
   }
