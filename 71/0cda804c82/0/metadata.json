@@ -1,0 +1,22 @@
+{
+  "sessionId": "adhoc-1998354",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "audit/qr-server",
+  "startedAt": "2026-09-24T18:41:07+08:00",
+  "condensedAt": "2026-09-24T18:41:07+08:00",
+  "reason": "commit",
+  "turns": 0,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 1827547,
+    "output": 142597,
+    "cached": 20091687
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read",
+    "Write"
+  ]
+}

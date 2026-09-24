@@ -1,0 +1,30 @@
+{
+  "id": "710cda804c82",
+  "timestamp": "2026-09-24T18:41:07+08:00",
+  "branch": "audit/qr-server",
+  "commitHash": "0c7153e58d570c0b6d20c3191055265a44d422b6",
+  "commitMessage": "feat(lark): 扫码建 / 更新 bot 服务端全套实现 (register session + 路由 + 对账 + 欢迎语 + 缺权限解析)",
+  "filesModified": [
+    "app/api/lark-bots/register/[sessionId]/route.ts",
+    "app/api/lark-bots/register/route.ts",
+    "lib/server/lark/manager.ts",
+    "lib/server/lark/register.test.ts",
+    "lib/server/lark/register.ts",
+    "lib/server/lark/scopes.ts",
+    "lib/server/lark/sdk.ts",
+    "lib/server/lark/store.ts",
+    "lib/server/sqlite.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 0,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 0,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
