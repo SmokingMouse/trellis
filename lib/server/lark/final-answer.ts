@@ -1,3 +1,5 @@
+import { CARD_MAX_BYTES, type FeishuCardV2 } from "./card";
+
 /**
  * 飞书出站只发 agent 的「最终答复」。
  *
@@ -20,3 +22,48 @@ export const LARK_SILENT_MARK = "[SILENT]";
 export function isLarkSilent(text: string): boolean {
   return text.trim().replace(/^`+|`+$/g, "").trim() === LARK_SILENT_MARK;
 }
+
+/**
+ * 尝试把文本解析为飞书 Card 2.0 JSON（用于任务推送直接发 interactive 卡片）。
+ *
+ * 门控规则：
+ * 1. 允许首尾空白，允许整段被 ```json ... ``` 或 ``` ... ``` 代码块包裹；
+ * 2. 解析后必须为普通对象，且 schema === "2.0"，body.elements 为数组；
+ * 3. 序列化后的 UTF-8 字节大小不能超过 CARD_MAX_BYTES（24KB），超限时返回 null 走原 markdown 降级路径。
+ */
+export function parseCardPassthrough(text: string | null | undefined): FeishuCardV2 | null {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  let raw = trimmed;
+  const fenceMatch = raw.match(/^(`{3,}|~{3,})(?:json|JSON)?\s*\n?([\s\S]*?)\n?\1$/);
+  if (fenceMatch) {
+    raw = fenceMatch[2].trim();
+  }
+
+  if (!raw.startsWith("{") || !raw.endsWith("}")) {
+    return null;
+  }
+
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      return null;
+    }
+    if (obj.schema !== "2.0") {
+      return null;
+    }
+    if (!obj.body || typeof obj.body !== "object" || !Array.isArray(obj.body.elements)) {
+      return null;
+    }
+    const jsonStr = JSON.stringify(obj);
+    if (Buffer.byteLength(jsonStr, "utf8") > CARD_MAX_BYTES) {
+      return null;
+    }
+    return obj as FeishuCardV2;
+  } catch {
+    return null;
+  }
+}
+

@@ -1,10 +1,12 @@
 import { describe, expect, mock, test } from "bun:test";
-import { isLarkSilent, larkFinalAnswer } from "./final-answer";
+import { CARD_MAX_BYTES, type FeishuCardV2 } from "./card";
+import { isLarkSilent, larkFinalAnswer, parseCardPassthrough } from "./final-answer";
 import { cardAtToTextAt } from "./protocol";
 import { taskLarkPushContent } from "./task-push-policy";
 
 mock.module("server-only", () => ({}));
 const { pushTaskRunToLark } = await import("./push");
+const { sendLarkText } = await import("./sdk");
 
 describe("larkFinalAnswer", () => {
   const response = "我先跑一下报告脚本。\n\n结果：号池正常。";
@@ -35,6 +37,94 @@ describe("isLarkSilent", () => {
   test("带了别的内容就不是静默", () => {
     expect(isLarkSilent("[SILENT] 今天没事")).toBe(false);
     expect(isLarkSilent("")).toBe(false);
+  });
+});
+
+describe("parseCardPassthrough", () => {
+  const validCard: FeishuCardV2 = {
+    schema: "2.0",
+    config: {
+      update_multi: true,
+      summary: { content: "巡检摘要" },
+    },
+    header: {
+      title: { tag: "plain_text", content: "巡检卡片" },
+    },
+    body: {
+      direction: "vertical",
+      vertical_spacing: "medium",
+      elements: [
+        { tag: "markdown", content: "巡检正常" },
+      ],
+    },
+  };
+
+  test("裸 JSON 正常解析", () => {
+    const raw = JSON.stringify(validCard);
+    expect(parseCardPassthrough(raw)).toEqual(validCard);
+  });
+
+  test("带首尾空白的裸 JSON 正常解析", () => {
+    const raw = `  \n  ${JSON.stringify(validCard)}  \n\t `;
+    expect(parseCardPassthrough(raw)).toEqual(validCard);
+  });
+
+  test("```json ... ``` 包裹正常解析", () => {
+    const raw = `\`\`\`json\n${JSON.stringify(validCard, null, 2)}\n\`\`\``;
+    expect(parseCardPassthrough(raw)).toEqual(validCard);
+  });
+
+  test("``` ... ``` 包裹（无语言标识）正常解析", () => {
+    const raw = `\`\`\`\n${JSON.stringify(validCard)}\n\`\`\``;
+    expect(parseCardPassthrough(raw)).toEqual(validCard);
+  });
+
+  test("~~~json ... ~~~ 包裹正常解析", () => {
+    const raw = `~~~json\n${JSON.stringify(validCard)}\n~~~`;
+    expect(parseCardPassthrough(raw)).toEqual(validCard);
+  });
+
+  test("非 2.0 schema 返回 null", () => {
+    expect(parseCardPassthrough(JSON.stringify({ schema: "1.0", body: { elements: [] } }))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify({ body: { elements: [] } }))).toBeNull();
+  });
+
+  test("非对象或顶层数组返回 null", () => {
+    expect(parseCardPassthrough(JSON.stringify([validCard]))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify("hello"))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify(12345))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify(null))).toBeNull();
+    expect(parseCardPassthrough("")).toBeNull();
+    expect(parseCardPassthrough("   ")).toBeNull();
+    expect(parseCardPassthrough(null as any)).toBeNull();
+    expect(parseCardPassthrough(undefined as any)).toBeNull();
+  });
+
+  test("body 为空或 body.elements 不是数组返回 null", () => {
+    expect(parseCardPassthrough(JSON.stringify({ schema: "2.0" }))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify({ schema: "2.0", body: null }))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify({ schema: "2.0", body: {} }))).toBeNull();
+    expect(parseCardPassthrough(JSON.stringify({ schema: "2.0", body: { elements: "not-array" } }))).toBeNull();
+  });
+
+  test("超 24KB 返回 null（走原 markdown 路径）", () => {
+    const bigContent = "a".repeat(CARD_MAX_BYTES + 100);
+    const bigCard = {
+      schema: "2.0",
+      body: {
+        elements: [{ tag: "markdown", content: bigContent }],
+      },
+    };
+    expect(parseCardPassthrough(JSON.stringify(bigCard))).toBeNull();
+  });
+
+  test("普通 markdown 返回 null", () => {
+    expect(parseCardPassthrough("# 标题\n\n这是一篇普通的 markdown 报告")).toBeNull();
+    expect(parseCardPassthrough("```python\nprint('hello')\n```")).toBeNull();
+  });
+
+  test("残缺的 JSON 返回 null", () => {
+    expect(parseCardPassthrough('{"schema": "2.0", "body": {')).toBeNull();
   });
 });
 
@@ -76,8 +166,8 @@ describe("cardAtToTextAt", () => {
 });
 
 describe("pushTaskRunToLark", () => {
-  test("把任务名与状态透传给卡片 header", async () => {
-    const calls: Array<{ title?: string; status?: string; textFallback?: string }> = [];
+  test("普通 markdown：把任务名与状态透传给卡片 header", async () => {
+    const calls: Array<{ title?: string; status?: string; textFallback?: string; card?: FeishuCardV2 }> = [];
     const result = await pushTaskRunToLark(
       {
         botId: "b1",
@@ -95,7 +185,7 @@ describe("pushTaskRunToLark", () => {
         getChat: () => ({ id: "c1", chatType: "group" }),
         createClient: () => ({}) as never,
         sendText: async (args) => {
-          calls.push({ title: args.title, status: args.status, textFallback: args.textFallback });
+          calls.push({ title: args.title, status: args.status, textFallback: args.textFallback, card: args.card });
           return { messageId: "om_1", threadId: null };
         },
         recordOutbox: () => {},
@@ -103,6 +193,257 @@ describe("pushTaskRunToLark", () => {
       },
     );
     expect(result).toEqual({ status: "sent", messageId: "om_1" });
-    expect(calls).toEqual([{ title: "号池巡检", status: "done", textFallback: "<at id=ou_x></at> 授权掉了" }]);
+    expect(calls).toEqual([
+      {
+        title: "号池巡检",
+        status: "done",
+        textFallback: "<at id=ou_x></at> 授权掉了",
+        card: undefined,
+      },
+    ]);
+  });
+
+  test("卡片 JSON 直通命中时：传 card，不传 title 与 status，textFallback 优先取 summary.content", async () => {
+    const cardJson: FeishuCardV2 = {
+      schema: "2.0",
+      config: {
+        update_multi: true,
+        summary: { content: "今日号池全绿" },
+      },
+      header: {
+        title: { tag: "plain_text", content: "日报卡片" },
+      },
+      body: {
+        direction: "vertical",
+        vertical_spacing: "medium",
+        elements: [{ tag: "markdown", content: "内容" }],
+      },
+    };
+
+    const calls: Array<{ title?: string; status?: string; textFallback?: string; card?: FeishuCardV2 }> = [];
+    const result = await pushTaskRunToLark(
+      {
+        botId: "b1",
+        chatId: "oc_1",
+        sessionId: "s1",
+        nodeId: "n1",
+        markdown: `\`\`\`json\n${JSON.stringify(cardJson, null, 2)}\n\`\`\``,
+        title: "号池巡检",
+        status: "done",
+      },
+      {
+        enabled: () => true,
+        publicUrl: () => null,
+        getBot: () => ({ appId: "a", appSecret: "s", enabled: true }),
+        getChat: () => ({ id: "c1", chatType: "group" }),
+        createClient: () => ({}) as never,
+        sendText: async (args) => {
+          calls.push({ title: args.title, status: args.status, textFallback: args.textFallback, card: args.card });
+          return { messageId: "om_card_1", threadId: null };
+        },
+        recordOutbox: () => {},
+        advanceChat: () => {},
+      },
+    );
+
+    expect(result).toEqual({ status: "sent", messageId: "om_card_1" });
+    expect(calls).toEqual([
+      {
+        title: undefined,
+        status: undefined,
+        textFallback: "今日号池全绿",
+        card: cardJson,
+      },
+    ]);
+  });
+
+  test("卡片直通无 summary 时降级取 header.title.content", async () => {
+    const cardJson: FeishuCardV2 = {
+      schema: "2.0",
+      config: {
+        update_multi: true,
+      },
+      header: {
+        title: { tag: "plain_text", content: "巡检结果标题" },
+      },
+      body: {
+        direction: "vertical",
+        vertical_spacing: "medium",
+        elements: [{ tag: "markdown", content: "内容" }],
+      },
+    };
+
+    const calls: Array<{ title?: string; status?: string; textFallback?: string; card?: FeishuCardV2 }> = [];
+    await pushTaskRunToLark(
+      {
+        botId: "b1",
+        chatId: "oc_1",
+        sessionId: "s1",
+        nodeId: "n1",
+        markdown: JSON.stringify(cardJson),
+        title: "号池巡检",
+        status: "done",
+      },
+      {
+        enabled: () => true,
+        publicUrl: () => null,
+        getBot: () => ({ appId: "a", appSecret: "s", enabled: true }),
+        getChat: () => ({ id: "c1", chatType: "group" }),
+        createClient: () => ({}) as never,
+        sendText: async (args) => {
+          calls.push({ title: args.title, status: args.status, textFallback: args.textFallback, card: args.card });
+          return { messageId: "om_card_2", threadId: null };
+        },
+        recordOutbox: () => {},
+        advanceChat: () => {},
+      },
+    );
+
+    expect(calls).toEqual([
+      {
+        title: undefined,
+        status: undefined,
+        textFallback: "巡检结果标题",
+        card: cardJson,
+      },
+    ]);
+  });
+
+  test("卡片直通既无 summary 也无 header 时降级为「（卡片消息）」", async () => {
+    const cardJson: FeishuCardV2 = {
+      schema: "2.0",
+      config: {
+        update_multi: true,
+      },
+      body: {
+        direction: "vertical",
+        vertical_spacing: "medium",
+        elements: [{ tag: "markdown", content: "内容" }],
+      },
+    };
+
+    const calls: Array<{ title?: string; status?: string; textFallback?: string; card?: FeishuCardV2 }> = [];
+    await pushTaskRunToLark(
+      {
+        botId: "b1",
+        chatId: "oc_1",
+        sessionId: "s1",
+        nodeId: "n1",
+        markdown: JSON.stringify(cardJson),
+        title: "号池巡检",
+        status: "done",
+      },
+      {
+        enabled: () => true,
+        publicUrl: () => null,
+        getBot: () => ({ appId: "a", appSecret: "s", enabled: true }),
+        getChat: () => ({ id: "c1", chatType: "group" }),
+        createClient: () => ({}) as never,
+        sendText: async (args) => {
+          calls.push({ title: args.title, status: args.status, textFallback: args.textFallback, card: args.card });
+          return { messageId: "om_card_3", threadId: null };
+        },
+        recordOutbox: () => {},
+        advanceChat: () => {},
+      },
+    );
+
+    expect(calls).toEqual([
+      {
+        title: undefined,
+        status: undefined,
+        textFallback: "（卡片消息）",
+        card: cardJson,
+      },
+    ]);
   });
 });
+
+describe("sendLarkText with card option", () => {
+  test("传入 card 时跳过 buildLarkCard 直接以 interactive 发送", async () => {
+    const directCard: FeishuCardV2 = {
+      schema: "2.0",
+      config: { update_multi: true, summary: { content: "直通卡片" } },
+      body: {
+        direction: "vertical",
+        vertical_spacing: "medium",
+        elements: [{ tag: "markdown", content: "直通内容" }],
+      },
+    };
+
+    let sentContent = "";
+    let msgType = "";
+    const fakeClient = {
+      im: {
+        v1: {
+          message: {
+            create: async (params: any) => {
+              msgType = params.data.msg_type;
+              sentContent = params.data.content;
+              return { code: 0, data: { message_id: "om_direct_card" } };
+            },
+          },
+        },
+      },
+    } as any;
+
+    const res = await sendLarkText({
+      client: fakeClient,
+      chatId: "oc_test",
+      markdown: "原本的 markdown",
+      card: directCard,
+      mode: "plain",
+    });
+
+    expect(res.messageId).toBe("om_direct_card");
+    expect(msgType).toBe("interactive");
+    expect(JSON.parse(sentContent)).toEqual(directCard);
+  });
+
+  test("传入 card 但卡片发送失败时，降级使用 textFallback 发送纯文本", async () => {
+    const directCard: FeishuCardV2 = {
+      schema: "2.0",
+      config: { update_multi: true },
+      body: {
+        direction: "vertical",
+        vertical_spacing: "medium",
+        elements: [{ tag: "markdown", content: "卡片内容" }],
+      },
+    };
+
+    const messagesSent: Array<{ msgType: string; content: string }> = [];
+    const fakeClient = {
+      im: {
+        v1: {
+          message: {
+            create: async (params: any) => {
+              messagesSent.push({ msgType: params.data.msg_type, content: params.data.content });
+              if (params.data.msg_type === "interactive") {
+                return { code: 99999, msg: "Card validation error" };
+              }
+              return { code: 0, data: { message_id: "om_text_fallback" } };
+            },
+          },
+        },
+      },
+    } as any;
+
+    const res = await sendLarkText({
+      client: fakeClient,
+      chatId: "oc_test",
+      markdown: JSON.stringify(directCard),
+      card: directCard,
+      textFallback: "<at id=ou_123></at> 卡片降级回退",
+      mode: "plain",
+    });
+
+    expect(res.messageId).toBe("om_text_fallback");
+    expect(messagesSent).toHaveLength(2);
+    expect(messagesSent[0].msgType).toBe("interactive");
+    expect(messagesSent[1].msgType).toBe("text");
+    expect(JSON.parse(messagesSent[1].content)).toEqual({
+      text: '<at user_id="ou_123"></at> 卡片降级回退',
+    });
+  });
+});
+
