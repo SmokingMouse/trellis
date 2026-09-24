@@ -1,0 +1,24 @@
+{
+  "id": "1eade582a4df",
+  "timestamp": "2026-09-24T17:00:57+08:00",
+  "branch": "feat/lark-ops-bot",
+  "commitHash": "458b9bc6ace60ed40cc85f3c5bcbe6cfb6e8d12f",
+  "commitMessage": "fix(lark): 审批改成先原子领取挂起消息再 await，并发批准不再重复重放",
+  "filesModified": [
+    "lib/server/lark/access.test.ts",
+    "lib/server/lark/access.ts",
+    "lib/server/lark/store.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 1662,
+    "humanModified": 5,
+    "humanRemoved": 0,
+    "totalLinesChanged": 1667,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
