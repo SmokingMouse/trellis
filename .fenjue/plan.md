@@ -1,50 +1,28 @@
 # plan（leader 拆解的计划；fj next 按依赖推「可起」，fj status 顶部画目标图）
 
-写法：`- [ ] id: 一句话 | after: a,b | mode: readonly | kind: codex | keep-seat`，缩进两格的续行写多行目标或 `verify: <命令>`。
+写法：`- [ ] id: 一句话 | after: a,b | mode: readonly | seat: reviewer | keep-seat`，缩进两格的续行写多行目标或 `verify: <命令>`。
 id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；keep-seat = 验收后坐席留着给下一单复用（review 循环用）。
+seat 引用 policy.md / 全局 seats 预设；task go --plan <id> 一步准备工作区并起位；keep-seat: false 显式关闭 policy 留位缺省。
+gate: review-id 要求报告交付已验收且 review_verdict=pass，或该项有有效 waiver；fail / none 不解锁 gate，fix 用 after: review-id。
+fj plan waive <review-id> --reason "原因" 记录本次 review 的豁免；重绑或重新结算后需重新确认。
 状态不用手改：绑了 cid 的项从任务推导；没绑的 [ ] 待做、[x] 已做、[-] 放弃。
 
-目标：修 BOE devbox prod 卡顿的两处 watcher 缺陷：A herdr-fleet 对不可解析 transcript 无限重试；B cli-sync 对超大 transcript 全量重 parse 阻塞事件循环
-- [ ] fix-a: herdr-fleet：0-turn transcript 判为 empty 不报错；attach 失败区分可重试与确定性失败，后者不清 key（去重不失效） | seat: worker
-  cid: fj-fix-a-ce8d
-  改 lib/server/herdr-fleet.ts attachTranscript 的 catch 与 lib/server/cli-sync-watcher.ts seedLineage 的 throw。带单测。
-- [ ] fix-b: cli-sync reimport：mtime/size 短路 + 增量 parse（只读新增字节），大文件不再阻塞事件循环；debounce 对持续写入合并成安静后解析 | seat: worker
-  cid: fj-fix-b-facc
-  改 lib/server/{cli-import,codex-import,cli-transcript,cli-import-db,cli-sync-watcher}.ts。带基准与单测。与 fix-a 无依赖，并行。
-- [-] review: 异源 review fix-a + fix-b：重试语义、增量 parse 正确性（截断/并发写/回滚）、两分支合并后零回归 | after: fix-a,fix-b,fix-c | mode: readonly | seat: reviewer-codex | keep-seat
-- [-] release: 起位前问用户：两分支合 main、本机 prod 部署与否由用户定；devbox 侧由对方拉取 | after: review | gate: review
-- [ ] fix-c: SQLite 写失败前端明确报错（不再静默转圈）+ 磁盘水位告警与健康端点字段 | seat: worker
-  cid: fj-fix-c-19ee
-  devbox /data00 94%、13:39 三次 SQLITE_FULL。与 fix-a/fix-b 并行，禁区：herdr-fleet / cli-sync-watcher / cli-import* / codex-import / cli-transcript。
-- [ ] review-ab: 异源 review fix-a + fix-b 的集成分支：重试语义、增量 parse 正确性与基准可复现、合并后零回归 | after: fix-a,fix-b | mode: readonly | seat: reviewer-codex | keep-seat
-  cid: fj-review-ab-2c36
-  waiver: {"at":"2026-09-18T08:11:24.517Z","reason":"唯一 fail 项 F1（fork 文件存在但 EACCES 时 anyUnreadable 判 false，清理会删已有 fork 节点）是 main 存量缺陷，review 自己用 git show 6510127 归因确认非本次合并引入；A/B 修的是线上正在烧的 CPU 火（devbox 已被迫 TRELLIS_HERDR=off 止血）。A 的核心断言经变异测试红→绿、B 的真样本等价性与基准量级均独立复现通过。F1 与 fix-c 列出的三处上游接口合成 fix-d 紧接着做。M1 只是把 3.2% CPU 的适用条件写清楚，m1 是空会话 UI 提示建议，均不挡合并。","cid":"fj-review-ab-2c36","settlement":"[\"d5748fb2dd6b36ef1451cbe98208f4f0efabd2209af99bde9eb09f69b8e7a88d\",0,[\"2026-09-18T08:10:55.027Z\",\"d5748fb2dd6b36ef1451cbe98208f4f0efabd2209af99bde9eb09f69b8e7a88d\",\"646f886f98bf081e3be9300cf36a7487f7d5b379f6c21dada953135233a9c977\",4,0,\"fail\",\"21ccba4b2815cb21cc932b659e812f1286a31faea1aad38459b7b009eb677220\"]]"}
-- [x] release-ab: A/B 合 main + 本机 prod 部署（用户已授权免问）+ 通知 devbox 拉取 | after: review-ab | gate: review-ab
-- [ ] review-c: 异源 review fix-c：写失败分类与传播、不留半截状态、水位告警去重、健康端点字段；与已合入的 A/B 无冲突 | after: fix-c | mode: readonly | seat: reviewer-codex | keep-seat
-  cid: fj-review-c-0911
-- [-] fix-d: 存量 F1（EACCES 等读失败被判 anyUnreadable=false 导致删节点）+ fix-c 列的三处上游接口（cli-sync-watcher 报错通知、cli-import-db/codex-import 走 dbWrite、herdr-fleet DB 写审查） | after: review-c | seat: worker
-- [ ] fix-d1: fix-c 返工：F2 写成功后再更新 committedText（失败内容不得经重连快照回流）+ M1 BUSY 总等待预算封顶（实测 42s 同步阻塞）+ F1 水位告警周期语义与文档/测试对齐 + m1 阈值文案修正 | seat: worker
-  cid: fj-fix-d1-3a3b
-  在 fix/write-failure-visible 上继续；review-c 说 F1/F2 都可本单自洽，无须等上游三条。
-- [ ] fix-d2: 存量 F1（EACCES/EIO 等读失败被判 anyUnreadable=false → 删已有 fork 节点）+ cli-sync reimport 失败按 classifyDbError 分类可见化（P1） | seat: worker
-  cid: fj-fix-d2-c01d
-  基于 fix/write-failure-visible（需要 classifyDbError/isDbFailure）。P2 import 事务、P3 herdr-fleet 按 review 判断降级另排。
-- [ ] fix-e: 根因 D：herdr 首次 attach 仍同步全量 parse（attachSession→importCliLineage），大 rollout 单次阻塞数十秒；sibling 全树扫描每次重扫 1406 个文件 meta | after: merge-c | seat: worker
-  cid: fj-fix-e-3591
-  devbox：codex 目录 1406 jsonl / 3.4GB，最大 1.28GB。修法：attachSessionAsync + importCliLineageAsync（与 catchUp 同等待遇）+ sibling 扫描 stat/mtime 短路与缓存。after fix-d2 是真依赖：同改 cli-sync-watcher.ts attachSession 与 herdr-bindings.ts。
-- [-] fix-f: 根因 C：物理路径 vs 符号链接路径精确串比较失败，codex attach 永远失败并无限重试（devbox 实锤） | seat: worker
-  cid: fj-fix-f-eb76
-  在 fix/reliability-d2 上继续（已含 EACCES 分类与 cli-sync 出口）。探针 test/scripts/probe-codex-symlink-path.ts 已就位。fix-e（根因 D）改依赖本项。
-- [ ] merge-c: 把 fix-c/d1/d2 合到含 A/B 的 main 上（解 6 处冲突，cli-sync-watcher 有 150 行语义冲突），并在正确基线上实现根因 C | seat: worker
-  cid: fj-merge-c-83b8
-  替代 fix-f（基线错误已撤）。worktree ~/.herdr/worktrees/trellis/cd-int，分支 integration/reliability-cd，合并冲突现场保留。
-- [ ] fix-gitstatus: 根因 E：git 角标接口每请求 N×M 全量重扫 + 同步 spawn git，占满主线程（devbox 实锤，herdr=off 也压不住） | seat: worker
-  cid: fj-fix-gitstatus-f873
-  与 C/D 文件不相交，基于 main 并行。运维已在网关临时短路，deploy 会丢，必须代码修。
-- [ ] review-cde: 异源 review C+D+E 集成分支：符号链接收口、首次 attach 异步化、git 角标节流，三者互不架空且零回归 | after: fix-e,fix-gitstatus | mode: readonly | seat: reviewer-codex | keep-seat
-  cid: fj-review-cde-4573
-- [ ] fix-g: 返工 review-cde 的 F1（canonical 回退让越界 symlink 通过包含判断，安全闸 fail-open）+ M1（C 探针假绿，需完整等价性断言） | seat: worker
-  cid: fj-fix-g-d5e9
-- [ ] fix-startup: 启动补齐 2min 不可用窗口：给 lineage 持久化文件水位，没变过的会话零读取跳过 + 补齐限速 | seat: worker
-  cid: fj-fix-startup-4c19
-  devbox e80951a94 实测：重启后约 2min 事件循环占满、curl 整批超时；稳态正常。补齐已异步，问题是总 CPU 体量。
+目标：sub2api 号池巡检 bot：新 bot 在「sub2api 测试群」日报 + 异常巡检，授权掉/重置卡临期 @ 号主；bot 对话需管理员审批
+
+- [x] push: 任务推送小改：只推最终答复（finalStart）、[SILENT] 不推、卡片带任务名标题、<at> 在文本降级时转换
+  leader 轻档自做，分支 feat/lark-ops-bot；改 tasks.ts / task-push-policy.ts / push.ts / sdk.ts 降级分支 / card.ts summary / handler.ts 回复正文。
+- [ ] access: bot 对话审批：按 bot 的发送人白名单 + 管理员私聊卡片审批（文字命令兜底）+ 挂起消息放行后重放 + 设置页名单管理 | seat: gemini37
+  cid: fj-access-c7de
+  verify: bun x tsc --noEmit
+  verify: sh -c 'out=$(bun test 2>&1); echo "$out" | grep -qE "^ *[0-9]+ pass$" || exit 1; n=$(echo "$out" | grep -oE "^ *[0-9]+ fail$" | grep -oE "[0-9]+"); test "${n:-0}" -le 5'
+  verify: bun --bun run build
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/lark-access-goal.md（先通读再动手）。worktree 基线 = feat/lark-ops-bot（= main 425d47b）。open 模式零行为变化；避开 leader 并行在改的任务推送路径（brief 约束节列了文件与位置）。
+- [ ] review-access: 异源 review access：门禁不可绕过、open 模式零变化、挂起重放不重复执行、按钮 value 伪造与非 admin 命令被拒、迁移可重入 | after: access | mode: readonly | seat: cpa-sonnet5 | keep-seat
+  cid: fj-review-access-4822
+  工具类 review，审 access 分支相对 feat/lark-ops-bot 的全部改动。做三件事：① bunx tsc --noEmit 与 bun test 复跑；② 隔离实例冒烟（sqlite3 .backup 出副本 + 独立 HOME + TRELLIS_LARK=off，参照 scripts/mobile-verify/），走一遍 approval 模式下 设置页切换 → 成员 API 增改查 的主路径；③ 读门禁、decideMember、card.action.trigger 回调、文字命令、重放五处代码找绕过路径。只报行为错误，不审风格。首行 verdict: pass|fail；fail 只认四种：结论或行为错 · 伪造或不可复现到影响结论 · 凭证泄露 · 破坏现有测试，其余写在 ## 建议 下；只列可操作问题（文件:行、命令输出）；只读，运行产物写 /tmp。
+- [ ] watch: sub2api 巡检脚本 alert_watch.py：可行动告警规则 + 去重状态 + 号主 @ 映射 + [SILENT] 输出 | seat: gemini37
+  cid: fj-watch-9a06
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/alert-watch-goal.md。workdir 在仓库外（~/.claude/skills/sub2api-admin），走 task quick --workdir + launch；只新增三个文件、不 commit。
+- [ ] release: 起位前问用户：push + access 合 main、make deploy 上线并验活（动生产，必须问） | after: push,access | gate: review-access
+- [ ] config: 配置上线：登记新 bot（approval 模式）+ 设管理员、建只读 agent sub2api-ops、owners 映射、日报/巡检两任务推「sub2api 测试群」，手动各跑一次验 @ 与审批卡片再挂 cron | after: release,watch
+  依赖用户在飞书建好应用并把 bot 拉进群；leader 自做（轻档），逐步给用户看效果。

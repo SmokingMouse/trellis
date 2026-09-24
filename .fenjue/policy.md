@@ -53,4 +53,5 @@ codex_bin: /Users/smokingmouse/.nvm/versions/node/v24.14.1/bin/codex   # codex-t
 - 同一失败出现两次之后怎么办
 
 - **模型选择硬规则（用户 2026-09-07 明令）**：Fable 5.1 只做 leader 与裁决，执行类坐席（实现 / 探针 / 调研 / review）一律不用 Fable：`--kind claude` 必须带 `--env-file ~/.config/herdr-leader/presets/claude-official.env -- --model opus`（或 sonnet / gemini-flash 预设），本机 `~/.claude/settings.json` 默认 model 是 fable，裸起 claude 就会烧 Fable 额度。**默认 runner 已是 codex-tui（`FJ_RUNNER_DEFAULT`），它不接受 --env-file / 原生 agent 参数，写法是 `--runner codex-tui --kind claude --model opus --permission full`；只有 `--runner native` 才用 --env-file 形式（S174 踩坑）。**
+- **Linux devbox 坐席走 llm 的方式（用户 2026-09-24 明令「使用 llm 命令的方式」）**：本机 claude 没有自己的登录态，裸起即「Not logged in」；坐席用 `~/.config/herdr-leader/seat-presets.yaml` 里复刻 `llm cpa:<model>` 环境的预设（`gemini37` 实现 / `cpa-sonnet5` review）。实测 cpa 的 `ag/claude-*` 多轮工具调用必 400、不能当坐席；super-relay `alwaysday1_max` 自报 Fable 5，按上条不用；`cpa-sonnet5` 烧本人 Claude 订阅，只给 review 这类短时高价值单（本轮 review-access 用户已拍板）。本 policy frontmatter 的 worker/reviewer 预设是 Mac 路径，这台机器不可用。
 - **codex 坐席不开 fast（用户 2026-09-07 明令）**：起位加 `-c 'service_tier="default"'`；已在跑的用 `/fast` 切回 default。
