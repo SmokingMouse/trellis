@@ -1,0 +1,27 @@
+{
+  "id": "d8b47d36ea45",
+  "timestamp": "2026-09-24T17:55:38+08:00",
+  "branch": "main",
+  "commitHash": "0f19bcdf029df844ec03adbc0f3af39f135192c5",
+  "commitMessage": "docs(progress+fenjue): S179 卡片改版收账——lark-card 设计 + #71 卡片直通（450782a8a）",
+  "filesModified": [
+    ".fenjue/briefs/cards-trellis-goal.md",
+    ".fenjue/briefs/cards-watch-goal.md",
+    ".fenjue/ledger/DECISIONS.md",
+    ".fenjue/plan-events.ndjson",
+    ".fenjue/plan.md",
+    "progress/sessions/2026-09-24-1725-s179-ops-bot.md"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 67,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 67,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
