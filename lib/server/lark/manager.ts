@@ -1,4 +1,5 @@
 import "server-only";
+import { handleCardActionTrigger } from "./access";
 import { acceptLarkEvent } from "./handler";
 import { diffLarkConnections, type LarkMessageEvent } from "./protocol";
 import { createLarkClient, fetchLarkBotInfo, lark, type LarkSdkClient } from "./sdk";
@@ -47,6 +48,9 @@ async function connect(bot: LarkBotRecord): Promise<void> {
   const dispatcher = new lark.EventDispatcher({}).register({
     "im.message.receive_v1": async (event: LarkMessageEvent) => {
       acceptLarkEvent(bot.id, client, event);
+    },
+    "card.action.trigger": async (data: any) => {
+      return handleCardActionTrigger(bot.id, client, data);
     },
   });
   // S134 就绪门：SDK 的 `start()` 在拿到 ws 地址后就 resolve（state=connecting），

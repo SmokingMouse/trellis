@@ -43,6 +43,7 @@ import {
   bindLarkChatSession,
   claimLarkInbox,
   ensureLarkChat,
+  getLarkBotMember,
   getLarkBotRecord,
   getLarkChat,
   getLarkInbox,
@@ -51,8 +52,16 @@ import {
   recordLarkOutbox,
   updateLarkInbox,
   upsertLarkThread,
+  upsertPendingMember,
   type LarkBotRecord,
 } from "./store";
+import {
+  handleAdminCommand,
+  isLarkBotAdmin,
+  notifyAdminsForApproval,
+  parseAdminCommand,
+  setGlobalReplayHandler,
+} from "./access";
 
 const MAX_CHAT_QUEUE_DEPTH = 5;
 const MAX_CONCURRENT_LARK_RUNS = 2;
@@ -60,11 +69,14 @@ const MAX_CONCURRENT_LARK_RUNS = 2;
 const MENTION_HISTORY_DEPTH = 4;
 
 type ParsedMessage = Extract<ParsedIncoming, { kind: "message" }>;
-type QueuedMessage = ParsedMessage & { addressReason: ImAddressReason };
+export type QueuedMessage = ParsedMessage & { addressReason: ImAddressReason };
 type ChatQueue = { tail: Promise<void>; depth: number };
 
 const CHAT_QUEUES = new Map<string, ChatQueue>();
 const GLOBAL_RUNS = new AsyncSemaphore(MAX_CONCURRENT_LARK_RUNS);
+
+// 注册消息重放处理器给 access 审批模块
+setGlobalReplayHandler((botId, client, message) => enqueueMessage(botId, client, message));
 
 async function withGlobalRun<T>(fn: () => Promise<T>): Promise<T> {
   return GLOBAL_RUNS.run(fn);
@@ -192,6 +204,94 @@ export function acceptLarkEvent(
     }
     queued = { ...parsed, text: address.text, addressReason: address.reason };
   }
+
+  // ── 审批门禁（fj-access） ──
+  if (bot.accessMode === "approval") {
+    const senderOpenId = parsed.senderOpenId;
+
+    // 4.2 admin 在与 bot 的私聊里发「同意 <code>」「拒绝 <code>」「名单」：在门禁之前拦截
+    if (parsed.chatType === "p2p" && senderOpenId && parsed.text) {
+      const isAdmin = isLarkBotAdmin(bot.id, senderOpenId);
+      if (isAdmin) {
+        const adminCmd = parseAdminCommand(parsed.text);
+        if (adminCmd) {
+          updateLarkInbox(parsed.messageId, "done");
+          void handleAdminCommand({
+            botId: bot.id,
+            adminOpenId: senderOpenId,
+            chatId: parsed.chatId,
+            messageId: parsed.messageId,
+            command: adminCmd,
+            client,
+          }).catch((err) => console.error("[lark-access] 管理员命令执行失败", err));
+          return;
+        }
+      }
+    }
+
+    // 检查发送人权限
+    const member = senderOpenId ? getLarkBotMember(bot.id, senderOpenId) : null;
+    const isApproved = !!(member && member.status === "approved");
+
+    if (!isApproved) {
+      // 如果被拒绝（denied）：inbox 记为 ignored，静默不回
+      if (member && member.status === "denied") {
+        updateLarkInbox(parsed.messageId, "ignored");
+        return;
+      }
+
+      // 挂起路径上的群聊也要登记 chat（ensureLarkChat）
+      if (parsed.chatType === "group") {
+        ensureLarkChat(bot.id, parsed.chatId, "group", null, Date.now());
+      }
+
+      // 其余情况（pending 或从未记录）：upsert 成 pending（覆盖为最新一条挂起消息）
+      const preview = (parsed.text ?? (parsed.unsupportedType ? `[${parsed.unsupportedType}]` : "")).slice(0, 200);
+      const targetOpenId = senderOpenId ?? `unknown_${parsed.messageId}`;
+
+      const upsertRes = upsertPendingMember({
+        botId: bot.id,
+        openId: targetOpenId,
+        pendingMessage: queued,
+        pendingPreview: preview,
+        pendingChatId: parsed.chatId,
+        now: Date.now(),
+      });
+
+      updateLarkInbox(parsed.messageId, "pending");
+
+      // a. 引用该消息回复发送人：「这个机器人需要管理员审批后才能对话，已提交申请，通过后会自动回复你。」同一人 24h 内只回一次
+      if (upsertRes.shouldNotifySender) {
+        void sendLarkText({
+          client,
+          chatId: parsed.chatId,
+          replyToMessageId: parsed.messageId,
+          markdown: "这个机器人需要管理员审批后才能对话，已提交申请，通过后会自动回复你。",
+        }).catch((err) => console.warn("[lark-access] 发送待审批提示给发送人失败", err));
+      }
+
+      // b. 私聊通知每位 admin，发一张 Schema 2.0 卡片（同一申请人 1h 内不重复通知 admin）
+      if (upsertRes.shouldNotifyAdmin && senderOpenId) {
+        void (async () => {
+          const source =
+            parsed.chatType === "group"
+              ? await resolveLarkChatTitle(client, parsed.chatId, "group", senderOpenId)
+              : "私聊";
+          await notifyAdminsForApproval({
+            botId: bot.id,
+            client,
+            senderOpenId,
+            code: upsertRes.member.code,
+            source,
+            preview,
+          });
+        })().catch((err) => console.warn("[lark-access] 通知管理员审批失败", err));
+      }
+
+      return;
+    }
+  }
+
   if (!enqueueMessage(botId, client, queued)) {
     void rejectOverflow(botId, client, queued).catch((error) =>
       console.error("[lark] 队列超限提示发送失败", error),
