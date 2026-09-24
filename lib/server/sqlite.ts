@@ -342,6 +342,22 @@ function migrate(db: Database) {
       "ALTER TABLE cli_lineages ADD COLUMN provider_family TEXT NOT NULL DEFAULT 'claude'",
     );
   }
+  // 启动补齐的持久水位（fj-fix-startup）：上次**成功导入**时该成员 jsonl 的
+  // stat 快照 + 当时的 synced_uuid。重启后 stat 一致就整条 lineage 零读取跳过；
+  // 升级上来全是 NULL = 没水位，退化成老路径全量补齐一次。判据见
+  // cli-import-db.ts:lineageWatermarksCurrent。
+  const watermarkCols: { name: string; type: string }[] = [
+    { name: "wm_size", type: "INTEGER" },
+    { name: "wm_mtime_ms", type: "REAL" },
+    { name: "wm_ino", type: "TEXT" },
+    { name: "wm_dir_mtime_ms", type: "REAL" },
+    { name: "wm_cursor", type: "TEXT" },
+  ];
+  for (const c of watermarkCols) {
+    if (!lineageColumnNames.has(c.name)) {
+      db.exec(`ALTER TABLE cli_lineages ADD COLUMN ${c.name} ${c.type}`);
+    }
+  }
   db.exec(`
     UPDATE sessions
     SET cli_provider = 'claude'
@@ -974,7 +990,7 @@ function migrate(db: Database) {
     // 这里作废增量游标，强制下次 importCliLineage 全量重导；假节点由 import 事务
     // 里的清理逻辑顺带删。不作废不行：allUnchanged 判定会直接跳过整个重写，存量
     // 永远修不好。
-    db.exec("UPDATE cli_lineages SET synced_uuid = NULL");
+    db.exec("UPDATE cli_lineages SET synced_uuid = NULL, wm_size = NULL");
     db.exec("PRAGMA user_version = 1");
   }
 

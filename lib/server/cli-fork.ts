@@ -166,6 +166,8 @@ export function registerForkLineage(
      VALUES (?, ?, ?, ?, ?, 0, NULL)
      ON CONFLICT(trellis_session_id, cli_session_id) DO UPDATE SET
        provider_family = excluded.provider_family,
+       wm_size = CASE WHEN cli_lineages.jsonl_path = excluded.jsonl_path
+                      THEN cli_lineages.wm_size END,
        jsonl_path = excluded.jsonl_path,
        fork_point_uuid = excluded.fork_point_uuid`,
   ).run(trellisSessionId, newSid, provider, jsonlPath, forkPointUuid);

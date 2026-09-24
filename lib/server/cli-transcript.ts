@@ -35,6 +35,7 @@ import {
   DEFAULT_SLICE_MS,
   makeSlicer,
   runCooperatively,
+  yieldToEventLoop,
   runToCompletion,
 } from "./cooperative";
 
@@ -413,7 +414,7 @@ async function ingestRangeAsync(
       read += bytesRead;
       stats.bytesRead += bytesRead;
       if (performance.now() - sliceStart >= sliceMs) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await yieldToEventLoop();
         sliceStart = performance.now();
       }
     }

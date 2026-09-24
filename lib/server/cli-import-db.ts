@@ -3,6 +3,8 @@
 // 幂等：节点 id = CLI turn 的 uuid（确定性），重复同步走 ON CONFLICT 更新、不产重复行。
 // 详见 progress/cli-sync.md。
 import "server-only";
+import fs from "node:fs";
+import path from "node:path";
 import { getDB } from "./sqlite";
 import {
   classifyParsedTranscript,
@@ -72,6 +74,153 @@ function parseLineages(rows: LineageRow[]): ParsedLineage[] {
   return parseLineagesChecked(rows).parsed;
 }
 
+// ── 持久水位（fj-fix-startup：重启后约 2 分钟不可用窗口）────────────────────
+//
+// 进程内的 (dev,ino,size,mtimeMs) 指纹缓存重启即空，于是每次启动补齐都得把每个
+// attached 会话的 jsonl 全部重读、重解析、重发现一遍才知道「没变」—— 1406 个
+// codex 文件那一轮就是 2 分钟满 CPU。水位把「上次成功导入时文件长什么样」落进
+// cli_lineages，启动时一个 stat 就能判「没变」。
+//
+// 何时写：**只在导入成功之后**、与 synced_uuid 同一个事务，stat 取自**解析之前**。
+// 解析期间文件又被追加 → 记下的是旧 size → 下次失配 → 重导。宁可多导一次，
+// 绝不把没导进去的字节记成「已同步」。
+// 谁不写：读不到（unreadable）的成员水位清空 —— 它的内容我们一无所知，不能凭
+// 水位跳过。
+export type LineageWatermark = {
+  size: number;
+  mtimeMs: number;
+  ino: string;
+  dirMtimeMs: number | null;
+};
+
+function statWatermark(file: string): LineageWatermark | null {
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile()) return null;
+    let dirMtimeMs: number | null = null;
+    try {
+      dirMtimeMs = fs.statSync(path.dirname(file)).mtimeMs;
+    } catch {
+      dirMtimeMs = null;
+    }
+    return { size: st.size, mtimeMs: st.mtimeMs, ino: String(st.ino), dirMtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+type WatermarkRow = {
+  cli_session_id: string;
+  jsonl_path: string;
+  synced_uuid: string | null;
+  wm_size: number | null;
+  wm_mtime_ms: number | null;
+  wm_ino: string | null;
+  wm_dir_mtime_ms: number | null;
+  wm_cursor: string | null;
+};
+
+/**
+ * 启动补齐的跳过判据：这条 lineage 自上次成功导入以来**确定没变**。
+ * 全部成立才返回 true（任何一条存疑都退回老路径，老路径永远是正确的）：
+ *   ① 至少一个成员，且每个成员都有水位；
+ *   ② 每个成员 stat 的 size / mtimeMs / ino 与水位逐一相等 —— 追加（size 变）、
+ *      截断、原地重写（mtime 变）、原子替换（ino 变）、删除（stat 失败）都失配；
+ *   ③ wm_cursor IS synced_uuid —— 水位是和游标一起写的；有人单独作废了游标
+ *      （v1 那种「强制全量重导」的迁移），两者就对不上，以游标为准重导；
+ *   ④ 成员所在目录的 mtime 没变；变了则只看目录里**水位之后新出现 / 改过**的
+ *      非成员 jsonl（新 fork 只可能在这里面）—— 有就不跳（交给 discover 认领），
+ *      没有（只是删了别的文件）就跳过并把目录水位推进到本次 stat。
+ * 只 stat / readdir，不打开任何 jsonl。
+ */
+export function lineageWatermarksCurrent(trellisSessionId: string): boolean {
+  const db = getDB();
+  const rows = db
+    .prepare(
+      `SELECT cli_session_id, jsonl_path, synced_uuid, wm_size, wm_mtime_ms,
+              wm_ino, wm_dir_mtime_ms, wm_cursor
+       FROM cli_lineages WHERE trellis_session_id = ?`,
+    )
+    .all(trellisSessionId) as WatermarkRow[];
+  if (rows.length === 0) return false;
+  const members = new Set(rows.map((r) => r.jsonl_path));
+  const dirBumps: { dir: string; mtimeMs: number }[] = [];
+  for (const row of rows) {
+    if (
+      row.wm_size === null ||
+      row.wm_mtime_ms === null ||
+      row.wm_ino === null ||
+      row.wm_cursor !== row.synced_uuid
+    ) {
+      return false;
+    }
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(row.jsonl_path);
+    } catch {
+      return false;
+    }
+    if (
+      !st.isFile() ||
+      st.size !== row.wm_size ||
+      st.mtimeMs !== row.wm_mtime_ms ||
+      String(st.ino) !== row.wm_ino
+    ) {
+      return false;
+    }
+    const dir = path.dirname(row.jsonl_path);
+    let dirMtimeMs: number;
+    try {
+      dirMtimeMs = fs.statSync(dir).mtimeMs;
+    } catch {
+      return false;
+    }
+    if (row.wm_dir_mtime_ms !== null && dirMtimeMs === row.wm_dir_mtime_ms) continue;
+    if (row.wm_dir_mtime_ms === null) return false;
+    if (hasFreshNonMember(dir, members, row.wm_dir_mtime_ms)) return false;
+    dirBumps.push({ dir, mtimeMs: dirMtimeMs });
+  }
+  if (dirBumps.length > 0) {
+    const bump = db.prepare(
+      `UPDATE cli_lineages SET wm_dir_mtime_ms = ?
+       WHERE trellis_session_id = ? AND jsonl_path = ?`,
+    );
+    for (const row of rows) {
+      const hit = dirBumps.find((b) => b.dir === path.dirname(row.jsonl_path));
+      if (hit) bump.run(hit.mtimeMs, trellisSessionId, row.jsonl_path);
+    }
+  }
+  return true;
+}
+
+function hasFreshNonMember(
+  dir: string,
+  members: Set<string>,
+  sinceMs: number,
+): boolean {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return true;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    const full = path.join(dir, name);
+    if (members.has(full)) continue;
+    try {
+      if (fs.statSync(full).mtimeMs >= sinceMs) return true;
+    } catch {
+      // 刚被删 —— 不是新 fork
+    }
+  }
+  return false;
+}
+
+function snapshotWatermarks(rows: LineageRow[]): Map<string, LineageWatermark | null> {
+  return new Map(rows.map((r) => [r.cli_session_id, statWatermark(r.jsonl_path)]));
+}
+
 // 「读不到」和「读到了但没内容」必须分开。前者意味着我们对这条 lineage 的
 // turn 集合**一无所知** —— 拿这种残缺集合去做「不在集合里就删」的清理，会把整条
 // lineage 的节点全剥掉（CLI transcript 过期 / 用户清理 / fork jsonl 被删都会走
@@ -90,32 +239,35 @@ function parseLineages(rows: LineageRow[]): ParsedLineage[] {
 // parseCliTranscript / parseCliTranscriptAsync 会先作废缓存再返回 null，随后
 // classifyParsedTranscript 重新读一次文件定性 —— 缓存不会把「读不到」悄悄变成
 // 「读到了但没内容」。
-function parseLineagesChecked(rows: LineageRow[]): {
+type CheckedLineages = {
   parsed: ParsedLineage[];
   anyUnreadable: boolean;
-} {
+  /** 读不到的成员（cli_session_id）—— 它们的水位要清空，不能被跳过。 */
+  unreadable: Set<string>;
+};
+
+function parseLineagesChecked(rows: LineageRow[]): CheckedLineages {
   const out: ParsedLineage[] = [];
-  let anyUnreadable = false;
+  const unreadable = new Set<string>();
   for (const row of rows) {
     const parsed = parseCliTranscript(row.provider_family, row.jsonl_path);
     const state = classifyParsedTranscript(row.jsonl_path, parsed);
     if (state.kind === "unreadable") {
-      anyUnreadable = true;
+      unreadable.add(row.cli_session_id);
       continue;
     }
     if (state.kind === "empty") continue;
     out.push({ row, parsed: state.parsed });
   }
-  return { parsed: out, anyUnreadable };
+  return { parsed: out, anyUnreadable: unreadable.size > 0, unreadable };
 }
 
 // 同上，但解析分片让出事件循环（watcher / 启动补齐走这条）。判据逐字相同。
-async function parseLineagesCheckedAsync(rows: LineageRow[]): Promise<{
-  parsed: ParsedLineage[];
-  anyUnreadable: boolean;
-}> {
+async function parseLineagesCheckedAsync(
+  rows: LineageRow[],
+): Promise<CheckedLineages> {
   const out: ParsedLineage[] = [];
-  let anyUnreadable = false;
+  const unreadable = new Set<string>();
   for (const row of rows) {
     const parsed = await parseCliTranscriptAsync(
       row.provider_family,
@@ -123,13 +275,13 @@ async function parseLineagesCheckedAsync(rows: LineageRow[]): Promise<{
     );
     const state = classifyParsedTranscript(row.jsonl_path, parsed);
     if (state.kind === "unreadable") {
-      anyUnreadable = true;
+      unreadable.add(row.cli_session_id);
       continue;
     }
     if (state.kind === "empty") continue;
     out.push({ row, parsed: state.parsed });
   }
-  return { parsed: out, anyUnreadable };
+  return { parsed: out, anyUnreadable: unreadable.size > 0, unreadable };
 }
 
 function unionTurns(parsedRows: ParsedLineage[]): ParsedTurn[] {
@@ -212,8 +364,10 @@ function importPrelude(
 export function importCliLineage(trellisSessionId: string): ImportResult {
   const pre = importPrelude(trellisSessionId);
   if ("done" in pre) return pre.done;
-  const { parsed, anyUnreadable } = parseLineagesChecked(pre.rows);
-  return commitCliLineage(trellisSessionId, pre.rows, parsed, anyUnreadable);
+  // 水位 stat 必须先于解析（见 statWatermark 上方）。
+  const marks = snapshotWatermarks(pre.rows);
+  const checked = parseLineagesChecked(pre.rows);
+  return commitCliLineage(trellisSessionId, pre.rows, checked, marks);
 }
 
 /**
@@ -226,18 +380,60 @@ export async function importCliLineageAsync(
 ): Promise<ImportResult> {
   const pre = importPrelude(trellisSessionId);
   if ("done" in pre) return pre.done;
-  const { parsed, anyUnreadable } = await parseLineagesCheckedAsync(pre.rows);
-  return commitCliLineage(trellisSessionId, pre.rows, parsed, anyUnreadable);
+  const marks = snapshotWatermarks(pre.rows);
+  const checked = await parseLineagesCheckedAsync(pre.rows);
+  return commitCliLineage(trellisSessionId, pre.rows, checked, marks);
+}
+
+// 把本轮解析前的 stat 快照落成水位。cursor 取「本轮提交后该成员的 synced_uuid」：
+// 有内容的成员 = 本轮 lastUuid（与 updateCursor 同值），空成员 = 原游标不动。
+// 读不到的成员一律清空 —— 调用方必须在事务里（或紧随成功返回）调用。
+function writeWatermarks(
+  db: ReturnType<typeof getDB>,
+  trellisSessionId: string,
+  rows: LineageRow[],
+  checked: CheckedLineages,
+  marks: Map<string, LineageWatermark | null>,
+): void {
+  const cursorBySid = new Map(
+    checked.parsed.map((p) => [p.row.cli_session_id, p.parsed.lastUuid]),
+  );
+  const set = db.prepare(
+    `UPDATE cli_lineages
+     SET wm_size = ?, wm_mtime_ms = ?, wm_ino = ?, wm_dir_mtime_ms = ?, wm_cursor = ?
+     WHERE trellis_session_id = ? AND cli_session_id = ?`,
+  );
+  for (const row of rows) {
+    const mark = checked.unreadable.has(row.cli_session_id)
+      ? null
+      : (marks.get(row.cli_session_id) ?? null);
+    const cursor = cursorBySid.has(row.cli_session_id)
+      ? cursorBySid.get(row.cli_session_id)!
+      : row.synced_uuid;
+    set.run(
+      mark?.size ?? null,
+      mark?.mtimeMs ?? null,
+      mark?.ino ?? null,
+      mark?.dirMtimeMs ?? null,
+      mark ? cursor : null,
+      trellisSessionId,
+      row.cli_session_id,
+    );
+  }
 }
 
 function commitCliLineage(
   trellisSessionId: string,
   rows: LineageRow[],
-  parsedRows: ParsedLineage[],
-  anyUnreadable: boolean,
+  checked: CheckedLineages,
+  marks: Map<string, LineageWatermark | null>,
 ): ImportResult {
   const db = getDB();
+  const { parsed: parsedRows, anyUnreadable } = checked;
   if (parsedRows.length === 0) {
+    // 没有任何可导内容，一个节点都不写；但「空」与「读不到」照样要记水位 ——
+    // 空成员下次 stat 一致可以跳过，读不到的清空水位。
+    writeWatermarks(db, trellisSessionId, rows, checked, marks);
     return { sessionId: trellisSessionId, status: "empty", turns: 0 };
   }
 
@@ -252,6 +448,7 @@ function commitCliLineage(
     ) &&
     nodesHaveLineageSids(db, trellisSessionId, turnLineageSids, provider);
   if (allUnchanged) {
+    writeWatermarks(db, trellisSessionId, rows, checked, marks);
     return {
       sessionId: trellisSessionId,
       status: "unchanged",
@@ -356,6 +553,51 @@ function commitCliLineage(
       "INSERT INTO search_index (text, source_kind, source_id, session_id) VALUES (?, ?, ?, ?)",
     );
 
+    // 全文索引只重建**文本真的变了**的节点（fj-fix-startup）。search_index 是
+    // FTS5，source_id / session_id 都是 UNINDEXED —— `WHERE source_id = ?` 每次
+    // 都是**整表扫描**。老写法每个 turn 删一次，一次提交 = turns × 全索引行数：
+    // 实测第 k 个 5MB 会话的提交要 k × ~130ms 的同步事务（20 个会话时单次 2.7s
+    // 阻塞），正是补齐期间 HTTP 整批超时的那段同步。现在按节点分三类：
+    //   · 本会话里 question / response 都没变 → 索引行本来就对，不碰；
+    //   · 本会话里文本变了 → 旧行要删：1 个就按 source_id 删，多个就一次按
+    //     session_id 扫出 rowid 再按 rowid 删（一次扫描代替 N 次）；
+    //   · 此前不存在的节点 → 没有旧行可删，直接插；挂在别的会话下被 upsert
+    //     搬过来的（罕见）→ 按 source_id 删。
+    // 删节点的路径（repo.deleteSession / 下面的清理）都连带删索引行，所以「节点
+    // 不存在但索引行还在」不是会出现的状态。
+    const before = new Map(
+      (
+        db
+          .prepare("SELECT id, question, response FROM nodes WHERE session_id = ?")
+          .all(trellisSessionId) as { id: string; question: string; response: string }[]
+      ).map((r) => [r.id, r]),
+    );
+    const elsewhere = db.prepare("SELECT 1 FROM nodes WHERE id = ?");
+    const reindex = new Set<string>();
+    const changed = new Set<string>();
+    for (const t of turns) {
+      const prev = before.get(t.id);
+      if (prev) {
+        if (prev.question === t.question && prev.response === t.response) continue;
+        changed.add(t.id);
+      } else if (elsewhere.get(t.id)) {
+        ftsDel.run(t.id);
+      }
+      reindex.add(t.id);
+    }
+    if (changed.size === 1) {
+      for (const id of changed) ftsDel.run(id);
+    } else if (changed.size > 1) {
+      const delRow = db.prepare("DELETE FROM search_index WHERE rowid = ?");
+      const oldRows = db
+        .prepare(
+          `SELECT rowid AS r, source_id AS id FROM search_index
+           WHERE session_id = ? AND source_kind IN ('node_question','node_response')`,
+        )
+        .all(trellisSessionId) as { r: number; id: string }[];
+      for (const row of oldRows) if (changed.has(row.id)) delRow.run(row.r);
+    }
+
     for (const t of turns) {
       upsertNode.run(
         t.id,
@@ -382,8 +624,8 @@ function commitCliLineage(
         provider === "codex" ? (t.turnOrdinal ?? null) : null,
         t.finalStart || null,
       );
-      // 重建该节点的全文索引（先删后插，幂等）。
-      ftsDel.run(t.id);
+      // 重建该节点的全文索引（旧行已在上面删掉；没变的节点不碰）。
+      if (!reindex.has(t.id)) continue;
       if (t.question.trim())
         ftsIns.run(t.question, "node_question", t.id, trellisSessionId);
       if (t.response.trim())
@@ -449,6 +691,7 @@ function commitCliLineage(
         item.row.cli_session_id,
       );
     }
+    writeWatermarks(db, trellisSessionId, rows, checked, marks);
   });
   tx();
 
