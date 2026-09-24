@@ -338,6 +338,76 @@ describe("Lark Bot Register & Permissions (qr-server)", () => {
       expect(session!.error).toContain("已取消");
     });
 
+    test("review-qr F1：拿到二维码前就失败 -> 立刻用真实原因 reject，不干等 30s", async () => {
+      const mockRegisterApp = mock(() => Promise.reject({ code: "some_real_error", description: "App not found upstream" }));
+      const t0 = Date.now();
+      let caught: unknown = null;
+      try {
+        await startRegistration({ mode: "create", name: "早失败" }, { registerAppFn: mockRegisterApp as any });
+      } catch (e) {
+        caught = e;
+      }
+      expect(Date.now() - t0).toBeLessThan(1000);
+      expect(String((caught as Error)?.message)).toContain("App not found upstream");
+    });
+
+    test("review-qr F2：binding 中取消被拒，后台跑完仍是 done；waiting 中取消后即便飞书回了凭证也不建 bot", async () => {
+      // binding 阶段：cancel 返回 false，状态不被改写
+      let release!: (v: unknown) => void;
+      const gate = new Promise((r) => (release = r));
+      const mockRegisterApp = mock((options: any) => {
+        options.onQRCodeReady({ url: "https://qr.url", expireIn: 60 });
+        return Promise.resolve({ client_id: "cli_bind_cancel", client_secret: "sec", user_info: { open_id: "ou_c" } });
+      });
+      const start = await startRegistration(
+        { mode: "create", name: "绑定中取消" },
+        {
+          registerAppFn: mockRegisterApp as any,
+          testCredentialsFn: mock(async () => {
+            await gate; // 卡在 binding
+            return { openId: "ou_bot", name: "绑定中取消" };
+          }),
+          createClientFn: (() => ({ im: { v1: { message: { create: async () => ({}) } } } })) as any,
+          reconcileNowFn: mock(async () => {}),
+          getBotRecordFn: (() => ({ lastConnectedAt: Date.now() + 1000 })) as any,
+          pollConnectionIntervalMs: 5,
+          pollConnectionTimeoutMs: 200,
+        },
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(getRegistration(start.sessionId)!.status).toBe("binding");
+      expect(cancelRegistration(start.sessionId)).toBe(false);
+      release(null);
+      let session = getRegistration(start.sessionId);
+      const t0 = Date.now();
+      while (session && session.status === "binding" && Date.now() - t0 < 2000) {
+        await new Promise((r) => setTimeout(r, 10));
+        session = getRegistration(start.sessionId);
+      }
+      expect(session!.status).toBe("done");
+
+      // waiting 阶段取消后，飞书那边恰好也确认了：保持 cancelled，不建 bot
+      let confirm!: (v: unknown) => void;
+      const createBotFn = mock(() => {
+        throw new Error("不该建 bot");
+      });
+      const start2 = await startRegistration(
+        { mode: "create", name: "等待中取消" },
+        {
+          registerAppFn: mock((options: any) => {
+            options.onQRCodeReady({ url: "https://qr.url", expireIn: 60 });
+            return new Promise((r) => (confirm = r));
+          }) as any,
+          createBotFn: createBotFn as any,
+        },
+      );
+      expect(cancelRegistration(start2.sessionId)).toBe(true);
+      confirm({ client_id: "cli_late", client_secret: "sec" });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(getRegistration(start2.sessionId)!.status).toBe("cancelled");
+      expect(createBotFn).not.toHaveBeenCalled();
+    });
+
     test("binding 阶段连接超时失败 -> status 变为 error，已建好的 bot 保留", async () => {
       const mockRegisterApp = mock((options: any) => {
         options.onQRCodeReady({ url: "https://qr.url", expireIn: 60 });

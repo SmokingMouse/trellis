@@ -82,7 +82,7 @@ export function RegisterBotModal({
   }, []);
 
   const handleClose = useCallback(() => {
-    if (currentSessionIdRef.current && session?.status !== "done") {
+    if (currentSessionIdRef.current && session?.status === "waiting") {
       void cancelSession(currentSessionIdRef.current);
     }
     onClose();
@@ -270,6 +270,14 @@ export function RegisterBotModal({
           const res = await fetch(`/api/lark-bots/register/${encodeURIComponent(sessionId)}`, {
             cache: "no-store",
           });
+          if (res.status === 404) {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+            setSession((prev) =>
+              prev ? { ...prev, status: "error", error: "会话已失效（服务可能重启过），请重新生成二维码" } : prev,
+            );
+            return;
+          }
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             throw new Error(errData.error || "轮询状态失败");
@@ -718,7 +726,14 @@ export function RegisterBotModal({
               <span className="text-nano text-ink-faint">飞书授权会话进行中</span>
             )}
             <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="md" onClick={handleClose}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="md"
+                onClick={handleClose}
+                disabled={session?.status === "binding"}
+                title={session?.status === "binding" ? "已确认，正在完成绑定，稍等几秒" : undefined}
+              >
                 取消
               </Button>
               {(isExpired || isError) && (

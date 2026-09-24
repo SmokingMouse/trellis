@@ -146,9 +146,7 @@ export async function startRegistration(
       if (!resolved) {
         resolved = true;
         abortController.abort();
-        session.status = "error";
-        session.error = "获取扫码二维码超时（30s）";
-        scheduleCleanup(session);
+        finish(session, "error", "获取扫码二维码超时（30s）");
         reject(new Error("获取扫码二维码超时（30s）"));
       }
     }, 30_000);
@@ -186,7 +184,14 @@ export async function startRegistration(
 
     registerAppFn(options)
       .then((result) => handleRegistrationSuccess(session, req, result, deps))
-      .catch((err) => handleRegistrationError(session, err));
+      .catch((err) => {
+        handleRegistrationError(session, err);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(qrTimeout);
+          reject(new Error(session.error ?? "发起扫码注册失败"));
+        }
+      });
   });
 }
 
@@ -196,6 +201,8 @@ async function handleRegistrationSuccess(
   result: RegisterAppResult,
   deps?: LarkRegisterDeps,
 ): Promise<void> {
+  // 用户在确认前一刻取消了：尊重取消，不再建 bot（飞书侧应用已建，可稍后用「手动接入」绑定）。
+  if (isTerminal(session)) return;
   session.status = "binding";
   const bindingStartedAt = Date.now();
   session.appId = result.client_id;
@@ -278,8 +285,7 @@ async function handleRegistrationSuccess(
         session.welcomeSent = true;
       }
 
-      session.status = "done";
-      scheduleCleanup(session);
+      finish(session, "done");
     } else {
       // update 流程
       const bot = getBot(req.botId);
@@ -325,13 +331,10 @@ async function handleRegistrationSuccess(
       }
       session.connected = connected;
 
-      session.status = "done";
-      scheduleCleanup(session);
+      finish(session, "done");
     }
   } catch (error) {
-    session.status = "error";
-    session.error = error instanceof Error ? error.message : String(error);
-    scheduleCleanup(session);
+    finish(session, "error", error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -340,19 +343,29 @@ function handleRegistrationError(session: RegistrationSessionInternal, err: unkn
   const desc =
     (err as any)?.description || (err instanceof Error ? err.message : String(err));
   if (code === "access_denied") {
-    session.status = "denied";
-    session.error = "用户在飞书确认页取消授权";
+    finish(session, "denied", "用户在飞书确认页取消授权");
   } else if (code === "expired_token") {
-    session.status = "expired";
-    session.error = "二维码已过期，请重新发起";
+    finish(session, "expired", "二维码已过期，请重新发起");
   } else if (code === "abort" || session.abortController.signal.aborted) {
-    session.status = "cancelled";
-    session.error = "注册流程已取消";
+    finish(session, "cancelled", "注册流程已取消");
   } else {
-    session.status = "error";
-    session.error = desc;
+    finish(session, "error", desc);
   }
+}
+
+const TERMINAL_STATUSES: ReadonlySet<LarkRegisterStatus> = new Set(["done", "denied", "expired", "cancelled", "error"]);
+
+function isTerminal(session: RegistrationSessionInternal): boolean {
+  return TERMINAL_STATUSES.has(session.status);
+}
+
+/** 会话进终态只发生一次：先到先得，后到的一律不覆盖（取消、超时、后台绑定三条路会竞争）。 */
+function finish(session: RegistrationSessionInternal, status: LarkRegisterStatus, error: string | null = null): boolean {
+  if (isTerminal(session)) return false;
+  session.status = status;
+  session.error = error;
   scheduleCleanup(session);
+  return true;
 }
 
 /** 获取会话当前公开状态。 */
@@ -368,23 +381,17 @@ export function getRegistration(sessionId: string): LarkRegisterSession | null {
   return publicSession;
 }
 
-/** 取消进行中的会话。 */
+/**
+ * 取消会话。只有 waiting（用户还没在飞书确认）能取消；binding 时飞书侧应用已建好，
+ * 半截中止只会留下「有 bot 没管理员」之类的残局，所以让它跑完，返回 false。终态幂等返回 true。
+ */
 export function cancelRegistration(sessionId: string): boolean {
   const session = getSessionMap().get(sessionId);
   if (!session) return false;
-  if (
-    session.status === "done" ||
-    session.status === "cancelled" ||
-    session.status === "denied" ||
-    session.status === "expired"
-  ) {
-    return true;
-  }
+  if (isTerminal(session)) return true;
+  if (session.status !== "waiting") return false;
   session.abortController.abort();
-  session.status = "cancelled";
-  session.error = "注册流程已取消";
-  scheduleCleanup(session);
-  return true;
+  return finish(session, "cancelled", "注册流程已取消");
 }
 
 /** 测试辅助：清空会话缓存 */

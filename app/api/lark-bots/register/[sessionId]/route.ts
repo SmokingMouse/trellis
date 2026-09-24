@@ -24,6 +24,9 @@ export async function DELETE(
   if (!session) {
     return Response.json({ error: "会话不存在或已结束" }, { status: 404 });
   }
-  cancelRegistration(sessionId);
+  if (!cancelRegistration(sessionId)) {
+    // binding：飞书侧已确认、正在写库 / 连接，跑完比半截中止干净
+    return Response.json({ error: "已确认，正在完成绑定，无法取消" }, { status: 409 });
+  }
   return Response.json({ ok: true });
 }

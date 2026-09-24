@@ -192,10 +192,12 @@ async function reconcile(): Promise<void> {
  * 触发一次立即对账。可在路由 bundle 调用，经 globalThis 桥接到 manager 实例。
  */
 export async function reconcileNow(): Promise<void> {
+  // 桥没挂上 = manager 没在跑（TRELLIS_LARK=off 或 instrumentation 未就绪）。此时绝不能在调用方 bundle
+  // 里跑本地 reconcile：那份 ACTIVE 是空的，会另起一套影子长连接。等 manager 自己的下一轮对账即可。
   if (globalManager.__trellisLarkReconcileNow) {
     await globalManager.__trellisLarkReconcileNow();
   } else {
-    await reconcile();
+    console.warn("[lark] reconcileNow: manager 未启动，跳过立即对账（等下一轮 15s 对账）");
   }
 }
 
