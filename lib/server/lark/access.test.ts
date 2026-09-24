@@ -34,6 +34,7 @@ const {
   handleCardActionTrigger,
   handleAdminCommand,
   setGlobalReplayHandler,
+  replayDeferredApprovals,
   REPLAY_EXPIRY_MS,
 } = await import("./access");
 
@@ -777,6 +778,62 @@ describe("Lark Access Control (fj-access)", () => {
 
       expect(replies.length).toBe(1);
       expect(getLarkBotMember(bot.id, "ou_race_applicant")?.status).toBe("denied");
+    });
+  });
+
+  describe("10. 设置页 / API 批准：路由 bundle 没有重放处理器，交给长连接进程对账补重放", () => {
+    function client() {
+      const replies: string[] = [];
+      const c: any = {
+        im: { v1: { message: {
+          reply: async (req: { data: { content: string } }) => {
+            replies.push(req.data.content);
+            return { code: 0, data: { message_id: `om_r_${replies.length}` } };
+          },
+          create: async () => ({ code: 0, data: { message_id: "om_c" } }),
+        } } },
+      };
+      return { c, replies };
+    }
+
+    test("无重放处理器时批准：状态变 approved，挂起消息原样保留，不提前回复申请人", async () => {
+      setGlobalReplayHandler(null);
+      const bot = createLarkBot({ name: "defer-bot", appId: "defer_app_1", appSecret: "sec", accessMode: "approval" });
+      const member = upsertPendingMember({
+        botId: bot.id, openId: "ou_defer", pendingMessage: { messageId: "om_defer_1", chatId: "oc_defer" },
+        pendingPreview: "hi", pendingChatId: "oc_defer",
+      }).member;
+      const { c, replies } = client();
+
+      const res = await decideMember({ botId: bot.id, openIdOrCode: { id: member.id }, decision: "approved", decidedBy: "ui", client: c });
+
+      expect(res.ok).toBe(true);
+      expect(res.replayed).toBe(false);
+      expect(replies.length).toBe(0);
+      const after = getLarkBotMember(bot.id, "ou_defer");
+      expect(after?.status).toBe("approved");
+      expect(after?.pendingMessage).toBeTruthy();
+    });
+
+    test("长连接进程对账补重放：只放一次，再对账不重复", async () => {
+      setGlobalReplayHandler(null);
+      const bot = createLarkBot({ name: "defer-bot-2", appId: "defer_app_2", appSecret: "sec", accessMode: "approval" });
+      const member = upsertPendingMember({
+        botId: bot.id, openId: "ou_defer2", pendingMessage: { messageId: "om_defer_2", chatId: "oc_defer2" },
+        pendingPreview: "hi", pendingChatId: "oc_defer2",
+      }).member;
+      const { c, replies } = client();
+      await decideMember({ botId: bot.id, openIdOrCode: { id: member.id }, decision: "approved", decidedBy: "ui", client: c });
+
+      const replayed: string[] = [];
+      setGlobalReplayHandler((_b, _c, q) => { replayed.push(q.messageId); return true; });
+      const [n1, n2] = await Promise.all([replayDeferredApprovals(bot.id, c), replayDeferredApprovals(bot.id, c)]);
+
+      expect(n1 + n2).toBe(1);
+      expect(replayed).toEqual(["om_defer_2"]);
+      expect(replies.length).toBe(1);
+      expect(await replayDeferredApprovals(bot.id, c)).toBe(0);
+      expect(getLarkBotMember(bot.id, "ou_defer2")?.pendingMessage).toBeFalsy();
     });
   });
 });

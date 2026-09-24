@@ -504,6 +504,18 @@ export function getLarkBotMemberByCode(botId: string, code: string): LarkBotMemb
   return row ? rowToMember(row) : null;
 }
 
+/** 已批准但挂起消息还没重放的成员：设置页 / API 批准留下的，等长连接进程对账补重放。 */
+export function listApprovedMembersWithPending(botId: string): LarkBotMemberRecord[] {
+  return (
+    getDB()
+      .query(
+        `SELECT ${MEMBER_COLUMNS} FROM lark_bot_members
+         WHERE bot_id = ? AND status = 'approved' AND pending_message IS NOT NULL`,
+      )
+      .all(botId) as MemberRow[]
+  ).map(rowToMember);
+}
+
 export function getLarkBotMemberById(id: string): LarkBotMemberRecord | null {
   const row = getDB()
     .query(`SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE id = ?`)
