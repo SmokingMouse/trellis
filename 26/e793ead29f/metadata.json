@@ -1,0 +1,24 @@
+{
+  "id": "26e793ead29f",
+  "timestamp": "2026-09-24T18:54:45+08:00",
+  "branch": "feat/lark-qr-register",
+  "commitHash": "07751e7fd8b1dba445baaffaf65533dc092d37e1",
+  "commitMessage": "fix(lark): 标准 scope 集改用飞书实有名字；收群全部消息改为按需申请",
+  "filesModified": [
+    "lib/server/lark/register.test.ts",
+    "lib/server/lark/register.ts",
+    "lib/server/lark/scopes.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 1014,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 1014,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
