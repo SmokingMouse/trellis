@@ -1,0 +1,26 @@
+{
+  "id": "53df0b2057cf",
+  "timestamp": "2026-09-24T19:14:31+08:00",
+  "branch": "feat/lark-qr-register",
+  "commitHash": "f71007ee65bb20cd281cbe1fa3d9b54879d1828e",
+  "commitMessage": "fix(lark): 修 review-qr 两处状态机行为错 + 两条建议",
+  "filesModified": [
+    "app/api/lark-bots/register/[sessionId]/route.ts",
+    "app/settings/bots/RegisterBotModal.tsx",
+    "lib/server/lark/manager.ts",
+    "lib/server/lark/register.test.ts",
+    "lib/server/lark/register.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 97,
+    "humanModified": 36,
+    "humanRemoved": 0,
+    "totalLinesChanged": 133,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
