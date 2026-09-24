@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as lark from "@larksuiteoapi/node-sdk";
 import { buildLarkCard } from "./card";
-import { markdownToLarkText } from "./protocol";
+import { cardAtToTextAt, markdownToLarkText } from "./protocol";
 
 export type LarkSdkClient = lark.Client;
 export type LarkBotInfo = { openId: string; name: string };
@@ -351,10 +351,10 @@ export async function sendLarkText(args: LarkSendOptions): Promise<LarkSentMessa
     console.warn(`[lark] 互动卡片发送失败 (${formatErrorBrief(cardError)})，降级为纯文本`);
   }
 
-  // 2. 降级回纯文本（text）
+  // 2. 降级回纯文本（text）；卡片的 <at> 写法要换成 text 的，否则 @ 人会变成一串原文
   const content = args.textFallback
-    ? JSON.stringify({ text: args.textFallback })
-    : markdownToLarkText(args.markdown);
+    ? JSON.stringify({ text: cardAtToTextAt(args.textFallback) })
+    : markdownToLarkText(cardAtToTextAt(args.markdown));
 
   if (mode !== "plain" && args.replyToMessageId) {
     try {

@@ -1,12 +1,20 @@
 import "server-only";
+import crypto from "node:crypto";
 import {
   LARK_ACK_MODES,
+  LARK_ACCESS_MODES,
   LARK_GROUP_TRIGGERS,
+  LARK_MEMBER_ROLES,
+  LARK_MEMBER_STATUSES,
   LARK_POLICY_DEFAULTS,
   LARK_REPLY_MODES,
   LARK_SESSION_POLICIES,
+  type LarkAccessMode,
   type LarkBot,
   type LarkBotInput,
+  type LarkBotMember,
+  type LarkBotMemberRole,
+  type LarkBotMemberStatus,
   type LarkBotPolicy,
   type LarkChat,
   type LarkChatType,
@@ -45,6 +53,7 @@ type BotRow = {
   reply_mode: string | null;
   session_policy: string | null;
   ack_mode: string | null;
+  access_mode: string | null;
 };
 
 type ChatRow = {
@@ -59,9 +68,34 @@ type ChatRow = {
   created_at: number;
 };
 
+export type MemberRow = {
+  id: string;
+  bot_id: string;
+  open_id: string;
+  role: string;
+  status: string;
+  code: string;
+  name: string | null;
+  pending_message: string | null;
+  pending_preview: string | null;
+  pending_chat_id: string | null;
+  last_sender_notified_at: number | null;
+  last_admin_notified_at: number | null;
+  applied_at: number;
+  decided_at: number | null;
+  decided_by: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
 const BOT_COLUMNS = `id, name, app_id, app_secret, agent_id, workspace_path, enabled,
   bot_open_id, bot_name, last_connected_at, last_error, created_at, updated_at,
-  group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode`;
+  group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode, access_mode`;
+
+const MEMBER_COLUMNS = `id, bot_id, open_id, role, status, code, name,
+  pending_message, pending_preview, pending_chat_id,
+  last_sender_notified_at, last_admin_notified_at,
+  applied_at, decided_at, decided_by, created_at, updated_at`;
 
 /** 读侧宽容：库里出现未知值（手改 / 老版本回滚）退回默认，而不是让整个机器人列表炸掉。 */
 function asEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -84,6 +118,7 @@ function rowToPolicy(row: BotRow): LarkBotPolicy {
     sessionPolicy: asEnum(row.session_policy, LARK_SESSION_POLICIES, d.sessionPolicy),
     replyMode: asEnum(row.reply_mode, LARK_REPLY_MODES, d.replyMode),
     ackMode: asEnum(row.ack_mode, LARK_ACK_MODES, d.ackMode),
+    accessMode: asEnum(row.access_mode, LARK_ACCESS_MODES, d.accessMode),
   };
 }
 
@@ -117,6 +152,34 @@ function rowToChat(row: ChatRow): LarkChat {
     title: row.title,
     lastMessageAt: row.last_message_at,
     createdAt: row.created_at,
+  };
+}
+
+export type LarkBotMemberRecord = LarkBotMember & {
+  pendingMessage: string | null;
+  lastSenderNotifiedAt: number | null;
+  lastAdminNotifiedAt: number | null;
+};
+
+function rowToMember(row: MemberRow): LarkBotMemberRecord {
+  return {
+    id: row.id,
+    botId: row.bot_id,
+    openId: row.open_id,
+    role: asEnum(row.role, LARK_MEMBER_ROLES, "member"),
+    status: asEnum(row.status, LARK_MEMBER_STATUSES, "pending"),
+    code: row.code,
+    name: row.name,
+    pendingMessage: row.pending_message,
+    pendingPreview: row.pending_preview,
+    pendingChatId: row.pending_chat_id,
+    lastSenderNotifiedAt: row.last_sender_notified_at,
+    lastAdminNotifiedAt: row.last_admin_notified_at,
+    appliedAt: row.applied_at,
+    decidedAt: row.decided_at,
+    decidedBy: row.decided_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -187,12 +250,15 @@ export function createLarkBot(input: LarkBotInput): LarkBot {
     ackMode: input.ackMode === undefined
       ? d.ackMode
       : requireEnum(input.ackMode, LARK_ACK_MODES, "ackMode"),
+    accessMode: input.accessMode === undefined
+      ? d.accessMode
+      : requireEnum(input.accessMode, LARK_ACCESS_MODES, "accessMode"),
   };
   getDB().prepare(
     `INSERT INTO lark_bots
       (id, name, app_id, app_secret, agent_id, workspace_path, enabled, created_at, updated_at,
-       group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode, access_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     name,
@@ -208,6 +274,7 @@ export function createLarkBot(input: LarkBotInput): LarkBot {
     policy.replyMode,
     policy.sessionPolicy,
     policy.ackMode,
+    policy.accessMode,
   );
   return getLarkBot(id)!;
 }
@@ -227,7 +294,7 @@ export function updateLarkBot(id: string, patch: Partial<LarkBotInput>): LarkBot
   if (patch.agentId !== undefined) put("agent_id", patch.agentId?.trim() || null);
   if (patch.workspacePath !== undefined) put("workspace_path", patch.workspacePath?.trim() || null);
   if (patch.enabled !== undefined) put("enabled", patch.enabled ? 1 : 0);
-  // S134 四旋钮：undefined = 不改；给了就必须是合法档位。
+  // S134 四旋钮 + accessMode：undefined = 不改；给了就必须是合法档位。
   if (patch.groupTrigger !== undefined) {
     put("group_trigger", requireEnum(patch.groupTrigger, LARK_GROUP_TRIGGERS, "groupTrigger"));
   }
@@ -240,6 +307,9 @@ export function updateLarkBot(id: string, patch: Partial<LarkBotInput>): LarkBot
   }
   if (patch.ackMode !== undefined) {
     put("ack_mode", requireEnum(patch.ackMode, LARK_ACK_MODES, "ackMode"));
+  }
+  if (patch.accessMode !== undefined) {
+    put("access_mode", requireEnum(patch.accessMode, LARK_ACCESS_MODES, "accessMode"));
   }
   if (sets.length === 0) return getLarkBot(id);
   put("updated_at", Date.now());
@@ -297,7 +367,7 @@ export function ensureLarkChat(
   botId: string,
   chatId: string,
   chatType: LarkChatType,
-  title: string,
+  title: string | null,
   now: number,
 ): LarkChat {
   const current = getLarkChat(botId, chatId);
@@ -386,6 +456,294 @@ export function upsertLarkThread(row: {
 export function larkThreadTail(botId: string, threadId: string): string | null {
   return larkThreadTailIn(getDB(), botId, threadId);
 }
+
+// ── 对话权限审批（fj-access）：成员与管理员管理 ──
+
+export function generateMemberCode(botId: string): string {
+  const db = getDB();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = crypto.randomBytes(2).toString("hex").toLowerCase();
+    const existing = db
+      .prepare("SELECT 1 FROM lark_bot_members WHERE bot_id = ? AND code = ?")
+      .get(botId, code);
+    if (!existing) return code;
+  }
+  return crypto.randomBytes(4).toString("hex").slice(0, 4).toLowerCase();
+}
+
+export function listLarkBotMembers(botId: string): LarkBotMemberRecord[] {
+  return (
+    getDB()
+      .query(`SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE bot_id = ? ORDER BY applied_at DESC, created_at DESC`)
+      .all(botId) as MemberRow[]
+  ).map(rowToMember);
+}
+
+export function listLarkBotAdmins(botId: string): LarkBotMemberRecord[] {
+  return (
+    getDB()
+      .query(
+        `SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE bot_id = ? AND role = 'admin' AND status = 'approved' ORDER BY created_at ASC`,
+      )
+      .all(botId) as MemberRow[]
+  ).map(rowToMember);
+}
+
+export function getLarkBotMember(botId: string, openId: string): LarkBotMemberRecord | null {
+  const row = getDB()
+    .query(`SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE bot_id = ? AND open_id = ?`)
+    .get(botId, openId) as MemberRow | undefined;
+  return row ? rowToMember(row) : null;
+}
+
+export function getLarkBotMemberByCode(botId: string, code: string): LarkBotMemberRecord | null {
+  const cleanCode = code.trim().toLowerCase();
+  const row = getDB()
+    .query(`SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE bot_id = ? AND LOWER(code) = ?`)
+    .get(botId, cleanCode) as MemberRow | undefined;
+  return row ? rowToMember(row) : null;
+}
+
+export function getLarkBotMemberById(id: string): LarkBotMemberRecord | null {
+  const row = getDB()
+    .query(`SELECT ${MEMBER_COLUMNS} FROM lark_bot_members WHERE id = ?`)
+    .get(id) as MemberRow | undefined;
+  return row ? rowToMember(row) : null;
+}
+
+export function upsertPendingMember(args: {
+  botId: string;
+  openId: string;
+  name?: string | null;
+  pendingMessage: unknown;
+  pendingPreview: string;
+  pendingChatId: string;
+  now?: number;
+}): {
+  member: LarkBotMemberRecord;
+  shouldNotifySender: boolean;
+  shouldNotifyAdmin: boolean;
+} {
+  const now = args.now ?? Date.now();
+  const preview = args.pendingPreview.slice(0, 200);
+  const pendingMsgJson = JSON.stringify(args.pendingMessage);
+  const existing = getLarkBotMember(args.botId, args.openId);
+
+  if (existing) {
+    // 已经 approved 的用户不进入 pending
+    if (existing.status === "approved") {
+      return { member: existing, shouldNotifySender: false, shouldNotifyAdmin: false };
+    }
+    // 24 小时内同一申请人不重复提示发送人
+    const shouldNotifySender =
+      !existing.lastSenderNotifiedAt || now - existing.lastSenderNotifiedAt >= 24 * 3600 * 1000;
+    // 1 小时内同一申请人不重复通知 admin
+    const shouldNotifyAdmin =
+      !existing.lastAdminNotifiedAt || now - existing.lastAdminNotifiedAt >= 3600 * 1000;
+
+    const nextSenderNotified = shouldNotifySender ? now : existing.lastSenderNotifiedAt;
+    const nextAdminNotified = shouldNotifyAdmin ? now : existing.lastAdminNotifiedAt;
+
+    getDB().prepare(
+      `UPDATE lark_bot_members SET
+        status = 'pending',
+        pending_message = ?,
+        pending_preview = ?,
+        pending_chat_id = ?,
+        name = COALESCE(?, name),
+        last_sender_notified_at = ?,
+        last_admin_notified_at = ?,
+        applied_at = ?,
+        updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      pendingMsgJson,
+      preview,
+      args.pendingChatId,
+      args.name || null,
+      nextSenderNotified,
+      nextAdminNotified,
+      now,
+      now,
+      existing.id,
+    );
+
+    return {
+      member: getLarkBotMember(args.botId, args.openId)!,
+      shouldNotifySender,
+      shouldNotifyAdmin,
+    };
+  }
+
+  // 新建申请
+  const id = crypto.randomUUID();
+  const code = generateMemberCode(args.botId);
+  getDB().prepare(
+    `INSERT INTO lark_bot_members
+      (id, bot_id, open_id, role, status, code, name, pending_message, pending_preview, pending_chat_id,
+       last_sender_notified_at, last_admin_notified_at, applied_at, created_at, updated_at)
+     VALUES (?, ?, ?, 'member', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    args.botId,
+    args.openId,
+    code,
+    args.name || null,
+    pendingMsgJson,
+    preview,
+    args.pendingChatId,
+    now,
+    now,
+    now,
+    now,
+    now,
+  );
+
+  return {
+    member: getLarkBotMember(args.botId, args.openId)!,
+    shouldNotifySender: true,
+    shouldNotifyAdmin: true,
+  };
+}
+
+export function preapproveMember(args: {
+  botId: string;
+  openId: string;
+  role?: LarkBotMemberRole;
+  name?: string | null;
+  now?: number;
+}): LarkBotMemberRecord {
+  const now = args.now ?? Date.now();
+  const role = args.role ?? "member";
+  const existing = getLarkBotMember(args.botId, args.openId);
+  if (existing) {
+    getDB().prepare(
+      `UPDATE lark_bot_members SET
+        status = 'approved',
+        role = ?,
+        name = COALESCE(?, name),
+        decided_at = ?,
+        decided_by = 'admin',
+        updated_at = ?
+       WHERE id = ?`,
+    ).run(role, args.name || null, now, now, existing.id);
+    return getLarkBotMember(args.botId, args.openId)!;
+  }
+  const id = crypto.randomUUID();
+  const code = generateMemberCode(args.botId);
+  getDB().prepare(
+    `INSERT INTO lark_bot_members
+      (id, bot_id, open_id, role, status, code, name, applied_at, decided_at, decided_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'approved', ?, ?, ?, ?, 'admin', ?, ?)`,
+  ).run(
+    id,
+    args.botId,
+    args.openId,
+    role,
+    code,
+    args.name || null,
+    now,
+    now,
+    now,
+    now,
+  );
+  return getLarkBotMember(args.botId, args.openId)!;
+}
+
+export function updateMemberRole(
+  botId: string,
+  openId: string,
+  role: LarkBotMemberRole,
+): LarkBotMemberRecord | null {
+  const existing = getLarkBotMember(botId, openId);
+  if (!existing) return null;
+  getDB().prepare(
+    "UPDATE lark_bot_members SET role = ?, updated_at = ? WHERE id = ?",
+  ).run(role, Date.now(), existing.id);
+  return getLarkBotMember(botId, openId);
+}
+
+export function setMemberDecision(args: {
+  botId: string;
+  openId: string;
+  status: LarkBotMemberStatus;
+  decidedBy: string;
+  now?: number;
+}): LarkBotMemberRecord | null {
+  const existing = getLarkBotMember(args.botId, args.openId);
+  if (!existing) return null;
+  const now = args.now ?? Date.now();
+  getDB().prepare(
+    `UPDATE lark_bot_members SET
+      status = ?,
+      decided_at = ?,
+      decided_by = ?,
+      updated_at = ?
+     WHERE id = ?`,
+  ).run(args.status, now, args.decidedBy, now, existing.id);
+  return getLarkBotMember(args.botId, args.openId);
+}
+
+export function clearMemberPendingMessage(botId: string, openId: string): void {
+  getDB().prepare(
+    `UPDATE lark_bot_members SET
+      pending_message = NULL,
+      pending_preview = NULL,
+      pending_chat_id = NULL,
+      updated_at = ?
+     WHERE bot_id = ? AND open_id = ?`,
+  ).run(Date.now(), botId, openId);
+}
+
+/**
+ * 原子领取并清空挂起消息：并发的多次批准 / 拒绝里只有一次拿得到，其余拿到 null。
+ * 「还有没有挂起消息」和「清空」必须在同一个 IMMEDIATE 事务里——先读快照、await 网络
+ * 之后才清空，两次审批就会各重放一遍（review-access F1，同 claimLarkInboxIn 的去重范式）。
+ */
+export function takeMemberPendingMessage(
+  botId: string,
+  openId: string,
+  now = Date.now(),
+): { pendingMessage: string; pendingChatId: string | null; appliedAt: number } | null {
+  const db = getDB();
+  const take = db.transaction(() => {
+    const row = db
+      .prepare(
+        `SELECT pending_message, pending_chat_id, applied_at FROM lark_bot_members
+         WHERE bot_id = ? AND open_id = ? AND pending_message IS NOT NULL`,
+      )
+      .get(botId, openId) as
+      | { pending_message: string; pending_chat_id: string | null; applied_at: number }
+      | null;
+    if (!row) return null;
+    db.prepare(
+      `UPDATE lark_bot_members SET
+        pending_message = NULL,
+        pending_preview = NULL,
+        pending_chat_id = NULL,
+        updated_at = ?
+       WHERE bot_id = ? AND open_id = ?`,
+    ).run(now, botId, openId);
+    return {
+      pendingMessage: row.pending_message,
+      pendingChatId: row.pending_chat_id,
+      appliedAt: row.applied_at,
+    };
+  });
+  return take.immediate();
+}
+
+export function deleteLarkBotMember(botId: string, openId: string): boolean {
+  return (
+    getDB().prepare("DELETE FROM lark_bot_members WHERE bot_id = ? AND open_id = ?").run(botId, openId)
+      .changes > 0
+  );
+}
+
+export function deleteLarkBotMemberById(id: string): boolean {
+  return getDB().prepare("DELETE FROM lark_bot_members WHERE id = ?").run(id).changes > 0;
+}
+
 
 export function backfillLarkThreadFromOutbox(row: {
   botId: string;
