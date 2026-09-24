@@ -1,28 +1,23 @@
 {
   "id": "02fe78af1fec",
-  "timestamp": "2026-09-15T21:55:28+08:00",
-  "branch": "feat/lark-post-rich-text",
-  "commitHash": "6a49ba4ccfb29bf5d61cf6cf3f84169305a7ea78",
+  "timestamp": "2026-09-24T14:14:46+08:00",
+  "branch": "feat/lark-post-richtext",
+  "commitHash": "2d474094290da9262f08798c8c6d80e6cf7b07ff",
   "commitMessage": "wip(lark): post 富文本收发——升级前存档",
   "filesModified": [
     "lib/server/lark/protocol.ts",
-    "lib/server/lark/sdk.ts",
     "scripts/test-lark-bot.ts"
   ],
-  "sessions": 1,
+  "sessions": 2,
   "attribution": {
-    "agentLines": 149,
-    "agentRemoved": 13,
+    "agentLines": 0,
+    "agentRemoved": 0,
     "humanAdded": 0,
     "humanModified": 0,
     "humanRemoved": 0,
-    "totalLinesChanged": 162,
-    "agentPercentage": 92.0,
-    "agentFiles": [
-      "lib/server/lark/protocol.ts",
-      "lib/server/lark/sdk.ts",
-      "scripts/test-lark-bot.ts"
-    ]
+    "totalLinesChanged": 0,
+    "agentPercentage": 0.0,
+    "agentFiles": []
   },
   "reason": "commit",
   "rewrittenFrom": "bba37d3d494fc584c16170a41a144e8f25137d58"

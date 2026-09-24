@@ -1,0 +1,17 @@
+{
+  "sessionId": "3e476eea-848a-4dbe-b78b-ebe967cbb059",
+  "agent": "claude-code",
+  "model": "auto_model/alwaysday1_max",
+  "branch": "feat/lark-post-richtext",
+  "startedAt": "2026-09-08T14:48:44+08:00",
+  "condensedAt": "2026-09-24T14:14:46+08:00",
+  "reason": "commit",
+  "turns": 2,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 0,
+    "output": 0,
+    "cached": 0
+  },
+  "tools": []
+}
