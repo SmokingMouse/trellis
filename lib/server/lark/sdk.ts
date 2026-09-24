@@ -3,7 +3,7 @@ import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as lark from "@larksuiteoapi/node-sdk";
-import { buildLarkCard } from "./card";
+import { buildLarkCard, type FeishuCardV2 } from "./card";
 import { cardAtToTextAt, markdownToLarkText } from "./protocol";
 
 export type LarkSdkClient = lark.Client;
@@ -79,6 +79,7 @@ export type LarkSendOptions = {
   summary?: string;
   workspacePath?: string;
   textFallback?: string;
+  card?: FeishuCardV2;
 };
 
 type SentData = { message_id?: string; thread_id?: string } | undefined;
@@ -306,18 +307,20 @@ export async function sendLarkText(args: LarkSendOptions): Promise<LarkSentMessa
 
   // 1. 尝试卡片发送（Schema 2.0 interactive）
   try {
-    const card = await buildLarkCard(args.markdown, {
-      sessionUrl: args.sessionUrl,
-      title: args.title,
-      status: args.status,
-      summary: args.summary,
-      uploadImage: (src) =>
-        uploadLarkImage({
-          client: args.client,
-          image: src,
-          workspacePath: args.workspacePath,
-        }),
-    });
+    const card =
+      args.card ??
+      (await buildLarkCard(args.markdown, {
+        sessionUrl: args.sessionUrl,
+        title: args.title,
+        status: args.status,
+        summary: args.summary,
+        uploadImage: (src) =>
+          uploadLarkImage({
+            client: args.client,
+            image: src,
+            workspacePath: args.workspacePath,
+          }),
+      }));
     const interactiveContent = JSON.stringify(card);
 
     if (mode !== "plain" && args.replyToMessageId) {

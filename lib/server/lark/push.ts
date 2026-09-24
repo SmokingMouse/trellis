@@ -1,4 +1,6 @@
 import "server-only";
+import type { FeishuCardV2 } from "./card";
+import { parseCardPassthrough } from "./final-answer";
 import { LARK_TEXT_LIMIT } from "./protocol";
 import {
   createLarkClient,
@@ -42,6 +44,7 @@ export type TaskLarkPushDeps = {
     workspacePath?: string;
     title?: string;
     status?: "done" | "error";
+    card?: FeishuCardV2;
   }) => Promise<LarkSentMessage>;
   recordOutbox: typeof recordLarkOutbox;
   advanceChat: typeof advanceLarkChat;
@@ -119,19 +122,24 @@ export async function pushTaskRunToLark(
       : null;
     const base = deps.publicUrl()?.trim().replace(/\/+$/, "");
     const sessionUrl = link && base ? `${base}${link}` : undefined;
+
+    const card = parseCardPassthrough(args.markdown);
+    const textFallback = card
+      ? card.config?.summary?.content || card.header?.title?.content || "（卡片消息）"
+      : taskLarkMarkdown(args.markdown, link ?? "/", deps.publicUrl());
+
     const sent = await deps.sendText({
       client: deps.createClient(bot.appId, bot.appSecret),
       chatId: args.chatId,
       markdown: args.markdown,
-      textFallback: taskLarkMarkdown(args.markdown, link ?? "/", deps.publicUrl()),
+      textFallback,
       // 任务消息没有可引用的入站锚点；群聊必须顶层发送以成为话题根，私聊同样用
       // chat_id create，后续引用由 outbox、非引用消息由既有 p2p 链尾语义承接。
       mode: "plain",
       sessionUrl,
       // 不传的话 workspace 里的图片一律进不了白名单、只能降级成文本（复审 n2）。
       workspacePath: bot.workspacePath ?? undefined,
-      title: args.title,
-      status: args.status,
+      ...(card ? { card } : { title: args.title, status: args.status }),
     });
     if (!sent.messageId) {
       console.error(`[lark] task push returned no message_id bot=${args.botId} chat=${args.chatId}`);
