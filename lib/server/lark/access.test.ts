@@ -711,4 +711,72 @@ describe("Lark Access Control (fj-access)", () => {
       expect(replyCount).toBe(0); // 静默不回
     });
   });
+
+  describe("9. 并发审批幂等（review-access F1）", () => {
+    function countingClient() {
+      const replies: string[] = [];
+      const client: any = {
+        im: {
+          v1: {
+            message: {
+              reply: async (req: { data: { content: string } }) => {
+                replies.push(req.data.content);
+                await Bun.sleep(5); // 模拟网络往返：旧实现正是在这个 await 窗口里被第二次审批穿过
+                return { code: 0, data: { message_id: `om_reply_${replies.length}` } };
+              },
+              create: async () => ({ code: 0, data: { message_id: "om_create" } }),
+            },
+          },
+        },
+      };
+      return { client, replies };
+    }
+
+    function pendingApplicant(botId: string) {
+      return upsertPendingMember({
+        botId,
+        openId: "ou_race_applicant",
+        pendingMessage: { messageId: "om_race_1", chatId: "oc_race_1", text: "race message" },
+        pendingPreview: "race message",
+        pendingChatId: "oc_race_1",
+      }).member;
+    }
+
+    test("同一申请被并发批准两次：挂起消息只重放一次、申请人只收到一条通过提示", async () => {
+      const bot = createLarkBot({ name: "race-bot", appId: "race_app_ok", appSecret: "sec", accessMode: "approval" });
+      const member = pendingApplicant(bot.id);
+      const replayed: string[] = [];
+      setGlobalReplayHandler((_botId, _client, queued) => {
+        replayed.push(queued.messageId);
+        return true;
+      });
+      const { client, replies } = countingClient();
+
+      const results = await Promise.all([
+        decideMember({ botId: bot.id, openIdOrCode: { code: member.code }, decision: "approved", decidedBy: "card", client }),
+        decideMember({ botId: bot.id, openIdOrCode: { code: member.code }, decision: "approved", decidedBy: "ui", client }),
+      ]);
+
+      expect(replayed).toEqual(["om_race_1"]);
+      expect(replies.length).toBe(1);
+      expect(results.filter((r) => r.replayed).length).toBe(1);
+      expect(results.every((r) => r.ok)).toBe(true);
+      expect(getLarkBotMember(bot.id, "ou_race_applicant")?.status).toBe("approved");
+      expect(getLarkBotMember(bot.id, "ou_race_applicant")?.pendingMessage).toBeFalsy();
+    });
+
+    test("同一申请被并发拒绝两次：申请人只收到一条未通过通知", async () => {
+      const bot = createLarkBot({ name: "race-bot-2", appId: "race_app_deny", appSecret: "sec", accessMode: "approval" });
+      const member = pendingApplicant(bot.id);
+      const { client, replies } = countingClient();
+
+      await Promise.all([
+        decideMember({ botId: bot.id, openIdOrCode: { code: member.code }, decision: "denied", decidedBy: "card", client }),
+        decideMember({ botId: bot.id, openIdOrCode: { code: member.code }, decision: "denied", decidedBy: "cmd", client }),
+      ]);
+
+      expect(replies.length).toBe(1);
+      expect(getLarkBotMember(bot.id, "ou_race_applicant")?.status).toBe("denied");
+    });
+  });
 });

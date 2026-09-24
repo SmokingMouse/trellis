@@ -695,6 +695,44 @@ export function clearMemberPendingMessage(botId: string, openId: string): void {
   ).run(Date.now(), botId, openId);
 }
 
+/**
+ * 原子领取并清空挂起消息：并发的多次批准 / 拒绝里只有一次拿得到，其余拿到 null。
+ * 「还有没有挂起消息」和「清空」必须在同一个 IMMEDIATE 事务里——先读快照、await 网络
+ * 之后才清空，两次审批就会各重放一遍（review-access F1，同 claimLarkInboxIn 的去重范式）。
+ */
+export function takeMemberPendingMessage(
+  botId: string,
+  openId: string,
+  now = Date.now(),
+): { pendingMessage: string; pendingChatId: string | null; appliedAt: number } | null {
+  const db = getDB();
+  const take = db.transaction(() => {
+    const row = db
+      .prepare(
+        `SELECT pending_message, pending_chat_id, applied_at FROM lark_bot_members
+         WHERE bot_id = ? AND open_id = ? AND pending_message IS NOT NULL`,
+      )
+      .get(botId, openId) as
+      | { pending_message: string; pending_chat_id: string | null; applied_at: number }
+      | null;
+    if (!row) return null;
+    db.prepare(
+      `UPDATE lark_bot_members SET
+        pending_message = NULL,
+        pending_preview = NULL,
+        pending_chat_id = NULL,
+        updated_at = ?
+       WHERE bot_id = ? AND open_id = ?`,
+    ).run(now, botId, openId);
+    return {
+      pendingMessage: row.pending_message,
+      pendingChatId: row.pending_chat_id,
+      appliedAt: row.applied_at,
+    };
+  });
+  return take.immediate();
+}
+
 export function deleteLarkBotMember(botId: string, openId: string): boolean {
   return (
     getDB().prepare("DELETE FROM lark_bot_members WHERE bot_id = ? AND open_id = ?").run(botId, openId)

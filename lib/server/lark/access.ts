@@ -3,7 +3,6 @@ import type { LarkChatType } from "@/lib/lark-types";
 import type { FeishuCardV2 } from "./card";
 import { createLarkClient, sendLarkText, type LarkSdkClient } from "./sdk";
 import {
-  clearMemberPendingMessage,
   getLarkBotMember,
   getLarkBotMemberByCode,
   getLarkBotMemberById,
@@ -11,6 +10,7 @@ import {
   listLarkBotAdmins,
   listLarkBotMembers,
   setMemberDecision,
+  takeMemberPendingMessage,
   type LarkBotMemberRecord,
 } from "./store";
 
@@ -163,6 +163,16 @@ export function setGlobalReplayHandler(fn: ReplayHandler): void {
   _globalReplayHandler = fn;
 }
 
+/** 挂起消息是入队所需字段的 JSON；坏数据当没有，不让一条脏行卡住审批。 */
+function parsePendingMessage(raw: string | null | undefined): any {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 统一审批服务函数（共三条入口共用：卡片按钮、私聊文字命令、设置页）
  */
@@ -209,19 +219,15 @@ export async function decideMember(args: {
       now,
     });
 
+    // 先原子领取挂起消息、再做任何 await：并发的第二次批准（重复点按钮 / 卡片 + 设置页各点
+    // 一次）领到 null，不会重复回复、也不会把同一条消息重放两遍（review-access F1）。
+    const claimed = takeMemberPendingMessage(args.botId, member.openId, now);
+    const pendingMsg = parsePendingMessage(claimed?.pendingMessage);
     let replayed = false;
-    let pendingMsg: any = null;
-    if (member.pendingMessage) {
-      try {
-        pendingMsg = JSON.parse(member.pendingMessage);
-      } catch {
-        pendingMsg = null;
-      }
-    }
 
-    if (pendingMsg && pendingMsg.messageId) {
-      const expired = isMessageExpiredForReplay(member.appliedAt, now);
-      const chatId = member.pendingChatId || pendingMsg.chatId;
+    if (claimed && pendingMsg?.messageId) {
+      const expired = isMessageExpiredForReplay(claimed.appliedAt, now);
+      const chatId = claimed.pendingChatId || pendingMsg.chatId;
 
       if (!expired) {
         // 回复申请人提示已同意
@@ -258,9 +264,6 @@ export async function decideMember(args: {
           console.warn("[lark-access] 回复申请人超时提示失败", err);
         }
       }
-
-      // 清除已处理的 pending message
-      clearMemberPendingMessage(args.botId, member.openId);
     }
 
     const updated = getLarkBotMember(args.botId, member.openId)!;
@@ -281,17 +284,12 @@ export async function decideMember(args: {
       now,
     });
 
-    let pendingMsg: any = null;
-    if (member.pendingMessage) {
-      try {
-        pendingMsg = JSON.parse(member.pendingMessage);
-      } catch {
-        pendingMsg = null;
-      }
-    }
+    // 同上：领到挂起消息的那一次才通知，并发拒绝不重复发「未通过」
+    const claimed = takeMemberPendingMessage(args.botId, member.openId, now);
+    const pendingMsg = parsePendingMessage(claimed?.pendingMessage);
 
-    if (pendingMsg && pendingMsg.messageId) {
-      const chatId = member.pendingChatId || pendingMsg.chatId;
+    if (claimed && pendingMsg?.messageId) {
+      const chatId = claimed.pendingChatId || pendingMsg.chatId;
       try {
         await sendLarkText({
           client,
@@ -302,7 +300,6 @@ export async function decideMember(args: {
       } catch (err) {
         console.warn("[lark-access] 通知申请人拒绝失败", err);
       }
-      clearMemberPendingMessage(args.botId, member.openId);
     }
 
     const updated = getLarkBotMember(args.botId, member.openId)!;
