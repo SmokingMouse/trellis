@@ -1,14 +1,38 @@
 export type LarkChatType = "p2p" | "group";
-export type LarkInboxStatus = "processing" | "done" | "error" | "ignored";
+export type LarkInboxStatus = "processing" | "done" | "error" | "ignored" | "pending";
 
 /**
- * S134 IM 入口层四旋钮（spec: progress/im-entry-layer.md）。取值是 IM 无关的策略，
- * 飞书只提供实现：将来 Telegram / 企微接进来复用同一组枚举。
+ * S134 IM 入口层四旋钮（spec: progress/im-entry-layer.md）+ 访问控制模式。
+ * 取值是 IM 无关的策略，飞书只提供实现。
  */
 export type LarkGroupTrigger = "mention" | "all" | "prefix";
 export type LarkSessionPolicy = "thread" | "chat";
 export type LarkReplyMode = "thread" | "quote" | "plain";
 export type LarkAckMode = "reaction" | "none";
+export type LarkAccessMode = "open" | "approval";
+
+export type LarkBotMemberRole = "admin" | "member";
+export type LarkBotMemberStatus = "pending" | "approved" | "denied";
+
+export const LARK_MEMBER_ROLES: readonly LarkBotMemberRole[] = ["admin", "member"];
+export const LARK_MEMBER_STATUSES: readonly LarkBotMemberStatus[] = ["pending", "approved", "denied"];
+
+export type LarkBotMember = {
+  id: string;
+  botId: string;
+  openId: string;
+  role: LarkBotMemberRole;
+  status: LarkBotMemberStatus;
+  code: string;
+  name: string | null;
+  pendingPreview: string | null;
+  pendingChatId: string | null;
+  appliedAt: number;
+  decidedAt: number | null;
+  decidedBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
 
 export type LarkBotPolicy = {
   /** 群里什么消息算对机器人说的。私聊固定全收。 */
@@ -21,20 +45,24 @@ export type LarkBotPolicy = {
   replyMode: LarkReplyMode;
   /** 收到即回 OnIt 表情。 */
   ackMode: LarkAckMode;
+  /** 对话权限模式：open 开放（默认）；approval 需管理员审批。 */
+  accessMode: LarkAccessMode;
 };
 
 export const LARK_GROUP_TRIGGERS: readonly LarkGroupTrigger[] = ["mention", "all", "prefix"];
 export const LARK_SESSION_POLICIES: readonly LarkSessionPolicy[] = ["thread", "chat"];
 export const LARK_REPLY_MODES: readonly LarkReplyMode[] = ["thread", "quote", "plain"];
 export const LARK_ACK_MODES: readonly LarkAckMode[] = ["reaction", "none"];
+export const LARK_ACCESS_MODES: readonly LarkAccessMode[] = ["open", "approval"];
 
-/** 用户拍板的默认值（S134）：群仅 @ 触发、话题即树、话题回复、表情确认。 */
+/** 用户拍板的默认值（S134）：群仅 @ 触发、话题即树、话题回复、表情确认、开放模式。 */
 export const LARK_POLICY_DEFAULTS: LarkBotPolicy = {
   groupTrigger: "mention",
   triggerPrefix: null,
   sessionPolicy: "thread",
   replyMode: "thread",
   ackMode: "reaction",
+  accessMode: "open",
 };
 
 export type LarkChat = {

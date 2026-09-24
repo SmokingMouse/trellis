@@ -920,6 +920,7 @@ function migrate(db: Database) {
     ["reply_mode", "TEXT NOT NULL DEFAULT 'thread'"],
     ["session_policy", "TEXT NOT NULL DEFAULT 'thread'"],
     ["ack_mode", "TEXT NOT NULL DEFAULT 'reaction'"],
+    ["access_mode", "TEXT NOT NULL DEFAULT 'open'"],
   ];
   for (const [column, ddl] of larkPolicyColumns) {
     const has = db
@@ -928,6 +929,33 @@ function migrate(db: Database) {
     if (!has) db.exec(`ALTER TABLE lark_bots ADD COLUMN ${column} ${ddl}`);
   }
   db.exec(LARK_THREAD_TABLES_SQL);
+
+  // 对话权限审批表（fj-access）：按 bot 维度的成员白名单与管理员审批队列
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lark_bot_members (
+      id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL REFERENCES lark_bots(id) ON DELETE CASCADE,
+      open_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      status TEXT NOT NULL DEFAULT 'pending',
+      code TEXT NOT NULL,
+      name TEXT,
+      pending_message TEXT,
+      pending_preview TEXT,
+      pending_chat_id TEXT,
+      last_sender_notified_at INTEGER,
+      last_admin_notified_at INTEGER,
+      applied_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      decided_by TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(bot_id, open_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS lark_bot_members_bot_status ON lark_bot_members(bot_id, status);
+    CREATE INDEX IF NOT EXISTS lark_bot_members_code ON lark_bot_members(bot_id, code);
+  `);
 
   // S89: `tasks.model` 这一列名不副实 —— 它存的一直是 **providerId**
   // （`lib/server/tasks.ts` 里 `isProviderId(task.model) ? task.model : DEFAULT_PROVIDER`），

@@ -3,7 +3,18 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { LARK_POLICY_DEFAULTS, type LarkAckMode, type LarkGroupTrigger, type LarkReplyMode, type LarkSessionPolicy, type LarkBot, type LarkBotInput } from "@/lib/lark-types";
+import {
+  LARK_POLICY_DEFAULTS,
+  type LarkAckMode,
+  type LarkAccessMode,
+  type LarkBotMember,
+  type LarkBotMemberRole,
+  type LarkGroupTrigger,
+  type LarkReplyMode,
+  type LarkSessionPolicy,
+  type LarkBot,
+  type LarkBotInput,
+} from "@/lib/lark-types";
 
 type AgentOption = { id: string; name: string; slug: string };
 type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
@@ -17,6 +28,7 @@ type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
   sessionPolicy: LarkSessionPolicy;
   replyMode: LarkReplyMode;
   ackMode: LarkAckMode;
+  accessMode: LarkAccessMode;
 };
 
 type DiscoveredBot = {
@@ -46,6 +58,7 @@ const EMPTY: Draft = {
   sessionPolicy: LARK_POLICY_DEFAULTS.sessionPolicy,
   replyMode: LARK_POLICY_DEFAULTS.replyMode,
   ackMode: LARK_POLICY_DEFAULTS.ackMode,
+  accessMode: LARK_POLICY_DEFAULTS.accessMode,
 };
 
 const FEISHU_LAUNCHER_URL = "https://open.feishu.cn/page/launcher?from=backend_oneclick";
@@ -57,6 +70,10 @@ export default function LarkBotsSettingsPage() {
   const [discovered, setDiscovered] = useState<DiscoveredBot[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [members, setMembers] = useState<LarkBotMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [preapproveOpenId, setPreapproveOpenId] = useState("");
+  const [preapproveRole, setPreapproveRole] = useState<LarkBotMemberRole>("member");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"save" | "test" | "delete" | "one-click" | string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -102,6 +119,23 @@ export default function LarkBotsSettingsPage() {
     }
   }, []);
 
+  const refreshMembers = useCallback(async (botId: string) => {
+    setMembersLoading(true);
+    try {
+      const res = await fetch(`/api/lark-bots/${botId}/members`, { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok && data.members) {
+        setMembers(data.members);
+      } else {
+        setMembers([]);
+      }
+    } catch {
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const initial = setTimeout(() => void refresh(), 0);
     void refreshAgents();
@@ -111,6 +145,14 @@ export default function LarkBotsSettingsPage() {
       clearInterval(timer);
     };
   }, [refresh, refreshAgents]);
+
+  useEffect(() => {
+    if (selectedId) {
+      void refreshMembers(selectedId);
+    } else {
+      setMembers([]);
+    }
+  }, [selectedId, refreshMembers]);
 
   // 处理 URL query params（如 ?new=1&agentId=xxx 或 ?id=xxx）
   useEffect(() => {
@@ -149,6 +191,7 @@ export default function LarkBotsSettingsPage() {
           sessionPolicy: bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
           replyMode: bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
           ackMode: bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
+          accessMode: bot.accessMode ?? LARK_POLICY_DEFAULTS.accessMode,
         });
       }
     }
@@ -170,6 +213,7 @@ export default function LarkBotsSettingsPage() {
       sessionPolicy: bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
       replyMode: bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
       ackMode: bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
+      accessMode: bot.accessMode ?? LARK_POLICY_DEFAULTS.accessMode,
     });
     setMessage(null);
     setError(null);
@@ -227,6 +271,7 @@ export default function LarkBotsSettingsPage() {
         sessionPolicy: data.bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
         replyMode: data.bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
         ackMode: data.bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
+        accessMode: data.bot.accessMode ?? LARK_POLICY_DEFAULTS.accessMode,
       });
 
       const agentName = agents.find((a) => a.id === data.bot.agentId)?.name || "默认助手";
@@ -286,6 +331,12 @@ export default function LarkBotsSettingsPage() {
         agentId: targetAgentId,
         workspacePath: draft.workspacePath.trim() || null,
         enabled: draft.enabled,
+        groupTrigger: draft.groupTrigger,
+        triggerPrefix: draft.triggerPrefix.trim() || null,
+        sessionPolicy: draft.sessionPolicy,
+        replyMode: draft.replyMode,
+        ackMode: draft.ackMode,
+        accessMode: draft.accessMode,
       };
       const botRes = await request("/api/lark-bots", {
         method: "POST",
@@ -317,6 +368,7 @@ export default function LarkBotsSettingsPage() {
         sessionPolicy: botRes.bot.sessionPolicy ?? LARK_POLICY_DEFAULTS.sessionPolicy,
         replyMode: botRes.bot.replyMode ?? LARK_POLICY_DEFAULTS.replyMode,
         ackMode: botRes.bot.ackMode ?? LARK_POLICY_DEFAULTS.ackMode,
+        accessMode: botRes.bot.accessMode ?? LARK_POLICY_DEFAULTS.accessMode,
       });
       setMessage(`🎉 飞书机器人接入成功！${testMessage}。服务端长连接将在 15 秒内就绪。`);
       await refresh(true);
@@ -345,6 +397,7 @@ export default function LarkBotsSettingsPage() {
         sessionPolicy: draft.sessionPolicy,
         replyMode: draft.replyMode,
         ackMode: draft.ackMode,
+        accessMode: draft.accessMode,
       };
       const data = await request(
         selectedId ? `/api/lark-bots/${selectedId}` : "/api/lark-bots",
@@ -358,6 +411,90 @@ export default function LarkBotsSettingsPage() {
       setDraft((current) => current ? { ...current, appSecret: "" } : current);
       setMessage("已保存；连接配置会在 15 秒内由后台对账生效。");
       await refresh(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePreapprove = async () => {
+    if (!selectedId || !preapproveOpenId.trim()) return;
+    setBusy("preapprove");
+    setMessage(null);
+    setError(null);
+    try {
+      await request(`/api/lark-bots/${selectedId}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          openId: preapproveOpenId.trim(),
+          role: preapproveRole,
+        }),
+      });
+      setPreapproveOpenId("");
+      setMessage(`已预先放行用户 ${preapproveOpenId.trim()}`);
+      await refreshMembers(selectedId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleMemberDecision = async (memberId: string, status: "approved" | "denied") => {
+    if (!selectedId) return;
+    setBusy(`decision-${memberId}`);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await request(`/api/lark-bots/${selectedId}/members`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: memberId, status }),
+      });
+      setMessage(res.message || (status === "approved" ? "已同意申请" : "已拒绝申请"));
+      await refreshMembers(selectedId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleMemberRole = async (memberId: string, role: LarkBotMemberRole) => {
+    if (!selectedId) return;
+    setBusy(`role-${memberId}`);
+    setMessage(null);
+    setError(null);
+    try {
+      await request(`/api/lark-bots/${selectedId}/members`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: memberId, role }),
+      });
+      setMessage(role === "admin" ? "已设为管理员" : "已取消管理员");
+      await refreshMembers(selectedId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleMemberDelete = async (memberId: string) => {
+    if (!selectedId || !confirm("确认移除该成员的权限记录？")) return;
+    setBusy(`delete-${memberId}`);
+    setMessage(null);
+    setError(null);
+    try {
+      await request(`/api/lark-bots/${selectedId}/members`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: memberId }),
+      });
+      setMessage("已移除成员");
+      await refreshMembers(selectedId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -785,6 +922,237 @@ export default function LarkBotsSettingsPage() {
                 <div className="text-label text-ink-muted">上下文按话题、回复却不进话题：飞书不会给后续消息 thread_id，追问只能靠引用回复归树。建议回复形式也选「话题回复」。</div>
               )}
               <div className="text-label text-ink-faint">消息里写 <code>@agent-slug</code> 可让另一个 Agent 单轮作答，与画布 @ 同语义：只看最近几轮、不改主线人设。</div>
+            </section>
+
+            {/* 5. 对话权限（fj-access 白名单与审批） */}
+            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+              <div className="text-ui font-semibold">5. 对话权限控制</div>
+              <Field label="权限模式" hint="审批模式下，未在白名单的用户必须经管理员审批放行后才能与机器人对话。">
+                <select
+                  className={INPUT}
+                  value={draft.accessMode}
+                  onChange={(e) => setDraft({ ...draft, accessMode: e.target.value as LarkAccessMode })}
+                >
+                  <option value="open">开放模式（默认：群内 @ 或私聊直接对话）</option>
+                  <option value="approval">需管理员审批（发送人白名单 + 挂起消息审批重放）</option>
+                </select>
+              </Field>
+
+              {draft.accessMode === "approval" && (
+                <div className="space-y-4 pt-2">
+                  {selected && members.filter((m) => m.role === "admin" && m.status === "approved").length === 0 && (
+                    <div className="p-3 rounded-lg border border-accent-line bg-accent-muted/20 text-ui leading-relaxed">
+                      <div className="font-semibold text-accent-ink flex items-center gap-1.5 mb-1">
+                        <span>💡 首个管理员配置引导</span>
+                      </div>
+                      <div className="text-label text-ink-muted">
+                        当前机器人尚未配置管理员。管理员本人可在飞书私聊向机器人发送任意一句话（如「申请」），进入下方待审批列表后点击<b>「设为管理员」</b>，即可完成初始化。
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 预先放行表单 */}
+                  {selected && (
+                    <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-2">
+                      <div className="text-label font-medium text-ink">按 open_id 手动预先放行</div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          className={`${INPUT} font-mono flex-1`}
+                          value={preapproveOpenId}
+                          onChange={(e) => setPreapproveOpenId(e.target.value)}
+                          placeholder="用户的 open_id（例如 ou_xxxxxxxxxxxxxxxx）"
+                        />
+                        <select
+                          className={`${INPUT} sm:w-32`}
+                          value={preapproveRole}
+                          onChange={(e) => setPreapproveRole(e.target.value as LarkBotMemberRole)}
+                        >
+                          <option value="member">普通成员</option>
+                          <option value="admin">管理员</option>
+                        </select>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handlePreapprove()}
+                          disabled={busy !== null || !preapproveOpenId.trim()}
+                        >
+                          预先放行
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 成员列表与审批 */}
+                  {selected ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-label font-medium text-ink">
+                          成员与申请列表 ({members.length})
+                        </div>
+                        {membersLoading && <span className="text-nano text-ink-faint">刷新中…</span>}
+                      </div>
+
+                      {members.length === 0 ? (
+                        <div className="py-4 text-center text-label text-ink-faint border border-dashed border-line rounded-lg">
+                          暂无成员或申请记录。
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-line border border-line rounded-lg overflow-hidden bg-surface-muted">
+                          {members.map((m) => {
+                            const isPending = m.status === "pending";
+                            const isApproved = m.status === "approved";
+                            const isDenied = m.status === "denied";
+                            const isAdmin = m.role === "admin";
+                            const displayName = m.name || `用户 (${m.openId.slice(-6)})`;
+
+                            return (
+                              <div key={m.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-ui">
+                                <div className="min-w-0 space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-medium text-ink">{displayName}</span>
+                                    <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
+                                      {m.openId}
+                                    </span>
+                                    <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
+                                      短码: {m.code}
+                                    </span>
+                                    <span
+                                      className={`text-nano px-1.5 py-0.2 rounded-full border ${
+                                        isAdmin
+                                          ? "bg-accent-muted text-accent-ink border-accent-line"
+                                          : "bg-surface text-ink-muted border-line"
+                                      }`}
+                                    >
+                                      {isAdmin ? "管理员" : "成员"}
+                                    </span>
+                                    <span
+                                      className={`text-nano px-1.5 py-0.2 rounded-full border ${
+                                        isPending
+                                          ? "bg-warn-muted text-warn-ink border-warn-line"
+                                          : isApproved
+                                            ? "bg-accent-muted text-accent-ink border-accent-line"
+                                            : "bg-danger-muted text-danger-ink border-danger-line"
+                                      }`}
+                                    >
+                                      {isPending ? "待审批" : isApproved ? "已通过" : "已拒绝"}
+                                    </span>
+                                  </div>
+
+                                  {m.pendingPreview && (
+                                    <div className="text-label text-ink-muted line-clamp-2">
+                                      <span className="text-ink-faint">申请内容：</span>
+                                      {m.pendingPreview}
+                                    </div>
+                                  )}
+
+                                  <div className="text-nano text-ink-faint">
+                                    申请时间：{new Date(m.appliedAt).toLocaleString()}
+                                    {m.decidedAt && ` · 审批时间：${new Date(m.decidedAt).toLocaleString()} (${m.decidedBy || "admin"})`}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isPending && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="primary"
+                                        size="sm"
+                                        className="text-xs px-2.5 py-1"
+                                        disabled={busy !== null}
+                                        onClick={() => void handleMemberDecision(m.id, "approved")}
+                                      >
+                                        同意
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs px-2.5 py-1 text-danger-ink"
+                                        disabled={busy !== null}
+                                        onClick={() => void handleMemberDecision(m.id, "denied")}
+                                      >
+                                        拒绝
+                                      </Button>
+                                    </>
+                                  )}
+
+                                  {isApproved && (
+                                    <>
+                                      {isAdmin ? (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="text-xs px-2 py-1"
+                                          disabled={busy !== null}
+                                          onClick={() => void handleMemberRole(m.id, "member")}
+                                        >
+                                          取消管理员
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          type="button"
+                                          variant="secondary"
+                                          size="sm"
+                                          className="text-xs px-2 py-1"
+                                          disabled={busy !== null}
+                                          onClick={() => void handleMemberRole(m.id, "admin")}
+                                        >
+                                          设为管理员
+                                        </Button>
+                                      )}
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs px-2 py-1 text-danger-ink"
+                                        disabled={busy !== null}
+                                        onClick={() => void handleMemberDecision(m.id, "denied")}
+                                      >
+                                        拒绝
+                                      </Button>
+                                    </>
+                                  )}
+
+                                  {isDenied && (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      className="text-xs px-2 py-1"
+                                      disabled={busy !== null}
+                                      onClick={() => void handleMemberDecision(m.id, "approved")}
+                                    >
+                                      重新放行
+                                    </Button>
+                                  )}
+
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs px-2 py-1 text-ink-faint hover:text-danger-ink"
+                                    disabled={busy !== null}
+                                    onClick={() => void handleMemberDelete(m.id)}
+                                  >
+                                    移除
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-label text-ink-faint">
+                      保存机器人配置后即可管理成员名单与审批请求。
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
             {/* 连接状态与会话明细（编辑模式） */}
