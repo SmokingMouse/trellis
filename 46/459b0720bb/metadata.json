@@ -1,0 +1,25 @@
+{
+  "id": "46459b0720bb",
+  "timestamp": "2026-09-24T17:14:01+08:00",
+  "branch": "fix/lark-approval-replay",
+  "commitHash": "bc02bdba4a7dbab88f4348b1c49d57f6221b8bff",
+  "commitMessage": "fix(lark): 设置页 / API 批准后挂起消息改由长连接进程对账补重放",
+  "filesModified": [
+    "lib/server/lark/access.test.ts",
+    "lib/server/lark/access.ts",
+    "lib/server/lark/manager.ts",
+    "lib/server/lark/store.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 110,
+    "humanModified": 47,
+    "humanRemoved": 0,
+    "totalLinesChanged": 157,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
