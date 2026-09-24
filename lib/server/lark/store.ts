@@ -46,6 +46,7 @@ type BotRow = {
   bot_name: string | null;
   last_connected_at: number | null;
   last_error: string | null;
+  missing_scopes: string | null;
   created_at: number;
   updated_at: number;
   group_trigger: string | null;
@@ -89,7 +90,7 @@ export type MemberRow = {
 };
 
 const BOT_COLUMNS = `id, name, app_id, app_secret, agent_id, workspace_path, enabled,
-  bot_open_id, bot_name, last_connected_at, last_error, created_at, updated_at,
+  bot_open_id, bot_name, last_connected_at, last_error, missing_scopes, created_at, updated_at,
   group_trigger, trigger_prefix, reply_mode, session_policy, ack_mode, access_mode`;
 
 const MEMBER_COLUMNS = `id, bot_id, open_id, role, status, code, name,
@@ -123,6 +124,17 @@ function rowToPolicy(row: BotRow): LarkBotPolicy {
 }
 
 function rowToBot(row: BotRow): LarkBotRecord {
+  let missingScopes: string[] | undefined = undefined;
+  if (row.missing_scopes) {
+    try {
+      const parsed = JSON.parse(row.missing_scopes);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        missingScopes = parsed.filter((s) => typeof s === "string");
+      }
+    } catch {
+      // ignore
+    }
+  }
   return {
     id: row.id,
     name: row.name,
@@ -135,6 +147,7 @@ function rowToBot(row: BotRow): LarkBotRecord {
     botName: row.bot_name,
     lastConnectedAt: row.last_connected_at,
     lastError: row.last_error,
+    missingScopes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...rowToPolicy(row),
@@ -279,7 +292,10 @@ export function createLarkBot(input: LarkBotInput): LarkBot {
   return getLarkBot(id)!;
 }
 
-export function updateLarkBot(id: string, patch: Partial<LarkBotInput>): LarkBot | null {
+export function updateLarkBot(
+  id: string,
+  patch: Partial<LarkBotInput> & { missingScopes?: string[] },
+): LarkBot | null {
   if (!getLarkBotRecord(id)) return null;
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -311,6 +327,14 @@ export function updateLarkBot(id: string, patch: Partial<LarkBotInput>): LarkBot
   if (patch.accessMode !== undefined) {
     put("access_mode", requireEnum(patch.accessMode, LARK_ACCESS_MODES, "accessMode"));
   }
+  if (patch.missingScopes !== undefined) {
+    put(
+      "missing_scopes",
+      patch.missingScopes && patch.missingScopes.length > 0
+        ? JSON.stringify(patch.missingScopes)
+        : null,
+    );
+  }
   if (sets.length === 0) return getLarkBot(id);
   put("updated_at", Date.now());
   values.push(id);
@@ -326,6 +350,17 @@ export function setLarkBotIdentity(id: string, openId: string | null, name: stri
   getDB().prepare(
     "UPDATE lark_bots SET bot_open_id = ?, bot_name = ?, updated_at = ? WHERE id = ?",
   ).run(openId, name, Date.now(), id);
+}
+
+export function setLarkBotMissingScopes(id: string, scopes: string[] | null): void {
+  const value = scopes && scopes.length > 0 ? JSON.stringify(scopes) : null;
+  getDB().prepare(
+    "UPDATE lark_bots SET missing_scopes = ?, updated_at = ? WHERE id = ?",
+  ).run(value, Date.now(), id);
+}
+
+export function clearLarkBotMissingScopes(id: string): void {
+  setLarkBotMissingScopes(id, null);
 }
 
 export function setLarkBotConnection(

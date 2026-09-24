@@ -18,15 +18,130 @@ export function createLarkClient(appId: string, appSecret: string): LarkSdkClien
   });
 }
 
+export type LarkPermissionViolation = {
+  isPermissionError: boolean;
+  code?: number;
+  missingScopes: string[];
+  message: string;
+};
+
+/**
+ * 统一拆开 AxiosError、HTTP 4xx 响应与 code≠0 错误体，识别 99991672 缺权限错误。
+ * 优先从 error.permission_violations[].subject 解析，取不到时从 msg 的 [...] 或 URL 中兜底解析。
+ */
+export function extractLarkPermissionViolation(errorOrResponse: unknown): LarkPermissionViolation {
+  let code: number | undefined = undefined;
+  let msg: string | undefined = undefined;
+  let permissionViolations: Array<{ subject?: string }> | undefined = undefined;
+
+  const anyObj = errorOrResponse as any;
+  const resData = anyObj?.response?.data ?? anyObj?.data ?? (typeof anyObj === "object" && anyObj !== null ? anyObj : undefined);
+
+  if (resData && typeof resData === "object") {
+    if (typeof resData.code === "number") code = resData.code;
+    if (typeof resData.msg === "string") msg = resData.msg;
+    if (Array.isArray(resData.error?.permission_violations)) {
+      permissionViolations = resData.error.permission_violations;
+    }
+  }
+
+  const rawMsg =
+    anyObj instanceof Error
+      ? anyObj.message
+      : typeof anyObj === "string"
+        ? anyObj
+        : msg || "";
+
+  if (code === undefined) {
+    if (rawMsg.includes("99991672")) {
+      code = 99991672;
+    } else {
+      const codeMatch = rawMsg.match(/code\s*[:=]?\s*(\d+)/i);
+      if (codeMatch) {
+        code = parseInt(codeMatch[1], 10);
+      }
+    }
+  }
+
+  const missingScopes: string[] = [];
+  if (permissionViolations) {
+    for (const v of permissionViolations) {
+      if (v && typeof v.subject === "string" && v.subject.trim()) {
+        const s = v.subject.trim();
+        if (!missingScopes.includes(s)) missingScopes.push(s);
+      }
+    }
+  }
+
+  // 兜底：从 msg 与 rawMsg 里提取权限标识符
+  if (missingScopes.length === 0) {
+    const textToSearch = `${msg ?? ""} ${rawMsg}`;
+    // 匹配类似 [application:application:self_manage, application:application.app_version:readonly] 或 [im:chat:read]
+    const bracketMatches = textToSearch.matchAll(/\[([a-zA-Z0-9_:., -]+)\]/g);
+    for (const match of bracketMatches) {
+      const candidates = match[1].split(/[, ]+/).map((s) => s.trim()).filter(Boolean);
+      for (const cand of candidates) {
+        if (
+          (cand.includes(":") || cand.startsWith("im.") || cand.startsWith("contact.") || cand.startsWith("application.")) &&
+          !missingScopes.includes(cand)
+        ) {
+          missingScopes.push(cand);
+        }
+      }
+    }
+    // 匹配 auth?q=scope1,scope2 或 scope-apply?scopes=scope1,scope2
+    const urlMatches = textToSearch.matchAll(/[?&](?:q|scopes)=([^&\s"'<>]+)/g);
+    for (const match of urlMatches) {
+      const candidates = decodeURIComponent(match[1]).split(/[, ]+/).map((s) => s.trim()).filter(Boolean);
+      for (const cand of candidates) {
+        if (!missingScopes.includes(cand)) {
+          missingScopes.push(cand);
+        }
+      }
+    }
+  }
+
+  const isPermissionError = code === 99991672 || (code !== undefined && code !== 0 && missingScopes.length > 0);
+  let formattedMessage = rawMsg;
+  if (isPermissionError) {
+    if (missingScopes.length > 0) {
+      formattedMessage = `缺少应用身份权限：${missingScopes.join(", ")}（可在开放平台开通或扫码补齐）`;
+    } else {
+      formattedMessage = `缺少应用身份权限（code 99991672）`;
+    }
+  }
+
+  return {
+    isPermissionError,
+    code,
+    missingScopes,
+    message: formattedMessage,
+  };
+}
+
 function assertApiSuccess(label: string, response: unknown): void {
   const result = response as { code?: number; msg?: string } | null;
   if (result && typeof result.code === "number" && result.code !== 0) {
+    const perm = extractLarkPermissionViolation(response);
+    if (perm.isPermissionError) {
+      throw new Error(`${label}: ${perm.message}`);
+    }
     throw new Error(`${label}: ${result.msg || `code ${result.code}`}`);
   }
 }
 
-function formatErrorBrief(error: unknown): string {
+export function formatErrorBrief(error: unknown): string {
+  const perm = extractLarkPermissionViolation(error);
+  if (perm.isPermissionError) {
+    return perm.message;
+  }
   if (error instanceof Error) {
+    const axiosData = (error as any).response?.data;
+    if (axiosData && typeof axiosData === "object") {
+      if (typeof axiosData.code === "number" && axiosData.msg) {
+        return `code=${axiosData.code} msg=${axiosData.msg}`;
+      }
+    }
     return error.message;
   }
   const obj = error as { code?: number; msg?: string } | null;
