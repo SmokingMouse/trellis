@@ -31,3 +31,11 @@ fj plan waive <review-id> --reason "原因" 记录本次 review 的豁免；重�
   leader 轻档自修（原实现坐席已退位）。回归用例旧代码 2 fail、修复后 23/23；全量 559 pass / 5 存量 fail；tsc 0。
 - [ ] console: 开放平台收尾：补 im:chat:readonly / contact:user.id:readonly、长连接卡片回调 card.action.trigger、改名「号池巡检」、发版；之后用邮箱补 owners.json 的 open_id
   卡在飞书扫码登录（共享 Chrome 无登录态，用户经 localhost:6080 扫码后续派）。补完 open_id 巡检才会真 @ 号主；卡片按钮审批也要回调配好才生效（文字命令已可用）。
+- [ ] cards-trellis: trellis 任务推送支持 Card 2.0 JSON 直通（最终答复是卡片 JSON 时原样发 interactive） | seat: gemini37
+  cid: fj-cards-trellis-47cc
+  verify: bun x tsc --noEmit
+  verify: sh -c 'out=$(bun test 2>&1); echo "$out" | grep -qE "^ *[0-9]+ pass$" || exit 1; n=$(echo "$out" | grep -oE "^ *[0-9]+ fail$" | grep -oE "[0-9]+"); test "${n:-0}" -le 5'
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/cards-trellis-goal.md。worktree 基线 = main 08d1cd5。
+- [ ] cards-watch: 巡检脚本 --format card / --daily-card：结构化事件 + alert_cards 渲染 | seat: gemini37
+  cid: fj-cards-watch-2158
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/cards-watch-goal.md。workdir 在仓库外，走 quick --workdir + launch；只改三个文件、不 commit。
