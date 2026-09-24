@@ -20,9 +20,14 @@ fj plan waive <review-id> --reason "原因" 记录本次 review 的豁免；重�
 - [ ] review-access: 异源 review access：门禁不可绕过、open 模式零变化、挂起重放不重复执行、按钮 value 伪造与非 admin 命令被拒、迁移可重入 | after: access | mode: readonly | seat: cpa-sonnet5 | keep-seat
   cid: fj-review-access-4822
   工具类 review，审 access 分支相对 feat/lark-ops-bot 的全部改动。做三件事：① bunx tsc --noEmit 与 bun test 复跑；② 隔离实例冒烟（sqlite3 .backup 出副本 + 独立 HOME + TRELLIS_LARK=off，参照 scripts/mobile-verify/），走一遍 approval 模式下 设置页切换 → 成员 API 增改查 的主路径；③ 读门禁、decideMember、card.action.trigger 回调、文字命令、重放五处代码找绕过路径。只报行为错误，不审风格。首行 verdict: pass|fail；fail 只认四种：结论或行为错 · 伪造或不可复现到影响结论 · 凭证泄露 · 破坏现有测试，其余写在 ## 建议 下；只列可操作问题（文件:行、命令输出）；只读，运行产物写 /tmp。
+  waiver: {"at":"2026-09-24T09:00:58.436Z","reason":"唯一 fail 项 F1 已由 fix-1 修复（458b9bc）：先原子领取再 await，reviewer 同款并发复现改写成回归用例，旧代码 2 fail / 修复后全绿；修复属轻档且未改结论，按 playbook §4 不复审","cid":"fj-review-access-4822","settlement":"[\"fd6864dbef769e46b14295c7742d639040adfadf329e674e3488e40fb559270f\",0,[\"2026-09-24T08:55:42.834Z\",\"fd6864dbef769e46b14295c7742d639040adfadf329e674e3488e40fb559270f\",\"939df123f3bc08cd28d8ef841a612b47f05761ff2f25c8b728dd7b02b1589d2b\",2,0,\"fail\",\"5eee14616cb2acdd288c62919f8921e7336d6da0f83831816822f100f1c3f313\"]]"}
 - [ ] watch: sub2api 巡检脚本 alert_watch.py：可行动告警规则 + 去重状态 + 号主 @ 映射 + [SILENT] 输出 | seat: gemini37
   cid: fj-watch-9a06
   完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/alert-watch-goal.md。workdir 在仓库外（~/.claude/skills/sub2api-admin），走 task quick --workdir + launch；只新增三个文件、不 commit。
-- [ ] release: 起位前问用户：push + access 合 main、make deploy 上线并验活（动生产，必须问） | after: push,access | gate: review-access
-- [ ] config: 配置上线：登记新 bot（approval 模式）+ 设管理员、建只读 agent sub2api-ops、owners 映射、日报/巡检两任务推「sub2api 测试群」，手动各跑一次验 @ 与审批卡片再挂 cron | after: release,watch
+- [x] release: 起位前问用户：push + access 合 main、make deploy 上线并验活（动生产，必须问） | after: push,access | gate: review-access
+- [x] config: 配置上线：登记新 bot（approval 模式）+ 设管理员、建只读 agent sub2api-ops、owners 映射、日报/巡检两任务推「sub2api 测试群」，手动各跑一次验 @ 与审批卡片再挂 cron | after: release,watch
   依赖用户在飞书建好应用并把 bot 拉进群；leader 自做（轻档），逐步给用户看效果。
+- [x] fix-1: 修 review-access F1：审批先原子领取挂起消息再 await，并发批准/拒绝不重复重放/通知 | after: review-access
+  leader 轻档自修（原实现坐席已退位）。回归用例旧代码 2 fail、修复后 23/23；全量 559 pass / 5 存量 fail；tsc 0。
+- [ ] console: 开放平台收尾：补 im:chat:readonly / contact:user.id:readonly、长连接卡片回调 card.action.trigger、改名「号池巡检」、发版；之后用邮箱补 owners.json 的 open_id
+  卡在飞书扫码登录（共享 Chrome 无登录态，用户经 localhost:6080 扫码后续派）。补完 open_id 巡检才会真 @ 号主；卡片按钮审批也要回调配好才生效（文字命令已可用）。

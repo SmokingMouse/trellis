@@ -299,3 +299,4 @@
 - [fj-watch-078b] sub2api 巡检脚本 alert_watch.py：可行动告警规则 + 去重状态 + 号主 @ 映射 + [SILE | aborted | reworks=0 | 2026-09-24T16:09:01+08:00
 - [fj-watch-9a06] sub2api 巡检脚本 alert_watch.py：可行动告警规则 + 去重状态 + 号主 @ 映射 + [SILE | accepted | reworks=0 | 2026-09-24T16:15:35+08:00 | b6fce0e7f65f
 - [fj-access-c7de] bot 对话审批：按 bot 的发送人白名单 + 管理员私聊卡片审批（文字命令兜底）+ 挂起消息放行后重放 + 设置页名 | accepted | reworks=0 | 2026-09-24T16:41:40+08:00 | 560d7ee945db
+- [fj-review-access-4822] 异源 review access：门禁不可绕过、open 模式零变化、挂起重放不重复执行、按钮 value 伪造与非 a | accepted | reworks=0 | 2026-09-24T16:55:42+08:00 | 939df123f3bc
