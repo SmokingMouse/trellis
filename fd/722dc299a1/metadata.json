@@ -1,0 +1,25 @@
+{
+  "id": "fd722dc299a1",
+  "timestamp": "2026-09-24T18:44:50+08:00",
+  "branch": "audit/qr-ui",
+  "commitHash": "92c473d61b8a18bc2439d706a0b92cb5c36415d3",
+  "commitMessage": "feat(settings/bots): 扫码建 / 更新 bot 设置页 UI（三步弹窗 + 行内补权限 + 折叠表单）",
+  "filesModified": [
+    "app/settings/bots/RegisterBotModal.tsx",
+    "app/settings/bots/page.tsx",
+    "bun.lock",
+    "package.json"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 0,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 0,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
