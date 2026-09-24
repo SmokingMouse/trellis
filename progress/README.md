@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-动线优化已上线 3a57be2（PR #64）：Workflow 行按参考稿重做 + 动线行安静化，两轮异源 review 全过；待用户在真实 Workflow 运行里看一次运行中态；网关 codex 号池已恢复。
+devbox prod 卡顿五个根因 A–E 全部上线并闭环（e80951a94，稳态 p50 8ms）；残留一条：重启后约 2 分钟启动补齐窗口，正在做水位跳过。
 
 ## Goals
 

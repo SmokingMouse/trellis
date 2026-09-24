@@ -45,3 +45,6 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
   cid: fj-review-cde-4573
 - [ ] fix-g: 返工 review-cde 的 F1（canonical 回退让越界 symlink 通过包含判断，安全闸 fail-open）+ M1（C 探针假绿，需完整等价性断言） | seat: worker
   cid: fj-fix-g-d5e9
+- [ ] fix-startup: 启动补齐 2min 不可用窗口：给 lineage 持久化文件水位，没变过的会话零读取跳过 + 补齐限速 | seat: worker
+  cid: fj-fix-startup-4c19
+  devbox e80951a94 实测：重启后约 2min 事件循环占满、curl 整批超时；稳态正常。补齐已异步，问题是总 CPU 体量。
