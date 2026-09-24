@@ -8,6 +8,7 @@ import {
   getLarkBotMemberById,
   getLarkBotRecord,
   listLarkBotAdmins,
+  listApprovedMembersWithPending,
   listLarkBotMembers,
   setMemberDecision,
   takeMemberPendingMessage,
@@ -159,7 +160,7 @@ export function buildDecisionCard(args: {
 export type ReplayHandler = (botId: string, client: LarkSdkClient, queued: any) => boolean;
 
 let _globalReplayHandler: ReplayHandler | null = null;
-export function setGlobalReplayHandler(fn: ReplayHandler): void {
+export function setGlobalReplayHandler(fn: ReplayHandler | null): void {
   _globalReplayHandler = fn;
 }
 
@@ -171,6 +172,72 @@ function parsePendingMessage(raw: string | null | undefined): any {
   } catch {
     return null;
   }
+}
+
+/**
+ * 原子领取一个已批准成员的挂起消息并重放：先领取、再 await（review-access F1），并发调用里
+ * 只有一次领得到。超过 24h 的只提示重新发送。返回是否真的重放了。
+ */
+async function replayClaimedPending(
+  botId: string,
+  client: LarkSdkClient,
+  openId: string,
+  now: number,
+): Promise<boolean> {
+  const claimed = takeMemberPendingMessage(botId, openId, now);
+  const pendingMsg = parsePendingMessage(claimed?.pendingMessage);
+  if (!claimed || !pendingMsg?.messageId) return false;
+
+  const chatId = claimed.pendingChatId || pendingMsg.chatId;
+  if (isMessageExpiredForReplay(claimed.appliedAt, now)) {
+    try {
+      await sendLarkText({
+        client,
+        chatId,
+        replyToMessageId: pendingMsg.messageId,
+        markdown: "✅ 管理员已同意。该消息已超过 24 小时，请重新发送。",
+      });
+    } catch (err) {
+      console.warn("[lark-access] 回复申请人超时提示失败", err);
+    }
+    return false;
+  }
+
+  try {
+    await sendLarkText({
+      client,
+      chatId,
+      replyToMessageId: pendingMsg.messageId,
+      markdown: "✅ 管理员已同意，正在处理你的消息",
+    });
+  } catch (err) {
+    console.warn("[lark-access] 回复申请人通过提示失败", err);
+  }
+  if (!_globalReplayHandler) return false;
+  try {
+    _globalReplayHandler(botId, client, pendingMsg);
+    return true;
+  } catch (err) {
+    console.error("[lark-access] 重放挂起消息失败", err);
+    return false;
+  }
+}
+
+/**
+ * manager 对账时在长连接进程里调用：补重放设置页 / API 批准后留在库里的挂起消息。
+ * 只在注册了重放处理器的 bundle 里生效；返回本轮重放条数。
+ */
+export async function replayDeferredApprovals(
+  botId: string,
+  client: LarkSdkClient,
+  now = Date.now(),
+): Promise<number> {
+  if (!_globalReplayHandler) return 0;
+  let count = 0;
+  for (const m of listApprovedMembersWithPending(botId)) {
+    if (await replayClaimedPending(botId, client, m.openId, now)) count++;
+  }
+  return count;
 }
 
 /**
@@ -219,53 +286,19 @@ export async function decideMember(args: {
       now,
     });
 
-    // 先原子领取挂起消息、再做任何 await：并发的第二次批准（重复点按钮 / 卡片 + 设置页各点
-    // 一次）领到 null，不会重复回复、也不会把同一条消息重放两遍（review-access F1）。
-    const claimed = takeMemberPendingMessage(args.botId, member.openId, now);
-    const pendingMsg = parsePendingMessage(claimed?.pendingMessage);
-    let replayed = false;
-
-    if (claimed && pendingMsg?.messageId) {
-      const expired = isMessageExpiredForReplay(claimed.appliedAt, now);
-      const chatId = claimed.pendingChatId || pendingMsg.chatId;
-
-      if (!expired) {
-        // 回复申请人提示已同意
-        try {
-          await sendLarkText({
-            client,
-            chatId,
-            replyToMessageId: pendingMsg.messageId,
-            markdown: "✅ 管理员已同意，正在处理你的消息",
-          });
-        } catch (err) {
-          console.warn("[lark-access] 回复申请人通过提示失败", err);
-        }
-
-        // 重新入队重放
-        if (_globalReplayHandler) {
-          try {
-            _globalReplayHandler(args.botId, client, pendingMsg);
-            replayed = true;
-          } catch (err) {
-            console.error("[lark-access] 重放挂起消息失败", err);
-          }
-        }
-      } else {
-        // 超过 24h，只提示重新发送
-        try {
-          await sendLarkText({
-            client,
-            chatId,
-            replyToMessageId: pendingMsg.messageId,
-            markdown: "✅ 管理员已同意。该消息已超过 24 小时，请重新发送。",
-          });
-        } catch (err) {
-          console.warn("[lark-access] 回复申请人超时提示失败", err);
-        }
-      }
+    // 设置页 / API 批准跑在 Next 路由 bundle 里，那里没有重放处理器（与长连接所在的
+    // instrumentation bundle 模块实例不共享）：挂起消息原样留在库里，由 manager 对账时
+    // 在长连接进程里补重放（replayDeferredApprovals）。这里不能领取，领了就丢了。
+    if (!_globalReplayHandler) {
+      return {
+        ok: true,
+        member: getLarkBotMember(args.botId, member.openId)!,
+        message: member.pendingMessage ? "已同意申请，挂起消息将在 15 秒内自动处理" : "已同意申请",
+        replayed: false,
+      };
     }
 
+    const replayed = await replayClaimedPending(args.botId, client, member.openId, now);
     const updated = getLarkBotMember(args.botId, member.openId)!;
     return {
       ok: true,

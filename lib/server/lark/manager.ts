@@ -1,5 +1,5 @@
 import "server-only";
-import { handleCardActionTrigger } from "./access";
+import { handleCardActionTrigger, replayDeferredApprovals } from "./access";
 import { acceptLarkEvent } from "./handler";
 import { diffLarkConnections, type LarkMessageEvent } from "./protocol";
 import { createLarkClient, fetchLarkBotInfo, lark, type LarkSdkClient } from "./sdk";
@@ -144,6 +144,14 @@ async function reconcile(): Promise<void> {
         setLarkBotConnection(id, { error: errorText(error) });
         console.error(`[lark] bot ${id} 连接失败`, error);
       }
+    }
+    // 设置页 / API 的批准写在路由 bundle，那里没有重放处理器，挂起消息留在库里；
+    // 这里（长连接所在 bundle）每轮对账补重放，原子领取保证与卡片 / 私聊命令并发时只放一次。
+    for (const [id, connection] of ACTIVE) {
+      if (byId.get(id)?.accessMode !== "approval") continue;
+      void replayDeferredApprovals(id, connection.client).catch((error) =>
+        console.error(`[lark-access] bot ${id} 补重放失败`, error),
+      );
     }
   } finally {
     reconciling = false;
