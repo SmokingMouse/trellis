@@ -10,8 +10,10 @@ import { getDB } from "./sqlite";
 import {
   importCliLineage,
   importCliLineageAsync,
+  lineageWatermarksCurrent,
   type ImportResult,
 } from "./cli-import-db";
+import { pacedSleepMs, runPaced, yieldToEventLoop } from "./cooperative";
 import { ensureWorkspaceForPath } from "./workspaces";
 import {
   CODEX_SESSIONS_DIR,
@@ -259,6 +261,8 @@ function seedLineageFrom(
        VALUES (?, ?, ?, ?, ?, ?, NULL)
        ON CONFLICT(trellis_session_id, cli_session_id) DO UPDATE SET
          provider_family = excluded.provider_family,
+         wm_size = CASE WHEN cli_lineages.jsonl_path = excluded.jsonl_path
+                        THEN cli_lineages.wm_size END,
          jsonl_path = excluded.jsonl_path,
          fork_point_uuid = excluded.fork_point_uuid,
          is_root = excluded.is_root`,
@@ -344,6 +348,8 @@ async function attachNewForkIfMatched(
      VALUES (?, ?, ?, ?, ?, 0, NULL)
      ON CONFLICT(trellis_session_id, cli_session_id) DO UPDATE SET
        provider_family = excluded.provider_family,
+       wm_size = CASE WHEN cli_lineages.jsonl_path = excluded.jsonl_path
+                      THEN cli_lineages.wm_size END,
        jsonl_path = excluded.jsonl_path,
        fork_point_uuid = excluded.fork_point_uuid`,
   ).run(best.sid, parsed.sessionId, provider, full, forkPointUuid);
@@ -699,19 +705,83 @@ export function startCliSyncWatcher(): void {
   void catchUpAttachedSessions();
 }
 
-async function catchUpAttachedSessions(): Promise<void> {
+// 启动补齐的 CPU 占空比（fj-fix-startup）。补齐是后台批处理，不能和 HTTP 抢满
+// CPU：分片让出只把阻塞切碎，占空比仍是 ~100%，请求排在一串时间片后面照样超时。
+// runPaced 让补齐里所有分片点按「忙 x ms → 睡 x·(1−d)/d ms」让出。
+// TRELLIS_CLI_CATCHUP_DUTY 覆盖（0<d≤1，1 = 不限速、退回纯分片让出）。
+const DEFAULT_CATCHUP_DUTY = 0.5;
+
+export function catchUpDuty(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.TRELLIS_CLI_CATCHUP_DUTY);
+  return Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : DEFAULT_CATCHUP_DUTY;
+}
+
+export type CatchUpStats = {
+  sessions: number;
+  /** 水位全对、零读取跳过的会话数。 */
+  skipped: number;
+  /** 真走了 discover → seed → import 的会话数。 */
+  processed: number;
+  failed: number;
+  pathMapMs: number;
+  watchMs: number;
+  totalMs: number;
+  pacedSleepMs: number;
+};
+
+/** 测试入口：跑一轮启动补齐（生产只经 startCliSyncWatcher 触发一次）。 */
+export function catchUpAttachedSessionsForTests(): Promise<CatchUpStats | null> {
+  return catchUpAttachedSessions();
+}
+
+async function catchUpAttachedSessions(): Promise<CatchUpStats | null> {
+  return runPaced(catchUpDuty(), catchUpAttachedSessionsPaced);
+}
+
+async function catchUpAttachedSessionsPaced(): Promise<CatchUpStats | null> {
+  const t0 = performance.now();
+  const stats: CatchUpStats = {
+    sessions: 0,
+    skipped: 0,
+    processed: 0,
+    failed: 0,
+    pathMapMs: 0,
+    watchMs: 0,
+    totalMs: 0,
+    pacedSleepMs: 0,
+  };
   try {
+    // 先让出一次：这之前的一切都同步跑在 instrumentation register 里。
+    await yieldToEventLoop();
     // Heal moved Codex rollout paths before the startup re-import reads them.
+    let t = performance.now();
     attachedPathMap();
+    stats.pathMapMs = performance.now() - t;
+    await yieldToEventLoop();
+    t = performance.now();
     refreshWatches();
+    stats.watchMs = performance.now() - t;
     // 启动时补齐进程离线期间的变更，监听先建立以免漏掉补齐期间的新写入。
     for (const session of attachedSessions()) {
+      stats.sessions++;
       // Yield between per-session imports, including before the first one.
-      // A single deferred callback around the whole loop still blocks the
-      // event loop for the sum of all transcript parsing times. (每段解析自己
-      // 也分片让出了，但每个会话之间仍要让一次：discover / seed / import 三段之
-      // 间还有纯同步的 DB 工作。)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // (每段解析自己也分片让出了，但每个会话之间仍要让一次：discover / seed /
+      // import 三段之间还有纯同步的 DB 工作。) 在 runPaced 里这一次让出按
+      // 占空比补足睡眠 —— 上一个会话忙了多久，这里就歇相应比例。
+      await yieldToEventLoop();
+      // 水位跳过（fj-fix-startup 第 1 条）：自上次成功导入以来一个成员都没变
+      // → 不读、不解析、不 discover、不 import。跳过的会话**不参与**本轮任何
+      // 清理决策（清理只在 commitCliLineage 里、且只对真解析过的集合做），
+      // 所以它既不会被当成「读到了但没内容」，也不影响 anyUnreadable。
+      try {
+        if (lineageWatermarksCurrent(session.id)) {
+          stats.skipped++;
+          continue;
+        }
+      } catch {
+        // 判不了就走老路径 —— 老路径永远是正确的。
+      }
+      stats.processed++;
       let rootPath = "";
       try {
         const db = getDB();
@@ -739,6 +809,7 @@ async function catchUpAttachedSessions(): Promise<void> {
           publishCliSessionUpdated(res.sessionId);
         }
       } catch (err) {
+        stats.failed++;
         // 单文件失败不影响其余 —— 但同样要走出口分流。启动补齐撞上盘满时
         // 原先是彻底静默的，整轮镜像停在旧快照而没有任何痕迹。
         await reportReimportFailure(rootPath, session.id, err).catch(() => {});
@@ -747,5 +818,15 @@ async function catchUpAttachedSessions(): Promise<void> {
     refreshWatches();
   } catch {
     // DB 未就绪等极端情况，下次启动再说
+    return null;
   }
+  stats.totalMs = performance.now() - t0;
+  stats.pacedSleepMs = pacedSleepMs();
+  console.log(
+    `[trellis] cli-sync 启动补齐：${stats.sessions} 会话，水位跳过 ${stats.skipped}，` +
+      `补齐 ${stats.processed}（失败 ${stats.failed}），用时 ${Math.round(stats.totalMs)}ms` +
+      `（限速睡眠 ${Math.round(stats.pacedSleepMs)}ms；路径表 ${Math.round(stats.pathMapMs)}ms，` +
+      `watch ${Math.round(stats.watchMs)}ms）`,
+  );
+  return stats;
 }
