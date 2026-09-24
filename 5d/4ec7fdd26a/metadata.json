@@ -1,0 +1,31 @@
+{
+  "id": "5d4ec7fdd26a",
+  "timestamp": "2026-09-24T16:37:08+08:00",
+  "branch": "audit/access",
+  "commitHash": "03b7838d4dca7fe2ab41291683c41f6794b59463",
+  "commitMessage": "feat(lark): 支持 bot 对话权限审批与发送人白名单管理",
+  "filesModified": [
+    "app/api/lark-bots/[id]/members/[memberId]/route.ts",
+    "app/api/lark-bots/[id]/members/route.ts",
+    "app/settings/bots/page.tsx",
+    "lib/lark-types.ts",
+    "lib/server/lark/access.test.ts",
+    "lib/server/lark/access.ts",
+    "lib/server/lark/handler.ts",
+    "lib/server/lark/manager.ts",
+    "lib/server/lark/store.ts",
+    "lib/server/sqlite.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 0,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 0,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}
