@@ -19,7 +19,7 @@ const {
   clearLarkBotMissingScopes,
   getLarkBotMember,
 } = await import("./store");
-const { TRELLIS_BOT_ADDONS } = await import("./scopes");
+const { GROUP_ALL_MESSAGES_SCOPE, TRELLIS_BOT_ADDONS } = await import("./scopes");
 const {
   extractLarkPermissionViolation,
   formatErrorBrief,
@@ -55,13 +55,15 @@ describe("Lark Bot Register & Permissions (qr-server)", () => {
       const tenantScopes = TRELLIS_BOT_ADDONS.scopes?.tenant ?? [];
       expect(tenantScopes).toContain("im:message.p2p_msg:readonly");
       expect(tenantScopes).toContain("im:message.group_at_msg:readonly");
-      expect(tenantScopes).toContain("im:message.group_msg:readonly");
+      // 收群全部消息按需申请，不进标准集（企业租户常要审批）
+      expect(tenantScopes).not.toContain(GROUP_ALL_MESSAGES_SCOPE);
       expect(tenantScopes).toContain("im:message:send_as_bot");
       expect(tenantScopes).toContain("im:message");
       expect(tenantScopes).toContain("im:message:update");
       expect(tenantScopes).toContain("im:message.reactions:write_only");
-      expect(tenantScopes).toContain("im:resource:upload");
-      expect(tenantScopes).toContain("im:resource:download");
+      expect(tenantScopes).toContain("im:resource");
+      // 飞书没有 :upload / :download 细分 scope（lark-cli scope_priorities.json）
+      expect(tenantScopes.some((x) => x.startsWith("im:resource:"))).toBe(false);
       expect(tenantScopes).toContain("im:chat:read");
       expect(tenantScopes).toContain("contact:user.id:readonly");
 
@@ -375,6 +377,22 @@ describe("Lark Bot Register & Permissions (qr-server)", () => {
   });
 
   describe("5. 扫码更新流程 (startRegistration mode=update)", () => {
+    test("收群全部消息 scope 只对 groupTrigger≠mention 的 bot 按需带上", async () => {
+      const seen: Record<string, string[]> = {};
+      for (const groupTrigger of ["mention", "all"] as const) {
+        const bot = createLarkBot({ name: `群触发-${groupTrigger}`, appId: `cli_group_${groupTrigger}`, appSecret: "sec", groupTrigger });
+        const mockRegisterApp = mock((options: any) => {
+          seen[groupTrigger] = options.addons.scopes.tenant;
+          options.onQRCodeReady({ url: "https://qr.url", expireIn: 60 });
+          return new Promise(() => {});
+        });
+        const start = await startRegistration({ mode: "update", botId: bot.id }, { registerAppFn: mockRegisterApp as any });
+        cancelRegistration(start.sessionId);
+      }
+      expect(seen.mention).not.toContain(GROUP_ALL_MESSAGES_SCOPE);
+      expect(seen.all).toContain(GROUP_ALL_MESSAGES_SCOPE);
+    });
+
     test("情况 1：确认的 client_id 与原 bot 不一致 -> status 变为 error", async () => {
       const originalBot = createLarkBot({
         name: "原应用",

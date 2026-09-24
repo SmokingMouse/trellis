@@ -10,7 +10,7 @@ import type {
   LarkRegisterStatus,
 } from "@/lib/lark-types";
 import { reconcileNow } from "./manager";
-import { TRELLIS_BOT_ADDONS } from "./scopes";
+import { GROUP_ALL_MESSAGES_SCOPE, TRELLIS_BOT_ADDONS } from "./scopes";
 import {
   createLarkClient,
   lark,
@@ -103,8 +103,9 @@ export async function startRegistration(
     const standardScopes = TRELLIS_BOT_ADDONS.scopes?.tenant ?? [];
     const requestedScopes = req.scopes ?? [];
     const missingScopes = targetBot.missingScopes ?? [];
+    const groupScopes = targetBot.groupTrigger === "mention" ? [] : [GROUP_ALL_MESSAGES_SCOPE];
     const mergedScopes = Array.from(
-      new Set([...standardScopes, ...requestedScopes, ...missingScopes]),
+      new Set([...standardScopes, ...groupScopes, ...requestedScopes, ...missingScopes]),
     );
     addons = {
       ...TRELLIS_BOT_ADDONS,
