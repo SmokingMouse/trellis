@@ -25,6 +25,7 @@ import {
 } from "@/lib/server/repo";
 import { startRun } from "@/lib/server/run-bus";
 import { getDB } from "@/lib/server/sqlite";
+import { larkFinalAnswer } from "./final-answer";
 import { parseIncomingEvent, type LarkMessageEvent, type ParsedIncoming } from "./protocol";
 import { AsyncSemaphore } from "./semaphore";
 import {
@@ -377,13 +378,14 @@ async function runAgentTurn(args: {
         onSettled: (result) => {
           void (async () => {
             const node = getNode(turn.nodeId);
+            const answer = node ? larkFinalAnswer(node) : "";
             const now = Date.now();
-            if (result.status === "done" && node?.response.trim()) {
+            if (result.status === "done" && answer.trim()) {
               const sent = await sendLarkText({
                 client: args.client,
                 chatId: message.chatId,
                 replyToMessageId: message.messageId,
-                markdown: node.response,
+                markdown: answer,
                 mode: sendModeFor(bot, message),
                 sessionUrl: sessionUrlFor(turn),
                 workspacePath: bot.workspacePath ?? undefined,

@@ -1,3 +1,5 @@
+import { isLarkSilent } from "./final-answer";
+
 export type TaskLarkOutcomeStatus = "done" | "error" | "timeout";
 export type TaskLarkNotifyOn = "never" | "error" | "always";
 
@@ -6,7 +8,10 @@ export function taskRunStatusText(status: TaskLarkOutcomeStatus): "完成" | "�
   return status === "done" ? "完成" : status === "timeout" ? "超时" : "失败";
 }
 
-/** null = 本次不应推送；成功空回答与失败 notify_on 门控都收口在这里。 */
+/**
+ * null = 本次不应推送；成功空回答、成功 [SILENT]（巡检无事）与失败 notify_on 门控都收口在这里。
+ * response 应是最终答复（larkFinalAnswer），不是整段 response。
+ */
 export function taskLarkPushContent(args: {
   taskName: string;
   status: TaskLarkOutcomeStatus;
@@ -14,7 +19,9 @@ export function taskLarkPushContent(args: {
   response: string;
   errorMessage: string | null | undefined;
 }): string | null {
-  if (args.status === "done") return args.response.trim() ? args.response : null;
+  if (args.status === "done") {
+    return args.response.trim() && !isLarkSilent(args.response) ? args.response : null;
+  }
   if (args.notifyOn === "never") return null;
   const title = `任务「${args.taskName}」${taskRunStatusText(args.status)}`;
   if (args.status === "timeout") return title;

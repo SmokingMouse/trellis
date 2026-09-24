@@ -40,6 +40,8 @@ export type TaskLarkPushDeps = {
     sessionUrl?: string;
     textFallback?: string;
     workspacePath?: string;
+    title?: string;
+    status?: "done" | "error";
   }) => Promise<LarkSentMessage>;
   recordOutbox: typeof recordLarkOutbox;
   advanceChat: typeof advanceLarkChat;
@@ -87,6 +89,9 @@ export async function pushTaskRunToLark(
     sessionId: string | null;
     nodeId: string | null;
     markdown: string;
+    /** 卡片 header：群里一眼看出这是哪个定时任务发的；失败时 status=error 变红。 */
+    title?: string;
+    status?: "done" | "error";
   },
   deps: TaskLarkPushDeps = DEFAULT_DEPS,
 ): Promise<TaskLarkPushResult> {
@@ -125,6 +130,8 @@ export async function pushTaskRunToLark(
       sessionUrl,
       // 不传的话 workspace 里的图片一律进不了白名单、只能降级成文本（复审 n2）。
       workspacePath: bot.workspacePath ?? undefined,
+      title: args.title,
+      status: args.status,
     });
     if (!sent.messageId) {
       console.error(`[lark] task push returned no message_id bot=${args.botId} chat=${args.chatId}`);

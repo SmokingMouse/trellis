@@ -320,6 +320,12 @@ describe("Lark Interactive Card Schema 2.0 Builder", () => {
       const card = await buildLarkCard("正文内容", { status: "error" });
       expect(card.header).toBeUndefined();
     });
+
+    test("正文里的 <at> 原样进卡片 markdown，summary 里换成 @ 不露 open_id", async () => {
+      const card = await buildLarkCard("<at id=ou_abc></at> 你的号授权掉了");
+      expect(JSON.stringify(card.body.elements)).toContain("<at id=ou_abc></at>");
+      expect(card.config.summary!.content).toBe("@ 你的号授权掉了");
+    });
   });
 
   describe("6. M1: 长度预算改按 UTF-8 字节 <= 24KB", () => {

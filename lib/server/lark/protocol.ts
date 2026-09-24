@@ -48,6 +48,33 @@ export type ParsedIncoming =
       parentId: string | null;
     };
 
+/**
+ * 卡片 markdown 的 @ 写法（`<at id=ou_x></at>` / `<at ids=a,b></at>` / `<at email=…></at>`）
+ * text 消息不认，卡片降级成纯文本时换成 text 的 `<at user_id="…"></at>`；email 没有 text
+ * 等价写法，退成可读的「@前缀」。
+ */
+export function cardAtToTextAt(text: string): string {
+  return text.replace(
+    /<at\s+([a-z_]+)\s*=\s*"?([^">\s]+)"?\s*>([\s\S]*?)<\/at>/gi,
+    (match, attr: string, value: string, inner: string) => {
+      const key = attr.toLowerCase();
+      if (key === "id" || key === "user_id" || key === "open_id") {
+        return `<at user_id="${value}">${inner || (value === "all" ? "所有人" : "")}</at>`;
+      }
+      if (key === "ids") {
+        return value
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .map((id) => `<at user_id="${id}"></at>`)
+          .join(" ");
+      }
+      if (key === "email") return `@${inner || value.split("@")[0]}`;
+      return match;
+    },
+  );
+}
+
 /** 飞书 text 消息本质是 JSON 字符串；markdown 原样保留，客户端至少能完整阅读。 */
 export function markdownToLarkText(markdown: string, limit = LARK_TEXT_LIMIT): string {
   const text = markdown.trim() || "（Agent 未返回文本，完整状态见 Trellis 会话）";

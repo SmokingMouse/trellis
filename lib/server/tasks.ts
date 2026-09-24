@@ -14,6 +14,7 @@ import { notify } from "./notify";
 import { createWatchPool, type WatchPool } from "./fs-watch-pool";
 import { createRootInLarkChat } from "./lark/session";
 import { getLarkBotRecord, getLarkChat } from "./lark/store";
+import { isLarkSilent, LARK_SILENT_MARK, larkFinalAnswer } from "./lark/final-answer";
 import { pushTaskRunToLark } from "./lark/push";
 import {
   LarkTaskBindingError,
@@ -585,6 +586,8 @@ function failRun(task: Task, runId: string, message: string): StartTaskRunResult
         sessionId: null,
         nodeId: null,
         markdown: markdown!,
+        title: task.name,
+        status: "error",
       }).catch((error) => console.error("[lark] task push crashed", error));
     }
   }
@@ -735,7 +738,8 @@ export function finishTaskRun(
 
   // 飞书落点本身就是成功产出的目的，不受 notify_on 控制；失败/超时则沿用 notify_on。
   if (task?.larkBotId && task.larkChatId && run) {
-    const response = run.nodeId ? getNode(run.nodeId)?.response ?? "" : "";
+    const node = run.nodeId ? getNode(run.nodeId) : null;
+    const response = node ? larkFinalAnswer(node) : "";
     const markdown = taskLarkPushContent({
       taskName: task.name,
       status,
@@ -744,7 +748,9 @@ export function finishTaskRun(
       errorMessage: r.errorMessage,
     });
     if (markdown === null) {
-      if (status === "done") {
+      if (status === "done" && isLarkSilent(response)) {
+        console.info(`[lark] task ${task.id} done with ${LARK_SILENT_MARK}; push skipped`);
+      } else if (status === "done") {
         console.warn(`[lark] task ${task.id} done with empty response; push skipped`);
       }
     } else {
@@ -754,6 +760,8 @@ export function finishTaskRun(
         sessionId: run.sessionId,
         nodeId: run.nodeId,
         markdown,
+        title: task.name,
+        status: status === "done" ? "done" : "error",
       }).catch((error) => console.error("[lark] task push crashed", error));
     }
   }

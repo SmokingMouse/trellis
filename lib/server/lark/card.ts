@@ -385,6 +385,8 @@ export async function buildLarkCard(
   let cleanSummaryText: string | undefined;
   if (trimmed) {
     const clean = trimmed
+      // 会话列表预览不渲染 <at>，原样会露出 open_id
+      .replace(/<at\b[^>]*>([\s\S]*?)<\/at>/g, (_m, inner: string) => `@${inner}`)
       .replace(/!\[([^\]]*)\]\([^)]+\)/g, "")
       .replace(/`{1,3}[\s\S]*?`{1,3}/g, "")
       .replace(/[#*~_>]/g, "")
