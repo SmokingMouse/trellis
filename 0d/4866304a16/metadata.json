@@ -1,0 +1,25 @@
+{
+  "id": "0d4866304a16",
+  "timestamp": "2026-09-24T17:47:06+08:00",
+  "branch": "audit/cards-trellis",
+  "commitHash": "73e2617544d2f2a3c4c2a6f9c4701da466586a60",
+  "commitMessage": "feat(lark): 任务推送支持 Card 2.0 JSON 直通",
+  "filesModified": [
+    "lib/server/lark/final-answer.test.ts",
+    "lib/server/lark/final-answer.ts",
+    "lib/server/lark/push.ts",
+    "lib/server/lark/sdk.ts"
+  ],
+  "sessions": 1,
+  "attribution": {
+    "agentLines": 0,
+    "agentRemoved": 0,
+    "humanAdded": 0,
+    "humanModified": 0,
+    "humanRemoved": 0,
+    "totalLinesChanged": 0,
+    "agentPercentage": 0.0,
+    "agentFiles": []
+  },
+  "reason": "commit"
+}

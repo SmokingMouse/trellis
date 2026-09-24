@@ -1,0 +1,21 @@
+{
+  "sessionId": "adhoc-1615478",
+  "agent": "claude-code",
+  "model": "gemini-3.7-flash-high",
+  "branch": "audit/cards-trellis",
+  "startedAt": "2026-09-24T17:47:06+08:00",
+  "condensedAt": "2026-09-24T17:47:06+08:00",
+  "reason": "commit",
+  "turns": 0,
+  "interrupted": 0,
+  "tokenUsage": {
+    "input": 718767,
+    "output": 64552,
+    "cached": 5720544
+  },
+  "tools": [
+    "Bash",
+    "Edit",
+    "Read"
+  ]
+}
