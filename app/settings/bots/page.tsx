@@ -15,8 +15,8 @@ import {
   type LarkBot,
   type LarkBotInput,
 } from "@/lib/lark-types";
+import { RegisterBotModal, type AgentOption } from "./RegisterBotModal";
 
-type AgentOption = { id: string; name: string; slug: string };
 type Draft = Required<Pick<LarkBotInput, "name" | "appId">> & {
   appSecret: string;
   agentId: string | null;
@@ -79,7 +79,12 @@ export default function LarkBotsSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 一键创建向导中的 Agent 模式：选择已有 vs 就地新建
+  // 扫码建 / 更新 bot 弹窗状态
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [registerModalMode, setRegisterModalMode] = useState<"create" | "update">("create");
+  const [registerModalBot, setRegisterModalBot] = useState<LarkBot | null>(null);
+
+  // 手动创建向导中的 Agent 模式：选择已有 vs 就地新建
   const [agentMode, setAgentMode] = useState<"existing" | "new">("existing");
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentSlug, setNewAgentSlug] = useState("");
@@ -159,10 +164,15 @@ export default function LarkBotsSettingsPage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const newParam = params.get("new") === "1";
+    const qrParam = params.get("qr") === "1";
     const agentIdParam = params.get("agentId");
     const idParam = params.get("id");
 
-    if (newParam) {
+    if (qrParam) {
+      setRegisterModalMode("create");
+      setRegisterModalBot(null);
+      setRegisterModalOpen(true);
+    } else if (newParam) {
       setSelectedId(null);
       setDraft({
         ...EMPTY,
@@ -198,6 +208,12 @@ export default function LarkBotsSettingsPage() {
   }, [selectedId, draft, bots]);
 
   const selected = bots.find((bot) => bot.id === selectedId) ?? null;
+
+  const openRegisterModal = (mode: "create" | "update", targetBot?: LarkBot | null) => {
+    setRegisterModalMode(mode);
+    setRegisterModalBot(targetBot ?? null);
+    setRegisterModalOpen(true);
+  };
 
   const edit = (bot: LarkBot) => {
     setSelectedId(bot.id);
@@ -408,7 +424,7 @@ export default function LarkBotsSettingsPage() {
         },
       );
       setSelectedId(data.bot.id);
-      setDraft((current) => current ? { ...current, appSecret: "" } : current);
+      setDraft((current) => (current ? { ...current, appSecret: "" } : current));
       setMessage("已保存；连接配置会在 15 秒内由后台对账生效。");
       await refresh(true);
     } catch (cause) {
@@ -538,50 +554,130 @@ export default function LarkBotsSettingsPage() {
 
   return (
     <div className="flex flex-col md:flex-row gap-4">
+      {/* 扫码创建 / 补权限弹窗 */}
+      <RegisterBotModal
+        open={registerModalOpen}
+        mode={registerModalMode}
+        bot={registerModalBot}
+        agents={agents}
+        onClose={() => setRegisterModalOpen(false)}
+        onSuccess={() => void refresh(true)}
+        refreshAgents={refreshAgents}
+      />
+
       {/* 左侧：机器人列表与新建入口 */}
-      <aside className="md:w-[280px] shrink-0 flex flex-col gap-2">
-        <Button type="button" variant="primary" size="sm" onClick={() => create()}>
-          + 接入飞书机器人
+      <aside className="md:w-[300px] shrink-0 flex flex-col gap-2.5">
+        {/* 顶部主按钮：扫码创建机器人 */}
+        <Button
+          type="button"
+          variant="primary"
+          size="md"
+          className="w-full justify-center text-sm font-semibold py-2.5 shadow-sm"
+          onClick={() => openRegisterModal("create")}
+        >
+          ✨ 扫码创建机器人
         </Button>
-        <div className="text-label text-ink-faint px-1">
-          保存后由服务端长连接接收消息，无需公网 webhook。
+
+        <div className="flex items-center justify-between px-1">
+          <span className="text-label text-ink-faint">已接入机器人 ({bots.length})</span>
+          <button
+            type="button"
+            onClick={() => create()}
+            className="text-label text-accent-ink hover:underline"
+          >
+            + 手动配置
+          </button>
         </div>
-        {loading && <div className="text-ui text-ink-faint">加载中…</div>}
-        {bots.map((bot) => {
-          const botAgent = agents.find((a) => a.id === bot.agentId);
-          return (
-            <button
-              key={bot.id}
-              type="button"
-              onClick={() => edit(bot)}
-              className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
-                selectedId === bot.id
-                  ? "bg-accent text-ink-inverse border-accent"
-                  : "bg-surface border-line hover:border-line-strong"
-              } ${bot.enabled ? "" : "opacity-55"}`}
-            >
-              <div className="flex items-center gap-2 text-ui font-medium">
-                <span className="truncate">{bot.botName || bot.name}</span>
-                <StatusBadge bot={bot} selected={selectedId === bot.id} />
-              </div>
-              <div className={`text-label font-mono truncate ${selectedId === bot.id ? "opacity-75" : "text-ink-faint"}`}>
-                {bot.appId}
-              </div>
-              {botAgent ? (
-                <div className={`text-nano truncate mt-0.5 ${selectedId === bot.id ? "opacity-90" : "text-accent-ink"}`}>
-                  🎭 {botAgent.name}
+
+        {loading && <div className="text-ui text-ink-faint px-1">加载中…</div>}
+
+        <div className="flex flex-col gap-2">
+          {bots.map((bot) => {
+            const botAgent = agents.find((a) => a.id === bot.agentId);
+            const isSelected = selectedId === bot.id;
+            const hasMissingScopes = Boolean(bot.missingScopes && bot.missingScopes.length > 0);
+
+            return (
+              <div
+                key={bot.id}
+                className={`p-3 rounded-xl border transition-all flex flex-col gap-2 ${
+                  isSelected
+                    ? "bg-surface border-accent shadow-sm ring-1 ring-accent"
+                    : "bg-surface border-line hover:border-line-strong"
+                } ${bot.enabled ? "" : "opacity-60"}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => edit(bot)}
+                  className="text-left w-full flex flex-col gap-1 focus:outline-none"
+                >
+                  <div className="flex items-center gap-1.5 text-ui font-medium">
+                    <span className="truncate text-ink font-semibold flex-1">
+                      {bot.botName || bot.name}
+                    </span>
+                    <StatusBadge bot={bot} />
+                  </div>
+                  <div className="text-label font-mono text-ink-faint truncate">
+                    {bot.appId}
+                  </div>
+                  {botAgent ? (
+                    <div className="text-nano truncate text-accent-ink">
+                      🎭 {botAgent.name}
+                    </div>
+                  ) : (
+                    <div className="text-nano truncate text-ink-faint">
+                      默认助手
+                    </div>
+                  )}
+                </button>
+
+                {/* 缺权限提示与高亮 */}
+                {hasMissingScopes && (
+                  <div className="p-2 rounded-lg bg-warn-muted border border-warn-line text-warn-ink text-nano leading-snug space-y-0.5">
+                    <div className="font-semibold flex items-center gap-1">
+                      <span>⚠️ 缺少权限</span>
+                    </div>
+                    <div className="font-mono text-label break-all" title={bot.missingScopes!.join(", ")}>
+                      {bot.missingScopes!.join(", ")}
+                    </div>
+                  </div>
+                )}
+
+                {/* 行内补权限 / 更新配置按钮 */}
+                <div className="flex items-center gap-1.5 pt-1.5 border-t border-line/60">
+                  <Button
+                    type="button"
+                    variant={hasMissingScopes ? "primary" : "secondary"}
+                    size="sm"
+                    className={`w-full text-xs py-1 ${
+                      hasMissingScopes
+                        ? "bg-warn hover:opacity-90 text-ink-inverse border-transparent font-medium shadow-sm"
+                        : ""
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openRegisterModal("update", bot);
+                    }}
+                  >
+                    {hasMissingScopes ? "⚡ 补权限" : "🔄 补权限 / 更新配置"}
+                  </Button>
                 </div>
-              ) : (
-                <div className={`text-nano truncate mt-0.5 ${selectedId === bot.id ? "opacity-70" : "text-ink-faint"}`}>
-                  默认助手
-                </div>
-              )}
-            </button>
-          );
-        })}
+              </div>
+            );
+          })}
+        </div>
+
         {!loading && bots.length === 0 && (
-          <div className="rounded-lg border border-dashed border-line px-3 py-5 text-ui text-ink-faint text-center">
-            尚未接入机器人。
+          <div className="rounded-xl border border-dashed border-line px-4 py-8 text-ui text-ink-faint text-center space-y-2">
+            <div>尚未接入机器人。</div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => openRegisterModal("create")}
+            >
+              扫码极速创建
+            </Button>
           </div>
         )}
       </aside>
@@ -593,14 +689,14 @@ export default function LarkBotsSettingsPage() {
           <section className="rounded-xl border border-accent-line bg-accent-muted/20 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-base" aria-hidden>✨</span>
+                <span className="text-base" aria-hidden>
+                  ✨
+                </span>
                 <span className="font-semibold text-ui text-ink">
                   检测到本机已配置的飞书应用（一键直连，无需复制 App ID / Secret）
                 </span>
               </div>
-              <span className="text-label text-ink-faint">
-                来源：~/.feishu-cli / 环境变量
-              </span>
+              <span className="text-label text-ink-faint">来源：~/.feishu-cli / 环境变量</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -613,9 +709,7 @@ export default function LarkBotsSettingsPage() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-ui truncate text-ink">
-                          🤖 {disc.name}
-                        </span>
+                        <span className="font-medium text-ui truncate text-ink">🤖 {disc.name}</span>
                         {disc.online ? (
                           <span className="px-1.5 py-0.2 rounded-full text-nano bg-accent-muted text-accent-ink border border-accent-line shrink-0">
                             在线可用
@@ -673,539 +767,922 @@ export default function LarkBotsSettingsPage() {
           </section>
         )}
 
-        {error && <div className="px-3 py-2 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">{error}</div>}
-        {message && <div className="px-3 py-2 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted leading-relaxed">{message}</div>}
+        {error && (
+          <div className="px-3.5 py-2.5 rounded-lg border border-danger-line bg-danger-muted text-danger-ink text-ui">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div className="px-3.5 py-2.5 rounded-lg border border-line bg-surface-muted text-ui text-ink-muted leading-relaxed">
+            {message}
+          </div>
+        )}
 
+        {/* 当没有选中任何 bot 且没有主动打开草稿时 */}
         {!draft ? (
-          <div className="py-8 text-ui text-ink-faint text-center">
-            {discovered.length === 0
-              ? "左边选一个机器人编辑，或点击上方接入新应用。"
-              : "可在上方直接一键接入本机发现的应用，或在左侧编辑已接入的机器人。"}
+          <div className="p-8 rounded-xl border border-line bg-surface text-center space-y-4">
+            <div className="text-2xl" aria-hidden>
+              🤖
+            </div>
+            <div className="space-y-1 max-w-md mx-auto">
+              <div className="text-ui font-semibold text-ink">快速接入飞书机器人</div>
+              <div className="text-label text-ink-faint leading-relaxed">
+                点击上方「扫码创建机器人」直接生成二维码极速配对；或在左侧选择已有机器人进行参数配置与权限管理。
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="md"
+                onClick={() => openRegisterModal("create")}
+              >
+                ✨ 扫码创建机器人
+              </Button>
+              <Button type="button" variant="secondary" size="md" onClick={() => create()}>
+                ⚙️ 手动接入已有应用
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* 指南卡片与一键创建链接 */}
-            <div className="rounded-xl border border-line bg-surface p-4">
-              <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
-                <div>
-                  <div className="text-ui font-semibold flex items-center gap-2">
-                    <span>🚀 飞书 / Lark 应用一键极速创建与接入</span>
+            {/* 选中机器人且有 missingScopes 时在编辑区顶部提示 */}
+            {selected && selected.missingScopes && selected.missingScopes.length > 0 && (
+              <div className="p-4 rounded-xl border border-warn-line bg-warn-muted text-warn-ink flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                <div className="min-w-0">
+                  <div className="font-semibold text-ui flex items-center gap-1.5">
+                    <span>⚠️ 飞书提示此机器人缺少权限：</span>
                   </div>
-                  <div className="text-label text-ink-muted mt-1 leading-relaxed space-y-1">
-                    <div>1. 点击右侧 <b>「⚡ 飞书一键创建应用 (Launcher)」</b> 直达预置模板快速生成自建应用；</div>
-                    <div>2. 模板已预配好机器人与长连接事件，创建后将自动生成的 <b>App ID</b> 和 <b>App Secret</b> 填入下方；</div>
-                    <div>3. 若本机已安装并登录 <code className="px-1 py-0.5 bg-surface-muted rounded font-mono text-nano">feishu-cli</code>，上方卡片会<b>自动探测识别</b>，直接点击一键接入即可。</div>
+                  <div className="font-mono text-label break-all mt-0.5" title={selected.missingScopes.join(", ")}>
+                    {selected.missingScopes.join(", ")}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                  <a
-                    href={FEISHU_LAUNCHER_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1 text-label rounded-md bg-accent text-ink-inverse hover:bg-accent-strong transition-colors font-medium"
-                    title="在飞书开放平台通过官方 Launcher 模板一键创建机器人应用"
-                  >
-                    ⚡ 飞书一键创建 (Launcher) ↗
-                  </a>
-                  <a
-                    href={LARK_LAUNCHER_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
-                    title="在 Lark 国际版通过官方 Launcher 模板一键创建机器人应用"
-                  >
-                    Lark 国际版 ↗
-                  </a>
-                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  className="shrink-0 text-xs bg-warn hover:opacity-90 text-ink-inverse border-transparent font-medium shadow-sm"
+                  onClick={() => openRegisterModal("update", selected)}
+                >
+                  ⚡ 扫码一键补权限 ↗
+                </Button>
               </div>
-            </div>
+            )}
 
-            {/* 1. 基础与凭证信息 */}
-            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
-              <div className="text-ui font-semibold">1. 应用与凭证信息</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="配置名称" hint="在 Trellis 中显示的易记名称">
-                  <input className={INPUT} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：代码评审专家" />
-                </Field>
-                <Field label="飞书 App ID" hint="开放平台 cli_ 开头的唯一标识">
-                  <input className={`${INPUT} font-mono`} value={draft.appId} onChange={(e) => setDraft({ ...draft, appId: e.target.value })} placeholder="cli_xxxxxxxxxxxxxxxx" autoComplete="off" />
-                </Field>
-              </div>
-
-              <Field
-                label="飞书 App Secret"
-                hint={selected?.hasSecret ? "已保存安全凭证。留空表示不修改；服务端永不回显。" : "在开放平台复制，或直接从上方本机发现中一键接入免填。"}
-              >
-                <input className={`${INPUT} font-mono`} type="password" value={draft.appSecret} onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })} placeholder={selected ? "留空不改" : "请输入 app_secret"} autoComplete="new-password" />
-              </Field>
-            </section>
-
-            {/* 2. 绑定 Agent 策略（Agent-first 体验） */}
-            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-ui font-semibold">2. 绑定执行 Agent（人设、技能与工具）</div>
-                  <div className="text-label text-ink-faint mt-0.5">飞书用户发消息时，将以该 Agent 的专属提示词、挂载技能与模型运行。</div>
-                </div>
-                {!selected && (
-                  <div className="flex rounded-lg border border-line p-0.5 bg-surface-muted text-label">
-                    <button
-                      type="button"
-                      onClick={() => setAgentMode("existing")}
-                      className={`px-2 py-0.5 rounded transition-colors ${agentMode === "existing" ? "bg-surface font-medium text-ink shadow-sm" : "text-ink-muted hover:text-ink"}`}
-                    >
-                      选择已有 Agent
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAgentMode("new")}
-                      className={`px-2 py-0.5 rounded transition-colors ${agentMode === "new" ? "bg-surface font-medium text-ink shadow-sm" : "text-ink-muted hover:text-ink"}`}
-                    >
-                      就地新建 Agent
-                    </button>
+            {/* 新建模式下：折叠式「手动接入已有应用」外壳 */}
+            {!selected ? (
+              <details className="group rounded-xl border border-line bg-surface overflow-hidden shadow-sm">
+                <summary className="px-4 py-3 cursor-pointer select-none font-semibold text-ui text-ink flex items-center justify-between hover:bg-surface-muted transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span>⚙️ 手动接入已有应用</span>
+                    <span className="text-label text-ink-faint font-normal">
+                      （填 App ID / Secret）
+                    </span>
                   </div>
-                )}
-              </div>
+                  <span className="text-ink-faint group-open:rotate-180 transition-transform">
+                    ▼
+                  </span>
+                </summary>
 
-              {agentMode === "existing" || selected ? (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <select
-                      className={`${INPUT} flex-1`}
-                      value={draft.agentId ?? ""}
-                      onChange={(e) => setDraft({ ...draft, agentId: e.target.value || null })}
-                    >
-                      <option value="">默认助手（不附加自定义人设）</option>
-                      {agents.map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name} (@{agent.slug})
-                        </option>
-                      ))}
-                    </select>
-                    {!selected && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => setAgentMode("new")}
-                      >
-                        + 新建 Agent
-                      </Button>
-                    )}
-                  </div>
-                  {boundAgent && (
-                    <div className="flex items-center gap-1.5 text-label">
-                      <span className="text-ink-faint">当前绑定人设：</span>
-                      <span className="text-ink font-medium">{boundAgent.name}</span>
-                      <Link
-                        href={`/settings/agents?id=${encodeURIComponent(boundAgent.id)}`}
-                        className="text-accent-ink hover:underline ml-1"
-                      >
-                        查看 / 编辑人设 ↗
-                      </Link>
+                <div className="p-4 pt-2 border-t border-line space-y-4">
+                  {/* 指南卡片与一键创建链接 */}
+                  <div className="rounded-xl border border-line bg-surface-muted p-4">
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
+                      <div>
+                        <div className="text-ui font-semibold flex items-center gap-2">
+                          <span>🚀 飞书 / Lark 应用一键极速创建与接入</span>
+                        </div>
+                        <div className="text-label text-ink-muted mt-1 leading-relaxed space-y-1">
+                          <div>
+                            1. 点击右侧 <b>「⚡ 飞书一键创建应用 (Launcher)」</b> 直达预置模板快速生成自建应用；
+                          </div>
+                          <div>
+                            2. 模板已预配好机器人与长连接事件，创建后将自动生成的 <b>App ID</b> 和{" "}
+                            <b>App Secret</b> 填入下方；
+                          </div>
+                          <div>
+                            3. 若本机已安装并登录{" "}
+                            <code className="px-1 py-0.5 bg-surface rounded font-mono text-nano">
+                              feishu-cli
+                            </code>
+                            ，上方卡片会<b>自动探测识别</b>，直接点击一键接入即可。
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        <a
+                          href={FEISHU_LAUNCHER_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1 text-label rounded-md bg-accent text-ink-inverse hover:bg-accent-strong transition-colors font-medium"
+                          title="在飞书开放平台通过官方 Launcher 模板一键创建机器人应用"
+                        >
+                          ⚡ 飞书一键创建 (Launcher) ↗
+                        </a>
+                        <a
+                          href={LARK_LAUNCHER_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1 text-label rounded-md border border-line hover:border-line-strong text-ink hover:text-ink-strong transition-colors"
+                          title="在 Lark 国际版通过官方 Launcher 模板一键创建机器人应用"
+                        >
+                          Lark 国际版 ↗
+                        </a>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ) : (
-                /* 就地新建 Agent 表单 */
-                <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-3">
-                  <div className="text-label text-ink-muted font-medium">✨ 在此处定义新人设，创建后自动与该机器人绑定：</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <Field label="Agent 名字" hint="例如：技术支持">
-                      <input
-                        className={INPUT}
-                        value={newAgentName}
-                        onChange={(e) => {
-                          setNewAgentName(e.target.value);
-                          if (!newAgentSlug) {
-                            const s = e.target.value
-                              .toLowerCase()
-                              .replace(/[^a-z0-9]+/g, "-")
-                              .replace(/^-|-$/g, "");
-                            if (s) setNewAgentSlug(s);
-                          }
-                        }}
-                        placeholder="例如：代码审查专家"
-                      />
-                    </Field>
-                    <Field label="slug" hint="英文/数字/连字符，≤32字符">
+                  </div>
+
+                  {/* 1. 基础与凭证信息 */}
+                  <section className="space-y-3">
+                    <div className="text-ui font-semibold">1. 应用与凭证信息</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="配置名称" hint="在 Trellis 中显示的易记名称">
+                        <input
+                          className={INPUT}
+                          value={draft.name}
+                          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                          placeholder="例如：代码评审专家"
+                        />
+                      </Field>
+                      <Field label="飞书 App ID" hint="开放平台 cli_ 开头的唯一标识">
+                        <input
+                          className={`${INPUT} font-mono`}
+                          value={draft.appId}
+                          onChange={(e) => setDraft({ ...draft, appId: e.target.value })}
+                          placeholder="cli_xxxxxxxxxxxxxxxx"
+                          autoComplete="off"
+                        />
+                      </Field>
+                    </div>
+
+                    <Field
+                      label="飞书 App Secret"
+                      hint="在开放平台复制，或直接从上方本机发现中一键接入免填。"
+                    >
                       <input
                         className={`${INPUT} font-mono`}
-                        value={newAgentSlug}
-                        onChange={(e) => setNewAgentSlug(e.target.value)}
-                        placeholder="code-reviewer"
+                        type="password"
+                        value={draft.appSecret}
+                        onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })}
+                        placeholder="请输入 app_secret"
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </section>
+
+                  {/* 2. 绑定 Agent */}
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-ui font-semibold">2. 绑定执行 Agent（人设、技能与工具）</div>
+                        <div className="text-label text-ink-faint mt-0.5">
+                          飞书用户发消息时，将以该 Agent 的专属提示词、挂载技能与模型运行。
+                        </div>
+                      </div>
+                      <div className="flex rounded-lg border border-line p-0.5 bg-surface text-label">
+                        <button
+                          type="button"
+                          onClick={() => setAgentMode("existing")}
+                          className={`px-2 py-0.5 rounded transition-colors ${
+                            agentMode === "existing"
+                              ? "bg-surface font-medium text-ink shadow-sm"
+                              : "text-ink-muted hover:text-ink"
+                          }`}
+                        >
+                          选择已有 Agent
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAgentMode("new")}
+                          className={`px-2 py-0.5 rounded transition-colors ${
+                            agentMode === "new"
+                              ? "bg-surface font-medium text-ink shadow-sm"
+                              : "text-ink-muted hover:text-ink"
+                          }`}
+                        >
+                          就地新建 Agent
+                        </button>
+                      </div>
+                    </div>
+
+                    {agentMode === "existing" ? (
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <select
+                            className={`${INPUT} flex-1`}
+                            value={draft.agentId ?? ""}
+                            onChange={(e) => setDraft({ ...draft, agentId: e.target.value || null })}
+                          >
+                            <option value="">默认助手（不附加自定义人设）</option>
+                            {agents.map((agent) => (
+                              <option key={agent.id} value={agent.id}>
+                                {agent.name} (@{agent.slug})
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => setAgentMode("new")}
+                          >
+                            + 新建 Agent
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-3">
+                        <div className="text-label text-ink-muted font-medium">
+                          ✨ 在此处定义新人设，创建后自动与该机器人绑定：
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <Field label="Agent 名字" hint="例如：技术支持">
+                            <input
+                              className={INPUT}
+                              value={newAgentName}
+                              onChange={(e) => {
+                                setNewAgentName(e.target.value);
+                                if (!newAgentSlug) {
+                                  const s = e.target.value
+                                    .toLowerCase()
+                                    .replace(/[^a-z0-9]+/g, "-")
+                                    .replace(/^-|-$/g, "");
+                                  if (s) setNewAgentSlug(s);
+                                }
+                              }}
+                              placeholder="例如：代码审查专家"
+                            />
+                          </Field>
+                          <Field label="slug" hint="英文/数字/连字符，≤32字符">
+                            <input
+                              className={`${INPUT} font-mono`}
+                              value={newAgentSlug}
+                              onChange={(e) => setNewAgentSlug(e.target.value)}
+                              placeholder="code-reviewer"
+                            />
+                          </Field>
+                        </div>
+                        <Field label="一句话职责自述">
+                          <input
+                            className={INPUT}
+                            value={newAgentDesc}
+                            onChange={(e) => setNewAgentDesc(e.target.value)}
+                            placeholder="例如：专注代码架构与潜在缺陷审查"
+                          />
+                        </Field>
+                        <Field label="系统提示词（人设 Prompt）">
+                          <textarea
+                            className={`${INPUT} resize-y font-mono text-ui`}
+                            rows={3}
+                            value={newAgentPrompt}
+                            onChange={(e) => setNewAgentPrompt(e.target.value)}
+                            placeholder="你是飞书助手，主要职责是..."
+                          />
+                        </Field>
+                        <Field label="指定模型" hint="留空跟随会话默认模型">
+                          <input
+                            className={`${INPUT} font-mono`}
+                            value={newAgentModel}
+                            onChange={(e) => setNewAgentModel(e.target.value)}
+                            placeholder="haiku / sonnet / opus / codex（留空默认）"
+                          />
+                        </Field>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* 3. 运行选项与工作目录 */}
+                  <section className="space-y-3">
+                    <div className="text-ui font-semibold">3. 运行目录与连接控制</div>
+                    <Field
+                      label="工作目录（选填）"
+                      hint="留空使用通用聊天工作区；填写绝对路径后，机器人将以 project 模式在该目录执行与读写文件"
+                    >
+                      <input
+                        className={`${INPUT} font-mono`}
+                        value={draft.workspacePath}
+                        onChange={(e) => setDraft({ ...draft, workspacePath: e.target.value })}
+                        placeholder="/absolute/path/to/project"
+                      />
+                    </Field>
+
+                    <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-line bg-surface-muted px-3 py-2.5">
+                      <input
+                        className="mt-1"
+                        type="checkbox"
+                        checked={draft.enabled}
+                        onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                      />
+                      <span className="text-ui">
+                        启用长连接监听
+                        <span className="block text-label text-ink-faint">
+                          保存或修改凭证后无需重启 Trellis；后台每 15 秒自动对账并保持长连接。
+                        </span>
+                      </span>
+                    </label>
+                  </section>
+
+                  {/* 4. 群聊行为 */}
+                  <section className="space-y-3">
+                    <div className="text-ui font-semibold">4. 群聊行为</div>
+                    <div className="text-label text-ink-faint">
+                      私聊固定：全部消息、引用回复、线性上下文。下面四项只影响群。
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field
+                        label="触发"
+                        hint="群里什么消息算对机器人说的。它开的话题里的追问、引用它回答的消息，不论哪档都算。"
+                      >
+                        <select
+                          className={INPUT}
+                          value={draft.groupTrigger}
+                          onChange={(e) =>
+                            setDraft({ ...draft, groupTrigger: e.target.value as LarkGroupTrigger })
+                          }
+                        >
+                          <option value="mention">仅 @ 它时</option>
+                          <option value="prefix">消息以前缀开头</option>
+                          <option value="all">群里所有消息（慎用，每条都跑一次）</option>
+                        </select>
+                        {draft.groupTrigger === "prefix" && (
+                          <input
+                            className={`${INPUT} mt-2 font-mono`}
+                            value={draft.triggerPrefix}
+                            onChange={(e) => setDraft({ ...draft, triggerPrefix: e.target.value })}
+                            placeholder="/ask"
+                          />
+                        )}
+                      </Field>
+                      <Field
+                        label="上下文"
+                        hint="按话题：每个话题一棵树，互不串味；整群一条链：旧行为，谁 @ 都接在同一条链尾。"
+                      >
+                        <select
+                          className={INPUT}
+                          value={draft.sessionPolicy}
+                          onChange={(e) =>
+                            setDraft({ ...draft, sessionPolicy: e.target.value as LarkSessionPolicy })
+                          }
+                        >
+                          <option value="thread">按话题（每个话题一棵树）</option>
+                          <option value="chat">整群一条链</option>
+                        </select>
+                      </Field>
+                      <Field
+                        label="回复形式"
+                        hint="话题回复把对话收进话题；引用回复平铺在群里带引用；平铺发送不引用原消息。"
+                      >
+                        <select
+                          className={INPUT}
+                          value={draft.replyMode}
+                          onChange={(e) =>
+                            setDraft({ ...draft, replyMode: e.target.value as LarkReplyMode })
+                          }
+                        >
+                          <option value="thread">话题回复</option>
+                          <option value="quote">引用回复</option>
+                          <option value="plain">平铺发送</option>
+                        </select>
+                      </Field>
+                      <Field label="收到确认" hint="收到消息先回一个 OnIt 表情再开始跑。">
+                        <select
+                          className={INPUT}
+                          value={draft.ackMode}
+                          onChange={(e) =>
+                            setDraft({ ...draft, ackMode: e.target.value as LarkAckMode })
+                          }
+                        >
+                          <option value="reaction">表情确认</option>
+                          <option value="none">不确认</option>
+                        </select>
+                      </Field>
+                    </div>
+                  </section>
+
+                  {/* 5. 对话权限 */}
+                  <section className="space-y-3">
+                    <div className="text-ui font-semibold">5. 对话权限控制</div>
+                    <Field
+                      label="权限模式"
+                      hint="审批模式下，未在白名单的用户必须经管理员审批放行后才能与机器人对话。"
+                    >
+                      <select
+                        className={INPUT}
+                        value={draft.accessMode}
+                        onChange={(e) =>
+                          setDraft({ ...draft, accessMode: e.target.value as LarkAccessMode })
+                        }
+                      >
+                        <option value="open">开放模式（默认：群内 @ 或私聊直接对话）</option>
+                        <option value="approval">需管理员审批（发送人白名单 + 挂起消息审批重放）</option>
+                      </select>
+                    </Field>
+                  </section>
+
+                  {/* 提交动作栏 */}
+                  <div className="pt-2 border-t border-line flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="md"
+                      onClick={() => void handleOneClickSetup()}
+                      disabled={
+                        busy !== null ||
+                        !draft.name.trim() ||
+                        !draft.appId.trim() ||
+                        !draft.appSecret.trim()
+                      }
+                    >
+                      {busy === "one-click" ? "正在测试并创建接入…" : "⚡ 测试凭证并接入绑定"}
+                    </Button>
+                  </div>
+                </div>
+              </details>
+            ) : (
+              /* 编辑已有机器人时的平铺面板 */
+              <>
+                {/* 1. 基础与凭证信息 */}
+                <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                  <div className="text-ui font-semibold">1. 应用与凭证信息</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="配置名称" hint="在 Trellis 中显示的易记名称">
+                      <input
+                        className={INPUT}
+                        value={draft.name}
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                        placeholder="例如：代码评审专家"
+                      />
+                    </Field>
+                    <Field label="飞书 App ID" hint="开放平台 cli_ 开头的唯一标识">
+                      <input
+                        className={`${INPUT} font-mono`}
+                        value={draft.appId}
+                        onChange={(e) => setDraft({ ...draft, appId: e.target.value })}
+                        placeholder="cli_xxxxxxxxxxxxxxxx"
+                        autoComplete="off"
                       />
                     </Field>
                   </div>
-                  <Field label="一句话职责自述">
-                    <input
-                      className={INPUT}
-                      value={newAgentDesc}
-                      onChange={(e) => setNewAgentDesc(e.target.value)}
-                      placeholder="例如：专注代码架构与潜在缺陷审查"
-                    />
-                  </Field>
-                  <Field label="系统提示词（人设 Prompt）">
-                    <textarea
-                      className={`${INPUT} resize-y font-mono text-ui`}
-                      rows={3}
-                      value={newAgentPrompt}
-                      onChange={(e) => setNewAgentPrompt(e.target.value)}
-                      placeholder="你是飞书助手，主要职责是..."
-                    />
-                  </Field>
-                  <Field label="指定模型" hint="留空跟随会话默认模型">
+
+                  <Field
+                    label="飞书 App Secret"
+                    hint={
+                      selected?.hasSecret
+                        ? "已保存安全凭证。留空表示不修改；服务端永不回显。"
+                        : "在开放平台复制，或直接从上方本机发现中一键接入免填。"
+                    }
+                  >
                     <input
                       className={`${INPUT} font-mono`}
-                      value={newAgentModel}
-                      onChange={(e) => setNewAgentModel(e.target.value)}
-                      placeholder="haiku / sonnet / opus / codex（留空默认）"
+                      type="password"
+                      value={draft.appSecret}
+                      onChange={(e) => setDraft({ ...draft, appSecret: e.target.value })}
+                      placeholder={selected ? "留空不改" : "请输入 app_secret"}
+                      autoComplete="new-password"
                     />
                   </Field>
-                </div>
-              )}
-            </section>
+                </section>
 
-            {/* 3. 运行选项与工作目录 */}
-            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
-              <div className="text-ui font-semibold">3. 运行目录与连接控制</div>
-              <Field label="工作目录（选填）" hint="留空使用通用聊天工作区；填写绝对路径后，机器人将以 project 模式在该目录执行与读写文件">
-                <input className={`${INPUT} font-mono`} value={draft.workspacePath} onChange={(e) => setDraft({ ...draft, workspacePath: e.target.value })} placeholder="/absolute/path/to/project" />
-              </Field>
-
-              <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-line bg-surface-muted px-3 py-2.5">
-                <input className="mt-1" type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
-                <span className="text-ui">
-                  启用长连接监听
-                  <span className="block text-label text-ink-faint">保存或修改凭证后无需重启 Trellis；后台每 15 秒自动对账并保持长连接。</span>
-                </span>
-              </label>
-            </section>
-
-            {/* 4. 群聊行为（S134 IM 入口层四旋钮，spec: progress/im-entry-layer.md） */}
-            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
-              <div className="text-ui font-semibold">4. 群聊行为</div>
-              <div className="text-label text-ink-faint">私聊固定：全部消息、引用回复、线性上下文。下面四项只影响群。</div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="触发" hint="群里什么消息算对机器人说的。它开的话题里的追问、引用它回答的消息，不论哪档都算。">
-                  <select className={INPUT} value={draft.groupTrigger} onChange={(e) => setDraft({ ...draft, groupTrigger: e.target.value as LarkGroupTrigger })}>
-                    <option value="mention">仅 @ 它时</option>
-                    <option value="prefix">消息以前缀开头</option>
-                    <option value="all">群里所有消息（慎用，每条都跑一次）</option>
-                  </select>
-                  {draft.groupTrigger === "prefix" && (
-                    <input className={`${INPUT} mt-2 font-mono`} value={draft.triggerPrefix} onChange={(e) => setDraft({ ...draft, triggerPrefix: e.target.value })} placeholder="/ask" />
-                  )}
-                </Field>
-                <Field label="上下文" hint="按话题：每个话题一棵树，互不串味；整群一条链：旧行为，谁 @ 都接在同一条链尾。">
-                  <select className={INPUT} value={draft.sessionPolicy} onChange={(e) => setDraft({ ...draft, sessionPolicy: e.target.value as LarkSessionPolicy })}>
-                    <option value="thread">按话题（每个话题一棵树）</option>
-                    <option value="chat">整群一条链</option>
-                  </select>
-                </Field>
-                <Field label="回复形式" hint="话题回复把对话收进话题；引用回复平铺在群里带引用；平铺发送不引用原消息。">
-                  <select className={INPUT} value={draft.replyMode} onChange={(e) => setDraft({ ...draft, replyMode: e.target.value as LarkReplyMode })}>
-                    <option value="thread">话题回复</option>
-                    <option value="quote">引用回复</option>
-                    <option value="plain">平铺发送</option>
-                  </select>
-                </Field>
-                <Field label="收到确认" hint="收到消息先回一个 OnIt 表情再开始跑。">
-                  <select className={INPUT} value={draft.ackMode} onChange={(e) => setDraft({ ...draft, ackMode: e.target.value as LarkAckMode })}>
-                    <option value="reaction">表情确认</option>
-                    <option value="none">不确认</option>
-                  </select>
-                </Field>
-              </div>
-              {draft.sessionPolicy === "thread" && draft.replyMode !== "thread" && (
-                <div className="text-label text-ink-muted">上下文按话题、回复却不进话题：飞书不会给后续消息 thread_id，追问只能靠引用回复归树。建议回复形式也选「话题回复」。</div>
-              )}
-              <div className="text-label text-ink-faint">消息里写 <code>@agent-slug</code> 可让另一个 Agent 单轮作答，与画布 @ 同语义：只看最近几轮、不改主线人设。</div>
-            </section>
-
-            {/* 5. 对话权限（fj-access 白名单与审批） */}
-            <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
-              <div className="text-ui font-semibold">5. 对话权限控制</div>
-              <Field label="权限模式" hint="审批模式下，未在白名单的用户必须经管理员审批放行后才能与机器人对话。">
-                <select
-                  className={INPUT}
-                  value={draft.accessMode}
-                  onChange={(e) => setDraft({ ...draft, accessMode: e.target.value as LarkAccessMode })}
-                >
-                  <option value="open">开放模式（默认：群内 @ 或私聊直接对话）</option>
-                  <option value="approval">需管理员审批（发送人白名单 + 挂起消息审批重放）</option>
-                </select>
-              </Field>
-
-              {draft.accessMode === "approval" && (
-                <div className="space-y-4 pt-2">
-                  {selected && members.filter((m) => m.role === "admin" && m.status === "approved").length === 0 && (
-                    <div className="p-3 rounded-lg border border-accent-line bg-accent-muted/20 text-ui leading-relaxed">
-                      <div className="font-semibold text-accent-ink flex items-center gap-1.5 mb-1">
-                        <span>💡 首个管理员配置引导</span>
-                      </div>
-                      <div className="text-label text-ink-muted">
-                        当前机器人尚未配置管理员。管理员本人可在飞书私聊向机器人发送任意一句话（如「申请」），进入下方待审批列表后点击<b>「设为管理员」</b>，即可完成初始化。
-                      </div>
+                {/* 2. 绑定 Agent 策略（Agent-first 体验） */}
+                <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                  <div>
+                    <div className="text-ui font-semibold">2. 绑定执行 Agent（人设、技能与工具）</div>
+                    <div className="text-label text-ink-faint mt-0.5">
+                      飞书用户发消息时，将以该 Agent 的专属提示词、挂载技能与模型运行。
                     </div>
-                  )}
+                  </div>
 
-                  {/* 预先放行表单 */}
-                  {selected && (
-                    <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-2">
-                      <div className="text-label font-medium text-ink">按 open_id 手动预先放行</div>
-                      <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <select
+                        className={`${INPUT} flex-1`}
+                        value={draft.agentId ?? ""}
+                        onChange={(e) => setDraft({ ...draft, agentId: e.target.value || null })}
+                      >
+                        <option value="">默认助手（不附加自定义人设）</option>
+                        {agents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>
+                            {agent.name} (@{agent.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {boundAgent && (
+                      <div className="flex items-center gap-1.5 text-label">
+                        <span className="text-ink-faint">当前绑定人设：</span>
+                        <span className="text-ink font-medium">{boundAgent.name}</span>
+                        <Link
+                          href={`/settings/agents?id=${encodeURIComponent(boundAgent.id)}`}
+                          className="text-accent-ink hover:underline ml-1"
+                        >
+                          查看 / 编辑人设 ↗
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* 3. 运行选项与工作目录 */}
+                <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                  <div className="text-ui font-semibold">3. 运行目录与连接控制</div>
+                  <Field
+                    label="工作目录（选填）"
+                    hint="留空使用通用聊天工作区；填写绝对路径后，机器人将以 project 模式在该目录执行与读写文件"
+                  >
+                    <input
+                      className={`${INPUT} font-mono`}
+                      value={draft.workspacePath}
+                      onChange={(e) => setDraft({ ...draft, workspacePath: e.target.value })}
+                      placeholder="/absolute/path/to/project"
+                    />
+                  </Field>
+
+                  <label className="flex items-start gap-2 cursor-pointer rounded-lg border border-line bg-surface-muted px-3 py-2.5">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      checked={draft.enabled}
+                      onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                    />
+                    <span className="text-ui">
+                      启用长连接监听
+                      <span className="block text-label text-ink-faint">
+                        保存或修改凭证后无需重启 Trellis；后台每 15 秒自动对账并保持长连接。
+                      </span>
+                    </span>
+                  </label>
+                </section>
+
+                {/* 4. 群聊行为 */}
+                <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                  <div className="text-ui font-semibold">4. 群聊行为</div>
+                  <div className="text-label text-ink-faint">
+                    私聊固定：全部消息、引用回复、线性上下文。下面四项只影响群。
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field
+                      label="触发"
+                      hint="群里什么消息算对机器人说的。它开的话题里的追问、引用它回答的消息，不论哪档都算。"
+                    >
+                      <select
+                        className={INPUT}
+                        value={draft.groupTrigger}
+                        onChange={(e) =>
+                          setDraft({ ...draft, groupTrigger: e.target.value as LarkGroupTrigger })
+                        }
+                      >
+                        <option value="mention">仅 @ 它时</option>
+                        <option value="prefix">消息以前缀开头</option>
+                        <option value="all">群里所有消息（慎用，每条都跑一次）</option>
+                      </select>
+                      {draft.groupTrigger === "prefix" && (
                         <input
-                          className={`${INPUT} font-mono flex-1`}
-                          value={preapproveOpenId}
-                          onChange={(e) => setPreapproveOpenId(e.target.value)}
-                          placeholder="用户的 open_id（例如 ou_xxxxxxxxxxxxxxxx）"
+                          className={`${INPUT} mt-2 font-mono`}
+                          value={draft.triggerPrefix}
+                          onChange={(e) => setDraft({ ...draft, triggerPrefix: e.target.value })}
+                          placeholder="/ask"
                         />
-                        <select
-                          className={`${INPUT} sm:w-32`}
-                          value={preapproveRole}
-                          onChange={(e) => setPreapproveRole(e.target.value as LarkBotMemberRole)}
-                        >
-                          <option value="member">普通成员</option>
-                          <option value="admin">管理员</option>
-                        </select>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => void handlePreapprove()}
-                          disabled={busy !== null || !preapproveOpenId.trim()}
-                        >
-                          预先放行
-                        </Button>
-                      </div>
+                      )}
+                    </Field>
+                    <Field
+                      label="上下文"
+                      hint="按话题：每个话题一棵树，互不串味；整群一条链：旧行为，谁 @ 都接在同一条链尾。"
+                    >
+                      <select
+                        className={INPUT}
+                        value={draft.sessionPolicy}
+                        onChange={(e) =>
+                          setDraft({ ...draft, sessionPolicy: e.target.value as LarkSessionPolicy })
+                        }
+                      >
+                        <option value="thread">按话题（每个话题一棵树）</option>
+                        <option value="chat">整群一条链</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label="回复形式"
+                      hint="话题回复把对话收进话题；引用回复平铺在群里带引用；平铺发送不引用原消息。"
+                    >
+                      <select
+                        className={INPUT}
+                        value={draft.replyMode}
+                        onChange={(e) =>
+                          setDraft({ ...draft, replyMode: e.target.value as LarkReplyMode })
+                        }
+                      >
+                        <option value="thread">话题回复</option>
+                        <option value="quote">引用回复</option>
+                        <option value="plain">平铺发送</option>
+                      </select>
+                    </Field>
+                    <Field label="收到确认" hint="收到消息先回一个 OnIt 表情再开始跑。">
+                      <select
+                        className={INPUT}
+                        value={draft.ackMode}
+                        onChange={(e) =>
+                          setDraft({ ...draft, ackMode: e.target.value as LarkAckMode })
+                        }
+                      >
+                        <option value="reaction">表情确认</option>
+                        <option value="none">不确认</option>
+                      </select>
+                    </Field>
+                  </div>
+                  {draft.sessionPolicy === "thread" && draft.replyMode !== "thread" && (
+                    <div className="text-label text-ink-muted">
+                      上下文按话题、回复却不进话题：飞书不会给后续消息 thread_id，追问只能靠引用回复归树。建议回复形式也选「话题回复」。
                     </div>
                   )}
+                </section>
 
-                  {/* 成员列表与审批 */}
-                  {selected ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="text-label font-medium text-ink">
-                          成员与申请列表 ({members.length})
+                {/* 5. 对话权限 */}
+                <section className="rounded-xl border border-line bg-surface p-4 space-y-3">
+                  <div className="text-ui font-semibold">5. 对话权限控制</div>
+                  <Field
+                    label="权限模式"
+                    hint="审批模式下，未在白名单的用户必须经管理员审批放行后才能与机器人对话。"
+                  >
+                    <select
+                      className={INPUT}
+                      value={draft.accessMode}
+                      onChange={(e) =>
+                        setDraft({ ...draft, accessMode: e.target.value as LarkAccessMode })
+                      }
+                    >
+                      <option value="open">开放模式（默认：群内 @ 或私聊直接对话）</option>
+                      <option value="approval">需管理员审批（发送人白名单 + 挂起消息审批重放）</option>
+                    </select>
+                  </Field>
+
+                  {draft.accessMode === "approval" && (
+                    <div className="space-y-4 pt-2">
+                      {selected &&
+                        members.filter((m) => m.role === "admin" && m.status === "approved").length === 0 && (
+                          <div className="p-3 rounded-lg border border-accent-line bg-accent-muted/20 text-ui leading-relaxed">
+                            <div className="font-semibold text-accent-ink flex items-center gap-1.5 mb-1">
+                              <span>💡 首个管理员配置引导</span>
+                            </div>
+                            <div className="text-label text-ink-muted">
+                              当前机器人尚未配置管理员。管理员本人可在飞书私聊向机器人发送任意一句话（如「申请」），进入下方待审批列表后点击
+                              <b>「设为管理员」</b>，即可完成初始化。
+                            </div>
+                          </div>
+                        )}
+
+                      {/* 预先放行表单 */}
+                      <div className="p-3 rounded-lg border border-line bg-surface-muted space-y-2">
+                        <div className="text-label font-medium text-ink">按 open_id 手动预先放行</div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            className={`${INPUT} font-mono flex-1`}
+                            value={preapproveOpenId}
+                            onChange={(e) => setPreapproveOpenId(e.target.value)}
+                            placeholder="用户的 open_id（例如 ou_xxxxxxxxxxxxxxxx）"
+                          />
+                          <select
+                            className={`${INPUT} sm:w-32`}
+                            value={preapproveRole}
+                            onChange={(e) => setPreapproveRole(e.target.value as LarkBotMemberRole)}
+                          >
+                            <option value="member">普通成员</option>
+                            <option value="admin">管理员</option>
+                          </select>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void handlePreapprove()}
+                            disabled={busy !== null || !preapproveOpenId.trim()}
+                          >
+                            预先放行
+                          </Button>
                         </div>
-                        {membersLoading && <span className="text-nano text-ink-faint">刷新中…</span>}
                       </div>
 
-                      {members.length === 0 ? (
-                        <div className="py-4 text-center text-label text-ink-faint border border-dashed border-line rounded-lg">
-                          暂无成员或申请记录。
+                      {/* 成员列表与审批 */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-label font-medium text-ink">
+                            成员与申请列表 ({members.length})
+                          </div>
+                          {membersLoading && <span className="text-nano text-ink-faint">刷新中…</span>}
                         </div>
-                      ) : (
-                        <div className="divide-y divide-line border border-line rounded-lg overflow-hidden bg-surface-muted">
-                          {members.map((m) => {
-                            const isPending = m.status === "pending";
-                            const isApproved = m.status === "approved";
-                            const isDenied = m.status === "denied";
-                            const isAdmin = m.role === "admin";
-                            const displayName = m.name || `用户 (${m.openId.slice(-6)})`;
 
-                            return (
-                              <div key={m.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-ui">
-                                <div className="min-w-0 space-y-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-medium text-ink">{displayName}</span>
-                                    <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
-                                      {m.openId}
-                                    </span>
-                                    <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
-                                      短码: {m.code}
-                                    </span>
-                                    <span
-                                      className={`text-nano px-1.5 py-0.2 rounded-full border ${
-                                        isAdmin
-                                          ? "bg-accent-muted text-accent-ink border-accent-line"
-                                          : "bg-surface text-ink-muted border-line"
-                                      }`}
-                                    >
-                                      {isAdmin ? "管理员" : "成员"}
-                                    </span>
-                                    <span
-                                      className={`text-nano px-1.5 py-0.2 rounded-full border ${
-                                        isPending
-                                          ? "bg-warn-muted text-warn-ink border-warn-line"
-                                          : isApproved
+                        {members.length === 0 ? (
+                          <div className="py-4 text-center text-label text-ink-faint border border-dashed border-line rounded-lg">
+                            暂无成员或申请记录。
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-line border border-line rounded-lg overflow-hidden bg-surface-muted">
+                            {members.map((m) => {
+                              const isPending = m.status === "pending";
+                              const isApproved = m.status === "approved";
+                              const isDenied = m.status === "denied";
+                              const isAdmin = m.role === "admin";
+                              const displayName = m.name || `用户 (${m.openId.slice(-6)})`;
+
+                              return (
+                                <div
+                                  key={m.id}
+                                  className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-ui"
+                                >
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-medium text-ink">{displayName}</span>
+                                      <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
+                                        {m.openId}
+                                      </span>
+                                      <span className="font-mono text-nano text-ink-faint px-1 py-0.5 rounded bg-surface border border-line">
+                                        短码: {m.code}
+                                      </span>
+                                      <span
+                                        className={`text-nano px-1.5 py-0.2 rounded-full border ${
+                                          isAdmin
                                             ? "bg-accent-muted text-accent-ink border-accent-line"
-                                            : "bg-danger-muted text-danger-ink border-danger-line"
-                                      }`}
-                                    >
-                                      {isPending ? "待审批" : isApproved ? "已通过" : "已拒绝"}
-                                    </span>
-                                  </div>
-
-                                  {m.pendingPreview && (
-                                    <div className="text-label text-ink-muted line-clamp-2">
-                                      <span className="text-ink-faint">申请内容：</span>
-                                      {m.pendingPreview}
+                                            : "bg-surface text-ink-muted border-line"
+                                        }`}
+                                      >
+                                        {isAdmin ? "管理员" : "成员"}
+                                      </span>
+                                      <span
+                                        className={`text-nano px-1.5 py-0.2 rounded-full border ${
+                                          isPending
+                                            ? "bg-warn-muted text-warn-ink border-warn-line"
+                                            : isApproved
+                                              ? "bg-accent-muted text-accent-ink border-accent-line"
+                                              : "bg-danger-muted text-danger-ink border-danger-line"
+                                        }`}
+                                      >
+                                        {isPending ? "待审批" : isApproved ? "已通过" : "已拒绝"}
+                                      </span>
                                     </div>
-                                  )}
 
-                                  <div className="text-nano text-ink-faint">
-                                    申请时间：{new Date(m.appliedAt).toLocaleString()}
-                                    {m.decidedAt && ` · 审批时间：${new Date(m.decidedAt).toLocaleString()} (${m.decidedBy || "admin"})`}
+                                    {m.pendingPreview && (
+                                      <div className="text-label text-ink-muted line-clamp-2">
+                                        <span className="text-ink-faint">申请内容：</span>
+                                        {m.pendingPreview}
+                                      </div>
+                                    )}
+
+                                    <div className="text-nano text-ink-faint">
+                                      申请时间：{new Date(m.appliedAt).toLocaleString()}
+                                      {m.decidedAt &&
+                                        ` · 审批时间：${new Date(m.decidedAt).toLocaleString()} (${m.decidedBy || "admin"})`}
+                                    </div>
                                   </div>
-                                </div>
 
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {isPending && (
-                                    <>
-                                      <Button
-                                        type="button"
-                                        variant="primary"
-                                        size="sm"
-                                        className="text-xs px-2.5 py-1"
-                                        disabled={busy !== null}
-                                        onClick={() => void handleMemberDecision(m.id, "approved")}
-                                      >
-                                        同意
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-xs px-2.5 py-1 text-danger-ink"
-                                        disabled={busy !== null}
-                                        onClick={() => void handleMemberDecision(m.id, "denied")}
-                                      >
-                                        拒绝
-                                      </Button>
-                                    </>
-                                  )}
-
-                                  {isApproved && (
-                                    <>
-                                      {isAdmin ? (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {isPending && (
+                                      <>
+                                        <Button
+                                          type="button"
+                                          variant="primary"
+                                          size="sm"
+                                          className="text-xs px-2.5 py-1"
+                                          disabled={busy !== null}
+                                          onClick={() => void handleMemberDecision(m.id, "approved")}
+                                        >
+                                          同意
+                                        </Button>
                                         <Button
                                           type="button"
                                           variant="ghost"
                                           size="sm"
-                                          className="text-xs px-2 py-1"
+                                          className="text-xs px-2.5 py-1 text-danger-ink"
                                           disabled={busy !== null}
-                                          onClick={() => void handleMemberRole(m.id, "member")}
+                                          onClick={() => void handleMemberDecision(m.id, "denied")}
                                         >
-                                          取消管理员
+                                          拒绝
                                         </Button>
-                                      ) : (
+                                      </>
+                                    )}
+
+                                    {isApproved && (
+                                      <>
+                                        {isAdmin ? (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-xs px-2 py-1"
+                                            disabled={busy !== null}
+                                            onClick={() => void handleMemberRole(m.id, "member")}
+                                          >
+                                            取消管理员
+                                          </Button>
+                                        ) : (
+                                          <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="sm"
+                                            className="text-xs px-2 py-1"
+                                            disabled={busy !== null}
+                                            onClick={() => void handleMemberRole(m.id, "admin")}
+                                          >
+                                            设为管理员
+                                          </Button>
+                                        )}
                                         <Button
                                           type="button"
-                                          variant="secondary"
+                                          variant="ghost"
                                           size="sm"
-                                          className="text-xs px-2 py-1"
+                                          className="text-xs px-2 py-1 text-danger-ink"
                                           disabled={busy !== null}
-                                          onClick={() => void handleMemberRole(m.id, "admin")}
+                                          onClick={() => void handleMemberDecision(m.id, "denied")}
                                         >
-                                          设为管理员
+                                          拒绝
                                         </Button>
-                                      )}
+                                      </>
+                                    )}
+
+                                    {isDenied && (
                                       <Button
                                         type="button"
-                                        variant="ghost"
+                                        variant="secondary"
                                         size="sm"
-                                        className="text-xs px-2 py-1 text-danger-ink"
+                                        className="text-xs px-2 py-1"
                                         disabled={busy !== null}
-                                        onClick={() => void handleMemberDecision(m.id, "denied")}
+                                        onClick={() => void handleMemberDecision(m.id, "approved")}
                                       >
-                                        拒绝
+                                        重新放行
                                       </Button>
-                                    </>
-                                  )}
+                                    )}
 
-                                  {isDenied && (
                                     <Button
                                       type="button"
-                                      variant="secondary"
+                                      variant="ghost"
                                       size="sm"
-                                      className="text-xs px-2 py-1"
+                                      className="text-xs px-2 py-1 text-ink-faint hover:text-danger-ink"
                                       disabled={busy !== null}
-                                      onClick={() => void handleMemberDecision(m.id, "approved")}
+                                      onClick={() => void handleMemberDelete(m.id)}
                                     >
-                                      重新放行
+                                      移除
                                     </Button>
-                                  )}
-
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="text-xs px-2 py-1 text-ink-faint hover:text-danger-ink"
-                                    disabled={busy !== null}
-                                    onClick={() => void handleMemberDelete(m.id)}
-                                  >
-                                    移除
-                                  </Button>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-label text-ink-faint">
-                      保存机器人配置后即可管理成员名单与审批请求。
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
-            </section>
+                </section>
 
-            {/* 连接状态与会话明细（编辑模式） */}
-            {selected && (
-              <section className="rounded-xl border border-line bg-surface overflow-hidden">
-                <div className="px-4 py-3 border-b border-line flex items-center gap-2">
-                  <div className="font-medium text-ui">连接状态</div>
-                  <StatusBadge bot={selected} />
-                  <span className="ml-auto text-label text-ink-faint">
-                    {selected.lastConnectedAt ? `最近连接 ${new Date(selected.lastConnectedAt).toLocaleString()}` : "尚未连接"}
-                  </span>
-                </div>
-                {selected.lastError && <div className="px-4 py-2.5 text-label text-danger-ink bg-danger-muted">{selected.lastError}</div>}
-                <div className="px-4 py-3">
-                  <div className="text-ui font-medium mb-2">飞书会话（最近）</div>
-                  <div className="flex flex-col gap-1.5">
-                    {selected.chats.length === 0 && <div className="text-label text-ink-faint">还没有收到消息。在飞书里向机器人发一条私聊开始对话。</div>}
-                    {selected.chats.map((chat) => (
-                      <a
-                        key={chat.id}
-                        href={chat.sessionId ? `/?session=${encodeURIComponent(chat.sessionId)}&node=${encodeURIComponent(chat.lastNodeId || "")}` : undefined}
-                        aria-disabled={!chat.sessionId}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg border border-line bg-surface-muted hover:border-line-strong aria-disabled:opacity-50"
-                      >
-                        <span aria-hidden>{chat.chatType === "group" ? "👥" : "👤"}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-ui truncate">{chat.title || chat.chatId}</span>
-                          <span className="block text-label text-ink-faint font-mono truncate">{chat.chatId}</span>
-                        </span>
-                        <span className="text-label text-ink-faint shrink-0">
-                          {chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleString() : ""}
-                        </span>
-                      </a>
-                    ))}
+                {/* 连接状态与会话明细（编辑模式） */}
+                <section className="rounded-xl border border-line bg-surface overflow-hidden">
+                  <div className="px-4 py-3 border-b border-line flex items-center gap-2">
+                    <div className="font-medium text-ui">连接状态</div>
+                    <StatusBadge bot={selected} />
+                    <span className="ml-auto text-label text-ink-faint">
+                      {selected.lastConnectedAt
+                        ? `最近连接 ${new Date(selected.lastConnectedAt).toLocaleString()}`
+                        : "尚未连接"}
+                    </span>
                   </div>
-                </div>
-              </section>
-            )}
+                  {selected.lastError && (
+                    <div className="px-4 py-2.5 text-label text-danger-ink bg-danger-muted">
+                      {selected.lastError}
+                    </div>
+                  )}
+                  <div className="px-4 py-3">
+                    <div className="text-ui font-medium mb-2">飞书会话（最近）</div>
+                    <div className="flex flex-col gap-1.5">
+                      {selected.chats.length === 0 && (
+                        <div className="text-label text-ink-faint">
+                          还没有收到消息。在飞书里向机器人发一条私聊开始对话。
+                        </div>
+                      )}
+                      {selected.chats.map((chat) => (
+                        <a
+                          key={chat.id}
+                          href={
+                            chat.sessionId
+                              ? `/?session=${encodeURIComponent(chat.sessionId)}&node=${encodeURIComponent(chat.lastNodeId || "")}`
+                              : undefined
+                          }
+                          aria-disabled={!chat.sessionId}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg border border-line bg-surface-muted hover:border-line-strong aria-disabled:opacity-50"
+                        >
+                          <span aria-hidden>{chat.chatType === "group" ? "👥" : "👤"}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-ui truncate">{chat.title || chat.chatId}</span>
+                            <span className="block text-label text-ink-faint font-mono truncate">
+                              {chat.chatId}
+                            </span>
+                          </span>
+                          <span className="text-label text-ink-faint shrink-0">
+                            {chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleString() : ""}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                </section>
 
-            {/* 提交动作栏 */}
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line">
-              {!selected ? (
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="md"
-                  onClick={() => void handleOneClickSetup()}
-                  disabled={busy !== null || !draft.name.trim() || !draft.appId.trim() || !draft.appSecret.trim()}
-                >
-                  {busy === "one-click" ? "正在测试并创建接入…" : "⚡ 测试凭证并接入绑定"}
-                </Button>
-              ) : (
-                <>
+                {/* 提交动作栏 */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line">
                   <Button
                     type="button"
                     variant="primary"
@@ -1214,6 +1691,15 @@ export default function LarkBotsSettingsPage() {
                     disabled={busy !== null || !draft.name.trim() || !draft.appId.trim()}
                   >
                     {busy === "save" ? "保存中…" : "保存变更"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => openRegisterModal("update", selected)}
+                    disabled={busy !== null}
+                  >
+                    🔄 扫码更新配置 / 补权限
                   </Button>
                   <Button
                     type="button"
@@ -1233,9 +1719,9 @@ export default function LarkBotsSettingsPage() {
                   >
                     {busy === "delete" ? "删除中…" : "删除"}
                   </Button>
-                </>
-              )}
-            </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -1243,20 +1729,25 @@ export default function LarkBotsSettingsPage() {
   );
 }
 
-function StatusBadge({ bot, selected = false }: { bot: LarkBot; selected?: boolean }) {
+function StatusBadge({ bot }: { bot: LarkBot }) {
   const text = !bot.enabled ? "已停用" : bot.lastError ? "异常" : bot.lastConnectedAt ? "已连接" : "待连接";
-  const tone = selected
-    ? "bg-white/15 text-current border-white/20"
-    : bot.lastError
-      ? "bg-danger-muted text-danger-ink border-danger-line"
-      : bot.lastConnectedAt && bot.enabled
-        ? "bg-accent-muted text-accent-ink border-accent-line"
-        : "bg-surface-muted text-ink-faint border-line";
+  const tone = bot.lastError
+    ? "bg-danger-muted text-danger-ink border-danger-line"
+    : bot.lastConnectedAt && bot.enabled
+      ? "bg-accent-muted text-accent-ink border-accent-line"
+      : "bg-surface-muted text-ink-faint border-line";
   return <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded-full border text-nano ${tone}`}>{text}</span>;
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return <div><div className="text-ui font-medium mb-1">{label}</div>{hint && <div className="text-label text-ink-faint mb-1">{hint}</div>}{children}</div>;
+  return (
+    <div>
+      <div className="text-ui font-medium mb-1">{label}</div>
+      {hint && <div className="text-label text-ink-faint mb-1">{hint}</div>}
+      {children}
+    </div>
+  );
 }
 
-const INPUT = "w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line";
+const INPUT =
+  "w-full px-3 py-2 rounded-field border border-line bg-surface text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line";

@@ -90,6 +90,8 @@ export type LarkBot = {
   botName: string | null;
   lastConnectedAt: number | null;
   lastError: string | null;
+  /** 最近一次飞书 API 报缺的应用身份 scope（99991672）；扫码更新成功后清空。 */
+  missingScopes?: string[];
   createdAt: number;
   updatedAt: number;
   chats: LarkChat[];
@@ -103,3 +105,51 @@ export type LarkBotInput = {
   workspacePath?: string | null;
   enabled?: boolean;
 } & Partial<LarkBotPolicy>;
+
+// ── 扫码建 / 更新 bot（飞书官方 registerApp 流程）的 API 契约：server 与设置页共用 ──
+
+/** POST /api/lark-bots/register 请求体。 */
+export type LarkRegisterRequest =
+  | {
+      mode: "create";
+      /** 预填到飞书创建页的应用名，同时作为 trellis 里的 bot 名。 */
+      name: string;
+      description?: string;
+      agentId?: string | null;
+      workspacePath?: string | null;
+      /** 缺省 approval：别人和 bot 聊天前要创建者批准。 */
+      accessMode?: LarkAccessMode;
+    }
+  | {
+      mode: "update";
+      botId: string;
+      /** 额外要补的应用身份 scope；服务端会并上 trellis 标准集和该 bot 记录的 missingScopes。 */
+      scopes?: string[];
+    };
+
+/** POST /api/lark-bots/register 响应：url 即二维码内容（飞书确认页）。 */
+export type LarkRegisterStart = { sessionId: string; url: string; expiresAt: number };
+
+/**
+ * waiting 等用户在飞书确认 → binding 已拿到凭证、正在写库 / 连接 → done；
+ * 终态另有 denied（确认页取消）/ expired（二维码过期）/ cancelled（DELETE 取消）/ error。
+ */
+export type LarkRegisterStatus = "waiting" | "binding" | "done" | "denied" | "expired" | "cancelled" | "error";
+
+/** GET /api/lark-bots/register/:sessionId 响应；DELETE 同一路径 = 取消。永不含 secret。 */
+export type LarkRegisterSession = {
+  sessionId: string;
+  mode: "create" | "update";
+  status: LarkRegisterStatus;
+  url: string;
+  expiresAt: number;
+  botId: string | null;
+  appId: string | null;
+  /** create：长连接已连上；update：更新后已按新配置重连。 */
+  connected: boolean;
+  /** create：创建者已登记为该 bot 的管理员。 */
+  adminBound: boolean;
+  /** create：已用新 bot 给创建者发了欢迎私聊（闭环验证）。 */
+  welcomeSent: boolean;
+  error: string | null;
+};

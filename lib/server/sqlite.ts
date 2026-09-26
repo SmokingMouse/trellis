@@ -883,6 +883,7 @@ function migrate(db: Database) {
       bot_name TEXT,
       last_connected_at INTEGER,
       last_error TEXT,
+      missing_scopes TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -921,6 +922,7 @@ function migrate(db: Database) {
     ["session_policy", "TEXT NOT NULL DEFAULT 'thread'"],
     ["ack_mode", "TEXT NOT NULL DEFAULT 'reaction'"],
     ["access_mode", "TEXT NOT NULL DEFAULT 'open'"],
+    ["missing_scopes", "TEXT"],
   ];
   for (const [column, ddl] of larkPolicyColumns) {
     const has = db

@@ -2,11 +2,18 @@ import "server-only";
 import { handleCardActionTrigger, replayDeferredApprovals } from "./access";
 import { acceptLarkEvent } from "./handler";
 import { diffLarkConnections, type LarkMessageEvent } from "./protocol";
-import { createLarkClient, fetchLarkBotInfo, lark, type LarkSdkClient } from "./sdk";
+import {
+  createLarkClient,
+  extractLarkPermissionViolation,
+  fetchLarkBotInfo,
+  lark,
+  type LarkSdkClient,
+} from "./sdk";
 import {
   listLarkBotRecords,
   setLarkBotConnection,
   setLarkBotIdentity,
+  setLarkBotMissingScopes,
   type LarkBotRecord,
 } from "./store";
 
@@ -24,6 +31,11 @@ type ActiveConnection = {
 const ACTIVE = new Map<string, ActiveConnection>();
 let started = false;
 let reconciling = false;
+let rerunRequested = false;
+
+const globalManager = globalThis as typeof globalThis & {
+  __trellisLarkReconcileNow?: () => Promise<void>;
+};
 
 function fingerprint(bot: LarkBotRecord): string {
   return `${bot.appId}\0${bot.appSecret}`;
@@ -41,7 +53,13 @@ async function connect(bot: LarkBotRecord): Promise<void> {
     setLarkBotIdentity(bot.id, info.openId, info.name);
   } catch (error) {
     // P2P 仍可工作；群聊因 open_id 不可知而在 parseIncomingEvent fail-closed。
-    identityError = `已连接配置，但 bot 信息拉取失败：${errorText(error)}`;
+    const perm = extractLarkPermissionViolation(error);
+    if (perm.isPermissionError && perm.missingScopes.length > 0) {
+      setLarkBotMissingScopes(bot.id, perm.missingScopes);
+      identityError = `已连接配置，但 bot 信息拉取失败：${perm.message}`;
+    } else {
+      identityError = `已连接配置，但 bot 信息拉取失败：${errorText(error)}`;
+    }
     setLarkBotIdentity(bot.id, null, null);
   }
 
@@ -119,42 +137,67 @@ function disconnect(botId: string): void {
 }
 
 async function reconcile(): Promise<void> {
-  if (reconciling) return;
+  if (reconciling) {
+    rerunRequested = true;
+    return;
+  }
   reconciling = true;
   try {
-    const bots = listLarkBotRecords(true);
-    const byId = new Map(bots.map((bot) => [bot.id, bot]));
-    const desired = bots.map((bot) => ({ id: bot.id, fingerprint: fingerprint(bot) }));
-    const active = [...ACTIVE].map(([id, connection]) => {
-      const state = connection.wsClient.getConnectionStatus().state;
-      const unhealthy = state === "idle" || state === "failed";
-      return {
-        id,
-        fingerprint: unhealthy ? `${connection.fingerprint}\0${state}` : connection.fingerprint,
-      };
-    });
-    const diff = diffLarkConnections(desired, active);
-    for (const id of diff.disconnect) disconnect(id);
-    for (const id of diff.connect) {
-      const bot = byId.get(id);
-      if (!bot) continue;
-      try {
-        await connect(bot);
-      } catch (error) {
-        setLarkBotConnection(id, { error: errorText(error) });
-        console.error(`[lark] bot ${id} 连接失败`, error);
+    do {
+      rerunRequested = false;
+      const bots = listLarkBotRecords(true);
+      const byId = new Map(bots.map((bot) => [bot.id, bot]));
+      const desired = bots.map((bot) => ({ id: bot.id, fingerprint: fingerprint(bot) }));
+      const active = [...ACTIVE].map(([id, connection]) => {
+        const state = connection.wsClient.getConnectionStatus().state;
+        const unhealthy = state === "idle" || state === "failed";
+        return {
+          id,
+          fingerprint: unhealthy ? `${connection.fingerprint}\0${state}` : connection.fingerprint,
+        };
+      });
+      const diff = diffLarkConnections(desired, active);
+      for (const id of diff.disconnect) disconnect(id);
+      for (const id of diff.connect) {
+        const bot = byId.get(id);
+        if (!bot) continue;
+        try {
+          await connect(bot);
+        } catch (error) {
+          const perm = extractLarkPermissionViolation(error);
+          if (perm.isPermissionError && perm.missingScopes.length > 0) {
+            setLarkBotMissingScopes(id, perm.missingScopes);
+            setLarkBotConnection(id, { error: perm.message });
+          } else {
+            setLarkBotConnection(id, { error: errorText(error) });
+          }
+          console.error(`[lark] bot ${id} 连接失败`, error);
+        }
       }
-    }
-    // 设置页 / API 的批准写在路由 bundle，那里没有重放处理器，挂起消息留在库里；
-    // 这里（长连接所在 bundle）每轮对账补重放，原子领取保证与卡片 / 私聊命令并发时只放一次。
-    for (const [id, connection] of ACTIVE) {
-      if (byId.get(id)?.accessMode !== "approval") continue;
-      void replayDeferredApprovals(id, connection.client).catch((error) =>
-        console.error(`[lark-access] bot ${id} 补重放失败`, error),
-      );
-    }
+      // 设置页 / API 的批准写在路由 bundle，那里没有重放处理器，挂起消息留在库里；
+      // 这里（长连接所在 bundle）每轮对账补重放，原子领取保证与卡片 / 私聊命令并发时只放一次。
+      for (const [id, connection] of ACTIVE) {
+        if (byId.get(id)?.accessMode !== "approval") continue;
+        void replayDeferredApprovals(id, connection.client).catch((error) =>
+          console.error(`[lark-access] bot ${id} 补重放失败`, error),
+        );
+      }
+    } while (rerunRequested);
   } finally {
     reconciling = false;
+  }
+}
+
+/**
+ * 触发一次立即对账。可在路由 bundle 调用，经 globalThis 桥接到 manager 实例。
+ */
+export async function reconcileNow(): Promise<void> {
+  // 桥没挂上 = manager 没在跑（TRELLIS_LARK=off 或 instrumentation 未就绪）。此时绝不能在调用方 bundle
+  // 里跑本地 reconcile：那份 ACTIVE 是空的，会另起一套影子长连接。等 manager 自己的下一轮对账即可。
+  if (globalManager.__trellisLarkReconcileNow) {
+    await globalManager.__trellisLarkReconcileNow();
+  } else {
+    console.warn("[lark] reconcileNow: manager 未启动，跳过立即对账（等下一轮 15s 对账）");
   }
 }
 
@@ -164,6 +207,7 @@ async function reconcile(): Promise<void> {
  */
 export function startLarkManager(): void {
   if (process.env.TRELLIS_LARK === "off") return;
+  globalManager.__trellisLarkReconcileNow = () => reconcile();
   if (started) return;
   started = true;
   void reconcile();
