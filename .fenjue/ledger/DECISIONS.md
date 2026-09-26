@@ -302,3 +302,6 @@
 - [fj-review-access-4822] 异源 review access：门禁不可绕过、open 模式零变化、挂起重放不重复执行、按钮 value 伪造与非 a | accepted | reworks=0 | 2026-09-24T16:55:42+08:00 | 939df123f3bc
 - [fj-cards-trellis-47cc] trellis 任务推送支持 Card 2.0 JSON 直通（最终答复是卡片 JSON 时原样发 interactiv | accepted | reworks=0 | 2026-09-24T17:50:49+08:00 | 3b3d32c51b40
 - [fj-cards-watch-2158] 巡检脚本 --format card / --daily-card：结构化事件 + alert_cards 渲染 | accepted | reworks=0 | 2026-09-24T17:50:55+08:00 | a3dad42dac81
+- [fj-qr-server-c9dc] 扫码建 / 更新 bot 服务端：registerApp 会话 + 路由 + 立即对账 + 自动设管理员 + 欢迎私聊  | accepted | reworks=0 | 2026-09-24T18:44:50+08:00 | 33c087eec95e
+- [fj-qr-ui-8c2b] 扫码建 / 更新 bot 设置页：三步弹窗（填信息 → 二维码 → 已连接）+ 行内补权限 + 手动表单折叠 | accepted | reworks=0 | 2026-09-24T18:49:48+08:00 | bbe553d0d62a
+- [fj-review-qr-f9a6] 异源 review 扫码建 bot：secret 不外泄、会话状态机与取消、update 校验 client_id /  | accepted | reworks=0 | 2026-09-24T19:09:15+08:00 | d29c34446800

@@ -7,7 +7,7 @@ gate: review-id 要求报告交付已验收且 review_verdict=pass，或该项�
 fj plan waive <review-id> --reason "原因" 记录本次 review 的豁免；重绑或重新结算后需重新确认。
 状态不用手改：绑了 cid 的项从任务推导；没绑的 [ ] 待做、[x] 已做、[-] 放弃。
 
-目标：sub2api 号池巡检 bot：新 bot 在「sub2api 测试群」日报 + 异常巡检，授权掉/重置卡临期 @ 号主；bot 对话需管理员审批
+目标：sub2api 号池巡检 bot 上线；顺势把 trellis 建 bot 做成扫码一站式（创建 → 确认权限 → 自动绑定），已有 bot 缺权限也扫码补
 
 - [x] push: 任务推送小改：只推最终答复（finalStart）、[SILENT] 不推、卡片带任务名标题、<at> 在文本降级时转换
   leader 轻档自做，分支 feat/lark-ops-bot；改 tasks.ts / task-push-policy.ts / push.ts / sdk.ts 降级分支 / card.ts summary / handler.ts 回复正文。
@@ -39,3 +39,20 @@ fj plan waive <review-id> --reason "原因" 记录本次 review 的豁免；重�
 - [ ] cards-watch: 巡检脚本 --format card / --daily-card：结构化事件 + alert_cards 渲染 | seat: gemini37
   cid: fj-cards-watch-2158
   完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/cards-watch-goal.md。workdir 在仓库外，走 quick --workdir + launch；只改三个文件、不 commit。
+- [ ] qr-server: 扫码建 / 更新 bot 服务端：registerApp 会话 + 路由 + 立即对账 + 自动设管理员 + 欢迎私聊 + 缺权限解析 | seat: gemini37
+  cid: fj-qr-server-c9dc
+  verify: bun x tsc --noEmit
+  verify: sh -c 'out=$(bun test 2>&1); echo "$out" | grep -qE "^ *[0-9]+ pass$" || exit 1; n=$(echo "$out" | grep -oE "^ *[0-9]+ fail$" | grep -oE "[0-9]+"); test "${n:-0}" -le 5'
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/qr-server-goal.md。worktree 基线 = main 7c57fe5（契约类型已在 lib/lark-types.ts）。
+- [ ] qr-ui: 扫码建 / 更新 bot 设置页：三步弹窗（填信息 → 二维码 → 已连接）+ 行内补权限 + 手动表单折叠 | seat: gemini37
+  cid: fj-qr-ui-8c2b
+  verify: bun x tsc --noEmit
+  verify: sh -c 'out=$(bun test 2>&1); echo "$out" | grep -qE "^ *[0-9]+ pass$" || exit 1; n=$(echo "$out" | grep -oE "^ *[0-9]+ fail$" | grep -oE "[0-9]+"); test "${n:-0}" -le 5'
+  verify: bun run build
+  完整目标见 /data00/home/zhangpeng.pada/trellis/.fenjue/briefs/qr-ui-goal.md。worktree 基线 = main 7c57fe5（契约类型已在 lib/lark-types.ts）。
+- [ ] review-qr: 异源 review 扫码建 bot：secret 不外泄、会话状态机与取消、update 校验 client_id / secret 轮换、对账 rerun、迁移可重入、UI 轮询与取消 | after: qr-server,qr-ui | mode: readonly | seat: cpa-sonnet5
+  cid: fj-review-qr-f9a6
+  审 main..feat/lark-qr-register 的 diff（leader 合并两单后建分支）。首行 verdict: pass|fail；fail 只认四种：结论/行为错 · 伪造或不可复现 · 凭证泄露 · 破坏现有测试，其余列建议。目标见 .fenjue/briefs/qr-server-goal.md 与 qr-ui-goal.md。
+  waiver: {"at":"2026-09-24T11:15:01.709Z","reason":"F1/F2 两项行为错已由 fix-qr 修复（f71007e）：reviewer 两条复现改写成回归用例，旧代码 2 fail / 修复后全绿；两条建议（影子连接、404 无限轮询）一并修；修复属轻档未改结论，按 playbook §4 不复审","cid":"fj-review-qr-f9a6","settlement":"[\"a43e9420a1fe57e87ee614783674f2f8f8f2f3b4616a761e083a55c62fb80974\",0,[\"2026-09-24T11:09:15.946Z\",\"a43e9420a1fe57e87ee614783674f2f8f8f2f3b4616a761e083a55c62fb80974\",\"d29c34446800f68203ff8e91f347195856daee9a083a493743a2bb4e1e8f5369\",2,0,\"fail\",\"71698bf129762abc7b0c3819ebc2d0b2acfeee7aac23e153b6e11a499213f0c1\"]]"}
+- [x] release-qr: 起位前问用户：扫码建 bot 合 main、make deploy 上线，和用户扫码做一次新建 E2E（动生产，必须问） | after: review-qr
+- [x] fix-qr: 修 review-qr F1/F2：出二维码前失败立刻报真实原因；会话终态先到先得、binding 不可取消；reconcileNow 不起影子连接；弹窗 404 停轮询 | after: review-qr
