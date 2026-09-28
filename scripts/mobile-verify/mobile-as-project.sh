@@ -79,6 +79,8 @@ ab open "$BASE/login"
 wait_js 'login ready' "Boolean(document.querySelector('#pw'))"
 ab fill '#pw' as-project-pass
 ab click 'button[type="submit"]'
+# 登录页 fetch 成功后自己 location.href 跳走；不等它就 ab open 会被这次跳转打断（ERR_ABORTED）
+wait_js 'login redirected' "location.pathname !== '/login'"
 ab open "$BASE/?session=$SID&node=$FIRST"
 wait_js 'thread permission and system log visible' "Boolean(document.querySelector('[data-as-project=\"$FIRST\"] [data-as-system-log]')) && document.querySelector('[data-as-permission]')?.value === 'plan'"
 wait_js 'live partial response visible' "document.body.innerText.includes('针对你问的') && document.querySelector('[data-as-system-log]')?.textContent.includes('project-proof')"

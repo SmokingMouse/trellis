@@ -22,7 +22,7 @@ export function SubagentView({
       {meta.prompt && (
         <details>
           <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
-            📋 交给它的任务
+            交给它的任务
           </summary>
           <pre className="mt-1 text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-60 overflow-auto">
             {meta.prompt}
@@ -47,7 +47,7 @@ export function SubagentView({
       )}
 
       {node.report && (
-        <Section label="📄 它交回的报告">
+        <Section label="它交回的报告">
           <OutputView text={node.report} />
         </Section>
       )}

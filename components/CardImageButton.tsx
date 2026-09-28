@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import { Modal } from "./ui/Modal";
+import { Copy, Download, Image as ImageIcon, X } from "lucide-react";
+import { Button, ErrorCallout, Icon, IconButton, Modal, Spinner, toast } from "@/components/ui";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import {
   MARKDOWN_REHYPE_PLUGINS,
@@ -46,11 +47,19 @@ export function CardImageButton({
   }, []);
 
   const buttonLabel =
-    phase === "rendering"
-      ? "生成中…"
-      : phase === "error"
-        ? "✗ 失败"
-        : "🖼 卡片图";
+    phase === "rendering" ? (
+      <>
+        <Spinner size="sm" label={null} />
+        生成中…
+      </>
+    ) : phase === "error" ? (
+      "生成失败"
+    ) : (
+      <>
+        <Icon icon={ImageIcon} size="sm" />
+        卡片图
+      </>
+    );
 
   return (
     <>
@@ -64,7 +73,7 @@ export function CardImageButton({
         }}
         disabled={phase === "rendering" && isOpen}
         title="把这条问答渲染成一张卡片图片"
-        className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors disabled:opacity-50"
+        className="nodrag inline-flex items-center gap-1.5 px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-field border border-line text-ui text-ink-muted hover:bg-surface-hover hover:text-ink transition-colors disabled:opacity-50"
       >
         {buttonLabel}
       </button>
@@ -97,7 +106,6 @@ function CardPreviewDialog({
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const updatePhase = useCallback(
     (p: "generating" | "preview" | "error") => {
@@ -160,12 +168,14 @@ function CardPreviewDialog({
 
       // 7. Rasterize via html-to-image toCanvas
       const { toCanvas } = await import("html-to-image");
-      const isDark =
-        typeof document !== "undefined" &&
-        document.documentElement.classList.contains("dark");
+      // 衬底取当前皮肤的 surface token（跟随明暗 / 皮肤），不写死 hex。
+      const surface =
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--surface")
+          .trim() || undefined;
       const canvas = await toCanvas(cardEl, {
         pixelRatio,
-        backgroundColor: isDark ? "#1c1917" : "#ffffff",
+        backgroundColor: surface,
         cacheBust: false,
         imagePlaceholder: TRANSPARENT_IMAGE_DATA_URL,
         includeQueryParams: true,
@@ -206,12 +216,10 @@ function CardPreviewDialog({
       await navigator.clipboard.write([
         new ClipboardItem({ "image/png": previewBlob }),
       ]);
-      setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 2000);
+      toast.success("卡片图已复制");
     } catch (err) {
       console.error("[trellis] card image copy failed:", err);
-      setCopyState("failed");
-      window.setTimeout(() => setCopyState("idle"), 2500);
+      toast.error("复制失败", { description: "这个浏览器不支持复制图片，请用「下载图片」。" });
     }
   };
 
@@ -230,36 +238,26 @@ function CardPreviewDialog({
       <Modal onClose={onClose} size="lg">
         <div className="flex items-center justify-between px-5 py-3 border-b border-line">
           <span className="text-ui font-medium text-ink-strong">卡片图</span>
-          <button
-            type="button"
-            aria-label="关闭"
-            onClick={onClose}
-            className="px-2 py-0.5 rounded text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
-          >
-            ✕
-          </button>
+          <IconButton label="关闭" onClick={onClose}>
+            <Icon icon={X} />
+          </IconButton>
         </div>
 
-        <div className="max-h-[65vh] overflow-auto p-4 bg-surface-muted/40">
+        <div className="max-h-[65vh] overflow-auto p-4 bg-surface-muted">
           {dialogPhase === "generating" && (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <Spinner size="lg" label={null} />
               <span className="text-ui text-ink-muted">正在渲染卡片图…</span>
             </div>
           )}
 
           {dialogPhase === "error" && (
-            <div className="flex flex-col items-center justify-center py-12 gap-3 px-6 text-center">
-              <span className="text-ui text-warn-ink">
-                {errorMessage || "卡片图生成失败"}
-              </span>
-              <button
-                type="button"
-                onClick={() => void generate()}
-                className="px-4 py-1.5 rounded bg-accent text-white text-ui hover:opacity-90 transition-opacity"
-              >
-                重试
-              </button>
+            <div className="px-2 py-8">
+              <ErrorCallout
+                title="卡片图生成失败"
+                error={errorMessage || null}
+                onRetry={() => void generate()}
+              />
             </div>
           )}
 
@@ -268,31 +266,21 @@ function CardPreviewDialog({
             <img
               src={previewDataUrl}
               alt={`卡片图预览：${title}`}
-              className="w-full rounded border border-line shadow-sm"
+              className="w-full rounded-card border border-line"
             />
           )}
         </div>
 
         {dialogPhase === "preview" && (
           <div className="flex gap-2 px-5 py-3 border-t border-line">
-            <button
-              type="button"
-              onClick={() => void copy()}
-              className="flex-1 px-3 py-1.5 rounded border border-line text-ui text-ink hover:bg-surface-muted hover:text-ink-strong transition-colors"
-            >
-              {copyState === "copied"
-                ? "✓ 已复制"
-                : copyState === "failed"
-                  ? "复制失败，请用下载"
-                  : "复制图片"}
-            </button>
-            <button
-              type="button"
-              onClick={download}
-              className="flex-1 px-3 py-1.5 rounded bg-accent text-white text-ui hover:opacity-90 transition-opacity"
-            >
+            <Button className="flex-1" onClick={() => void copy()}>
+              <Icon icon={Copy} size="sm" />
+              复制图片
+            </Button>
+            <Button variant="primary" className="flex-1" onClick={download}>
+              <Icon icon={Download} size="sm" />
               下载图片
-            </button>
+            </Button>
           </div>
         )}
       </Modal>

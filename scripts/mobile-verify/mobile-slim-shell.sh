@@ -23,7 +23,13 @@ fail() {
   exit 1
 }
 
+. "$ROOT/scripts/mobile-verify/lib-settle.sh"
+
 ab() {
+  # 点击前先等目标停稳（弹层进场动画 / Header 位移），见 lib-settle.sh；@ref 不处理
+  if [ "${1:-}" = click ] && [ $# -ge 2 ]; then
+    case $2 in @*) ;; *) mv_wait_settled "$2" ;; esac
+  fi
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
@@ -98,6 +104,7 @@ wait_for_js() {
   wait_try=0
   while :; do
     if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      mv_wait_idle soft
       echo "✓ $wait_label"
       return 0
     fi
@@ -265,10 +272,15 @@ ab eval --stdin <<'JS'
 JS
 
 echo "== mobile reading chrome follows scroll direction =="
+# W5：useScrollHide 在会话挂载后 400ms 才开始认滚动（readyDelayMs），会话数据
+# 到得晚时脚本那一次性的 0 → 300 会落在就绪之前被忽略（实测 scroll 事件发生在
+# 导航后 ~200ms，之后再不收起 → 偶发超时）。改成与 followup-approval 同款：等待
+# 条件里没收起就再往下推 24px，直到 hook 就绪后认到一次向下滚动。
 sleep 1
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset"'
-ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down"'
-wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
+mv_wait_idle soft
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; window.__mvScrollBeforeHide = 300; "scrolled down"'
+wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); if (h?.dataset.headerHidden !== 'true') { const sc=document.querySelector('[data-thread-scroll]'); if (sc) { sc.scrollTop=Math.min(sc.scrollTop + 24, sc.scrollHeight - sc.clientHeight); window.__mvScrollBeforeHide = sc.scrollTop; sc.dispatchEvent(new Event('scroll')); } return false; } const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
 ab eval --stdin <<'JS'
 (() => {
   const scroll = document.querySelector('[data-thread-scroll]');
@@ -276,7 +288,8 @@ ab eval --stdin <<'JS'
   const title = document.querySelector('[data-thread-header]');
   const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
   const shift = header.getBoundingClientRect().height + title.getBoundingClientRect().height - safe;
-  const expected = 300 - shift;
+  // 收起那一刻的 scrollTop：通常是 300，就绪前被推过几次则更大（见上方等待条件）。
+  const expected = (window.__mvScrollBeforeHide ?? 300) - shift;
   if (Math.abs(scroll.scrollTop - expected) > 2) {
     throw new Error(`H-1 anchor compensation scrollTop=${scroll.scrollTop}, expected=${expected}, shift=${shift}`);
   }
@@ -506,25 +519,24 @@ ab eval --stdin <<'JS'
   assert(!header.hasAttribute('data-header-hidden'), `desktop header hidden=${header.dataset.headerHidden}`);
   assert(header.scrollWidth === header.clientWidth, `desktop header overflow ${header.scrollWidth}/${header.clientWidth}`);
 
+  // W4：桌面 Header 重排成「导航 / 会话语境 / 系统」三组，控件清单以语义约束代替
+  // 逐像素钉死：三组都在、系统组的入口一个不少、桌面控件没有带上手机的 44px 热区。
+  const groups = ['nav', 'context', 'system'].map((name) => header.querySelector(`[data-header-group="${name}"]`));
+  assert(groups.every(Boolean), `desktop header groups=${groups.map(Boolean)}`);
   const controls = [...header.querySelectorAll('button,a')].filter(visible);
-  const expected = [
-    ['搜索', 30, 22],
-    ['工作区文件', 30, 22],
-    ['笔记', 30, 22],
-    ['导出当前对话', 49.046875, 24],
-    ['[Claude]Opus▾', 127.453125, 24],
-    ['主题', 28, 28],
-    ['自动化任务', 26.15625, 21],
-    ['设置', 30, 22],
-  ];
-  assert(controls.length === expected.length, `desktop control count=${controls.length}`);
-  controls.forEach((control, index) => {
+  const labels = controls.map(label);
+  for (const required of ['搜索', '主题', '更多', '设置']) {
+    assert(labels.includes(required), `desktop header missing ${required}: ${JSON.stringify(labels)}`);
+  }
+  assert(controls.some((c) => c.hasAttribute('data-model-picker-trigger')), `desktop header missing model picker: ${JSON.stringify(labels)}`);
+  controls.forEach((control) => {
     const rect = control.getBoundingClientRect();
-    const [expectedLabel, width, height] = expected[index];
-    assert(label(control) === expectedLabel, `desktop control ${index}: ${label(control)} != ${expectedLabel}`);
-    assert(near(rect.width, width) && near(rect.height, height), `${expectedLabel} size=${rect.width}x${rect.height}`);
+    assert(rect.height < 44 && rect.height >= 16, `${label(control)} desktop height=${rect.height}`);
+    assert(rect.top >= headerRect.top && rect.bottom <= headerRect.bottom + 0.8, `${label(control)} escapes header`);
   });
-  return { header: { width: headerRect.width, height: headerRect.height }, controls: expected.map(([name]) => name) };
+  const emoji = /[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u;
+  assert(!emoji.test(header.textContent || ''), `desktop header still has emoji: ${header.textContent}`);
+  return { header: { width: headerRect.width, height: headerRect.height }, controls: labels };
 })()
 JS
 

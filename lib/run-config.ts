@@ -127,19 +127,20 @@ export const AGENT_UNSUPPORTED_HINT =
 
 // ── 权限审批 ──────────────────────────────────────────────────────────────────
 
-export type ApprovalCopy = { icon: string; label: string; title: string };
+/** icon 是 lucide 图标 key（lib 层不引 React 组件）：shield = ShieldCheck，zap = Zap。 */
+export type ApprovalCopy = { icon: "shield" | "zap"; label: string; title: string };
 
 /** YOLO ↔ 需确认。仅 claude 系的 project 有意义（见 approvalAvailable）。 */
 export function approvalCopy(requireApproval: boolean): ApprovalCopy {
   return requireApproval
     ? {
-        icon: "🛡️",
+        icon: "shield",
         label: "需确认",
         title:
           "需确认：Bash/Write/Edit 等可变更工具逐个弹卡，等你允许/拒绝后才执行（创建会话时锁定）",
       }
     : {
-        icon: "⚡",
+        icon: "zap",
         label: "YOLO",
         title:
           "YOLO：工具自动放行（现状默认）。点击切换为需确认——可变更工具执行前先问你",

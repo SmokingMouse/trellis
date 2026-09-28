@@ -1,5 +1,7 @@
 "use client";
 
+import { Bookmark } from "lucide-react";
+import { Icon } from "@/components/ui";
 import type { ChatNode } from "@/lib/types";
 import { useSessionStore } from "@/stores/sessionStore";
 
@@ -29,27 +31,15 @@ export function BookmarkButton({
       }}
       className={
         mobileMenu
-          ? "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-ui text-ink-muted hover:bg-surface-muted hover:text-ink"
+          ? "flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-ui text-ink-muted hover:bg-surface-hover hover:text-ink"
           : `hidden rounded-md px-1.5 py-1 transition-colors md:flex ${
               saved
-                ? "text-accent hover:bg-accent-muted"
-                : "text-ink-faint hover:bg-surface-muted hover:text-ink"
+                ? "text-accent-ink hover:bg-accent-muted"
+                : "text-ink-faint hover:bg-surface-hover hover:text-ink"
             }`
       }
     >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill={saved ? "currentColor" : "none"}
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
-      </svg>
+      <Icon icon={Bookmark} size="sm" fill={saved ? "currentColor" : "none"} />
       {mobileMenu && <span>{label}</span>}
     </button>
   );

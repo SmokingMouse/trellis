@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Button } from "@/components/ui/Button";
+import { Bot, ChevronDown } from "lucide-react";
+import { Button, Icon, Textarea } from "@/components/ui";
 import {
   AGENT_DEFAULT_HINT,
   AGENT_DEFAULT_LABEL,
@@ -84,7 +85,7 @@ export function AgentPicker() {
         title={AGENT_UNSUPPORTED_HINT}
         className="px-3 py-1.5 rounded-full border border-line bg-surface-muted text-ink-faint text-ui inline-flex items-center gap-1.5"
       >
-        <span aria-hidden>🎭</span>
+        <Icon icon={Bot} size="sm" />
         <span className="line-through">Agent：{label}</span>
       </span>
     );
@@ -110,17 +111,15 @@ export function AgentPicker() {
         title="选择这个对话用哪个 Agent（人设 / 模型 / 工具 / 技能）"
         className="px-3 py-1.5 rounded-full border border-line bg-surface text-ink-muted hover:border-line-strong transition-colors flex items-center gap-1.5 text-ui"
       >
-        <span aria-hidden>🎭</span>
+        <Icon icon={Bot} size="sm" />
         <span>Agent：{label}</span>
-        <span className="text-ink-faint" aria-hidden>
-          ▾
-        </span>
+        <Icon icon={ChevronDown} size="sm" className="text-ink-faint" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           {/* 注：这是锚定触发按钮的居中下拉（非标准居中弹窗），保持手写外壳。 */}
-          <div className="absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[360px] bg-surface border border-line rounded-xl shadow-pop p-3 text-left">
+          <div className="ui-layer absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[360px] bg-surface-raised border border-line rounded-overlay shadow-pop p-3 text-left">
             <div className="text-ui text-ink-muted mb-2">
               选一个 Agent（创建后锁定）
             </div>
@@ -150,12 +149,13 @@ export function AgentPicker() {
             {/* 自定义 system prompt：仅 chat + 未选 agent 时可用（见文件头注释）。 */}
             {draftMode === "chat" && !draftAgentId && (
               <>
-                <textarea
+                <Textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   rows={3}
+                  aria-label="自定义系统提示词"
                   placeholder="或直接写一段自定义系统提示词……留空则用内置默认"
-                  className="w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none resize-none focus:border-accent-line"
+                  className="resize-none"
                 />
                 <div className="flex items-center justify-end gap-2 mt-2">
                   <Button
@@ -206,15 +206,16 @@ function AgentRow({
     <button
       type="button"
       onClick={onClick}
-      className={`text-left px-2.5 py-1.5 rounded-lg border transition-colors ${
+      aria-pressed={active}
+      className={`text-left px-2.5 py-1.5 rounded-field border transition-colors ${
         active
-          ? "bg-accent text-ink-inverse border-accent"
-          : "bg-surface-muted text-ink-muted border-line hover:border-line-strong"
+          ? "bg-accent-muted text-ink-strong border-accent-line"
+          : "bg-surface text-ink border-line hover:bg-surface-hover"
       }`}
     >
       <div className="text-ui font-medium">{name}</div>
       {hint && (
-        <div className={`text-ui ${active ? "opacity-80" : "text-ink-faint"}`}>
+        <div className="text-label text-ink-muted">
           {hint}
         </div>
       )}

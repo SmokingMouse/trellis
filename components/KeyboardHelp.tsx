@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Modal } from "@/components/ui/Modal";
-import { IconButton } from "@/components/ui/IconButton";
+import { X } from "lucide-react";
+import { Icon, IconButton, Kbd, Modal } from "@/components/ui";
 import {
   SHORTCUTS,
   OPEN_HELP_EVENT,
@@ -40,13 +40,13 @@ export function KeyboardHelp() {
   }
 
   return (
-    <Modal onClose={() => setOpen(false)} closeOnEsc="always">
+    <Modal onClose={() => setOpen(false)} closeOnEsc="always" title="键盘快捷键">
       <div className="px-5 py-4 border-b border-line-faint flex items-center justify-between">
         <div className="text-reading font-semibold text-ink-strong">
           键盘快捷键
         </div>
         <IconButton label="关闭" onClick={() => setOpen(false)}>
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
       <div className="px-5 py-4 max-h-[60vh] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
@@ -58,9 +58,9 @@ export function KeyboardHelp() {
             <ul className="flex flex-col gap-1">
               {items.map((s) => (
                 <li key={s.keys + s.label} className="flex items-center gap-3">
-                  <kbd className="shrink-0 min-w-[64px] text-center px-1.5 py-0.5 rounded border border-line bg-surface-muted font-mono text-label text-ink-muted">
-                    {s.keys}
-                  </kbd>
+                  <span className="shrink-0 min-w-16">
+                    <Kbd className="text-label">{s.keys}</Kbd>
+                  </span>
                   <span className="text-ui text-ink">{s.label}</span>
                 </li>
               ))}
@@ -69,7 +69,7 @@ export function KeyboardHelp() {
         ))}
       </div>
       <div className="px-5 py-2.5 border-t border-line-faint text-label text-ink-faint">
-        随时按 <kbd className="px-1 rounded border border-line bg-surface-muted font-mono">?</kbd>{" "}
+        随时按 <Kbd>?</Kbd>{" "}
         打开本面板 · 输入框里输 /help 也可以
       </div>
     </Modal>

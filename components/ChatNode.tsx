@@ -38,6 +38,20 @@ import { SkillPickerList } from "./SkillPickerList";
 import { ZoneEditor } from "./ZoneEditor";
 import { EmptyResponseNotice } from "./EmptyResponseNotice";
 import { providerFamily } from "@/lib/llm";
+import {
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  CornerDownRight,
+  Maximize2,
+  MessageCircleQuestion,
+  Plus,
+  RotateCcw,
+  TriangleAlert,
+  Workflow,
+  Wrench,
+} from "lucide-react";
+import { Button, Icon, StatusDot, StopButton } from "@/components/ui";
 
 export type ChildAnchor = { text: string; childId: string };
 
@@ -184,12 +198,13 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
   if (showCompact) {
     return (
       <div
-        className={`group relative nopan w-[280px] rounded-card bg-surface cursor-pointer transition-all duration-200 ring-1 shadow-[0_1px_2px_rgba(28,25,23,0.04),0_6px_20px_-6px_rgba(28,25,23,0.10)] hover:shadow-[0_2px_4px_rgba(28,25,23,0.05),0_14px_30px_-8px_rgba(28,25,23,0.18)] hover:-translate-y-px ${
+        // w-70 = lib/layout.ts NODE_WIDTH_COMPACT（280px），两边必须一致。
+        className={`group relative nopan w-70 rounded-card border bg-surface cursor-pointer transition-colors duration-100 hover:bg-surface-hover ${
           isActive
-            ? "ring-2 ring-accent/80"
+            ? "border-accent ring-1 ring-accent"
             : isUnread
-              ? "ring-unread-line/80"
-              : "ring-line/80 hover:ring-line-strong"
+              ? "border-unread-line"
+              : "border-line hover:border-line-strong"
         }`}
         onClick={goRead}
         title={n.question}
@@ -207,21 +222,9 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           }}
           title="展开预览（留在画布）"
           aria-label="展开预览"
-          className="absolute -top-2 right-4 z-10 w-5 h-5 rounded-full border bg-surface border-line-strong text-ink-muted shadow-raise opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-ink hover:text-ink-inverse hover:border-ink transition-opacity flex items-center justify-center"
+          className="absolute -top-2 right-4 z-10 size-5 rounded-full border bg-surface border-line-strong text-ink-muted opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-surface-hover hover:text-ink transition-opacity flex items-center justify-center"
         >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
+          <ChevronDown size={12} strokeWidth={2} aria-hidden />
         </button>
         {showCollapseChip && (
           <CollapseChip
@@ -235,7 +238,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           />
         )}
         <span
-          className={`absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full ${
+          className={`absolute left-0 top-3 bottom-3 w-0.75 rounded-r-full ${
             isError
               ? "bg-warn"
               : n.status !== "done"
@@ -258,29 +261,31 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               {labelText}
             </div>
             {n.parentAnchor && (
-              <div className="mt-0.5 text-label text-fork-ink truncate">
-                ↳ {truncate(n.parentAnchor.selectedText, 22)}
+              <div className="mt-0.5 text-label text-fork-ink truncate flex items-center gap-1">
+                <Icon icon={CornerDownRight} size="sm" className="text-fork" />
+                <span className="truncate">{truncate(n.parentAnchor.selectedText, 22)}</span>
               </div>
             )}
           </div>
           {n.pendingInteraction && (
             <span
-              className="shrink-0 px-1.5 py-0.5 rounded-full bg-warn-muted text-warn-ink text-nano font-medium"
+              className="shrink-0 inline-flex text-warn-ink"
               title="待你回答"
+              aria-label="待你回答"
             >
-              🙋
+              <Icon icon={MessageCircleQuestion} size="sm" />
             </span>
           )}
           {isError && (
             <span
-              className="shrink-0 text-warn-ink text-nano"
+              className="shrink-0 inline-flex text-warn-ink"
               title={
                 n.errorMessage === "aborted"
                   ? "本轮已手动停止（后续已继续）"
                   : `本轮中途中断（后续已继续）：${n.errorMessage ?? ""}`
               }
             >
-              ⚠
+              <Icon icon={TriangleAlert} size="sm" />
             </span>
           )}
           <ToolCallBadge toolCalls={n.toolCalls} stats={n.toolCallStats} />
@@ -304,13 +309,14 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
       // flex-fill + scroll inside — so the card's on-canvas footprint is a
       // known constant the layout can reserve exactly (see PEEK_CARD_HEIGHT).
       style={data.isPeeked ? { height: PEEK_CARD_HEIGHT } : undefined}
-      className={`group relative nopan bg-surface border rounded-card shadow-raise w-[600px] transition-all ${
+      // w-150 = lib/layout.ts NODE_WIDTH_FULL（600px）。卡片不投影，靠描边。
+      className={`group relative nopan bg-surface border rounded-card w-150 transition-colors ${
         data.isPeeked ? "flex flex-col" : ""
       } ${
         isStreaming
-          ? "border-accent-line ring-4 ring-accent-muted"
+          ? "border-accent-line ring-2 ring-accent-muted"
           : isActive
-            ? "border-accent ring-2 ring-accent-line/60 shadow-raise"
+            ? "border-accent ring-1 ring-accent"
             : isUnread
               ? "border-unread-line"
               : "border-line"
@@ -332,7 +338,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
 
       {n.parentAnchor && (
         <div className="px-4 py-2 border-b border-line-faint bg-fork-muted text-label text-fork-ink flex items-center gap-1.5 rounded-t-card">
-          <span className="text-fork">↳</span>
+          <Icon icon={CornerDownRight} size="sm" className="text-fork" />
           <span>
             从「
             <span className="font-medium">
@@ -349,7 +355,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
             n.parentAnchor ? "" : "rounded-t-card"
           }`}
         >
-          <span>🙋</span>
+          <Icon icon={MessageCircleQuestion} size="sm" />
           <span>待你回答</span>
         </div>
       )}
@@ -358,19 +364,16 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         className={`px-5 py-3 border-b border-line-faint flex items-start gap-2.5 ${
           n.parentAnchor || n.pendingInteraction
             ? ""
-            : "bg-accent-muted/60 rounded-t-card"
+            : "bg-surface-muted rounded-t-card"
         }`}
       >
-        <div className="w-7 h-7 rounded-full bg-accent text-ink-inverse text-label flex items-center justify-center mt-0.5 shrink-0 font-medium">
-          你
-        </div>
         <div
           className={`flex-1 text-body text-ink leading-relaxed pt-1 font-medium min-w-0 ${
             // Peek pins the whole card to PEEK_CARD_HEIGHT with the body as the
             // flex-fill scroll area. A long question / many attachments would
             // otherwise grow this header unbounded, pushing the card past its
             // reserved footprint and over the child below — so cap + scroll it.
-            data.isPeeked ? "max-h-[200px] overflow-y-auto" : ""
+            data.isPeeked ? "max-h-50 overflow-y-auto" : ""
           }`}
         >
           {indexLabel && (
@@ -393,51 +396,30 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           )}
         </div>
         {data.isPeeked && (
-          <button
+          <Button
+            size="sm"
             onClick={(e) => {
               e.stopPropagation();
               data.onTogglePeek(n.id);
             }}
             title="收起预览"
             aria-label="收起预览"
-            className="shrink-0 mt-0.5 px-2 h-7 rounded-md bg-surface border border-line-strong text-ink-muted hover:bg-ink hover:text-ink-inverse hover:border-ink active:scale-95 flex items-center gap-1 text-label font-medium transition-colors shadow-raise"
+            className="shrink-0 mt-0.5"
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M18 15l-6-6-6 6" />
-            </svg>
+            <Icon icon={ChevronUp} size="sm" />
             收起
-          </button>
+          </Button>
         )}
-        <button
+        <Button
+          size="sm"
           onClick={goRead}
           title="线性阅读"
           aria-label="线性阅读"
-          className="shrink-0 mt-0.5 px-2 h-7 rounded-md bg-surface border border-line-strong text-ink-muted hover:bg-ink hover:text-ink-inverse hover:border-ink active:scale-95 flex items-center gap-1 text-label font-medium transition-colors shadow-raise"
+          className="shrink-0 mt-0.5"
         >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-          </svg>
+          <Icon icon={Maximize2} size="sm" />
           阅读
-        </button>
+        </Button>
       </div>
 
       <div
@@ -445,7 +427,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
         data-chat-node-id={n.id}
         onClick={onMarkClick}
         className={`px-5 py-4 md-body text-body text-ink-muted overflow-y-auto nodrag nowheel nopan ${
-          data.isPeeked ? "flex-1 min-h-0" : "max-h-[420px]"
+          data.isPeeked ? "flex-1 min-h-0" : "max-h-105"
         }`}
       >
         {isStreaming ? (
@@ -455,14 +437,13 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               style={{ display: "none" }}
               className="items-center gap-1.5 mb-1 text-ui text-ink-faint"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              <StatusDot tone="live" />
               思考中…
             </div>
             <div
               ref={streamRef}
               className="whitespace-pre-wrap break-words leading-relaxed"
             />
-            <span className="streaming-cursor" />
           </>
         ) : n.response ? (
           <MarkdownBody cacheKey={n.id} content={n.response} />
@@ -481,15 +462,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
           (n.errorMessage === "aborted" ? (
             <div className="mt-3 p-2 bg-surface-muted border border-line rounded text-ink-muted text-xs flex items-start gap-2">
               <div className="flex-1">已停止生成</div>
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   retryNode(n.id);
                 }}
-                className="shrink-0 px-2 py-0.5 rounded bg-accent text-ink-inverse text-label hover:bg-accent-strong active:scale-95 transition-transform"
+                className="shrink-0"
               >
-                ↻ 重新发送
-              </button>
+                <Icon icon={RotateCcw} size="sm" />
+                重新发送
+              </Button>
             </div>
           ) : (
             <div className="mt-3 p-2 bg-danger-muted border border-danger-line rounded text-danger-ink text-xs flex items-start gap-2">
@@ -505,15 +489,18 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
                   </a>
                 )}
               </div>
-              <button
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   retryNode(n.id);
                 }}
-                className="shrink-0 px-2 py-0.5 rounded bg-danger text-ink-inverse text-label hover:bg-danger-strong active:scale-95 transition-transform"
+                className="shrink-0"
               >
-                ↻ 重新生成
-              </button>
+                <Icon icon={RotateCcw} size="sm" />
+                重新生成
+              </Button>
             </div>
           ))}
       </div>
@@ -566,20 +553,17 @@ function NodeFooter({
     <div className="px-5 py-2 border-t border-line-faint flex items-center gap-2 text-xs text-ink-muted">
       {isStreaming ? (
         <>
-          <span className="w-1.5 h-1.5 bg-positive rounded-full animate-pulse" />
+          <StatusDot tone="live" />
           <span>正在生成…</span>
-          <button
+          <StopButton
             onClick={(e) => {
               e.stopPropagation();
               abortStream(node.id);
             }}
-            className="ml-2 px-2 py-0.5 rounded border border-line-strong bg-surface text-ink-muted hover:bg-ink hover:text-ink-inverse hover:border-ink active:scale-95 transition-colors flex items-center gap-1"
+            className="ml-2"
             title="停止生成 (Esc)"
             aria-label="停止生成"
-          >
-            <span className="inline-block w-2 h-2 bg-current rounded-[1px]" />
-            停止
-          </button>
+          />
         </>
       ) : (
         <>
@@ -598,18 +582,21 @@ function NodeFooter({
           {node.response && (
             <CopyButton
               text={node.response}
-              className="nodrag ml-2 px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+              className="nodrag ml-2 px-2 py-0.5 rounded-field text-ink-muted hover:bg-surface-hover hover:text-ink-strong transition-colors"
             />
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setOpen(true)}
-            className="ml-1 px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
+            className="ml-1"
           >
-            + 追问
-          </button>
+            <Icon icon={Plus} size="sm" />
+            追问
+          </Button>
         </>
       )}
-      <span className="ml-auto text-ink-faint italic text-label">
+      <span className="ml-auto text-ink-faint text-label">
         或选中文字 → ⌘K 提问
       </span>
     </div>
@@ -697,27 +684,22 @@ function FollowupInput({
         />
       </div>
       <div className="px-3 py-1.5 flex items-center justify-end gap-2 text-xs">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setZoneOpen(true)}
           title="专注写作模式（全屏 Markdown 编辑 + 预览）"
-          className="mr-auto px-2 py-0.5 text-ink-muted hover:text-ink-strong inline-flex items-center gap-1"
+          className="mr-auto"
         >
-          <span aria-hidden>⛶</span>
-          <span>专注写作</span>
-        </button>
-        <button
-          onClick={onClose}
-          className="px-2 py-0.5 text-ink-muted hover:text-ink-strong"
-        >
+          <Icon icon={Maximize2} size="sm" />
+          专注写作
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
           取消
-        </button>
-        <button
-          onClick={submit}
-          disabled={!q.trim()}
-          className="px-2.5 py-0.5 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
-        >
+        </Button>
+        <Button variant="primary" size="sm" onClick={submit} disabled={!q.trim()}>
           提问
-        </button>
+        </Button>
       </div>
       {zoneOpen && (
         <ZoneEditor
@@ -784,15 +766,22 @@ function ToolCallBadge({
   }
   if (total === 0) return null;
   return (
-    <span className="shrink-0 inline-flex items-center gap-1 text-nano tabular-nums text-ink-muted">
-      <span title={`本轮共 ${total} 次工具调用`}>🔧{total}</span>
+    <span className="shrink-0 inline-flex items-center gap-2 text-nano tabular-nums text-ink-faint">
+      <span className="inline-flex items-center gap-0.5" title={`本轮共 ${total} 次工具调用`}>
+        <Icon icon={Wrench} size="sm" />
+        {total}
+      </span>
       {subagents > 0 && (
-        <span title={`派了 ${subagents} 个子 Agent：${labels.join("、")}`}>
-          🤖{subagents}
+        <span className="inline-flex items-center gap-0.5" title={`派了 ${subagents} 个子 Agent：${labels.join("、")}`}>
+          <Icon icon={Bot} size="sm" />
+          {subagents}
         </span>
       )}
       {workflows > 0 && (
-        <span title={`跑了 ${workflows} 个 Workflow`}>⚙{workflows}</span>
+        <span className="inline-flex items-center gap-0.5" title={`跑了 ${workflows} 个 Workflow`}>
+          <Icon icon={Workflow} size="sm" />
+          {workflows}
+        </span>
       )}
     </span>
   );

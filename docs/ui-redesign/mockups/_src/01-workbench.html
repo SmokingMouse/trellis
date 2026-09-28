@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis 重设计稿 · 01 主工作台</title>
+<script>
+  // 防闪屏：先定主题再绘制（落地对应 layout.tsx 的 ThemeScript）。?theme=dark|light 用于截图。
+  (function () {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("trellis-mock-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (t === "dark") document.documentElement.classList.add("dark");
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/*@TOKENS*/
+/*@BASE*/
+
+/* ───────── 布局 ───────── */
+html, body { height: 100%; overflow: hidden; }
+.app { display: flex; height: 100vh; }
+.sb {
+  width: 264px; flex: none; display: flex; flex-direction: column;
+  border-right: 1px solid var(--line); background: var(--surface-canvas);
+  transition: margin-left var(--dur-base) var(--ease-out);
+}
+.app[data-sidebar="closed"] .sb { margin-left: -264px; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }
+
+/* ───────── 侧栏 ───────── */
+.sb-top { padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 8px; height: 32px; padding-left: 4px; }
+.logo { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #6366f1 0%, #d946ef 55%, #f59e0b 100%); flex: none; }
+.brand b { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; color: var(--ink-strong); }
+.brand .icon-btn { margin-left: auto; }
+.sb-actions { display: flex; gap: 6px; }
+.sb-actions .btn-primary { flex: 1; }
+.sb-actions .btn-primary .kbd { background: transparent; border-color: rgba(255,255,255,.3); color: rgba(255,255,255,.8); margin-left: auto; }
+.sb-row { display: flex; gap: 6px; align-items: center; }
+.sb-row .seg { flex: 1; }
+.sb-row .seg button { flex: 1; justify-content: center; }
+.tree { flex: 1; overflow-y: auto; padding: 4px 6px 12px; }
+.t-sec { margin-top: 10px; }
+.t-row {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 6px 0 calc(6px + var(--lv, 0) * 14px);
+  border-radius: 6px; color: var(--ink-muted); font-size: var(--text-ui); cursor: pointer;
+}
+.t-row:hover { background: var(--surface-hover); color: var(--ink); }
+.t-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-row .meta { color: var(--ink-faint); font-size: var(--text-label); display: inline-flex; align-items: center; gap: 4px; }
+.t-row .chev { color: var(--ink-faint); transition: transform var(--dur-fast); }
+.t-row[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.t-row .slot { width: 14px; display: grid; place-items: center; flex: none; color: var(--ink-faint); }
+.t-row.proj { color: var(--ink); font-weight: 500; }
+.t-row.proj .i { color: var(--ink-muted); }
+.t-row.ws .i { color: var(--ink-faint); }
+.t-row.sess { color: var(--ink); }
+.t-row.topic { color: var(--ink-muted); }
+.t-row.sel { background: var(--accent-muted); color: var(--accent-ink); }
+.t-row.sel::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--accent); }
+.t-row .more { display: none; }
+.t-row:hover .more { display: grid; }
+.t-row:hover .meta.hide-on-hover { display: none; }
+.t-children[hidden] { display: none; }
+.t-label { padding: 12px 8px 4px; font-size: var(--text-label); color: var(--ink-faint); }
+.sb-foot { border-top: 1px solid var(--line); padding: 6px; display: flex; gap: 2px; }
+.sb-foot .btn { flex: 1; justify-content: flex-start; color: var(--ink-muted); font-weight: 400; }
+
+/* ───────── Header：导航 · 会话语境 · 系统 ───────── */
+.hd {
+  height: 48px; flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 0 10px; border-bottom: 1px solid var(--line); gap: 12px;
+}
+.hd-l, .hd-r { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hd-r { justify-content: flex-end; }
+.hd-c { display: flex; align-items: center; gap: 6px; }
+.app[data-sidebar="open"] .show-when-closed { display: none; }
+.crumb { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--text-ui); color: var(--ink-muted); padding-left: 4px; }
+.crumb a:hover { color: var(--ink); }
+.crumb .sep { color: var(--ink-faint); }
+.crumb .cur { color: var(--ink-strong); font-weight: 500; display: inline-flex; align-items: center; gap: 4px; min-width: 0; height: 28px; padding: 0 6px; border-radius: 6px; }
+.crumb .cur:hover { background: var(--surface-hover); }
+.crumb .cur span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.ctx-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px;
+  border: 1px solid var(--line); border-radius: var(--radius-field); color: var(--ink); font-size: var(--text-ui);
+}
+.ctx-btn:hover, .ctx-btn[aria-expanded="true"] { background: var(--surface-hover); }
+.ctx-btn .sub { color: var(--ink-faint); }
+.ctx-btn .i { color: var(--ink-faint); }
+.meter { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 9px; border-radius: var(--radius-field); color: var(--ink-muted); font-size: var(--text-label); position: relative; cursor: default; }
+.meter:hover { background: var(--surface-hover); }
+.meter .bar { width: 44px; height: 4px; border-radius: 2px; background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.meter .bar i { display: block; height: 100%; width: 62%; background: var(--ink-faint); border-radius: 2px; }
+.meter .tipbox {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  width: 240px; padding: 10px 12px; border-radius: var(--radius-overlay); background: var(--surface-raised);
+  box-shadow: var(--shadow-overlay); z-index: var(--z-popover); color: var(--ink); font-size: var(--text-label);
+  opacity: 0; pointer-events: none; transition: opacity var(--dur-fast);
+}
+.meter:hover .tipbox { opacity: 1; transition-delay: 250ms; }
+.tipbox dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; }
+.tipbox dt { color: var(--ink-faint); }
+.tipbox dd { margin: 0; text-align: right; font-family: var(--font-mono); font-size: 11.5px; }
+.search-trigger {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; width: 200px; padding: 0 6px 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-field); color: var(--ink-faint); background: var(--surface-canvas);
+  margin-right: 4px;
+}
+.search-trigger:hover { border-color: var(--line-strong); color: var(--ink-muted); }
+.search-trigger .kbd { margin-left: auto; }
+
+/* ───────── 标签条 ───────── */
+.tabs { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+.tab {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 6px 0 10px; max-width: 200px;
+  border-radius: var(--radius-field); color: var(--ink-muted); font-size: var(--text-ui);
+}
+.tab:hover { background: var(--surface-hover); color: var(--ink); }
+.tab[aria-selected="true"] { background: var(--surface-muted); color: var(--ink-strong); }
+.tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .x { opacity: 0; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--ink-faint); }
+.tab:hover .x, .tab[aria-selected="true"] .x { opacity: 1; }
+.tab .x:hover { background: var(--surface-hover); color: var(--ink); }
+.tabs .spacer { flex: 1; }
+
+/* ───────── 舞台：对话流 + composer + 树浮窗 ───────── */
+.stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; --safe-r: 332px; }
+.stage[data-tree="dot"] { --safe-r: 64px; }
+.scroll { flex: 1; overflow-y: auto; padding: 0 var(--safe-r) 0 24px; transition: padding var(--dur-base) var(--ease-out); scroll-behavior: smooth; }
+.col { max-width: 740px; margin: 0 auto; }
+.stage[data-width="narrow"] .col { max-width: 640px; }
+.stage[data-width="wide"] .col { max-width: 880px; }
+
+/* ── 对话：无框连续流 ── */
+.turn { padding: 20px 0 4px; }
+.turn + .turn { border-top: 0; }
+.msg-user {
+  position: relative; background: var(--surface-muted); border-radius: var(--radius-card);
+  padding: 10px 14px; font-size: var(--text-reading); line-height: 1.65; color: var(--ink-strong);
+}
+.msg-user .idx { position: absolute; right: 100%; top: 12px; margin-right: 10px; font-family: var(--font-mono); font-size: var(--text-nano); color: var(--ink-faint); opacity: 0; }
+.msg-user:hover .idx { opacity: 1; }
+.msg-user .edit { position: absolute; right: 6px; top: 6px; opacity: 0; }
+.msg-user:hover .edit { opacity: 1; }
+.asst { position: relative; margin-top: 14px; font-size: var(--text-reading); line-height: 1.75; color: var(--ink); }
+.asst p { margin: 0 0 12px; }
+.asst h3 { font-size: 16px; font-weight: 600; margin: 22px 0 8px; color: var(--ink-strong); letter-spacing: -0.01em; }
+.asst ol, .asst ul { margin: 0 0 12px; padding-left: 22px; }
+.asst li { margin: 4px 0; }
+.asst li::marker { color: var(--ink-faint); }
+.asst strong { font-weight: 600; color: var(--ink-strong); }
+.asst blockquote { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 2px solid var(--line-strong); color: var(--ink-muted); }
+.asst code:not(pre code) { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-inline-bg); color: var(--code-inline-ink); padding: 1px 5px; border-radius: 4px; }
+mark.fork { background: var(--mark-fork-bg); color: inherit; border-bottom: 1.5px solid var(--mark-fork-line); padding: 0 1px; border-radius: 2px 2px 0 0; cursor: pointer; }
+mark.fork:hover { background: var(--mark-fork-hover-bg); }
+mark.fork sup { font-size: 10px; color: var(--fork-ink); margin-left: 2px; font-family: var(--font-mono); }
+
+.code { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--code-bg); margin: 0 0 14px; overflow: hidden; }
+.code-bar { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--code-bar-line); font-size: var(--text-label); color: var(--ink-faint); }
+.code-bar .mono { color: var(--ink-muted); }
+.code-bar .icon-btn { margin-left: auto; }
+.code pre { margin: 0; padding: 10px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; color: var(--code-ink); overflow-x: auto; }
+.code pre > span { display: block; padding: 0 14px; }
+.code .c { color: var(--code-comment); }
+.code .add { background: var(--code-add-bg); }
+.code .del { background: var(--code-del-bg); color: var(--ink-muted); }
+.code .gut { display: inline-block; width: 14px; color: var(--ink-faint); user-select: none; }
+
+/* ── 思考块 ── */
+.think { margin-top: 12px; }
+.fold-head { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 4px; border-radius: 6px; color: var(--ink-faint); font-size: var(--text-ui); }
+.fold-head:hover { background: var(--surface-hover); color: var(--ink-muted); }
+.fold-head .chev { transition: transform var(--dur-fast); }
+.fold-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.think-body { margin: 6px 0 0 11px; padding: 2px 0 2px 14px; border-left: 1px solid var(--line-strong); color: var(--ink-muted); font-size: 14px; line-height: 1.7; }
+.think-body[hidden] { display: none; }
+
+/* ── 工具轨迹：持久保留的紧凑时间线 ── */
+.trace { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-card); }
+.trace-head { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 10px 0 8px; color: var(--ink-muted); font-size: var(--text-ui); border-radius: var(--radius-card); }
+.trace-head:hover { background: var(--surface-hover); }
+.trace-head .chev { color: var(--ink-faint); transition: transform var(--dur-fast); }
+.trace[data-open="true"] .trace-head .chev { transform: rotate(90deg); }
+.trace-head .sum b { font-weight: 500; color: var(--ink); }
+.trace-head .fail { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-muted); }
+.trace-head .dur { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-label); color: var(--ink-faint); }
+.trace-body { border-top: 1px solid var(--line); padding: 4px 0; }
+.trace[data-open="false"] .trace-body { display: none; }
+.step { position: relative; }
+.step-row { display: grid; grid-template-columns: 16px 64px 1fr auto 14px; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 12px; text-align: left; font-size: var(--text-ui); }
+.step-row:hover { background: var(--surface-hover); }
+.step-row .i { color: var(--ink-faint); }
+.step-row .tool { font-weight: 500; color: var(--ink); }
+.step-row .arg { font-family: var(--font-mono); font-size: 12px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-row .ms { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); text-align: right; }
+.step-row .st { display: grid; place-items: center; }
+.step-row .ok { color: var(--ink-faint); }
+.step-out { display: none; margin: 2px 12px 8px 36px; padding: 8px 10px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--ink-muted); white-space: pre-wrap; max-height: 180px; overflow: auto; }
+.step[data-open="true"] .step-out { display: block; }
+.step.failed .step-out { border-color: var(--danger-line); }
+.step.wait .st { color: var(--accent); }
+
+/* ── 审批卡 ── */
+.approve { margin: 14px 0 6px; border: 1px solid var(--accent-line); border-radius: var(--radius-card); padding: 14px; background: var(--surface); }
+.approve-h { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); color: var(--ink); }
+.approve-h .i { color: var(--accent); }
+.approve-h .tool { font-family: var(--font-mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--ink); }
+.approve-h .desc { color: var(--ink-muted); }
+.approve pre { margin: 10px 0 12px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); white-space: pre-wrap; }
+.approve-act { display: flex; align-items: center; gap: 8px; }
+.approve-act .btn-primary { min-width: 112px; }
+.approve-act .btn-primary .kbd { background: transparent; border-color: rgba(255,255,255,.3); color: rgba(255,255,255,.85); }
+.approve-act .always { margin-left: auto; font-weight: 400; }
+.approve textarea { width: 100%; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-field); background: var(--surface); resize: vertical; font-size: var(--text-ui); outline: 0; }
+.approve textarea:focus { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--focus-ring); }
+.approve-done { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: var(--text-ui); color: var(--ink-muted); }
+.approve-done .i { color: var(--ink-faint); }
+
+/* ── 运行指示：全页唯一一种 ── */
+.runline { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: var(--text-ui); color: var(--ink-muted); }
+.runline .t { font-family: var(--font-mono); font-size: var(--text-label); color: var(--ink-faint); }
+
+/* ── 助手消息 hover 工具栏 ── */
+.tb { display: flex; align-items: center; gap: 2px; height: 28px; margin: -4px 0 0 -6px; opacity: 0; transition: opacity var(--dur-fast); }
+.turn:hover .tb, .tb:focus-within { opacity: 1; }
+.tb .meta { margin-left: 8px; font-family: var(--font-mono); font-size: var(--text-label); color: var(--ink-faint); }
+.tb .icon-btn.on { color: var(--accent); }
+
+.divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 0; color: var(--ink-faint); font-size: var(--text-label); }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.divider span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ───────── Composer ───────── */
+.composer-wrap { flex: none; padding: 8px var(--safe-r) 16px 24px; transition: padding var(--dur-base) var(--ease-out); }
+.composer { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
+.composer:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--focus-ring); }
+.queue { display: flex; align-items: center; gap: 8px; margin: 6px 6px 0; padding: 6px 6px 6px 10px; border-radius: 6px; background: var(--surface-muted); font-size: var(--text-ui); }
+.queue .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.queue .lab { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-faint); font-size: var(--text-label); flex: none; }
+.composer textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 12px 14px 4px; font-size: var(--text-body); line-height: 1.6; color: var(--ink); min-height: 48px; }
+.composer textarea::placeholder { color: var(--ink-faint); }
+.c-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--radius-field); border: 1px solid var(--line); color: var(--ink-muted); font-size: var(--text-ui); }
+.chip:hover, .chip[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
+.chip .i { color: var(--ink-faint); }
+.c-bar .to { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink-faint); font-size: var(--text-label); margin-right: 6px; }
+.c-bar .to b { font-weight: 500; color: var(--ink-muted); }
+.send { width: 32px; height: 32px; border-radius: var(--radius-field); display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); transition: background var(--dur-fast); }
+.send:hover { background: var(--accent-strong); }
+.send[data-state="idle-empty"] { background: var(--surface-muted); color: var(--ink-faint); pointer-events: none; }
+.send[data-state="stop"] { background: var(--ink-strong); color: var(--surface); }
+.send[data-state="stop"] .i { fill: currentColor; }
+.c-hint { display: flex; justify-content: space-between; padding: 6px 4px 0; font-size: var(--text-label); color: var(--ink-faint); }
+
+/* ───────── TreePanel 浮窗（保留小浮窗 + 小圆点形态） ───────── */
+.treep {
+  position: absolute; right: 16px; bottom: 16px; width: 300px; max-height: min(460px, calc(100% - 32px));
+  display: flex; flex-direction: column; z-index: var(--z-float);
+  background: var(--surface-raised); border-radius: var(--radius-overlay); box-shadow: var(--shadow-float);
+  transform-origin: bottom right; transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+.stage[data-tree="dot"] .treep { opacity: 0; transform: scale(0.9); pointer-events: none; }
+.treep-h { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); }
+.treep-h b { font-weight: 500; font-size: var(--text-ui); color: var(--ink); }
+.treep-h .cnt { color: var(--ink-faint); font-size: var(--text-label); margin: 0 auto 0 8px; }
+.treep-b { overflow-y: auto; padding: 4px; }
+.n-row { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 calc(8px + var(--lv, 0) * 14px); border-radius: 6px; font-size: 12.5px; color: var(--ink-muted); cursor: pointer; }
+.n-row:hover { background: var(--surface-hover); color: var(--ink); }
+.n-row .n { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); min-width: 20px; }
+.n-row .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.n-row .c { font-size: var(--text-label); color: var(--ink-faint); }
+.n-row.root { color: var(--ink); font-weight: 500; }
+.n-row.cur { background: var(--accent-muted); color: var(--accent-ink); }
+.n-row.cur .n { color: var(--accent-ink); }
+.n-row .br { color: var(--fork); }
+.n-row .guide { position: absolute; left: calc(14px + (var(--lv, 0) - 1) * 14px); top: 0; bottom: 0; width: 1px; background: var(--line); }
+.tree-dot {
+  position: absolute; right: 16px; bottom: 22px; z-index: var(--z-float);
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-raised); box-shadow: var(--shadow-float); color: var(--ink-muted);
+  opacity: 0; transform: scale(0.6); pointer-events: none; transition: opacity var(--dur-base), transform var(--dur-base) var(--ease-out);
+}
+.tree-dot:hover { color: var(--ink); }
+.tree-dot .b { position: absolute; top: -4px; right: -6px; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line-strong); font-size: 10px; font-family: var(--font-mono); color: var(--ink-muted); display: grid; place-items: center; }
+.stage[data-tree="dot"] .tree-dot { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ───────── 模型下拉 ───────── */
+.model-pop { width: 340px; padding: 0; }
+.model-pop .input { margin: 8px; }
+.model-pop .seg { margin: 0 8px 6px; display: flex; }
+.model-pop .seg button { flex: 1; justify-content: center; }
+.m-list { max-height: 300px; overflow-y: auto; padding: 0 4px 4px; border-top: 1px solid var(--line); padding-top: 4px; }
+.m-item { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; width: 100%; padding: 7px 8px; border-radius: 6px; text-align: left; }
+.m-item:hover, .m-item.kb { background: var(--surface-hover); }
+.m-item .nm { font-size: var(--text-ui); color: var(--ink); font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.m-item .pv { font-size: var(--text-label); color: var(--ink-faint); }
+.m-item .ck { grid-row: span 2; color: var(--accent); }
+.m-foot { border-top: 1px solid var(--line); padding: 8px 12px; font-size: var(--text-label); color: var(--ink-faint); display: flex; justify-content: space-between; }
+
+/* ───────── ⌘K ───────── */
+.cmdk-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-modal); display: none; }
+.cmdk-scrim.open { display: block; animation: fade var(--dur-fast) var(--ease-out); }
+@keyframes fade { from { opacity: 0; } }
+.cmdk { position: fixed; left: 50%; top: 14vh; transform: translateX(-50%); width: 600px; z-index: calc(var(--z-modal) + 1); background: var(--surface-raised); border-radius: 12px; box-shadow: var(--shadow-overlay); display: none; overflow: hidden; }
+.cmdk.open { display: block; animation: pop var(--dur-fast) var(--ease-out); }
+@keyframes pop { from { opacity: 0; transform: translateX(-50%) scale(0.97); } }
+.cmdk-in { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--ink-faint); }
+.cmdk-in input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 15px; color: var(--ink); }
+.cmdk-in input::placeholder { color: var(--ink-faint); }
+.cmdk-scope { display: flex; gap: 4px; padding: 8px 10px 0; }
+.cmdk-scope button { height: 24px; padding: 0 8px; border-radius: 5px; font-size: var(--text-label); color: var(--ink-muted); border: 1px solid var(--line); }
+.cmdk-scope button[aria-selected="true"] { background: var(--surface-muted); color: var(--ink); border-color: var(--line-strong); }
+.cmdk-list { max-height: 380px; overflow-y: auto; padding: 4px 6px 8px; }
+.cmdk-list .menu-item { height: auto; min-height: 36px; padding: 6px 8px; }
+.cmdk-list .menu-item .two { display: flex; flex-direction: column; min-width: 0; }
+.cmdk-list .menu-item .two small { color: var(--ink-faint); font-size: var(--text-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-list mark { background: var(--accent-muted); color: var(--accent-ink); border-radius: 2px; padding: 0 1px; }
+.cmdk-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: var(--text-label); color: var(--ink-faint); }
+.cmdk-foot span { display: inline-flex; align-items: center; gap: 5px; }
+.cmdk-empty { padding: 28px; text-align: center; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<!--@SPRITE-->
+<!--icons: square list-plus arrow-up loader-circle check x clock pencil corner-down-right -->
+
+<div class="app" id="app" data-sidebar="open">
+
+  <!-- ═════════ 侧栏：一棵树 项目 › 工作区 › 会话 ═════════ -->
+  <aside class="sb" aria-label="会话导航">
+    <div class="sb-top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span><b>Trellis</b>
+        <button class="icon-btn" data-tip="收起侧栏  ⌘\" aria-label="收起侧栏" data-act="sidebar"><svg class="i"><use href="#i-panel-left-close"/></svg></button>
+      </div>
+      <div class="sb-actions">
+        <button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>新会话<span class="kbd">⌘N</span></button>
+        <button class="icon-btn" style="border:1px solid var(--line)" data-tip="接入 CLI 会话" aria-label="接入 CLI 会话"><svg class="i"><use href="#i-plug"/></svg></button>
+      </div>
+      <label class="input"><svg class="i sm"><use href="#i-search"/></svg><input id="sbFilter" placeholder="筛选会话"><span class="kbd">/</span></label>
+      <div class="sb-row">
+        <div class="seg" role="tablist" id="groupSeg">
+          <button role="tab" aria-selected="true" data-g="proj">按项目</button>
+          <button role="tab" aria-selected="false" data-g="time">按时间</button>
+        </div>
+        <button class="icon-btn" aria-label="来源与归档筛选" data-tip="来源 · 含已归档" data-pop="filterPop"><svg class="i"><use href="#i-list-filter"/></svg></button>
+      </div>
+    </div>
+
+    <nav class="tree" id="treeProj">
+      <!-- 项目 trellis -->
+      <div class="t-row proj" style="--lv:0" aria-expanded="true" data-toggle>
+        <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-folder-git-2"/></svg><span class="name">trellis</span><span class="meta">6</span>
+      </div>
+      <div class="t-children">
+        <div class="t-row ws" style="--lv:1" aria-expanded="true" data-toggle>
+          <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-git-branch"/></svg><span class="name">trellis</span><span class="meta mono">main</span>
+        </div>
+        <div class="t-children">
+          <div class="t-row sess" style="--lv:2"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="name">Trellis UI 重设计</span><span class="meta hide-on-hover" data-tip="Herdr 托管"><svg class="i xs"><use href="#i-anchor"/></svg></span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2"><span class="slot"><span class="dot unread"></span></span><span class="name">仓库日报（定时）</span><span class="meta hide-on-hover"><svg class="i xs"><use href="#i-calendar-clock"/></svg>2</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">fj-ship-3f07</span><span class="meta hide-on-hover">外部</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">你是什么模型</span><span class="meta hide-on-hover">外部</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">现在 trellis 使用体验基线</span><span class="meta hide-on-hover">3</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+        </div>
+        <div class="t-row ws" style="--lv:1" aria-expanded="true" data-toggle>
+          <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-git-branch"/></svg><span class="name">fix-b</span><span class="meta">worktree</span>
+        </div>
+        <div class="t-children">
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">fj-fix-b-facc · 补测试</span><span class="meta hide-on-hover">外部</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+        </div>
+        <div class="t-row ws" style="--lv:1" aria-expanded="false" data-toggle>
+          <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-git-branch"/></svg><span class="name faint">startup-review</span><span class="meta">已脱离</span>
+        </div>
+        <div class="t-children" hidden>
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">fj-review-startup</span><span class="meta">外部</span></div>
+        </div>
+      </div>
+
+      <!-- 项目 .claude -->
+      <div class="t-sec"></div>
+      <div class="t-row proj" style="--lv:0" aria-expanded="true" data-toggle>
+        <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-folder-git-2"/></svg><span class="name">.claude</span><span class="meta">5</span>
+      </div>
+      <div class="t-children">
+        <div class="t-row ws" style="--lv:1" aria-expanded="true" data-toggle>
+          <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-git-branch"/></svg><span class="name">.claude</span><span class="meta mono">main</span>
+        </div>
+        <div class="t-children">
+          <div class="t-row sess" style="--lv:2"><span class="slot"><span class="dot unread"></span></span><span class="name">pvncher 推文</span><span class="meta hide-on-hover"><svg class="i xs"><use href="#i-anchor"/></svg></span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2"><span class="slot"></span><span class="name">Hook 拦截问题</span><span class="meta hide-on-hover"><svg class="i xs"><use href="#i-anchor"/></svg></span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+          <div class="t-row sess" style="--lv:2; font-weight:500" aria-expanded="true" data-toggle><span class="slot"><svg class="i xs chev"><use href="#i-chevron-down"/></svg></span><span class="name">harness</span><span class="meta">4 个话题</span></div>
+          <div class="t-children">
+            <div class="t-row topic" style="--lv:3"><span class="slot"></span><span class="name">如果要把一本书读薄</span><span class="meta">8/3</span></div>
+            <div class="t-row topic" style="--lv:3"><span class="slot"></span><span class="name">把 .claude 里的 wiki registry 改成…</span><span class="meta">7/19</span></div>
+            <div class="t-row topic" style="--lv:3"><span class="slot"></span><span class="name">关于调研文，是不是也需要</span><span class="meta">6/10</span></div>
+            <div class="t-row topic sel" style="--lv:3" aria-current="page"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="name">claude design 为啥效果这么好</span><span class="meta">9 节</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目 web3学习（Chat 模式） -->
+      <div class="t-sec"></div>
+      <div class="t-row proj" style="--lv:0" aria-expanded="true" data-toggle>
+        <svg class="i xs chev"><use href="#i-chevron-down"/></svg><svg class="i sm"><use href="#i-message-square"/></svg><span class="name">对话</span><span class="meta">2</span>
+      </div>
+      <div class="t-children">
+        <div class="t-row sess" style="--lv:1"><span class="slot"></span><span class="name">讲讲 web3 L2 生态和原理</span><span class="meta hide-on-hover">55 节</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+        <div class="t-row sess" style="--lv:1"><span class="slot"></span><span class="name">https://xueqiu.com/1966…</span><span class="meta hide-on-hover">2 节</span><button class="icon-btn sm more" aria-label="更多" data-pop="rowPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></div>
+      </div>
+    </nav>
+
+    <nav class="tree" id="treeTime" hidden>
+      <div class="t-label">今天</div>
+      <div class="t-row topic sel"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="name">claude design 为啥效果这么好</span><span class="meta">.claude</span></div>
+      <div class="t-row sess"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="name">Trellis UI 重设计</span><span class="meta">trellis</span></div>
+      <div class="t-row sess"><span class="slot"><span class="dot unread"></span></span><span class="name">仓库日报（定时）</span><span class="meta">trellis</span></div>
+      <div class="t-label">昨天</div>
+      <div class="t-row sess"><span class="slot"><span class="dot unread"></span></span><span class="name">pvncher 推文</span><span class="meta">.claude</span></div>
+      <div class="t-row sess"><span class="slot"></span><span class="name">fj-fix-b-facc · 补测试</span><span class="meta">fix-b</span></div>
+      <div class="t-label">本周</div>
+      <div class="t-row sess"><span class="slot"></span><span class="name">Hook 拦截问题</span><span class="meta">.claude</span></div>
+      <div class="t-row sess"><span class="slot"></span><span class="name">讲讲 web3 L2 生态和原理</span><span class="meta">对话</span></div>
+      <div class="t-row sess"><span class="slot"></span><span class="name">你是什么模型</span><span class="meta">trellis</span></div>
+    </nav>
+
+    <div class="sb-foot">
+      <button class="btn btn-ghost btn-sm"><svg class="i sm"><use href="#i-archive"/></svg>已归档 12</button>
+      <button class="btn btn-ghost btn-sm"><svg class="i sm"><use href="#i-bookmark"/></svg>稍后再读 3</button>
+    </div>
+  </aside>
+
+  <!-- ═════════ 主区 ═════════ -->
+  <div class="main">
+    <header class="hd">
+      <!-- 左：导航 -->
+      <div class="hd-l">
+        <button class="icon-btn show-when-closed" aria-label="展开侧栏" data-tip="展开侧栏  ⌘\" data-act="sidebar"><svg class="i"><use href="#i-panel-left-open"/></svg></button>
+        <div class="crumb">
+          <a href="#">.claude</a><svg class="i xs sep"><use href="#i-chevron-right"/></svg>
+          <a href="#">harness</a><svg class="i xs sep"><use href="#i-chevron-right"/></svg>
+          <button class="cur" aria-label="切换话题"><span>claude design 为啥效果这么好</span><svg class="i xs faint"><use href="#i-chevrons-up-down"/></svg></button>
+        </div>
+      </div>
+      <!-- 中：会话语境 -->
+      <div class="hd-c">
+        <button class="ctx-btn" data-pop="modePop" aria-label="会话模式"><span class="dot project"></span>Project<span class="sub mono">.claude</span></button>
+        <button class="ctx-btn" data-pop="modelPop" id="modelBtn" aria-label="切换模型"><svg class="i sm"><use href="#i-cpu"/></svg><span class="mono" data-model-name>claude-opus-5-5</span><span class="sub">1M</span><svg class="i xs"><use href="#i-chevron-down"/></svg></button>
+        <div class="meter" tabindex="0" aria-label="上下文用量 62%">
+          <span>上下文</span><span class="bar"><i></i></span><span class="mono">62%</span>
+          <div class="tipbox" role="tooltip">
+            <div style="display:flex;justify-content:space-between"><b style="font-weight:500">上下文 124k / 200k</b><span class="faint">本树 16 节点</span></div>
+            <dl>
+              <dt>输入</dt><dd>360.6k</dd>
+              <dt>输出</dt><dd>196.2k</dd>
+              <dt>缓存读取</dt><dd>9.31M</dd>
+              <dt>缓存写入</dt><dd>1.31M</dd>
+              <dt>本轮耗时</dt><dd>42s</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+      <!-- 右：系统 -->
+      <div class="hd-r">
+        <button class="search-trigger" data-act="cmdk"><svg class="i sm"><use href="#i-search"/></svg>搜索<span class="kbd">⌘K</span></button>
+        <button class="icon-btn" aria-label="切换主题" data-tip="切换明暗" data-act="theme"><svg class="i"><use href="#i-sun" id="themeIcon"/></svg></button>
+        <button class="icon-btn" aria-label="更多" data-tip="更多" data-pop="morePop"><svg class="i"><use href="#i-ellipsis"/></svg></button>
+        <a class="icon-btn" href="02-settings.html" aria-label="设置" data-tip="设置"><svg class="i"><use href="#i-settings"/></svg></a>
+      </div>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="已打开的会话">
+      <button class="tab" role="tab" aria-selected="true"><span class="dot project"></span><span>harness</span><span class="x" aria-label="关闭"><svg class="i xs"><use href="#i-x"/></svg></span></button>
+      <button class="tab" role="tab" aria-selected="false"><svg class="i xs spin"><use href="#i-loader-circle"/></svg><span>Trellis UI 重设计</span><span class="x"><svg class="i xs"><use href="#i-x"/></svg></span></button>
+      <button class="tab" role="tab" aria-selected="false"><span class="dot chat"></span><span>web3 L2 生态</span><span class="x"><svg class="i xs"><use href="#i-x"/></svg></span></button>
+      <button class="icon-btn sm" aria-label="新标签" data-tip="新标签"><svg class="i sm"><use href="#i-plus"/></svg></button>
+      <span class="spacer"></span>
+      <div class="seg" role="tablist" aria-label="视图">
+        <button role="tab" aria-selected="true"><svg class="i sm"><use href="#i-list-tree"/></svg>线性</button>
+        <button role="tab" aria-selected="false"><svg class="i sm"><use href="#i-workflow"/></svg>画布</button>
+      </div>
+      <button class="icon-btn" aria-label="阅读宽度" data-tip="阅读宽度" data-pop="widthPop"><svg class="i"><use href="#i-columns-2"/></svg></button>
+    </div>
+
+    <div class="stage" id="stage" data-tree="open" data-width="normal">
+      <div class="scroll" id="scroll">
+        <div class="col">
+
+          <!-- ── #1 ── -->
+          <section class="turn">
+            <div class="msg-user"><span class="idx">#1</span>claude design 为啥效果这么好，咱们本地的能力为啥打不平呢
+              <button class="icon-btn sm edit" aria-label="编辑并重发" data-tip="编辑并重发"><svg class="i sm"><use href="#i-pencil"/></svg></button></div>
+            <div class="trace" data-open="false">
+              <button class="trace-head" data-act="trace"><svg class="i xs chev"><use href="#i-chevron-right"/></svg><span class="sum"><b>2 步</b> · Bash, Read</span><span class="dur">0.8s</span></button>
+              <div class="trace-body">
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">find ~/.claude/skills/frontend-design -type f | head -50</span><span class="ms">754ms</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button>
+                  <div class="step-out">SKILL.md
+LICENSE.txt
+references/styles/_index.md
+references/styles/od-design-systems/linear-app/DESIGN.md
+… 共 47 个文件</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">frontend-design/SKILL.md</span><span class="ms">71ms</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button>
+                  <div class="step-out">读取 96 行（6.3 KB）</div></div>
+              </div>
+            </div>
+            <div class="asst">
+              <p>好问题，但先别接受「claude design 神、本地打不平」这个框架——里面藏了个容易归错因的陷阱。我先看了一眼本地 <code>frontend-design</code> skill 到底装了什么，再给你一个有依据的判断。</p>
+              <h3>先纠个框架：差距不在「智能」，在「脚手架」</h3>
+              <p>claude.ai 和你本地跑的是<strong>同一个模型</strong>。同样的脑子、甚至同一份美学 prompt，所以差距只可能出在 harness。这点很重要——它意味着差距是<mark class="fork" data-tip="从这里分叉出 2 条追问">可复刻的<sup>2</sup></mark>，不是你买不到的护城河。</p>
+              <ol>
+                <li><strong>渲染反馈闭环</strong>（最大的一条）：artifact 实时渲染，你看着说「再大胆点」；本地默认一次盲画直出，模型写完 SVG/HTML 自己看不见结果。</li>
+                <li><strong>上下文净度</strong>：claude.ai 的 artifact 在一个干净聚焦的上下文里生成；本地 session 背着 CLAUDE.md、一堆 rules 和之前的对话。</li>
+                <li><strong>评估标准</strong>：没有 rubric，「好不好看」只能靠感觉，迭代没有方向。</li>
+              </ol>
+              <blockquote>类比：让一个有品味的设计师闭着眼画完直接交，和让他画完看一眼再调。差的不是品味，是那一眼。</blockquote>
+              <div class="tb">
+                <button class="icon-btn sm" aria-label="复制" data-tip="复制" data-act="copy"><svg class="i sm"><use href="#i-copy"/></svg></button>
+                <button class="icon-btn sm" aria-label="从此分叉" data-tip="从此分叉"><svg class="i sm"><use href="#i-git-branch"/></svg></button>
+                <button class="icon-btn sm" aria-label="收藏" data-tip="收藏" data-act="fav"><svg class="i sm"><use href="#i-bookmark"/></svg></button>
+                <button class="icon-btn sm" aria-label="更多操作" data-pop="msgPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button>
+                <span class="meta" data-tip="输入 96 · 输出 93k · 缓存 3.06M">4m 55s · 315 tok/s</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="divider"><span><svg class="i xs"><use href="#i-layers"/></svg>上下文已自动压缩 · 早期历史已转为摘要</span></div>
+
+          <!-- ── #8 ── -->
+          <section class="turn">
+            <div class="msg-user"><span class="idx">#8</span>那把评估闭环补上：给 prototype-evaluation 加上网页视觉的 rubric，别动已经定稿的结构。
+              <button class="icon-btn sm edit" aria-label="编辑并重发"><svg class="i sm"><use href="#i-pencil"/></svg></button></div>
+            <div class="think">
+              <button class="fold-head" aria-expanded="false" data-act="think"><svg class="i xs chev"><use href="#i-chevron-right"/></svg><svg class="i sm"><use href="#i-brain"/></svg>思考了 14 秒</button>
+              <div class="think-body" hidden>用户要的是「补」，不是「重写」。IA1–IA5 已经是自包含的结构域 rubric，网页视觉那一侧缺的是 H1–H5 的对称版本。先读现有文件确认行号，再只做追加式 Edit；原来依赖 <code>~/design-loop-demo/web_review.py</code> 的那句要改成自包含说明，否则换机器就失效。</div>
+            </div>
+            <div class="trace" data-open="false">
+              <button class="trace-head" data-act="trace"><svg class="i xs chev"><use href="#i-chevron-right"/></svg><span class="sum"><b>7 步</b> · Edit, Read, Bash</span><span class="fail"><span class="dot danger"></span>2 失败</span><span class="dur">41.2s</span></button>
+              <div class="trace-body">
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">references/prototype-evaluation.md</span><span class="ms">0.1s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">读取 88 行</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-text-search"/></svg><span class="tool">Grep</span><span class="arg">"web_review" ~/design-loop-demo</span><span class="ms">0.3s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">web_review.py:12  def make_compare_image(…)
+web_review.py:41  def run_gemini(…)</div></div>
+                <div class="step failed"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">sed -n '70,90p' prototype-evaluation.md</span><span class="ms">0.2s</span><span class="st"><span class="dot danger"></span></span></button><div class="step-out">退出码 1
+sed: prototype-evaluation.md: No such file or directory
+（工作目录是 skills/ui-explorer，需要带 references/ 前缀）</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">skills/ui-explorer/SKILL.md</span><span class="ms">0.1s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">读取 142 行</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-pen-line"/></svg><span class="tool">Edit</span><span class="arg">prototype-evaluation.md  +18 −2</span><span class="ms">0.1s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">第 41–58 行：新增 H1–H5 网页视觉 rubric</div></div>
+                <div class="step failed"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-pen-line"/></svg><span class="tool">Edit</span><span class="arg">prototype-evaluation.md  +6 −1</span><span class="ms">0.1s</span><span class="st"><span class="dot danger"></span></span></button><div class="step-out">old_string 在文件中出现 2 次，无法唯一定位；已扩大上下文重试</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-pen-line"/></svg><span class="tool">Edit</span><span class="arg">prototype-evaluation.md  +6 −1</span><span class="ms">0.1s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">第 77 行：把外部脚本依赖改成自包含说明</div></div>
+              </div>
+            </div>
+            <div class="asst">
+              <p>补好了。三处 Edit 都落在 <code>references/prototype-evaluation.md</code>，没动你已定稿的结构：</p>
+              <ul>
+                <li><strong>网页 H1–H5 五维补全</strong>：和 IA1–IA5 对称，两套缺口域（IA 结构 + 网页视觉）的 rubric 都落进文档了。</li>
+                <li><strong>去掉会失效的活依赖</strong>：第 77 行原来「参考 <code>~/design-loop-demo/web_review.py</code>」改成自包含说明，换台机器也能复现。</li>
+                <li><strong>唯一保留的外部引用</strong>在第 85 行，是实证案例的历史出处，不是文件依赖。</li>
+              </ul>
+              <div class="code">
+                <div class="code-bar"><svg class="i sm"><use href="#i-file-code-2"/></svg><span class="mono">references/prototype-evaluation.md</span><span>+18 −2</span><button class="icon-btn sm" aria-label="复制代码" data-tip="复制" data-act="copy"><svg class="i sm"><use href="#i-copy"/></svg></button></div>
+<pre><span class="c"><span class="gut"> </span>## 缺口域 rubric</span><span><span class="gut"> </span>### IA1–IA5（结构域）</span><span class="del"><span class="gut">−</span>### 网页视觉：参考 ~/design-loop-demo/web_review.py</span><span class="add"><span class="gut">+</span>### H1–H5（网页视觉，自包含）</span><span class="add"><span class="gut">+</span>- H1 层级：一眼能分出主操作、次操作与说明文字</span><span class="add"><span class="gut">+</span>- H2 克制：同屏饱和色 ≤ 2，状态色只做圆点与细描边</span><span class="add"><span class="gut">+</span>- H3 密度：控件同高（32px），行距与间距来自同一套刻度</span><span class="add"><span class="gut">+</span>- H4 反馈：每个异步操作都有且只有一种进行中指示</span><span class="add"><span class="gut">+</span>- H5 一致：同一语义在所有页面用同一个组件表达</span></pre>
+              </div>
+              <p>现在沉淀链是完整的：常驻入口只留一行指针，细则全文按需拉取。</p>
+              <div class="tb">
+                <button class="icon-btn sm" aria-label="复制" data-tip="复制" data-act="copy"><svg class="i sm"><use href="#i-copy"/></svg></button>
+                <button class="icon-btn sm" aria-label="从此分叉" data-tip="从此分叉"><svg class="i sm"><use href="#i-git-branch"/></svg></button>
+                <button class="icon-btn sm on" aria-label="已收藏" data-tip="已收藏" data-act="fav"><svg class="i sm"><use href="#i-bookmark-check"/></svg></button>
+                <button class="icon-btn sm" aria-label="更多操作" data-pop="msgPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button>
+                <span class="meta" data-tip="输入 1.2k · 输出 4.8k · 缓存 2.1M">1m 12s · 288 tok/s</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── #9：流式中的最后一轮 ── -->
+          <section class="turn" id="liveTurn">
+            <div class="msg-user"><span class="idx">#9</span>跑一下 web_review.py 验证一遍，过了就 commit。
+              <button class="icon-btn sm edit" aria-label="编辑并重发"><svg class="i sm"><use href="#i-pencil"/></svg></button></div>
+            <div class="trace" data-open="true" id="liveTrace">
+              <button class="trace-head" data-act="trace"><svg class="i xs chev"><use href="#i-chevron-right"/></svg><span class="sum" id="liveSum"><b>3 步</b> · Read, Bash</span><span class="dur" id="liveDur">8.7s</span></button>
+              <div class="trace-body">
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">web_review.py</span><span class="ms">0.1s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">读取 64 行</div></div>
+                <div class="step"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">uv run python web_review.py --target references/</span><span class="ms">8.4s</span><span class="st ok"><svg class="i xs"><use href="#i-check"/></svg></span></button><div class="step-out">IA1 结构层级 ........ 通过
+IA2 导航可达 ........ 通过
+H1  视觉层级 ........ 通过
+H2  色彩克制 ........ 通过
+H3  密度刻度 ........ 通过
+H4  反馈单一 ........ 通过
+H5  组件一致 ........ 通过
+10/10 通过</div></div>
+                <div class="step wait" id="gitStep"><button class="step-row" data-act="step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">git commit -am "docs(ui-explorer): 补网页视觉 rubric H1–H5"</span><span class="ms" id="gitMs">—</span><span class="st" id="gitSt" data-tip="等待你批准"><svg class="i xs"><use href="#i-hand"/></svg></span></button><div class="step-out" id="gitOut">等待批准</div></div>
+              </div>
+            </div>
+            <div class="asst">
+              <p id="liveP1">验证通过：H1–H5 五条 rubric 全部命中，IA 与 H 两域现在是对称的。准备把这一处改动提交——</p>
+              <div class="approve" id="approve" data-mobile-target="permission-card">
+                <div class="approve-h"><svg class="i"><use href="#i-shield-check"/></svg><b style="font-weight:500">需要你批准</b><span class="tool">Bash</span><span class="desc">提交 references/ 下的 rubric 改动</span></div>
+                <pre>git commit -am "docs(ui-explorer): 补网页视觉 rubric H1–H5"</pre>
+                <div id="denyBox" hidden><textarea rows="2" placeholder="拒绝理由（可选）— 会传给模型，让它换个做法"></textarea></div>
+                <div class="approve-act">
+                  <button class="btn btn-primary" data-act="allow" data-mobile-target="permission-allow">允许一次<span class="kbd">↵</span></button>
+                  <button class="btn btn-outline" data-act="deny" id="denyBtn" data-mobile-target="permission-deny">拒绝</button>
+                  <button class="btn btn-ghost btn-sm always" data-act="always" data-mobile-target="permission-always" data-tip="本会话内 Bash(git commit:*) 不再询问">总是允许此类命令</button>
+                </div>
+              </div>
+              <p id="liveP2" hidden></p>
+              <div class="runline" id="runline"><span class="dot live"></span><span id="runTxt">等待你批准</span><span class="t" id="runT">42s</span></div>
+              <div class="tb" id="liveTb" hidden>
+                <button class="icon-btn sm" aria-label="复制" data-tip="复制" data-act="copy"><svg class="i sm"><use href="#i-copy"/></svg></button>
+                <button class="icon-btn sm" aria-label="从此分叉" data-tip="从此分叉"><svg class="i sm"><use href="#i-git-branch"/></svg></button>
+                <button class="icon-btn sm" aria-label="收藏" data-tip="收藏" data-act="fav"><svg class="i sm"><use href="#i-bookmark"/></svg></button>
+                <button class="icon-btn sm" aria-label="更多操作" data-pop="msgPop"><svg class="i sm"><use href="#i-ellipsis"/></svg></button>
+                <span class="meta">51s · 302 tok/s</span>
+              </div>
+            </div>
+          </section>
+          <div style="height:24px"></div>
+        </div>
+      </div>
+
+      <!-- ── Composer ── -->
+      <div class="composer-wrap">
+        <div class="col">
+          <div class="composer" data-mobile-composer>
+            <div id="queueList">
+              <div class="queue"><span class="lab"><svg class="i xs"><use href="#i-clock"/></svg>排队中</span><span class="txt">提交后顺手把 README 里的指针也更新下</span>
+                <button class="icon-btn sm" aria-label="打断并立即发送" data-tip="打断当前回复，立即发送"><svg class="i sm"><use href="#i-corner-down-right"/></svg></button>
+                <button class="icon-btn sm" aria-label="编辑" data-tip="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button>
+                <button class="icon-btn sm" aria-label="移除" data-tip="移除" data-act="unqueue"><svg class="i sm"><use href="#i-x"/></svg></button></div>
+            </div>
+            <textarea id="input" rows="2" placeholder="继续对话…  输入 / 调出命令，选中正文可分叉追问"></textarea>
+            <div class="c-bar">
+              <button class="chip" data-pop="modePop" aria-label="模式"><span class="dot project"></span>Project</button>
+              <button class="chip" data-pop="modelPop" aria-label="模型"><svg class="i sm"><use href="#i-cpu"/></svg><span class="mono" data-model-name>claude-opus-5-5</span><svg class="i xs"><use href="#i-chevron-down"/></svg></button>
+              <button class="icon-btn" aria-label="添加附件" data-tip="添加附件"><svg class="i"><use href="#i-paperclip"/></svg></button>
+              <button class="icon-btn" aria-label="笔记" data-tip="笔记"><svg class="i"><use href="#i-notebook-pen"/></svg></button>
+              <span class="to" data-tip="新消息会接在这个节点之后" data-tip-pos="top"><svg class="i xs"><use href="#i-git-branch"/></svg>发送到：<b>评估闭环</b><span class="mono">#9</span></span>
+              <button class="send" id="send" data-state="stop" aria-label="停止生成" data-tip="停止  Esc" data-tip-pos="top"><svg class="i sm" id="sendIcon"><use href="#i-square"/></svg></button>
+            </div>
+          </div>
+          <div class="c-hint"><span>回复进行中：现在发送会进入排队，可随时打断</span><span>↵ 发送 · ⇧↵ 换行</span></div>
+        </div>
+      </div>
+
+      <!-- ── TreePanel 浮窗 ── -->
+      <section class="treep" aria-label="会话树" data-mobile-tree-sheet>
+        <div class="treep-h">
+          <b>会话树</b><span class="cnt">16 节点</span>
+          <button class="icon-btn sm" aria-label="新树" data-tip="新开一棵树"><svg class="i sm"><use href="#i-plus"/></svg></button>
+          <button class="icon-btn sm" aria-label="只看分支" data-tip="只看分叉点"><svg class="i sm"><use href="#i-git-fork"/></svg></button>
+          <button class="icon-btn sm" aria-label="在树中搜索" data-tip="在树中搜索"><svg class="i sm"><use href="#i-search"/></svg></button>
+          <button class="icon-btn sm" aria-label="收起为圆点" data-tip="收起" data-act="tree"><svg class="i sm"><use href="#i-minimize-2"/></svg></button>
+        </div>
+        <div class="treep-b">
+          <div class="n-row root" style="--lv:0"><svg class="i xs"><use href="#i-chevron-down"/></svg><span class="tx">claude design 为啥效果这么好</span><span class="c">9</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#1</span><span class="tx">claude design 为啥效果这么好，咱们…</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#2</span><span class="tx">我想也弄出类似的效果，先看看下面…</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#3</span><span class="tx">先看一下对比可视化面板吧</span><svg class="i xs br" data-tip="2 条分叉"><use href="#i-git-branch"/></svg></div>
+          <div class="n-row" style="--lv:2"><span class="guide"></span><span class="n">#3a</span><span class="tx">换成 before/after 并排</span></div>
+          <div class="n-row" style="--lv:2"><span class="guide"></span><span class="n">#3b</span><span class="tx">「可复刻的」具体指哪几块</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#4</span><span class="tx">这个跟 frontend-design 有啥关系</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#7</span><span class="tx">印象里 Claude Design 的过程是会…</span></div>
+          <div class="n-row" style="--lv:1"><span class="guide"></span><span class="n">#8</span><span class="tx">那把评估闭环补上</span></div>
+          <div class="n-row cur" style="--lv:1"><span class="guide"></span><span class="n">#9</span><span class="tx">跑一下 web_review.py 验证一遍</span><svg class="i xs spin"><use href="#i-loader-circle"/></svg></div>
+          <div class="n-row root" style="--lv:0; margin-top:4px"><svg class="i xs faint" style="transform:rotate(-90deg)"><use href="#i-chevron-down"/></svg><span class="tx">如果要把一本书读薄，你认为最重…</span><span class="c">1</span></div>
+          <div class="n-row root" style="--lv:0"><svg class="i xs faint" style="transform:rotate(-90deg)"><use href="#i-chevron-down"/></svg><span class="tx">把 .claude 里的 wiki registry 改成…</span><span class="c">2</span></div>
+          <div class="n-row root" style="--lv:0"><svg class="i xs faint" style="transform:rotate(-90deg)"><use href="#i-chevron-down"/></svg><span class="tx">关于调研文，是不是也需要在 ghos…</span><span class="c">4</span></div>
+        </div>
+      </section>
+      <button class="tree-dot" data-act="tree" aria-label="展开会话树" data-tip="展开会话树" data-tip-pos="top"><svg class="i"><use href="#i-git-branch"/></svg><span class="b">16</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 浮层 ═════════ -->
+<div class="pop model-pop" id="modelPop" role="listbox" aria-label="模型">
+  <label class="input"><svg class="i sm"><use href="#i-search"/></svg><input placeholder="搜索模型或厂商，如 opus、deepseek" id="modelQ"></label>
+  <div class="seg" role="tablist" id="modelSeg">
+    <button aria-selected="true" data-f="all">全部</button><button aria-selected="false" data-f="claude">Claude</button><button aria-selected="false" data-f="codex">Codex</button><button aria-selected="false" data-f="third">第三方</button>
+  </div>
+  <div class="m-list" id="mList"></div>
+  <div class="m-foot"><span>共 169 个可用模型</span><span>↑↓ 选择 · ↵ 确认</span></div>
+</div>
+
+<div class="pop" id="modePop" style="width:260px">
+  <div class="menu-label">会话模式</div>
+  <button class="menu-item active"><svg class="i"><use href="#i-folder-git-2"/></svg><span>Project<div class="faint" style="font-size:12px">在 .claude 仓库里读写文件、跑命令</div></span><svg class="i end" style="color:var(--accent)"><use href="#i-check"/></svg></button>
+  <button class="menu-item" style="height:auto;padding:6px 8px"><svg class="i"><use href="#i-message-square"/></svg><span>Chat<div class="faint" style="font-size:12px">纯对话，不碰文件系统</div></span></button>
+  <div class="menu-sep"></div>
+  <button class="menu-item"><svg class="i"><use href="#i-shield-check"/></svg>自动批准<span class="end">关</span></button>
+</div>
+
+<div class="pop" id="morePop" style="width:236px">
+  <button class="menu-item"><svg class="i"><use href="#i-notebook-pen"/></svg>笔记</button>
+  <button class="menu-item"><svg class="i"><use href="#i-bookmark"/></svg>稍后再读<span class="end">3</span></button>
+  <button class="menu-item"><svg class="i"><use href="#i-folder-open"/></svg>打开工作区目录</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item"><svg class="i"><use href="#i-download"/></svg>导出为 Markdown</button>
+  <button class="menu-item"><svg class="i"><use href="#i-download"/></svg>导出为 JSON</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item"><svg class="i"><use href="#i-sparkles"/></svg>增强模式<span class="end">开</span></button>
+  <button class="menu-item"><svg class="i"><use href="#i-keyboard"/></svg>快捷键<span class="end"><span class="kbd">?</span></span></button>
+  <button class="menu-item"><svg class="i"><use href="#i-rotate-ccw"/></svg>重启服务</button>
+</div>
+
+<div class="pop" id="widthPop" style="width:180px">
+  <div class="menu-label">阅读宽度</div>
+  <button class="menu-item" data-w="narrow">窄</button>
+  <button class="menu-item active" data-w="normal">标准<svg class="i end" style="color:var(--accent)"><use href="#i-check"/></svg></button>
+  <button class="menu-item" data-w="wide">宽</button>
+</div>
+
+<div class="pop" id="filterPop" style="width:220px">
+  <div class="menu-label">来源</div>
+  <button class="menu-item active">全部<svg class="i end" style="color:var(--accent)"><use href="#i-check"/></svg></button>
+  <button class="menu-item">Trellis 内创建</button>
+  <button class="menu-item">外部 CLI</button>
+  <button class="menu-item">Herdr 托管</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item"><svg class="i"><use href="#i-archive"/></svg>含已归档与离线</button>
+</div>
+
+<div class="pop" id="rowPop" style="width:200px">
+  <button class="menu-item"><svg class="i"><use href="#i-pencil"/></svg>重命名</button>
+  <button class="menu-item"><svg class="i"><use href="#i-external-link"/></svg>在新标签打开</button>
+  <button class="menu-item"><svg class="i"><use href="#i-archive"/></svg>归档</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" style="color:var(--danger-ink)"><svg class="i" style="color:var(--danger-ink)"><use href="#i-trash-2"/></svg>删除…</button>
+</div>
+
+<div class="pop" id="msgPop" style="width:200px">
+  <button class="menu-item"><svg class="i"><use href="#i-copy"/></svg>复制全文</button>
+  <button class="menu-item"><svg class="i"><use href="#i-download"/></svg>导出为卡片图</button>
+  <button class="menu-item"><svg class="i"><use href="#i-bookmark"/></svg>稍后再读</button>
+</div>
+
+<div class="cmdk-scrim" id="cmdkScrim" data-act="cmdk-close"></div>
+<div class="cmdk" id="cmdk" role="dialog" aria-label="搜索">
+  <div class="cmdk-in"><svg class="i lg"><use href="#i-search"/></svg><input id="cmdkQ" placeholder="搜索会话、节点内容，或输入命令…"><span class="kbd">esc</span></div>
+  <div class="cmdk-scope" role="tablist">
+    <button aria-selected="true">全部</button><button aria-selected="false">会话</button><button aria-selected="false">节点内容</button><button aria-selected="false">命令</button>
+  </div>
+  <div class="cmdk-list" id="cmdkList"></div>
+  <div class="cmdk-foot"><span><span class="kbd">↑</span><span class="kbd">↓</span>选择</span><span><span class="kbd">↵</span>打开</span><span><span class="kbd">⌘</span><span class="kbd">↵</span>在新标签打开</span></div>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const ic = (n, c = "sm") => `<svg class="i ${c}"><use href="#i-${n}"/></svg>`;
+const root = document.documentElement;
+
+/* 主题 */
+function syncThemeIcon() { $("#themeIcon").setAttribute("href", root.classList.contains("dark") ? "#i-moon" : "#i-sun"); }
+syncThemeIcon();
+
+/* 浮层：统一锚定 + 点击外部关闭 */
+let openPop = null;
+function closePop() { if (openPop) { openPop.pop.classList.remove("open"); openPop.btn.setAttribute("aria-expanded", "false"); openPop = null; } }
+function showPop(btn, id) {
+  const pop = document.getElementById(id);
+  if (openPop && openPop.pop === pop) return closePop();
+  closePop();
+  const r = btn.getBoundingClientRect();
+  pop.style.left = pop.style.top = pop.style.bottom = "";
+  pop.classList.add("open");
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  let left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+  if (id === "rowPop" || id === "msgPop" || id === "filterPop") left = Math.min(r.left, innerWidth - w - 8);
+  pop.style.left = left + "px";
+  if (r.bottom + h + 8 > innerHeight) { pop.style.top = (r.top - h - 6) + "px"; pop.style.transformOrigin = "bottom center"; }
+  else { pop.style.top = (r.bottom + 6) + "px"; pop.style.transformOrigin = "top center"; }
+  btn.setAttribute("aria-expanded", "true");
+  openPop = { pop, btn };
+  if (id === "modelPop") setTimeout(() => $("#modelQ").focus(), 50);
+}
+document.addEventListener("click", (e) => {
+  const pb = e.target.closest("[data-pop]");
+  if (pb) { e.stopPropagation(); return showPop(pb, pb.dataset.pop); }
+  if (openPop && !e.target.closest(".pop")) closePop();
+});
+
+/* 模型列表 */
+const MODELS = [
+  ["claude", "claude-opus-5-5", "1M 上下文"], ["claude", "claude-fable-5-1", "1M 上下文"], ["claude", "claude-sonnet-5", "1M 上下文"],
+  ["claude", "claude-opus-4-8", "200k 上下文"], ["codex", "gpt-5.6-sol", "Codex CLI · 默认"], ["codex", "gpt-5.5-codex", "Codex CLI"],
+  ["third", "deepseek-v4-pro", "deepseek"], ["third", "deepseek-v4-flash", "deepseek"], ["third", "gemini-2.5-flash", "gemini"], ["third", "doubao-seed-2.0-code", "ark-coding"],
+];
+let curModel = "claude-opus-5-5", mFilter = "all";
+function renderModels() {
+  const q = $("#modelQ").value.trim().toLowerCase();
+  const rows = MODELS.filter(([f, n, p]) => (mFilter === "all" || f === mFilter) && (!q || (n + p).toLowerCase().includes(q)));
+  $("#mList").innerHTML = rows.length ? rows.map(([f, n, p]) => `<button class="m-item" data-m="${n}"><span class="nm mono">${n}</span>${n === curModel ? `<span class="ck">${ic("check")}</span>` : "<span></span>"}<span class="pv">${p}</span></button>`).join("") : `<div class="cmdk-empty">没有匹配的模型</div>`;
+}
+renderModels();
+$("#modelQ").addEventListener("input", renderModels);
+$("#modelSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#modelSeg button").forEach(x => x.setAttribute("aria-selected", x === b)); mFilter = b.dataset.f; renderModels(); });
+$("#mList").addEventListener("click", (e) => { const b = e.target.closest(".m-item"); if (!b) return; curModel = b.dataset.m; $$("[data-model-name]").forEach(x => x.textContent = curModel); renderModels(); closePop(); });
+
+/* 阅读宽度 */
+$("#widthPop").addEventListener("click", (e) => { const b = e.target.closest("[data-w]"); if (!b) return; $("#stage").dataset.width = b.dataset.w; $$("#widthPop [data-w]").forEach(x => { x.classList.toggle("active", x === b); const ck = x.querySelector(".end"); if (ck) ck.remove(); }); b.insertAdjacentHTML("beforeend", `<svg class="i end" style="color:var(--accent)"><use href="#i-check"/></svg>`); closePop(); });
+
+/* 侧栏：分组切换 + 折叠节点 + 筛选 */
+$("#groupSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#groupSeg button").forEach(x => x.setAttribute("aria-selected", x === b)); $("#treeProj").hidden = b.dataset.g !== "proj"; $("#treeTime").hidden = b.dataset.g !== "time"; });
+$$("[data-toggle]").forEach(r => r.addEventListener("click", (e) => { if (e.target.closest(".more")) return; const open = r.getAttribute("aria-expanded") !== "true"; r.setAttribute("aria-expanded", open); const next = r.nextElementSibling; if (next && next.classList.contains("t-children")) next.hidden = !open; }));
+$("#sbFilter").addEventListener("input", (e) => { const q = e.target.value.trim(); $$("#treeProj .t-row.sess, #treeProj .t-row.topic").forEach(r => r.style.display = !q || r.textContent.includes(q) ? "" : "none"); });
+
+/* 通用动作 */
+let traceTouched = new WeakSet();
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-act]"); if (!a) return;
+  const act = a.dataset.act;
+  if (act === "sidebar") { const app = $("#app"); app.dataset.sidebar = app.dataset.sidebar === "open" ? "closed" : "open"; }
+  if (act === "theme") { root.classList.toggle("dark"); localStorage.setItem("trellis-mock-theme", root.classList.contains("dark") ? "dark" : "light"); syncThemeIcon(); }
+  if (act === "trace") { const t = a.closest(".trace"); t.dataset.open = t.dataset.open === "true" ? "false" : "true"; traceTouched.add(t); }
+  if (act === "step") { const s = a.closest(".step"); s.dataset.open = s.dataset.open === "true" ? "false" : "true"; }
+  if (act === "think") { const open = a.getAttribute("aria-expanded") !== "true"; a.setAttribute("aria-expanded", open); a.nextElementSibling.hidden = !open; }
+  if (act === "tree") { const s = $("#stage"); s.dataset.tree = s.dataset.tree === "open" ? "dot" : "open"; }
+  if (act === "fav") { const on = !a.classList.contains("on"); a.classList.toggle("on", on); a.querySelector("use").setAttribute("href", on ? "#i-bookmark-check" : "#i-bookmark"); a.dataset.tip = on ? "已收藏" : "收藏"; }
+  if (act === "copy") { const u = a.querySelector("use"); const old = u.getAttribute("href"); u.setAttribute("href", "#i-check"); a.dataset.tip = "已复制"; setTimeout(() => { u.setAttribute("href", old); a.dataset.tip = "复制"; }, 1200); }
+  if (act === "unqueue") { a.closest(".queue").remove(); }
+  if (act === "cmdk") openCmdk();
+  if (act === "cmdk-close") closeCmdk();
+  if (act === "allow" || act === "always") resolveApproval(act);
+  if (act === "deny") denyFlow();
+});
+
+/* ── 最后一轮：审批 → 继续流式 → 结束自动收起 ── */
+let running = true, t0 = 42;
+const tick = setInterval(() => { if (!running) return; t0++; $("#runT").textContent = t0 + "s"; }, 1000);
+function denyFlow() {
+  const box = $("#denyBox"), btn = $("#denyBtn");
+  if (box.hidden) { box.hidden = false; box.querySelector("textarea").focus(); btn.textContent = "确认拒绝"; btn.className = "btn btn-danger-outline"; btn.dataset.mobileTarget = "permission-deny-confirm"; return; }
+  $("#approve").outerHTML = `<div class="approve-done">${ic("x")}已拒绝 · 理由已转给模型</div>`;
+  $("#gitSt").innerHTML = `<span class="dot danger"></span>`; $("#gitStep").classList.remove("wait"); $("#gitStep").classList.add("failed"); $("#gitOut").textContent = "用户拒绝了本次工具执行";
+  finish("好，先不提交。改动还留在工作区，你看过 diff 再决定。", "4 步 · Read, Bash", true);
+}
+function resolveApproval(kind) {
+  $("#approve").outerHTML = `<div class="approve-done">${ic("check")}${kind === "always" ? "已设为总是允许 · Bash(git commit:*)" : "已允许一次"}</div>`;
+  $("#runTxt").textContent = "生成中";
+  $("#gitStep").classList.remove("wait");
+  $("#gitSt").innerHTML = ic("loader-circle", "xs spin"); $("#gitSt").removeAttribute("data-tip");
+  setTimeout(() => {
+    $("#gitSt").innerHTML = ic("check", "xs"); $("#gitSt").classList.add("ok"); $("#gitMs").textContent = "0.4s";
+    $("#gitOut").textContent = "[main a3f9c21] docs(ui-explorer): 补网页视觉 rubric H1–H5\n 1 file changed, 24 insertions(+), 3 deletions(-)";
+    finish("已提交 `a3f9c21`。沉淀链现在完整：常驻入口一行指针，细则全文按需拉取；下一步可以处理你排队的那条——更新 README 里的指针。", "4 步 · Read, Bash");
+  }, 900);
+}
+function finish(text, sum, failed) {
+  const p = $("#liveP2"); p.hidden = false; let i = 0;
+  const html = (s) => s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  const iv = setInterval(() => {
+    i += 3; p.innerHTML = html(text.slice(0, i));
+    if (i >= text.length) {
+      clearInterval(iv); running = false;
+      $("#runline").remove(); $("#liveTb").hidden = false;
+      const [n, rest] = sum.split(" · ");
+      $("#liveSum").innerHTML = `<b>${n}</b> · ${rest}`; $("#liveDur").textContent = "9.2s";
+      if (failed) $("#liveSum").insertAdjacentHTML("afterend", `<span class="fail"><span class="dot danger"></span>1 失败</span>`);
+      const tr = $("#liveTrace"); if (!traceTouched.has(tr)) tr.dataset.open = "false"; // 结束自动收起，但尊重手动操作
+      $$(".n-row.cur .spin, .t-row.sel .spin").forEach(x => x.remove());
+      setSend();
+    }
+  }, 30);
+}
+
+/* ── 发送按钮三态：空闲 / 停止 / 加载 ── */
+const input = $("#input"), send = $("#send");
+function setSend(state) {
+  const has = input.value.trim().length > 0;
+  const s = state || (running ? (has ? "queue" : "stop") : (has ? "send" : "idle-empty"));
+  send.dataset.state = s;
+  const map = { stop: ["square", "停止  Esc"], queue: ["list-plus", "加入排队  ↵"], send: ["arrow-up", "发送  ↵"], "idle-empty": ["arrow-up", "发送  ↵"], loading: ["loader-circle", "发送中"] };
+  const [icon, tip] = map[s];
+  send.innerHTML = ic(icon, s === "loading" ? "sm spin" : "sm"); send.dataset.tip = tip; send.setAttribute("aria-label", tip);
+  $(".c-hint span").textContent = running ? "回复进行中：现在发送会进入排队，可随时打断" : "Enter 发送到当前分支";
+}
+input.addEventListener("input", () => setSend());
+function doSend() {
+  const v = input.value.trim(); if (!v) return;
+  if (running) {
+    $("#queueList").insertAdjacentHTML("beforeend", `<div class="queue"><span class="lab">${ic("clock", "xs")}排队中</span><span class="txt"></span><button class="icon-btn sm" aria-label="打断并立即发送">${ic("corner-down-right")}</button><button class="icon-btn sm" aria-label="编辑">${ic("pencil")}</button><button class="icon-btn sm" aria-label="移除" data-act="unqueue">${ic("x")}</button></div>`);
+    $("#queueList .queue:last-child .txt").textContent = v; input.value = ""; setSend(); return;
+  }
+  setSend("loading"); setTimeout(() => { input.value = ""; setSend(); }, 800);
+}
+send.addEventListener("click", () => { if (send.dataset.state === "stop") { running = false; $("#runTxt") && ($("#runTxt").textContent = "已停止"); setSend(); return; } doSend(); });
+input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); doSend(); } });
+
+/* ── ⌘K ── */
+const CMDK = [
+  { g: "最近会话", icon: "folder-git-2", t: "claude design 为啥效果这么好", s: ".claude › harness · 9 节点 · 生成中" },
+  { g: "最近会话", icon: "folder-git-2", t: "Trellis UI 重设计", s: "trellis › main · Herdr 托管" },
+  { g: "最近会话", icon: "message-square", t: "讲讲 web3 L2 生态和原理", s: "对话 · 55 节点" },
+  { g: "节点内容", icon: "text-search", t: "差距是<mark>可复刻</mark>的，不是买不到的护城河", s: "harness › #1 · 助手回复" },
+  { g: "节点内容", icon: "text-search", t: "Optimistic Rollup 的挑战期为什么是 7 天，<mark>可</mark>以缩短吗", s: "web3 L2 生态 › #26" },
+  { g: "命令", icon: "plus", t: "新会话", k: "⌘N" },
+  { g: "命令", icon: "workflow", t: "切换到画布视图", k: "⌘⇧C" },
+  { g: "命令", icon: "moon", t: "切换明暗主题" },
+  { g: "命令", icon: "settings", t: "打开设置", k: "⌘," },
+  { g: "命令", icon: "calendar-clock", t: "定时任务" },
+];
+let sel = 0;
+function renderCmdk() {
+  const q = $("#cmdkQ").value.trim();
+  const rows = CMDK.filter(r => !q || (r.t + (r.s || "")).replace(/<[^>]+>/g, "").includes(q));
+  if (!rows.length) { $("#cmdkList").innerHTML = `<div class="cmdk-empty">没有找到「${q.replace(/</g, "&lt;")}」相关的会话或命令</div>`; return; }
+  sel = Math.min(sel, rows.length - 1);
+  let g = "", out = "";
+  rows.forEach((r, i) => {
+    if (r.g !== g) { g = r.g; out += `<div class="menu-label">${g}</div>`; }
+    out += `<button class="menu-item${i === sel ? " active" : ""}">${ic(r.icon, "")}<span class="two"><span>${r.t}</span>${r.s ? `<small>${r.s}</small>` : ""}</span>${r.k ? `<span class="end"><span class="kbd">${r.k}</span></span>` : ""}</button>`;
+  });
+  $("#cmdkList").innerHTML = out;
+}
+function openCmdk() { closePop(); $("#cmdkScrim").classList.add("open"); $("#cmdk").classList.add("open"); $("#cmdkQ").value = ""; sel = 0; renderCmdk(); setTimeout(() => $("#cmdkQ").focus(), 20); }
+function closeCmdk() { $("#cmdkScrim").classList.remove("open"); $("#cmdk").classList.remove("open"); }
+$("#cmdkQ").addEventListener("input", () => { sel = 0; renderCmdk(); });
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#cmdk").classList.contains("open") ? closeCmdk() : openCmdk(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === "\\") { e.preventDefault(); const app = $("#app"); app.dataset.sidebar = app.dataset.sidebar === "open" ? "closed" : "open"; }
+  if (e.key === "Escape") { closeCmdk(); closePop(); }
+  if ($("#cmdk").classList.contains("open") && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); const n = $$("#cmdkList .menu-item").length; sel = (sel + (e.key === "ArrowDown" ? 1 : n - 1)) % n; renderCmdk(); }
+  if (e.key === "/" && document.activeElement === document.body) { e.preventDefault(); $("#sbFilter").focus(); }
+});
+
+/* 打开后滚到底（看最后一轮） */
+requestAnimationFrame(() => { const s = $("#scroll"); s.style.scrollBehavior = "auto"; s.scrollTop = s.scrollHeight; s.style.scrollBehavior = ""; });
+/* 截图辅助：?open=cmdk|model|trace */
+const open = new URLSearchParams(location.search).get("open");
+if (open === "cmdk") setTimeout(openCmdk, 100);
+if (open === "model") setTimeout(() => showPop($("#modelBtn"), "modelPop"), 100);
+</script>
+</body>
+</html>

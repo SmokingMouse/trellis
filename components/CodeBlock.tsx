@@ -7,8 +7,20 @@ import {
   type ReactNode,
   type MouseEvent,
 } from "react";
-import { createPortal } from "react-dom";
+import {
+  Check,
+  Code,
+  Copy,
+  Download,
+  Eye,
+  Maximize2,
+  Minus,
+  Plus,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { copyText } from "@/lib/clipboard";
+import { Button, Icon, IconButton, Modal, SegmentedControl } from "@/components/ui";
 import {
   isSvgCode,
   createSvgBlobUrl,
@@ -148,6 +160,9 @@ export function CodeBlock({
     }
   };
 
+  const copyLabel = failed ? "复制失败" : copied ? "已复制" : "复制";
+  const copyIcon = failed ? X : copied ? Check : Copy;
+
   // If this is not a diagram codeblock, render the standard code block
   if (!isDiagram) {
     return (
@@ -161,7 +176,8 @@ export function CodeBlock({
             className="md-codeblock-copy nodrag"
             aria-label="复制代码"
           >
-            {failed ? "✗ 失败" : copied ? "✓ 已复制" : "复制"}
+            <Icon icon={copyIcon} size="sm" />
+            {copyLabel}
           </button>
         </div>
         <pre ref={preRef}>{children}</pre>
@@ -169,127 +185,89 @@ export function CodeBlock({
     );
   }
 
-  const bgClasses: Record<BgMode, string> = {
-    checkered:
-      "[background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/16px_16px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.2)_0%_50%)_50%/16px_16px]",
-    white: "bg-white",
-    dark: "bg-[#141414]",
-  };
-
   const bgLabels: Record<BgMode, string> = {
-    checkered: "背景: 网格",
-    white: "背景: 亮色",
-    dark: "背景: 暗色",
+    checkered: "背景：网格",
+    white: "背景：亮色",
+    dark: "背景：暗色",
   };
 
   const badgeText = isSvg ? "SVG" : "Mermaid";
 
   return (
-    <div className="md-codeblock my-3 rounded-card border border-line overflow-hidden shadow-raise">
+    <div className="md-codeblock md-codeblock-diagram">
       {/* Top action bar */}
       <div
-        className="md-codeblock-bar flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-muted/90 border-b border-line text-ui text-ink select-none"
+        className="md-codeblock-bar flex items-center justify-between gap-2 px-2 py-1 bg-surface-muted border-b border-line text-ui text-ink select-none"
         contentEditable={false}
       >
         {/* Left: Diagram badge + Mode switcher */}
-        <div className="flex items-center gap-1.5">
-          <span className="px-1.5 py-0.5 rounded text-nano font-mono font-semibold bg-accent-muted text-accent-ink border border-accent-line">
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <span className="px-1.5 font-mono text-label text-ink-muted">
             {badgeText}
           </span>
-          <div className="inline-flex rounded-md p-0.5 bg-surface border border-line text-label">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMode("preview");
-              }}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                mode === "preview"
-                  ? "bg-accent text-ink-inverse font-medium shadow-sm"
-                  : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              👁 预览
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMode("code");
-              }}
-              className={`px-2 py-0.5 rounded transition-colors ${
-                mode === "code"
-                  ? "bg-accent text-ink-inverse font-medium shadow-sm"
-                  : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              📄 源码
-            </button>
-          </div>
+          <SegmentedControl
+            size="sm"
+            aria-label="图表视图"
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              { value: "preview", label: "预览", icon: Eye },
+              { value: "code", label: "源码", icon: Code },
+            ]}
+          />
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-0.5">
           {mode === "preview" && (
             <>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={cycleBg}
                 title="切换图形预览背景（网格 / 亮色 / 暗色）"
-                className="px-2 py-0.5 rounded text-label text-ink-muted bg-surface hover:bg-surface-raised border border-line transition-colors"
               >
                 {bgLabels[bg]}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <IconButton
+                size="sm"
+                label="全屏放大查看"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsZoomed(true);
                 }}
-                title="全屏放大查看"
-                className="px-2 py-0.5 rounded text-label text-ink-muted bg-surface hover:bg-surface-raised border border-line transition-colors"
               >
-                🔍 放大
-              </button>
-              <button
-                type="button"
-                onClick={handleDownload}
-                title="下载为 .svg 矢量图"
-                className="px-2 py-0.5 rounded text-label text-ink-muted bg-surface hover:bg-surface-raised border border-line transition-colors"
-              >
-                ⤓ 下载
-              </button>
+                <Icon icon={Maximize2} size="sm" />
+              </IconButton>
+              <IconButton size="sm" label="下载为 .svg 矢量图" onClick={handleDownload}>
+                <Icon icon={Download} size="sm" />
+              </IconButton>
             </>
           )}
-          <button
-            type="button"
-            onClick={copy}
-            className="md-codeblock-copy nodrag text-label"
-            aria-label="复制代码"
-          >
-            {failed ? "✗ 失败" : copied ? "✓ 已复制" : "复制"}
-          </button>
+          <IconButton size="sm" label={failed ? "复制失败" : copied ? "已复制" : "复制代码"} onClick={copy} className="nodrag">
+            <Icon icon={copyIcon} size="sm" />
+          </IconButton>
         </div>
       </div>
 
       {/* Main body: Preview or Code */}
       {mode === "preview" ? (
         <div
-          className={`relative min-h-[160px] max-h-[520px] overflow-auto flex items-center justify-center p-6 transition-colors ${bgClasses[bg]}`}
+          className={`relative min-h-40 max-h-128 overflow-auto flex items-center justify-center p-6 transition-colors ${DIAGRAM_BG[bg]}`}
         >
           {diagramError ? (
-            <div className="text-center p-4 bg-warn-muted/80 border border-warn-line rounded-lg text-warn-ink text-ui max-w-md">
-              <div className="font-semibold mb-1">⚠️ {diagramError}</div>
-              <p className="text-label opacity-90 mb-2">
+            <div className="text-center p-4 bg-surface border border-warn-line rounded-card text-ink text-ui max-w-md">
+              <div className="font-medium mb-1 flex items-center justify-center gap-1.5 text-warn-ink">
+                <Icon icon={TriangleAlert} size="sm" />
+                {diagramError}
+              </div>
+              <p className="text-label text-ink-muted mb-2">
                 当前图表语法有误或模型尚未完全输出闭合标签。
               </p>
-              <button
-                type="button"
-                onClick={() => setMode("code")}
-                className="px-2.5 py-1 rounded bg-surface border border-line text-ink text-label hover:bg-surface-muted"
-              >
-                查看代码源码
-              </button>
+              <Button type="button" size="sm" onClick={() => setMode("code")}>
+                查看源码
+              </Button>
             </div>
           ) : blobUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
@@ -297,7 +275,7 @@ export function CodeBlock({
               src={blobUrl}
               alt={`${badgeText} Diagram Preview`}
               onClick={() => setIsZoomed(true)}
-              className="max-w-full max-h-[460px] object-contain cursor-zoom-in transition-transform duration-150 hover:scale-[1.01]"
+              className="max-w-full max-h-116 object-contain cursor-zoom-in"
               title="点击放大查看"
             />
           ) : (
@@ -326,6 +304,13 @@ export function CodeBlock({
   );
 }
 
+// 图表预览背景：网格 / 亮色 / 暗色。网格与暗色在 globals.css 里取主题变量。
+const DIAGRAM_BG: Record<BgMode, string> = {
+  checkered: "diagram-bg-checkered",
+  white: "bg-white",
+  dark: "code-surface",
+};
+
 function DiagramZoomModal({
   title,
   blobUrl,
@@ -345,13 +330,6 @@ function DiagramZoomModal({
 }) {
   const [scale, setScale] = useState(1);
   const [copied, setCopied] = useState(false);
-
-  const bgClasses: Record<BgMode, string> = {
-    checkered:
-      "[background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/20px_20px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.3)_0%_50%)_50%/20px_20px]",
-    white: "bg-white",
-    dark: "bg-[#141414]",
-  };
 
   const handleCopy = async () => {
     try {
@@ -374,126 +352,77 @@ function DiagramZoomModal({
     }
   };
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-scrim/70 backdrop-blur-sm ui-enter-fade"
-      onClick={onClose}
+  return (
+    <Modal
+      onClose={onClose}
+      size="lg"
+      title={title}
+      closeOnEsc="always"
+      panelClassName="flex h-5/6 flex-col md:max-w-5xl"
     >
-      <div
-        className="w-full max-w-5xl h-[85vh] flex flex-col bg-surface rounded-overlay shadow-overlay overflow-hidden border border-line ui-enter-pop"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-      >
-        {/* Modal Top Bar */}
-        <div className="shrink-0 flex items-center justify-between px-5 h-13 border-b border-line bg-surface-muted/60">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-ui text-ink-strong">
-              {title}
-            </span>
-            <span className="text-label text-ink-faint">
-              ({Math.round(scale * 100)}%)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Zoom Controls */}
-            <div className="inline-flex items-center rounded-md border border-line bg-surface p-0.5 text-label">
-              <button
-                type="button"
-                onClick={() => setScale((s) => Math.max(0.2, s - 0.2))}
-                className="px-2 py-1 hover:bg-surface-muted rounded text-ink"
-                title="缩小"
-              >
-                −
-              </button>
-              <button
-                type="button"
-                onClick={() => setScale(1)}
-                className="px-2 py-1 hover:bg-surface-muted rounded text-ink font-mono"
-                title="重置 100%"
-              >
-                1:1
-              </button>
-              <button
-                type="button"
-                onClick={() => setScale((s) => Math.min(4, s + 0.2))}
-                className="px-2 py-1 hover:bg-surface-muted rounded text-ink"
-                title="放大"
-              >
-                +
-              </button>
-            </div>
-
-            {/* Background toggle */}
-            <button
-              type="button"
-              onClick={() =>
-                onBgChange(
-                  bg === "checkered"
-                    ? "white"
-                    : bg === "white"
-                      ? "dark"
-                      : "checkered",
-                )
-              }
-              className="px-2.5 py-1 rounded border border-line bg-surface text-ui text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
-            >
-              {bg === "checkered"
-                ? "🎨 网格底"
-                : bg === "white"
-                  ? "🎨 白底"
-                  : "🎨 暗底"}
-            </button>
-
-            {/* Copy button */}
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="px-2.5 py-1 rounded border border-line bg-surface text-ui text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
-            >
-              {copied ? "✓ 已复制源码" : "复制代码"}
-            </button>
-
-            {/* Download button */}
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="px-2.5 py-1 rounded bg-accent text-white text-ui hover:opacity-90 transition-opacity"
-            >
-              ⤓ 下载 SVG
-            </button>
-
-            {/* Close button */}
-            <button
-              type="button"
-              onClick={onClose}
-              className="ml-2 w-8 h-8 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted hover:text-ink transition-colors"
-              aria-label="关闭"
-            >
-              ✕
-            </button>
-          </div>
+      {/* Modal Top Bar */}
+      <div className="shrink-0 flex items-center justify-between gap-2 px-4 h-12 border-b border-line">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium text-ui text-ink-strong truncate">
+            {title}
+          </span>
+          <span className="text-label text-ink-faint tabular-nums">
+            {Math.round(scale * 100)}%
+          </span>
         </div>
 
-        {/* Modal Canvas Viewport */}
-        <div
-          className={`flex-1 overflow-auto flex items-center justify-center p-8 select-none transition-colors ${bgClasses[bg]}`}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={blobUrl}
-            alt="Full Diagram Preview"
-            style={{
-              transform: `scale(${scale})`,
-              transformOrigin: "center center",
-              transition: "transform 120ms ease-out",
-            }}
-            className="max-w-full max-h-full object-contain pointer-events-auto"
-          />
+        <div className="flex items-center gap-1">
+          <IconButton size="sm" label="缩小" onClick={() => setScale((s) => Math.max(0.2, s - 0.2))}>
+            <Icon icon={Minus} size="sm" />
+          </IconButton>
+          <Button type="button" variant="ghost" size="sm" className="font-mono" onClick={() => setScale(1)} title="重置 100%">
+            1:1
+          </Button>
+          <IconButton size="sm" label="放大" onClick={() => setScale((s) => Math.min(4, s + 0.2))}>
+            <Icon icon={Plus} size="sm" />
+          </IconButton>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              onBgChange(
+                bg === "checkered" ? "white" : bg === "white" ? "dark" : "checkered",
+              )
+            }
+          >
+            {bg === "checkered" ? "网格底" : bg === "white" ? "白底" : "暗底"}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={handleCopy}>
+            <Icon icon={copied ? Check : Copy} size="sm" />
+            {copied ? "已复制源码" : "复制源码"}
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={handleDownload}>
+            <Icon icon={Download} size="sm" />
+            下载 SVG
+          </Button>
+          <IconButton size="sm" label="关闭" shortcut="Esc" onClick={onClose} className="ml-1">
+            <Icon icon={X} size="sm" />
+          </IconButton>
         </div>
       </div>
-    </div>,
-    document.body,
+
+      {/* Modal Canvas Viewport */}
+      <div
+        className={`flex-1 min-h-0 overflow-auto flex items-center justify-center p-8 select-none transition-colors ${DIAGRAM_BG[bg]}`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={blobUrl}
+          alt="Full Diagram Preview"
+          style={{
+            transform: `scale(${scale})`,
+            transformOrigin: "center center",
+            transition: "transform 120ms ease-out",
+          }}
+          className="max-w-full max-h-full object-contain pointer-events-auto"
+        />
+      </div>
+    </Modal>
   );
 }

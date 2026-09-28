@@ -2,9 +2,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { providerFamily } from "@/lib/llm";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
+import { CircleAlert, FileText, Link, Paperclip, X } from "lucide-react";
+import {
+  Button,
+  Icon,
+  IconButton,
+  Input,
+  Modal,
+  SegmentedControl,
+  Textarea,
+} from "@/components/ui";
 
 type Mode = "paste" | "url";
 
@@ -102,33 +109,37 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
             </div>
           </div>
           <IconButton label="关闭" onClick={onClose}>
-            ✕
+            <Icon icon={X} />
           </IconButton>
         </div>
 
-        <div className="px-5 pt-3 flex gap-1 text-sm">
-          <TabButton active={mode === "paste"} onClick={() => setMode("paste")}>
-            📄 粘贴文本
-          </TabButton>
-          <TabButton active={mode === "url"} onClick={() => setMode("url")}>
-            🔗 URL 抓取
-          </TabButton>
+        <div className="px-5 pt-3">
+          <SegmentedControl
+            aria-label="参考来源"
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              { value: "paste", label: "粘贴文本", icon: FileText },
+              { value: "url", label: "URL 抓取", icon: Link },
+            ]}
+          />
         </div>
 
         <div className="px-5 py-4">
           {mode === "paste" ? (
             <>
-              <input
+              <Input
                 ref={firstField as React.RefObject<HTMLInputElement>}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="标题（可选）"
-                className="w-full px-3 py-2 mb-2 rounded-field border border-line-strong bg-surface text-ink-strong text-sm outline-none focus:border-accent-line placeholder:text-ink-faint"
+                className="mb-2"
               />
-              <textarea
+              <Textarea
                 value={pastedText}
                 onChange={(e) => setPastedText(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
                     submit();
@@ -136,18 +147,20 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
                 }}
                 placeholder="把背景文本粘到这里…"
                 rows={10}
-                className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink-strong text-sm outline-none focus:border-accent-line resize-none font-mono leading-relaxed placeholder:text-ink-faint"
+                className="resize-none font-mono"
               />
               <div className="text-label text-ink-faint mt-1 flex items-center justify-between gap-2">
                 <span>⌘↩ 创建 · {pastedText.length} 字</span>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => fileRef.current?.click()}
-                  className="inline-flex items-center gap-1 text-ink-muted hover:text-ink-strong px-1.5 py-0.5 rounded hover:bg-surface-muted"
                   title="读取本地代码/文本文件（PDF/Excel/Word 暂需粘贴或后续支持）"
                 >
-                  📎 从文件读取
-                </button>
+                  <Icon icon={Paperclip} size="sm" />
+                  从文件读取
+                </Button>
               </div>
               <input
                 ref={fileRef}
@@ -159,19 +172,19 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
             </>
           ) : (
             <>
-              <input
+              <Input
                 ref={firstField as React.RefObject<HTMLInputElement>}
                 type="url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter") {
                     e.preventDefault();
                     submit();
                   }
                 }}
                 placeholder="https://...（网页 / 飞书 / YouTube / B站 / X / PDF 都行）"
-                className="w-full px-3 py-2 rounded-field border border-line-strong bg-surface text-ink-strong text-sm outline-none focus:border-accent-line placeholder:text-ink-faint"
               />
               <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
                 <div>{fetcherDescription}</div>
@@ -180,8 +193,9 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
             </>
           )}
           {error && (
-            <div className="mt-3 text-ui text-danger-ink bg-danger-muted border border-danger-line rounded px-2.5 py-1.5">
-              {error}
+            <div role="alert" className="mt-3 flex items-start gap-2 rounded-field border border-danger-line bg-surface px-2.5 py-1.5 text-ui text-danger-ink">
+              <Icon icon={CircleAlert} size="sm" className="mt-0.5" />
+              <span className="min-w-0 break-words">{error}</span>
             </div>
           )}
         </div>
@@ -190,33 +204,10 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" onClick={submit} disabled={busy}>
-            {busy ? "处理中…" : "创建"}
+          <Button variant="primary" onClick={submit} loading={busy}>
+            创建
           </Button>
         </div>
     </Modal>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 rounded-md text-ui transition-colors ${
-        active
-          ? "bg-accent text-ink-inverse"
-          : "text-ink-muted hover:bg-surface-muted"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

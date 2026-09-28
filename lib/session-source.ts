@@ -12,11 +12,11 @@ export function sessionSourceChip(session: Pick<Session, "kind" | "origin" | "ba
     return { label: "外部", title: session.backend ? `外部会话 · ${session.backend}` : "外部会话" };
   }
   if (session.kind === "herdr" || session.origin === "herdr") {
-    return { label: "⚓", title: "Herdr 会话" };
+    return { label: "Herdr", title: "Herdr 会话" };
   }
-  if (session.kind === "task") return { label: "⏱", title: "定时任务会话" };
+  if (session.kind === "task") return { label: "定时", title: "定时任务会话" };
   if (session.kind === "lark" || session.origin === "lark") {
-    return { label: "💬", title: "飞书会话" };
+    return { label: "飞书", title: "飞书会话" };
   }
   return null;
 }

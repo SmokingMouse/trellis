@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { ToastShell } from "@/components/ui/Toast";
+import { toast } from "@/components/ui";
 import { bindPageStream } from "@/lib/page-stream";
 
 // S88: 任务执行完成 / 失败的站内提醒。
@@ -11,8 +11,7 @@ import { bindPageStream } from "@/lib/page-stream";
 // （S117 起有两处最小交集：run 事件 bump 一下侧栏、点击 toast 直接切会话 ——
 // 都是对既有 store action 的调用，本地状态仍然自持。）
 //
-// 与 DoneToast 共用右下角堆叠位（后者 z-40，这里 z-40 且更靠上一点），
-// 视觉走同一套 ToastShell，用户不会觉得是两个系统。
+// W4 起不自己画 UI：结果进全站 sonner 队列（右下角），与 DoneToast 等同一堆叠。
 
 type TaskEvent =
   | { type: "run_started"; taskId: string; runId: string }
@@ -31,8 +30,6 @@ type Item = {
 const AUTO_DISMISS_MS = 8000;
 
 export function TaskToast() {
-  const [items, setItems] = useState<Item[]>([]);
-
   useEffect(() => {
     let ctrl = new AbortController();
     let cancelled = false;
@@ -71,11 +68,7 @@ export function TaskToast() {
             // 服务端决定了要不要**外部**推送，站内 toast 是廉价的、看一眼就走。
             void hydrateItem(ev.taskId, ev.runId, ev.status).then((it) => {
               if (!it || cancelled) return;
-              setItems((prev) => [...prev, it]);
-              window.setTimeout(
-                () => setItems((prev) => prev.filter((x) => x.runId !== it.runId)),
-                AUTO_DISMISS_MS,
-              );
+              showTaskToast(it);
             });
           }
         }
@@ -100,38 +93,36 @@ export function TaskToast() {
     });
   }, []);
 
-  if (!items.length) return null;
+  return null;
+}
 
-  return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2 max-w-sm pointer-events-none">
-      {items.map((it) => (
-        <ToastShell
-          key={it.runId}
-          tone={it.status === "done" ? "positive" : "danger"}
-          className="px-3 py-2 cursor-pointer"
-          onClick={() => {
+// 同一次执行只弹一条（id = runId，重复事件就地更新）。done → 成功；error → 失败；
+// timeout → 警告；skipped → 普通提示。8 秒自动消失（悬停暂停）。
+function showTaskToast(it: Item) {
+  const title = `任务「${it.taskName}」${statusText(it.status)}`;
+  const sessionId = it.sessionId;
+  const opts = {
+    id: `task-run:${it.runId}`,
+    duration: AUTO_DISMISS_MS,
+    action: sessionId
+      ? {
+          label: "查看执行",
+          onClick: () => {
             // S117: 原来是 window.location.href 整页刷新（store 全丢重启）。
-            // toast 只挂在主 SPA 里，直接驱动 store 切过去即可 —— 与侧栏点行
-            // 同一条路径，tab / 高亮自然跟上。
-            if (!it.sessionId) return;
+            // 直接驱动 store 切过去即可 —— 与侧栏点行同一条路径，tab / 高亮自然跟上。
             const st = useSessionStore.getState();
             const nodeId = it.nodeId;
-            void st.previewSession(it.sessionId).then(() => {
+            void st.previewSession(sessionId).then(() => {
               if (nodeId) st.setActiveNode(nodeId);
             });
-            setItems((prev) => prev.filter((x) => x.runId !== it.runId));
-          }}
-        >
-          <div className="text-ui">
-            ⏱ 任务「{it.taskName}」{statusText(it.status)}
-          </div>
-          {it.sessionId && (
-            <div className="text-label text-ink-faint">点击查看这次执行</div>
-          )}
-        </ToastShell>
-      ))}
-    </div>
-  );
+          },
+        }
+      : undefined,
+  };
+  if (it.status === "done") toast.success(title, opts);
+  else if (it.status === "error") toast.error(title, opts);
+  else if (it.status === "timeout") toast.warning(title, opts);
+  else toast.info(title, opts);
 }
 
 function statusText(s: string): string {

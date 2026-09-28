@@ -23,6 +23,8 @@ import {
 } from "@/lib/generated-files";
 import { createSvgBlobUrl } from "@/lib/svg";
 import { renderMermaidToSvg } from "@/lib/mermaid";
+import { ImageOff } from "lucide-react";
+import { Icon } from "@/components/ui";
 
 // Hover preview for file links / inline file paths inside rendered markdown:
 // linger ~250ms on a previewable target → a floating card shows the content
@@ -104,12 +106,12 @@ function HoverCard({
   const left = Math.min(Math.max(anchor.left, 8), Math.max(8, vw - CARD_W - 8));
   const fitsBelow = anchor.bottom + 8 + CARD_MAX_H <= vh || anchor.top < CARD_MAX_H + 16;
   const style = fitsBelow
-    ? { left, top: anchor.bottom + 8 }
-    : { left, top: anchor.top - 8, transform: "translateY(-100%)" };
+    ? { left, top: anchor.bottom + 8, width: CARD_W, maxHeight: CARD_MAX_H }
+    : { left, top: anchor.top - 8, transform: "translateY(-100%)", width: CARD_W, maxHeight: CARD_MAX_H };
 
   return createPortal(
     <div
-      className="fixed z-[70] pointer-events-none w-[380px] max-h-[300px] overflow-hidden rounded-card border border-line bg-surface shadow-pop"
+      className="fixed z-70 pointer-events-none overflow-hidden rounded-overlay border border-line bg-surface-raised shadow-pop"
       style={style}
       aria-hidden
     >
@@ -129,7 +131,7 @@ function HoverBody({ target }: { target: HoverTarget }) {
     return <TextBody url={target.url} markdown={target.kind === "markdown"} />;
   // html/pdf: content needs an iframe — too heavy for a peek card.
   return (
-    <div className="px-3 py-2.5 text-xs text-ink-faint">
+    <div className="px-3 py-2.5 text-label text-ink-faint">
       {target.kind.toUpperCase()} 文件 · 点击打开完整预览
     </div>
   );
@@ -175,16 +177,16 @@ function MermaidHoverBody({ url, name }: { url: string; name: string }) {
   }
 
   if (!blobUrl) {
-    return <div className="px-3 py-2.5 text-xs text-ink-faint">渲染图表中…</div>;
+    return <div className="px-3 py-2.5 text-label text-ink-faint">渲染图表中…</div>;
   }
 
   return (
-    <div className="p-2 flex items-center justify-center min-h-[100px] [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/12px_12px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.2)_0%_50%)_50%/12px_12px]">
+    <div className="p-2 flex items-center justify-center min-h-25 bg-surface-muted">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={blobUrl}
         alt={name}
-        className="max-w-full max-h-[252px] object-contain"
+        className="max-w-full max-h-63 object-contain"
       />
     </div>
   );
@@ -193,15 +195,15 @@ function MermaidHoverBody({ url, name }: { url: string; name: string }) {
 function ImageBody({ url, name }: { url: string; name: string }) {
   const [failed, setFailed] = useState(false);
   if (failed)
-    return <div className="px-3 py-2.5 text-xs text-ink-faint">图片加载失败</div>;
+    return <div className="px-3 py-2.5 text-label text-ink-faint">图片加载失败</div>;
   return (
-    <div className="p-2 flex items-center justify-center min-h-[100px] [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/12px_12px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.2)_0%_50%)_50%/12px_12px]">
+    <div className="p-2 flex items-center justify-center min-h-25 bg-surface-muted">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
         alt={name}
         onError={() => setFailed(true)}
-        className="max-w-full max-h-[252px] object-contain"
+        className="max-w-full max-h-63 object-contain"
       />
     </div>
   );
@@ -236,16 +238,16 @@ function TextBody({ url, markdown }: { url: string; markdown: boolean }) {
 
   if (error)
     return (
-      <div className="px-3 py-2.5 text-xs text-ink-faint">
+      <div className="px-3 py-2.5 text-label text-ink-faint">
         无法读取：文件不存在，或不在本会话可预览范围（workspace + 本会话写过的文件）
       </div>
     );
   if (text === null)
-    return <div className="px-3 py-2.5 text-xs text-ink-faint">加载中…</div>;
+    return <div className="px-3 py-2.5 text-label text-ink-faint">加载中…</div>;
 
   if (markdown)
     return (
-      <div className="md-body px-3 py-2 text-xs text-ink [&_pre]:!text-[11px]">
+      <div className="md-body px-3 py-2 text-label text-ink">
         <ReactMarkdown
           remarkPlugins={MARKDOWN_REMARK_PLUGINS}
           rehypePlugins={MARKDOWN_PREVIEW_REHYPE_PLUGINS}
@@ -255,7 +257,7 @@ function TextBody({ url, markdown }: { url: string; markdown: boolean }) {
       </div>
     );
   return (
-    <pre className="m-0 px-3 py-2 text-[11px] leading-relaxed text-ink font-mono whitespace-pre overflow-hidden">
+    <pre className="m-0 px-3 py-2 text-nano leading-relaxed text-ink font-mono whitespace-pre overflow-hidden">
       {text}
     </pre>
   );
@@ -364,10 +366,10 @@ export function MdImage(props: {
   if (!srcStr || failed) {
     return (
       <span
-        className="inline-flex max-w-full items-baseline gap-1.5 px-2 py-1 rounded bg-surface-muted border border-line-faint text-xs text-ink-faint"
+        className="inline-flex max-w-full items-center gap-1.5 px-2 py-1 rounded-field bg-surface-muted border border-line-faint text-label text-ink-faint"
         title={abs ?? srcStr}
       >
-        <span aria-hidden>🖼</span>
+        <Icon icon={ImageOff} size="sm" />
         <span className="truncate">
           {alt || (srcStr.split("/").pop() ?? "图片")}
         </span>
@@ -395,7 +397,7 @@ export function MdImage(props: {
           : undefined
       }
       className={
-        "nodrag max-w-full max-h-[420px] rounded-card border border-line-faint object-contain" +
+        "nodrag max-w-full max-h-105 rounded-card border border-line-faint object-contain" +
         (local ? " cursor-zoom-in" : "")
       }
     />
@@ -423,7 +425,9 @@ export function InlineFileButton({
           dismiss();
           useSessionStore.getState().openFilePreview(abs);
         }}
-        className="nodrag px-1 py-0.5 mx-0.5 rounded bg-accent-muted text-[0.9em] font-mono text-accent-ink underline decoration-dotted decoration-accent-line underline-offset-2 hover:bg-accent-line/40 cursor-pointer align-baseline"
+        // 行内文件路径：和行内 code 同一中性灰底，只用 accent 墨色 + 点线下划线表示「可点」。
+        style={{ fontSize: "0.86em" }}
+        className="nodrag px-1 py-0.5 mx-0.5 rounded-sm bg-surface-muted font-mono text-accent-ink underline decoration-dotted decoration-accent-line underline-offset-2 hover:bg-surface-hover cursor-pointer align-baseline"
       >
         {children}
       </button>

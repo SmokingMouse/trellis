@@ -74,7 +74,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.theme,
     label: "外观模式",
-    where: "Header 的 ☀ 主题菜单",
+    where: "Header 的「主题」菜单",
     group: "外观",
     kind: "enum",
     fallback: "system",
@@ -87,7 +87,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.palette,
     label: "主题皮肤",
-    where: "Header 的 ☀ 主题菜单",
+    where: "Header 的「主题」菜单",
     group: "外观",
     kind: "enum",
     fallback: "default",
@@ -108,7 +108,7 @@ export const PREF_ITEMS: PrefItem[] = [
   {
     key: PREF_KEYS.historyDepth,
     label: "上下文历史深度",
-    where: "新会话「更多设置」/ 会话输入框 📚 脚注",
+    where: "新会话「更多设置」/ 会话输入框脚注「上下文」",
     group: "输入",
     kind: "enum",
     fallback: "0",

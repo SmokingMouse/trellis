@@ -14,9 +14,39 @@ import type { ToolCall } from "@/lib/types";
 // Unknown tools are fine — they get DEFAULT_META, whose summary is the same
 // field-sniffing heuristic the old panel used for everything.
 
+/**
+ * 行首图标 key。这里只存字符串 key（本文件也被 API route 引用，不能带 React
+ * 组件）；key → lucide 组件的映射在 components/ui/Icon.tsx 的 TOOL_ICONS。
+ * 原来存的是 emoji（📄🔍🌐🤖…），W2 起换成统一线宽的 lucide 图标。
+ */
+export type ToolIconKey =
+  | "terminal"
+  | "stop"
+  | "file"
+  | "file-pen"
+  | "pencil"
+  | "notebook"
+  | "search"
+  | "globe"
+  | "toolbox"
+  | "bot"
+  | "workflow"
+  | "list-checks"
+  | "clipboard"
+  | "question"
+  | "target"
+  | "slash"
+  | "plus"
+  | "check"
+  | "list"
+  | "mail"
+  | "plug"
+  | "timer"
+  | "dot";
+
 export type ToolMeta = {
-  /** Leading glyph. Keep it one grapheme so rows stay aligned. */
-  icon?: string;
+  /** 行首图标 key（见 ToolIconKey）。 */
+  icon?: ToolIconKey;
   /** Row title; defaults to the raw tool name. */
   title?: string | ((call: ToolCall) => string);
   /** One-line summary next to the title. null = show nothing. */
@@ -54,56 +84,56 @@ function path(call: ToolCall, key = "file_path"): string | null {
 const REGISTRY: Record<string, ToolMeta> = {
   // ── shell ──────────────────────────────────────────────────────────────
   Bash: {
-    icon: "▶",
+    icon: "terminal",
     summary: (c) => field(c, "command") ?? field(c, "description"),
   },
   // codex names the same thing differently, and hands the command over as a
   // bare string rather than an object.
   shell: {
-    icon: "▶",
+    icon: "terminal",
     title: "Bash",
     summary: (c) => (typeof c.input === "string" ? c.input : field(c, "command")),
   },
-  BashOutput: { icon: "▶", summary: (c) => field(c, "bash_id") },
-  KillShell: { icon: "◼", summary: (c) => field(c, "shell_id") },
+  BashOutput: { icon: "terminal", summary: (c) => field(c, "bash_id") },
+  KillShell: { icon: "stop", summary: (c) => field(c, "shell_id") },
 
   // ── files ──────────────────────────────────────────────────────────────
   Read: {
-    icon: "📄",
+    icon: "file",
     summary: (c) => path(c),
     // The file body is already in the model's answer; showing it again turns
     // the timeline into a wall of source.
     resultPolicy: "hideOnSuccess",
   },
-  Write: { icon: "✍", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
-  Edit: { icon: "✎", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
-  MultiEdit: { icon: "✎", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
-  NotebookEdit: { icon: "📓", summary: (c) => path(c, "notebook_path") },
+  Write: { icon: "file-pen", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
+  Edit: { icon: "pencil", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
+  MultiEdit: { icon: "pencil", summary: (c) => path(c), defaultOpen: true, resultPolicy: "hideOnSuccess" },
+  NotebookEdit: { icon: "notebook", summary: (c) => path(c, "notebook_path") },
 
   // ── search ─────────────────────────────────────────────────────────────
-  Glob: { icon: "🔍", summary: (c) => field(c, "pattern") },
+  Glob: { icon: "search", summary: (c) => field(c, "pattern") },
   Grep: {
-    icon: "🔍",
+    icon: "search",
     summary: (c) => {
       const p = field(c, "pattern");
       const dir = field(c, "path");
       return p && dir ? `${p}  ·  ${basename(dir)}` : p;
     },
   },
-  WebFetch: { icon: "🌐", summary: (c) => field(c, "url") },
-  WebSearch: { icon: "🌐", summary: (c) => field(c, "query") },
+  WebFetch: { icon: "globe", summary: (c) => field(c, "url") },
+  WebSearch: { icon: "globe", summary: (c) => field(c, "query") },
   web_search: {
-    icon: "🌐",
+    icon: "globe",
     title: "WebSearch",
     summary: (c) => (typeof c.input === "string" ? c.input : field(c, "query")),
   },
-  ToolSearch: { icon: "🧰", summary: (c) => field(c, "query") },
+  ToolSearch: { icon: "toolbox", summary: (c) => field(c, "query") },
 
   // ── delegation (bodies come from the view registry) ─────────────────────
-  Agent: { icon: "🤖", summary: (c) => field(c, "description") },
-  Task: { icon: "🤖", summary: (c) => field(c, "description") },
+  Agent: { icon: "bot", summary: (c) => field(c, "description") },
+  Task: { icon: "bot", summary: (c) => field(c, "description") },
   Workflow: {
-    icon: "⚙",
+    icon: "workflow",
     // The input is a multi-KB script; JSON-stringifying it (the old fallback)
     // produced an unreadable blob as the summary line.
     summary: () => null,
@@ -114,7 +144,7 @@ const REGISTRY: Record<string, ToolMeta> = {
 
   // ── planning / interaction ─────────────────────────────────────────────
   TodoWrite: {
-    icon: "☑",
+    icon: "list-checks",
     summary: (c) => {
       const todos = (c.input as { todos?: unknown[] } | null)?.todos;
       return Array.isArray(todos) ? `${todos.length} 项` : null;
@@ -122,9 +152,9 @@ const REGISTRY: Record<string, ToolMeta> = {
     defaultOpen: true,
     resultPolicy: "hidden",
   },
-  ExitPlanMode: { icon: "📋", summary: () => "提交计划待批", defaultOpen: true },
+  ExitPlanMode: { icon: "clipboard", summary: () => "提交计划待批", defaultOpen: true },
   AskUserQuestion: {
-    icon: "❓",
+    icon: "question",
     summary: (c) => {
       const qs = (c.input as { questions?: Array<{ question?: string }> } | null)
         ?.questions;
@@ -132,19 +162,19 @@ const REGISTRY: Record<string, ToolMeta> = {
     },
   },
   Skill: {
-    icon: "🎯",
+    icon: "target",
     summary: (c) => {
       const s = field(c, "skill");
       const args = field(c, "args");
       return s ? (args ? `${s} ${args}` : s) : null;
     },
   },
-  SlashCommand: { icon: "／", summary: (c) => field(c, "command") },
+  SlashCommand: { icon: "slash", summary: (c) => field(c, "command") },
 
   // ── background task bookkeeping ────────────────────────────────────────
-  TaskCreate: { icon: "✚", summary: (c) => field(c, "description") ?? field(c, "prompt") },
+  TaskCreate: { icon: "plus", summary: (c) => field(c, "description") ?? field(c, "prompt") },
   TaskUpdate: {
-    icon: "✔",
+    icon: "check",
     summary: (c) => {
       const id = field(c, "taskId");
       const st = field(c, "status");
@@ -152,18 +182,18 @@ const REGISTRY: Record<string, ToolMeta> = {
     },
     resultPolicy: "hideOnSuccess",
   },
-  TaskList: { icon: "≡", summary: () => null },
-  TaskGet: { icon: "≡", summary: (c) => field(c, "task_id") },
-  TaskOutput: { icon: "≡", summary: (c) => field(c, "task_id") },
-  TaskStop: { icon: "◼", summary: (c) => field(c, "task_id") },
-  SendMessage: { icon: "✉", summary: (c) => field(c, "to") },
+  TaskList: { icon: "list", summary: () => null },
+  TaskGet: { icon: "list", summary: (c) => field(c, "task_id") },
+  TaskOutput: { icon: "list", summary: (c) => field(c, "task_id") },
+  TaskStop: { icon: "stop", summary: (c) => field(c, "task_id") },
+  SendMessage: { icon: "mail", summary: (c) => field(c, "to") },
 };
 
 // Fallback: pull the most user-meaningful field out of an unknown tool's
 // input. Order matters — `command` before `description` so a Bash shows its
 // command, not its label.
 const DEFAULT_META: ToolMeta = {
-  icon: "·",
+  icon: "dot",
   summary: (call) => {
     const i = call.input;
     if (typeof i === "string") return i || null;
@@ -186,7 +216,7 @@ function mcpMeta(name: string): ToolMeta | null {
   const [, server, ...rest] = name.split("__");
   const tool = rest.join("__").replace(/_/g, " ");
   return {
-    icon: "🔌",
+    icon: "plug",
     title: `MCP ${server}`,
     summary: () => tool || null,
   };
@@ -208,7 +238,7 @@ export function toolSummary(call: ToolCall): string | null {
   return s ?? null;
 }
 
-export function toolIcon(call: ToolCall): string {
+export function toolIcon(call: ToolCall): ToolIconKey {
   return toolMeta(call.name).icon ?? DEFAULT_META.icon!;
 }
 

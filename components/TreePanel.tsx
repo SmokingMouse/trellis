@@ -5,7 +5,25 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
 import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
 import { layoutNodes } from "@/lib/layout";
-import { refIcon } from "@/lib/ref-icon";
+import {
+  ChevronRight,
+  CircleCheck,
+  CircleDot,
+  CornerDownRight,
+  EyeOff,
+  FileText,
+  GitBranch,
+  Link2,
+  List,
+  MessageCircleQuestion,
+  Minimize2,
+  Network,
+  Pencil,
+  Plus,
+  Search,
+  X,
+} from "lucide-react";
+import { Icon, IconButton, StatusDot } from "@/components/ui";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import {
@@ -58,6 +76,25 @@ const GRAPH_MIN_SCALE_Y = 12 / 126;
 
 type Hover = { nodeId: string; top: number } | null;
 
+// 参考卡的行首图标：粘贴文本 / 链接两类，lucide 线性图标（原平台 emoji 退役）。
+function RefGlyph({ node }: { node: ChatNode }) {
+  return (
+    <Icon
+      icon={node.reference?.sourceType === "paste" ? FileText : Link2}
+      size="sm"
+      className="text-ink-faint"
+    />
+  );
+}
+
+function WaitingGlyph({ title, label }: { title: string; label: string }) {
+  return (
+    <span className="shrink-0 inline-flex text-warn-ink" title={title} aria-label={label}>
+      <Icon icon={MessageCircleQuestion} size="sm" />
+    </span>
+  );
+}
+
 function nodeRowLabel(n: ChatNode, max = 30): string {
   if (n.topicLabel) return n.topicLabel;
   const q = n.question.trim();
@@ -92,7 +129,8 @@ export function TreePanel() {
   const toggleBookmark = useSessionStore((s) => s.toggleBookmark);
   const confirmDelete = useConfirmDelete();
 
-  const [collapsed, setCollapsed] = useState(false);
+  // 桌面端「收起为右下小圆点」—— 偏好持久化（localStorage），跨会话保留。
+  const [collapsed, setCollapsed] = useSidebarPreference("tree-panel-collapsed", false, isBoolean);
   const [coldOpen, setColdOpen] = useSidebarPreference("tree-earlier-open", false, isBoolean);
   // 树重命名编辑态
   const [editingRootId, setEditingRootId] = useState<string | null>(null);
@@ -493,7 +531,7 @@ export function TreePanel() {
       return (
         <div
           key={entry.root.id}
-          className="flex items-center rounded bg-surface-muted/60 px-1.5 py-1"
+          className="flex items-center rounded-field bg-surface-muted px-1.5 py-1"
         >
           <input
             autoFocus
@@ -521,8 +559,8 @@ export function TreePanel() {
       <div
         key={entry.root.id}
         {...bindTrigger({ type: "tree", entry })}
-        className={`group flex items-center rounded ${
-          isActive ? "bg-surface-muted/60" : "hover:bg-surface-muted"
+        className={`group flex items-center rounded-field ${
+          isActive ? "bg-surface-muted" : "hover:bg-surface-hover"
         }`}
       >
         <button
@@ -546,26 +584,22 @@ export function TreePanel() {
           title={`${treeLabel(entry.root, 200)}\n双击重命名`}
         >
           {entry.root.kind === "reference" && (
-            <span className="shrink-0" aria-hidden>
-              {refIcon(entry.root.reference)}
-            </span>
+            <RefGlyph node={entry.root} />
           )}
           <span className="truncate">{treeLabel(entry.root)}</span>
           {/* 树级运行状态 rollup：等待输入 > 生成中（等输入更紧急）。折叠行
               看不见节点级的点，这里补一眼可扫的树级信号。 */}
           {entry.hasWaiting ? (
-            <span className="shrink-0 text-[10px] animate-pulse" title="有节点在等你回答" aria-label="等待输入">
-              🙋
-            </span>
+            <WaitingGlyph title="有节点在等你回答" label="等待输入" />
           ) : entry.hasStreaming ? (
-            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" title="生成中" aria-label="生成中" />
+            <StatusDot tone="live" label="生成中" />
           ) : null}
           <span className="ml-auto shrink-0 font-mono text-nano text-ink-faint tabular-nums">
             {entry.count}
           </span>
           {entry.unreadCount > 0 && !entry.hidden && (
             <span className="shrink-0 inline-flex items-center gap-0.5 text-nano font-medium text-unread-ink tabular-nums">
-              <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
+              <StatusDot tone="unread" />
               {entry.unreadCount}
             </span>
           )}
@@ -576,14 +610,11 @@ export function TreePanel() {
             e.stopPropagation();
             startEdit(entry.root);
           }}
-          className="shrink-0 px-1.5 py-1 text-nano rounded transition-opacity opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+          className="shrink-0 px-1.5 py-1 text-nano rounded transition-opacity opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-hover"
           title="重命名这棵树"
           aria-label="重命名这棵树"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-          </svg>
+          <Icon icon={Pencil} size="sm" />
         </button>
         <button
           type="button"
@@ -610,18 +641,14 @@ export function TreePanel() {
           }}
           className={`shrink-0 px-1.5 py-1 text-nano rounded transition-opacity ${
             entry.hidden
-              ? "text-ink-muted hover:text-ink hover:bg-surface-muted"
-              : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+              ? "text-ink-muted hover:text-ink hover:bg-surface-hover"
+              : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-hover"
           }`}
           title={entry.hidden ? "恢复显示" : "隐藏这棵树（数据保留，可随时恢复）"}
           aria-label={entry.hidden ? "恢复显示" : "隐藏这棵树"}
         >
           {entry.hidden ? "恢复" : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-              <line x1="1" y1="1" x2="23" y2="23" />
-            </svg>
+            <Icon icon={EyeOff} size="sm" />
           )}
         </button>
       </div>
@@ -770,7 +797,7 @@ export function TreePanel() {
                   className={`cursor-pointer outline-none ${
                     isCollapsed
                       ? ""
-                      : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+                      : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto pointer-coarse:opacity-100 pointer-coarse:pointer-events-auto"
                   }`}
                 >
                   <title>
@@ -834,7 +861,7 @@ export function TreePanel() {
     return (
       <div key={entry.root.id}>
         {isEditing ? (
-          <div className="flex items-center rounded bg-surface-muted/60 px-1.5 py-1">
+          <div className="flex items-center rounded-field bg-surface-muted px-1.5 py-1">
             <input
               autoFocus
               value={editingTitle}
@@ -857,7 +884,7 @@ export function TreePanel() {
         ) : (
           <div
             {...bindTrigger({ type: "tree", entry })}
-            className="group flex items-center rounded bg-surface-muted/60"
+            className="group flex items-center rounded-field bg-surface-muted"
           >
             <div
               className="flex-1 min-w-0 flex items-center gap-1.5 px-2 py-1 cursor-pointer"
@@ -865,9 +892,7 @@ export function TreePanel() {
               title={`${treeLabel(entry.root, 200)}\n双击重命名`}
             >
               {entry.root.kind === "reference" && (
-                <span className="shrink-0" aria-hidden>
-                  {refIcon(entry.root.reference)}
-                </span>
+                <RefGlyph node={entry.root} />
               )}
               <span className="truncate font-medium text-ink-strong">
                 {treeLabel(entry.root)}
@@ -879,14 +904,11 @@ export function TreePanel() {
             <button
               type="button"
               onClick={() => startEdit(entry.root)}
-              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
+              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:text-ink hover:bg-surface-hover transition-opacity"
               title="重命名这棵树"
               aria-label="重命名这棵树"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-              </svg>
+              <Icon icon={Pencil} size="sm" />
             </button>
             <button
               type="button"
@@ -899,15 +921,11 @@ export function TreePanel() {
                 }
                 void setTreeHidden(entry.root.id, true);
               }}
-              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-ink hover:bg-surface-muted transition-opacity"
+              className="shrink-0 px-1.5 py-1 rounded text-ink-faint opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:text-ink hover:bg-surface-hover transition-opacity"
               title="隐藏这棵树（数据保留，可随时恢复）"
               aria-label="隐藏这棵树"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
+              <Icon icon={EyeOff} size="sm" />
             </button>
           </div>
         )}
@@ -925,8 +943,8 @@ export function TreePanel() {
               key={node.id}
               data-node-id={node.id}
               {...bindTrigger({ type: "node", node })}
-              className={`group flex items-center rounded transition-colors ${
-                isActive ? "bg-accent-muted" : "hover:bg-surface-muted"
+              className={`group flex items-center rounded-field transition-colors ${
+                isActive ? "bg-accent-muted" : "hover:bg-surface-hover"
               }`}
               style={{ paddingLeft: `${2 + depth * 10}px` }}
             >
@@ -938,16 +956,7 @@ export function TreePanel() {
                   title={collapsed ? "展开子树" : "折叠子树"}
                   aria-label={collapsed ? "展开子树" : "折叠子树"}
                 >
-                  <svg
-                    width="8"
-                    height="8"
-                    viewBox="0 0 12 12"
-                    className={`transition-transform ${collapsed ? "" : "rotate-90"}`}
-                    fill="currentColor"
-                    aria-hidden
-                  >
-                    <path d="M3 2 L9 6 L3 10 Z" />
-                  </svg>
+                  <Icon icon={ChevronRight} size="sm" className={`transition-transform ${collapsed ? "" : "rotate-90"}`} />
                 </button>
               ) : (
                 <span className="shrink-0 w-4" aria-hidden />
@@ -957,7 +966,7 @@ export function TreePanel() {
                 onClick={() => jumpToNode(node.id)}
                 onMouseEnter={hoverRow(node.id)}
                 onMouseLeave={leaveRow(node.id)}
-                className={`flex-1 min-w-0 flex items-center gap-1 pr-1 py-[3px] text-left transition-colors ${
+                className={`flex-1 min-w-0 flex items-center gap-1 pr-1 py-0.75 text-left transition-colors ${
                   isActive
                     ? "text-accent-ink font-medium"
                     : offLineage
@@ -966,27 +975,23 @@ export function TreePanel() {
                 }`}
                 title={node.question || undefined}
               >
-                {isBranch && <span className="shrink-0 text-ink-faint">↳</span>}
+                {isBranch && <Icon icon={CornerDownRight} size="sm" className="text-fork" />}
                 <span className="shrink-0 font-mono text-nano text-ink-faint tabular-nums">
                   #{indices[node.id] ?? "?"}
                 </span>
                 {isWaitingNode(node) ? (
-                  <span className="shrink-0 text-[10px] animate-pulse" title="等你回答" aria-label="等待输入">
-                    🙋
-                  </span>
+                  <WaitingGlyph title="等你回答" label="等待输入" />
                 ) : node.status === "streaming" ? (
-                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
+                  <StatusDot tone="live" />
                 ) : null}
                 {node.status === "error" && (
-                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-danger" aria-hidden />
+                  <StatusDot tone="danger" />
                 )}
                 {unread && (
-                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-unread" aria-label="未读" />
+                  <StatusDot tone="unread" label="未读" />
                 )}
                 {node.kind === "reference" && (
-                  <span className="shrink-0" aria-hidden>
-                    {refIcon(node.reference)}
-                  </span>
+                  <RefGlyph node={node} />
                 )}
                 <span className="truncate">{nodeRowLabel(node)}</span>
                 {/* 折叠行 rollup：藏起来的后代数量 + 运行/未读信号（折叠树
@@ -994,19 +999,9 @@ export function TreePanel() {
                 {hiddenRollup && (
                   <>
                     {hiddenRollup.waiting ? (
-                      <span
-                        className="shrink-0 text-[10px] animate-pulse"
-                        title="折叠的分支里有节点在等你回答"
-                        aria-label="折叠分支等待输入"
-                      >
-                        🙋
-                      </span>
+                      <WaitingGlyph title="折叠的分支里有节点在等你回答" label="折叠分支等待输入" />
                     ) : hiddenRollup.streaming ? (
-                      <span
-                        className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent animate-pulse"
-                        title="折叠的分支里在生成"
-                        aria-label="折叠分支生成中"
-                      />
+                      <StatusDot tone="live" label="折叠分支生成中" />
                     ) : null}
                     <span
                       className="shrink-0 font-mono text-nano text-ink-faint tabular-nums"
@@ -1016,7 +1011,7 @@ export function TreePanel() {
                     </span>
                     {hiddenRollup.unread > 0 && (
                       <span className="shrink-0 inline-flex items-center gap-0.5 text-nano font-medium text-unread-ink tabular-nums">
-                        <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
+                        <StatusDot tone="unread" />
                         {hiddenRollup.unread}
                       </span>
                     )}
@@ -1031,7 +1026,7 @@ export function TreePanel() {
                       ? void markNodeRead(node.id)
                       : void markNodeUnread(node.id)
                   }
-                  className={`shrink-0 px-1.5 py-1 rounded transition-opacity opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-muted ${
+                  className={`shrink-0 px-1.5 py-1 rounded transition-opacity opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-surface-hover ${
                     unread
                       ? "text-ink-faint hover:text-ink"
                       : "text-ink-faint hover:text-unread-ink"
@@ -1040,17 +1035,9 @@ export function TreePanel() {
                   aria-label={unread ? "标为已读" : "标为未读"}
                 >
                   {unread ? (
-                    /* 圆内勾：标为已读 */
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <circle cx="12" cy="12" r="8" />
-                      <path d="m9 12 2 2 4-4" />
-                    </svg>
+                    <Icon icon={CircleCheck} size="sm" />
                   ) : (
-                    /* 点亮未读点：标为未读 */
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                      <circle cx="12" cy="12" r="8" />
-                      <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
-                    </svg>
+                    <Icon icon={CircleDot} size="sm" />
                   )}
                 </button>
               )}
@@ -1063,7 +1050,55 @@ export function TreePanel() {
   );
 };
 
+  // 给线性视图的正文 / composer 让出右侧安全区：LinearThreadView 用
+  // `padding-right: var(--trellis-tree-safe, 0px)` 消费。展开 = 面板宽
+  // （w-72 = 18rem）+ 右边距 0.75rem + 间隙 0.75rem；收起为圆点 = 3.5rem
+  // （圆点 2.5rem + 右边距 0.75rem + 余量）。手机端是全屏 sheet，不占位。
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isMobile !== false) {
+      root.style.removeProperty("--trellis-tree-safe");
+      return;
+    }
+    root.style.setProperty("--trellis-tree-safe", collapsed ? "3.5rem" : "19.5rem");
+    return () => {
+      root.style.removeProperty("--trellis-tree-safe");
+    };
+  }, [isMobile, collapsed]);
+
   if (isMobile === null || (isMobile && !mobileOpen)) return null;
+
+  const stackBottom = {
+    bottom: "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
+  };
+
+  // 桌面收起态：右下角一个小圆点（节点数角标），一键展开。形态沿用
+  // 「小浮窗 + 小点」（9/9 两次否决改形态），只是把原来的窄条换成圆点。
+  if (!isMobile && collapsed) {
+    return (
+      <div className="fixed right-3 z-20 transition-all duration-150" style={stackBottom}>
+        <IconButton
+          label={`展开会话树（${totalNodes} 节点）`}
+          tooltipSide="left"
+          onClick={() => {
+            setCollapsed(false);
+            setHover(null);
+          }}
+          className="relative size-10 rounded-full border border-line bg-surface-raised shadow-pop"
+        >
+          <Icon icon={Network} />
+          <span className="absolute -right-1 -top-1 min-w-4.5 rounded-full border border-line bg-surface-raised px-1 text-center font-mono text-nano leading-4 text-ink-muted tabular-nums">
+            {totalNodes}
+          </span>
+          {entries.some((e) => e.hasWaiting) ? (
+            <StatusDot tone="warn" label="有节点在等你回答" className="absolute bottom-0.5 right-0.5 ring-2 ring-surface-raised" />
+          ) : entries.some((e) => e.unreadCount > 0 && !e.hidden) ? (
+            <StatusDot tone="unread" label="有未读" className="absolute bottom-0.5 right-0.5 ring-2 ring-surface-raised" />
+          ) : null}
+        </IconButton>
+      </div>
+    );
+  }
 
   const closeMobileSheet = () => {
     setMobileOpen(false);
@@ -1083,8 +1118,8 @@ export function TreePanel() {
       aria-label={isMobile ? "思维树" : undefined}
       className={
         isMobile
-          ? "fixed inset-0 z-50 text-xs"
-          : "fixed right-3 z-40 text-xs transition-[bottom] duration-150"
+          ? "fixed inset-0 z-50 text-label"
+          : "fixed right-3 z-20 text-label transition-all duration-150"
       }
       style={
         isMobile
@@ -1092,120 +1127,94 @@ export function TreePanel() {
               paddingTop: "var(--safe-top)",
               paddingBottom: "var(--safe-bottom)",
             }
-          : {
-              bottom:
-                "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
-            }
+          : stackBottom
       }
     >
       <div
         className={
           isMobile
             ? "flex h-full flex-col bg-surface"
-            : "rounded-card border border-line/80 bg-surface/95 shadow-pop backdrop-blur"
+            : "rounded-overlay border border-line bg-surface-raised shadow-pop"
         }
       >
-        <div className="flex items-center">
-          <button
-            type="button"
-            onClick={() => {
-              setCollapsed((v) => !v);
-              setHover(null);
-            }}
-            className="flex-1 px-3 py-2 flex items-center justify-between gap-3 text-ink-muted hover:bg-surface-muted rounded-t-card"
-            title={collapsed ? "展开树面板" : "收起树面板"}
-          >
-            <span className="font-medium">树</span>
-            <span className="text-ink-faint tabular-nums">
-              {collapsed ? `${totalNodes} · ▴` : `${totalNodes} · ▾`}
-            </span>
-          </button>
+        <div className="flex h-10 items-center gap-0.5 pl-3 pr-1.5 max-md:h-auto">
+          <span className="font-medium text-ui text-ink">会话树</span>
+          <span className="mr-auto ml-2 text-label text-ink-faint tabular-nums">
+            {totalNodes} 节点
+          </span>
           {sessionId && (
-            <button
+            <IconButton
+              size="sm"
               type="button"
               data-mobile-target="new-tree-open"
+              label="新树"
+              title="新树：保留当前 session，只清空上下文（等价 /clear）"
               onClick={() => {
                 if (isMobile) closeMobileSheet();
                 setComposeRootOpen(true);
               }}
-              className="shrink-0 px-2 py-2 max-md:min-h-11 max-md:min-w-11 font-medium text-accent-ink hover:bg-accent-muted transition-colors"
-              title="新树：保留当前 session，只清空上下文（等价 /clear）"
             >
-              ＋ 新树
-            </button>
+              <Icon icon={Plus} size="sm" />
+            </IconButton>
           )}
-          {!collapsed && (
-            <button
-              type="button"
-              onClick={() => switchView(view === "list" ? "graph" : "list")}
-              className="shrink-0 px-2 py-2 rounded-t-card text-ink-faint hover:text-ink hover:bg-surface-muted transition-colors"
-              title={
-                view === "list"
-                  ? "当前树切为图形视图（看分叉形状）"
-                  : "当前树切为列表视图"
+          <IconButton
+            size="sm"
+            type="button"
+            onClick={() => switchView(view === "list" ? "graph" : "list")}
+            label={view === "list" ? "切为图形视图" : "切为列表视图"}
+            title={
+              view === "list"
+                ? "当前树切为图形视图（看分叉形状）"
+                : "当前树切为列表视图"
+            }
+          >
+            <Icon icon={view === "list" ? GitBranch : List} size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            type="button"
+            onClick={() => {
+              if (filter === null) {
+                setFilter("");
+                setFilterSel(0);
+              } else {
+                exitFilter();
               }
-              aria-label={view === "list" ? "切为图形视图" : "切为列表视图"}
-            >
-              {view === "list" ? (
-                /* git-branch：切到图形 */
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <circle cx="6" cy="5" r="2.5" />
-                  <circle cx="6" cy="19" r="2.5" />
-                  <circle cx="18" cy="12" r="2.5" />
-                  <path d="M6 7.5v9" />
-                  <path d="M6 12h9.5" />
-                </svg>
-              ) : (
-                /* 列表：切回列表 */
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <line x1="4" y1="6" x2="20" y2="6" />
-                  <line x1="4" y1="12" x2="20" y2="12" />
-                  <line x1="4" y1="18" x2="20" y2="18" />
-                </svg>
-              )}
-            </button>
-          )}
-          {!collapsed && (
-            <button
-              type="button"
-              onClick={() => {
-                if (filter === null) {
-                  setFilter("");
-                  setFilterSel(0);
-                } else {
-                  exitFilter();
-                }
-              }}
-              className={`shrink-0 px-2.5 py-2 rounded-t-card transition-colors ${
-                filter !== null
-                  ? "text-accent bg-accent-muted"
-                  : "text-ink-faint hover:text-ink hover:bg-surface-muted"
-              }`}
-              title="过滤跳转（⌘J）"
-              aria-label="过滤跳转"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <circle cx="11" cy="11" r="7" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-            </button>
-          )}
-          {isMobile && (
-            <button
+            }}
+            label="过滤跳转"
+            shortcut="⌘J"
+            aria-pressed={filter !== null}
+            className={filter !== null ? "bg-accent-muted text-accent-ink" : undefined}
+          >
+            <Icon icon={Search} size="sm" />
+          </IconButton>
+          {isMobile ? (
+            <IconButton
               ref={mobileCloseRef}
               type="button"
               data-mobile-target="tree-sheet-close"
               onClick={closeMobileSheet}
-              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-xl text-ink-muted hover:bg-surface-muted"
-              title="关闭思维树"
-              aria-label="关闭思维树"
+              label="关闭思维树"
+              tooltip={false}
             >
-              ×
-            </button>
+              <Icon icon={X} />
+            </IconButton>
+          ) : (
+            <IconButton
+              size="sm"
+              type="button"
+              label="收起为圆点"
+              onClick={() => {
+                setCollapsed(true);
+                setHover(null);
+              }}
+            >
+              <Icon icon={Minimize2} size="sm" />
+            </IconButton>
           )}
         </div>
 
-        {!collapsed && (
+        {(isMobile || !collapsed) && (
           <div
             className={
               isMobile
@@ -1224,7 +1233,7 @@ export function TreePanel() {
                   }}
                   onKeyDown={onFilterKeyDown}
                   placeholder="过滤节点…（↑↓ 选择，↩ 跳转，Esc 退出）"
-                  className="w-full px-2 py-1.5 rounded-field border border-line bg-surface text-xs text-ink placeholder:text-ink-faint outline-none focus:border-accent-line"
+                  className="w-full px-2 py-1.5 rounded-field border border-line bg-surface text-label text-ink placeholder:text-ink-faint outline-none focus:border-accent-line"
                   aria-label="过滤节点"
                 />
               </div>
@@ -1235,8 +1244,9 @@ export function TreePanel() {
               className={
                 isMobile
                   ? "h-full overflow-y-auto overscroll-contain p-1.5"
-                  : "p-1.5 max-h-[min(420px,55vh)] overflow-y-auto overscroll-contain"
+                  : "p-1.5 overflow-y-auto overscroll-contain"
               }
+              style={isMobile ? undefined : { maxHeight: "min(420px, 55vh)" }}
               onScroll={() => setHover(null)}
             >
               {filter !== null && filter.trim() ? (
@@ -1255,17 +1265,17 @@ export function TreePanel() {
                       }}
                       onMouseEnter={hoverRow(node.id)}
                       onMouseLeave={leaveRow(node.id)}
-                      className={`w-full min-w-0 flex items-center gap-1 px-2 py-1 rounded text-left ${
+                      className={`w-full min-w-0 flex items-center gap-1 px-2 py-1 rounded-field text-left ${
                         i === filterSel
                           ? "bg-accent-muted text-accent-ink"
-                          : "text-ink-muted hover:bg-surface-muted"
+                          : "text-ink-muted hover:bg-surface-hover"
                       }`}
                     >
                       <span className="shrink-0 font-mono text-nano text-ink-faint tabular-nums">
                         #{indices[node.id] ?? "?"}
                       </span>
                       <span className="truncate">{nodeRowLabel(node)}</span>
-                      <span className="ml-auto shrink-0 truncate max-w-[7rem] text-nano text-ink-faint">
+                      <span className="ml-auto shrink-0 truncate max-w-28 text-nano text-ink-faint">
                         {entry.hidden ? "已隐藏 · " : ""}
                         {treeLabel(entry.root, 16)}
                       </span>
@@ -1285,14 +1295,14 @@ export function TreePanel() {
                       <button
                         type="button"
                         onClick={() => setColdOpen((v) => !v)}
-                        className="w-full px-2 py-1 flex items-center gap-1 rounded text-ink-faint hover:bg-surface-muted"
+                        className="w-full px-2 py-1 flex items-center gap-1 rounded-field text-ink-faint hover:bg-surface-hover"
+                        aria-expanded={coldOpen}
                       >
-                        <span
-                          className={`inline-block transition-transform ${coldOpen ? "rotate-90" : ""}`}
-                          aria-hidden
-                        >
-                          ▸
-                        </span>
+                        <Icon
+                          icon={ChevronRight}
+                          size="sm"
+                          className={`transition-transform ${coldOpen ? "rotate-90" : ""}`}
+                        />
                         更早 · {groups.cold.length} 棵
                       </button>
                       {coldOpen && groups.cold.map(renderTreeRow)}
@@ -1305,15 +1315,15 @@ export function TreePanel() {
 
             {!isMobile && hoverNode && hover && (
               <div
-                className={`pointer-events-none absolute right-full mr-2 ${PREVIEW_W} rounded-card border border-line bg-surface shadow-pop px-3 py-2.5 text-left`}
+                className={`pointer-events-none absolute right-full mr-2 ${PREVIEW_W} rounded-overlay border border-line bg-surface-raised shadow-pop px-3 py-2.5 text-left`}
                 style={{ top: hover.top, transform: "translateY(-50%)" }}
                 aria-hidden
               >
                 <div className="text-label text-ink-faint font-mono">
                   #{indices[hoverNode.id] ?? "?"} ·{" "}
-                  {hoverNode.kind === "reference" ? "Reference" : "Turn"}
+                  {hoverNode.kind === "reference" ? "参考材料" : "对话"}
                 </div>
-                <div className="mt-1 text-xs font-semibold text-ink-strong line-clamp-2">
+                <div className="mt-1 text-ui font-semibold text-ink-strong line-clamp-2">
                   {hoverNode.topicLabel ?? mdExcerpt(hoverNode.question, 80)}
                 </div>
                 {(() => {
@@ -1321,11 +1331,11 @@ export function TreePanel() {
                     hoverNode.status === "error"
                       ? "生成失败"
                       : isWaitingNode(hoverNode)
-                        ? "🙋 模型在等你回答"
+                        ? "模型在等你回答"
                         : mdExcerpt(hoverNode.response, 160) ||
                           (hoverNode.status === "streaming" ? "生成中…" : "");
                   return body ? (
-                    <div className="mt-1 text-xs leading-relaxed text-ink-muted line-clamp-4">
+                    <div className="mt-1 text-label leading-relaxed text-ink-muted line-clamp-4">
                       {body}
                     </div>
                   ) : null;

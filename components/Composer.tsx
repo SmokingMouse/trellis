@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUp, GitBranch, Paperclip, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
@@ -12,14 +13,19 @@ import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { SketchModal } from "./SketchModal";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
-import { StopButton } from "./ui/StopButton";
+import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
+import { ModeBadge } from "./ModeBadge";
+import { ModelPicker } from "./ModelPicker";
 import type { ChatNode } from "@/lib/types";
 
 // #3/#7: the shared always-docked composer. Used by the linear thread's
-// sticky footer and the canvas's fixed bottom bar — one input surface with a
-// STABLE height: while the target streams, the textarea swaps to an
-// equal-height stop button instead of disappearing/resizing, so the bottom
-// region never jumps.
+// sticky footer and the canvas's fixed bottom bar.
+//
+// W3：单一卡片式输入（描边卡 + 聚焦描边环）。卡内：可选横幅（分叉目标）→
+// 附件 → 输入框 → 底栏（模式 chip · 模型 · 附件 / 手绘 ghost 图标 ·「发送到」·
+// 主按钮）；卡外一行弱化提示（状态 + 快捷键）。主按钮三态合一：空闲 = 发送、
+// 流式 = 停止、连接中 / 上传中 = 加载。流式时输入框不再被停止按钮替换 ——
+// 可以先写好下一条，回合结束再发（没有排队后端，所以流式中不发送）。
 export function Composer({
   targetNode,
   placeholder,
@@ -29,6 +35,8 @@ export function Composer({
   mobileCompact = false,
   fork = false,
   onMobileExpandedChange,
+  targetIndex,
+  banner,
 }: {
   // The node a submit branches from (thread tip in linear view, the active
   // node on canvas). null → composer renders disabled.
@@ -47,6 +55,10 @@ export function Composer({
   // attachment/sketch surface after focus. Canvas keeps its existing shape.
   mobileCompact?: boolean;
   onMobileExpandedChange?: (expanded: boolean) => void;
+  /** 「发送到」里显示的节点序号（线性视图传入） */
+  targetIndex?: number | string;
+  /** 卡内顶部横幅（分叉目标 chip 等） */
+  banner?: ReactNode;
 }) {
   const [text, setText] = useState("");
   const [sketchOpen, setSketchOpen] = useState(false);
@@ -60,6 +72,9 @@ export function Composer({
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // 输入法组字保护：组字中的 Enter（isComposing / keyCode 229）不发送；
+  // Safari 在 compositionend 之后还会补发一次 keydown(Enter)，再挡 100ms。
+  const compositionEndAt = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
@@ -149,7 +164,7 @@ export function Composer({
     // with full tools; the Header badge reflects it and the notice says why.
     if (!toolCapable) {
       setChatEnhanced(true);
-      setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO，本轮起生效）");
+      setCmdNotice("已自动开启增强模式：技能需要工具，工具调用自动批准（本轮起生效）");
     }
     setText(`${skillPrefix}${name} `);
     ref.current?.focus();
@@ -239,33 +254,82 @@ export function Composer({
     if (mobileCompact) setMobileExpanded(false);
   };
 
-  if (isStreaming && targetNode) {
-    return (
-      <div
-        data-mobile-composer
-        data-composer-state="stopping"
-        className="py-3 max-md:py-1"
-      >
-        <StopButton
-          onClick={() => abortStream(targetNode.id)}
-          disabled={isPending}
-          className="w-full h-[44px] disabled:opacity-60"
-          label={isPending ? "连接中…" : "停止生成（Esc）"}
-          aria-label="停止生成"
-          title={isPending ? "正在建立连接…" : "停止生成 (Esc)"}
-        />
-      </div>
-    );
-  }
-
   const compact = mobileCompact && !mobileExpanded;
+  const noTarget = !targetNode && !emptyExternal;
+  const streaming = Boolean(isStreaming && targetNode);
+  const canSend =
+    !streaming && !!text.trim() && !noTarget && !att.hasUploading && !externalEnded;
+  const targetLabel = targetNode
+    ? (targetNode.topicLabel ?? targetNode.question).replace(/\s+/g, " ").trim()
+    : null;
+  const hint = streaming
+    ? isPending
+      ? "正在建立连接…"
+      : "回复进行中：可以先写下一条，结束后再发送 · Esc 停止"
+    : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · 可粘贴图片 / 文件");
+
+  // 主按钮三态合一：发送 / 停止 / 加载。停止态 aria-label 固定「停止生成」
+  // （mobile-followup-approval.sh 依赖），手机 ≥44px。
+  const primary = streaming ? (
+    <Tooltip content={isPending ? "正在建立连接…" : "停止生成"} shortcut={isPending ? undefined : "Esc"} side="top">
+      <Button
+        variant="secondary"
+        size="icon"
+        aria-label="停止生成"
+        data-composer-primary={isPending ? "loading" : "stop"}
+        onClick={() => abortStream(targetNode!.id)}
+        disabled={isPending}
+        className="shrink-0"
+      >
+        {isPending ? (
+          <Spinner size="sm" label={null} />
+        ) : (
+          <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden />
+        )}
+      </Button>
+    </Tooltip>
+  ) : (
+    <Tooltip
+      content={att.hasUploading ? "等待附件上传…" : "发送"}
+      shortcut={sendKey === "enter" ? "↩" : ["⌘", "↩"]}
+      side="top"
+    >
+      <Button
+        variant="primary"
+        size="icon"
+        aria-label="发送"
+        data-composer-primary={att.hasUploading ? "loading" : "send"}
+        onClick={submit}
+        disabled={!canSend}
+        className="shrink-0"
+      >
+        {att.hasUploading ? (
+          <Spinner size="sm" label={null} className="text-current" />
+        ) : (
+          <Icon icon={ArrowUp} size="md" selected />
+        )}
+      </Button>
+    </Tooltip>
+  );
+
+  const attachButton = (
+    <IconButton
+      label="添加附件"
+      title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+      onClick={() => fileInputRef.current?.click()}
+      disabled={noTarget || att.atLimit}
+      data-composer-attach=""
+    >
+      <Icon icon={Paperclip} />
+    </IconButton>
+  );
 
   return (
     <div
       ref={rootRef}
       data-mobile-composer
-      data-composer-state={compact ? "compact" : "expanded"}
-      className={`relative ${compact ? "py-1" : "py-3 max-md:py-2"}`}
+      data-composer-state={streaming ? "stopping" : compact ? "compact" : "expanded"}
+      className={`relative ${compact ? "py-1" : "pt-2 pb-3 max-md:py-2"}`}
       onBlur={collapseMobileIfEmpty}
     >
       {(matchedCommands.length > 0 ||
@@ -282,112 +346,129 @@ export function Composer({
           skillPrefix={skillPrefix}
         />
       )}
-      {cmdNotice && (
-        <div className="mb-1.5 text-label text-warn-ink">
-          {cmdNotice}
-        </div>
-      )}
-      {att.pending.length > 0 && (
-        <div className="mb-2">
-          <AttachmentPreview pending={att.pending} onRemove={att.remove} />
-        </div>
-      )}
-      {att.notice && (
-        <div className="mb-1.5 text-label text-warn-ink">
-          {att.notice}
-        </div>
-      )}
-      <div className="flex items-end gap-2">
-        <textarea
-          data-composer-input
-          ref={ref}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            if (cmdNotice) setCmdNotice(null);
-          }}
-          onKeyDown={(e) => {
-            // Suggestion navigation first — while the "/" dropdown is open,
-            // Enter picks the highlighted item instead of sending.
-            if (slashNav.handleKeyDown(e)) return;
-            if (isSendCombo(e, sendKey)) {
-              e.preventDefault();
-              submit();
-            } else if (e.key === "Escape" && onEscape) {
-              e.preventDefault();
-              onEscape();
-            }
-          }}
-          onPaste={att.handlePaste}
-          onFocus={expandMobile}
-          rows={1}
-          disabled={(!targetNode && !emptyExternal) || externalEnded}
-          placeholder={externalEnded ? "外部线程已结束" : compact ? "追问…" : (placeholder ?? `继续对话…（${sendHint(sendKey)}，可粘贴图片 / 文件）`)}
-          className={`min-w-0 flex-1 resize-none rounded-2xl border border-line-strong bg-surface text-body text-ink-strong outline-none focus:border-accent focus:ring-2 focus:ring-accent-line/50 placeholder:text-ink-faint transition-shadow shadow-raise disabled:opacity-50 ${
-            compact
-              ? "h-[44px] min-h-[44px] max-h-[44px] px-3 py-2.5"
-              : "min-h-[44px] max-h-[160px] px-4 py-3 max-md:min-h-[72px]"
-          }`}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={att.accept}
-          multiple
-          onChange={att.handlePicked}
-          className="hidden"
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={(!targetNode && !emptyExternal) || att.atLimit}
-          title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
-          aria-label="添加附件"
-        >
-          <span aria-hidden>📎</span>
-        </button>
-        {!compact && (
-          <>
-            <button
-              type="button"
-              onClick={() => setSketchOpen(true)}
-              disabled={(!targetNode && !emptyExternal) || att.atLimit}
-              title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
-              className="shrink-0 h-[44px] w-[44px] rounded-2xl border border-line-strong bg-surface text-ink-muted flex items-center justify-center disabled:opacity-30 hover:text-ink hover:border-ink-faint active:scale-95 transition-all shadow-raise"
-              aria-label="画个草图"
-            >
-              <span aria-hidden>✏️</span>
-            </button>
-          </>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={att.accept}
+        multiple
+        onChange={att.handlePicked}
+        className="hidden"
+      />
+      <div
+        data-composer-card=""
+        className="rounded-card border border-line-strong bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring"
+      >
+        {banner}
+        {!compact && att.pending.length > 0 && (
+          <div className="px-3 pt-2.5">
+            <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+          </div>
         )}
-        {sketchOpen && (
-          <SketchModal
-            onClose={() => setSketchOpen(false)}
-            onExport={(blob) => att.startUpload(blob, "sketch.png")}
+        <div className={compact ? "flex items-center gap-1 pr-1" : undefined}>
+          <textarea
+            data-composer-input
+            ref={ref}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (cmdNotice) setCmdNotice(null);
+            }}
+            onCompositionEnd={() => {
+              compositionEndAt.current = Date.now();
+            }}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === "Enter" && Date.now() - compositionEndAt.current < 100) return;
+              // Suggestion navigation first — while the "/" dropdown is open,
+              // Enter picks the highlighted item instead of sending.
+              if (slashNav.handleKeyDown(e)) return;
+              if (isSendCombo(e, sendKey)) {
+                e.preventDefault();
+                submit();
+              } else if (e.key === "Escape" && onEscape) {
+                e.preventDefault();
+                onEscape();
+              }
+            }}
+            onPaste={att.handlePaste}
+            onFocus={expandMobile}
+            rows={1}
+            // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 不在
+            // layer 里、utility 压不住，只能内联去掉输入框自己的那一圈。
+            style={{ outline: "none" }}
+            disabled={noTarget || externalEnded}
+            placeholder={externalEnded ? "外部线程已结束" : compact ? "追问…" : (placeholder ?? "继续对话…")}
+            className={`block w-full min-w-0 resize-none bg-transparent text-body text-ink-strong outline-none placeholder:text-ink-faint disabled:opacity-50 ${
+              compact
+                ? "flex-1 h-11 min-h-11 max-h-11 px-3 py-2.5"
+                : "min-h-12 max-h-40 px-3.5 pt-3 pb-1 leading-relaxed max-md:min-h-18"
+            }`}
           />
+          {compact && (
+            <>
+              {attachButton}
+              {primary}
+            </>
+          )}
+        </div>
+        {!compact && (
+          <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+            {!mobileCompact && (
+              <div className="flex min-w-0 items-center gap-1.5 mr-1" data-composer-context="">
+                <ModeBadge />
+                <ModelPicker />
+              </div>
+            )}
+            {attachButton}
+            <IconButton
+              label="画个草图"
+              title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
+              onClick={() => setSketchOpen(true)}
+              disabled={noTarget || att.atLimit}
+            >
+              <Icon icon={PenLine} />
+            </IconButton>
+            <span className="flex-1" />
+            {targetLabel && (
+              <Tooltip content="新消息会接在这个节点之后" side="top">
+                <span
+                  tabIndex={0}
+                  data-composer-send-to=""
+                  className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 text-label text-ink-faint"
+                >
+                  <Icon icon={GitBranch} size="sm" className={fork ? "text-fork" : undefined} />
+                  <span className="shrink-0">发送到：</span>
+                  <b className="min-w-0 truncate font-medium text-ink-muted">{targetLabel}</b>
+                  {targetIndex !== undefined && (
+                    <span className="shrink-0 font-mono tabular-nums">#{targetIndex}</span>
+                  )}
+                </span>
+              </Tooltip>
+            )}
+            {primary}
+          </div>
         )}
-        <button
-          onClick={submit}
-          disabled={!text.trim() || (!targetNode && !emptyExternal) || att.hasUploading || externalEnded}
-          title={att.hasUploading ? "等待附件上传…" : undefined}
-          className="shrink-0 h-[44px] w-[44px] rounded-2xl bg-accent text-ink-inverse flex items-center justify-center disabled:opacity-30 hover:bg-accent-strong active:scale-95 transition-all shadow-raise"
-          aria-label="发送"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 19V5M5 12l7-7 7 7" />
-          </svg>
-        </button>
       </div>
+      {sketchOpen && (
+        <SketchModal
+          onClose={() => setSketchOpen(false)}
+          onExport={(blob) => att.startUpload(blob, "sketch.png")}
+        />
+      )}
+      {(cmdNotice || att.notice) && (
+        <div className="mt-1.5 px-1 text-label text-warn-ink" role="status">
+          {cmdNotice ?? att.notice}
+        </div>
+      )}
+      {!compact && (
+        <div
+          data-composer-hint=""
+          className="mt-1.5 flex items-center justify-between gap-3 px-1 text-label text-ink-faint max-md:hidden"
+        >
+          <span className="min-w-0 truncate">{streaming ? hint : ""}</span>
+          <span className="shrink-0">{streaming ? "" : hint}</span>
+        </div>
+      )}
     </div>
   );
 }

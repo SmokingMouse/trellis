@@ -3,7 +3,13 @@ import { useState } from "react";
 import { useElapsed } from "@/hooks/useElapsed";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
-import { defaultOpen, toolIcon, toolSummary, toolTitle } from "@/lib/tool-registry";
+import {
+  defaultOpen,
+  toolIcon,
+  toolSummary,
+  toolTitle,
+  type ToolIconKey,
+} from "@/lib/tool-registry";
 import {
   nestedErrorCount,
   segmentTimeline,
@@ -12,7 +18,8 @@ import {
   type ToolNode,
 } from "@/lib/tool-tree";
 import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
-import { Pill } from "../ui/Pill";
+import { Check, ChevronRight } from "lucide-react";
+import { Icon, Pill, Spinner, StatusDot, ToolIcon } from "@/components/ui";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
 import { WorkflowHead } from "./views/WorkflowChrome";
@@ -98,35 +105,24 @@ function SegmentRow({
   const { nodes } = entry;
 
   return (
-    <div
-      className={`transition-colors ${
-        live
-          ? "bg-surface/80 border-l-2 border-l-line-strong/60 hover:bg-surface-muted/60"
-          : "bg-surface/60 hover:bg-surface-muted/60"
-      }`}
-    >
+    <div data-tool-segment="">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
-        className="w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:text-ink-muted transition-colors group pointer-coarse:min-h-[44px]"
+        className="w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors pointer-coarse:min-h-11"
       >
-        <span
-          className="transition-transform motion-reduce:transition-none shrink-0"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
-          aria-hidden
-        >
-          ▸
-        </span>
-        <span className="shrink-0 select-none" aria-hidden>
-          ⋯
-        </span>
-        <span className="tabular-nums shrink-0 font-mono text-ink-muted">
+        <Icon
+          icon={ChevronRight}
+          size="sm"
+          className={`transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+        <span className="tabular-nums shrink-0 text-ink-muted">
           {nodes.length} 步
         </span>
         <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
-        <span className="shrink-0 text-nano px-1.5 py-0.5 rounded bg-surface-muted border border-line/60 text-ink-faint group-hover:text-ink-muted transition-colors">
+        <span className="shrink-0 text-nano text-ink-faint">
           {open ? "已展开" : "已自动收起"}
         </span>
         <span className="flex-1" />
@@ -135,7 +131,7 @@ function SegmentRow({
         </span>
       </button>
       {open && (
-        <div className="border-t border-line/70 divide-y divide-line/70">
+        <div className="border-t border-line-faint divide-y divide-line-faint">
           {nodes.map((n) => (
             <ToolRow key={n.call.id} node={n} live={live} depth={depth} />
           ))}
@@ -197,10 +193,12 @@ export function ToolRow({
   // 不合规就退回普通行头：名称、图标、状态胶囊都还在，只是不画进度轨。
   const workflow = node.kind === "workflow" && hasValidWorkflowProgress(node);
 
+  const failed = node.call.status === "error" || node.meta.status === "failed";
+
   return (
     <div
-      className="bg-surface/60"
       data-tool-row={node.kind}
+      data-tool-failed={failed ? "" : undefined}
       data-workflow-card={
         workflow ? workflowStatusOf(node, live) : undefined
       }
@@ -210,47 +208,44 @@ export function ToolRow({
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-workflow-head={workflow ? "" : undefined}
-        className={`w-full px-3 py-0.5 flex items-center gap-2 text-ui leading-6 text-left text-ink-faint hover:bg-surface-muted/60 transition-colors ${
+        className={`w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left hover:bg-surface-hover transition-colors ${
           workflow
-            ? "flex-wrap pointer-coarse:min-h-[44px]"
+            ? "flex-wrap py-1 pointer-coarse:min-h-[44px]"
             : ""
         }`}
       >
-        <span
-          className="text-ink-faint transition-transform motion-reduce:transition-none shrink-0"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
-          aria-hidden
-        >
-          ▸
-        </span>
         {workflow ? (
           <WorkflowHead node={node} live={live} elapsed={elapsed} />
         ) : (
           <>
-            <StatusPill node={node} live={live} />
-            <span className="shrink-0 select-none text-ink-faint" aria-hidden>
-              {rowIcon(node)}
+            <ToolIcon name={rowIcon(node)} className="text-ink-faint" />
+            <span className="shrink-0 min-w-11 max-w-40 truncate font-medium text-ink">
+              {rowTitle(node)}
             </span>
-            <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
-            <span className="text-ink-muted truncate min-w-0">
+            <span className="flex-1 min-w-0 truncate font-mono text-label text-ink-muted">
               {rowSummary(node) ?? ""}
             </span>
-            <span className="flex-1" />
             {nestedErrors > 0 && (
               // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
-              <span className="text-nano text-danger-ink shrink-0">
+              <span className="shrink-0 inline-flex items-center gap-1 text-nano text-danger-ink">
+                <StatusDot tone="danger" />
                 {nestedErrors} 失败
               </span>
             )}
-            <span className="font-mono text-nano tabular-nums text-ink-faint shrink-0">
+            <span className="shrink-0 font-mono text-nano tabular-nums text-ink-faint">
               {statLine(node, elapsed)}
             </span>
+            <StatusPill node={node} live={live} />
           </>
         )}
       </button>
 
       {open && (
-        <div className="px-3 pb-3 pt-1 space-y-2">
+        <div
+          className={`pr-3 pb-3 pt-1 space-y-2 ${
+            failed ? "ml-4 pl-4 border-l-2 border-danger-line" : "pl-8"
+          }`}
+        >
           <Body node={node} live={live}>
             <TimelineList nodes={node.children} live={live} depth={depth + 1} />
           </Body>
@@ -259,7 +254,7 @@ export function ToolRow({
               that somehow spawned children renders them here. */}
           {!useCustom && node.children.length > 0 && (
             <div className="border-l-2 border-line ml-1 pl-2">
-              <div className="border border-line rounded divide-y divide-line/70 overflow-hidden">
+              <div className="border border-line rounded divide-y divide-line-faint overflow-hidden">
                 <TimelineList
                   nodes={node.children}
                   live={live}
@@ -304,10 +299,10 @@ export function rowAutoOpen(
   return defaultOpen(node);
 }
 
-function rowIcon(node: ToolNode): string {
-  if (node.kind === "subagent") return "🤖";
-  if (node.kind === "workflow") return "⚙";
-  if (node.kind === "longRunning") return "⏱";
+function rowIcon(node: ToolNode): ToolIconKey {
+  if (node.kind === "subagent") return "bot";
+  if (node.kind === "workflow") return "workflow";
+  if (node.kind === "longRunning") return "timer";
   return toolIcon(node.call);
 }
 
@@ -327,17 +322,16 @@ function rowSummary(node: ToolNode): string | null {
 }
 
 /**
- * 行首状态胶囊 —— 只在有话要说的时候出现。
+ * 行尾状态位 —— 安静是默认值。
  *
- * 跑完的普通行不再挂「完成」：一屏 40 行绿胶囊，等于没有胶囊，还把真正要人
- * 看的失败 / 运行中挤没了。失败、运行中、已中断三种仍然显示。
+ * 跑完的普通行只挂一枚淡灰对勾（一屏 40 行绿胶囊等于没有胶囊）；运行中是
+ * Spinner；失败是红点 + 「失败」二字（醒目，但不喊）；turn 已结束却仍开着
+ * 的调用承认「已中断」。
  */
 export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
   if (node.running) {
     return live ? (
-      <Pill tone="warn" className="shrink-0">
-        运行中
-      </Pill>
+      <Spinner size="sm" label="运行中" />
     ) : (
       // The turn ended while this call was still open — aborted, or the run
       // died. Showing "运行中" forever is worse than admitting we lost it.
@@ -348,12 +342,13 @@ export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
   }
   if (node.call.status === "error" || node.meta.status === "failed") {
     return (
-      <Pill tone="danger" className="shrink-0">
+      <span className="shrink-0 inline-flex items-center gap-1 text-nano font-medium text-danger-ink">
+        <StatusDot tone="danger" />
         失败
-      </Pill>
+      </span>
     );
   }
-  return null;
+  return <Icon icon={Check} size="sm" className="text-ink-faint" />;
 }
 
 // "3 工具 · 12.4k · 8s". Counts come from the CLI's own task_progress usage

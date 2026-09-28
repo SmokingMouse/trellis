@@ -2179,10 +2179,16 @@ export type SearchResult = {
   hits: SearchHit[];
 };
 
-// trigram needs ≥ 3 chars per query token. Below that, FTS5 returns 0
-// rows; we short-circuit so callers can render a "type more" hint without
-// a round-trip.
+// trigram needs ≥ 3 chars per query token. Below that, FTS5 MATCH returns 0
+// rows, so 1–2 char queries（中文里最常见的「向量」「钱包」、英文缩写「AI」）
+// fall back to a parameterized LIKE scan over the same table — see
+// searchAllLike. Empty / whitespace queries still short-circuit to [].
 const MIN_QUERY_CHARS = 3;
+// LIKE 回退是全表扫描：限制条数，窗口按会话最近更新时间排（没有 bm25 可用）。
+const LIKE_FALLBACK_MAX = 80;
+// 回退片段的上下文窗口（字符数），量级对齐 FTS5 snippet(…, 12) 的观感。
+const LIKE_SNIPPET_BEFORE = 16;
+const LIKE_SNIPPET_AFTER = 28;
 
 // Wrap the user's raw query as a single FTS5 phrase. trigram tokenization
 // makes phrase matching equivalent to substring matching — no boolean /
@@ -2196,48 +2202,121 @@ function buildFtsQuery(raw: string): string | null {
   return `"${escaped}"`;
 }
 
-export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
-  const ftsQuery = buildFtsQuery(rawQuery);
-  if (!ftsQuery) return [];
+// LIKE 模式转义：`\` 本身、`%`、`_` 前加反斜杠，配合 `ESCAPE '\'`。
+export function escapeLikePattern(raw: string): string {
+  return raw.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 
-  const db = getDB();
-  type Row = {
-    source_kind: string;
-    source_id: string;
-    session_id: string;
-    snippet: string;
-    match_text: string;
-    title: string;
-    context_mode: string;
-    workspace_path: string | null;
-    rank: number;
+// 回退路径的片段：在原文里找第一处命中（LIKE 对 ASCII 不分大小写，这里同样按
+// 小写找），截前后窗口，命中处包 <mark>。返回结构与 FTS5 snippet() 一致：
+// snippet 带标记和省略号，matchText 是去掉标记 / 省略号后的原文子串。
+export function likeSnippet(
+  text: string,
+  query: string,
+): { snippet: string; matchText: string } {
+  const lower = text.toLowerCase();
+  let at = lower.indexOf(query.toLowerCase());
+  // toLowerCase 改变长度的罕见字符会让下标错位：退回精确查找，再不行取开头。
+  if (at < 0 || text.slice(at, at + query.length).toLowerCase() !== query.toLowerCase()) {
+    at = text.indexOf(query);
+  }
+  if (at < 0) {
+    const head = text.slice(0, LIKE_SNIPPET_BEFORE + LIKE_SNIPPET_AFTER);
+    return {
+      snippet: head + (text.length > head.length ? "…" : ""),
+      matchText: head,
+    };
+  }
+  const start = Math.max(0, at - LIKE_SNIPPET_BEFORE);
+  const end = Math.min(text.length, at + query.length + LIKE_SNIPPET_AFTER);
+  const before = text.slice(start, at);
+  const hit = text.slice(at, at + query.length);
+  const after = text.slice(at + query.length, end);
+  return {
+    snippet:
+      (start > 0 ? "…" : "") +
+      `${before}<mark>${hit}</mark>${after}` +
+      (end < text.length ? "…" : ""),
+    matchText: before + hit + after,
   };
-  // Two snippet() calls share FTS5's positional offsets: `snippet` is
-  // the display string with <mark> wrappers; `match_text` is the same
-  // window with markers + ellipsis stripped, suitable for handing to the
-  // DOM anchor injector (which needs an exact substring of the rendered
-  // markdown).
-  let rows: Row[];
+}
+
+type SearchRow = {
+  source_kind: string;
+  source_id: string;
+  session_id: string;
+  snippet: string;
+  match_text: string;
+  title: string;
+  context_mode: string;
+  workspace_path: string | null;
+};
+
+// 1–2 字查询的回退：search_index.text 上参数化 LIKE，按会话最近更新排序。
+function searchAllLike(query: string, limit: number): SearchRow[] {
+  const db = getDB();
+  type Raw = Omit<SearchRow, "snippet" | "match_text"> & { text: string };
+  let raws: Raw[];
   try {
-    rows = db
+    raws = db
       .prepare(
-        `SELECT si.source_kind, si.source_id, si.session_id,
-                snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
-                snippet(search_index, 0, '', '', '', 12) AS match_text,
-                s.title, s.context_mode, s.workspace_path,
-                bm25(search_index) AS rank
+        `SELECT si.text, si.source_kind, si.source_id, si.session_id,
+                s.title, s.context_mode, s.workspace_path
          FROM search_index si
          JOIN sessions s ON s.id = si.session_id
-         WHERE search_index MATCH ?
-         ORDER BY rank
+         WHERE si.text LIKE ? ESCAPE '\\'
+         ORDER BY s.updated_at DESC, si.rowid DESC
          LIMIT ?`,
       )
-      .all(ftsQuery, limit) as Row[];
+      .all(
+        `%${escapeLikePattern(query)}%`,
+        Math.min(limit, LIKE_FALLBACK_MAX),
+      ) as Raw[];
   } catch {
-    // Defensive: a malformed escape or rare FTS5 syntax edge case. Treat
-    // as "no results" rather than 500ing the route. The UI will show the
-    // empty state.
     return [];
+  }
+  return raws.map(({ text, ...r }) => {
+    const { snippet, matchText } = likeSnippet(text, query);
+    return { ...r, snippet, match_text: matchText };
+  });
+}
+
+export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return [];
+  const ftsQuery = buildFtsQuery(trimmed);
+
+  let rows: SearchRow[];
+  if (!ftsQuery) {
+    rows = searchAllLike(trimmed, limit);
+  } else {
+    const db = getDB();
+    // Two snippet() calls share FTS5's positional offsets: `snippet` is
+    // the display string with <mark> wrappers; `match_text` is the same
+    // window with markers + ellipsis stripped, suitable for handing to the
+    // DOM anchor injector (which needs an exact substring of the rendered
+    // markdown).
+    try {
+      rows = db
+        .prepare(
+          `SELECT si.source_kind, si.source_id, si.session_id,
+                  snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
+                  snippet(search_index, 0, '', '', '', 12) AS match_text,
+                  s.title, s.context_mode, s.workspace_path,
+                  bm25(search_index) AS rank
+           FROM search_index si
+           JOIN sessions s ON s.id = si.session_id
+           WHERE search_index MATCH ?
+           ORDER BY rank
+           LIMIT ?`,
+        )
+        .all(ftsQuery, limit) as SearchRow[];
+    } catch {
+      // Defensive: a malformed escape or rare FTS5 syntax edge case. Treat
+      // as "no results" rather than 500ing the route. The UI will show the
+      // empty state.
+      return [];
+    }
   }
 
   // Preserve bm25 order (already ASC) when grouping. Sessions surface in
@@ -2601,24 +2680,6 @@ export function listRecentChains(limit = 200): RecentChainRow[] {
 
 export function listSessionChains(sessionId: string, limit = 200): RecentChainRow[] {
   return queryChainRows("s.id = ?", [sessionId], limit);
-}
-
-// 会话内未雪藏的树数 —— 最近分组据此决定链行要不要带树名前缀（单树会话
-// 的树名就是会话标题的另一种说法，前缀是噪音）。
-export function countVisibleTrees(sessionIds: string[]): Map<string, number> {
-  const out = new Map<string, number>();
-  if (sessionIds.length === 0) return out;
-  const db = getDB();
-  const rows = db
-    .prepare(
-      `SELECT session_id, COUNT(*) AS n FROM nodes
-        WHERE parent_id IS NULL AND hidden_at IS NULL
-          AND session_id IN (${sessionIds.map(() => "?").join(",")})
-        GROUP BY session_id`,
-    )
-    .all(...sessionIds) as Array<{ session_id: string; n: number }>;
-  for (const r of rows) out.set(r.session_id, r.n);
-  return out;
 }
 
 function refTitleOf(metaJson: string | null): string | null {

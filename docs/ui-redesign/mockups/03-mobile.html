@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trellis 重设计稿 · 03 手机端</title>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("trellis-mock-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (t === "dark") document.documentElement.classList.add("dark");
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   Trellis UI 重设计 · 克制工具风 · 设计 token（2026-09-28 静态稿）
+
+   用法：本文件是三份静态稿的唯一色值来源（构建时内联进各 HTML）。
+   变量名 = app/globals.css 的现有语义名，**只改取值不改名**；
+   标「新增」的是 globals.css 目前没有、落地时需要补进 :root / .dark
+   和 @theme inline 的变量。
+
+   原则
+   - 中性色承担 95% 的界面；强调色（低饱和蓝紫）只给主按钮 / 选中 / 焦点环。
+   - 状态色（positive / warn / danger）只做 6px 圆点与 1px 细描边，不做大面积填充。
+   - 六个语义拆开撞色（旧版：未读=成功、分叉=警告、Project=危险）：
+       unread   蓝紫偏亮（与强调同族——「等你处理」的提示）   h≈268
+       positive 绿                                              h≈155
+       fork     兰紫 / 洋红（不再用琥珀）                       h≈330
+       warn     琥珀                                            h≈70
+       mode-project 低饱和青（不再用红族）                      h≈195
+       danger   红                                              h≈25
+   - 卡片无阴影，1px ≈10% 描边；只有浮层（下拉、弹窗、树浮窗）用极轻阴影。
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* ── 字体（新增；globals.css 目前走 Tailwind 默认 font-sans） ── */
+  --font-sans: "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* ── 字号（对应 @theme 的 --text-*，整体上调到 13–14px 控件基线） ── */
+  --text-nano: 11px;    /* ← --text-nano（原 10px）：kbd / 角标 */
+  --text-label: 12px;   /* ← --text-label（原 11px）：meta / 时间 / 计数 */
+  --text-ui: 13px;      /* ← --text-ui（原 12.5px）：控件默认 */
+  --text-body: 14px;    /* ← --text-body：画布正文 / 输入框 */
+  --text-reading: 15px; /* ← --text-reading：线性正文 */
+  --text-title: 17px;   /* ← --text-title（原 18px） */
+
+  /* ── 圆角（对应 @theme 的 --radius-*，整体收紧一档） ── */
+  --radius-field: 6px;   /* ← --radius-field（原 8px）：按钮 / 输入 / chip = rounded-md */
+  --radius-card: 8px;    /* ← --radius-card（原 12px）：卡片 / 代码块 */
+  --radius-overlay: 10px;/* ← --radius-overlay（原 16px）：下拉 / 弹窗 / 浮窗 */
+
+  /* ── 尺寸（新增） ── */
+  --control-h: 32px;     /* 新增：所有桌面控件统一 h-8 */
+  --control-h-sm: 26px;  /* 新增：表格行内的次级小按钮 */
+  --touch-min: 44px;     /* 新增：手机热区下限（mobile-verify 依赖 44px） */
+
+  /* ── 表面 ── */
+  --surface-canvas: #fafafa;           /* ← --surface-canvas（原 stone-50） */
+  --surface: #ffffff;                  /* ← --surface */
+  --surface-raised: #ffffff;           /* ← --surface-raised：浮层底 */
+  --surface-muted: #f3f3f4;            /* ← --surface-muted：用户消息块 / 分段器底 */
+  --surface-hover: rgba(0, 0, 0, 0.04);/* 新增：行 hover，替代各处 hover:bg-stone-100 */
+  --scrim: rgba(9, 9, 11, 0.36);       /* ← --scrim（原配 /50 用，这里直接给成品值） */
+
+  /* ── 描边（改成半透明，深浅皮肤都是「约 10%」） ── */
+  --line: rgba(0, 0, 0, 0.09);         /* ← --line：卡片 / 分隔线 */
+  --line-strong: rgba(0, 0, 0, 0.16);  /* ← --line-strong：输入框 / 描边按钮 */
+  --line-faint: rgba(0, 0, 0, 0.05);   /* ← --line-faint：表格行内分隔 */
+
+  /* ── 文字：近黑 + 两档灰 ── */
+  --ink: #1b1b1f;                      /* ← --ink */
+  --ink-strong: #0b0b0d;               /* ← --ink-strong：标题 */
+  --ink-muted: #56565f;                /* ← --ink-muted：灰一档（7.1:1 on #fafafa） */
+  --ink-faint: #74747e;                /* ← --ink-faint：灰二档（4.6:1 on #fafafa，满足 AA） */
+  --ink-inverse: #ffffff;              /* ← --ink-inverse */
+
+  /* ── 强调：唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） ── */
+  --accent: oklch(52% 0.12 277);       /* ← --accent：主按钮底 / 选中指示 */
+  --accent-strong: oklch(46% 0.12 277);/* ← --accent-strong：主按钮 hover */
+  --accent-ink: oklch(42% 0.1 277);    /* ← --accent-ink：淡底上的强调文字 */
+  --accent-muted: oklch(96.5% 0.014 277);/* ← --accent-muted：选中行底 */
+  --accent-line: oklch(84% 0.045 277); /* ← --accent-line：选中描边 */
+  --accent-fg: #ffffff;                /* 新增：主按钮上的文字（深色皮肤不必是 ink-inverse） */
+  --focus-ring: oklch(52% 0.12 277 / 0.35); /* 新增：统一焦点环（2px） */
+
+  /* ── 状态色：只做圆点与细描边 ── */
+  --warn: oklch(72% 0.14 70);          /* ← --warn */
+  --warn-ink: oklch(45% 0.09 60);      /* ← --warn-ink */
+  --warn-muted: oklch(97.5% 0.02 80);  /* ← --warn-muted */
+  --warn-line: oklch(85% 0.08 75);     /* ← --warn-line */
+  --danger: oklch(58% 0.18 25);        /* ← --danger */
+  --danger-strong: oklch(52% 0.18 25); /* ← --danger-strong */
+  --danger-ink: oklch(46% 0.14 25);    /* ← --danger-ink */
+  --danger-muted: oklch(97% 0.012 25); /* ← --danger-muted */
+  --danger-line: oklch(86% 0.05 25);   /* ← --danger-line */
+  --positive: oklch(62% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(42% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(97.5% 0.015 155); /* ← --positive-muted */
+  --positive-line: oklch(85% 0.06 155);/* ← --positive-line */
+
+  /* ── 未读：与「成功」拆开，改用强调同族的亮蓝紫 ── */
+  --unread: oklch(60% 0.13 268);       /* ← --unread（原 emerald，与 positive 撞） */
+  --unread-ink: oklch(44% 0.1 268);    /* ← --unread-ink */
+  --unread-muted: oklch(96.5% 0.016 268); /* ← --unread-muted */
+  --unread-line: oklch(84% 0.05 268);  /* ← --unread-line */
+
+  /* ── 分叉：与「警告」拆开，改兰紫 ── */
+  --fork: oklch(58% 0.11 330);         /* ← --fork（原 amber，与 warn 撞） */
+  --fork-ink: oklch(44% 0.09 330);     /* ← --fork-ink */
+  --fork-muted: oklch(96.5% 0.02 330); /* ← --fork-muted */
+  --fork-line: oklch(84% 0.06 330);    /* ← --fork-line */
+
+  /* ── 模式：Chat 中性灰；Project 改低饱和青（原 rose，与 danger 撞） ── */
+  --mode-chat: #9a9aa3;                /* ← --mode-chat */
+  --mode-chat-ink: #3f3f46;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #f3f3f4;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(0, 0, 0, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(0, 0, 0, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(60% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(42% 0.06 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(97% 0.012 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(85% 0.04 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(70% 0.07 195); /* ← --mode-project-line-strong */
+
+  /* ── 画布 ── */
+  --accent-vivid: oklch(56% 0.13 277); /* ← --accent-vivid */
+  --edge: oklch(84% 0.02 277);         /* ← --edge：连线降到近中性 */
+  --edge-active: oklch(56% 0.12 277);  /* ← --edge-active */
+
+  /* ── 代码：浅色皮肤下代码块也浅（旧「代码块恒暗」待用户确认是否保留） ── */
+  --code-bg: #f6f6f7;                  /* ← --code-bg */
+  --code-ink: #1b1b1f;                 /* ← --code-ink */
+  --code-bar-bg: #f6f6f7;              /* ← --code-bar-bg：与正文同底，靠分隔线区分 */
+  --code-bar-line: rgba(0, 0, 0, 0.07);/* ← --code-bar-line */
+  --code-inline-ink: #1b1b1f;          /* ← --code-inline-ink（原 pink-700，去掉） */
+  --code-inline-bg: rgba(0, 0, 0, 0.05); /* 新增：行内 code 灰底 */
+  --code-comment: #8b8b94;             /* 新增：唯一的语法着色——注释降灰 */
+  --code-add-bg: oklch(62% 0.13 155 / 0.08); /* 新增：diff 新增行底 */
+  --code-del-bg: oklch(58% 0.18 25 / 0.07);  /* 新增：diff 删除行底 */
+
+  /* ── 正文划选标记 ── */
+  --mark-fork-bg: oklch(58% 0.11 330 / 0.12);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(58% 0.11 330 / 0.55); /* ← --mark-fork-line（下划线） */
+  --mark-fork-hover-bg: oklch(58% 0.11 330 / 0.2); /* ← --mark-fork-hover-bg */
+  --mark-fork-ink: inherit;                     /* ← --mark-fork-ink */
+  --mark-fork-pulse-bg: oklch(58% 0.11 330 / 0.3);   /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(58% 0.11 330 / 0.5); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(62% 0.13 155 / 0.1);    /* ← --mark-note-bg */
+  --mark-note-line: oklch(62% 0.13 155 / 0.5);  /* ← --mark-note-line */
+  --mark-note-ink: inherit;                     /* ← --mark-note-ink */
+  --mark-note-pulse-bg: oklch(62% 0.13 155 / 0.25);  /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(62% 0.13 155 / 0.5); /* ← --mark-note-pulse-ring */
+
+  /* ── 层级（新增）：只有浮层有阴影 ── */
+  --shadow-overlay: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px -8px rgba(0, 0, 0, 0.14);
+  --shadow-float: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 14px -6px rgba(0, 0, 0, 0.12);
+  --z-float: 20;   /* 新增：TreePanel 浮窗 */
+  --z-popover: 50; /* 新增：下拉 / 菜单（必须高于 TreePanel，修 d-14 遮挡） */
+  --z-modal: 60;   /* 新增：⌘K / 弹窗 */
+
+  /* ── 动效（新增）：弹层 100ms 淡入 + 0.97 缩放 ── */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface-canvas: #0b0b0c;           /* ← --surface-canvas（原 stone-950） */
+  --surface: #111113;                  /* ← --surface */
+  --surface-raised: #18181b;           /* ← --surface-raised */
+  --surface-muted: #1c1c20;            /* ← --surface-muted */
+  --surface-hover: rgba(255, 255, 255, 0.05); /* 新增 */
+  --scrim: rgba(0, 0, 0, 0.6);         /* ← --scrim */
+
+  --line: rgba(255, 255, 255, 0.09);   /* ← --line */
+  --line-strong: rgba(255, 255, 255, 0.16); /* ← --line-strong */
+  --line-faint: rgba(255, 255, 255, 0.05);  /* ← --line-faint */
+
+  --ink: #e8e8eb;                      /* ← --ink */
+  --ink-strong: #fafafa;               /* ← --ink-strong */
+  --ink-muted: #a3a3ac;                /* ← --ink-muted（8.3:1 on #0b0b0c） */
+  --ink-faint: #7e7e89;                /* ← --ink-faint（4.9:1 on #0b0b0c） */
+  --ink-inverse: #0b0b0c;              /* ← --ink-inverse */
+
+  --accent: oklch(57% 0.12 277);       /* ← --accent */
+  --accent-strong: oklch(62% 0.12 277);/* ← --accent-strong（深色 hover 变亮） */
+  --accent-ink: oklch(80% 0.08 277);   /* ← --accent-ink */
+  --accent-muted: oklch(25% 0.035 277);/* ← --accent-muted */
+  --accent-line: oklch(42% 0.07 277);  /* ← --accent-line */
+  --accent-fg: #ffffff;                /* 新增 */
+  --focus-ring: oklch(68% 0.12 277 / 0.45); /* 新增 */
+
+  --warn: oklch(78% 0.13 75);          /* ← --warn */
+  --warn-ink: oklch(86% 0.09 85);      /* ← --warn-ink */
+  --warn-muted: oklch(25% 0.03 70);    /* ← --warn-muted */
+  --warn-line: oklch(45% 0.07 70);     /* ← --warn-line */
+  --danger: oklch(66% 0.17 25);        /* ← --danger */
+  --danger-strong: oklch(71% 0.15 25); /* ← --danger-strong */
+  --danger-ink: oklch(84% 0.08 25);    /* ← --danger-ink */
+  --danger-muted: oklch(24% 0.04 25);  /* ← --danger-muted */
+  --danger-line: oklch(44% 0.09 25);   /* ← --danger-line */
+  --positive: oklch(72% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(85% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(24% 0.03 155); /* ← --positive-muted */
+  --positive-line: oklch(44% 0.07 155);/* ← --positive-line */
+
+  --unread: oklch(70% 0.12 268);       /* ← --unread */
+  --unread-ink: oklch(84% 0.07 268);   /* ← --unread-ink */
+  --unread-muted: oklch(25% 0.035 268);/* ← --unread-muted */
+  --unread-line: oklch(44% 0.07 268);  /* ← --unread-line */
+
+  --fork: oklch(70% 0.11 330);         /* ← --fork */
+  --fork-ink: oklch(84% 0.07 330);     /* ← --fork-ink */
+  --fork-muted: oklch(25% 0.035 330);  /* ← --fork-muted */
+  --fork-line: oklch(44% 0.07 330);    /* ← --fork-line */
+
+  --mode-chat: #7e7e89;                /* ← --mode-chat */
+  --mode-chat-ink: #d4d4d8;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #1c1c20;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(255, 255, 255, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(255, 255, 255, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(70% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(84% 0.05 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(24% 0.025 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(42% 0.05 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(56% 0.07 195); /* ← --mode-project-line-strong */
+
+  --accent-vivid: oklch(66% 0.12 277); /* ← --accent-vivid */
+  --edge: oklch(34% 0.03 277);         /* ← --edge */
+  --edge-active: oklch(66% 0.12 277);  /* ← --edge-active */
+
+  --code-bg: #141416;                  /* ← --code-bg */
+  --code-ink: #e4e4e7;                 /* ← --code-ink */
+  --code-bar-bg: #141416;              /* ← --code-bar-bg */
+  --code-bar-line: rgba(255, 255, 255, 0.07); /* ← --code-bar-line */
+  --code-inline-ink: #e8e8eb;          /* ← --code-inline-ink */
+  --code-inline-bg: rgba(255, 255, 255, 0.07); /* 新增 */
+  --code-comment: #6f6f7a;             /* 新增 */
+  --code-add-bg: oklch(72% 0.13 155 / 0.1);  /* 新增 */
+  --code-del-bg: oklch(66% 0.17 25 / 0.1);   /* 新增 */
+
+  --mark-fork-bg: oklch(70% 0.11 330 / 0.16);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(70% 0.11 330 / 0.6);  /* ← --mark-fork-line */
+  --mark-fork-hover-bg: oklch(70% 0.11 330 / 0.26); /* ← --mark-fork-hover-bg */
+  --mark-fork-pulse-bg: oklch(70% 0.11 330 / 0.35);  /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(70% 0.11 330 / 0.6); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(72% 0.13 155 / 0.14);   /* ← --mark-note-bg */
+  --mark-note-line: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-line */
+  --mark-note-pulse-bg: oklch(72% 0.13 155 / 0.3);   /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-pulse-ring */
+
+  --shadow-overlay: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 共享原语（落地时对应 shadcn/Radix 组件：Button / Input / Tabs / Tooltip / DropdownMenu / Dialog / Badge / Skeleton） ── */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface-canvas);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "liga", "calt";
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+.muted { color: var(--ink-muted); }
+.faint { color: var(--ink-faint); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* 图标：lucide 1.33（构建时从 lucide-react 抽成 sprite 内联） */
+.i {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.i.sm { width: 14px; height: 14px; }
+.i.xs { width: 12px; height: 12px; stroke-width: 2; }
+.i.lg { width: 18px; height: 18px; }
+
+/* 焦点环：唯一的 2px 蓝紫环 */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Button ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-h); padding: 0 12px;
+  border-radius: var(--radius-field);
+  font-size: var(--text-ui); font-weight: 500; white-space: nowrap;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn-primary { background: var(--accent); color: var(--accent-fg); }
+.btn-primary:hover { background: var(--accent-strong); }
+.btn-outline { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.btn-outline:hover { background: var(--surface-hover); }
+.btn-ghost { color: var(--ink-muted); }
+.btn-ghost:hover { background: var(--surface-hover); color: var(--ink); }
+.btn-danger-outline { border: 1px solid var(--danger-line); color: var(--danger-ink); background: transparent; }
+.btn-danger-outline:hover { background: var(--danger-muted); }
+.btn-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--text-label); }
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: var(--control-h); height: var(--control-h);
+  border-radius: var(--radius-field); color: var(--ink-muted);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
+.icon-btn.sm { width: 26px; height: 26px; }
+
+/* ── Input ── */
+.input {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--control-h); padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-field);
+  background: var(--surface); color: var(--ink-faint);
+}
+.input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: var(--text-ui); }
+.input input::placeholder { color: var(--ink-faint); }
+.input:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* ── Kbd ── */
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border: 1px solid var(--line); border-radius: 4px;
+  font-family: var(--font-mono); font-size: var(--text-nano); color: var(--ink-faint);
+  background: var(--surface);
+}
+
+/* ── Dot（状态色唯一的出场方式之一） ── */
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.dot.positive { background: var(--positive); }
+.dot.warn { background: var(--warn); }
+.dot.danger { background: var(--danger); }
+.dot.unread { background: var(--unread); }
+.dot.fork { background: var(--fork); }
+.dot.project { background: var(--mode-project); }
+.dot.chat { background: var(--mode-chat); }
+.dot.idle { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+.dot.live { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ── Badge（中性底 + 可选状态点；不做彩色实心 badge） ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 7px;
+  border: 1px solid var(--line); border-radius: 5px;
+  font-size: var(--text-label); color: var(--ink-muted); white-space: nowrap;
+}
+.badge.positive { border-color: var(--positive-line); }
+.badge.danger { border-color: var(--danger-line); }
+.badge.warn { border-color: var(--warn-line); }
+
+/* ── Segmented（Tabs 原语） ── */
+.seg {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--surface-muted); border-radius: var(--radius-field);
+}
+.seg button {
+  height: 26px; padding: 0 10px; border-radius: 4px;
+  font-size: var(--text-ui); color: var(--ink-muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-selected="true"] {
+  background: var(--surface); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* ── Popover / Menu（浮层：唯一允许阴影的地方） ── */
+.pop {
+  position: absolute; z-index: var(--z-popover);
+  background: var(--surface-raised); border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay); padding: 4px;
+  opacity: 0; transform: scale(0.97); pointer-events: none;
+  transform-origin: top center;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.pop.open { opacity: 1; transform: none; pointer-events: auto; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: 32px; padding: 0 8px; border-radius: 6px;
+  font-size: var(--text-ui); color: var(--ink); text-align: left;
+}
+.menu-item .i { color: var(--ink-muted); }
+.menu-item:hover, .menu-item.active { background: var(--surface-hover); }
+.menu-item .end { margin-left: auto; color: var(--ink-faint); font-size: var(--text-label); display: inline-flex; gap: 4px; align-items: center; }
+.menu-sep { height: 1px; background: var(--line); margin: 4px -4px; }
+.menu-label { padding: 6px 8px 4px; font-size: var(--text-label); color: var(--ink-faint); }
+
+/* ── Tooltip（hover 触发，纯 CSS） ── */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; top: calc(100% + 6px); transform: translate(-50%, -2px);
+  padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+  background: var(--ink-strong); color: var(--surface-canvas);
+  font-size: var(--text-label); font-weight: 400; line-height: 1.4;
+  opacity: 0; pointer-events: none; z-index: var(--z-modal);
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+[data-tip]:hover::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; }
+[data-tip-pos="top"]::after { top: auto; bottom: calc(100% + 6px); }
+
+/* ── Skeleton ── */
+.sk {
+  background: linear-gradient(90deg, var(--surface-muted) 0%, var(--surface-hover) 50%, var(--surface-muted) 100%);
+  background-size: 200% 100%; border-radius: 4px;
+  animation: sk 1.4s linear infinite;
+}
+@keyframes sk { to { background-position: -200% 0; } }
+
+/* ── Spinner ── */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 滚动条 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+
+/* ── 展示页外壳（非产品 UI） ── */
+body { background: var(--surface-muted); }
+.stagehead { display: flex; align-items: center; gap: 12px; max-width: 1290px; margin: 0 auto; padding: 24px 24px 0; }
+.stagehead h1 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink-strong); }
+.stagehead p { margin: 0; color: var(--ink-faint); font-size: var(--text-ui); }
+.stagehead .icon-btn { margin-left: auto; }
+.phones { display: flex; gap: 32px; justify-content: center; padding: 20px 24px 48px; flex-wrap: wrap; }
+.ph-wrap { display: flex; flex-direction: column; gap: 10px; }
+.ph-cap { font-size: var(--text-ui); color: var(--ink-muted); display: flex; gap: 8px; align-items: center; }
+.ph-cap b { font-weight: 500; color: var(--ink); }
+.phone { position: relative; width: 390px; height: 844px; border-radius: 36px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 8px var(--surface), 0 0 0 9px var(--line); }
+@media (max-width: 500px) {
+  body { background: var(--surface); }
+  .stagehead, .ph-cap { display: none; }
+  .phones { padding: 0; gap: 0; }
+  .phone { border-radius: 0; box-shadow: none; }
+}
+
+/* ── 手机 App ── */
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; font-size: 14px; }
+.status { height: 47px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 28px 0 32px; font-size: 15px; font-weight: 600; color: var(--ink-strong); font-family: var(--font-sans); }
+.status .sys { display: flex; gap: 6px; align-items: center; }
+.status .sys .i { width: 17px; height: 17px; }
+.mhd { height: 48px; flex: none; display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding: 0 4px; border-bottom: 1px solid var(--line); }
+.hit { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; color: var(--ink-muted); }
+.hit:active { background: var(--surface-hover); }
+.mhd .title { text-align: center; min-width: 0; }
+.mhd .title b { display: block; font-size: 15px; font-weight: 600; color: var(--ink-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mhd .title span { display: inline-flex; gap: 5px; align-items: center; font-size: 11.5px; color: var(--ink-faint); }
+.mscroll { flex: 1; overflow-y: auto; padding: 4px 16px 16px; }
+.m-user { background: var(--surface-muted); border-radius: 10px; padding: 10px 12px; font-size: 15px; line-height: 1.6; color: var(--ink-strong); margin-top: 18px; }
+.m-asst { font-size: 15px; line-height: 1.7; color: var(--ink); margin-top: 12px; }
+.m-asst p { margin: 0 0 10px; }
+.m-asst code { font-family: var(--font-mono); font-size: 0.85em; background: var(--code-inline-bg); padding: 1px 4px; border-radius: 4px; }
+.m-asst strong { font-weight: 600; color: var(--ink-strong); }
+.m-trace { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.m-trace .hd { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; font-size: 13px; color: var(--ink-muted); }
+.m-trace .hd b { font-weight: 500; color: var(--ink); }
+.m-trace .hd .r { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); }
+.m-trace .hd .chev { color: var(--ink-faint); transition: transform var(--dur-fast); }
+.m-trace[data-open="true"] .hd .chev { transform: rotate(90deg); }
+.m-trace .bd { border-top: 1px solid var(--line); padding: 2px 0; }
+.m-trace[data-open="false"] .bd { display: none; }
+.m-step { display: grid; grid-template-columns: 16px auto 1fr 14px; gap: 8px; align-items: center; min-height: 40px; padding: 0 12px; font-size: 13px; }
+.m-step .i { color: var(--ink-faint); }
+.m-step .tool { font-weight: 500; color: var(--ink); }
+.m-step .arg { font-family: var(--font-mono); font-size: 12px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-code { border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); margin: 0 0 10px; overflow: hidden; }
+.m-code .bar { height: 32px; display: flex; align-items: center; padding: 0 4px 0 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); border-bottom: 1px solid var(--code-bar-line); }
+.m-code .bar .hit { margin-left: auto; width: 40px; height: 32px; }
+.m-code pre { margin: 0; padding: 8px 10px; font-family: var(--font-mono); font-size: 12px; line-height: 1.65; color: var(--code-ink); overflow-x: auto; }
+.m-code .add { background: var(--code-add-bg); display: block; margin: 0 -10px; padding: 0 10px; }
+.m-approve { margin: 12px 0 4px; border: 1px solid var(--accent-line); border-radius: 10px; padding: 14px; }
+.m-approve .h { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.m-approve .h .i { color: var(--accent); }
+.m-approve .h .tool { font-family: var(--font-mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 4px; }
+.m-approve pre { margin: 10px 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.m-approve .acts { display: flex; flex-direction: column; gap: 8px; }
+.m-approve .btn { height: 44px; font-size: 14px; }
+.m-approve .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.m-run { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--ink-muted); }
+.m-run .t { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); }
+
+.mcomp { flex: none; padding: 6px 10px calc(10px + 20px); border-top: 1px solid var(--line); background: var(--surface); }
+.mcomp .to { display: flex; align-items: center; gap: 5px; padding: 2px 4px 6px; font-size: 11.5px; color: var(--ink-faint); }
+.mcomp .to b { font-weight: 500; color: var(--ink-muted); }
+.mcomp .card { border: 1px solid var(--line-strong); border-radius: 12px; }
+.mcomp textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 10px 12px 2px; font-size: 16px; color: var(--ink); height: 40px; }
+.mcomp textarea::placeholder { color: var(--ink-faint); }
+.mcomp .bar { display: flex; align-items: center; padding: 0 2px 2px 4px; }
+.mcomp .chipbtn { height: 44px; display: inline-flex; align-items: center; padding: 0 4px; }
+.mcomp .chipbtn span.c { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--ink-muted); }
+.mcomp .chipbtn .i { color: var(--ink-faint); }
+.mcomp .send { margin-left: auto; width: 44px; height: 44px; display: grid; place-items: center; }
+.mcomp .send span { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--ink-strong); color: var(--surface); }
+.mcomp .send .i { fill: currentColor; }
+.homebar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: var(--ink-strong); opacity: 0.85; z-index: 30; }
+
+/* 遮罩 + 抽屉 + 底部 sheet */
+.m-scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 10; opacity: 0; pointer-events: none; transition: opacity var(--dur-base); }
+.screen[data-open] .m-scrim { opacity: 1; pointer-events: auto; }
+.drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 318px; z-index: 20; background: var(--surface-canvas); border-right: 1px solid var(--line); display: flex; flex-direction: column; transform: translateX(-102%); transition: transform var(--dur-base) var(--ease-out); }
+.screen[data-open="drawer"] .drawer { transform: none; }
+.drawer .dtop { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 8px; }
+.drawer .brand { display: flex; align-items: center; gap: 8px; height: 44px; padding-left: 4px; }
+.drawer .brand .hit { margin-left: auto; }
+.logo { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, #6366f1 0%, #d946ef 55%, #f59e0b 100%); }
+.drawer .brand b { font-size: 15px; font-weight: 600; color: var(--ink-strong); }
+.drawer .btn { height: 44px; font-size: 14px; }
+.drawer .input { height: 44px; font-size: 14px; }
+.drawer .seg button { height: 38px; flex: 1; justify-content: center; font-size: 13px; }
+.drawer .seg { display: flex; }
+.dtree { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.dlabel { padding: 12px 10px 4px; font-size: 12px; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; }
+.drow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px 0 calc(10px + var(--lv, 0) * 14px); border-radius: 8px; font-size: 14px; color: var(--ink); position: relative; }
+.drow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drow .mt { font-size: 12px; color: var(--ink-faint); display: inline-flex; gap: 4px; align-items: center; }
+.drow .slot { width: 14px; display: grid; place-items: center; color: var(--ink-faint); flex: none; }
+.drow.sel { background: var(--accent-muted); color: var(--accent-ink); }
+.drow.sel::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--accent); }
+.drow.ws { color: var(--ink-muted); font-size: 13px; }
+.drow.ws .i { color: var(--ink-faint); }
+.dfoot { border-top: 1px solid var(--line); padding: 6px 8px 30px; display: flex; }
+.dfoot a, .dfoot button { flex: 1; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px; border-radius: 8px; color: var(--ink-muted); font-size: 14px; }
+
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface-raised); border-radius: 16px 16px 0 0; box-shadow: var(--shadow-overlay); transform: translateY(102%); transition: transform var(--dur-base) var(--ease-out); max-height: 86%; display: flex; flex-direction: column; }
+.screen[data-open="sheet"] .sheet { transform: none; }
+.sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line-strong); margin: 8px auto 0; }
+.sheet .sh { display: flex; align-items: center; padding: 2px 6px 2px 16px; }
+.sheet .sh b { font-size: 15px; font-weight: 600; color: var(--ink-strong); }
+.sheet .sh .hit { margin-left: auto; }
+.sheet .sb { overflow-y: auto; padding: 0 8px 30px; }
+.ctx { margin: 4px 8px 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 10px; }
+.ctx .l { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-muted); }
+.ctx .l .v { margin-left: auto; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+.ctx .bar { height: 4px; border-radius: 2px; background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.ctx .bar i { display: block; height: 100%; width: 62%; background: var(--ink-faint); }
+.ctx .toks { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }
+.sgrp { padding: 10px 12px 4px; font-size: 12px; color: var(--ink-faint); }
+.srow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; border-radius: 8px; font-size: 15px; color: var(--ink); text-align: left; }
+.srow:active { background: var(--surface-hover); }
+.srow .i { color: var(--ink-muted); width: 18px; height: 18px; }
+.srow .end { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-faint); }
+.srow .end .i { width: 16px; height: 16px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-anchor" viewBox="0 0 24 24"><path d="M12 6v16"/><path d="m19 13 2-1a9 9 0 0 1-18 0l2 1"/><path d="M9 11h6"/><circle cx="12" cy="4" r="2"/></symbol><symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol><symbol id="i-battery-full" viewBox="0 0 24 24"><path d="M10 10v4"/><path d="M14 10v4"/><path d="M22 14v-4"/><path d="M6 10v4"/><rect x="2" y="6" width="16" height="12" rx="2"/></symbol><symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></symbol><symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol><symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol><symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol><symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></symbol><symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol><symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol><symbol id="i-file-pen-line" viewBox="0 0 24 24"><path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z"/><path d="M14.487 7.858A1 1 0 0 1 14 7V2"/><path d="M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516"/><path d="M8 18h1"/></symbol><symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol><symbol id="i-folder-git-2" viewBox="0 0 24 24"><path d="M18 19a5 5 0 0 1-5-5v8"/><path d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5"/><circle cx="13" cy="12" r="2"/><circle cx="20" cy="19" r="2"/></symbol><symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol><symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol><symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol><symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol><symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h16"/></symbol><symbol id="i-message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></symbol><symbol id="i-notebook-pen" viewBox="0 0 24 24"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/></symbol><symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol><symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol><symbol id="i-signal" viewBox="0 0 24 24"><path d="M2 20h.01"/><path d="M7 20v-4"/><path d="M12 20v-8"/><path d="M17 20V8"/><path d="M22 4v16"/></symbol><symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/></symbol><symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol><symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol><symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/></symbol><symbol id="i-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol></svg>
+
+<div class="stagehead">
+  <h1>手机端 · 390 × 844</h1>
+  <p>三屏：主对话 · 侧栏抽屉 · 更多功能。每一屏都可点：左上菜单开抽屉、右上更多开 sheet、点遮罩关闭。热区 ≥ 44px。</p>
+  <button class="icon-btn" aria-label="切换主题" data-tip="切换明暗" id="themeBtn"><svg class="i"><use href="#i-sun" id="themeIcon"/></svg></button>
+</div>
+
+<div class="phones">
+  <div class="ph-wrap"><div class="ph-cap"><b>1</b>主对话（等待审批）</div><div class="phone" data-init=""></div></div>
+  <div class="ph-wrap"><div class="ph-cap"><b>2</b>侧栏抽屉</div><div class="phone" data-init="drawer"></div></div>
+  <div class="ph-wrap"><div class="ph-cap"><b>3</b>更多功能</div><div class="phone" data-init="sheet"></div></div>
+</div>
+
+<template id="app">
+  <div class="screen">
+    <div class="status"><span>9:41</span><span class="sys"><svg class="i"><use href="#i-signal"/></svg><svg class="i"><use href="#i-wifi"/></svg><svg class="i"><use href="#i-battery-full"/></svg></span></div>
+    <header class="mhd" data-mobile-header>
+      <button class="hit" aria-label="打开侧栏" data-open-to="drawer" data-mobile-target="open-drawer"><svg class="i lg"><use href="#i-menu"/></svg></button>
+      <div class="title"><b>claude design 为啥效果这么好</b><span><span class="dot project"></span>Project · claude-opus-5-5</span></div>
+      <button class="hit" aria-label="更多功能" data-open-to="sheet" data-mobile-target="open-overflow"><svg class="i lg"><use href="#i-ellipsis"/></svg></button>
+    </header>
+
+    <div class="mscroll">
+      <div class="m-user">那把评估闭环补上：给 prototype-evaluation 加上网页视觉的 rubric，别动已经定稿的结构。</div>
+      <div class="m-trace" data-open="false"><button class="hd" data-mt><svg class="i xs chev"><use href="#i-chevron-right"/></svg><span><b>7 步</b> · Edit, Read, Bash</span><span class="dot danger"></span><span style="font-size:12px">2 失败</span><span class="r">41.2s</span></button>
+        <div class="bd">
+          <div class="m-step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">prototype-evaluation.md</span><svg class="i xs"><use href="#i-check"/></svg></div>
+          <div class="m-step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">sed -n '70,90p' …</span><span class="dot danger"></span></div>
+          <div class="m-step"><svg class="i sm"><use href="#i-file-pen-line"/></svg><span class="tool">Edit</span><span class="arg">+18 −2</span><svg class="i xs"><use href="#i-check"/></svg></div>
+        </div>
+      </div>
+      <div class="m-asst">
+        <p>补好了。三处 Edit 都落在 <code>prototype-evaluation.md</code>，没动已定稿的结构：</p>
+        <div class="m-code"><div class="bar">prototype-evaluation.md<button class="hit" aria-label="复制代码"><svg class="i sm"><use href="#i-copy"/></svg></button></div>
+<pre><span class="add">+ ### H1–H5（网页视觉，自包含）</span><span class="add">+ - H1 层级：主次操作一眼可分</span><span class="add">+ - H2 克制：同屏饱和色 ≤ 2</span></pre></div>
+      </div>
+
+      <div class="m-user">跑一下 web_review.py 验证一遍，过了就 commit。</div>
+      <div class="m-trace" data-open="true"><button class="hd" data-mt><svg class="i xs chev"><use href="#i-chevron-right"/></svg><span><b>3 步</b> · Read, Bash</span><span class="r">8.7s</span></button>
+        <div class="bd">
+          <div class="m-step"><svg class="i sm"><use href="#i-file-text"/></svg><span class="tool">Read</span><span class="arg">web_review.py</span><svg class="i xs"><use href="#i-check"/></svg></div>
+          <div class="m-step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">uv run python web_review.py</span><svg class="i xs"><use href="#i-check"/></svg></div>
+          <div class="m-step"><svg class="i sm"><use href="#i-square-terminal"/></svg><span class="tool">Bash</span><span class="arg">git commit -am "docs…"</span><svg class="i xs" style="color:var(--accent)"><use href="#i-hand"/></svg></div>
+        </div>
+      </div>
+      <div class="m-asst">
+        <p>验证通过：H1–H5 全部命中。准备提交——</p>
+        <div class="m-approve" data-mobile-interaction>
+          <div class="h"><svg class="i"><use href="#i-shield-check"/></svg><b style="font-weight:500">需要你批准</b><span class="tool">Bash</span></div>
+          <pre>git commit -am "docs(ui-explorer): 补网页视觉 rubric H1–H5"</pre>
+          <div class="acts">
+            <button class="btn btn-primary" data-mobile-target="permission-allow">允许一次</button>
+            <div class="row2">
+              <button class="btn btn-outline" data-mobile-target="permission-deny">拒绝</button>
+              <button class="btn btn-ghost" data-mobile-target="permission-always">总是允许</button>
+            </div>
+          </div>
+        </div>
+        <div class="m-run"><span class="dot live"></span>等待你批准<span class="t">42s</span></div>
+      </div>
+    </div>
+
+    <div class="mcomp" data-mobile-composer>
+      <div class="to"><svg class="i xs"><use href="#i-git-branch"/></svg>发送到：<b>评估闭环</b><span class="mono">#9</span></div>
+      <div class="card">
+        <textarea placeholder="继续对话…" rows="1"></textarea>
+        <div class="bar">
+          <button class="chipbtn" aria-label="模式"><span class="c"><span class="dot project"></span>Project</span></button>
+          <button class="chipbtn" aria-label="模型"><span class="c"><svg class="i sm"><use href="#i-cpu"/></svg><span class="mono" style="font-size:12px">opus-5-5</span></span></button>
+          <button class="hit" aria-label="添加附件"><svg class="i"><use href="#i-paperclip"/></svg></button>
+          <button class="send" aria-label="停止生成"><span><svg class="i sm"><use href="#i-square"/></svg></span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="m-scrim" data-close></div>
+
+    <!-- 抽屉 -->
+    <aside class="drawer" aria-label="会话导航">
+      <div style="height:47px;flex:none"></div>
+      <div class="dtop">
+        <div class="brand"><span class="logo"></span><b>Trellis</b><button class="hit" aria-label="关闭侧栏" data-close><svg class="i lg"><use href="#i-x"/></svg></button></div>
+        <button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>新会话</button>
+        <label class="input"><svg class="i sm"><use href="#i-search"/></svg><input placeholder="筛选会话"></label>
+        <div class="seg"><button aria-selected="true">按项目</button><button aria-selected="false">按时间</button></div>
+      </div>
+      <div class="dtree">
+        <div class="dlabel"><svg class="i sm"><use href="#i-folder-git-2"/></svg>.claude</div>
+        <div class="drow ws" style="--lv:0"><svg class="i sm"><use href="#i-git-branch"/></svg><span class="nm">.claude</span><span class="mt mono">main</span></div>
+        <div class="drow" style="--lv:1"><span class="slot"><span class="dot unread"></span></span><span class="nm">pvncher 推文</span><span class="mt"><svg class="i xs"><use href="#i-anchor"/></svg></span></div>
+        <div class="drow" style="--lv:1"><span class="slot"></span><span class="nm">Hook 拦截问题</span><span class="mt"><svg class="i xs"><use href="#i-anchor"/></svg></span></div>
+        <div class="drow" style="--lv:1"><span class="slot"><svg class="i xs"><use href="#i-chevron-down"/></svg></span><span class="nm" style="font-weight:500">harness</span><span class="mt">4 个话题</span></div>
+        <div class="drow sel" style="--lv:2"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="nm">claude design 为啥效果这么好</span><span class="mt">9 节</span></div>
+        <div class="drow" style="--lv:2"><span class="slot"></span><span class="nm">关于调研文，是不是也需要</span><span class="mt">6/10</span></div>
+        <div class="dlabel"><svg class="i sm"><use href="#i-folder-git-2"/></svg>trellis</div>
+        <div class="drow ws" style="--lv:0"><svg class="i sm"><use href="#i-git-branch"/></svg><span class="nm">trellis</span><span class="mt mono">main</span></div>
+        <div class="drow" style="--lv:1"><span class="slot"><svg class="i xs spin"><use href="#i-loader-circle"/></svg></span><span class="nm">Trellis UI 重设计</span><span class="mt"><svg class="i xs"><use href="#i-anchor"/></svg></span></div>
+        <div class="drow" style="--lv:1"><span class="slot"><span class="dot unread"></span></span><span class="nm">仓库日报（定时）</span><span class="mt"><svg class="i xs"><use href="#i-calendar-clock"/></svg>2</span></div>
+        <div class="drow" style="--lv:1"><span class="slot"></span><span class="nm">fj-ship-3f07</span><span class="mt">外部</span></div>
+        <div class="dlabel"><svg class="i sm"><use href="#i-message-square"/></svg>对话</div>
+        <div class="drow" style="--lv:0"><span class="slot"></span><span class="nm">讲讲 web3 L2 生态和原理</span><span class="mt">55 节</span></div>
+      </div>
+      <div class="dfoot">
+        <a href="02-settings.html"><svg class="i"><use href="#i-settings"/></svg>设置</a>
+        <button><svg class="i"><use href="#i-archive"/></svg>已归档 12</button>
+      </div>
+    </aside>
+
+    <!-- 更多功能 sheet -->
+    <section class="sheet" role="dialog" aria-label="更多功能" data-mobile-overflow-menu>
+      <div class="grab"></div>
+      <div class="sh"><b>更多功能</b><button class="hit" aria-label="关闭" data-close><svg class="i lg"><use href="#i-x"/></svg></button></div>
+      <div class="sb">
+        <div class="ctx">
+          <div class="l"><svg class="i sm"><use href="#i-gauge"/></svg>上下文<span class="v mono">124k / 200k · 62%</span></div>
+          <div class="bar"><i></i></div>
+          <div class="toks"><span>输入 360.6k</span><span>输出 196.2k</span><span>缓存 9.31M</span></div>
+        </div>
+        <div class="sgrp">当前会话</div>
+        <button class="srow"><svg class="i"><use href="#i-folder-git-2"/></svg>模式<span class="end">Project<svg class="i"><use href="#i-chevron-right"/></svg></span></button>
+        <button class="srow"><svg class="i"><use href="#i-cpu"/></svg>模型<span class="end mono" style="font-size:12px">claude-opus-5-5<svg class="i"><use href="#i-chevron-right"/></svg></span></button>
+        <button class="srow" data-mobile-tree-sheet><svg class="i"><use href="#i-git-branch"/></svg>会话树<span class="end">16 节点<svg class="i"><use href="#i-chevron-right"/></svg></span></button>
+        <button class="srow"><svg class="i"><use href="#i-workflow"/></svg>画布视图</button>
+        <button class="srow"><svg class="i"><use href="#i-notebook-pen"/></svg>笔记</button>
+        <button class="srow"><svg class="i"><use href="#i-download"/></svg>导出<span class="end">Markdown / JSON<svg class="i"><use href="#i-chevron-right"/></svg></span></button>
+        <div class="sgrp">全局</div>
+        <button class="srow"><svg class="i"><use href="#i-search"/></svg>搜索</button>
+        <button class="srow"><svg class="i"><use href="#i-bookmark"/></svg>稍后再读<span class="end">3</span></button>
+        <button class="srow"><svg class="i"><use href="#i-calendar-clock"/></svg>定时任务<span class="end"><svg class="i"><use href="#i-chevron-right"/></svg></span></button>
+        <button class="srow" data-theme-row><svg class="i"><use href="#i-sun-moon"/></svg>主题<span class="end" data-theme-label>浅色</span></button>
+        <a class="srow" href="02-settings.html"><svg class="i"><use href="#i-settings"/></svg>设置<span class="end"><svg class="i"><use href="#i-chevron-right"/></svg></span></a>
+      </div>
+    </section>
+    <div class="homebar"></div>
+  </div>
+</template>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const root = document.documentElement;
+function syncTheme() {
+  const d = root.classList.contains("dark");
+  $("#themeIcon").setAttribute("href", d ? "#i-moon" : "#i-sun");
+  $$("[data-theme-label]").forEach(x => x.textContent = d ? "深色" : "浅色");
+}
+function toggleTheme() { root.classList.toggle("dark"); localStorage.setItem("trellis-mock-theme", root.classList.contains("dark") ? "dark" : "light"); syncTheme(); }
+$("#themeBtn").onclick = toggleTheme;
+
+const tpl = $("#app");
+$$(".phone").forEach(ph => {
+  ph.appendChild(tpl.content.cloneNode(true));
+  const sc = ph.querySelector(".screen");
+  if (ph.dataset.init) sc.dataset.open = ph.dataset.init;
+  if (ph.dataset.init) sc.querySelector(".mscroll").scrollTop = 0;
+  sc.addEventListener("click", (e) => {
+    const o = e.target.closest("[data-open-to]"); if (o) { sc.dataset.open = o.dataset.openTo; return; }
+    if (e.target.closest("[data-close]")) { delete sc.dataset.open; return; }
+    const t = e.target.closest("[data-mt]"); if (t) { const tr = t.closest(".m-trace"); tr.dataset.open = tr.dataset.open === "true" ? "false" : "true"; }
+    if (e.target.closest("[data-theme-row]")) toggleTheme();
+  });
+});
+syncTheme();
+/* 主对话屏滚到底，看审批卡 */
+requestAnimationFrame(() => $$(".phone .mscroll").forEach(s => s.scrollTop = s.scrollHeight));
+</script>
+</body>
+</html>

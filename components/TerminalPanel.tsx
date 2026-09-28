@@ -1,7 +1,17 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { IconButton } from "@/components/ui/IconButton";
+import { ChevronDown, Pin, PinOff, Plus, SquareTerminal, X } from "lucide-react";
+import {
+  Button,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  Kbd,
+  Spinner,
+  toast,
+  useConfirm,
+} from "@/components/ui";
 
 // S1 P1（progress/project-workspace-layer.md）：工作区终端，IDE 式底部分栏。
 //
@@ -72,6 +82,8 @@ export function TerminalPanel() {
   const [installing, setInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const confirm = useConfirm();
 
   const open = Boolean(workspaceId && openSet.has(workspaceId));
 
@@ -153,11 +165,21 @@ export function TerminalPanel() {
 
   const addTerminal = useCallback(async () => {
     if (!workspaceId) return;
-    const r = await fetch("/api/terminals", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId }),
-    }).then((x) => x.json());
+    setCreating(true);
+    let r;
+    try {
+      r = await fetch("/api/terminals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId }),
+      }).then((x) => x.json());
+    } catch (e) {
+      toast.error("新建终端失败", { description: "连不上 Trellis 服务，检查服务是否在运行后重试。" });
+      console.error("[trellis] create terminal failed:", e);
+      return;
+    } finally {
+      setCreating(false);
+    }
     if (r.platform) setPlatform(r.platform);
     if (r.arch) setArch(r.arch);
     if (r.error && !r.ready) {
@@ -214,7 +236,7 @@ export function TerminalPanel() {
           // 堆一地 session。创建必须是显式的。
         })
         .catch(() => {
-          if (!signal?.cancelled) setError("拉取终端列表失败");
+          if (!signal?.cancelled) setError("读取终端列表失败");
           return null;
         });
     },
@@ -269,10 +291,21 @@ export function TerminalPanel() {
   }, [retryTerminals]);
 
   const closeTerminal = useCallback(
-    async (s: string) => {
-      await fetch(`/api/terminals?session=${encodeURIComponent(s)}`, {
-        method: "DELETE",
+    async (s: string, index: number) => {
+      const ok = await confirm({
+        title: `结束终端 ${index}？`,
+        description: "终端里正在跑的进程和命令历史都会丢失。只是不想看的话，点右上角「收起」即可。",
+        confirmLabel: "结束终端",
+        danger: true,
       });
+      if (!ok) return;
+      const res = await fetch(`/api/terminals?session=${encodeURIComponent(s)}`, {
+        method: "DELETE",
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        toast.error("结束终端失败", { description: "稍后重试；终端仍在运行。" });
+        return;
+      }
       setTerminals((prev) => {
         const next = (prev ?? []).filter((t) => t.session !== s);
         setActiveSession((cur) =>
@@ -281,7 +314,7 @@ export function TerminalPanel() {
         return next;
       });
     },
-    [],
+    [confirm],
   );
 
   // 拖拽调高。鼠标可能划过 iframe，那会把 mousemove 吞掉 —— 拖拽期间给
@@ -324,15 +357,14 @@ export function TerminalPanel() {
       <button
         onClick={toggleOpen}
         title="打开终端（⌃`）"
+        aria-label="打开终端"
         // bottom 走常量而不是 bottom-[88px]：它和 --trellis-term-stack 是同一个
         // 数，写两处必然漂。
         style={{ bottom: FLOAT_BOTTOM }}
         className="hidden md:flex fixed right-4 z-40 items-center gap-1.5 h-7 px-2.5 rounded-full bg-surface/90 backdrop-blur border border-line shadow-raise text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
       >
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M4 17l6-5-6-5M12 19h8" />
-        </svg>
-        <span className="text-nano opacity-70">⌃`</span>
+        <Icon icon={SquareTerminal} size="sm" />
+        <Kbd>⌃`</Kbd>
       </button>
     );
   }
@@ -379,32 +411,30 @@ export function TerminalPanel() {
         {(terminals ?? []).map((t) => (
           <div
             key={t.session}
-            className={`group flex items-center gap-1 h-6 pl-2 pr-1 rounded-md text-label cursor-pointer ${
+            className={`group flex items-center gap-0.5 h-7 pl-2 pr-0.5 rounded-field text-label cursor-pointer ${
               t.session === activeSession
                 ? "bg-surface-muted text-ink-strong"
-                : "text-ink-muted hover:bg-surface-muted"
+                : "text-ink-muted hover:bg-surface-hover"
             }`}
             onClick={() => setActiveSession(t.session)}
-            title={t.session}
           >
-            <span>bash {t.index}</span>
-            <button
+            <span>终端 {t.index}</span>
+            <IconButton
+              label={`结束终端 ${t.index}`}
+              size="sm"
+              tone="danger"
               onClick={(e) => {
                 e.stopPropagation();
-                void closeTerminal(t.session);
+                void closeTerminal(t.session, t.index);
               }}
-              title="结束这个终端（kill-session，shell 状态会丢；只是不想看就用右上角收起）"
-              aria-label="关闭终端"
-              className="opacity-0 group-hover:opacity-100 px-1 rounded hover:bg-danger-muted hover:text-danger"
+              className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
-              ✕
-            </button>
+              <Icon icon={X} size="sm" />
+            </IconButton>
           </div>
         ))}
-        <IconButton label="新建终端" title="新建终端" size="sm" onClick={addTerminal}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+        <IconButton label="新建终端" size="sm" onClick={addTerminal} disabled={creating}>
+          {creating ? <Spinner size="sm" label={null} /> : <Icon icon={Plus} size="sm" />}
         </IconButton>
         <span className="ml-auto truncate text-nano text-ink-faint" title={cwd ?? ""}>
           {cwd}
@@ -415,77 +445,62 @@ export function TerminalPanel() {
           size="sm"
           onClick={togglePin}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            {pinned ? (
-              <>
-                <path d="M4 20 L20 4" />
-                <path d="M9 4h6l-1 6 4 3v2H6v-2l4-3z" />
-              </>
-            ) : (
-              <path d="M9 4h6l-1 6 4 3v2h-5v5l-1 2-1-2v-5H6v-2l4-3z" />
-            )}
-          </svg>
+          <Icon icon={pinned ? PinOff : Pin} size="sm" />
         </IconButton>
-        <IconButton label="收起终端" title="收起终端（⌃`）" size="sm" onClick={toggleOpen}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
+        <IconButton label="收起终端" shortcut="⌃`" size="sm" onClick={toggleOpen}>
+          <Icon icon={ChevronDown} size="sm" />
         </IconButton>
       </div>
 
       {/* 主体 */}
       <div className="flex-1 min-h-0 relative">
         {error && !ready ? (
-          <div className="p-3 space-y-2">
-            <div className="text-label text-danger">终端不可用：{error}</div>
-            {errorDetail && (
-              <details className="text-nano text-ink-faint">
-                <summary className="cursor-pointer hover:text-ink-muted">探测详情</summary>
-                <div className="mt-1 font-mono break-all whitespace-pre-wrap">
-                  {errorDetail}
-                </div>
-              </details>
-            )}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={retryTerminals}
-                disabled={retrying || installing}
-                className="h-7 px-2.5 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
-              >
-                {retrying ? "重试中…" : "重试"}
-              </button>
-              {platform === "linux" && (
-                <button
-                  onClick={handleInstallTtyd}
-                  disabled={retrying || installing}
-                  className="h-7 px-2.5 rounded-md bg-accent text-ink-inverse text-label font-medium hover:opacity-90 disabled:opacity-50"
-                >
-                  {installing ? "正在安装…" : arch ? `自动安装 ttyd (${arch})` : "自动安装 ttyd"}
-                </button>
-              )}
-            </div>
+          <div className="p-3 space-y-2 overflow-y-auto h-full">
+            {/* 服务端的 error 是一句人话（缺 ttyd / 端口被占…），当「怎么办」那行；
+                探测证据（探了哪些路径、各自为什么不行）收进「详情」。 */}
+            <ErrorCallout
+              compact
+              error={errorDetail ?? error}
+              title="终端不可用"
+              hint={error}
+              action={
+                <>
+                  <Button size="sm" onClick={() => void retryTerminals()} loading={retrying} disabled={retrying || installing}>
+                    重试
+                  </Button>
+                  {platform === "linux" && (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void handleInstallTtyd()}
+                      loading={installing}
+                      disabled={retrying || installing}
+                    >
+                      {arch ? `自动安装 ttyd（${arch}）` : "自动安装 ttyd"}
+                    </Button>
+                  )}
+                </>
+              }
+            />
             {installMessage && (
-              <div className="text-nano text-ink-muted">
+              <div className="text-label text-ink-muted" role="status">
                 {installMessage}
               </div>
             )}
           </div>
         ) : terminals === null ? (
-          <div className="p-3 text-label text-ink-faint italic">准备中…</div>
+          <div className="h-full flex items-center justify-center">
+            <Spinner label="正在准备终端" />
+          </div>
         ) : !ready || !activeSession ? (
           // 空态是个真入口，不是一句干瞪眼的「没有终端」—— 创建现在是显式的，
           // 那这里就得把「怎么创建」摆在手边。
           <div className="h-full flex flex-col items-center justify-center gap-2">
-            <button
-              onClick={addTerminal}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-accent text-ink-inverse text-label font-medium hover:opacity-90"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+            <Button variant="primary" onClick={() => void addTerminal()} loading={creating}>
+              {!creating && <Icon icon={Plus} size="sm" />}
               新建终端
-            </button>
-            <div className="text-nano text-ink-faint">
+            </Button>
+            <div className="text-label font-mono text-ink-faint">
               {cwd ?? ""}
             </div>
           </div>

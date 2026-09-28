@@ -62,6 +62,8 @@ ab set viewport 390 844
 ab snapshot -i
 ab fill '#pw' as-adopt-pass
 ab click 'button[type="submit"]'
+# 登录页 fetch 成功后自己 location.href 跳走；不等它就 ab open 会被这次跳转打断（ERR_ABORTED）
+wait_js 'login redirected' "location.pathname !== '/login'"
 ab open "$BASE/?session=$SID&node=$NODE"
 wait_js 'adopted conversation rendered in home' "Boolean(document.querySelector('[data-as-project=\"$NODE\"]')) && document.body.innerText.includes('外部线程回复') && document.body.innerText.includes('外部会话')"
 wait_js 'external permission is read only' "Boolean(document.querySelector('[data-as-permission]')) && !document.querySelector('select[data-as-permission]') && !document.body.innerText.includes('Shift+Tab 切换')"

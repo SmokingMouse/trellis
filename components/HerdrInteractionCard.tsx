@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  CircleCheck,
+  MessageCircleQuestion,
+  ShieldCheck,
+  Square,
+  SquareCheck,
+  SquareTerminal,
+} from "lucide-react";
+import { Button, Icon } from "@/components/ui";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 
@@ -139,10 +149,11 @@ export function HerdrInteractionCard({
       <div
         data-herdr-card
         data-herdr-card-state="answered"
-        className={`${compact ? "mx-2 mb-2 px-3 py-2" : "px-4 py-3 max-md:px-3"} rounded-card border border-positive-line bg-positive-muted text-sm text-positive-ink`}
+        className={`${compact ? "mx-2 mb-2 px-3 py-2" : "px-3.5 py-2.5 max-md:px-3"} flex items-center gap-2 rounded-card border border-line bg-surface text-ui text-ink-muted`}
         aria-live="polite"
       >
-        ✓ 已回答，等待 Herdr 确认…
+        <Icon icon={CircleCheck} size="sm" className="text-positive" />
+        已回答，等待 Herdr 确认…
       </div>
     );
   }
@@ -170,17 +181,27 @@ export function HerdrInteractionCard({
     <div
       data-herdr-card
       data-herdr-card-kind={codexBlocked ? "terminal" : approvalPrompt ? "permission" : "question"}
-      className={`${compact ? "mx-2 mb-2 p-2.5" : "p-4 max-md:p-3"} rounded-card border-2 border-warn-line bg-warn-muted text-warn-ink shadow-raise`}
+      className={`${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`}
     >
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <span aria-hidden>{codexBlocked ? "⌨" : approvalPrompt ? "🔐" : "🙋"}</span>
-        {codexBlocked
-          ? "终端在等你"
-          : approvalPrompt
-            ? `${approvalPrompt.tool} 请求权限`
-            : "Herdr 正在等你回答"}
+      <div className="flex items-center gap-2 text-ui">
+        <Icon
+          icon={codexBlocked ? SquareTerminal : approvalPrompt ? ShieldCheck : MessageCircleQuestion}
+          className="text-accent"
+        />
+        {approvalPrompt && !codexBlocked ? (
+          <>
+            <span className="font-medium">需要你批准</span>
+            <span className="rounded-sm border border-line-strong px-1.5 font-mono text-label">
+              {approvalPrompt.tool}
+            </span>
+          </>
+        ) : (
+          <span className="font-medium">
+            {codexBlocked ? "终端在等你" : "Herdr 正在等你回答"}
+          </span>
+        )}
         {questions.length > 1 && (
-          <span className="ml-auto text-label font-normal tabular-nums">
+          <span className="ml-auto text-label text-ink-faint tabular-nums">
             {Math.min(step + 1, questions.length)}/{questions.length}
           </span>
         )}
@@ -189,7 +210,7 @@ export function HerdrInteractionCard({
       {question && (
         <div className="mt-2" data-herdr-question>
           {typeof question.header === "string" && question.header && (
-            <div className="text-label opacity-70">{question.header}</div>
+            <div className="text-label text-ink-faint">{question.header}</div>
           )}
           <div className="text-sm font-medium">
             {typeof question.question === "string"
@@ -210,10 +231,22 @@ export function HerdrInteractionCard({
                   const sent = await sendKeys([String(index + 1)], final, !multiSelect && !final);
                   if (sent && multiSelect) setSelected(current => current.includes(index) ? current.filter(item => item !== index) : [...current, index]);
                 }}
-                className="min-h-11 rounded-field border border-warn-line bg-surface px-3 py-2 text-left text-sm text-ink disabled:opacity-60"
+                className={`min-h-11 rounded-field border px-3 py-2 text-left text-ui text-ink transition-colors hover:bg-surface-hover disabled:opacity-60 ${
+                  multiSelect && selected.includes(index)
+                    ? "border-accent-line bg-accent-muted"
+                    : "border-line bg-surface"
+                }`}
               >
-                <span className="mr-1.5 font-mono text-label text-ink-faint">
-                  {multiSelect ? (selected.includes(index) ? "☑" : "☐") : index + 1}
+                <span className="mr-1.5 inline-flex align-middle font-mono text-label text-ink-faint">
+                  {multiSelect ? (
+                    <Icon
+                      icon={selected.includes(index) ? SquareCheck : Square}
+                      size="sm"
+                      className={selected.includes(index) ? "text-accent" : undefined}
+                    />
+                  ) : (
+                    index + 1
+                  )}
                 </span>
                 <span className="font-medium">
                   {typeof option.label === "string"
@@ -231,51 +264,55 @@ export function HerdrInteractionCard({
             ))}
           </div>
           {multiSelect && (
-            <button type="button" data-herdr-multi-next data-mobile-target="herdr-multi-next"
+            <Button type="button" variant="primary" data-herdr-multi-next data-mobile-target="herdr-multi-next"
               disabled={answerState === "sending"}
               onClick={() => void sendKeys(["right"], false, true)}
-              className="mt-2 min-h-11 w-full rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60">
+              className="mt-2 min-h-11 w-full">
               {step >= questions.length - 1 ? "确认所选项" : "下一题"}
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       {reviewing && (
-        <button type="button" data-herdr-submit-answers data-mobile-target="herdr-submit-answers"
+        <Button type="button" variant="primary" data-herdr-submit-answers data-mobile-target="herdr-submit-answers"
           disabled={answerState === "sending"}
           onClick={() => void sendKeys(["Enter"])}
-          className="mt-2 min-h-11 w-full rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60">
+          className="mt-2 min-h-11 w-full">
+          <Icon icon={Check} size="sm" />
           提交回答
-        </button>
+        </Button>
       )}
 
       {approvalPrompt && (
         <div className="mt-2">
           {approvalPrompt.summary && (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface/70 p-2 text-label text-ink">
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-field border border-line bg-surface-muted px-3 py-2 font-mono text-label text-ink">
               {approvalPrompt.summary}
             </pre>
           )}
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
+          {/* Herdr 只能发按键：「1」放行、Escape 取消——没有理由输入。 */}
+          <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
+            <Button
               type="button"
+              variant="primary"
               data-mobile-target="herdr-permission-allow"
               disabled={answerState === "sending"}
               onClick={() => void sendKeys(["1"])}
-              className="min-h-11 rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60"
+              className="min-h-11 sm:min-h-8 sm:min-w-36"
             >
               允许
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
               data-mobile-target="herdr-permission-deny"
               disabled={answerState === "sending"}
               onClick={() => void sendKeys(["Escape"])}
-              className="min-h-11 rounded-field bg-danger px-3 text-sm font-semibold text-ink-inverse disabled:opacity-60"
+              className="min-h-11 sm:min-h-8"
             >
               拒绝
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -284,7 +321,7 @@ export function HerdrInteractionCard({
         <div className="mt-2">
           <pre
             data-herdr-screen
-            className={`${compact ? "max-h-36" : "max-h-64"} overflow-auto whitespace-pre-wrap break-words rounded-md bg-[#111827] p-3 font-mono text-[11px] leading-4 text-[#d1d5db]`}
+            className={`${compact ? "max-h-36" : "max-h-64"} code-surface overflow-auto whitespace-pre-wrap break-words rounded-field p-3 font-mono text-nano`}
           >
             {screenError
               ? "读屏暂不可用"
@@ -298,7 +335,7 @@ export function HerdrInteractionCard({
                   type="button"
                   data-mobile-target="herdr-terminal-key"
                   onClick={() => void sendKeys([key], false)}
-                  className="min-h-11 rounded-field border border-warn-line bg-surface font-mono text-sm text-ink"
+                  className="min-h-11 rounded-field border border-line bg-surface font-mono text-ui text-ink transition-colors hover:bg-surface-hover"
                 >
                   {key}
                 </button>
@@ -308,7 +345,7 @@ export function HerdrInteractionCard({
               type="button"
               data-mobile-target="herdr-terminal-enter"
               onClick={() => void sendKeys(["Enter"])}
-              className="col-span-3 min-h-11 rounded-field bg-positive px-2 text-sm font-semibold text-ink-inverse"
+              className="col-span-3 min-h-11 rounded-field bg-accent px-2 text-ui font-medium text-accent-fg transition-colors hover:bg-accent-strong"
             >
               Enter
             </button>
@@ -316,7 +353,7 @@ export function HerdrInteractionCard({
               type="button"
               data-mobile-target="herdr-terminal-escape"
               onClick={() => void sendKeys(["Escape"])}
-              className="col-span-3 min-h-11 rounded-field bg-danger px-2 text-sm font-semibold text-ink-inverse"
+              className="col-span-3 min-h-11 rounded-field border border-line-strong bg-surface px-2 text-ui font-medium text-ink transition-colors hover:bg-surface-hover"
             >
               Esc
             </button>
@@ -330,7 +367,7 @@ export function HerdrInteractionCard({
             type="button"
             data-mobile-target="herdr-generic-enter"
             onClick={() => void sendKeys(["Enter"])}
-            className="min-h-11 flex-1 rounded-field bg-positive px-3 text-sm font-semibold text-ink-inverse"
+            className="min-h-11 flex-1 rounded-field bg-accent px-3 text-ui font-medium text-accent-fg transition-colors hover:bg-accent-strong"
           >
             Enter
           </button>
@@ -338,7 +375,7 @@ export function HerdrInteractionCard({
             type="button"
             data-mobile-target="herdr-generic-escape"
             onClick={() => void sendKeys(["Escape"])}
-            className="min-h-11 flex-1 rounded-field bg-danger px-3 text-sm font-semibold text-ink-inverse"
+            className="min-h-11 flex-1 rounded-field border border-line-strong bg-surface px-3 text-ui font-medium text-ink transition-colors hover:bg-surface-hover"
           >
             Esc
           </button>
@@ -346,7 +383,7 @@ export function HerdrInteractionCard({
       )}
 
       {answerState === "error" && (
-        <div className="mt-2 text-label text-danger">按键发送失败，请重试</div>
+        <div className="mt-2 text-label text-danger-ink">按键发送失败，请重试</div>
       )}
     </div>
   );

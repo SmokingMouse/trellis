@@ -8,7 +8,9 @@ import {
 } from "@xyflow/react";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
-import { refIcon, refSourceLabel } from "@/lib/ref-icon";
+import { refIconKey, refSourceLabel } from "@/lib/ref-icon";
+import { Icon, RefIcon } from "@/components/ui/Icon";
+import { TriangleAlert } from "lucide-react";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
@@ -116,7 +118,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
       )}
       <div className="px-4 py-3 flex items-start gap-2.5">
         <span className="shrink-0 text-title leading-none mt-0.5" aria-hidden>
-          {isStreaming ? <Spinner /> : refIcon(ref)}
+          {isStreaming ? <Spinner /> : <RefIcon name={refIconKey(ref)} size="lg" />}
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-reading font-semibold text-ink-strong leading-tight truncate">
@@ -142,8 +144,9 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
               {fetchProgress || "启动中…"}
             </div>
           ) : fetchError ? (
-            <div className="mt-1 text-label text-danger truncate">
-              ⚠️ {fetchError}
+            <div className="mt-1 flex items-center gap-1 text-label text-danger">
+              <Icon icon={TriangleAlert} size="sm" className="shrink-0" />
+              <span className="truncate">{fetchError}</span>
             </div>
           ) : (
             <div className="mt-1 text-label text-ink-faint tabular-nums">
@@ -159,7 +162,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
         {isStreaming ? (
           <button
             onClick={onCancel}
-            className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-danger-muted hover:text-danger-ink active:scale-95 transition-colors"
+            className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-danger-muted hover:text-danger-ink transition-colors"
             title="停止抓取"
             aria-label="停止抓取"
           >
@@ -170,7 +173,7 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-warn-muted hover:text-ink active:scale-95 disabled:opacity-40 transition-colors"
+              className="shrink-0 -mr-1 -mt-1 px-1.5 py-1 rounded text-ink-muted hover:bg-warn-muted hover:text-ink disabled:opacity-40 transition-colors"
               title="重新抓取"
               aria-label="重新抓取"
             >

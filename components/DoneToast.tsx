@@ -1,151 +1,126 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { ClipboardList, MessageCircleQuestion, ShieldAlert } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
-import { ToastShell } from "@/components/ui/Toast";
+import { Icon, toast } from "@/components/ui";
+import type { ChatNode } from "@/lib/types";
 
-// Bottom-right stack of toasts for nodes that finished streaming while the
-// user was not focused on them. Each toast shows "#N 完成" + the topic
-// label / question prefix, and a × dismiss. Click body → focus that node
-// (canvas pans / fullscreen swaps) and dismiss. Auto-dismiss after 6s.
+// 用户没盯着的节点跑完 / 停下来等人时的提醒。W4 起不自己画 UI：只把
+// store.doneToasts 同步进全站 sonner 队列（右下角，与其他 toast 同一堆叠）。
 //
-// kind "waiting" = run 暂停在交互式工具（提问 / 计划批准 / 权限授权）等用户
-// 回答。与 done 同一堆叠位，但不自动消失——run 阻塞着，提醒消失了用户就再也
-// 不知道有事等他。回答 / 终结后由 store 清除。
+// kind "done"    → 「#N 已完成」+ 话题 / 问题前缀，6 秒自动消失。
+// kind "waiting" → run 暂停在交互式工具（提问 / 计划批准 / 权限授权）等用户
+//   回答。不自动消失——run 阻塞着，提醒消失了用户就再也不知道有事等他。
+//   回答 / 终结后由 store 清除，这里跟着 dismiss。
+// 「查看」→ 聚焦该节点、切回线性视图、关掉提醒。
 //
-// Why 6s, not 3-4s: the typical use case is "I asked something, branched
-// off, then went back to read another card" — the user needs enough time
-// to (a) notice the toast, (b) decide whether to break flow now or
-// finish what they're reading. 6s is on the long end of common toast
-// timings (Material 4-10s; macOS notifications 5-10s) without being
-// nagging. User can dismiss faster if they want.
+// 为什么 6 秒：典型场景是「问完一个问题、分叉出去、回头读另一张卡」，用户需要
+// 时间注意到提醒再决定要不要打断手头的阅读。6s 落在常见 toast 时长的偏长一端。
 const AUTO_DISMISS_MS = 6000;
+
+type Entry = { key: string; toastId: string; emittedAt: number };
 
 export function DoneToast() {
   const toasts = useSessionStore((s) => s.doneToasts);
   const nodes = useSessionStore((s) => s.nodes);
-  const setActiveNode = useSessionStore((s) => s.setActiveNode);
-  const setViewMode = useSessionStore((s) => s.setViewMode);
-  const dismiss = useSessionStore((s) => s.dismissDoneToast);
-
-  // Indices recomputed when nodes map changes — cheap, runs only when the
-  // tree actually mutates (not on every render).
+  // 只在树真的变了时重算编号。
   const indices = useMemo(() => buildNodeIndex(nodes), [nodes]);
+  // nodeId → 当前挂在 sonner 里的那条（签名变了才重发，避免每次 nodes 变动都刷新计时）。
+  const shown = useRef(new Map<string, Entry>());
 
-  if (toasts.length === 0) return null;
-
-  return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2 max-w-sm pointer-events-none">
-      {toasts.map((t) => (
-        <Toast
-          key={t.nodeId}
-          nodeId={t.nodeId}
-          emittedAt={t.emittedAt}
-          waiting={t.kind === "waiting"}
-          waitingTitle={waitingTitle(nodes[t.nodeId])}
-          index={indices[t.nodeId] ?? 0}
-          label={topicForNode(nodes[t.nodeId])}
-          onClick={() => {
-            setActiveNode(t.nodeId);
-            setViewMode("linear");
-            dismiss(t.nodeId);
-          }}
-          onDismiss={() => dismiss(t.nodeId)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function Toast({
-  nodeId,
-  emittedAt,
-  waiting,
-  waitingTitle,
-  index,
-  label,
-  onClick,
-  onDismiss,
-}: {
-  nodeId: string;
-  emittedAt: number;
-  waiting: boolean;
-  waitingTitle: string;
-  index: number;
-  label: string;
-  onClick: () => void;
-  onDismiss: () => void;
-}) {
-  // Per-toast timer. Resets when `emittedAt` changes (re-toast scenario:
-  // user retried a node already in the toasts list). Waiting toasts never
-  // auto-dismiss — the run is blocked on the user.
   useEffect(() => {
-    if (waiting) return;
-    const remaining = AUTO_DISMISS_MS - (Date.now() - emittedAt);
-    if (remaining <= 0) {
-      onDismiss();
-      return;
+    const live = new Set<string>();
+    for (const t of toasts) {
+      live.add(t.nodeId);
+      const node = nodes[t.nodeId];
+      const waiting = t.kind === "waiting";
+      const index = indices[t.nodeId] ?? 0;
+      const title = waiting ? waitingTitle(node) : "已完成";
+      const label = topicForNode(node);
+      const key = `${t.kind ?? "done"}|${t.emittedAt}|${index}|${title}|${label}`;
+      const prev = shown.current.get(t.nodeId);
+      if (prev?.key === key) continue;
+
+      // 同一节点重新提醒（重跑 / done↔waiting 切换）时 emittedAt 会变：换一个新
+      // toast id，让 sonner 从头计时；旧的那条先撤掉。
+      const toastId = `done:${t.nodeId}:${t.emittedAt}`;
+      if (prev && prev.toastId !== toastId) toast.dismiss(prev.toastId);
+      shown.current.set(t.nodeId, { key, toastId, emittedAt: t.emittedAt });
+
+      const nodeId = t.nodeId;
+      const emittedAt = t.emittedAt;
+      // 用户点 × / 自动消失 → 同步清 store。只清「还是这一条」的那项，避免旧 toast
+      // 被替换时误删刚发出的新提醒。
+      const clear = () => {
+        const cur = shown.current.get(nodeId);
+        if (cur?.toastId === toastId) shown.current.delete(nodeId);
+        const st = useSessionStore.getState();
+        if (st.doneToasts.some((x) => x.nodeId === nodeId && x.emittedAt === emittedAt)) {
+          st.dismissDoneToast(nodeId);
+        }
+      };
+      const titleNode = (
+        <span className="flex items-center gap-1.5">
+          {index ? <span className="font-mono tabular-nums text-ink-faint">#{index}</span> : null}
+          <span>{title}</span>
+        </span>
+      );
+      const opts = {
+        id: toastId,
+        description: label || undefined,
+        duration: waiting ? Infinity : Math.max(1000, AUTO_DISMISS_MS - (Date.now() - emittedAt)),
+        action: {
+          label: waiting ? "去处理" : "查看",
+          onClick: () => {
+            const st = useSessionStore.getState();
+            st.setActiveNode(nodeId);
+            st.setViewMode("linear");
+            clear();
+          },
+        },
+        onDismiss: clear,
+        onAutoClose: clear,
+      };
+      if (waiting) {
+        toast.warning(titleNode, {
+          ...opts,
+          icon: <Icon icon={waitingIcon(node)} className="text-warn" />,
+        });
+      } else {
+        toast.success(titleNode, opts);
+      }
     }
-    const t = window.setTimeout(onDismiss, remaining);
-    return () => window.clearTimeout(t);
-    // onDismiss is captured fresh per render via the parent's closure;
-    // safe to skip from deps to avoid resetting the timer on identity churn.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, emittedAt, waiting]);
+    // store 里没了（回答了 / 被别处清掉）→ 撤掉对应 toast。
+    for (const [nodeId, e] of shown.current) {
+      if (!live.has(nodeId)) {
+        shown.current.delete(nodeId);
+        toast.dismiss(e.toastId);
+      }
+    }
+  }, [toasts, nodes, indices]);
+  // 不在卸载时 dismiss：toast.dismiss 会回调 onDismiss 把 store 也清掉，StrictMode
+  // 的假卸载会因此吞掉提醒。主页面只在整页跳转时卸载，sonner 队列随之销毁。
 
-  return (
-    <ToastShell
-      tone={waiting ? "warn" : "positive"}
-      onClick={onClick}
-      className={`px-3 py-2 cursor-pointer transition-colors flex items-start gap-2.5 min-w-0 ${
-        waiting ? "hover:border-warn" : "hover:border-positive"
-      }`}
-    >
-      <span
-        className={`shrink-0 w-2 h-2 rounded-full mt-1.5 ${
-          waiting ? "bg-warn animate-pulse" : "bg-unread"
-        }`}
-        aria-hidden
-      />
-      <div className="flex-1 min-w-0">
-        <div className="text-ui font-medium text-ink-strong flex items-center gap-1.5">
-          {index ? (
-            <span className="font-mono text-ink-faint tabular-nums">
-              #{index}
-            </span>
-          ) : null}
-          <span>{waiting ? waitingTitle : "已完成"}</span>
-        </div>
-        <div className="text-ui text-ink-muted truncate">
-          {label}
-        </div>
-      </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDismiss();
-        }}
-        className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-ink-faint hover:text-ink text-sm leading-none"
-        aria-label="关闭"
-      >
-        ×
-      </button>
-    </ToastShell>
-  );
+  return null;
 }
 
-// 文案按暂停在哪个交互式工具上区分；node / pendingInteraction 已被清时给兜底
-// （store 会同步清 toast，这里只防一帧的竞态渲染）。
-function waitingTitle(
-  n: import("@/lib/types").ChatNode | undefined,
-): string {
+// 文案按暂停在哪个交互式工具上区分；node / pendingInteraction 已被清时给兜底。
+function waitingTitle(n: ChatNode | undefined): string {
   const tool = n?.pendingInteraction?.toolName;
-  if (tool === "AskUserQuestion") return "🙋 等你回答";
-  if (tool === "ExitPlanMode") return "📋 等你批准计划";
-  return "🛡️ 等待工具授权";
+  if (tool === "AskUserQuestion") return "等你回答";
+  if (tool === "ExitPlanMode") return "等你批准计划";
+  return "等待工具授权";
 }
 
-function topicForNode(n: import("@/lib/types").ChatNode | undefined): string {
+function waitingIcon(n: ChatNode | undefined) {
+  const tool = n?.pendingInteraction?.toolName;
+  if (tool === "AskUserQuestion") return MessageCircleQuestion;
+  if (tool === "ExitPlanMode") return ClipboardList;
+  return ShieldAlert;
+}
+
+function topicForNode(n: ChatNode | undefined): string {
   if (!n) return "";
   if (n.kind === "reference") {
     return n.topicLabel ?? "参考材料";

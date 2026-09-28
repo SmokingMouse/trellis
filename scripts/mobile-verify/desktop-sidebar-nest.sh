@@ -443,79 +443,21 @@ ab eval --stdin <<'JS'
 JS
 ab set viewport 1280 800
 
-echo "== 停止 V2 实例，准备 SN-3 Legacy 侧栏验证 =="
-kill "$SERVER_PID" >/dev/null 2>&1 || true
-wait "$SERVER_PID" >/dev/null 2>&1 || true
-SERVER_PID=
-sleep 1
+# SN-3（legacy 侧栏「最近」分组不重复画链行）已随 W4 退役：legacy 侧栏路径
+# （NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off 时的「最近」分组 / 独立 Herdr 分组 / 底部
+# 已归档区）已从 SessionSidebar 删除，不再有可验证的对象。这里只守住「没有 legacy
+# 布局残留」这一条。
+echo "== SN-3（已退役）: 确认不再渲染 legacy 侧栏 =="
+wait_for_js "no legacy sidebar layout" "!document.querySelector('[data-sidebar-layout=\"legacy\"]') && Boolean(document.querySelector('[data-sidebar-list][data-sidebar-layout]'))"
 
-echo "== 构建并启动 NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off 实例 =="
-NEXT_PUBLIC_TRELLIS_VERIFY=1 NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off bun --bun run build > /tmp/build-legacy.log 2>&1 || (cat /tmp/build-legacy.log && exit 1)
-
-(
-  export HOME="$H"
-  export TRELLIS_DB_PATH="$DB"
-  export TRELLIS_LARK=off
-  export NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off
-  export TRELLIS_AUTH_PASS="$AUTH_PASS"
-  export TRELLIS_AUTH_TOKEN="$AUTH_TOKEN"
-  exec bun --bun run start -- -p "$PORT"
-) >"$LOG" 2>&1 &
-SERVER_PID=$!
-
-ready_try=0
-until curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 "$BASE/__gate/health" 2>/dev/null | grep -q '"next":"ready"'; do
-  if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
-    tail -n 80 "$LOG" >&2
-    fail "legacy Trellis exited during startup"
-  fi
-  ready_try=$((ready_try + 1))
-  if [ "$ready_try" -ge 90 ]; then
-    tail -n 80 "$LOG" >&2
-    fail "legacy Trellis did not become ready"
-  fi
-  sleep 1
-done
-
-echo "== SN-3: 验证 legacy 侧栏下 renderRecentGroup 不重复画链行 =="
-ab open "$BASE/?session=$MULTI_SID"
-wait_for_js "legacy sidebar layout loaded" "Boolean(document.querySelector('[data-sidebar-layout=\"legacy\"]'))"
-wait_for_js "legacy sidebar session items loaded" "document.querySelectorAll('[data-sidebar-layout=\"legacy\"] [data-sidebar-session-item]').length > 0"
-
-# 验证「最近」分组存在，且内部会话行不带折叠按钮（不嵌套铺链），链行由 renderRecentGroup 自身单次列出
-ab eval --stdin <<JS
-(() => {
-  const sidebar = document.querySelector('[data-sidebar-layout="legacy"]');
-  if (!sidebar) throw new Error('Legacy sidebar not found');
-
-  // 查找最近分组里的会话行
-  const recentItems = sidebar.querySelectorAll('[data-sidebar-session-item]');
-  if (recentItems.length === 0) throw new Error('No session item found in legacy sidebar');
-
-  // 在最近分组的第一个会话中，验证其会话行没有 session-collapse-toggle（不嵌套折叠）
-  const firstItem = recentItems[0];
-  const toggle = firstItem.querySelector('[data-testid="session-collapse-toggle"]');
-  if (toggle) throw new Error('Legacy renderRecentGroup session row should not have collapse toggle');
-
-  // 验证不含两层嵌套链（data-session-trees 与 data-session-single-tree 在 legacy recent 里不渲染）
-  const nestedTrees = firstItem.querySelector('[data-session-trees]');
-  const nestedSingle = firstItem.querySelector('[data-session-single-tree]');
-  if (nestedTrees || nestedSingle) throw new Error('Legacy renderRecentGroup should not render nested trees/chains');
-
-  return true;
-})()
-JS
-
-# 截取 legacy 侧栏最近分组截图
-ab screenshot "$OUT_DIR/sidebar-legacy-recent.png"
-cp "$OUT_DIR/sidebar-legacy-recent.png" "$LOCAL_OUT/sidebar-legacy-recent.png"
-echo "✓ Screenshot saved to $OUT_DIR/sidebar-legacy-recent.png"
-
+# 开头用 NEXT_PUBLIC_TRELLIS_VERIFY=1 build 过（带调试钩子 __sessionStore）；原先由
+# SN-3 段末尾的普通 build 顺带恢复，SN-3 退役后在这里显式恢复，否则后续脚本
+# （如 workflow-card 的「普通构建不含调试钩子」检查）会读到验证构建。
 echo "== 恢复默认构建环境 =="
 kill "$SERVER_PID" >/dev/null 2>&1 || true
 wait "$SERVER_PID" >/dev/null 2>&1 || true
 SERVER_PID=
-bun --bun run build > /tmp/build-restore.log 2>&1 || true
+bun --bun run build > /tmp/build-restore.log 2>&1 || (cat /tmp/build-restore.log && exit 1)
 
 echo "========================================="
 echo "✓ ALL DESKTOP SIDEBAR NEST CHECKS PASSED!"

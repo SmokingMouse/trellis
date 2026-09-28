@@ -2,8 +2,20 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { previewKind } from "@/lib/generated-files";
-import { Drawer } from "@/components/ui/Drawer";
-import { IconButton } from "@/components/ui/IconButton";
+import {
+  ChevronDown,
+  ChevronRight,
+  File,
+  FileImage,
+  FileText,
+  Folder,
+  FolderOpen,
+  Globe,
+  RefreshCw,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { Drawer, ErrorCallout, Icon, IconButton, Spinner } from "@/components/ui";
 
 // Right-side drawer (mobile = bottom sheet) browsing the session's workspace
 // cwd — read-only, lazy per-directory listing via /api/sessions/[id]/files.
@@ -21,12 +33,12 @@ type Listing = {
   truncated: boolean;
 };
 
-const KIND_ICON: Record<string, string> = {
-  html: "🌐",
-  image: "🖼",
-  pdf: "📕",
-  markdown: "📝",
-  text: "📄",
+const KIND_ICON: Record<string, LucideIcon> = {
+  html: Globe,
+  image: FileImage,
+  pdf: FileText,
+  markdown: FileText,
+  text: File,
 };
 
 export function WorkspaceFilesDrawer() {
@@ -39,7 +51,7 @@ export function WorkspaceFilesDrawer() {
 
   // Each drawer opening bumps the epoch → the whole tree remounts and
   // refetches, so the listing is fresh every time (files change between
-  // turns). The ⟳ button bumps it too. 0 = never opened, render nothing
+  // turns). The refresh button bumps it too. 0 = never opened, render nothing
   // (avoids fetching behind a closed drawer).
   const [epoch, setEpoch] = useState(0);
   useEffect(() => {
@@ -52,16 +64,14 @@ export function WorkspaceFilesDrawer() {
   if (!sessionId || !workspacePath) return null;
 
   return (
-    <Drawer open={open} onClose={() => setOpen(false)}>
+    <Drawer open={open} onClose={() => setOpen(false)} title="工作区文件">
       <div className="px-4 py-3 border-b border-line flex items-center gap-2 shrink-0">
-        <div className="text-ink-faint uppercase tracking-wider text-nano font-medium">
-          工作区文件
-        </div>
+        <h2 className="shrink-0 text-ui font-semibold text-ink-strong">工作区文件</h2>
         <div
-          className="text-ink-faint text-xs font-mono truncate"
+          className="min-w-0 text-label text-ink-faint font-mono truncate"
           title={workspacePath}
         >
-          · {basename(workspacePath)}
+          {basename(workspacePath)}
         </div>
         <IconButton
           label="刷新"
@@ -69,10 +79,10 @@ export function WorkspaceFilesDrawer() {
           className="ml-auto"
           onClick={() => setEpoch((e) => e + 1)}
         >
-          ⟳
+          <Icon icon={RefreshCw} size="sm" />
         </IconButton>
         <IconButton label="关闭" size="sm" onClick={() => setOpen(false)}>
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
       <div className="flex-1 overflow-y-auto py-2 px-2">
@@ -85,8 +95,8 @@ export function WorkspaceFilesDrawer() {
           />
         )}
       </div>
-      <div className="px-4 py-2 border-t border-line text-nano text-ink-faint shrink-0">
-        只读浏览 · 点击文件预览
+      <div className="px-4 py-2 border-t border-line text-label text-ink-faint shrink-0">
+        只读浏览，点文件可预览
       </div>
     </Drawer>
   );
@@ -106,7 +116,8 @@ function DirChildren({
 }) {
   const openFilePreview = useSessionStore((s) => s.openFilePreview);
   const [listing, setListing] = useState<Listing | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -124,30 +135,37 @@ function DirChildren({
         return body as Listing;
       })
       .then((l) => alive && setListing(l))
-      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => {
+        if (alive) setError(e);
+      });
     return () => {
       alive = false;
     };
-  }, [sessionId, dir]);
+  }, [sessionId, dir, retry]);
 
   const pad = { paddingLeft: `${8 + depth * 14}px` };
 
   if (error)
     return (
-      <div className="py-1 text-ui text-danger" style={pad}>
-        {error}
+      <div className="py-1 pr-2" style={pad}>
+        <ErrorCallout
+          compact
+          error={error}
+          title="读取这个目录失败"
+          onRetry={() => setRetry((n) => n + 1)}
+        />
       </div>
     );
   if (listing === null)
     return (
-      <div className="py-1 text-ui text-ink-faint" style={pad}>
-        加载中…
+      <div className="py-1 flex items-center" style={pad}>
+        <Spinner size="sm" />
       </div>
     );
   if (listing.dirs.length === 0 && listing.files.length === 0)
     return (
-      <div className="py-1 text-ui text-ink-faint" style={pad}>
-        （空目录）
+      <div className="py-1 text-label text-ink-faint" style={pad}>
+        空目录
       </div>
     );
 
@@ -169,11 +187,10 @@ function DirChildren({
           onClick={() => openFilePreview(f.path)}
           title={f.path}
           style={pad}
-          className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-ui text-ink-muted hover:bg-surface-muted"
+          className="w-full flex items-center gap-1.5 py-1 pr-2 rounded-field text-left text-ui text-ink-muted hover:bg-surface-hover hover:text-ink"
         >
-          <span className="shrink-0">
-            {KIND_ICON[previewKind(f.name)] ?? "📄"}
-          </span>
+          <span className="w-3.5 shrink-0" aria-hidden />
+          <Icon icon={KIND_ICON[previewKind(f.name)] ?? File} size="sm" className="text-ink-faint" />
           <span className="flex-1 truncate">{f.name}</span>
           <span className="shrink-0 text-nano text-ink-faint tabular-nums">
             {fmtSize(f.size)}
@@ -182,7 +199,7 @@ function DirChildren({
       ))}
       {listing.truncated && (
         <div className="py-1 text-label text-ink-faint" style={pad}>
-          …条目过多，已截断（前 300 条）
+          条目太多，只显示前 300 条
         </div>
       )}
     </>
@@ -208,12 +225,11 @@ function DirRow({
         onClick={() => setExpanded((v) => !v)}
         title={path}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
-        className="w-full flex items-center gap-1.5 py-1 pr-2 rounded text-left text-ui text-ink-muted hover:bg-surface-muted"
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-1.5 py-1 pr-2 rounded-field text-left text-ui text-ink-muted hover:bg-surface-hover hover:text-ink"
       >
-        <span className="shrink-0 text-nano text-ink-faint w-3 text-center">
-          {expanded ? "▼" : "▶"}
-        </span>
-        <span aria-hidden>📁</span>
+        <Icon icon={expanded ? ChevronDown : ChevronRight} size="sm" className="text-ink-faint" />
+        <Icon icon={expanded ? FolderOpen : Folder} size="sm" className="text-ink-faint" />
         <span className="flex-1 truncate font-medium">{name}</span>
       </button>
       {expanded && (

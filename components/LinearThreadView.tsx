@@ -16,7 +16,6 @@ import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, nodeSort } from "@/lib/tree-panel";
 import { subscribeStream } from "@/lib/stream-bus";
 import { modeStyle } from "@/lib/mode-style";
-import { sendHint } from "@/lib/send-key";
 import {
   THREAD_WIDTH_CLASS,
   THREAD_WIDTH_OPTIONS,
@@ -36,11 +35,17 @@ import {
   isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
+import { ChevronRight, GitBranch, Layers, Workflow, X } from "lucide-react";
+import {
+  Button,
+  Icon,
+  IconButton,
+  SegmentedControl,
+  StatusDot,
+} from "@/components/ui";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
-import { TargetChip } from "./TargetChip";
 import { TurnCard } from "./TurnCard";
-import { BookmarkButton } from "./BookmarkButton";
 import {
   HerdrComposer,
   HerdrOfflineBanner,
@@ -79,9 +84,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const setReadingPosition = useSessionStore((s) => s.setReadingPosition);
   const setViewMode = useSessionStore((s) => s.setViewMode);
   const markNodeRead = useSessionStore((s) => s.markNodeRead);
-  const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
-  const sendKey = useSessionStore((s) => s.sendKey);
   const threadWidth = useSessionStore((s) => s.threadWidth);
   const setThreadWidth = useSessionStore((s) => s.setThreadWidth);
   const herdrSnapshot = useHerdrFleet();
@@ -118,6 +121,10 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const [branchFrom, setBranchFrom] = useState<{ id: string; n: number } | null>(
     null,
   );
+  // 稳定引用：TurnCard 是 memo 组件，回调换引用会让所有轮次跟着重渲。
+  const armBranch = useCallback((id: string) => {
+    setBranchFrom((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
+  }, []);
   const roundRefs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
   // #6: sticky-to-bottom while the tip streams. True = keep pinning the
@@ -578,7 +585,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             : undefined,
         }}
       >
-        <div className={`${widthClass} mx-auto px-4 py-3 max-md:h-full flex items-center gap-3`}>
+        <div className={`${widthClass} mx-auto px-4 py-2 max-md:h-full flex items-center gap-3`}>
           <div className="min-w-0 flex-1">
             {isHerdr ? (
               <HerdrSessionBadge
@@ -586,47 +593,40 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 loading={herdrSnapshot.loading}
               />
             ) : (
-              <div className="text-label uppercase tracking-wide text-ink-faint flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${mode.dot}`} aria-hidden />
+              <div className="text-label text-ink-faint flex items-center gap-1.5">
+                <StatusDot tone={session.mode === "project" ? "project" : "chat"} />
                 {mode.label} · 线性
               </div>
             )}
-            <h1 className="truncate text-sm font-semibold text-ink-strong">
+            <h1 className="truncate text-ui font-semibold text-ink-strong">
               {session.title}
             </h1>
           </div>
           {/* 移动端卡片本就贴满屏宽，宽度切换无意义，藏起来省空间 */}
-          <div
-            className="hidden md:flex shrink-0 items-center rounded-field border border-line bg-surface p-0.5"
-            role="group"
-            aria-label="内容宽度"
-          >
-            {THREAD_WIDTH_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setThreadWidth(opt.value)}
-                aria-pressed={threadWidth === opt.value}
-                title={`内容宽度：${opt.label}`}
-                className={`px-2 py-1 rounded-[calc(var(--radius-field)-2px)] text-xs font-medium transition-colors ${
-                  threadWidth === opt.value
-                    ? "bg-accent-muted text-accent-ink"
-                    : "text-ink-faint hover:text-ink hover:bg-surface-muted"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="hidden md:block shrink-0">
+            <SegmentedControl
+              size="sm"
+              aria-label="内容宽度"
+              value={threadWidth}
+              onValueChange={setThreadWidth}
+              options={THREAD_WIDTH_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label: opt.label,
+                title: `内容宽度：${opt.label}`,
+              }))}
+            />
           </div>
           {!isMobile && !isHerdr && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setViewMode("canvas")}
               data-map-open
-              className="shrink-0 px-3 py-1.5 rounded-field border border-line bg-surface text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition"
+              className="shrink-0"
             >
-              🗺 画布
-            </button>
+              <Icon icon={Workflow} size="sm" />
+              画布
+            </Button>
           )}
         </div>
       </div>
@@ -647,10 +647,14 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 transform:
                   "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))",
               }
-            : undefined
+            : isMobile
+              ? undefined
+              : // 树浮窗展开时右侧让出安全区（TreePanel 发布 --trellis-tree-safe），
+                // 正文列在剩余宽度里居中，不再被浮窗压住。
+                { paddingRight: "var(--trellis-tree-safe, 0px)" }
         }
       >
-        <main className={`${widthClass} mx-auto px-4 py-5 pb-6 max-md:pb-28 space-y-4`}>
+        <main className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
         {isHerdr && herdrPane && (
           <HerdrInteractionCard pane={herdrPane} />
         )}
@@ -662,7 +666,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           />
         )}
         {threadData.thread.length === 0 ? (
-          <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-8 text-center text-sm text-ink-muted">
+          <div className="rounded-card border border-dashed border-line-strong px-4 py-8 text-center text-ui text-ink-muted">
             {session.origin === "external" ? session.externalStatus === "closed" ? "外部线程已结束" : "外部线程已收编，可在下方提问" : "暂无节点"}
           </div>
         ) : (
@@ -686,17 +690,16 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               <Fragment key={node.id}>
                 {isCompacted && (
                   <div
-                    className="my-3 py-1 flex items-center gap-3 text-xs select-none"
+                    className="mt-6 mb-1 flex items-center gap-3 text-label text-ink-faint select-none"
                     role="separator"
                     aria-label="上下文已自动压缩"
                   >
-                    <div className="flex-1 border-t border-dashed border-line-strong/70" />
-                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface border border-line shadow-raise text-ink-muted text-ui">
-                      <span aria-hidden>🗜️</span>
-                      <span className="font-medium text-ink-strong">上下文已自动压缩</span>
-                      <span className="text-nano text-ink-faint">（早期历史已转入模型紧凑摘要）</span>
-                    </div>
-                    <div className="flex-1 border-t border-dashed border-line-strong/70" />
+                    <div className="flex-1 border-t border-line" />
+                    <span className="inline-flex items-center gap-1.5">
+                      <Icon icon={Layers} size="sm" />
+                      上下文已自动压缩 · 早期历史已转为摘要
+                    </span>
+                    <div className="flex-1 border-t border-line" />
                   </div>
                 )}
                 <section
@@ -705,190 +708,63 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   data-map-highlight={mapHighlight === node.id || undefined}
                   tabIndex={-1}
                   style={mapHighlight === node.id ? { outline: "3px solid var(--color-accent-ink)", outlineOffset: 3 } : undefined}
-                  className={`scroll-mt-3 rounded-card border bg-surface shadow-raise transition-colors ${
-                    isActive
-                      ? "border-accent-line ring-2 ring-accent-muted"
-                      : "border-line"
-                  }`}
+                  data-thread-active={isActive || undefined}
+                  className="group/turn scroll-mt-3 py-4 outline-none"
                 >
-                <div className="px-4 py-2.5 border-b border-line-faint flex items-center gap-2 text-xs">
-                  <span className="font-mono text-ink-faint">
-                    #{nodeIndices[node.id] ?? idx + 1}
-                  </span>
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      node.status === "streaming"
-                        ? "bg-accent animate-pulse"
-                        : node.status === "error"
-                          ? "bg-danger"
-                          : node.readAt
-                            ? "bg-line-strong"
-                            : "bg-unread"
-                    }`}
+                  <TurnCard
+                    node={node}
+                    readOnly={isHerdr}
+                    index={nodeIndices[node.id] ?? idx + 1}
+                    isActive={isActive}
+                    canBranch={canBranch}
+                    branchArmed={isBranchTarget}
+                    onBranch={armBranch}
+                    canDelete={canDelete}
+                    onDelete={confirmDelete}
                   />
-                  <span className="text-ink-muted">
-                    {node.kind === "reference" ? "Reference" : "Turn"}
-                  </span>
-                  <div className="ml-auto flex items-center gap-0.5">
-                    {node.status === "done" && (
-                      <button
-                        type="button"
-                        data-mobile-target="node-read-toggle"
-                        onClick={() =>
-                          node.readAt
-                            ? void markNodeUnread(node.id)
-                            : void markNodeRead(node.id)
-                        }
-                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
-                          node.readAt
-                            ? "text-ink-faint hover:bg-unread-muted hover:text-unread-ink"
-                            : "text-ink-faint hover:bg-surface-muted hover:text-ink"
-                        }`}
-                        title={node.readAt ? "标为未读" : "标为已读"}
-                        aria-label={node.readAt ? "标为未读" : "标为已读"}
-                      >
-                        {node.readAt ? (
-                          /* 点亮未读点：标为未读 */
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            aria-hidden
-                          >
-                            <circle cx="12" cy="12" r="8" />
-                            <circle
-                              cx="12"
-                              cy="12"
-                              r="3.5"
-                              fill="currentColor"
-                              stroke="none"
-                            />
-                          </svg>
-                        ) : (
-                          /* 圆内勾：标为已读 */
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden
-                          >
-                            <circle cx="12" cy="12" r="8" />
-                            <path d="m9 12 2 2 4-4" />
-                          </svg>
-                        )}
-                      </button>
-                    )}
-                    {node.status === "done" && <BookmarkButton node={node} />}
-                    {canBranch && (
-                      <button
-                        type="button"
-                        data-mobile-target="node-branch"
-                        onClick={() =>
-                          setBranchFrom((prev) => ({
-                            id: node.id,
-                            n: (prev?.n ?? 0) + 1,
-                          }))
-                        }
-                        className={`px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md transition-colors ${
-                          isBranchTarget
-                            ? "text-accent bg-accent-muted"
-                            : "text-ink-faint hover:bg-accent-muted hover:text-accent"
-                        }`}
-                        title="从此节点分叉提问"
-                        aria-label="从此节点分叉提问"
-                      >
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden
-                        >
-                          <line x1="6" y1="3" x2="6" y2="15" />
-                          <circle cx="18" cy="6" r="3" />
-                          <circle cx="6" cy="18" r="3" />
-                          <path d="M18 9a9 9 0 0 1-9 9" />
-                        </svg>
-                      </button>
-                    )}
-                    {canDelete && (
-                      <button
-                        type="button"
-                        data-mobile-target="node-delete"
-                        onClick={() => confirmDelete(node.id)}
-                        className="px-1.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded-md text-ink-faint hover:bg-danger-muted hover:text-danger transition-colors"
-                        title="删除节点（含子树）"
-                        aria-label="删除节点"
-                      >
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden
-                        >
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="px-4 py-4">
-                  <TurnCard node={node} readOnly={isHerdr} />
 
                   {branches.length > 0 && (
-                    <div className="mt-4 pt-2 border-t border-line-faint">
+                    <div className="mt-2">
                       <button
                         type="button"
                         onClick={() => toggleBranches(node.id)}
-                        className="text-xs font-medium text-fork-ink/80 hover:text-fork-ink"
+                        aria-expanded={openBranches.has(node.id)}
+                        className="-ml-1.5 inline-flex items-center gap-1.5 min-h-6.5 px-1.5 rounded-field text-label font-medium text-fork-ink hover:bg-fork-muted transition-colors max-md:min-h-11"
                       >
-                        ↳ {branches.length} 个分支
+                        <Icon icon={GitBranch} size="sm" className="text-fork" />
+                        {branches.length} 个分支
+                        <Icon
+                          icon={ChevronRight}
+                          size="sm"
+                          className={`text-ink-faint transition-transform motion-reduce:transition-none ${
+                            openBranches.has(node.id) ? "rotate-90" : ""
+                          }`}
+                        />
                       </button>
                       {openBranches.has(node.id) && (
-                        <div className="mt-2 space-y-1.5">
+                        <div className="mt-1.5 ml-2 pl-3 border-l border-fork-line space-y-0.5">
                           {branches.map((branch) => (
                             <button
                               key={branch.id}
                               type="button"
                               onClick={() => setActiveNode(branch.id)}
-                              className="w-full text-left px-3 py-2 rounded-card bg-fork-muted border border-fork-line/50 hover:bg-fork-line/25 transition-colors"
+                              className="w-full flex items-baseline gap-2 text-left min-h-8 px-2 py-1.5 rounded-field hover:bg-surface-hover transition-colors max-md:min-h-11"
                             >
-                              <div className="flex items-center gap-2 text-label text-fork-ink/80">
-                                <span className="font-mono">
-                                  #{nodeIndices[branch.id] ?? "?"}
-                                </span>
-                                <span>{branch.kind === "reference" ? "reference" : "branch"}</span>
-                              </div>
-                              <div className="mt-0.5 truncate text-xs text-ink">
+                              <span className="shrink-0 font-mono text-nano text-ink-faint">
+                                #{nodeIndices[branch.id] ?? "?"}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-ui text-ink">
                                 {branch.topicLabel ?? truncate(branch.question, 120)}
-                              </div>
+                              </span>
+                              <span className="shrink-0 text-nano text-ink-faint">
+                                {branch.kind === "reference" ? "参考材料" : "分支"}
+                              </span>
                             </button>
                           ))}
                         </div>
                       )}
                     </div>
                   )}
-                </div>
               </section>
             </Fragment>
           );
@@ -900,39 +776,69 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       <div
         data-safe-area="linear-composer"
         data-composer-hidden={composerIsHidden ? "true" : "false"}
-        className={`shrink-0 z-20 border-t border-line/80 bg-surface-canvas/95 backdrop-blur transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 ${
+        className={`shrink-0 z-20 bg-surface-canvas/95 transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:border-t max-md:border-line max-md:backdrop-blur ${
           composerIsHidden ? "max-md:translate-y-full max-md:pointer-events-none" : "translate-y-0"
         }`}
-        style={{ paddingBottom: "var(--safe-bottom)" }}
+        style={{
+          paddingBottom: "var(--safe-bottom)",
+          paddingRight: isMobile ? undefined : "var(--trellis-tree-safe, 0px)",
+        }}
       >
-        <div className={`${widthClass} mx-auto px-4`}>
-          {branchFromNode && (
-            <TargetChip
-              icon="⑂"
-              verb="从"
-              suffix="分叉"
-              index={nodeIndices[branchFromNode.id] ?? "?"}
-              label={branchFromNode.topicLabel ?? truncate(branchFromNode.question, 60)}
-              onLabelClick={() =>
-                roundRefs.current
-                  .get(branchFromNode.id)
-                  ?.scrollIntoView({ block: "start" })
-              }
-              onClear={() => setBranchFrom(null)}
-            />
-          )}
+        <div className={`${widthClass} mx-auto px-4 md:px-8`}>
           {isHerdr ? (
             herdrPane?.alive ? <HerdrComposer pane={herdrPane} /> : null
           ) : (
             <Composer
               targetNode={branchFromNode ?? tipNode}
+              targetIndex={
+                (branchFromNode ?? tipNode)
+                  ? nodeIndices[(branchFromNode ?? tipNode)!.id]
+                  : undefined
+              }
               fork={!!branchFromNode}
               mobileCompact={isMobile}
               onMobileExpandedChange={onComposerExpandedChange}
+              banner={
+                branchFromNode ? (
+                  <div
+                    data-composer-fork-target=""
+                    className="flex items-center gap-2 mx-1.5 mt-1.5 pl-2.5 pr-1 min-h-8 rounded-field bg-fork-muted text-ui text-fork-ink"
+                  >
+                    <Icon icon={GitBranch} size="sm" className="text-fork" />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        roundRefs.current
+                          .get(branchFromNode.id)
+                          ?.scrollIntoView({ block: "start" })
+                      }
+                      className="min-w-0 flex-1 truncate text-left hover:underline"
+                      title="定位到该节点"
+                    >
+                      从{" "}
+                      <span className="font-mono tabular-nums">
+                        #{nodeIndices[branchFromNode.id] ?? "?"}
+                      </span>{" "}
+                      分叉 ·{" "}
+                      <span className="text-ink">
+                        {branchFromNode.topicLabel ?? truncate(branchFromNode.question, 60)}
+                      </span>
+                    </button>
+                    <IconButton
+                      size="sm"
+                      label="取消分叉"
+                      shortcut="Esc"
+                      onClick={() => setBranchFrom(null)}
+                    >
+                      <Icon icon={X} size="sm" />
+                    </IconButton>
+                  </div>
+                ) : undefined
+              }
               placeholder={
                 branchFromNode
-                  ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…（${sendHint(sendKey)}，Esc 取消）`
-                  : `继续对话…（${sendHint(sendKey)}，选中文字可 ⌘K 分叉追问）`
+                  ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…`
+                  : "继续对话…  输入 / 调出命令，选中正文可分叉追问"
               }
               onSubmitted={branchFromNode ? () => setBranchFrom(null) : undefined}
               onEscape={branchFromNode ? () => setBranchFrom(null) : undefined}

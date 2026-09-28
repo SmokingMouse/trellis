@@ -13,10 +13,19 @@ import { providerFamily } from "@/lib/llm";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { RelatedHints } from "./RelatedHints";
 import { SketchModal } from "./SketchModal";
+import { SkillPickerList } from "./SkillPickerList";
 import { ModelPicker } from "./ModelPicker";
-import { Button } from "@/components/ui/Button";
-import { Drawer } from "@/components/ui/Drawer";
-import { IconButton } from "@/components/ui/IconButton";
+import {
+  ArrowLeftRight,
+  FileText,
+  History,
+  Maximize2,
+  Paperclip,
+  PencilLine,
+  X,
+  Zap,
+} from "lucide-react";
+import { Button, Drawer, Icon, IconButton, Tooltip } from "@/components/ui";
 import { setDesktopModeOverride } from "@/hooks/useIsMobile";
 import { middleEllipsisPath } from "@/lib/run-config";
 import {
@@ -42,16 +51,8 @@ const FEYNMAN_STARTERS = [
   "我来讲讲 HTTPS 是怎么保证安全的……",
 ];
 
-// Keep the keyboard highlight visible inside the scrollable dropdown. Ref
-// callbacks re-run per render, but scrollIntoView(nearest) on an already
-// visible element is a no-op.
-const scrollToActive = (el: HTMLButtonElement | null) => {
-  el?.scrollIntoView({ block: "nearest" });
-};
-const suggestionRowClass = (isActive: boolean) =>
-  `w-full text-left px-3 py-2 border-b last:border-b-0 border-line-faint ${
-    isActive ? "bg-surface-muted" : "hover:bg-surface-muted"
-  }`;
+const ENHANCED_HINT =
+  "增强模式：chat 可跑 skill + 联网，工具调用自动批准（无沙箱、能跑任意命令）。默认关 = 纯对话。";
 
 export function QuestionInput({ isMobile }: { isMobile: boolean }) {
   const [q, setQ] = useState("");
@@ -193,7 +194,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
     // skill can actually run (the toggle chip above reflects it).
     if (!skillCapable) {
       setChatEnhanced(true);
-      setCmdNotice("⚡ 已自动开启增强模式 — 技能需要工具（YOLO）");
+      setCmdNotice("已自动开启增强模式——技能需要工具（自动批准，本轮起生效）");
     }
     setQ(`${skillPrefix}${name} `);
     ref.current?.focus();
@@ -240,6 +241,8 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 输入法组字中的 Enter 是选词，不是发送 / 选中补全项。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Suggestion navigation first — while the "/" dropdown is open, Enter
     // picks the highlighted item instead of sending.
     if (slashNav.handleKeyDown(e)) return;
@@ -269,6 +272,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-8 max-md:mb-3 justify-center">
           {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
+          {/* ui-guard-allow(hex): 品牌渐变 logo（不随皮肤，刻意裁决） */}
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
           <h1 className="text-2xl font-semibold tracking-tight">Trellis</h1>
         </div>
@@ -280,7 +284,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
             type="button"
             data-mobile-target="new-session-config-summary"
             onClick={() => setMoreSettingsOpen(true)}
-            className="mb-3 w-full min-h-11 min-w-0 rounded-md border border-line bg-surface px-3 text-left text-ui text-ink-muted flex items-center gap-2 hover:border-line-strong"
+            className="mb-3 w-full min-h-11 min-w-0 rounded-field border border-line bg-surface px-3 text-left text-ui text-ink-muted flex items-center gap-2 hover:border-line-strong"
             title={`${modeSummary} · ${modelSummary}${draftMode === "project" ? ` · ${draftWorkspacePath ?? "未选工作区"}` : ""}`}
           >
             <span className="shrink-0 font-medium text-ink">{modeSummary}</span>
@@ -311,19 +315,22 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
             <AgentPicker />
             {draftMode === "chat" && (
-              <button
-                type="button"
-                onClick={() => setChatEnhanced(!chatEnhanced)}
-                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-                className={`px-3 py-1.5 rounded-full border text-ui inline-flex items-center gap-1.5 transition-colors ${
-                  chatEnhanced
-                    ? /* boost 复用 warn hue */ "bg-warn-muted border-warn-line text-warn-ink"
-                    : "border-line text-ink-muted hover:border-line-strong"
-                }`}
-              >
-                <span aria-hidden>⚡</span>
-                <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
-              </button>
+              <Tooltip content={ENHANCED_HINT}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  aria-pressed={chatEnhanced}
+                  onClick={() => setChatEnhanced(!chatEnhanced)}
+                  className={`border ${
+                    chatEnhanced
+                      ? "border-accent-line bg-accent-muted text-accent-ink"
+                      : "border-line"
+                  }`}
+                >
+                  <Icon icon={Zap} size="sm" selected={chatEnhanced} />
+                  增强模式{chatEnhanced ? " · 开" : ""}
+                </Button>
+              </Tooltip>
             )}
           </div>
         )}
@@ -383,8 +390,9 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           />
           {isMobile ? (
             <div className="border-t border-line-faint px-3 py-2 flex items-center justify-between gap-2">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 data-mobile-target="new-session-attach"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={busy || att.atLimit}
@@ -393,11 +401,11 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                     ? `已到 ${MAX_ATTACHMENTS} 个上限`
                     : "添加图片 / 文件（粘贴 / 拖拽 / 点击选）"
                 }
-                className="h-11 min-w-11 px-3 rounded-md text-sm text-ink-muted hover:text-ink-strong hover:bg-surface-muted disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+                className="h-11"
               >
-                <span aria-hidden>📎</span>
-                <span>附件</span>
-              </button>
+                <Icon icon={Paperclip} />
+                附件
+              </Button>
               <Button
                 variant="primary"
                 data-mobile-target="new-session-start"
@@ -423,9 +431,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
               >
                 <span>{sendHint(sendKey)}</span>
-                <span className="opacity-50" aria-hidden>
-                  ⇄
-                </span>
+                <Icon icon={ArrowLeftRight} size="sm" className="opacity-60" />
               </button>
               <span className="mx-1.5 text-ink-faint">·</span>
               <button
@@ -436,48 +442,42 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 title="0 = 全发（历史存在 CLI 会话里、缓存友好、不失忆，推荐；claude 走 --fork-session，codex 走 resume+前缀 rollout）；≥1 = 窗口回退，只折叠 N 层历史进提示"
                 className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
               >
-                <span aria-hidden>📚</span>
+                <Icon icon={History} size="sm" />
                 <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
               </button>
             </div>
-            <button
-              type="button"
+            <IconButton
+              label="专注写作"
+              title="专注写作（全屏 Markdown 编辑 + 预览）"
               onClick={() => setZoneOpen(true)}
               disabled={busy}
-              title="进入专注写作模式（全屏 Markdown 编辑 + 预览）"
-              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
             >
-              <span aria-hidden>⛶</span>
-              <span className="hidden sm:inline">专注写作</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={busy || att.atLimit}
+              <Icon icon={Maximize2} />
+            </IconButton>
+            <IconButton
+              label="添加附件"
               title={
                 att.atLimit
                   ? `已到 ${MAX_ATTACHMENTS} 个上限`
                   : "添加图片 / 文件（粘贴 / 拖拽 / 点击选）"
               }
-              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
-            >
-              <span aria-hidden>📎</span>
-              <span className="hidden sm:inline">附件</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSketchOpen(true)}
+              onClick={() => fileInputRef.current?.click()}
               disabled={busy || att.atLimit}
+            >
+              <Icon icon={Paperclip} />
+            </IconButton>
+            <IconButton
+              label="画个草图"
               title={
                 att.atLimit
                   ? `已到 ${MAX_ATTACHMENTS} 个上限`
                   : "画个草图（导出为图片附件）"
               }
-              className="text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-muted"
+              onClick={() => setSketchOpen(true)}
+              disabled={busy || att.atLimit}
             >
-              <span aria-hidden>✏️</span>
-              <span className="hidden sm:inline">草图</span>
-            </button>
+              <Icon icon={PencilLine} />
+            </IconButton>
             <Button
               variant="primary"
               onClick={submit}
@@ -497,7 +497,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
               type="button"
               data-mobile-target="new-session-more-settings"
               onClick={() => setMoreSettingsOpen(true)}
-              className="min-h-11 flex-1 rounded-md border border-line bg-surface text-ui text-ink-muted hover:border-line-strong hover:text-ink"
+              className="min-h-11 flex-1 rounded-field border border-line bg-surface text-ui text-ink-muted hover:border-line-strong hover:text-ink"
             >
               更多设置
             </button>
@@ -515,82 +515,27 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           </div>
         )}
         {cmdNotice && (
-          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-lg px-3 py-2">
+          <div className="mt-2 text-ui text-ink-muted bg-surface border border-line rounded-field px-3 py-2">
             {cmdNotice}
           </div>
         )}
         {att.notice && (
-          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-lg px-3 py-2">
+          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-field px-3 py-2">
             {att.notice}
           </div>
         )}
         {/* 体验 A：草稿相似检测。放在通知条之下、"/"下拉之上不冲突 ——
             "/"开头的输入 RelatedHints 自身会跳过。 */}
         <RelatedHints query={q} />
-        {(matchedCommands.length > 0 || matchedSkills.length > 0) && (
-          <div className="mt-2 border border-line rounded-lg bg-surface shadow-raise overflow-hidden max-h-64 overflow-y-auto">
-            {/* C1: Trellis commands first (first-class, all modes). Selecting
-                a no-arg command runs it immediately; /model (which takes an
-                arg) fills "/model " so the user can type the provider.
-                slashNav.active highlights in the same commands-then-skills
-                index space. */}
-            {matchedCommands.map((c, i) => (
-              <button
-                key={`cmd-${c.name}`}
-                type="button"
-                ref={i === slashNav.active ? scrollToActive : undefined}
-                onClick={() => pickCommand(c)}
-                className={suggestionRowClass(i === slashNav.active)}
-              >
-                <div className="text-ui font-mono text-ink flex items-center gap-1.5">
-                  {/* ⚡徽章标识「Trellis 命令」身份（非告警）→ accent-muted */}
-                  <span
-                    className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
-                    aria-hidden
-                  >
-                    ⚡ 命令
-                  </span>
-                  <span>
-                    /{c.name}
-                    {c.hint && (
-                      <span className="text-ink-faint">
-                        {" "}
-                        {c.hint}
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div className="text-label text-ink-muted truncate">
-                  {c.description}
-                </div>
-              </button>
-            ))}
-            {matchedSkills.map((s, i) => (
-              <button
-                key={`skill-${s.name}`}
-                type="button"
-                ref={
-                  matchedCommands.length + i === slashNav.active
-                    ? scrollToActive
-                    : undefined
-                }
-                onClick={() => pickSkill(s.name)}
-                className={suggestionRowClass(
-                  matchedCommands.length + i === slashNav.active,
-                )}
-              >
-                <div className="text-ui font-mono text-ink">
-                  {skillPrefix}{s.name}
-                </div>
-                {s.description && (
-                  <div className="text-label text-ink-muted truncate">
-                    {s.description}
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+        <SkillPickerList
+          placement="inline"
+          skills={matchedSkills}
+          onPick={pickSkill}
+          commands={matchedCommands}
+          onPickCommand={pickCommand}
+          activeIndex={slashNav.active}
+          skillPrefix={skillPrefix}
+        />
         {isMobile === false && draftMode === "chat" && !q.trim() && (
           <div className="mt-4 flex flex-wrap gap-2 justify-center">
             {(isFeynman ? FEYNMAN_STARTERS : SUGGESTED_PROMPTS).map((s) => (
@@ -614,13 +559,10 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           <div className="h-px flex-1 max-w-[80px] bg-line" />
         </div>}
         {isMobile === false && <div className="mt-3 flex justify-center">
-          <button
-            onClick={() => setPickerOpen(true)}
-            className="px-4 py-2 rounded-md text-sm border border-warn-line bg-warn-muted/60 text-warn-ink hover:bg-warn-muted active:scale-95 transition-colors flex items-center gap-2"
-          >
-            <span aria-hidden>📄</span>
-            <span>从背景材料开始（粘贴 / URL）</span>
-          </button>
+          <Button variant="secondary" onClick={() => setPickerOpen(true)}>
+            <Icon icon={FileText} size="sm" className="text-ink-faint" />
+            从背景材料开始（粘贴 / URL）
+          </Button>
         </div>}
         {isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
           模型在右上角切换 · {currentProvider ? `默认 ${currentProvider.shortLabel}` : "使用当前默认模型"}
@@ -634,7 +576,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
               <div className="text-label text-ink-faint">创建前可调整，当前默认值已保留</div>
             </div>
             <IconButton label="关闭更多设置" onClick={() => setMoreSettingsOpen(false)}>
-              ✕
+              <Icon icon={X} />
             </IconButton>
           </div>
           <div
@@ -660,15 +602,16 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 type="button"
                 data-mobile-target="new-session-enhanced"
                 onClick={() => setChatEnhanced(!chatEnhanced)}
-                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-                className={`w-full min-h-11 px-3 rounded-md border text-ui inline-flex items-center justify-center gap-1.5 transition-colors ${
+                aria-pressed={chatEnhanced}
+                title={ENHANCED_HINT}
+                className={`w-full min-h-11 px-3 rounded-field border text-ui inline-flex items-center justify-center gap-1.5 transition-colors ${
                   chatEnhanced
-                    ? "bg-warn-muted border-warn-line text-warn-ink"
-                    : "border-line text-ink-muted hover:border-line-strong"
+                    ? "bg-accent-muted border-accent-line text-accent-ink"
+                    : "border-line text-ink-muted hover:bg-surface-hover"
                 }`}
               >
-                <span aria-hidden>⚡</span>
-                <span>增强模式{chatEnhanced ? " · 开" : ""}</span>
+                <Icon icon={Zap} size="sm" selected={chatEnhanced} />
+                <span>增强模式{chatEnhanced ? " · 开" : ""}（工具调用自动批准）</span>
               </button>
             )}
             <div className="grid grid-cols-1 gap-2">
@@ -676,7 +619,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 type="button"
                 data-mobile-target="new-session-send-key"
                 onClick={() => setSendKey(sendKey === "enter" ? "mod-enter" : "enter")}
-                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted"
               >
                 快捷键 · {sendHint(sendKey)}
               </button>
@@ -684,7 +627,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 type="button"
                 data-mobile-target="new-session-history-depth"
                 onClick={() => setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)}
-                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted"
               >
                 历史深度 · {historyDepth === 0 ? "上下文全发" : `${historyDepth} 层`}
               </button>
@@ -693,18 +636,20 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                 data-mobile-target="new-session-focus-writing"
                 onClick={() => setZoneOpen(true)}
                 disabled={busy}
-                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+                className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40 inline-flex items-center gap-2"
               >
-                ⛶ 专注写作
+                <Icon icon={Maximize2} size="sm" />
+                专注写作
               </button>
               <button
                 type="button"
                 data-mobile-target="new-session-sketch"
                 onClick={() => setSketchOpen(true)}
                 disabled={busy || att.atLimit}
-                className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40"
+                className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted disabled:opacity-40 inline-flex items-center gap-2"
               >
-                ✏️ 草图
+                <Icon icon={PencilLine} size="sm" />
+                草图
               </button>
             </div>
             <section>
@@ -719,7 +664,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                       setMoreSettingsOpen(false);
                       ref.current?.focus();
                     }}
-                    className="min-h-11 rounded-md border border-line px-3 text-left text-ui text-ink-muted"
+                    className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted"
                   >
                     {starter}
                   </button>
@@ -730,9 +675,10 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
                     setMoreSettingsOpen(false);
                     setPickerOpen(true);
                   }}
-                  className="min-h-11 rounded-md border border-warn-line bg-warn-muted/60 px-3 text-left text-ui text-warn-ink"
+                  className="min-h-11 rounded-field border border-line px-3 text-left text-ui text-ink-muted inline-flex items-center gap-2"
                 >
-                  📄 从背景材料开始（粘贴 / URL）
+                  <Icon icon={FileText} size="sm" />
+                  从背景材料开始（粘贴 / URL）
                 </button>
               </div>
             </section>

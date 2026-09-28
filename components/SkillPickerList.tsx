@@ -1,14 +1,20 @@
 "use client";
+import { AtSign, Sparkles, SquareSlash, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { Icon } from "@/components/ui";
 import type { Command } from "@/lib/commands";
 
 // C4/C1: shared "/" suggestion dropdown for input boxes — Trellis commands
-// (⚡ first-class, all modes) render above skills (tool-capable modes only),
-// same ordering as the first-screen QuestionInput dropdown. Pops upward
-// (bottom-full) since every input that uses it sits at the bottom of its
-// container. Renders nothing when there are no matches.
+// (first-class, all modes) render above skills (tool-capable modes only).
+// placement="above" pops upward (bottom-full) for the docked composers;
+// "inline" flows under the first-screen QuestionInput. Renders nothing when
+// there are no matches.
 //
 // activeIndex is the keyboard highlight from useSlashNav, in the combined
 // commands-then-skills index space (matching render order).
+//
+// 行样式（W3）：行首 lucide 图标区分身份（命令 / 单轮 Agent / 技能），名字等宽，
+// 行尾弱化文字标注类别；不再用 emoji 徽章。
 export function SkillPickerList({
   skills,
   onPick,
@@ -18,6 +24,7 @@ export function SkillPickerList({
   onPickAgent,
   activeIndex = -1,
   skillPrefix = "/",
+  placement = "above",
 }: {
   skills: { name: string; description: string }[];
   onPick: (name: string) => void;
@@ -30,6 +37,7 @@ export function SkillPickerList({
   onPickAgent?: (slug: string) => void;
   activeIndex?: number;
   skillPrefix?: "/" | "$";
+  placement?: "above" | "inline";
 }) {
   if (!skills.length && !commands.length && !agents.length) return null;
   // Keep the keyboard highlight visible inside the scrollable list. Ref
@@ -37,84 +45,93 @@ export function SkillPickerList({
   // visible element is a no-op.
   const activeRef = (el: HTMLButtonElement | null) =>
     el?.scrollIntoView({ block: "nearest" });
-  const rowClass = (isActive: boolean) =>
-    `w-full text-left px-3 py-2 border-b last:border-b-0 border-line-faint ${
-      isActive ? "bg-surface-muted" : "hover:bg-surface-muted"
-    }`;
+  const row = ({
+    key,
+    active,
+    onClick,
+    icon,
+    name,
+    extra,
+    kind,
+    description,
+  }: {
+    key: string;
+    active: boolean;
+    onClick: () => void;
+    icon: LucideIcon;
+    name: string;
+    extra?: ReactNode;
+    kind: string;
+    description?: string;
+  }) => (
+    <button
+      key={key}
+      type="button"
+      role="option"
+      aria-selected={active}
+      ref={active ? activeRef : undefined}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className={`w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors ${
+        active ? "bg-surface-hover" : "hover:bg-surface-hover"
+      }`}
+    >
+      <Icon icon={icon} size="sm" className="mt-0.5 text-ink-faint" />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-1.5 text-ui text-ink">
+          <span className="font-mono">{name}</span>
+          {extra}
+          <span className="ml-auto shrink-0 text-label text-ink-faint">{kind}</span>
+        </span>
+        {description && (
+          <span className="block text-label text-ink-muted truncate">{description}</span>
+        )}
+      </span>
+    </button>
+  );
   return (
-    <div className="absolute bottom-full inset-x-0 mb-1 z-10 border border-line rounded-lg bg-surface shadow-pop overflow-hidden max-h-56 overflow-y-auto">
-      {commands.map((c, i) => (
-        <button
-          key={`cmd-${c.name}`}
-          type="button"
-          ref={i === activeIndex ? activeRef : undefined}
-          onClick={() => onPickCommand?.(c)}
-          className={rowClass(i === activeIndex)}
-        >
-          <div className="text-ui font-mono text-ink flex items-center gap-1.5">
-            {/* ⚡徽章标识「Trellis 命令」身份（非告警）→ accent-muted */}
-            <span
-              className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
-              aria-hidden
-            >
-              ⚡ 命令
-            </span>
-            <span>
-              /{c.name}
-              {c.hint && (
-                <span className="text-ink-faint">
-                  {" "}
-                  {c.hint}
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="text-label text-ink-muted truncate">
-            {c.description}
-          </div>
-        </button>
-      ))}
-      {agents.map((a, i) => (
-        <button
-          key={`agent-${a.slug}`}
-          type="button"
-          ref={i === activeIndex ? activeRef : undefined}
-          onClick={() => onPickAgent?.(a.slug)}
-          className={rowClass(i === activeIndex)}
-        >
-          <div className="text-ui font-mono text-ink flex items-center gap-1.5">
-            <span
-              className="text-nano px-1 py-0.5 rounded bg-accent-muted text-accent-ink font-sans"
-              aria-hidden
-            >
-              🎭 单轮
-            </span>
-            <span>@{a.slug}</span>
-            <span className="text-ink-faint font-sans">{a.name}</span>
-          </div>
-          {a.description && (
-            <div className="text-label text-ink-muted truncate">{a.description}</div>
-          )}
-        </button>
-      ))}
-      {skills.map((s, i) => (
-        <button
-          key={`skill-${s.name}`}
-          type="button"
-          ref={commands.length + i === activeIndex ? activeRef : undefined}
-          onClick={() => onPick(s.name)}
-          className={rowClass(commands.length + i === activeIndex)}
-        >
-          <div className="text-ui font-mono text-ink">
-            {skillPrefix}{s.name}
-          </div>
-          {s.description && (
-            <div className="text-label text-ink-muted truncate">
-              {s.description}
-            </div>
-          )}
-        </button>
-      ))}
+    <div
+      role="listbox"
+      aria-label="命令与技能"
+      className={`${
+        placement === "above" ? "absolute bottom-full inset-x-0 mb-1 z-10" : "mt-2"
+      } border border-line rounded-card bg-surface shadow-pop p-1 max-h-64 overflow-y-auto`}
+    >
+      {commands.map((c, i) =>
+        row({
+          key: `cmd-${c.name}`,
+          active: i === activeIndex,
+          onClick: () => onPickCommand?.(c),
+          icon: SquareSlash,
+          name: `/${c.name}`,
+          extra: c.hint ? <span className="font-mono text-ink-faint">{c.hint}</span> : undefined,
+          kind: "命令",
+          description: c.description,
+        }),
+      )}
+      {agents.map((a, i) =>
+        row({
+          key: `agent-${a.slug}`,
+          active: i === activeIndex,
+          onClick: () => onPickAgent?.(a.slug),
+          icon: AtSign,
+          name: `@${a.slug}`,
+          extra: <span className="text-ink-faint">{a.name}</span>,
+          kind: "单轮 Agent",
+          description: a.description,
+        }),
+      )}
+      {skills.map((s, i) =>
+        row({
+          key: `skill-${s.name}`,
+          active: commands.length + i === activeIndex,
+          onClick: () => onPick(s.name),
+          icon: Sparkles,
+          name: `${skillPrefix}${s.name}`,
+          kind: "技能",
+          description: s.description,
+        }),
+      )}
     </div>
   );
 }

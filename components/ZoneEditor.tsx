@@ -8,6 +8,9 @@ import {
   MARKDOWN_REMARK_PLUGINS,
 } from "@/lib/markdown-plugins";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
+import { Link2, Maximize2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 // "Zone" — a full-screen, distraction-free Markdown writing surface for
 // composing long-form input (esp. Feynman-mode explanations). Reusable:
@@ -35,7 +38,7 @@ type ToolAction =
   | { kind: "line"; prefix: string }
   | { kind: "link" };
 
-const TOOLBAR: { label: string; title: string; action: ToolAction }[] = [
+const TOOLBAR: { label: ReactNode; title: string; action: ToolAction }[] = [
   { label: "B", title: "粗体 (⌘B)", action: { kind: "wrap", marker: "**", placeholder: "粗体" } },
   { label: "I", title: "斜体 (⌘I)", action: { kind: "wrap", marker: "*", placeholder: "斜体" } },
   { label: "`", title: "行内代码", action: { kind: "wrap", marker: "`", placeholder: "code" } },
@@ -43,7 +46,7 @@ const TOOLBAR: { label: string; title: string; action: ToolAction }[] = [
   { label: "“", title: "引用", action: { kind: "line", prefix: "> " } },
   { label: "•", title: "无序列表", action: { kind: "line", prefix: "- " } },
   { label: "1.", title: "有序列表", action: { kind: "line", prefix: "1. " } },
-  { label: "🔗", title: "链接", action: { kind: "link" } },
+  { label: <Icon icon={Link2} size="sm" />, title: "链接", action: { kind: "link" } },
 ];
 
 // Apply a markdown transform against the textarea's current selection.
@@ -162,7 +165,7 @@ export function ZoneEditor({
       {/* Top bar: title · edit/preview toggle · exit */}
       <div className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-line bg-surface/80 backdrop-blur">
         <div className="flex items-center gap-2 text-sm text-ink-muted min-w-0">
-          <span aria-hidden>⛶</span>
+          <Icon icon={Maximize2} size="sm" />
           <span className="truncate">{title}</span>
         </div>
         <div className="inline-flex rounded-full border border-line bg-surface-muted p-0.5 text-ui">

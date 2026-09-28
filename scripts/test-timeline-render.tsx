@@ -82,8 +82,9 @@ console.log("\n── 收起态：一行说清一步");
 
   check("Bash 命令出现在摘要行", html.includes("git status"));
   check("子 Agent 标签用 subagent_type", html.includes("Explore"));
-  check("长跑命令挂 ⏱ 而不是 🤖", html.includes("⏱"));
-  check("只有真子 Agent 挂 🤖", html.split("🤖").length - 1 === 1, html.split("🤖").length - 1);
+  // W2/W3 起行首是 lucide 图标（不再是 ⏱ / 🤖 emoji），按行的 kind 钩子断言。
+  check("长跑命令归为 longRunning 而不是子 Agent", html.includes('data-tool-row="longRunning"'));
+  check("只有真子 Agent 归为 subagent", html.split('data-tool-row="subagent"').length - 1 === 1, html.split('data-tool-row="subagent"').length - 1);
   check("MCP 工具有像样的标题", html.includes("MCP linear"));
   check("未知工具不炸且有兜底摘要", html.includes("TotallyUnknownTool"));
   check("子调用不在顶层重复出现", html.split("/repo/x.ts").length - 1 <= 1, html.split("/repo/x.ts").length - 1);

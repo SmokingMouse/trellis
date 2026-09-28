@@ -1,60 +1,89 @@
 "use client";
-import type { ButtonHTMLAttributes } from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+import type { ComponentProps } from "react";
+import { cn } from "./cn";
+import { Spinner } from "./Spinner";
 
-// 全局按钮原语。主按钮裁决（2026-07-15）：提交/发送类动作统一 primary =
-// accent 填充（旧黑底按钮身份废除）——accent 已是焦点/流式/选中的既定
-// 强调身份，且随主题换肤。
+// 全局按钮原语（W2 重做，docs/ui-redesign/primitives.md）。
 //
 // variant:
-//   primary   — accent 实色填充（发送/提交/确认）
-//   secondary — 描边 + surface（次要动作）
-//   ghost     — 无边框纯文字（取消/低调动作）
-//   danger    — danger 实色填充（删除等破坏性确认）
-// size: sm = 行内小按钮；md = 表单/底栏默认
+//   primary      — accent 实色（发送 / 提交 / 确认），一屏最多一个
+//   secondary    — 描边 + surface（次要动作，默认）
+//   ghost        — 无框（取消 / 工具条里的低调动作）
+//   danger       — 描边红字（删除入口 / 破坏性动作的第一步）
+//   danger-solid — 实心红：只给 ConfirmDialog 的最终确认按钮
+//   link         — 行内文字链接样式
+// size: sm = 26px（表格行内次级）· md = 32px（默认，全站控件基线）· icon = 32px 方块
+//
+// 高度用 min-h 而不是 h：调用方加 py / h-11 放大时不会被夹住。
+// 手机端（max-md）统一 ≥44px 热区，mobile-verify 依赖它。
+// 不再有 active:scale 按压缩放——克制工具风只用颜色反馈。
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
-type Size = "sm" | "md";
+export const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-field font-medium select-none transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
+  {
+    variants: {
+      variant: {
+        primary: "bg-accent text-accent-fg hover:bg-accent-strong",
+        secondary: "border border-line-strong bg-surface text-ink hover:bg-surface-hover",
+        ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink",
+        danger: "border border-danger-line text-danger-ink hover:bg-danger-muted",
+        "danger-solid": "bg-danger text-accent-fg hover:bg-danger-strong",
+        link: "text-accent-ink underline-offset-2 hover:underline",
+      },
+      size: {
+        sm: "min-h-6.5 px-2 text-label",
+        md: "min-h-8 px-3 text-ui",
+        icon: "min-h-8 min-w-8 px-0 text-ui",
+      },
+    },
+    compoundVariants: [
+      // link 不占控件高度，贴着文字走
+      { variant: "link", className: "min-h-0 px-0 max-md:min-h-0 max-md:min-w-0" },
+    ],
+    defaultVariants: { variant: "secondary", size: "md" },
+  },
+);
 
-const VARIANT: Record<Variant, string> = {
-  primary:
-    "bg-accent hover:bg-accent-strong text-ink-inverse font-medium",
-  secondary:
-    "border border-line-strong bg-surface text-ink-muted hover:text-ink-strong hover:bg-surface-muted",
-  ghost: "text-ink-muted hover:text-ink-strong hover:bg-surface-muted",
-  danger: "bg-danger hover:bg-danger-strong text-ink-inverse font-medium",
-};
+export type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
+export type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
 
-const SIZE: Record<Size, string> = {
-  sm: "px-2.5 py-1 text-ui rounded-md",
-  md: "px-4 py-1.5 text-sm rounded-field",
+export type ButtonProps = ComponentProps<"button"> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  /** 进行中：显示 Spinner 并禁用；文字保持不变（别改成「加载中…」） */
+  loading?: boolean;
+  /** 把样式套到唯一子元素上（如 <a> / next/link），Radix Slot */
+  asChild?: boolean;
 };
 
 export function Button({
-  variant = "secondary",
-  size = "md",
+  variant,
+  size,
   loading = false,
-  className = "",
+  asChild = false,
+  className,
   disabled,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: Variant;
-  size?: Size;
-  loading?: boolean;
-}) {
+}: ButtonProps) {
+  const cls = cn(buttonVariants({ variant, size }), className);
+  if (asChild) {
+    return (
+      <Slot className={cls} aria-disabled={disabled || undefined} {...rest}>
+        {children}
+      </Slot>
+    );
+  }
   return (
     <button
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-1.5 max-md:min-h-11 max-md:min-w-11 transition-colors active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${VARIANT[variant]} ${SIZE[size]} ${className}`}
+      aria-busy={loading || undefined}
+      className={cls}
       {...rest}
     >
-      {loading && (
-        <span className="trellis-dots" aria-hidden>
-          <span />
-          <span />
-          <span />
-        </span>
-      )}
+      {loading && <Spinner size="sm" label={null} className="text-current" />}
       {children}
     </button>
   );

@@ -1,4 +1,5 @@
 "use client";
+import { ToolIcon } from "@/components/ui";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
 import type { ToolNode } from "@/lib/tool-tree";
@@ -162,9 +163,7 @@ export function WorkflowHead({
   const ms = elapsed ?? node.call.durationMs ?? node.meta.durationMs ?? null;
   return (
     <>
-      <span className="shrink-0 select-none text-ink-faint" aria-hidden>
-        ⚙
-      </span>
+      <ToolIcon name="workflow" className="text-ink-faint" />
       <span className="min-w-0 truncate text-ink-muted font-medium">
         <span className="font-normal text-ink-faint">Workflow</span>{" "}
         {node.meta.workflowName ?? "Workflow"}

@@ -1,8 +1,14 @@
 "use client";
+import { GitFork, X, type LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui";
 
 // 「下一句发去哪」的统一目标指示 chip —— 画布 DockedComposer（回复 #N）与
 // 线性视图分叉 chip（⑂ 从 #N 分叉）此前各长一样，视图切换要重学；现共用
 // 本组件（accent 淡底 + 描边的同一外壳），只在文案/动作上分化。
+// 旧调用点传的字符串图标 → lucide。调用方（Canvas / LinearThreadView）不用改也能
+// 去掉 emoji；新调用点直接传组件。
+const LEGACY_ICONS: Record<string, LucideIcon> = { "⑂": GitFork };
+
 export function TargetChip({
   icon,
   verb,
@@ -13,7 +19,8 @@ export function TargetChip({
   onLabelClick,
   onClear,
 }: {
-  icon: string;
+  /** lucide 图标组件（推荐）；为兼容旧调用仍接受字符串（如 "⑂"）。 */
+  icon: LucideIcon | string;
   verb: string; // 动词前缀：「回复」/「从」
   index: number | string;
   suffix?: string; // 紧跟编号的动词后半：「分叉」
@@ -30,8 +37,14 @@ export function TargetChip({
     </>
   );
   return (
-    <div className="mt-2 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-accent-line bg-accent-muted text-xs text-accent-ink">
-      <span aria-hidden>{icon}</span>
+    <div className="mt-2 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-field border border-accent-line bg-accent-muted text-label text-accent-ink">
+      {typeof icon !== "string" ? (
+        <Icon icon={icon} size="sm" />
+      ) : LEGACY_ICONS[icon] ? (
+        <Icon icon={LEGACY_ICONS[icon]} size="sm" />
+      ) : (
+        <span aria-hidden>{icon}</span>
+      )}
       {onLabelClick ? (
         <button
           type="button"
@@ -53,11 +66,11 @@ export function TargetChip({
         <button
           type="button"
           onClick={onClear}
-          className="shrink-0 px-1 rounded hover:bg-accent-line/40"
+          className="shrink-0 inline-flex rounded-sm p-0.5 hover:bg-accent-line/40"
           title="取消 (Esc)"
           aria-label="取消"
         >
-          ✕
+          <Icon icon={X} size="sm" />
         </button>
       )}
     </div>

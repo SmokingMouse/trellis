@@ -1,7 +1,10 @@
 "use client";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { Icon, Spinner, StatusDot, ToolIcon } from "@/components/ui";
+import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
-import { toolSummary, toolTitle } from "@/lib/tool-registry";
+import { toolIcon, toolSummary, toolTitle, type ToolIconKey } from "@/lib/tool-registry";
 import {
   buildToolTree,
   countToolTree,
@@ -62,7 +65,10 @@ export function ToolTimeline({
 
   if (!display || display.total === 0) return null;
   const chain = live ? runningChain(tree) : [];
+  const span = spanMs(tree);
 
+  // 外壳与 AsProjectControls（🔌 引擎块）同一套卡片语言：细描边 + card 圆角 +
+  // 一行表头（chevron · 摘要 · 右侧数值）+ 展开后的分隔线列表（decisions 9/15）。
   return (
     <div
       className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60"
@@ -73,15 +79,13 @@ export function ToolTimeline({
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-tool-timeline-head=""
-        className="w-full px-3 py-2 flex items-center gap-2 text-ui text-left hover:bg-surface-muted transition-colors"
+        className="w-full min-h-9 px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-muted hover:bg-surface-hover transition-colors max-md:min-h-11"
       >
-        <span
-          className="text-ink-faint transition-transform shrink-0"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
-          aria-hidden
-        >
-          ▸
-        </span>
+        <Icon
+          icon={ChevronRight}
+          size="sm"
+          className={`text-ink-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
         {chain.length > 0 ? (
           <LiveHeader
             chain={chain}
@@ -89,29 +93,32 @@ export function ToolTimeline({
           />
         ) : (
           <>
-            <span className="font-medium text-ink shrink-0">🧰 动线</span>
-            <span className="text-ink-muted tabular-nums shrink-0">
-              {display.total} 步
+            <span className="shrink-0 tabular-nums">
+              <b className="font-medium text-ink">{display.total} 步</b>
             </span>
-            <span className="text-ink-faint truncate min-w-0">
+            <span className="text-ink-muted truncate min-w-0">
               {summaryLine(tree, display.subagents, display.workflows, stats?.tools)}
             </span>
             {display.errors > 0 && (
-              <span className="text-danger-ink shrink-0">
-                · {display.errors} 失败
+              // 失败要醒目：红点 + 数字，常规调用保持安静。
+              <span className="shrink-0 inline-flex items-center gap-1.5 text-danger-ink">
+                <StatusDot tone="danger" />
+                {display.errors} 失败
               </span>
             )}
           </>
         )}
         <span className="flex-1" />
-        <span className="text-nano text-ink-faint hidden sm:inline shrink-0">
-          {open ? "收起" : "展开"}
-        </span>
+        {span !== null && chain.length === 0 && (
+          <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
+            {formatDuration(span)}
+          </span>
+        )}
       </button>
 
       {open &&
         (tree.length > 0 ? (
-          <div className="border-t border-line divide-y divide-line/70">
+          <div className="border-t border-line divide-y divide-line-faint py-0.5">
             <TimelineList nodes={tree} live={live} />
           </div>
         ) : (
@@ -120,7 +127,7 @@ export function ToolTimeline({
           <div className="border-t border-line px-3 py-2 text-ui text-ink-faint flex items-center gap-2">
             {loading ? (
               <>
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                <Spinner size="sm" label={null} />
                 正在加载工具调用…
               </>
             ) : (
@@ -130,6 +137,21 @@ export function ToolTimeline({
         ))}
     </div>
   );
+}
+
+// 本轮工具段的墙钟跨度：第一步开始 → 最后一步结束。拿不到时间戳（旧数据 /
+// 大会话剥离了 toolCalls）就不显示，别编一个数。
+function spanMs(tree: ToolNode[]): number | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const n of tree) {
+    const s = n.call.startedAt;
+    if (typeof s !== "number") continue;
+    start = Math.min(start, s);
+    end = Math.max(end, s + (n.call.durationMs ?? 0));
+  }
+  if (!Number.isFinite(start) || end <= start) return null;
+  return end - start;
 }
 
 // The live line — a breadcrumb of the deepest running chain, root → leaf.
@@ -149,7 +171,7 @@ function LiveHeader({
   const elapsed = useElapsed(leaf.call.startedAt);
   const crumbs = chain.map(crumbLabel);
   const step = leafStep(leaf);
-  if (step) crumbs.push(step);
+  if (step) crumbs.push({ kind: "step", label: step });
   const doing = leafDoing(leaf);
   const stat = [
     leaf.meta.totalTokens ? formatTokens(leaf.meta.totalTokens) : null,
@@ -159,9 +181,6 @@ function LiveHeader({
     .join(" · ");
   return (
     <>
-      <span className="font-medium text-ink shrink-0" aria-hidden>
-        🧰
-      </span>
       <span className="flex items-center gap-1 min-w-0 font-medium text-ink">
         {crumbs.map((c, i) => (
           <Fragment key={i}>
@@ -172,17 +191,19 @@ function LiveHeader({
             )}
             {/* 挤不下时先牺牲上游环节 —— 叶子（正在跑的那个）永远完整。 */}
             <span
-              className={
+              data-crumb-kind={c.kind}
+              className={`inline-flex items-center gap-1 ${
                 i === crumbs.length - 1 ? "shrink-0" : "truncate min-w-0"
-              }
+              }`}
             >
-              {c}
+              {c.icon && <ToolIcon name={c.icon} className="text-ink-faint" />}
+              {c.label}
             </span>
           </Fragment>
         ))}
       </span>
       {doing && (
-        <span className="text-warn-ink truncate min-w-0">{doing}</span>
+        <span className="text-ink-muted truncate min-w-0">{doing}</span>
       )}
       {stat && (
         <span className="text-ink-faint tabular-nums shrink-0 hidden sm:inline">
@@ -192,19 +213,20 @@ function LiveHeader({
       {parallel > 0 && (
         <span className="text-ink-faint shrink-0">+{parallel} 并行</span>
       )}
-      <span
-        className="w-1.5 h-1.5 rounded-full bg-warn animate-pulse shrink-0"
-        aria-hidden
-      />
+      <Spinner size="sm" label="运行中" />
     </>
   );
 }
 
-function crumbLabel(n: ToolNode): string {
-  if (n.kind === "subagent") return `🤖 ${subagentLabel(n.meta)}`;
-  if (n.kind === "workflow") return `⚙ ${n.meta.workflowName ?? "Workflow"}`;
-  if (n.kind === "longRunning") return `⏱ ${toolTitle(n.call)}`;
-  return toolTitle(n.call);
+type Crumb = { kind: string; label: string; icon?: ToolIconKey };
+
+// 面包屑一格 = 图标 + 名字；图标区分委派类型（子 Agent / Workflow / 长跑命令），
+// data-crumb-kind 给渲染测试断言用。
+function crumbLabel(n: ToolNode): Crumb {
+  if (n.kind === "subagent") return { kind: n.kind, icon: "bot", label: subagentLabel(n.meta) };
+  if (n.kind === "workflow") return { kind: n.kind, icon: "workflow", label: n.meta.workflowName ?? "Workflow" };
+  if (n.kind === "longRunning") return { kind: n.kind, icon: "timer", label: toolTitle(n.call) };
+  return { kind: n.kind, icon: toolIcon(n.call), label: toolTitle(n.call) };
 }
 
 // 面包屑的最后一格：委派叶子此刻抓着的东西。tool_call 事件到不了这一层
@@ -253,7 +275,7 @@ function summaryLine(
         ? [...new Set(tree.map((n) => toolTitle(n.call)))]
         : (statsTools ?? []);
     if (names.length === 0) return "";
-    return names.slice(0, 4).join("、") + (names.length > 4 ? "…" : "");
+    return "· " + names.slice(0, 4).join("、") + (names.length > 4 ? "…" : "");
   }
   return `· ${parts.join(" · ")}`;
 }

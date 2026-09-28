@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens, computeToolActiveDuration } from "@/lib/format-tokens";
 import type { ChatNode, ToolCall } from "@/lib/types";
+import { Tooltip } from "@/components/ui";
 
 export { computeToolActiveDuration };
 
@@ -58,7 +59,7 @@ export function TurnStatsMeta({
     ? output / llmDurationSec
     : null;
 
-  const baseCls = "tabular-nums whitespace-nowrap";
+  const baseCls = "tabular-nums whitespace-nowrap font-mono";
   const sizeCls = variant === "compact" ? "text-nano" : "text-label";
 
   if (!isStreaming && !hasTokens && !effectiveDuration) {
@@ -69,71 +70,51 @@ export function TurnStatsMeta({
     );
   }
 
-  const tokenTooltip = hasTokens
-    ? `输入 ${input.toLocaleString()} · 输出 ${output.toLocaleString()} · 缓存读取 ${cacheRead.toLocaleString()}${
-        cacheCreation > 0 ? ` · 缓存写入 ${cacheCreation.toLocaleString()}` : ""
-      } · 累计 ${totalTokens.toLocaleString()} tokens`
-    : undefined;
+  // 可见的只留一行弱化 meta：「耗时 · 速率」（没有速率就退到输出 token 数）；
+  // token 明细 / 耗时拆分 / 速率口径一律收进 Tooltip，不再用 ⏱ ↑↓ ⚡ 符号堆一行。
+  const detail: string[] = [];
+  if (effectiveDuration) {
+    detail.push(
+      isStreaming
+        ? `已耗时 ${formatDuration(effectiveDuration)}（生成中）`
+        : toolDuration > 0
+          ? `总耗时 ${formatDuration(effectiveDuration)}（模型 ${formatDuration(llmDuration)} + 工具 ${formatDuration(toolDuration)}）`
+          : `耗时 ${formatDuration(effectiveDuration)}`,
+    );
+  }
+  if (hasTokens) {
+    detail.push(
+      `输入 ${formatTokens(input)} · 输出 ${formatTokens(output)} · 缓存读取 ${formatTokens(cacheRead)}${
+        cacheCreation > 0 ? ` · 缓存写入 ${formatTokens(cacheCreation)}` : ""
+      }（累计 ${totalTokens.toLocaleString()} tokens）`,
+    );
+  }
+  if (tps !== null) {
+    detail.push(
+      `输出速率 ${tps.toFixed(1)} tok/s${toolDuration > 0 ? "（已扣除工具执行时间）" : ""}`,
+    );
+  }
 
-  const durationTooltip = effectiveDuration
-    ? isStreaming
-      ? `已耗时 ${formatDuration(effectiveDuration)}（生成中…）`
-      : toolDuration > 0
-        ? `本轮总耗时 ${formatDuration(effectiveDuration)}（模型生成 ${formatDuration(llmDuration)} + 工具调用 ${formatDuration(toolDuration)}）`
-        : `本轮耗时 ${formatDuration(effectiveDuration)}`
-    : undefined;
+  const parts: string[] = [];
+  if (effectiveDuration !== null && effectiveDuration > 0) {
+    parts.push(formatDuration(effectiveDuration));
+  }
+  if (tps !== null) parts.push(`${Math.round(tps)} tok/s`);
+  else if (output > 0) parts.push(`${formatTokens(output)} tok`);
 
-  const tpsTooltip = tps !== null
-    ? toolDuration > 0
-      ? `模型输出速率：${tps.toFixed(1)} tokens/s（模型实际耗时 ${formatDuration(llmDuration)}，已扣除工具执行 ${formatDuration(toolDuration)}；共 ${output.toLocaleString()} 输出 tokens）`
-      : `模型输出速率：${tps.toFixed(1)} tokens/s（${output.toLocaleString()} 输出 tokens / ${formatDuration(effectiveDuration!)}）`
-    : undefined;
-
-  return (
+  const text = (
     <span
-      className={`shrink-0 inline-flex items-center gap-1.5 ${sizeCls} ${baseCls} text-ink-muted ${className}`}
+      tabIndex={detail.length > 0 && !isStreaming ? 0 : undefined}
+      data-turn-stats=""
+      className={`shrink-0 inline-flex items-center ${sizeCls} ${baseCls} text-ink-faint ${className}`}
     >
-      {effectiveDuration !== null && effectiveDuration > 0 && (
-        <span
-          className="inline-flex items-center gap-0.5 text-ink-muted"
-          title={durationTooltip}
-        >
-          <span className="opacity-70 text-[0.9em]">⏱</span>
-          <span>{formatDuration(effectiveDuration)}</span>
-        </span>
-      )}
-
-      {effectiveDuration !== null && effectiveDuration > 0 && hasTokens && (
-        <span className="text-line-strong select-none">·</span>
-      )}
-
-      {hasTokens && (
-        <span
-          className="inline-flex items-center gap-1"
-          title={tokenTooltip}
-        >
-          <span>↑{formatTokens(input)}</span>
-          <span>↓{formatTokens(output)}</span>
-          {(cacheRead > 0 || cacheCreation > 0) && (
-            <span className="text-positive">
-              ⚡{formatTokens(cacheRead)}
-              {cacheCreation > 0 ? `+${formatTokens(cacheCreation)}` : ""}
-            </span>
-          )}
-        </span>
-      )}
-
-      {tps !== null && (
-        <>
-          <span className="text-line-strong select-none">·</span>
-          <span
-            className="font-mono text-ink-muted"
-            title={tpsTooltip}
-          >
-            {tps.toFixed(1)} tps
-          </span>
-        </>
-      )}
+      {parts.join(" · ")}
     </span>
+  );
+  if (isStreaming || detail.length === 0) return text;
+  return (
+    <Tooltip content={<span className="whitespace-pre-line">{detail.join("\n")}</span>} side="top">
+      {text}
+    </Tooltip>
   );
 }

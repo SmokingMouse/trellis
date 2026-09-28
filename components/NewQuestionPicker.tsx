@@ -1,10 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
-import { Pill } from "@/components/ui/Pill";
+import { X } from "lucide-react";
+import { Badge, Button, Icon, IconButton, Kbd, Modal, Textarea } from "@/components/ui";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 
@@ -26,7 +24,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   // model loses its conversation memory of the existing tree AND starts a
   // brand-new Claude session. In chat there is no resumed claude
   // session, but the new root still carries zero prior context. Either way
-  // the "🧹 清空上下文" promise holds, so we surface the badge in every mode.
+  // the「清空上下文」promise holds, so we surface the badge in every mode.
   const isProject = sessionMode === "project";
 
   useEffect(() => {
@@ -55,13 +53,14 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       onClose={onClose}
+      title="新树"
       panelClassName="max-md:max-h-[calc(100dvh-var(--safe-top)-var(--safe-bottom)-1rem)] max-md:flex max-md:flex-col"
     >
       <div className="shrink-0 px-5 py-4 max-md:py-3 border-b border-line-faint flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-reading font-semibold text-ink-strong flex items-center gap-2">
             新树
-            <Pill tone="danger">🧹 清空上下文</Pill>
+            <Badge variant="warn">清空上下文</Badge>
           </div>
           <div className="text-ui text-ink-muted mt-0.5">
             在当前会话中开启一棵独立的新树，模型不再记得现有节点（等价 CLI 的{" "}
@@ -80,7 +79,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           data-mobile-target="new-tree-close"
           onClick={onClose}
         >
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
 
@@ -90,7 +89,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
             <AttachmentPreview pending={att.pending} onRemove={att.remove} />
           </div>
         )}
-        <textarea
+        <Textarea
           ref={ref}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -103,14 +102,14 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           }}
           placeholder="为这棵新树输入第一个问题…（可粘贴图片）"
           rows={6}
-          className="w-full px-3 py-2 max-md:h-24 rounded-field border border-line-strong bg-surface text-ink text-sm outline-none focus:border-accent-line resize-none leading-relaxed placeholder:text-ink-faint"
+          className="px-3 py-2 max-md:h-24 resize-none"
           disabled={busy}
         />
-        <div className="text-label text-ink-faint mt-1">
-          ⌘↩ 提交 · {q.length} 字
+        <div className="text-label text-ink-faint mt-1 flex items-center gap-1">
+          <Kbd keys={["⌘", "↩"]} /> 提交 · {q.length} 字
         </div>
         {error && (
-          <div className="mt-2 text-ui text-danger">
+          <div role="alert" className="mt-2 text-ui text-danger-ink">
             {error}
           </div>
         )}
@@ -132,8 +131,9 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           data-mobile-target="new-tree-start"
           onClick={submit}
           disabled={!q.trim() || busy || att.hasUploading}
+          loading={busy || att.hasUploading}
         >
-          {busy ? "提交中…" : att.hasUploading ? "上传中…" : "开始"}
+          开始
         </Button>
       </div>
     </Modal>

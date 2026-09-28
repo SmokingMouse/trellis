@@ -14,8 +14,8 @@ export default function AppleIcon() {
           width: "100%",
           height: "100%",
           display: "flex",
-          background:
-            "linear-gradient(135deg, #6366f1 0%, #d946ef 50%, #fbbf24 100%)",
+          // ui-guard-allow(hex): 品牌渐变 logo（不随皮肤，刻意裁决）
+          background: "linear-gradient(135deg, #6366f1 0%, #d946ef 50%, #fbbf24 100%)",
         }}
       >
         <svg
