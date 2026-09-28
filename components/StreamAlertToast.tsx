@@ -23,7 +23,7 @@ export function StreamAlertToast() {
   if (!alert) return null;
 
   return (
-    <div className="fixed bottom-20 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
+    <div data-legacy-toast className="fixed bottom-20 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
       <ToastShell
         tone="danger"
         className="max-w-md w-full px-3 py-2 flex items-start gap-2.5"

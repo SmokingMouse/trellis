@@ -28,7 +28,7 @@ export function AbortToast() {
   if (!arm && !recovery) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2 pointer-events-none">
+    <div data-legacy-toast className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2 pointer-events-none">
       {arm && (
         <ToastShell tone="warn" className="px-4 py-2 text-ui flex items-center gap-2">
           <span aria-hidden>⚠️</span>
