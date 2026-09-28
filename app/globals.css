@@ -794,16 +794,20 @@ html, body {
 
 /* B5 (a11y): visible keyboard-focus ring. Pointer clicks don't trigger
    :focus-visible, so this only shows during keyboard navigation — no visual
-   noise for mouse users, clear affordance for keyboard users. */
-:focus-visible {
-  outline: 2px solid var(--accent-vivid);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-/* Modal / Drawer 打开时把焦点落在面板本身（tabindex=-1）以便 Tab 进入——面板
-   整块不画焦点环（全局规则不在 layer 里，utility 的 outline-none 压不住它）。 */
-[data-focus-panel]:focus-visible {
-  outline: none;
+   noise for mouse users, clear affordance for keyboard users.
+   W4：放进 @layer base —— 不在 layer 里的规则优先级高于所有 utility，组件想用
+   `focus-visible:outline-none` / `outline-*` 覆盖时压不住，只能写内联 style。 */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent-vivid);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  /* Modal / Drawer 打开时把焦点落在面板本身（tabindex=-1）以便 Tab 进入——面板
+     整块不画焦点环。 */
+  [data-focus-panel]:focus-visible {
+    outline: none;
+  }
 }
 
 /* Canvas (ReactFlow) polish: transparent container so the gradient bg shows
