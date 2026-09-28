@@ -9,6 +9,8 @@ DB="$H/.trellis/data.db"
 LOG="$H/server.log"
 OUT="${OUT:-$H/screenshots}"
 SESSION=mv-mobile-safe-area
+# mv_click / mv_wait_idle：等 W2 弹层进场动画播完再点 / 再量（见 lib-settle.sh）
+. "$ROOT_DIR/scripts/mobile-verify/lib-settle.sh"
 APP_PID=""
 OWNS_PORT=0
 
@@ -261,14 +263,16 @@ agent-browser --session "$SESSION" wait '[data-mobile-target="branch-open"]'
 agent-browser --session "$SESSION" eval "document.querySelector('[data-mobile-target=branch-open]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))"
 agent-browser --session "$SESSION" wait 'textarea[placeholder^="进一步追问"]'
 assert_visible_text_fields_at_least_16 "展开追问 popover"
-agent-browser --session "$SESSION" click '[data-mobile-target="branch-cancel"]'
+mv_click '[data-mobile-target="branch-cancel"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('textarea[placeholder^=\"进一步追问\"]')"
 
 echo "== Drawer / Modal safe-bottom geometry =="
-agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+mv_click 'button[aria-label="更多功能"]'
 agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-agent-browser --session "$SESSION" click '[data-mobile-target="overflow-notes"]'
+mv_click '[data-mobile-target="overflow-notes"]'
 agent-browser --session "$SESSION" wait --fn "[...document.querySelectorAll('[data-safe-area=bottom-sheet]')].some((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false' && sheet.textContent.includes('笔记'))"
+# 抽屉 200ms 上滑：aria-hidden=false 在第一帧就成立，量之前等动画播完
+mv_wait_idle
 agent-browser --session "$SESSION" eval --stdin <<'DRAWER_EOF'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -287,12 +291,13 @@ DRAWER_EOF
 agent-browser --session "$SESSION" eval "[...document.querySelectorAll('[data-safe-area=bottom-sheet]')].find((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false' && sheet.textContent.includes('笔记')).querySelector('button[aria-label=关闭]').click()"
 agent-browser --session "$SESSION" wait --fn "![...document.querySelectorAll('[data-safe-area=bottom-sheet]')].some((sheet) => sheet.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false')"
 
-agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+mv_click 'button[aria-label="更多功能"]'
 agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-agent-browser --session "$SESSION" click '[data-mobile-target="overflow-tree"]'
+mv_click '[data-mobile-target="overflow-tree"]'
 agent-browser --session "$SESSION" wait '[data-mobile-target="new-tree-open"]'
-agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-open"]'
+mv_click '[data-mobile-target="new-tree-open"]'
 agent-browser --session "$SESSION" wait '[data-mobile-target="new-tree-start"]'
+mv_wait_idle
 agent-browser --session "$SESSION" eval --stdin <<'MODAL_EOF'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -309,26 +314,26 @@ agent-browser --session "$SESSION" eval --stdin <<'MODAL_EOF'
 MODAL_EOF
 assert_visible_text_fields_at_least_16 "新树 modal"
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[data-mobile-target=\"new-tree-close\"]'))"
-agent-browser --session "$SESSION" click '[data-mobile-target="new-tree-close"]'
+mv_click '[data-mobile-target="new-tree-close"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-safe-area=modal-shell]')"
 
 # Cancelling the new-tree modal returns to the linear thread. Reopen the
 # mobile tree sheet before exercising its filter input.
-agent-browser --session "$SESSION" click 'button[aria-label="更多功能"]'
+mv_click 'button[aria-label="更多功能"]'
 agent-browser --session "$SESSION" wait --fn "document.querySelector('[data-mobile-overflow-menu]')?.closest('[aria-hidden]')?.getAttribute('aria-hidden') === 'false'"
-agent-browser --session "$SESSION" click '[data-mobile-target="overflow-tree"]'
+mv_click '[data-mobile-target="overflow-tree"]'
 agent-browser --session "$SESSION" wait '[data-mobile-tree-sheet="open"]'
 sleep 1
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('button[aria-label=\"过滤跳转\"]'))"
-agent-browser --session "$SESSION" click 'button[aria-label="过滤跳转"]'
+mv_click 'button[aria-label="过滤跳转"]'
 agent-browser --session "$SESSION" wait 'input[aria-label="过滤节点"]'
 assert_visible_text_fields_at_least_16 "思维树过滤输入"
-agent-browser --session "$SESSION" click '[data-mobile-target="tree-sheet-close"]'
+mv_click '[data-mobile-target="tree-sheet-close"]'
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('[data-mobile-tree-sheet]')"
 
-agent-browser --session "$SESSION" click 'button[aria-label="会话列表"]'
+mv_click 'button[aria-label="会话列表"]'
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-close]'))"
-agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-advanced"]'
+mv_click '[role="dialog"] [data-mobile-target="drawer-advanced"]'
 agent-browser --session "$SESSION" wait --fn "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-attach]'))"
 agent-browser --session "$SESSION" eval --stdin <<'OPEN_ATTACH_EOF'
 (() => {
@@ -344,7 +349,7 @@ assert_visible_text_fields_at_least_16 "会话 drawer 的 Attach CLI 输入"
 agent-browser --session "$SESSION" press Escape
 agent-browser --session "$SESSION" wait --fn "!document.querySelector('input[placeholder*=搜索标题]')"
 
-agent-browser --session "$SESSION" click '[role="dialog"] [data-mobile-target="drawer-new-session"]'
+mv_click '[role="dialog"] [data-mobile-target="drawer-new-session"]'
 agent-browser --session "$SESSION" wait 'textarea[placeholder^="例如："]'
 assert_visible_text_fields_at_least_16 "会话 drawer → 新会话首屏"
 
@@ -429,35 +434,25 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   const hr = header.getBoundingClientRect();
   const cr = composer.getBoundingClientRect();
   const desktopComposerFontSize = parseFloat(getComputedStyle(composerTextarea).fontSize);
-  assert(near(hr.top, 0) && near(hr.width, 1280) && near(hr.height, 48), `Header 偏离改前基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
-  assert(near(cr.left, 210) && near(cr.top, 729) && near(cr.width, 1070) && near(cr.height, 71) && near(cr.bottom, 800), `Composer 偏离改前基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
+  // 桌面 safe-area 基线：原先钉死 Header 48 高、Composer left=210（侧栏宽）/ 71 高等 W0 像素，
+  // W4 重做 Header / 侧栏必然漂移。这里只守 safe-area 本身的约束：Header 贴顶满宽、没被
+  // safe-top 撑高（手机端是 95px）；Composer 贴底贴右、没被 safe-bottom 垫高。
+  assert(near(hr.top, 0) && near(hr.width, 1280) && hr.height >= 32 && hr.height < 64, `Header 偏离桌面 safe-area 基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
+  assert(cr.left > 0 && near(cr.right, 1280) && near(cr.bottom, 800) && cr.height < 120, `Composer 偏离桌面 safe-area 基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
   assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;
   const label = (el) => el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent?.trim().replace(/\s+/g, '').slice(0, 60);
   const headerButtons = [...document.querySelectorAll('header button')].filter(visible);
-  const expectedHeader = [
-    ['搜索', 30, 22],
-    ['上下文占用，点击查看详情', 58.6, 22],
-    ['工作区文件', 30, 22],
-    ['笔记', 30, 22],
-    ['导出当前对话', 49, 24],
-    ['[Claude]Opus▾', 127.5, 24],
-    ['主题', 28, 28],
-  ];
+  // 原先钉死 7 个 Header 按钮的清单与像素（搜索 30x22 …），W2 IconButton 已改成 32x32，
+  // W4 还会重排 Header。这里只守：搜索入口在，且手机 44px 热区没漏到桌面 Header。
   const actualHeader = headerButtons.map((button) => {
     const rect = button.getBoundingClientRect();
-    return { label: label(button), width: rect.width, height: rect.height };
+    return { label: label(button), width: rect.width, height: rect.height, minHeight: getComputedStyle(button).minHeight };
   });
-  const expectedLabels = expectedHeader.map(([name]) => name);
-  const actualLabels = actualHeader.map((button) => button.label);
-  assert(JSON.stringify([...actualLabels].sort()) === JSON.stringify([...expectedLabels].sort()),
-    `Header 按钮集合变化: ${JSON.stringify({ expected: expectedLabels, actual: actualHeader })}`);
-  expectedHeader.forEach(([expectedLabel, width, height]) => {
-    const button = headerButtons.find((candidate) => label(candidate) === expectedLabel);
-    const rect = button.getBoundingClientRect();
-    assert(near(rect.width, width) && near(rect.height, height), `Header 按钮尺寸变化: ${expectedLabel} ${rect.width}x${rect.height}`);
-  });
+  assert(actualHeader.some((button) => button.label === '搜索'), `桌面 Header 缺搜索入口: ${JSON.stringify(actualHeader)}`);
+  const leaked = actualHeader.filter((button) => button.height >= 44 || button.minHeight === '44px');
+  assert(leaked.length === 0, `手机 44px 热区漏到桌面 Header: ${JSON.stringify(leaked)}`);
 
   const composerButtons = [...composer.querySelectorAll('button')].filter(visible);
   const expectedComposer = ['添加附件', '画个草图', '发送'];
