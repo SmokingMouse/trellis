@@ -450,6 +450,15 @@ ab set viewport 1280 800
 echo "== SN-3（已退役）: 确认不再渲染 legacy 侧栏 =="
 wait_for_js "no legacy sidebar layout" "!document.querySelector('[data-sidebar-layout=\"legacy\"]') && Boolean(document.querySelector('[data-sidebar-list][data-sidebar-layout]'))"
 
+# 开头用 NEXT_PUBLIC_TRELLIS_VERIFY=1 build 过（带调试钩子 __sessionStore）；原先由
+# SN-3 段末尾的普通 build 顺带恢复，SN-3 退役后在这里显式恢复，否则后续脚本
+# （如 workflow-card 的「普通构建不含调试钩子」检查）会读到验证构建。
+echo "== 恢复默认构建环境 =="
+kill "$SERVER_PID" >/dev/null 2>&1 || true
+wait "$SERVER_PID" >/dev/null 2>&1 || true
+SERVER_PID=
+bun --bun run build > /tmp/build-restore.log 2>&1 || (cat /tmp/build-restore.log && exit 1)
+
 echo "========================================="
 echo "✓ ALL DESKTOP SIDEBAR NEST CHECKS PASSED!"
 echo "========================================="

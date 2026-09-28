@@ -313,8 +313,8 @@ ab eval "(() => { const p=document.querySelector('[data-herdr-pane=\"pane-claude
 wait_for_js "project collapse hides its session" "!document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
 ab screenshot "$OUT/desktop-herdr-collapsed.png"
 ab reload
-wait_for_js "project collapse survives reload" "Boolean(document.querySelector('[data-sidebar-project] button[aria-expanded=false]')) && !document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
-ab eval "document.querySelector('[data-sidebar-project] button[aria-expanded=false]').click(); true"
+wait_for_js "project collapse survives reload" "Boolean(document.querySelector('[data-sidebar-project] [data-sidebar-group] > button[aria-expanded=false]')) && !document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
+ab eval "document.querySelector('[data-sidebar-project] [data-sidebar-group] > button[aria-expanded=false]').click(); true"
 wait_for_js "project expands" "Boolean(document.querySelector('[data-herdr-pane=\"pane-claude\"]'))"
 ab click '[data-herdr-pane="pane-claude"]'
 wait_for_js "Herdr session badge" "Boolean(document.querySelector('[data-herdr-badge]'))"
