@@ -3,7 +3,13 @@ import { useState } from "react";
 import { useElapsed } from "@/hooks/useElapsed";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
-import { defaultOpen, toolIcon, toolSummary, toolTitle } from "@/lib/tool-registry";
+import {
+  defaultOpen,
+  toolIcon,
+  toolSummary,
+  toolTitle,
+  type ToolIconKey,
+} from "@/lib/tool-registry";
 import {
   nestedErrorCount,
   segmentTimeline,
@@ -12,6 +18,7 @@ import {
   type ToolNode,
 } from "@/lib/tool-tree";
 import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
+import { ToolIcon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
 import { RawView } from "./RawView";
 import { resolveToolView } from "./views";
@@ -228,8 +235,8 @@ export function ToolRow({
         ) : (
           <>
             <StatusPill node={node} live={live} />
-            <span className="shrink-0 select-none text-ink-faint" aria-hidden>
-              {rowIcon(node)}
+            <span className="shrink-0 inline-flex select-none text-ink-faint" aria-hidden>
+              <ToolIcon name={rowIcon(node)} />
             </span>
             <span className="font-mono text-ink shrink-0">{rowTitle(node)}</span>
             <span className="text-ink-muted truncate min-w-0">
@@ -304,10 +311,10 @@ export function rowAutoOpen(
   return defaultOpen(node);
 }
 
-function rowIcon(node: ToolNode): string {
-  if (node.kind === "subagent") return "🤖";
-  if (node.kind === "workflow") return "⚙";
-  if (node.kind === "longRunning") return "⏱";
+function rowIcon(node: ToolNode): ToolIconKey {
+  if (node.kind === "subagent") return "bot";
+  if (node.kind === "workflow") return "workflow";
+  if (node.kind === "longRunning") return "timer";
   return toolIcon(node.call);
 }
 
