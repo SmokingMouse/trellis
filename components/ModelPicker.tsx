@@ -152,6 +152,7 @@ export function ModelPicker() {
       <Popover
         open={open}
         onClose={() => setOpen(false)}
+        wrapperClassName="min-w-0"
         panelClassName="w-80 max-h-[30rem] flex flex-col text-sm overflow-hidden shadow-pop"
         trigger={
           <button
@@ -160,7 +161,7 @@ export function ModelPicker() {
             aria-label={`切换模型，当前 ${current.shortLabel}`}
             aria-expanded={open}
             data-model-picker-trigger
-            className="inline-flex h-7 max-w-56 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover"
+            className="inline-flex h-7 min-w-0 max-w-56 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover"
           >
             <Icon icon={Cpu} size="sm" className="text-ink-muted" />
             <span className="text-nano text-ink-faint">{currentBadge}</span>

@@ -415,7 +415,8 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             label="展开侧栏"
             data-header-sidebar-toggle
             onClick={() => setSidebarOpen(true)}
-            className="hidden md:inline-flex"
+            // IconButton 自带 inline-flex，没有 tailwind-merge，所以用 max-md:hidden 而不是 hidden md:inline-flex
+            className="max-md:hidden"
           >
             <Icon icon={PanelLeftOpen} />
           </IconButton>
@@ -462,8 +463,12 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       </div>
 
       {/* ── 中：会话语境 ── */}
-      <div data-header-group="context" className="flex shrink-0 items-center gap-1.5">
-        <ModeBadge />
+      {/* 窄屏（手机用户手动「转桌面版」）下这一组可以收缩：模式 chip 让位，模型名截断，
+          不能盖住左侧的汉堡键。 */}
+      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5">
+        <div className="contents max-md:hidden">
+          <ModeBadge />
+        </div>
         <ModelPicker />
         {session && (
           <Popover
@@ -479,9 +484,8 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                   onClick={() => setCtxPopoverOpen((v) => !v)}
                   aria-expanded={ctxPopoverOpen}
                   aria-label={
-                    ctx
-                      ? `上下文占用 ${ctx.percent.toFixed(1)}%，点击查看详情`
-                      : "用量，点击查看详情"
+                    // 文案被 mobile-safe-area 当钩子用；百分比在按钮可见文字里，读屏照样念到。
+                    ctx ? "上下文占用，点击查看详情" : "用量，点击查看详情"
                   }
                   className="hidden h-7 items-center gap-2 rounded-field px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
                 >

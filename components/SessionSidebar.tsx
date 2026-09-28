@@ -964,7 +964,7 @@ export function SessionSidebar() {
             label="接入本机 CLI 会话（Claude Code / Codex，双向同步）"
             data-mobile-target="drawer-attach"
             onClick={() => setAttachOpen(true)}
-            className="hidden border border-line md:inline-flex"
+            className="border border-line max-md:hidden"
           >
             <Icon icon={Plug} />
           </IconButton>
