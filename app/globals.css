@@ -65,6 +65,10 @@
   --ink-muted: #56565f; /* 7.1:1 on canvas */
   --ink-faint: #74747e; /* 4.6:1 on canvas，满足 AA */
   --ink-inverse: #fff;
+  /* W2 原语新增：行 hover 底 / 输入框焦点光晕 / 主按钮文字 */
+  --surface-hover: rgb(0 0 0 / 0.04);
+  --focus-ring: color-mix(in oklab, var(--accent) 35%, transparent);
+  --accent-fg: #fff;
 
   /* accent —— 唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） */
   --accent: oklch(52% 0.12 277);
@@ -152,6 +156,9 @@
   --ink-muted: #a3a3ac; /* 8.3:1 on canvas */
   --ink-faint: #7e7e89; /* 4.9:1 on canvas */
   --ink-inverse: #0b0b0c;
+  --surface-hover: rgb(255 255 255 / 0.05);
+  --focus-ring: color-mix(in oklab, var(--accent-vivid) 45%, transparent);
+  --accent-fg: #fff;
 
   --accent: oklch(57% 0.12 277);
   --accent-strong: oklch(62% 0.12 277); /* dark hover 变亮 */
@@ -524,6 +531,12 @@
   --fork-line: #ffd23e;
 }
 
+/* 皮肤的 accent 亮度各异（terminal 暗色是荧光青），主按钮文字回落 ink-inverse；
+   只有默认皮肤用恒白。放在所有皮肤块之后、与 .dark 同优先级 → 后声明胜出。 */
+[data-theme] {
+  --accent-fg: var(--ink-inverse);
+}
+
 /* Tailwind utility 注册。inline = 在使用处解析 var()，随 .dark /
    [data-theme] 级联（关键，见上）。 */
 @theme inline {
@@ -550,6 +563,9 @@
   --color-ink-muted: var(--ink-muted);
   --color-ink-faint: var(--ink-faint);
   --color-ink-inverse: var(--ink-inverse);
+  --color-surface-hover: var(--surface-hover);
+  --color-focus-ring: var(--focus-ring);
+  --color-accent-fg: var(--accent-fg);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-ink: var(--accent-ink);
@@ -999,11 +1015,64 @@ html, body {
 .ui-enter-slide-up { animation: ui-slide-up-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ui-enter-slide-left { animation: ui-slide-left-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 
+/* ── W2 Radix 原语的进 / 退场（docs/ui-redesign/primitives.md）──
+   弹层统一 100ms 淡入 + 0.97 缩放；Radix 的 Presence 会等 data-state=closed
+   的退场动画播完再卸载，所以退场帧必须 forwards。transform-origin 取 Radix
+   popper 写在包裹层上的变量，缩放从锚点方向长出来。 */
+@keyframes ui-layer-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ui-layer-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.97); }
+}
+@keyframes ui-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.ui-enter-layer { animation: ui-layer-in 100ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ui-layer { transform-origin: var(--radix-popper-transform-origin, center); }
+.ui-layer[data-state="open"],
+.ui-layer[data-state="delayed-open"],
+.ui-layer[data-state="instant-open"] {
+  animation: ui-layer-in 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ui-layer[data-state="closed"] { animation: ui-layer-out 100ms ease-in forwards; }
+.ui-scrim[data-state="open"] { animation: ui-fade-in 100ms ease-out; }
+.ui-scrim[data-state="closed"] { animation: ui-fade-out 100ms ease-in forwards; }
+
+/* Drawer：手机底部 sheet 上滑，≥sm 右侧面板横滑；退场同路返回。 */
+@keyframes ui-drawer-up-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes ui-drawer-up-out { from { transform: none; } to { transform: translateY(100%); } }
+@keyframes ui-drawer-left-in { from { transform: translateX(calc(100% + 0.5rem)); } to { transform: none; } }
+@keyframes ui-drawer-left-out { from { transform: none; } to { transform: translateX(calc(100% + 0.5rem)); } }
+.ui-drawer[data-state="open"] { animation: ui-drawer-up-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ui-drawer[data-state="closed"] { animation: ui-drawer-up-out 200ms ease-in forwards; }
+@media (min-width: 640px) {
+  .ui-drawer[data-state="open"] { animation-name: ui-drawer-left-in; }
+  .ui-drawer[data-state="closed"] { animation-name: ui-drawer-left-out; }
+}
+
+/* Skeleton：中性灰扫光，全站唯一的占位写法 */
+@keyframes ui-skeleton-sweep { to { background-position: -200% 0; } }
+.ui-skeleton {
+  background: linear-gradient(90deg, var(--surface-muted) 0%, var(--surface-hover) 50%, var(--surface-muted) 100%);
+  background-color: var(--surface-muted);
+  background-size: 200% 100%;
+  animation: ui-skeleton-sweep 1.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ui-enter-fade,
   .ui-enter-pop,
   .ui-enter-slide-up,
   .ui-enter-slide-left,
+  .ui-enter-layer,
+  .ui-layer[data-state],
+  .ui-scrim[data-state],
+  .ui-drawer[data-state],
+  .ui-skeleton,
   .streaming-cursor::after,
   .md-body mark.anchor-pulse,
   .md-body mark[data-note-id]:not([data-child-id]).anchor-pulse,

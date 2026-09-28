@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { PREF_KEYS } from "@/lib/prefs";
+import { AppProviders } from "@/components/ui/AppProviders";
 
 export const metadata: Metadata = {
   title: "Trellis",
@@ -74,7 +75,9 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <AppProviders>{children}</AppProviders>
+      </body>
     </html>
   );
 }
