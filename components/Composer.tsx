@@ -314,7 +314,8 @@ export function Composer({
 
   const attachButton = (
     <IconButton
-      label={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
+      label="添加附件"
+      title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
       onClick={() => fileInputRef.current?.click()}
       disabled={noTarget || att.atLimit}
       data-composer-attach=""
@@ -328,7 +329,7 @@ export function Composer({
       ref={rootRef}
       data-mobile-composer
       data-composer-state={streaming ? "stopping" : compact ? "compact" : "expanded"}
-      className={`relative ${compact ? "py-1.5" : "pt-2 pb-3 max-md:py-2"}`}
+      className={`relative ${compact ? "py-1" : "pt-2 pb-3 max-md:py-2"}`}
       onBlur={collapseMobileIfEmpty}
     >
       {(matchedCommands.length > 0 ||
@@ -420,7 +421,8 @@ export function Composer({
             )}
             {attachButton}
             <IconButton
-              label={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
+              label="画个草图"
+              title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
               onClick={() => setSketchOpen(true)}
               disabled={noTarget || att.atLimit}
             >

@@ -332,7 +332,8 @@ function CopyIconButton({ text }: { text: string }) {
   return (
     <IconButton
       size="sm"
-      label={
+      label="复制全文"
+      title={
         state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制全文（markdown 源）"
       }
       className="max-md:hidden"
@@ -577,7 +578,8 @@ function QuestionBlock({
       {!readOnly && (
         <IconButton
           size="sm"
-          label="编辑问题（会新建一个分支重问）"
+          label="编辑问题"
+          title="编辑问题（会新建一个分支重问）"
           onClick={() => {
             setText(question);
             setEditing(true);
