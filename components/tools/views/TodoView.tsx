@@ -1,4 +1,6 @@
 "use client";
+import { Check, ChevronRight, Circle, Dot, type LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui";
 import type { ToolNode } from "@/lib/tool-tree";
 
 // TodoWrite. The result is always the same boilerplate acknowledgement, so the
@@ -25,15 +27,15 @@ export function canRenderTodo(node: ToolNode): boolean {
   return asTodos(node.call.input) !== null;
 }
 
-const MARK: Record<string, string> = {
-  completed: "✔",
-  in_progress: "▸",
-  pending: "○",
+const MARK: Record<string, LucideIcon> = {
+  completed: Check,
+  in_progress: ChevronRight,
+  pending: Circle,
 };
 
 const TONE: Record<string, string> = {
   completed: "text-ink-faint line-through",
-  in_progress: "text-warn-ink font-medium",
+  in_progress: "text-ink font-medium",
   pending: "text-ink-muted",
 };
 
@@ -48,8 +50,8 @@ export function TodoView({ node }: { node: ToolNode }) {
       <ul className="space-y-0.5">
         {todos.map((t, i) => (
           <li key={i} className="flex items-start gap-2 text-label">
-            <span className="shrink-0 w-3 text-center select-none text-ink-faint">
-              {MARK[t.status] ?? "·"}
+            <span className="shrink-0 mt-0.5 inline-flex text-ink-faint">
+              <Icon icon={MARK[t.status] ?? Dot} size="sm" />
             </span>
             <span className={TONE[t.status] ?? "text-ink-muted"}>
               {t.status === "in_progress" ? (t.activeForm ?? t.content) : t.content}

@@ -76,7 +76,7 @@ export function WorkflowView({
       {script && (
         <details>
           <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
-            ⚙ 工作流脚本
+            工作流脚本
           </summary>
           <pre className="mt-1 text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-72 overflow-auto">
             {script}
