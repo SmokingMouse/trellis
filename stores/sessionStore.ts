@@ -35,6 +35,7 @@ import {
 } from "@/lib/thread-width";
 import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
 import { uuid } from "@/lib/uuid";
+import { loadStartupView } from "@/lib/prefs";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -573,12 +574,20 @@ type State = {
   // it on demand). Ephemeral — not persisted, defaults closed so a session
   // isn't hidden behind it on load. Opened by the Header hamburger.
   mobileNavOpen: boolean;
+  // 首页（工作台总览）：session 为空时，true 渲染首页、false 渲染裸新会话首屏。
+  // 进任何会话后 session 非空、首页自然让位。「新会话」与首页已合一：
+  // newConversation 也落首页（首页内嵌同一个 QuestionInput）。
+  homeOpen: boolean;
+  // 每次 newConversation 自增，首页据此把光标送进输入框（已在首页时也生效）。
+  homeFocusNonce: number;
 };
 
 type Actions = {
   hydrate: (sessionId?: string) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   newConversation: () => void;
+  // 回首页：与 newConversation 同样清空当前会话（中断在途导航），再亮出首页。
+  openHome: () => void;
   // ── Workbench Wave 4: VSCode tab management ─────────────────────────
   // Single-click a sidebar item: load it + mark it as the (transient)
   // preview tab unless it's already pinned. Replaces any prior preview.
@@ -925,6 +934,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   waitingNodeIds: new Set(),
   sidebarOpen: loadSidebarOpen(),
   mobileNavOpen: false,
+  homeOpen: false,
+  homeFocusNonce: 0,
 
   hydrate: async (sessionId) => {
     // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
@@ -953,6 +964,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     void get().refreshBookmarks();
     try {
       let targetId = sessionId;
+      // 不带会话参数进来：按「启动时打开」偏好落首页（默认）或最近一个会话。
+      // 深链（sessionId 有值）永远直达，不看这个偏好。
+      if (!targetId && loadStartupView() === "home") {
+        if (!navigation.current()) return;
+        set({ hydrated: true, homeOpen: true });
+        return;
+      }
       if (!targetId) {
         const res = await fetchWithRetry("/api/sessions", 5000, navigation.signal);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1023,6 +1041,12 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // orphan italic tab pointing at nothing.
       previewSessionId: null,
     });
+    set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
+  },
+
+  openHome: () => {
+    get().newConversation();
+    set({ homeOpen: true, mobileNavOpen: false });
   },
 
   // ── Workbench Wave 4: VSCode tab management ───────────────────────────

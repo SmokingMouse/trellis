@@ -207,6 +207,29 @@ ab fill '#pw' "$AUTH_PASS"
 ab click 'button[type="submit"]'
 wait_for_js "authenticated home" "location.pathname !== '/login' && Boolean(document.querySelector('button[aria-label=\"会话列表\"]'))"
 
+echo "== home: / 默认落首页（热区 >=44）；启动偏好=上次的会话时直进会话；再切回首页 =="
+wait_for_js "home is the default landing" "Boolean(document.querySelector('[data-home] [data-home-greeting]')) && !location.search.includes('session=')"
+ab eval --stdin <<'JS'
+(() => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
+  const small = [...document.querySelectorAll('[data-home] button, [data-home] a')]
+    .map((el) => ({ el, r: el.getBoundingClientRect() }))
+    .filter(({ r }) => r.width > 0 && r.height > 0 && (r.width < 44 || r.height < 44))
+    .map(({ el, r }) => `${(el.textContent || '').trim().slice(0, 16)} ${r.width}x${r.height}`);
+  assert(small.length === 0, `home targets below 44px: ${small.join('; ')}`);
+  const title = document.querySelector('[data-mobile-header]')?.textContent || '';
+  assert(title.includes('首页'), `mobile header title on home: ${title}`);
+  assert(document.querySelector('[data-home] [data-mobile-target="new-session-input"]'), 'home reuses the new-session composer');
+  return 'home ok';
+})()
+JS
+ab eval 'localStorage.setItem("trellis-startup-view", "last"); true'
+ab open "$BASE/"
+wait_for_js "startup=last lands in the latest session" "!document.querySelector('[data-home]') && location.search.includes('session=')"
+ab eval 'localStorage.removeItem("trellis-startup-view"); true'
+ab open "$BASE/"
+wait_for_js "startup default returns to home" "Boolean(document.querySelector('[data-home]')) && !location.search.includes('session=')"
+
 echo "== drawer: new session is primary; Attach CLI is advanced =="
 ab click 'button[aria-label="会话列表"]'
 wait_for_js "mobile session drawer" "Boolean(document.querySelector('[role=dialog] [data-mobile-target=drawer-new-session]'))"
@@ -263,7 +286,9 @@ ab eval --stdin <<'JS'
   for (const hiddenStarter of ['用类比讲清楚 TCP 和 UDP 的区别', '从背景材料开始']) {
     assert(!text.includes(hiddenStarter), `starter template leaked: ${hiddenStarter}`);
   }
-  const intro = [...panel.querySelectorAll('p')].find((element) => element.textContent?.includes('想深入探索什么'));
+  // 「新会话」与首页已合一：起步提示是首页顶部的问候（旧裸首屏的「想深入探索什么」作为回退）。
+  const intro = document.querySelector('[data-home-greeting]')
+    || [...panel.querySelectorAll('p')].find((element) => element.textContent?.includes('想深入探索什么'));
   assert(intro && visible(intro), 'starting hint is not visible');
   const required = ['new-session-input', 'new-session-attach', 'new-session-start'];
   const measured = required.map((target) => {

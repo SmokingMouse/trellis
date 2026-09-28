@@ -13,7 +13,7 @@ import { PageHeader, Select, Skeleton, Switch } from "@/components/ui";
 // 见 decisions/2026-07-31-console-ia.md 决策 5：这修订了 decisions.md 2026-07-29
 // 「偏好类不搬进来」的一半（不搬家仍然对，"偏好少所以不需要穷举"已经不成立）。
 
-const GROUPS = ["外观", "输入", "版式", "新会话默认"] as const;
+const GROUPS = ["外观", "启动", "输入", "版式", "新会话默认"] as const;
 
 export default function PrefsSettingsPage() {
   // localStorage 只在浏览器里有。先渲染骨架、挂载后再读，避免 SSR / 水合不一致。

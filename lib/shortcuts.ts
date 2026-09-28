@@ -32,6 +32,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "Alt+↑↓←→", label: "父 / 首子 / 兄弟节点导航", scope: "全局" },
   { keys: "Esc ×2", label: "中止正在生成的回答", scope: "全局" },
   { keys: "?", label: "打开本快捷键面板", scope: "全局" },
+  { keys: "H", label: "回首页", scope: "全局" },
   { keys: "B", label: "跳回父节点锚点", scope: "线性视图" },
   { keys: "⌘J", label: "树面板：过滤跳转本会话节点", scope: "线性视图" },
   { keys: "F", label: "回全局视图（fit view）", scope: CANVAS_MAP ? "地图" : "画布" },

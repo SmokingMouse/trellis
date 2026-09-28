@@ -344,6 +344,8 @@ export const HOME_CLUSTER_KEY = "trellis:home";
 export type Session = {
   /** Visible root topics, supplied by the sidebar list endpoint. */
   treeCount?: number;
+  /** All nodes in the session, supplied by the list endpoint (首页最近会话行). */
+  nodeCount?: number;
   backend?: string;
   externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
