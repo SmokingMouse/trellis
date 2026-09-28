@@ -286,7 +286,9 @@ ab eval --stdin <<'JS'
   for (const hiddenStarter of ['用类比讲清楚 TCP 和 UDP 的区别', '从背景材料开始']) {
     assert(!text.includes(hiddenStarter), `starter template leaked: ${hiddenStarter}`);
   }
-  const intro = [...panel.querySelectorAll('p')].find((element) => element.textContent?.includes('想深入探索什么'));
+  // 「新会话」与首页已合一：起步提示是首页顶部的问候（旧裸首屏的「想深入探索什么」作为回退）。
+  const intro = document.querySelector('[data-home-greeting]')
+    || [...panel.querySelectorAll('p')].find((element) => element.textContent?.includes('想深入探索什么'));
   assert(intro && visible(intro), 'starting hint is not visible');
   const required = ['new-session-input', 'new-session-attach', 'new-session-start'];
   const measured = required.map((target) => {

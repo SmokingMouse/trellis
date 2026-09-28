@@ -575,8 +575,11 @@ type State = {
   // isn't hidden behind it on load. Opened by the Header hamburger.
   mobileNavOpen: boolean;
   // 首页（工作台总览）：session 为空时，true 渲染首页、false 渲染裸新会话首屏。
-  // 进任何会话后 session 非空、首页自然让位；newConversation 会把它清掉。
+  // 进任何会话后 session 非空、首页自然让位。「新会话」与首页已合一：
+  // newConversation 也落首页（首页内嵌同一个 QuestionInput）。
   homeOpen: boolean;
+  // 每次 newConversation 自增，首页据此把光标送进输入框（已在首页时也生效）。
+  homeFocusNonce: number;
 };
 
 type Actions = {
@@ -932,6 +935,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   sidebarOpen: loadSidebarOpen(),
   mobileNavOpen: false,
   homeOpen: false,
+  homeFocusNonce: 0,
 
   hydrate: async (sessionId) => {
     // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
@@ -1036,8 +1040,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
       previewSessionId: null,
-      homeOpen: false,
     });
+    set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
   },
 
   openHome: () => {

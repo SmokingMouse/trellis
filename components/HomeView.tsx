@@ -82,6 +82,11 @@ type SessionsPayload = { sessions: Session[]; projects: ProjectSummary[] };
 
 export function HomeView({ isMobile }: { isMobile: boolean }) {
   const inputRef = useRef<QuestionInputHandle>(null);
+  // 「新会话」落首页时把光标送进输入框；手机不抢焦点（避免弹键盘）。
+  const homeFocusNonce = useSessionStore((s) => s.homeFocusNonce);
+  useEffect(() => {
+    if (homeFocusNonce > 0 && !isMobile) inputRef.current?.focus();
+  }, [homeFocusNonce, isMobile]);
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const previewSession = useSessionStore((s) => s.previewSession);
