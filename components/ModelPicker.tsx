@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Popover } from "@/components/ui/Popover";
+import { ChevronDown, Cpu, History, Search, Settings, X } from "lucide-react";
+import { Button, Icon, Input, Popover, SegmentedControl } from "@/components/ui";
 import { ModelConfigModal } from "@/components/ModelConfigPanel";
 import {
   PROVIDERS,
@@ -154,71 +155,61 @@ export function ModelPicker() {
         panelClassName="w-80 max-h-[30rem] flex flex-col text-sm overflow-hidden shadow-pop"
         trigger={
           <button
+            type="button"
             onClick={() => setOpen((o) => !o)}
-            className="px-2.5 py-1 text-xs rounded-md bg-ink text-ink-inverse flex items-center gap-1.5 hover:bg-ink/90 transition-colors"
+            aria-label={`切换模型，当前 ${current.shortLabel}`}
+            aria-expanded={open}
+            data-model-picker-trigger
+            className="inline-flex h-7 max-w-56 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover"
           >
-            <span className="w-1.5 h-1.5 bg-positive rounded-full shrink-0" />
-            <span className="opacity-70 text-nano font-mono font-normal">[{currentBadge}]</span>
-            <span className="font-medium truncate max-w-[10rem]">{current.shortLabel}</span>
-            <span className="text-ink-inverse/60 text-nano">▾</span>
+            <Icon icon={Cpu} size="sm" className="text-ink-muted" />
+            <span className="text-nano text-ink-faint">{currentBadge}</span>
+            <span className="min-w-0 truncate font-mono">{current.shortLabel}</span>
+            <Icon icon={ChevronDown} size="sm" className="text-ink-faint" />
           </button>
         }
       >
         {/* 顶部搜索框 */}
         <div className="p-2 border-b border-line shrink-0 bg-surface">
-          <div className="relative flex items-center">
-            <svg
-              className="absolute left-2.5 w-3.5 h-3.5 text-ink-faint pointer-events-none"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <circle cx="11" cy="11" r="8" strokeWidth="2" />
-              <path d="M21 21l-4.35-4.35" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-            <input
-              ref={inputRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="搜索模型或厂商… (如 opus, deepseek)"
-              className="w-full pl-8 pr-7 py-1.5 text-ui rounded-field border border-line bg-surface-muted text-ink placeholder:text-ink-faint outline-none focus:border-accent-line focus:bg-surface transition-all"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2 text-ink-faint hover:text-ink text-ui"
-              >
-                ×
-              </button>
-            )}
-          </div>
+          <Input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="搜索模型或厂商（如 opus、deepseek）"
+            aria-label="搜索模型"
+            leading={<Icon icon={Search} size="sm" />}
+            trailing={
+              search ? (
+                <button
+                  type="button"
+                  aria-label="清空搜索"
+                  onClick={() => setSearch("")}
+                  className="inline-flex text-ink-faint hover:text-ink"
+                >
+                  <Icon icon={X} size="sm" />
+                </button>
+              ) : undefined
+            }
+          />
 
           {/* 分类筛选标签 */}
-          <div className="flex items-center gap-1 mt-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {[
-              { id: "all", label: "全部" },
-              ...(recentProviders.length > 0 ? [{ id: "recent", label: "常用" }] : []),
-              { id: "claude", label: "Claude 系" },
-              { id: "codex", label: "Codex 系" },
-              { id: "third_party", label: "第三方" },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id as FilterTab)}
-                className={`px-2 py-0.5 text-nano rounded-full shrink-0 transition-colors ${
-                  activeTab === tab.id
-                    ? "bg-accent-muted text-accent-ink font-medium border border-accent-line"
-                    : "text-ink-muted hover:bg-surface-muted hover:text-ink"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl<FilterTab>
+            aria-label="模型分类"
+            size="sm"
+            fullWidth
+            className="mt-2"
+            value={activeTab}
+            onValueChange={setActiveTab}
+            options={[
+              { value: "all", label: "全部" },
+              ...(recentProviders.length > 0 ? [{ value: "recent" as const, label: "常用" }] : []),
+              { value: "claude", label: "Claude 系" },
+              { value: "codex", label: "Codex 系" },
+              { value: "third_party", label: "第三方" },
+            ]}
+          />
         </div>
 
         {/* 模型列表 */}
@@ -227,7 +218,7 @@ export function ModelPicker() {
           {!search && activeTab === "all" && recentProviders.length > 0 && (
             <div className="p-2 bg-surface-muted/30 border-b border-line-faint">
               <div className="text-nano font-medium text-ink-faint px-1 mb-1.5 flex items-center gap-1">
-                <span>⚡</span>
+                <Icon icon={History} size="sm" />
                 <span>最近使用</span>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -244,7 +235,7 @@ export function ModelPicker() {
                       onClick={() => handleSelect(rp)}
                       className={`px-2 py-1 text-nano rounded-md border flex items-center gap-1 transition-colors ${
                         active
-                          ? "border-positive/50 bg-positive/10 text-positive font-medium"
+                          ? "border-accent-line bg-accent-muted text-accent-ink font-medium"
                           : disabled
                             ? "border-line/40 opacity-40 cursor-not-allowed bg-surface"
                             : "border-line bg-surface hover:bg-surface-muted text-ink-strong"
@@ -265,16 +256,15 @@ export function ModelPicker() {
               <div className="text-label text-ink-muted mb-3">
                 {search ? `没有包含「${search}」的模型` : "当前分类下暂无模型"}
               </div>
-              <button
-                type="button"
+              <Button
+                size="sm"
                 onClick={() => {
                   setOpen(false);
                   setConfigOpen(true);
                 }}
-                className="px-2.5 py-1 text-label rounded-md border border-line bg-surface hover:bg-surface-muted text-ink-strong"
               >
-                + 添加或配置模型
-              </button>
+                添加或配置模型
+              </Button>
             </div>
           ) : (
             filteredProviders.map((p, idx) => {
@@ -296,7 +286,7 @@ export function ModelPicker() {
                   onMouseEnter={() => setHighlightedIndex(idx)}
                   title={
                     noKey
-                      ? "缺 API key，未配置"
+                      ? "缺少 API 密钥，尚未配置"
                       : familyLocked
                         ? "跨系会丢失本会话上下文 — 请新建会话再选"
                         : undefined
@@ -311,7 +301,7 @@ export function ModelPicker() {
                 >
                   <span
                     className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
-                      active ? "bg-positive" : disabled ? "bg-line-strong" : "bg-line-strong/60"
+                      active ? "bg-accent" : disabled ? "bg-line-strong" : "bg-line-strong/60"
                     }`}
                   />
                   <div className="flex-1 min-w-0">
@@ -323,7 +313,7 @@ export function ModelPicker() {
                         {p.shortLabel}
                       </span>
                       {active && (
-                        <span className="text-nano text-positive font-medium ml-auto shrink-0">
+                        <span className="text-nano text-accent-ink font-medium ml-auto shrink-0">
                           当前
                         </span>
                       )}
@@ -331,7 +321,7 @@ export function ModelPicker() {
 
                     <div className="flex items-center gap-2 mt-0.5 text-label text-ink-faint truncate">
                       <span title={`上下文窗口 ~${winTokens.toLocaleString()} tokens`}>
-                        🧠 {winText}
+                        上下文 {winText}
                       </span>
                       {(p.note || familyLocked || noKey) && (
                         <>
@@ -339,11 +329,11 @@ export function ModelPicker() {
                           <span
                             className={
                               familyLocked || noKey
-                                ? "text-danger"
+                                ? "text-danger-ink"
                                 : "text-ink-faint"
                             }
                           >
-                            {noKey ? "缺 key" : familyLocked ? "跨系 · 需新会话" : p.note}
+                            {noKey ? "缺少密钥" : familyLocked ? "跨系 · 需新会话" : p.note}
                           </span>
                         </>
                       )}
@@ -360,17 +350,17 @@ export function ModelPicker() {
           <div className="text-nano text-ink-faint px-1">
             共 {catalog.length} 个可用模型
           </div>
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => {
               setOpen(false);
               setConfigOpen(true);
             }}
-            className="px-2.5 py-1 text-label rounded-md border border-line bg-surface hover:bg-surface-muted text-ink hover:text-ink-strong flex items-center gap-1 transition-colors"
           >
-            <span>⚙</span>
-            <span>管理模型与 Provider…</span>
-          </button>
+            <Icon icon={Settings} size="sm" />
+            管理模型与服务商…
+          </Button>
         </div>
       </Popover>
 

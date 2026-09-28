@@ -3,8 +3,8 @@ import { useState } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { PALETTES } from "@/lib/themes";
 import type { ThemeMode } from "@/lib/themes";
-import { Popover } from "@/components/ui/Popover";
-import { IconButton } from "@/components/ui/IconButton";
+import { Check, Moon, Sun } from "lucide-react";
+import { Icon, IconButton, Popover, SegmentedControl } from "@/components/ui";
 
 // Header 的主题入口：亮/暗/跟随系统 三段 + 主题皮肤 swatch 列表。
 // 面板内点选不关闭——方便连续试肤；outside-click / Esc 关闭（Popover 内置）。
@@ -31,16 +31,9 @@ export function ThemeMenu() {
           aria-expanded={open}
         >
           {mode === null ? (
-            <span className="block w-[16px] h-[16px]" aria-hidden />
-          ) : resolvedDark ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
+            <span className="block size-4" aria-hidden />
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-            </svg>
+            <Icon icon={resolvedDark ? Moon : Sun} />
           )}
         </IconButton>
       }
@@ -48,20 +41,15 @@ export function ThemeMenu() {
       <div className="px-3 pt-2.5 pb-1 text-nano uppercase tracking-wide text-ink-faint">
         外观
       </div>
-      <div className="px-2 pb-2 flex gap-1">
-        {MODE_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setMode(opt.value)}
-            className={`flex-1 px-2 py-1 rounded-md text-ui transition-colors ${
-              mode === opt.value
-                ? "bg-accent-muted text-accent-ink font-medium"
-                : "text-ink-muted hover:bg-surface-muted"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div className="px-2 pb-2">
+        <SegmentedControl<ThemeMode>
+          aria-label="外观"
+          size="sm"
+          fullWidth
+          value={mode ?? "system"}
+          onValueChange={setMode}
+          options={MODE_OPTIONS}
+        />
       </div>
       <div className="px-3 pt-1.5 pb-1 text-nano uppercase tracking-wide text-ink-faint border-t border-line-faint">
         主题
@@ -71,8 +59,9 @@ export function ThemeMenu() {
           <button
             key={p.id}
             onClick={() => setPalette(p.id)}
-            className={`w-full text-left px-3 py-1.5 flex items-center gap-2.5 transition-colors ${
-              palette === p.id ? "bg-surface-muted" : "hover:bg-surface-muted"
+            aria-pressed={palette === p.id}
+            className={`w-full text-left px-3 min-h-8 flex items-center gap-2.5 transition-colors ${
+              palette === p.id ? "bg-surface-hover" : "hover:bg-surface-hover"
             }`}
           >
             <span className="flex shrink-0 rounded-full overflow-hidden border border-line w-[30px] h-[14px]">
@@ -82,9 +71,7 @@ export function ThemeMenu() {
             </span>
             <span className="text-ui text-ink flex-1">{p.label}</span>
             {palette === p.id && (
-              <span className="text-accent text-ui" aria-hidden>
-                ✓
-              </span>
+              <Icon icon={Check} size="sm" className="text-accent-ink" />
             )}
           </button>
         ))}
