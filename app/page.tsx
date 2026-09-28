@@ -27,6 +27,8 @@ import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
 import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
+import { HomeView } from "@/components/HomeView";
+import { useHomeShortcut } from "@/hooks/useHomeShortcut";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ScrollHideProvider } from "@/hooks/useScrollHide";
 import { useEscapeAbort } from "@/hooks/useEscapeAbort";
@@ -55,8 +57,11 @@ export default function Home() {
   // linear view too, where the canvas FAB is unmounted.
   const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
+  const homeOpen = useSessionStore((s) => s.homeOpen);
   const isMobile = useIsMobile();
+  const showHome = !session && homeOpen;
   useEscapeAbort();
+  useHomeShortcut();
   useUnreadNavigation();
   useNodeKeyboardNav();
   useReconnectStreams();
@@ -159,8 +164,9 @@ export default function Home() {
   return (
     <ScrollHideProvider>
       <Header isMobile={isMobile} />
-      {!isMobile && <PendingBar />}
-      {isMobile && !session && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
+      {/* 首页自带「等你处理」列表，顶部待办条让位，不重复出现两份 */}
+      {!isMobile && !showHome && <PendingBar />}
+      {isMobile && !session && !showHome && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
@@ -175,7 +181,8 @@ export default function Home() {
           </span>
         </div>
       )}
-      {!session && <QuestionInput isMobile={isMobile} />}
+      {showHome && <HomeView isMobile={isMobile} />}
+      {!session && !showHome && <QuestionInput isMobile={isMobile} />}
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}

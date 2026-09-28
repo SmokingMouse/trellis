@@ -111,6 +111,8 @@ export function SessionSidebar() {
   const unpinSession = useSessionStore((s) => s.unpinSession);
   const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const newConversation = useSessionStore((s) => s.newConversation);
+  const openHome = useSessionStore((s) => s.openHome);
+  const homeActive = useSessionStore((s) => !s.session && s.homeOpen);
   const renameSession = useSessionStore((s) => s.renameSession);
   const archiveSession = useSessionStore((s) => s.archiveSession);
   const deleteSession = useSessionStore((s) => s.deleteSession);
@@ -959,6 +961,17 @@ export function SessionSidebar() {
             <Icon icon={Plus} size="sm" />
             新会话
           </Button>
+          <IconButton
+            label="首页"
+            shortcut="H"
+            data-sidebar-home
+            data-mobile-target="drawer-home"
+            aria-current={homeActive ? "page" : undefined}
+            onClick={() => openHome()}
+            className={homeActive ? "border border-line bg-surface-hover" : "border border-line"}
+          >
+            <Icon icon={House} selected={homeActive} />
+          </IconButton>
           {/* CLI 同步：接入本机 Claude Code / Codex 会话（双向）。手机端收在「高级操作」里。 */}
           <IconButton
             label="接入本机 CLI 会话（Claude Code / Codex，双向同步）"

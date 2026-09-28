@@ -1,18 +1,14 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSessionStore } from "@/stores/sessionStore";
-import { pendingKey, type PendingItem } from "@/lib/pending";
+import { pendingKey } from "@/lib/pending";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button, Icon } from "@/components/ui";
-import { openPendingItem } from "@/lib/pending-navigation";
+import { usePendingActions } from "@/hooks/usePendingActions";
 
 export function PendingBar({ mobile = false, hiddenChrome = false }: { mobile?: boolean; hiddenChrome?: boolean }) {
-  const snapshot = useSessionStore(s => s.pending);
-  const submitting = useSessionStore(s => s.pendingSubmissions);
-  const items = snapshot.items.filter(item => !submitting.has(item.nodeId));
+  const { items, error, jump, decide } = usePendingActions();
   const [expanded, setExpanded] = useState(false);
-  const [error, setError] = useState("");
   const rail = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -31,34 +27,13 @@ export function PendingBar({ mobile = false, hiddenChrome = false }: { mobile?: 
   }, [mobile, expanded, items.length]);
 
   const close = () => { dialog.current?.close(); setExpanded(false); trigger.current?.focus(); };
-  const jump = async (item: PendingItem) => {
-    setError("");
-    try {
-      await openPendingItem(item, close, useSessionStore.getState(), nodeId => {
-        const state = useSessionStore.getState();
-        if (state.session?.id !== item.sessionId || state.activeNodeId !== nodeId) throw new Error("目标会话未能载入，请重试");
-        useSessionStore.setState(s => ({ viewMode: "linear", pendingNavigation: {
-          nodeId, sequence: (s.pendingNavigation?.sequence ?? 0) + 1,
-        } }));
-      });
-    } catch (error) {
-      console.error("[pending navigation]", error);
-      setError(error instanceof Error ? error.message : "跳转失败，请重试。");
-    }
-  };
-  const decide = async (item: PendingItem, allow: boolean) => {
-    setError("");
-    const result = await useSessionStore.getState().respondToInteraction(item.nodeId, item.interaction.toolUseId,
-      allow ? { behavior: "allow", updatedInput: item.interaction.input } : { behavior: "deny", message: "用户拒绝了本次工具执行" });
-    if (!result.ok && result.reason !== "stale") setError("处理失败，请重试。");
-  };
   const list = <ul id={mobile ? "pending-mobile-list" : "pending-desktop-list"} className="max-h-[40vh] overflow-y-auto divide-y divide-warn-line/50">
     {items.map(item => <li key={pendingKey(item)} data-pending-item={pendingKey(item)} className="flex items-center gap-3 px-4 py-2 max-md:flex-wrap">
       <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano text-warn-ink">{item.kind === "approval" ? "审批" : "提问"}</span>
       <span className="max-w-40 truncate text-ui font-medium" title={item.sessionTitle}>{item.sessionTitle}</span>
       <span className="min-w-0 flex-1 truncate text-ui text-ink-muted max-md:basis-full" title={item.summary}>{item.summary}</span>
       <time className="shrink-0 text-nano text-ink-faint" dateTime={new Date(item.createdAt).toISOString()} title={new Date(item.createdAt).toLocaleString()}>{new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-      <Button size="sm" variant="ghost" data-pending-jump onClick={() => void jump(item)}>去处理</Button>
+      <Button size="sm" variant="ghost" data-pending-jump onClick={() => void jump(item, close)}>去处理</Button>
       {item.kind === "approval" && <>
         <Button size="sm" variant="primary" data-pending-allow onClick={() => void decide(item, true)}>允许一次</Button>
         <Button size="sm" variant="secondary" data-pending-deny onClick={() => void decide(item, false)}>拒绝</Button>

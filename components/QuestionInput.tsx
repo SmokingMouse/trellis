@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useImperativeHandle, type Ref } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ReferencePicker } from "./ReferencePicker";
 import { ModePicker } from "./ModePicker";
@@ -54,7 +54,25 @@ const FEYNMAN_STARTERS = [
 const ENHANCED_HINT =
   "增强模式：chat 可跑 skill + 联网，工具调用自动批准（无沙箱、能跑任意命令）。默认关 = 纯对话。";
 
-export function QuestionInput({ isMobile }: { isMobile: boolean }) {
+/** 首页用：从外部把文字填进输入框（快捷提示卡），或把焦点送回来。不发送。 */
+export type QuestionInputHandle = {
+  fill: (text: string) => void;
+  focus: () => void;
+};
+
+export function QuestionInput({
+  isMobile,
+  variant = "screen",
+  autoFocus = true,
+  controlRef,
+}: {
+  isMobile: boolean;
+  /** screen = 独占的新会话首屏（原样）；home = 嵌进首页，去掉品牌头、起步词和底部入口 */
+  variant?: "screen" | "home";
+  autoFocus?: boolean;
+  controlRef?: Ref<QuestionInputHandle>;
+}) {
+  const embedded = variant === "home";
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -112,8 +130,17 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    ref.current?.focus();
-  }, []);
+    if (autoFocus) ref.current?.focus();
+  }, [autoFocus]);
+
+  useImperativeHandle(controlRef, () => ({
+    fill: (text: string) => {
+      setQ(text);
+      setCmdNotice(null);
+      ref.current?.focus();
+    },
+    focus: () => ref.current?.focus(),
+  }), []);
 
   // C4: lazily load the skill list. Skills show in every mode — picking one
   // in pure chat auto-enables 增强模式 (see pickSkill), so the dropdown never
@@ -264,12 +291,14 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
 
   return (
     <div
-      className="min-h-dvh flex flex-col items-center justify-center px-6"
+      data-question-input={variant}
+      className={embedded ? "w-full flex flex-col items-center" : "min-h-dvh flex flex-col items-center justify-center px-6"}
       // Wave 4: keep the composer centered within the editor area (right of
       // the explorer sidebar). var from page.tsx; 0 on mobile / collapsed.
-      style={{ paddingLeft: "var(--trellis-sb, 0px)" }}
+      style={embedded ? undefined : { paddingLeft: "var(--trellis-sb, 0px)" }}
     >
       <div className="w-full max-w-2xl">
+        {!embedded && <>
         <div className="flex items-center gap-3 mb-8 max-md:mb-3 justify-center">
           {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
           {/* ui-guard-allow(hex): 品牌渐变 logo（不随皮肤，刻意裁决） */}
@@ -279,6 +308,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
         <p className="text-center text-ink-muted mb-6 max-md:mb-3 text-sm">
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
+        </>}
         {isMobile ? (
           <button
             type="button"
@@ -536,7 +566,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
           activeIndex={slashNav.active}
           skillPrefix={skillPrefix}
         />
-        {isMobile === false && draftMode === "chat" && !q.trim() && (
+        {!embedded && isMobile === false && draftMode === "chat" && !q.trim() && (
           <div className="mt-4 flex flex-wrap gap-2 justify-center">
             {(isFeynman ? FEYNMAN_STARTERS : SUGGESTED_PROMPTS).map((s) => (
               <button
@@ -553,18 +583,18 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
             ))}
           </div>
         )}
-        {isMobile === false && <div className="mt-5 flex items-center gap-3 justify-center text-xs">
+        {!embedded && isMobile === false && <div className="mt-5 flex items-center gap-3 justify-center text-xs">
           <div className="h-px flex-1 max-w-[80px] bg-line" />
           <span className="text-ink-faint">或</span>
           <div className="h-px flex-1 max-w-[80px] bg-line" />
         </div>}
-        {isMobile === false && <div className="mt-3 flex justify-center">
+        {!embedded && isMobile === false && <div className="mt-3 flex justify-center">
           <Button variant="secondary" onClick={() => setPickerOpen(true)}>
             <Icon icon={FileText} size="sm" className="text-ink-faint" />
             从背景材料开始（粘贴 / URL）
           </Button>
         </div>}
-        {isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
+        {!embedded && isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
           模型在右上角切换 · {currentProvider ? `默认 ${currentProvider.shortLabel}` : "使用当前默认模型"}
         </div>}
       </div>

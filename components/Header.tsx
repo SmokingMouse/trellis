@@ -192,6 +192,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const setSidebarOpen = useSessionStore((s) => s.setSidebarOpen);
+  const openHome = useSessionStore((s) => s.openHome);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
@@ -421,14 +422,25 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             <Icon icon={PanelLeftOpen} />
           </IconButton>
         )}
-        {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，刻意裁决） */}
-        <div
-          aria-hidden
-          className="ml-0.5 size-5 shrink-0 rounded-md bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]"
-        />
-        <span className="hidden shrink-0 text-ui font-semibold tracking-tight text-ink-strong lg:inline">
-          Trellis
-        </span>
+        {/* 品牌 = 面包屑根：点回首页（H 键同效） */}
+        <Tooltip content="首页" shortcut="H">
+          <button
+            type="button"
+            data-header-home
+            aria-label="回首页"
+            onClick={openHome}
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-field px-1 transition-colors hover:bg-surface-hover max-md:min-h-11 max-md:min-w-11 max-md:justify-center"
+          >
+            {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，刻意裁决） */}
+            <span
+              aria-hidden
+              className="size-5 shrink-0 rounded-md bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]"
+            />
+            <span className="hidden text-ui font-semibold tracking-tight text-ink-strong lg:inline">
+              Trellis
+            </span>
+          </button>
+        </Tooltip>
         {session && (
           <nav
             aria-label="当前位置"
