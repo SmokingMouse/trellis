@@ -1,9 +1,34 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
+import {
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderPlus,
+  GitBranchPlus,
+  Sparkles,
+  X,
+} from "lucide-react";
+import {
+  Button,
+  Badge,
+  Checkbox,
+  EmptyState,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  Input,
+  Modal,
+  Select,
+  SkeletonText,
+  Spinner,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui";
 
 export type WorkspaceEntry = {
   path: string;
@@ -35,7 +60,7 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("recent");
   const [customPath, setCustomPath] = useState("");
   const [scratchBusy, setScratchBusy] = useState(false);
-  const [scratchError, setScratchError] = useState<string | null>(null);
+  const [scratchError, setScratchError] = useState<unknown>(null);
   // 「新建 worktree 并使用」：bases=null 表示还没拉到 / 没有可用 repo，
   // 那时整个入口不渲染 —— 一个点了必然报「没有 git 工作区」的按钮不如不给。
   const [bases, setBases] = useState<WorktreeBase[] | null>(null);
@@ -43,7 +68,7 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   const [wtProjectId, setWtProjectId] = useState<string | null>(null);
   const [wtBranch, setWtBranch] = useState("");
   const [wtBusy, setWtBusy] = useState(false);
-  const [wtError, setWtError] = useState<string | null>(null);
+  const [wtError, setWtError] = useState<unknown>(null);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
 
   // Esc-to-close（input 聚焦时不拦截）由 Modal 的 closeOnEsc="outside-inputs"
@@ -75,7 +100,7 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
       }
       pickPath(body.path);
     } catch (err) {
-      setScratchError(err instanceof Error ? err.message : String(err));
+      setScratchError(err);
       setScratchBusy(false);
     }
   };
@@ -130,25 +155,22 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
       bumpSessionsRevision();
       pickPath(body.path);
     } catch (err) {
-      setWtError(err instanceof Error ? err.message : String(err));
+      setWtError(err);
       setWtBusy(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} panelClassName="flex flex-col max-h-[85vh]">
+    <Modal onClose={onClose} title="选择工作区" panelClassName="flex flex-col max-h-[85vh]">
       <div className="border-b border-line-faint px-4 py-3 flex items-center gap-3 shrink-0">
-        <span aria-hidden className="text-lg">
-          📁
-        </span>
-        <div className="flex-1">
-          <div className="text-sm font-medium">选择工作区</div>
-          <div className="text-xs text-ink-muted">
-            AI 将在该目录下执行工具调用 (cwd)
+        <div className="flex-1 min-w-0">
+          <h2 className="text-ui font-semibold text-ink-strong">选择工作区</h2>
+          <div className="text-label text-ink-muted">
+            AI 会在这个目录里读写文件、执行命令
           </div>
         </div>
         <IconButton label="关闭" onClick={onClose}>
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
 
@@ -156,24 +178,20 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
         <button
           onClick={createScratch}
           disabled={scratchBusy}
-          className="w-full text-left px-3 py-2 rounded-field border border-dashed border-positive-line bg-positive-muted/60 hover:bg-positive-muted transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
+          aria-busy={scratchBusy}
+          className="w-full text-left px-3 py-2 rounded-field border border-line hover:bg-surface-hover transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
         >
-          <span aria-hidden className="text-base shrink-0">
-            ✨
-          </span>
+          <Icon icon={Sparkles} className="text-ink-faint" />
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-positive-ink">
-              {scratchBusy ? "创建中…" : "空白沙箱"}
-            </span>
-            <span className="block text-xs text-positive-ink/70">
-              不挑目录 — 新建一个随机空目录作为 cwd（~/.trellis/scratch/）
+            <span className="block text-ui font-medium text-ink">空白沙箱</span>
+            <span className="block text-label text-ink-muted">
+              不挑目录，新建一个空目录当工作区（~/.trellis/scratch/ 下）
             </span>
           </span>
+          {scratchBusy && <Spinner size="sm" label="正在创建" />}
         </button>
-        {scratchError && (
-          <div className="mt-1.5 text-xs text-danger">
-            创建失败: {scratchError}
-          </div>
+        {!!scratchError && (
+          <ErrorCallout compact className="mt-1.5" error={scratchError} title="创建空白沙箱失败" />
         )}
 
         {/* 与「空白沙箱」「新建文件夹」并列的第三个「创建并使用」。
@@ -186,54 +204,51 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
                 setWtError(null);
                 setWtOpen((v) => !v);
               }}
-              className="w-full text-left px-3 py-2 rounded-field border border-dashed border-accent-line bg-accent-muted/60 hover:bg-accent-muted transition-colors flex items-center gap-3"
+              aria-expanded={wtOpen}
+              className="w-full text-left px-3 py-2 rounded-field border border-line hover:bg-surface-hover transition-colors flex items-center gap-3"
             >
-              <span aria-hidden className="text-base shrink-0">
-                🌿
-              </span>
+              <Icon icon={GitBranchPlus} className="text-ink-faint" />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-accent-ink">
+                <span className="block text-ui font-medium text-ink">
                   新建 worktree 并使用
                 </span>
-                <span className="block text-xs text-accent-ink/70">
-                  开一条新分支的平行工作目录，落在主 checkout 的同级
+                <span className="block text-label text-ink-muted">
+                  给新分支开一个平行的工作目录，放在主仓库目录旁边
                 </span>
               </span>
-              <span aria-hidden className="text-xs text-accent-ink/60 shrink-0">
-                {wtOpen ? "▾" : "▸"}
-              </span>
+              <Icon icon={wtOpen ? ChevronDown : ChevronRight} size="sm" className="text-ink-faint" />
             </button>
 
             {wtOpen && (
               <div className="mt-1.5 px-3 py-2 rounded-field bg-surface-muted flex flex-col gap-2">
                 {/* 只有一个 repo 时不给下拉 —— 一个选项的 select 是纯噪音。 */}
                 {bases.length > 1 ? (
-                  <label className="flex items-center gap-2 text-xs text-ink-muted">
+                  <div className="flex items-center gap-2 text-label text-ink-muted">
                     <span className="shrink-0">从</span>
-                    <select
+                    <Select
+                      size="sm"
+                      aria-label="从哪个仓库开 worktree"
+                      className="flex-1 min-w-0"
                       value={wtBase.projectId}
-                      onChange={(e) => setWtProjectId(e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line"
-                    >
-                      {bases.map((b) => (
-                        <option key={b.projectId} value={b.projectId}>
-                          {b.projectName}
-                          {b.branch ? ` (${b.branch})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setWtProjectId}
+                      options={bases.map((b) => ({
+                        value: b.projectId,
+                        label: `${b.projectName}${b.branch ? `（${b.branch}）` : ""}`,
+                      }))}
+                    />
                     <span className="shrink-0">起</span>
-                  </label>
+                  </div>
                 ) : (
-                  <div className="text-xs text-ink-muted truncate">
+                  <div className="text-label text-ink-muted truncate">
                     从 <span className="font-medium text-ink">{wtBase.projectName}</span>
                     {wtBase.branch ? ` (${wtBase.branch})` : ""} 起
                   </div>
                 )}
 
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     type="text"
+                    aria-label="分支名"
                     value={wtBranch}
                     autoFocus
                     disabled={wtBusy}
@@ -249,70 +264,64 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
                       }
                     }}
                     placeholder="分支名"
-                    className="flex-1 min-w-0 px-2 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line font-mono"
+                    className="flex-1 font-mono"
                   />
                   <Button
                     variant="primary"
                     className="shrink-0"
                     onClick={() => void createWorktree()}
+                    loading={wtBusy}
                     disabled={!wtBranch.trim() || wtBusy}
                   >
-                    {wtBusy ? "创建中…" : "创建并使用"}
+                    创建并使用
                   </Button>
                 </div>
 
                 {/* 落点实时回显：分支名会**原样变成磁盘目录名**，建之前看得见
                     比建完再解释「它去哪了」有用得多。 */}
-                <div className="text-xs text-ink-faint font-mono truncate">
+                <div className="text-label text-ink-faint font-mono truncate">
                   {wtTarget
-                    ? `→ ${prettifyHome(wtTarget)}`
-                    : `→ ${prettifyHome(wtBase.parent)}/…`}
+                    ? `将建在 ${prettifyHome(wtTarget)}`
+                    : `将建在 ${prettifyHome(wtBase.parent)}/…`}
                 </div>
-                <div className="text-xs text-ink-muted">
-                  {wtError ? (
-                    <span className="text-danger">{wtError}</span>
-                  ) : (
-                    "已有同名分支则直接检出，否则从当前 HEAD 新建"
-                  )}
-                </div>
+                {wtError ? (
+                  <ErrorCallout compact error={wtError} title="新建 worktree 失败" />
+                ) : (
+                  <div className="text-label text-ink-muted">
+                    已有同名分支就直接检出，否则从当前提交新建分支
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
       </div>
 
-      <div className="border-b border-line-faint px-2 pt-2 shrink-0">
-        <div className="flex gap-1">
-          <TabButton
-            active={tab === "recent"}
-            onClick={() => setTab("recent")}
-          >
-            最近
-          </TabButton>
-          <TabButton
-            active={tab === "browse"}
-            onClick={() => setTab("browse")}
-          >
-            浏览
-          </TabButton>
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col">
-        {tab === "recent" ? (
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as Tab)}
+        className="flex-1 min-h-0 flex flex-col"
+      >
+        <TabsList className="px-4 shrink-0">
+          <TabsTrigger value="recent">最近</TabsTrigger>
+          <TabsTrigger value="browse">浏览</TabsTrigger>
+        </TabsList>
+        <TabsContent value="recent" className="flex-1 min-h-0 flex flex-col">
           <RecentTab currentPath={currentPath} onPick={pickPath} />
-        ) : (
+        </TabsContent>
+        <TabsContent value="browse" className="flex-1 min-h-0 flex flex-col">
           <BrowseTab currentPath={currentPath} onPick={pickPath} />
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       <div className="border-t border-line-faint px-4 py-3 shrink-0">
-        <div className="text-xs text-ink-muted mb-2">
-          或手动输入绝对路径：
+        <div className="text-label text-ink-muted mb-2">
+          或手动输入绝对路径
         </div>
         <div className="flex items-center gap-2">
-          <input
+          <Input
             type="text"
+            aria-label="工作区绝对路径"
             value={customPath}
             onChange={(e) => setCustomPath(e.target.value)}
             onKeyDown={(e) => {
@@ -322,7 +331,7 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
               }
             }}
             placeholder="/Users/.../some-repo"
-            className="flex-1 px-3 py-1.5 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line font-mono"
+            className="flex-1 font-mono"
           />
           <Button
             variant="primary"
@@ -337,29 +346,6 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 text-sm rounded-t-md transition-colors ${
-        active
-          ? "bg-surface text-ink-strong border-x border-t border-line -mb-px"
-          : "text-ink-muted hover:text-ink-strong"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 // ─── Recent tab ──────────────────────────────────────────────────────────
 
 function RecentTab({
@@ -371,7 +357,7 @@ function RecentTab({
 }) {
   const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [filter, setFilter] = useState("");
 
   useEffect(() => {
@@ -389,7 +375,7 @@ function RecentTab({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err);
           setLoading(false);
         }
       }
@@ -410,30 +396,29 @@ function RecentTab({
   return (
     <>
       <div className="px-4 py-3 border-b border-line-faint shrink-0">
-        <input
+        <Input
           type="text"
+          aria-label="筛选最近用过的工作区"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="筛选最近用过的 workspace"
+          placeholder="筛选最近用过的工作区"
           autoFocus
-          className="w-full px-3 py-1.5 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line"
         />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {loading && (
-          <div className="px-4 py-6 text-sm text-ink-muted text-center">
-            加载中…
-          </div>
-        )}
-        {error && (
-          <div className="px-4 py-3 text-sm text-danger-ink bg-danger-muted">
-            加载失败: {error}
+        {loading && <SkeletonText lines={4} className="px-4 py-4" />}
+        {!!error && (
+          <div className="px-4 py-3">
+            <ErrorCallout compact error={error} title="读取最近用过的工作区失败" />
           </div>
         )}
         {!loading && !error && filtered.length === 0 && (
-          <div className="px-4 py-8 text-sm text-ink-muted text-center">
-            {filter ? "没有匹配的工作区" : "没有最近用过的工作区"}
-          </div>
+          <EmptyState
+            compact
+            icon={Folder}
+            title={filter ? "没有匹配的工作区" : "还没有用过的工作区"}
+            description={filter ? undefined : "到「浏览」里挑一个目录，或用上面的空白沙箱。"}
+          />
         )}
         {!loading && !error && (
           <ul>
@@ -443,28 +428,22 @@ function RecentTab({
                 <li key={e.path}>
                   <button
                     onClick={() => onPick(e.path)}
-                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors border-b border-line-faint last:border-b-0 ${
+                    className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors border-b border-line-faint last:border-b-0 ${
                       active
-                        ? "bg-mode-project-muted"
-                        : "hover:bg-surface-muted"
+                        ? "bg-surface-muted"
+                        : "hover:bg-surface-hover"
                     }`}
                   >
-                    <span aria-hidden className="text-base shrink-0">
-                      📁
-                    </span>
+                    <Icon icon={Folder} className="text-ink-faint" />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium truncate">
+                      <span className="block text-ui font-medium text-ink truncate">
                         {e.shortName}
                       </span>
-                      <span className="block text-xs text-ink-muted truncate font-mono">
+                      <span className="block text-label text-ink-muted truncate font-mono">
                         {prettifyHome(e.path)}
                       </span>
                     </span>
-                    {active && (
-                      <span className="text-xs text-mode-project-ink shrink-0">
-                        当前
-                      </span>
-                    )}
+                    {active && <Badge variant="accent">当前</Badge>}
                   </button>
                 </li>
               );
@@ -498,7 +477,7 @@ function BrowseTab({
   const [dir, setDir] = useState<string | null>(null);
   const [data, setData] = useState<BrowseResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [filter, setFilter] = useState("");
   // Inline "new folder" form: creates a dir under the dir we're viewing and
@@ -506,7 +485,7 @@ function BrowseTab({
   // it as the workspace.
   const [newName, setNewName] = useState<string | null>(null);
   const [mkdirBusy, setMkdirBusy] = useState(false);
-  const [mkdirError, setMkdirError] = useState<string | null>(null);
+  const [mkdirError, setMkdirError] = useState<unknown>(null);
 
   // Initial location: if there's already a workspace selected, jump to it
   // so the user can see siblings + drill nearby. Otherwise let the server
@@ -544,7 +523,7 @@ function BrowseTab({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err);
           setLoading(false);
         }
       }
@@ -580,7 +559,7 @@ function BrowseTab({
       if (!res.ok || !body.path) throw new Error(body.error ?? `HTTP ${res.status}`);
       onPick(body.path);
     } catch (err) {
-      setMkdirError(err instanceof Error ? err.message : String(err));
+      setMkdirError(err);
       setMkdirBusy(false);
     }
   };
@@ -594,7 +573,10 @@ function BrowseTab({
 
   return (
     <>
-      <div className="px-4 py-2 border-b border-line-faint shrink-0 flex items-center gap-2 overflow-x-auto whitespace-nowrap text-sm">
+      <nav
+        aria-label="当前路径"
+        className="px-4 py-2 border-b border-line-faint shrink-0 flex items-center gap-1.5 overflow-x-auto whitespace-nowrap text-ui"
+      >
         {segments.map((seg, i) => (
           <span key={seg.path} className="flex items-center gap-2 shrink-0">
             {i > 0 && (
@@ -606,54 +588,58 @@ function BrowseTab({
               </span>
             ) : (
               <button
+                type="button"
                 onClick={() => setDir(seg.path)}
-                className="text-ink-muted hover:text-ink-strong"
+                className="rounded-sm text-ink-muted hover:text-ink-strong"
               >
                 {seg.label}
               </button>
             )}
           </span>
         ))}
-      </div>
+      </nav>
 
       <div className="px-4 py-2 border-b border-line-faint shrink-0 flex items-center gap-2">
-        <input
+        <Input
+          size="sm"
           type="text"
+          aria-label="筛选当前目录"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="筛选当前目录"
-          className="flex-1 px-3 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line"
+          className="flex-1"
         />
-        <label className="text-xs text-ink-muted flex items-center gap-1 cursor-pointer select-none">
-          <input
-            type="checkbox"
+        <label className="shrink-0 text-label text-ink-muted flex items-center gap-1.5 cursor-pointer select-none">
+          <Checkbox
             checked={showHidden}
-            onChange={(e) => setShowHidden(e.target.checked)}
-            className="cursor-pointer"
+            onCheckedChange={(v) => setShowHidden(v === true)}
           />
-          隐藏目录
+          显示隐藏目录
         </label>
-        <button
+        <Button
+          size="sm"
+          className="shrink-0"
           onClick={() => {
             setMkdirError(null);
             setNewName((n) => (n === null ? "" : null));
           }}
           disabled={!data || loading}
-          className="shrink-0 px-2 py-1 text-xs rounded border border-line-strong text-ink-muted hover:text-ink-strong hover:bg-surface-muted disabled:opacity-40 transition-colors"
           title="在当前目录下新建文件夹"
         >
-          ＋ 新建文件夹
-        </button>
+          <Icon icon={FolderPlus} size="sm" />
+          新建文件夹
+        </Button>
       </div>
 
       {newName !== null && data && (
         <div className="px-4 py-2 border-b border-line-faint shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-ink-faint font-mono truncate max-w-[45%]">
+            <span className="text-label text-ink-faint font-mono truncate max-w-[45%]">
               {prettifyHomeWith(data.path, data.home)}/
             </span>
-            <input
+            <Input
               type="text"
+              aria-label="新文件夹名"
               value={newName}
               autoFocus
               disabled={mkdirBusy}
@@ -669,32 +655,40 @@ function BrowseTab({
                 }
               }}
               placeholder="新文件夹名"
-              className="flex-1 min-w-0 px-2 py-1 text-sm rounded border border-line-strong bg-surface outline-none focus:border-accent-line font-mono"
+              className="flex-1 font-mono"
             />
             <Button
               variant="primary"
               className="shrink-0"
               onClick={() => void createDir()}
+              loading={mkdirBusy}
               disabled={!newName.trim() || mkdirBusy}
             >
-              {mkdirBusy ? "创建中…" : "创建并使用"}
+              创建并使用
             </Button>
           </div>
-          {mkdirError && (
-            <div className="mt-1.5 text-xs text-danger">{mkdirError}</div>
+          {!!mkdirError && (
+            <ErrorCallout compact className="mt-1.5" error={mkdirError} title="新建文件夹失败" />
           )}
         </div>
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {loading && (
-          <div className="px-4 py-6 text-sm text-ink-muted text-center">
-            加载中…
-          </div>
-        )}
-        {error && (
-          <div className="px-4 py-3 text-sm text-danger-ink bg-danger-muted">
-            {error}
+        {loading && <SkeletonText lines={5} className="px-4 py-4" />}
+        {!!error && (
+          <div className="px-4 py-3">
+            <ErrorCallout
+              compact
+              error={error}
+              title="打不开这个目录"
+              action={
+                data && data.path !== dir ? (
+                  <Button size="sm" onClick={() => setDir(data.path)}>
+                    回到上次的位置
+                  </Button>
+                ) : undefined
+              }
+            />
           </div>
         )}
         {!loading && !error && data && (
@@ -702,21 +696,15 @@ function BrowseTab({
             {data.parent && (
               <button
                 onClick={() => setDir(data.parent)}
-                className="w-full text-left px-4 py-2 flex items-center gap-3 text-sm text-ink-muted hover:bg-surface-muted border-b border-line-faint"
+                className="w-full text-left px-4 py-2 flex items-center gap-3 text-ui text-ink-muted hover:bg-surface-hover border-b border-line-faint"
               >
-                <span aria-hidden className="text-base shrink-0">
-                  ↑
-                </span>
+                <Icon icon={ArrowUp} className="text-ink-faint" />
                 <span className="truncate">上一级</span>
               </button>
             )}
             {filteredChildren.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-ink-muted text-center">
-                {filter
-                  ? "无匹配的子目录"
-                  : data.children.length === 0
-                    ? "无子目录"
-                    : "（已被筛选过滤）"}
+              <div className="px-4 py-8 text-ui text-ink-muted text-center">
+                {filter ? "没有匹配的子目录" : "这个目录下没有子目录"}
               </div>
             ) : (
               <ul>
@@ -726,30 +714,28 @@ function BrowseTab({
                     <li key={c.path}>
                       <div
                         className={`w-full flex items-stretch border-b border-line-faint last:border-b-0 ${
-                          active ? "bg-mode-project-muted" : ""
+                          active ? "bg-surface-muted" : ""
                         }`}
                       >
                         <button
                           onClick={() => setDir(c.path)}
-                          className="flex-1 min-w-0 text-left px-4 py-2 flex items-center gap-3 hover:bg-surface-muted transition-colors"
-                          title="进入此目录"
+                          className="flex-1 min-w-0 text-left px-4 py-2 flex items-center gap-3 hover:bg-surface-hover transition-colors"
+                          title="进入这个目录"
                         >
-                          <span aria-hidden className="text-base shrink-0">
-                            📁
-                          </span>
-                          <span className="block text-sm truncate">
+                          <Icon icon={Folder} className="text-ink-faint" />
+                          <span className="block text-ui text-ink truncate">
                             {c.name}
                           </span>
                           {active && (
-                            <span className="text-xs text-mode-project-ink shrink-0 ml-auto">
+                            <Badge variant="accent" className="ml-auto">
                               当前
-                            </span>
+                            </Badge>
                           )}
                         </button>
                         <button
                           onClick={() => onPick(c.path)}
-                          className="px-3 text-xs text-ink-muted hover:text-positive-ink hover:bg-positive-muted border-l border-line-faint transition-colors"
-                          title="直接选用此目录"
+                          className="px-3 text-label text-ink-muted hover:text-accent-ink hover:bg-surface-hover border-l border-line-faint transition-colors"
+                          title="直接用这个目录当工作区"
                         >
                           选用
                         </button>
@@ -760,8 +746,8 @@ function BrowseTab({
               </ul>
             )}
             {data.truncated && (
-              <div className="px-4 py-2 text-xs text-ink-faint italic">
-                子目录过多，已截断显示
+              <div className="px-4 py-2 text-label text-ink-faint">
+                子目录太多，只显示了一部分；可以用上面的筛选框找
               </div>
             )}
           </>
@@ -770,7 +756,7 @@ function BrowseTab({
 
       {data && !loading && !error && (
         <div className="px-4 py-2 border-t border-line-faint shrink-0 flex items-center gap-2">
-          <span className="text-xs text-ink-muted font-mono truncate flex-1">
+          <span className="text-label text-ink-muted font-mono truncate flex-1">
             {prettifyHomeWith(data.path, data.home)}
           </span>
           <Button
@@ -778,7 +764,7 @@ function BrowseTab({
             className="shrink-0"
             onClick={() => onPick(data.path)}
           >
-            使用此目录
+            使用这个目录
           </Button>
         </div>
       )}
