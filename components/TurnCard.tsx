@@ -1,14 +1,34 @@
 "use client";
 import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import {
+  AtSign,
+  Brain,
+  ChevronRight,
+  CircleCheck,
+  CircleDot,
+  Copy,
+  Check,
+  Ellipsis,
+  FileText,
+  GitBranch,
+  Link2,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   subscribeStream,
   getStreamPending,
   thinkingChannel,
 } from "@/lib/stream-bus";
-import { refIcon } from "@/lib/ref-icon";
 import { isAuthErrorMessage } from "@/lib/auth-error";
+import { copyText } from "@/lib/clipboard";
+import { formatDuration } from "@/lib/format-duration";
+import { toolTitle } from "@/lib/tool-registry";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import {
   MARKDOWN_REMARK_PLUGINS,
@@ -19,6 +39,16 @@ import { isSendCombo, sendHint } from "@/lib/send-key";
 import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import { useNearViewport } from "@/hooks/useNearViewport";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
+import {
+  Button,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  Kbd,
+  Spinner,
+  StatusDot,
+  StopButton,
+} from "@/components/ui";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { CardImageButton } from "./CardImageButton";
 import { CliResumeButton } from "./CliResumeButton";
@@ -29,10 +59,7 @@ import { InteractionForm } from "./InteractionForm";
 import { AsProjectControls } from "./AsProjectControls";
 import { SupersededErrorNotice } from "./SupersededErrorNotice";
 import { ToolTimeline } from "./tools/ToolTimeline";
-import { TurnStatsMeta } from "./TurnStatsMeta";
-import { Button } from "./ui/Button";
-import { Dots } from "./ui/Dots";
-import { StopButton } from "./ui/StopButton";
+import { TurnStatsMeta, useElapsed } from "./TurnStatsMeta";
 import { BookmarkButton } from "./BookmarkButton";
 
 // 流式期间只做最小 rehype：rehypeRaw 跳过（半行 HTML 标签既浪费又可能抛错），
@@ -40,53 +67,87 @@ import { BookmarkButton } from "./BookmarkButton";
 // 几百 KB 的长回复能把主线程卡死，正是「tab 点不开」的主因。高亮只在 done
 // 态跑一次；流式态只保留数学公式渲染。
 
-// #7: the single "turn" reading/interaction surface, shared by every place a
-// node is read in full (the linear thread is the only consumer today — the
-// old NodeFullView duplicated all of this and has been retired). Carries the
-// complete capability set: parent-anchor jump banner, editable question,
-// tool-call panel, mark-injected markdown body with live streaming, the
-// action row (CLI resume / regenerate / card image / copy), generated files,
-// and the paused-interaction form.
+// #7 + W3「无框连续流」：一轮 = 用户消息（浅灰块）+ 工具轨迹 + 全宽正文 +
+// hover 才浮出的轻工具栏。不再有卡片外框、卡头「#序号 · 状态点 · Turn」和
+// 圆形「你」头像：序号 / 未读点挪到用户消息左侧槽位，已读 / 收藏 / 分叉 /
+// 删除 / 耗时 / 复制 / 卡片图收进每轮底部的工具栏（手机端常显）。
+//
 // React.memo：线性 thread 订阅整个 `nodes` 对象，流式期间每个 tool_call
 // 事件（合批后仍是每帧一次）都会让父组件重渲。未变的节点（同引用）直接跳
-// 过——避免 15 张已完成卡片每次都重跑完整语法高亮。只有正在流式
-// 的节点引用每帧更新，正常重渲（且流式态已不跑高亮，成本低）。
+// 过——避免 15 张已完成卡片每次都重跑完整语法高亮。所以这里只收原始值和
+// 稳定回调（父组件用 useCallback / store action），不收 ReactNode。
+export type TurnCardProps = {
+  node: ChatNode;
+  readOnly?: boolean;
+  /** 线性视图里的全局序号（#N），缺省不显示 */
+  index?: number | string;
+  /** 当前锚点（导航目标）——序号常显、accent 色 */
+  isActive?: boolean;
+  /** 可从本节点分叉（线性视图：非流式、非 tip） */
+  canBranch?: boolean;
+  /** 底部 composer 正指向本节点（分叉 chip 已激活） */
+  branchArmed?: boolean;
+  onBranch?: (nodeId: string) => void;
+  canDelete?: boolean;
+  onDelete?: (nodeId: string) => void;
+};
+
 export const TurnCard = memo(function TurnCard({
   node,
   readOnly = false,
-}: {
-  node: ChatNode;
-  readOnly?: boolean;
-}) {
+  index,
+  isActive = false,
+  canBranch = false,
+  branchArmed = false,
+  onBranch,
+  canDelete = false,
+  onDelete,
+}: TurnCardProps) {
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const hasParent = useSessionStore((s) =>
     Boolean(node.parentId && s.nodes[node.parentId]),
   );
 
+  const toolbar = (
+    <TurnToolbar
+      node={node}
+      readOnly={readOnly}
+      canBranch={canBranch}
+      branchArmed={branchArmed}
+      onBranch={onBranch}
+      canDelete={canDelete}
+      onDelete={onDelete}
+    />
+  );
+
   if (node.kind === "reference") {
-    return <ReferenceFullBody key={node.id} node={node} />;
+    return (
+      <>
+        <ReferenceFullBody key={node.id} node={node} />
+        {toolbar}
+      </>
+    );
   }
 
   return (
     <>
       {node.parentAnchor && hasParent && (
         <button
+          type="button"
           onClick={() => jumpToParentAtAnchor(node.parentId!, node.id)}
-          className="w-full text-left mb-3 px-3 py-2 rounded-lg bg-fork-muted border border-fork-line text-ui text-fork-ink active:scale-[0.99] transition-transform shadow-raise hover:bg-fork-line/25"
-          title="回到父节点的引用处 (B)"
+          className="mb-2 -ml-1.5 inline-flex max-w-full items-center gap-1.5 min-h-6.5 px-1.5 rounded-field text-label text-fork-ink hover:bg-fork-muted transition-colors max-md:min-h-11"
+          title="回到父节点的引用处（B）"
         >
-          <span className="text-fork mr-1">↳</span>
-          从「
-          <span className="font-medium">
-            {truncate(node.parentAnchor.selectedText, 60)}
+          <Icon icon={GitBranch} size="sm" className="text-fork" />
+          <span className="min-w-0 truncate">
+            从「
+            <span className="font-medium">
+              {truncate(node.parentAnchor.selectedText, 60)}
+            </span>
+            」分叉
           </span>
-          」分叉
-          <span className="ml-1.5 text-fork-ink/70">
-            · 点击或按
-            <kbd className="mx-1 px-1 py-px rounded bg-fork-line/40 border border-fork-line font-mono text-nano">
-              B
-            </kbd>
-            回到引用处
+          <span className="shrink-0 hidden sm:inline-flex items-center gap-1 text-ink-faint">
+            · 回到引用处 <Kbd>B</Kbd>
           </span>
         </button>
       )}
@@ -95,18 +156,23 @@ export const TurnCard = memo(function TurnCard({
         question={node.question}
         attachments={node.attachments}
         readOnly={readOnly}
+        index={index}
+        isActive={isActive}
+        unread={node.status === "done" && !node.readAt}
       />
       {/* One chronological timeline of everything the turn did — delegated
           work nests under the call that spawned it rather than being pulled
           out into a parallel panel. 大会话的 toolCalls 不随载荷下发，展开时
           由 ToolTimeline 自己按需拉取（折叠态用 stats 渲染）。 */}
-      <ToolTimeline
-        nodeId={node.id}
-        toolCalls={node.toolCalls}
-        stats={node.toolCallStats ?? null}
-        live={node.status === "streaming"}
-      />
-      <AsProjectControls nodeId={node.id} />
+      <div className="mt-3 empty:hidden">
+        <ToolTimeline
+          nodeId={node.id}
+          toolCalls={node.toolCalls}
+          stats={node.toolCallStats ?? null}
+          live={node.status === "streaming"}
+        />
+        <AsProjectControls nodeId={node.id} />
+      </div>
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
           imperative <mark> injection inside react-markdown's output diverges
           from React's virtual tree, so when the node prop changes in-place
@@ -124,9 +190,168 @@ export const TurnCard = memo(function TurnCard({
           interaction={node.pendingInteraction}
         />
       )}
+      {node.status === "streaming" && <RunLine node={node} />}
+      {toolbar}
     </>
   );
 });
+
+// 流式状态全页只有一种写法：每轮底部一行「圆点 + 状态文案 + 计时」。
+// 不再三点跳动 + 闪烁光标 + 脉冲点并存（research 根因 #4）。
+function RunLine({ node }: { node: ChatNode }) {
+  const elapsed = useElapsed(node.createdAt ?? null, true);
+  const runningTool = [...node.toolCalls]
+    .reverse()
+    .find((c) => c.status === "running");
+  const label = node.pendingInteraction
+    ? node.pendingInteraction.toolName === "AskUserQuestion"
+      ? "等待你回答"
+      : "等待你批准"
+    : runningTool
+      ? `正在运行 ${toolTitle(runningTool)}`
+      : "正在生成";
+  return (
+    <div
+      data-turn-runline=""
+      role="status"
+      className="mt-3 flex items-center gap-2 text-ui text-ink-muted"
+    >
+      <StatusDot tone="live" />
+      <span className="min-w-0 truncate">{label}</span>
+      {elapsed !== null && (
+        <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
+          {formatDuration(elapsed)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// 每轮底部的轻工具栏：桌面 hover / 聚焦才浮出（触屏常显），meta 一行弱化，
+// token 明细进 Tooltip。流式中不显示（那时底部是 RunLine）。
+function TurnToolbar({
+  node,
+  readOnly,
+  canBranch,
+  branchArmed,
+  onBranch,
+  canDelete,
+  onDelete,
+}: {
+  node: ChatNode;
+  readOnly: boolean;
+  canBranch: boolean;
+  branchArmed: boolean;
+  onBranch?: (nodeId: string) => void;
+  canDelete: boolean;
+  onDelete?: (nodeId: string) => void;
+}) {
+  const markNodeRead = useSessionStore((s) => s.markNodeRead);
+  const markNodeUnread = useSessionStore((s) => s.markNodeUnread);
+  if (node.status === "streaming") return null;
+  const done = node.status === "done";
+  const hasResponse = node.kind !== "reference" && Boolean(node.response);
+  const showBranch = canBranch && !!onBranch;
+  const showDelete = canDelete && !!onDelete;
+  if (!done && !showBranch && !showDelete) return null;
+
+  return (
+    <div
+      data-turn-toolbar=""
+      className="mt-2 -ml-1.5 flex min-h-7 flex-wrap items-center gap-0.5 transition-opacity duration-100 md:pointer-fine:opacity-0 md:pointer-fine:group-hover/turn:opacity-100 md:pointer-fine:focus-within:opacity-100"
+    >
+      {hasResponse && <CopyIconButton text={node.response} />}
+      {showBranch && (
+        <IconButton
+          size="sm"
+          label={branchArmed ? "正在从此节点分叉" : "从此节点分叉提问"}
+          data-mobile-target="node-branch"
+          aria-pressed={branchArmed}
+          onClick={() => onBranch!(node.id)}
+          className={branchArmed ? "text-fork-ink bg-fork-muted" : undefined}
+        >
+          <Icon icon={GitBranch} size="sm" />
+        </IconButton>
+      )}
+      {done && <BookmarkButton node={node} />}
+      {done && (
+        <IconButton
+          size="sm"
+          label={node.readAt ? "标为未读" : "标为已读"}
+          data-mobile-target="node-read-toggle"
+          onClick={() =>
+            node.readAt
+              ? void markNodeUnread(node.id)
+              : void markNodeRead(node.id)
+          }
+        >
+          <Icon icon={node.readAt ? CircleDot : CircleCheck} size="sm" />
+        </IconButton>
+      )}
+      {done && hasResponse && (
+        <div className="hidden md:contents">
+          {!readOnly && (
+            <RegenerateVariantButton nodeId={node.id} question={node.question} />
+          )}
+          {!readOnly && <CliResumeButton nodeId={node.id} />}
+          <CardImageButton
+            title={node.topicLabel ?? node.question}
+            // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
+            content={finalResponseText(node)}
+          />
+        </div>
+      )}
+      {done && node.kind !== "reference" && (
+        <TurnStatsMeta
+          tokenCount={node.tokenCount}
+          durationMs={node.durationMs}
+          createdAt={node.createdAt}
+          toolCalls={node.toolCalls}
+          isStreaming={false}
+          className="ml-2 max-md:hidden"
+        />
+      )}
+      <span className="flex-1" />
+      {showDelete && (
+        <IconButton
+          size="sm"
+          tone="danger"
+          label="删除节点（含子树）"
+          data-mobile-target="node-delete"
+          onClick={() => onDelete!(node.id)}
+        >
+          <Icon icon={Trash2} size="sm" />
+        </IconButton>
+      )}
+      {done && hasResponse && <MobileResponseActions node={node} readOnly={readOnly} />}
+    </div>
+  );
+}
+
+function CopyIconButton({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <IconButton
+      size="sm"
+      label={
+        state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制全文（markdown 源）"
+      }
+      className="max-md:hidden"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await copyText(text);
+          setState("copied");
+        } catch {
+          setState("failed");
+        }
+        window.setTimeout(() => setState("idle"), 1500);
+      }}
+    >
+      <Icon icon={state === "copied" ? Check : Copy} size="sm" />
+    </IconButton>
+  );
+}
 
 // D5: regenerate the same question as a NEW sibling (a second "version"),
 // rather than overwriting in place like retry. The branch entries in the
@@ -134,26 +359,44 @@ export const TurnCard = memo(function TurnCard({
 function RegenerateVariantButton({
   nodeId,
   question,
+  menu = false,
 }: {
   nodeId: string;
   question: string;
+  menu?: boolean;
 }) {
   const editNode = useSessionStore((s) => s.editNode);
+  const label = "用相同问题再答一版（新建兄弟节点，可在分支列表对比）";
+  const onClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    editNode(nodeId, question);
+  };
+  if (menu) {
+    return (
+      <Button
+        type="button"
+        data-mobile-target="response-regenerate"
+        variant="secondary"
+        size="sm"
+        onClick={onClick}
+        title={label}
+        className="nodrag"
+      >
+        <Icon icon={RefreshCw} size="sm" />
+        再答一版
+      </Button>
+    );
+  }
   return (
-    <Button
-      type="button"
-      data-mobile-target="response-regenerate"
-      variant="secondary"
+    <IconButton
       size="sm"
-      onClick={(e) => {
-        e.stopPropagation();
-        editNode(nodeId, question);
-      }}
-      title="用相同问题再生成一个版本（新建兄弟节点，可在分支列表对比）"
+      label={label}
+      data-mobile-target="response-regenerate"
+      onClick={onClick}
       className="nodrag"
     >
-      ↻ 再答一版
-    </Button>
+      <Icon icon={RefreshCw} size="sm" />
+    </IconButton>
   );
 }
 
@@ -187,12 +430,12 @@ function MobileResponseActions({
     <div
       ref={menuRef}
       data-mobile-response-actions
-      className="relative ml-auto flex items-center gap-2 md:hidden"
+      className="relative flex items-center gap-1 md:hidden"
     >
       <CopyButton
         text={node.response}
         label="复制全文"
-        className="nodrag min-h-11 min-w-11 rounded border border-line px-2.5 py-1 text-ui text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink-strong"
+        className="nodrag min-h-11 min-w-11 rounded-field px-2.5 text-ui text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
       />
       <button
         type="button"
@@ -200,14 +443,14 @@ function MobileResponseActions({
         aria-label="更多回答操作"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-11 min-w-11 items-center justify-center rounded border border-line bg-surface text-lg text-ink-muted"
+        className="flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-muted hover:bg-surface-hover"
       >
-        <span aria-hidden>…</span>
+        <Icon icon={Ellipsis} />
       </button>
       {open && (
         <div
           data-mobile-response-menu
-          className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-lg border border-line bg-surface p-2 shadow-pop"
+          className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-overlay border border-line bg-surface-raised p-2 shadow-pop"
         >
           <BookmarkButton
             node={node}
@@ -216,7 +459,7 @@ function MobileResponseActions({
           />
           {!readOnly && <CliResumeButton nodeId={node.id} />}
           {!readOnly && (
-            <RegenerateVariantButton nodeId={node.id} question={node.question} />
+            <RegenerateVariantButton nodeId={node.id} question={node.question} menu />
           )}
           <CardImageButton
             title={node.topicLabel ?? node.question}
@@ -233,11 +476,17 @@ function QuestionBlock({
   question,
   attachments,
   readOnly,
+  index,
+  isActive,
+  unread,
 }: {
   nodeId: string;
   question: string;
   attachments: NodeAttachment[];
   readOnly: boolean;
+  index?: number | string;
+  isActive: boolean;
+  unread: boolean;
 }) {
   const editNode = useSessionStore((s) => s.editNode);
   const sendKey = useSessionStore((s) => s.sendKey);
@@ -257,12 +506,13 @@ function QuestionBlock({
 
   if (editing) {
     return (
-      <div className="bg-accent-muted border border-accent-line rounded-lg px-4 py-3 mb-4">
+      <div className="rounded-card border border-accent-line bg-surface p-2.5">
         <textarea
           value={text}
           autoFocus
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (isSendCombo(e, sendKey)) {
               e.preventDefault();
               submit();
@@ -272,9 +522,9 @@ function QuestionBlock({
             }
           }}
           rows={3}
-          className="w-full resize-none px-3 py-2 rounded-field border border-accent-line bg-surface text-reading text-ink-strong outline-none focus:border-accent leading-relaxed"
+          className="w-full resize-none px-1.5 py-1 bg-transparent text-reading text-ink-strong outline-none leading-relaxed"
         />
-        <div className="flex items-center justify-between gap-2 mt-2">
+        <div className="flex items-center justify-between gap-2 mt-1.5">
           <span className="text-label text-ink-faint min-w-0 truncate">
             改问法会新建一个分支，保留原问答（{sendHint(sendKey)}）
           </span>
@@ -288,7 +538,8 @@ function QuestionBlock({
               onClick={submit}
               disabled={!text.trim()}
             >
-              ↻ 重问
+              <Icon icon={RotateCcw} size="sm" />
+              重问
             </Button>
           </div>
         </div>
@@ -297,43 +548,45 @@ function QuestionBlock({
   }
 
   return (
-    <div className="group bg-accent-muted border-l-[3px] border-l-accent rounded-lg px-4 py-3 mb-5 flex items-start gap-3">
-      <div className="w-7 h-7 rounded-full bg-accent text-ink-inverse text-label flex items-center justify-center shrink-0 font-medium shadow-raise">
-        你
-      </div>
-      <div className="flex-1 text-reading text-ink leading-relaxed pt-1 font-medium whitespace-pre-wrap break-words min-w-0">
-        {question}
-        {attachments.length > 0 && (
-          <div className="mt-2 font-normal">
-            <AttachmentPreview attachments={attachments} readOnly />
-          </div>
+    <div
+      data-turn-question=""
+      className="group/q relative rounded-card bg-surface-muted px-3.5 py-2.5 pr-10"
+    >
+      {/* 左侧槽位：未读点常显；序号 hover / 当前锚点时显示（手机端没有槽位，只留点）。 */}
+      <span className="absolute right-full top-3 mr-2 flex items-center gap-1.5 whitespace-nowrap">
+        {index !== undefined && (
+          <span
+            className={`font-mono text-nano tabular-nums max-md:hidden transition-opacity ${
+              isActive
+                ? "text-accent-ink opacity-100"
+                : "text-ink-faint opacity-0 group-hover/turn:opacity-100"
+            }`}
+          >
+            #{index}
+          </span>
         )}
+        {unread && <StatusDot tone="unread" label="未读" />}
+      </span>
+      <div className="text-reading text-ink-strong leading-relaxed whitespace-pre-wrap break-words min-w-0">
+        {question}
       </div>
+      {attachments.length > 0 && (
+        <div className="mt-2">
+          <AttachmentPreview attachments={attachments} readOnly />
+        </div>
+      )}
       {!readOnly && (
-        <button
+        <IconButton
+          size="sm"
+          label="编辑问题（会新建一个分支重问）"
           onClick={() => {
             setText(question);
             setEditing(true);
           }}
-          title="编辑问题（会新建一个分支重问）"
-          aria-label="编辑问题"
-          className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center rounded-md text-ink-muted opacity-60 sm:opacity-0 group-hover:opacity-100 hover:bg-surface-raised hover:text-accent transition-opacity"
+          className="absolute right-1.5 top-1.5 md:pointer-fine:opacity-0 md:pointer-fine:group-hover/q:opacity-100 md:pointer-fine:focus-visible:opacity-100"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
-        </button>
+          <Icon icon={Pencil} size="sm" />
+        </IconButton>
       )}
     </div>
   );
@@ -342,13 +595,7 @@ function QuestionBlock({
 // Dim auto-scrolling viewport for the live thinking stream. Pinned to the
 // bottom as text grows (thinking is transient status, not reading material —
 // following the tail beats preserving scroll position).
-function ThinkingScroll({
-  text,
-  className,
-}: {
-  text: string;
-  className?: string;
-}) {
+function ThinkingScroll({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -357,9 +604,39 @@ function ThinkingScroll({
   return (
     <div
       ref={ref}
-      className={`max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-ui leading-relaxed text-ink-faint ${className ?? ""}`}
+      className="max-h-36 overflow-y-auto whitespace-pre-wrap break-words text-ui leading-relaxed text-ink-muted"
     >
       {text}
+    </div>
+  );
+}
+
+// 思考块：还没有正文时展开（看它在想什么），正文一开始就自动折叠；用户点过
+// 就尊重用户（userOpen 钉住）。回合结束整块消失（思考流不落库）。
+function ThinkingBlock({ text, answering }: { text: string; answering: boolean }) {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? !answering;
+  return (
+    <div className="mb-3" data-turn-thinking="">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setUserOpen(!open)}
+        className="-ml-1 inline-flex items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors"
+      >
+        <Icon
+          icon={ChevronRight}
+          size="sm"
+          className={`transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+        <Icon icon={Brain} size="sm" />
+        {answering ? `思考过程（${text.length} 字）` : "思考中…"}
+      </button>
+      {open && (
+        <div className="mt-1.5 ml-2 pl-3.5 border-l border-line-strong">
+          <ThinkingScroll text={text} />
+        </div>
+      )}
     </div>
   );
 }
@@ -369,8 +646,8 @@ function ThinkingScroll({
 // agent 会让历史节点渲染出一片空白。语义（这轮不是主线人格答的）已经传达到了。
 function MentionChip() {
   return (
-    <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent-muted text-accent-ink text-label">
-      <span aria-hidden>🎭</span>
+    <div className="mb-2 inline-flex items-center gap-1.5 min-h-6 px-2 rounded-field border border-line text-label text-ink-muted">
+      <Icon icon={AtSign} size="sm" className="text-ink-faint" />
       <span>这一轮由 @提及的 Agent 单独作答（主线人格不变）</span>
     </div>
   );
@@ -469,96 +746,30 @@ function ResponseBody({
       ref={bodyRef}
       data-chat-node-id={node.id}
       onClick={onMarkClick}
-      className="md-body text-reading text-ink leading-relaxed"
+      className="md-body mt-3 text-reading text-ink leading-relaxed"
     >
       {/* S88 @提及：这一轮是外援答的，标出来 —— 否则读者会以为主线人格变了。
           会话级人设（agentScope==='session'）刻意不挂 chip：每张卡都挂一枚是
           噪音，那个显示在 Header 的 ModeBadge 上。 */}
       {node.agentScope === "mention" && <MentionChip />}
       {isStreaming && liveThinking && (
-        // The思考期 surface. While no answer text yet: an open dim panel with
-        // the thinking stream (this is what used to look like a dead UI for
-        // up to minutes). Once the answer starts: collapse to a <details>
-        // (uncontrolled so a user toggle sticks). Gone entirely at done.
-        liveText ? (
-          <details className="mb-2">
-            <summary className="cursor-pointer select-none text-ui text-ink-faint hover:text-ink-muted">
-              🧠 思考过程（{liveThinking.length} 字）
-            </summary>
-            <ThinkingScroll text={liveThinking} className="mt-1" />
-          </details>
-        ) : (
-          <div className="mb-2 rounded-md border border-line/70 bg-surface-muted/60 px-3 py-2">
-            <div className="mb-1 flex items-center gap-1.5 text-ui text-ink-faint">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-              思考中…
-            </div>
-            <ThinkingScroll text={liveThinking} />
-          </div>
-        )
+        <ThinkingBlock text={liveThinking} answering={Boolean(liveText)} />
       )}
       {isStreaming ? (
         liveText ? (
-          <>
-            <ReactMarkdown
-              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-              rehypePlugins={MARKDOWN_STREAMING_REHYPE_PLUGINS}
-              components={MD_COMPONENTS}
+          <ReactMarkdown
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_STREAMING_REHYPE_PLUGINS}
+            components={MD_COMPONENTS}
             urlTransform={MD_URL_TRANSFORM}
-            >
-              {liveText}
-            </ReactMarkdown>
-            <span className="streaming-cursor" />
-            <div className="mt-2 flex items-center">
-              <TurnStatsMeta
-                createdAt={node.createdAt}
-                isStreaming={true}
-              />
-            </div>
-          </>
-        ) : liveThinking ? null : (
-          // First token hasn't arrived yet — show an animated indicator
-          // instead of a blank pane (the "no streaming" complaint).
-          <div className="flex items-center gap-1.5 py-2 text-ink-faint">
-            <Dots />
-            <span className="ml-1.5 text-ui">正在生成…</span>
-            <TurnStatsMeta
-              createdAt={node.createdAt}
-              isStreaming={true}
-              className="ml-2"
-            />
-          </div>
-        )
+          >
+            {liveText}
+          </ReactMarkdown>
+        ) : null
       ) : node.response ? (
         near ? (
           <>
             <SegmentedResponse node={node} />
-            <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
-              <TurnStatsMeta
-                tokenCount={node.tokenCount}
-                durationMs={node.durationMs}
-                createdAt={node.createdAt}
-                toolCalls={node.toolCalls}
-                isStreaming={false}
-              />
-              <div className="hidden items-center gap-2 ml-auto md:flex">
-                {!readOnly && <CliResumeButton nodeId={node.id} />}
-                {!readOnly && (
-                  <RegenerateVariantButton nodeId={node.id} question={node.question} />
-                )}
-                <CardImageButton
-                  title={node.topicLabel ?? node.question}
-                  // 分享卡只带最终答复 —— 过程叙述在卡片图语境里是噪音。
-                  content={finalResponseText(node)}
-                />
-                <CopyButton
-                  text={node.response}
-                  label="复制全文"
-                  className="nodrag px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
-                />
-              </div>
-              <MobileResponseActions node={node} readOnly={readOnly} />
-            </div>
             <GeneratedFilesBar node={node} />
           </>
         ) : (
@@ -585,39 +796,36 @@ function ResponseBody({
         isError &&
         !hasChildren &&
         (node.errorMessage === "aborted" ? (
-          <div className="mt-3 p-2.5 bg-surface-muted border border-line rounded text-ink-muted text-ui flex items-start gap-2">
-            <div className="flex-1">已停止生成</div>
+          <div className="not-prose mt-3 flex items-center gap-2 text-ui text-ink-muted">
+            <Icon icon={TriangleAlert} size="sm" className="text-ink-faint" />
+            <span className="flex-1">已停止生成</span>
             <Button
-              variant="primary"
+              variant="secondary"
               size="sm"
               className="shrink-0"
               onClick={() => retryNode(node.id)}
             >
-              ↻ 重新发送
+              <Icon icon={RotateCcw} size="sm" />
+              重新发送
             </Button>
           </div>
         ) : (
-          <div className="mt-3 p-2.5 bg-danger-muted border border-danger-line rounded text-danger-ink text-ui flex items-start gap-2">
-            <div className="flex-1">
-              出错：{node.errorMessage}
-              {isAuthErrorMessage(node.errorMessage) && (
-                <a
-                  href="/settings/models"
-                  className="block mt-1 text-label underline underline-offset-2 opacity-80 hover:opacity-100"
-                >
-                  像是 CLI 授权问题 → 查看授权状态
-                </a>
-              )}
-            </div>
-            <Button
-              variant="danger"
-              size="sm"
-              className="shrink-0"
-              onClick={() => retryNode(node.id)}
-            >
-              ↻ 重新生成
-            </Button>
-          </div>
+          <ErrorCallout
+            className="mt-3"
+            compact
+            error={node.errorMessage}
+            title="本轮出错"
+            hint={node.errorMessage ?? undefined}
+            onRetry={() => retryNode(node.id)}
+            retryLabel="重新生成"
+            action={
+              isAuthErrorMessage(node.errorMessage) ? (
+                <Button asChild variant="link" size="sm">
+                  <a href="/settings/models">像是 CLI 授权问题，查看授权状态</a>
+                </Button>
+              ) : undefined
+            }
+          />
         ))}
     </div>
   );
@@ -647,13 +855,18 @@ function SegmentedResponse({ node }: { node: ChatNode }) {
   return (
     <>
       {preamble && (
-        // <details> 不受控，与流式态的思考折叠同一心智模型。展开后弱化
-        // 字号/墨色 —— 过程叙述是「它当时在干嘛」，不该和答复争阅读权重。
-        <details className="mb-3">
-          <summary className="cursor-pointer select-none text-ui text-ink-faint hover:text-ink-muted">
-            🧭 过程叙述（{preamble.length} 字）
+        // <details> 不受控，与思考折叠同一心智模型。展开后弱化字号/墨色 ——
+        // 过程叙述是「它当时在干嘛」，不该和答复争阅读权重。
+        <details className="group/pre mb-3">
+          <summary className="-ml-1 inline-flex cursor-pointer select-none items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted list-none [&::-webkit-details-marker]:hidden">
+            <Icon
+              icon={ChevronRight}
+              size="sm"
+              className="transition-transform motion-reduce:transition-none group-open/pre:rotate-90"
+            />
+            过程叙述（{preamble.length} 字）
           </summary>
-          <div className="mt-1.5 pl-3 border-l-2 border-line text-ui text-ink-muted [&_.md-body]:text-ui">
+          <div className="mt-1.5 ml-2 pl-3.5 border-l border-line-strong text-ui text-ink-muted [&_.md-body]:text-ui">
             <MarkdownBody cacheKey={`${node.id}:pre`} content={preamble} />
           </div>
         </details>
@@ -699,18 +912,17 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
 
   return (
     <>
-      <div
-        className={`mb-4 px-4 py-3 rounded-lg border text-ui flex items-start gap-2.5 ${
-          isStreaming
-            ? "bg-accent-muted border-accent-line"
-            : "bg-warn-muted border-warn-line"
-        }`}
-      >
-        <span className="text-title leading-none mt-0.5" aria-hidden>
-          {isStreaming ? "⏳" : refIcon(ref)}
+      <div className="mb-3 px-3.5 py-2.5 rounded-card border border-line bg-surface-muted text-ui flex items-start gap-2.5">
+        <span className="mt-0.5 shrink-0 inline-flex text-ink-faint" aria-hidden>
+          {isStreaming ? (
+            <Spinner size="sm" label={null} />
+          ) : (
+            <Icon icon={ref.sourceType === "paste" ? FileText : Link2} size="md" />
+          )}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-ink-strong truncate">
+          <div className="text-label text-ink-faint">参考材料</div>
+          <div className="font-medium text-ink-strong truncate">
             {node.topicLabel ?? "参考材料"}
           </div>
           {ref.sourceUri && (
@@ -718,17 +930,16 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
               href={ref.sourceUri}
               target="_blank"
               rel="noreferrer"
-              className={`block mt-0.5 truncate underline-offset-2 hover:underline ${
-                isStreaming ? "text-accent-ink" : "text-warn-ink"
-              }`}
+              className="block mt-0.5 truncate font-mono text-label text-ink-muted underline-offset-2 hover:underline hover:text-accent-ink"
               onClick={(e) => e.stopPropagation()}
             >
               {ref.sourceUri}
             </a>
           )}
           {ref.meta.fetchError && !isStreaming && (
-            <div className="mt-1 text-danger-ink text-ui">
-              ⚠️ 抓取失败：{ref.meta.fetchError}
+            <div className="mt-1 flex items-center gap-1.5 text-danger-ink text-ui">
+              <Icon icon={TriangleAlert} size="sm" />
+              抓取失败：{ref.meta.fetchError}
             </div>
           )}
         </div>
@@ -741,28 +952,30 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
           />
         ) : (
           canRefresh && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onRefresh}
-              disabled={refreshing}
-              className="shrink-0 px-2 py-1 text-label rounded border border-warn-line text-warn-ink hover:bg-warn-line/25 active:scale-95 disabled:opacity-50 transition-colors"
+              loading={refreshing}
+              className="shrink-0"
               title="重新抓取"
             >
-              {refreshing ? "抓取中…" : "↻ 刷新"}
-            </button>
+              {!refreshing && <Icon icon={RefreshCw} size="sm" />}
+              刷新
+            </Button>
           )
         )}
       </div>
 
       {isStreaming && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-surface-muted border border-line">
-          <div className="flex items-center gap-2 text-ui text-ink-muted">
-            <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
+        <div className="mb-3 text-ui text-ink-muted">
+          <div className="flex items-center gap-2">
+            <StatusDot tone="live" />
             <span className="font-medium">{fetchProgress || "启动中…"}</span>
           </div>
-          <div className="mt-2 text-label text-ink-faint leading-relaxed">
-            claude 正在挑选并运行合适的 skill 抓取这个 URL。
-            飞书 / YouTube / B站 等通常 5–60 秒，PDF / 大型文档可能更久。
-            可以随时点上方"停止"取消。
+          <div className="mt-1 pl-3.5 text-label text-ink-faint leading-relaxed">
+            正在挑选并运行合适的 skill 抓取这个链接。飞书 / YouTube / B 站
+            通常 5–60 秒，PDF / 大型文档可能更久，可以随时停止。
           </div>
         </div>
       )}

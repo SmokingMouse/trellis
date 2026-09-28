@@ -1,14 +1,16 @@
 "use client";
+import { File, FileText, FileType, Globe, Image, type LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui";
 import type { ChatNode } from "@/lib/types";
 import { useSessionStore } from "@/stores/sessionStore";
 import { generatedFilesFromNode, previewKind } from "@/lib/generated-files";
 
-const KIND_ICON: Record<string, string> = {
-  html: "🌐",
-  image: "🖼",
-  pdf: "📕",
-  markdown: "📝",
-  text: "📄",
+const KIND_ICON: Record<string, LucideIcon> = {
+  html: Globe,
+  image: Image,
+  pdf: FileType,
+  markdown: FileText,
+  text: File,
 };
 
 // Chips for the files this turn wrote/edited (from tool calls). Opens the same
@@ -28,19 +30,17 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
 
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <span className="text-label text-ink-faint mr-0.5">
-        本轮生成 ·
-      </span>
+      <span className="text-label text-ink-faint mr-0.5">本轮生成</span>
       {files.map((file) => (
         <button
           key={file.absPath}
           type="button"
           onClick={() => openFilePreview(file.absPath)}
           title={file.absPath}
-          className="nodrag inline-flex items-center gap-1 px-2 py-1 rounded-md border border-line text-ui text-ink-muted hover:bg-surface-muted hover:border-line-strong transition-colors"
+          className="nodrag inline-flex items-center gap-1.5 min-h-6.5 px-2 rounded-field border border-line bg-surface text-label text-ink-muted hover:bg-surface-hover hover:text-ink transition-colors max-md:min-h-11"
         >
-          <span>{KIND_ICON[previewKind(file.name)] ?? "📄"}</span>
-          <span className="truncate max-w-[180px]">{file.name}</span>
+          <Icon icon={KIND_ICON[previewKind(file.name)] ?? File} size="sm" className="text-ink-faint" />
+          <span className="truncate max-w-48 font-mono">{file.name}</span>
         </button>
       ))}
     </div>

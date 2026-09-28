@@ -1019,13 +1019,8 @@ html, body {
   margin: 1.2em 0;
 }
 
-.streaming-cursor::after {
-  content: "▋";
-  color: var(--accent-vivid);
-  animation: blink 1s step-end infinite;
-  margin-left: 1px;
-}
-@keyframes blink { 50% { opacity: 0; } }
+/* W3：流式状态只留一种（每轮底部「圆点 + 文案 + 计时」），闪烁光标
+   .streaming-cursor 与 blink 关键帧已退役。 */
 
 /* Anchor pulse: applied on a <mark> when the user jumps to a target
    mark — clicking "↳ 从「xxx」分叉" on a child (amber pulse) or a note
@@ -1133,7 +1128,6 @@ html, body {
   .ui-scrim[data-state],
   .ui-drawer[data-state],
   .ui-skeleton,
-  .streaming-cursor::after,
   .md-body mark.anchor-pulse,
   .md-body mark[data-note-id]:not([data-child-id]).anchor-pulse,
   .md-body mark[data-search-id].anchor-pulse {
