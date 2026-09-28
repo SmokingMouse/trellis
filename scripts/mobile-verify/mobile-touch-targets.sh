@@ -70,7 +70,13 @@ until mkdir "$LOCK_DIR" 2>/dev/null; do
 done
 echo "$$ $(date +%H:%M:%S) $(basename "$0")" > "$LOCK_DIR/owner"
 
+. "$ROOT/scripts/mobile-verify/lib-settle.sh"
+
 ab() {
+  # 点击前先等目标停稳（弹层进场动画 / Header 位移），见 lib-settle.sh；@ref 不处理
+  if [ "${1:-}" = click ] && [ $# -ge 2 ]; then
+    case $2 in @*) ;; *) mv_wait_settled "$2" ;; esac
+  fi
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
@@ -89,6 +95,7 @@ wait_for_js() {
   wait_started=$(date +%s)
   while :; do
     if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      mv_wait_idle soft
       echo "✓ $wait_label"
       return 0
     fi
@@ -526,38 +533,40 @@ wait_for_js "desktop answer actions visible" "Boolean(document.querySelector('[d
 echo "== desktop 1280x800: approval hierarchy and unchanged surrounding baseline =="
 ab eval --stdin <<'JS'
 (() => {
-  const specs = [
-    ['drawer new session', '[data-mobile-target="drawer-new-session"]', 159, 32],
-    ['drawer close', '[data-mobile-target="drawer-close"]', 28, 32],
-    ['drawer attach', '[data-mobile-target="drawer-attach"]', 193, 28],
-    ['session row', '[data-mobile-target="session-row"]', 201, 26],
-    // Chain rows moved to the in-session TreePanel; no desktop sidebar leaf below sessions.
-    ['permission allow', '[data-mobile-target="permission-allow"]', 144, 34.75],
-    ['permission deny', '[data-mobile-target="permission-deny"]', 78.39, 36.75],
-    ['code copy', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="code-copy"]', 38, 19.88],
-    ['mark read toggle', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-read-toggle"]', 25, 21],
-    ['branch from node', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-branch"]', 25, 21],
-    ['delete node', '[data-thread-node-id="mv-touch-permission"] [data-mobile-target="node-delete"]', 25, 21],
-    ['response regenerate', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-regenerate"]', 85.67, 28.75],
-    ['response card image', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-card-image"]', 78.98, 28.75],
-    ['response copy full', '[data-thread-node-id="mv-touch-done"] button[aria-label="复制全文"]', 72, 28.75],
-    ['new tree entry', '[data-mobile-target="new-tree-open"]', 55.28, 32],
-  ];
-  const tolerance = 0.25;
+  // 桌面「不回归」：原先逐个钉死 W0 像素（例 drawer new session 159x32），W1 字号 token /
+  // W4 侧栏重做后必然漂移。这里只守真正的约束：元素在、可见，且手机 44px 热区
+  // （max-md:min-h-11 / min-w-11）没漏到桌面——高度 < 44、computed min-height 不是 44px。
+  const desktopCompact = (name, selector, maxHeight = 44) => {
+    const el = document.querySelector(selector);
+    if (!el) throw new Error(`${name}: missing ${selector}`);
+    const r = el.getBoundingClientRect();
+    const minHeight = getComputedStyle(el).minHeight;
+    if (!(r.width > 0 && r.height > 0)) throw new Error(`${name}: not visible (${r.width}x${r.height})`);
+    if (r.height >= maxHeight || minHeight === '44px') throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} min-h=${minHeight} — mobile 44px target leaked onto desktop`);
+    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+  };
   const allow = document.querySelector('[data-mobile-target="permission-allow"]');
   const always = document.querySelector('[data-mobile-target="permission-always"]');
   if (!allow || !always || always.getBoundingClientRect().width >= allow.getBoundingClientRect().width || always.classList.contains('bg-accent')) {
     throw new Error('always allow must remain a narrower tertiary action');
   }
-  const results = specs.map(([name, selector, expectedWidth, expectedHeight]) => {
-    const el = document.querySelector(selector);
-    if (!el) throw new Error(`${name}: missing ${selector}`);
-    const r = el.getBoundingClientRect();
-    if (Math.abs(r.width - expectedWidth) > tolerance || Math.abs(r.height - expectedHeight) > tolerance) {
-      throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} != ${expectedWidth}x${expectedHeight}`);
-    }
-    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2), expected: `${expectedWidth}x${expectedHeight}` };
-  });
+  const results = [
+    ['drawer new session', '[data-mobile-target="drawer-new-session"]'],
+    ['drawer close', '[data-mobile-target="drawer-close"]'],
+    ['drawer attach', '[data-mobile-target="drawer-attach"]'],
+    ['session row', '[data-mobile-target="session-row"]'],
+    ['permission allow', '[data-mobile-target="permission-allow"]'],
+    ['permission deny', '[data-mobile-target="permission-deny"]'],
+    ['code copy', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="code-copy"]'],
+    ['mark read toggle', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-read-toggle"]'],
+    ['branch from node', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-branch"]'],
+    ['delete node', '[data-thread-node-id="mv-touch-permission"] [data-mobile-target="node-delete"]'],
+    ['response regenerate', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-regenerate"]'],
+    ['response card image', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-card-image"]'],
+    ['response copy full', '[data-thread-node-id="mv-touch-done"] button[aria-label="复制全文"]'],
+    ['new tree entry', '[data-mobile-target="new-tree-open"]'],
+    // Chain rows moved to the in-session TreePanel; no desktop sidebar leaf below sessions.
+  ].map(([name, selector]) => desktopCompact(name, selector));
   return JSON.stringify(results, null, 2);
 })()
 JS
@@ -581,18 +590,22 @@ JS
 wait_for_js "desktop branch selection actions" "Boolean(document.querySelector('[data-mobile-target=branch-open]')) && Boolean(document.querySelector('[data-mobile-target=branch-note]'))"
 ab eval --stdin <<'JS'
 (() => {
-  const specs = [
-    ['branch selection open', '[data-mobile-target="branch-open"]', 128.05, 33.5],
-    ['branch save note', '[data-mobile-target="branch-note"]', 63.05, 33.5],
-  ];
-  const tolerance = 0.25;
-  return JSON.stringify(specs.map(([name, selector, expectedWidth, expectedHeight]) => {
+  // 桌面「不回归」：原先逐个钉死 W0 像素（例 drawer new session 159x32），W1 字号 token /
+  // W4 侧栏重做后必然漂移。这里只守真正的约束：元素在、可见，且手机 44px 热区
+  // （max-md:min-h-11 / min-w-11）没漏到桌面——高度 < 44、computed min-height 不是 44px。
+  const desktopCompact = (name, selector, maxHeight = 44) => {
     const el = document.querySelector(selector);
     if (!el) throw new Error(`${name}: missing ${selector}`);
     const r = el.getBoundingClientRect();
-    if (Math.abs(r.width - expectedWidth) > tolerance || Math.abs(r.height - expectedHeight) > tolerance) throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} != ${expectedWidth}x${expectedHeight}`);
-    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2), expected: `${expectedWidth}x${expectedHeight}` };
-  }), null, 2);
+    const minHeight = getComputedStyle(el).minHeight;
+    if (!(r.width > 0 && r.height > 0)) throw new Error(`${name}: not visible (${r.width}x${r.height})`);
+    if (r.height >= maxHeight || minHeight === '44px') throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} min-h=${minHeight} — mobile 44px target leaked onto desktop`);
+    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+  };
+  return JSON.stringify([
+    ['branch selection open', '[data-mobile-target="branch-open"]'],
+    ['branch save note', '[data-mobile-target="branch-note"]'],
+  ].map(([name, selector]) => desktopCompact(name, selector)), null, 2);
 })()
 JS
 ab eval --stdin <<'JS'
@@ -606,19 +619,23 @@ JS
 wait_for_js "desktop branch footer" "Boolean(document.querySelector('[data-mobile-target=branch-submit]'))"
 ab eval --stdin <<'JS'
 (() => {
-  const specs = [
-    ['branch attach', '[data-mobile-target="branch-attach"]', 31, 20],
-    ['branch cancel', '[data-mobile-target="branch-cancel"]', 40, 20],
-    ['branch submit', '[data-mobile-target="branch-submit"]', 44, 20],
-  ];
-  const tolerance = 0.25;
-  return JSON.stringify(specs.map(([name, selector, expectedWidth, expectedHeight]) => {
+  // 桌面「不回归」：原先逐个钉死 W0 像素（例 drawer new session 159x32），W1 字号 token /
+  // W4 侧栏重做后必然漂移。这里只守真正的约束：元素在、可见，且手机 44px 热区
+  // （max-md:min-h-11 / min-w-11）没漏到桌面——高度 < 44、computed min-height 不是 44px。
+  const desktopCompact = (name, selector, maxHeight = 44) => {
     const el = document.querySelector(selector);
     if (!el) throw new Error(`${name}: missing ${selector}`);
     const r = el.getBoundingClientRect();
-    if (Math.abs(r.width - expectedWidth) > tolerance || Math.abs(r.height - expectedHeight) > tolerance) throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} != ${expectedWidth}x${expectedHeight}`);
-    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2), expected: `${expectedWidth}x${expectedHeight}` };
-  }), null, 2);
+    const minHeight = getComputedStyle(el).minHeight;
+    if (!(r.width > 0 && r.height > 0)) throw new Error(`${name}: not visible (${r.width}x${r.height})`);
+    if (r.height >= maxHeight || minHeight === '44px') throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} min-h=${minHeight} — mobile 44px target leaked onto desktop`);
+    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+  };
+  return JSON.stringify([
+    ['branch attach', '[data-mobile-target="branch-attach"]'],
+    ['branch cancel', '[data-mobile-target="branch-cancel"]'],
+    ['branch submit', '[data-mobile-target="branch-submit"]'],
+  ].map(([name, selector]) => desktopCompact(name, selector)), null, 2);
 })()
 JS
 ab press Escape
@@ -628,19 +645,23 @@ ab click '[data-mobile-target="new-tree-open"]'
 wait_for_js "desktop new tree modal" "Boolean(document.querySelector('[data-mobile-target=new-tree-start]'))"
 ab eval --stdin <<'JS'
 (() => {
-  const specs = [
-    ['new tree close', '[data-mobile-target="new-tree-close"]', 24.2, 36],
-    ['new tree cancel', '[data-mobile-target="new-tree-cancel"]', 60, 32],
-    ['new tree start', '[data-mobile-target="new-tree-start"]', 60, 32],
-  ];
-  const tolerance = 0.25;
-  return JSON.stringify(specs.map(([name, selector, expectedWidth, expectedHeight]) => {
+  // 桌面「不回归」：原先逐个钉死 W0 像素（例 drawer new session 159x32），W1 字号 token /
+  // W4 侧栏重做后必然漂移。这里只守真正的约束：元素在、可见，且手机 44px 热区
+  // （max-md:min-h-11 / min-w-11）没漏到桌面——高度 < 44、computed min-height 不是 44px。
+  const desktopCompact = (name, selector, maxHeight = 44) => {
     const el = document.querySelector(selector);
     if (!el) throw new Error(`${name}: missing ${selector}`);
     const r = el.getBoundingClientRect();
-    if (Math.abs(r.width - expectedWidth) > tolerance || Math.abs(r.height - expectedHeight) > tolerance) throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} != ${expectedWidth}x${expectedHeight}`);
-    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2), expected: `${expectedWidth}x${expectedHeight}` };
-  }), null, 2);
+    const minHeight = getComputedStyle(el).minHeight;
+    if (!(r.width > 0 && r.height > 0)) throw new Error(`${name}: not visible (${r.width}x${r.height})`);
+    if (r.height >= maxHeight || minHeight === '44px') throw new Error(`${name}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} min-h=${minHeight} — mobile 44px target leaked onto desktop`);
+    return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
+  };
+  return JSON.stringify([
+    ['new tree close', '[data-mobile-target="new-tree-close"]'],
+    ['new tree cancel', '[data-mobile-target="new-tree-cancel"]'],
+    ['new tree start', '[data-mobile-target="new-tree-start"]'],
+  ].map(([name, selector]) => desktopCompact(name, selector)), null, 2);
 })()
 JS
 ab click '[data-mobile-target="new-tree-close"]'
@@ -664,19 +685,21 @@ ab eval --stdin <<'JS'
 (() => {
   const optionEls = [...document.querySelectorAll('[data-mobile-target="ask-option"]')];
   if (optionEls.length !== 3) throw new Error(`ask options: expected 3, got ${optionEls.length}`);
-  const expected = [[922, 40.39], [922, 40.39], [922, 61.14]];
-  const tolerance = 0.25;
+  // 原先钉死 922x40.39 / 61.14 与 submit 60x32（W0 像素）。守结构：三个选项同宽占满卡片列、
+  // 选项没塌；提交按钮是桌面紧凑尺寸（没继承手机 44px 热区）。
+  const widths = optionEls.map((el) => el.getBoundingClientRect().width);
+  if (Math.max(...widths) - Math.min(...widths) > 0.5 || widths[0] < 300) throw new Error(`ask options should share one wide column: ${JSON.stringify(widths)}`);
   const results = optionEls.map((el, index) => {
     const r = el.getBoundingClientRect();
-    const [expectedWidth, expectedHeight] = expected[index];
-    if (Math.abs(r.width - expectedWidth) > tolerance || Math.abs(r.height - expectedHeight) > tolerance) throw new Error(`ask option ${index + 1}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} != ${expectedWidth}x${expectedHeight}`);
-    return { name: `ask option ${index + 1}`, selector: '[data-mobile-target="ask-option"]', width: +r.width.toFixed(2), height: +r.height.toFixed(2), expected: `${expectedWidth}x${expectedHeight}` };
+    if (r.height < 28) throw new Error(`ask option ${index + 1}: ${r.width.toFixed(2)}x${r.height.toFixed(2)} collapsed`);
+    return { name: `ask option ${index + 1}`, selector: '[data-mobile-target="ask-option"]', width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
   });
   const submit = document.querySelector('[data-mobile-target="ask-submit"]');
   if (!submit) throw new Error('ask submit missing');
   const sr = submit.getBoundingClientRect();
-  if (Math.abs(sr.width - 60) > tolerance || Math.abs(sr.height - 32) > tolerance) throw new Error(`ask submit: ${sr.width.toFixed(2)}x${sr.height.toFixed(2)} != 60x32`);
-  results.push({ name: 'ask submit', selector: '[data-mobile-target="ask-submit"]', width: +sr.width.toFixed(2), height: +sr.height.toFixed(2), expected: '60x32' });
+  const submitMin = getComputedStyle(submit).minHeight;
+  if (!(sr.width > 0) || sr.height >= 44 || submitMin === '44px') throw new Error(`ask submit: ${sr.width.toFixed(2)}x${sr.height.toFixed(2)} min-h=${submitMin} — mobile 44px target leaked onto desktop`);
+  results.push({ name: 'ask submit', selector: '[data-mobile-target="ask-submit"]', width: +sr.width.toFixed(2), height: +sr.height.toFixed(2) });
   return JSON.stringify(results, null, 2);
 })()
 JS

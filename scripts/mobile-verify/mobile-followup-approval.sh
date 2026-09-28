@@ -23,7 +23,13 @@ for tool in bun agent-browser sqlite3 curl; do
   fi
 done
 
+. "$ROOT/scripts/mobile-verify/lib-settle.sh"
+
 ab() {
+  # 点击前先等目标停稳（弹层进场动画 / Header 位移），见 lib-settle.sh；@ref 不处理
+  if [ "${1:-}" = click ] && [ $# -ge 2 ]; then
+    case $2 in @*) ;; *) mv_wait_settled "$2" ;; esac
+  fi
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
@@ -104,6 +110,7 @@ wait_for_js() {
   wait_started=$(date +%s)
   while :; do
     if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      mv_wait_idle soft
       echo "✓ $wait_label"
       return 0
     fi
@@ -544,15 +551,19 @@ wait_for_js "desktop collapsed BranchPopover" "Boolean(document.querySelector('[
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const specs = [
-    ['branch-open', 128.05, 33.5],
-    ['branch-note', 63.05, 33.5],
-  ];
-  return specs.map(([target, width, height]) => {
-    const rect = document.querySelector(`[data-mobile-target="${target}"]`)?.getBoundingClientRect();
-    assert(rect && Math.abs(rect.width - width) <= 0.25 && Math.abs(rect.height - height) <= 0.25, `${target}=${rect?.width}x${rect?.height}`);
+  // 原先钉死 128.05x33.5 / 63.05x33.5（W0 基线）；W1 把 text-nano 10→11px 后
+  // ⌘K 键帽把「针对此处提问」撑到 34.84 高。桌面要守的是：手机 44px 热区
+  // （max-md:min-h-11）没漏到桌面、两个按钮都在、主操作比「摘到笔记」宽。
+  const measured = ['branch-open', 'branch-note'].map((target) => {
+    const element = document.querySelector(`[data-mobile-target="${target}"]`);
+    const rect = element?.getBoundingClientRect();
+    assert(rect && rect.width > 0, `${target} missing on desktop`);
+    const minHeight = getComputedStyle(element).minHeight;
+    assert(rect.height >= 24 && rect.height < 44 && minHeight !== '44px', `${target}=${rect.width}x${rect.height} min-h=${minHeight} (expected desktop-compact <44px)`);
     return { target, width: rect.width, height: rect.height };
   });
+  assert(measured[0].width > measured[1].width, `branch-open should be wider than branch-note: ${JSON.stringify(measured)}`);
+  return measured;
 })()
 JS
 ab eval --stdin <<'JS'
@@ -567,14 +578,13 @@ wait_for_js "desktop expanded BranchPopover" "Boolean(document.querySelector('[d
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const specs = [
-    ['branch-attach', 31, 20],
-    ['branch-cancel', 40, 20],
-    ['branch-submit', 44, 20],
-  ];
-  return specs.map(([target, width, height]) => {
-    const rect = document.querySelector(`[data-mobile-target="${target}"]`)?.getBoundingClientRect();
-    assert(rect && Math.abs(rect.width - width) <= 0.25 && Math.abs(rect.height - height) <= 0.25, `${target}=${rect?.width}x${rect?.height}`);
+  // 同上：不钉像素，只守「桌面脚栏是紧凑按钮、没继承手机 44px 热区」。
+  return ['branch-attach', 'branch-cancel', 'branch-submit'].map((target) => {
+    const element = document.querySelector(`[data-mobile-target="${target}"]`);
+    const rect = element?.getBoundingClientRect();
+    assert(rect && rect.width > 0, `${target} missing on desktop`);
+    const minHeight = getComputedStyle(element).minHeight;
+    assert(rect.height >= 16 && rect.height < 32 && minHeight !== '44px', `${target}=${rect.width}x${rect.height} min-h=${minHeight} (expected desktop-compact <32px)`);
     return { target, width: rect.width, height: rect.height };
   });
 })()
