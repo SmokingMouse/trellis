@@ -423,7 +423,8 @@ ab click '[data-mobile-target="new-tree-close"]'
 echo "== /settings/prefs: labels stack above controls on phone =="
 ab set viewport 390 844
 ab open "$BASE/settings/prefs"
-wait_for_js "prefs controls" "document.querySelectorAll('select').length >= 4"
+# W4：偏好页的原生 <select> 换成 Radix Select（触发键是 button[role=combobox]）。
+wait_for_js "prefs controls" "document.querySelectorAll('button[role=combobox]').length >= 4"
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -432,7 +433,8 @@ ab eval --stdin <<'JS'
   assert(label, '上下文历史深度 label missing');
   const labelColumn = label.parentElement;
   const row = labelColumn.parentElement;
-  const select = row.querySelector('select');
+  const select = row.querySelector('button[role="combobox"]');
+  assert(select, 'prefs select trigger missing');
   const labelRect = label.getBoundingClientRect();
   const selectRect = select.getBoundingClientRect();
   assert(getComputedStyle(row).flexDirection === 'column', `prefs row flex-direction=${getComputedStyle(row).flexDirection}`);
