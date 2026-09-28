@@ -9,6 +9,7 @@ mock.module("server-only", () => ({}));
 // 对 1–2 字回退参数化 LIKE。这里覆盖 1 / 2 / 3 字三条路径 + 通配符转义。
 
 const testDir = mkdtempSync(path.join(tmpdir(), "trellis-search-short-"));
+const prevDbPath = process.env.TRELLIS_DB_PATH;
 process.env.TRELLIS_DB_PATH = path.join(testDir, "search.db");
 
 const sqlite = await import("./sqlite");
@@ -30,6 +31,10 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  // 同进程跑全套 lib/ 时 env 会串到后续文件（disk-watch 的真机 statfs 读它），
+  // 删目录前先还原。
+  if (prevDbPath === undefined) delete process.env.TRELLIS_DB_PATH;
+  else process.env.TRELLIS_DB_PATH = prevDbPath;
   rmSync(testDir, { recursive: true, force: true });
 });
 
