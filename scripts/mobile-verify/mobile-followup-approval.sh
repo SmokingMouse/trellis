@@ -281,10 +281,14 @@ ab eval --stdin <<'JS'
   assert(composer.dataset.composerState === 'compact', `state=${composer.dataset.composerState}`);
   assert(rect.height <= 56, `compact height=${rect.height}`);
   assert(input.getAttribute('placeholder') === '追问…', `placeholder=${input.getAttribute('placeholder')}`);
-  const visibleLabels = [...composer.querySelectorAll('button')]
-    .filter((button) => button.getBoundingClientRect().width > 0)
-    .map((button) => button.getAttribute('aria-label'));
-  assert(JSON.stringify(visibleLabels) === JSON.stringify(['添加附件', '发送']), `compact buttons=${JSON.stringify(visibleLabels)}`);
+  // 手机紧凑态：只要求附件 + 发送在、≥44px、在视口内；不钉完整按钮集合（W5）。
+  const visibleButtons = [...composer.querySelectorAll('button')].filter((button) => button.getBoundingClientRect().width > 0);
+  const visibleLabels = visibleButtons.map((button) => button.getAttribute('aria-label'));
+  for (const label of ['添加附件', '发送']) {
+    const b = visibleButtons.find((x) => x.getAttribute('aria-label') === label);
+    const r = b?.getBoundingClientRect();
+    assert(r && r.width >= 44 && r.height >= 44 && r.right <= innerWidth && r.bottom <= innerHeight, `compact ${label} missing/below 44px/offscreen (buttons=${JSON.stringify(visibleLabels)})`);
+  }
   return { state: composer.dataset.composerState, height: rect.height, railBottom: rail.getBoundingClientRect().bottom };
 })()
 JS
@@ -514,19 +518,38 @@ wait_for_js "desktop reading response loaded" "document.querySelector('[data-cha
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const near = (actual, expected, tolerance = 0.6) => Math.abs(actual - expected) <= tolerance;
+  // W5：新 composer 左下多了模式 chip + ModelPicker，不再钉 W0 的按钮集合与
+  // 210/729/1070/71 像素。只守约束：关键按钮在、可见、在视口内可达、没继承手机
+  // 44px 热区；发送在最右；语境组（模式 + 模型）在桌面露出；输入条贴底、占满内容区。
   const rail = document.querySelector('[data-safe-area="linear-composer"]');
   const composer = document.querySelector('[data-mobile-composer]');
   const input = document.querySelector('[data-composer-input]');
   assert(rail && composer && input, 'desktop Composer missing');
   assert(composer.dataset.composerState === 'expanded', `desktop state=${composer.dataset.composerState}`);
-  const labels = [...composer.querySelectorAll('button')]
-    .filter((button) => button.getBoundingClientRect().width > 0)
-    .map((button) => button.getAttribute('aria-label'));
-  assert(JSON.stringify(labels) === JSON.stringify(['添加附件', '画个草图', '发送']), `desktop buttons=${JSON.stringify(labels)}`);
+  const visible = [...composer.querySelectorAll('button')].filter((b) => b.getBoundingClientRect().width > 0);
+  const labels = visible.map((b) => b.getAttribute('aria-label'));
+  const required = ['添加附件', '画个草图', '发送'];
+  const rects = {};
+  for (const label of required) {
+    const b = visible.find((x) => x.getAttribute('aria-label') === label);
+    assert(b, `desktop ${label} missing (buttons=${JSON.stringify(labels)})`);
+    const r = b.getBoundingClientRect();
+    assert(r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, `${label} outside viewport ${JSON.stringify(r.toJSON())}`);
+    const minHeight = getComputedStyle(b).minHeight;
+    assert(r.height >= 24 && r.height < 44 && minHeight !== '44px', `${label}=${r.width}x${r.height} min-h=${minHeight} (mobile 44px target leaked onto desktop)`);
+    rects[label] = r;
+  }
+  const rightmost = visible.reduce((a, b) => (b.getBoundingClientRect().right > a.getBoundingClientRect().right ? b : a));
+  assert(rightmost.getAttribute('aria-label') === '发送', `rightmost button=${rightmost.getAttribute('aria-label')}`);
+  const context = composer.querySelector('[data-composer-context]');
+  const cr = context?.getBoundingClientRect();
+  assert(cr && cr.width > 0 && cr.right <= rects['添加附件'].left + 1, `desktop mode/model context group missing or misplaced ${JSON.stringify(cr?.toJSON?.())}`);
   const rr = rail.getBoundingClientRect();
-  assert(near(rr.left, 210) && near(rr.top, 729) && near(rr.width, 1070) && near(rr.height, 71), `desktop Composer rect=${JSON.stringify(rr.toJSON())}`);
-  assert(near(parseFloat(getComputedStyle(input).fontSize), 14), `desktop input font=${getComputedStyle(input).fontSize}`);
+  assert(Math.abs(rr.bottom - innerHeight) <= 1, `desktop Composer not docked: bottom=${rr.bottom} viewport=${innerHeight}`);
+  assert(rr.width >= 600 && rr.right <= innerWidth + 0.5, `desktop Composer width=${rr.width} right=${rr.right}`);
+  assert(rr.height >= 56 && rr.height <= 200, `desktop Composer height=${rr.height}`);
+  const font = parseFloat(getComputedStyle(input).fontSize);
+  assert(font >= 14 && font <= 16, `desktop input font=${font}`);
   return { rail: { left: rr.left, top: rr.top, width: rr.width, height: rr.height }, labels };
 })()
 JS
