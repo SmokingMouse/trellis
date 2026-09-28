@@ -1,7 +1,7 @@
 "use client";
 import { CircleAlert, CircleCheck, Info, LoaderCircle, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Toaster as SonnerToaster, toast, useSonner } from "sonner";
+import { Toaster as SonnerToaster, toast } from "sonner";
 
 // 全站统一的 toast 出口（sonner）。新代码只这样用：
 //   import { toast } from "@/components/ui";
@@ -9,33 +9,12 @@ import { Toaster as SonnerToaster, toast, useSonner } from "sonner";
 //   toast("已归档", { action: { label: "撤销", onClick: undo } });
 // <Toaster/> 在根布局挂一次（AppProviders），右下角，主题跟随 <html class="dark">。
 //
-// 过渡期（W4 前）旧的四套 toast（DoneToast / TaskToast / AbortToast /
-// StreamAlertToast）还在，都带 data-legacy-toast。有新 toast 在场时每 400ms 量一次
-// 旧堆叠的顶边，把 sonner 整体往上推，保证新旧不重叠；没有新 toast 时不测量。
+// W4 起旧的四套手写 toast 已迁进这里（DoneToast / TaskToast / AbortToast /
+// StreamAlertToast 只剩「监听 store / SSE → 调 toast」的无 UI 组件）。
 export { toast };
 
 const GAP = 8;
 const BASE = 16;
-
-function useLegacyToastOffset(active: boolean): number {
-  const [offset, setOffset] = useState(BASE);
-  useEffect(() => {
-    if (!active) return;
-    const measure = () => {
-      let top = window.innerHeight;
-      document.querySelectorAll<HTMLElement>("[data-legacy-toast]").forEach((el) => {
-        const r = el.getBoundingClientRect();
-        if (r.height > 0) top = Math.min(top, r.top);
-      });
-      const next = top < window.innerHeight ? window.innerHeight - top + GAP : BASE;
-      setOffset((prev) => (prev === next ? prev : next));
-    };
-    measure();
-    const id = window.setInterval(measure, 400);
-    return () => window.clearInterval(id);
-  }, [active]);
-  return active ? offset : BASE;
-}
 
 function useHtmlDark(): boolean {
   const [dark, setDark] = useState(false);
@@ -51,15 +30,13 @@ function useHtmlDark(): boolean {
 }
 
 export function Toaster() {
-  const { toasts } = useSonner();
-  const bottom = useLegacyToastOffset(toasts.length > 0);
   const dark = useHtmlDark();
   return (
     <SonnerToaster
       theme={dark ? "dark" : "light"}
       position="bottom-right"
-      offset={{ bottom, right: BASE }}
-      mobileOffset={{ bottom, left: 12, right: 12 }}
+      offset={{ bottom: BASE, right: BASE }}
+      mobileOffset={{ bottom: BASE, left: 12, right: 12 }}
       gap={GAP}
       visibleToasts={4}
       closeButton

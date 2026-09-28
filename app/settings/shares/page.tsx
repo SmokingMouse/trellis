@@ -1,9 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { Pill } from "@/components/ui/Pill";
-import { Modal } from "@/components/ui/Modal";
+import { Cpu, KeyRound, Lock, Plus, RefreshCw, Share2, TriangleAlert, Unplug, X } from "lucide-react";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  Input,
+  Modal,
+  PageHeader,
+  SegmentedControl,
+  Skeleton,
+  Textarea,
+  toast,
+  useConfirm,
+  Spinner,
+} from "@/components/ui";
 import {
   fetchShares,
   createShare,
@@ -18,17 +33,19 @@ import type {
   GwSharesResponse,
 } from "@/lib/gw-types";
 
-const FIELD =
-  "w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line";
+/** /__gw/api/* 只由多租户网关（tenancy/gateway）提供，Next 本身没有这些路由。
+ * 直连单人版（不经网关）时请求落到 Next → 404，这不是故障，是「单人版不提供」。 */
+function isGatewayAbsent(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return status === 404;
+}
 
 export default function SharesSettingsPage() {
   const [data, setData] = useState<GwSharesResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [gatewayError, setGatewayError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{
-    tone: "positive" | "warn" | "danger";
-    message: string;
-  } | null>(null);
+  const [gatewayError, setGatewayError] = useState<unknown>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const confirm = useConfirm();
 
   // 发布表单状态
   const [publishModalOpen, setPublishModalOpen] = useState(false);
@@ -50,10 +67,6 @@ export default function SharesSettingsPage() {
 
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-
-  // 订阅确认弹窗（特别针对 willRestart 的 claude-token）
-  const [pendingSubscribeShare, setPendingSubscribeShare] =
-    useState<GwAvailableShare | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
 
   // 保持 .then 链：setState 待在回调里，满足 eslint react-hooks/set-state-in-effect
@@ -67,12 +80,8 @@ export default function SharesSettingsPage() {
         setGatewayError(null);
         setLoading(false);
       })
-      .catch((err) => {
-        setGatewayError(
-          err instanceof Error
-            ? err.message
-            : "未启用多租户网关服务（接口不可达）",
-        );
+      .catch((err: unknown) => {
+        setGatewayError(err ?? new Error("网关不可达"));
         setLoading(false);
       });
   }, []);
@@ -80,6 +89,11 @@ export default function SharesSettingsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const refresh = () => {
+    setRefreshing(true);
+    void loadData(true).finally(() => setRefreshing(false));
+  };
 
   const handleOpenPublish = () => {
     setLabel("");
@@ -131,7 +145,7 @@ export default function SharesSettingsPage() {
     } else {
       const trimmedProvider = providerName.trim();
       if (!trimmedProvider) {
-        setPublishError("请输入 Provider 名称");
+        setPublishError("请输入服务商名称");
         return;
       }
       const models = modelsText
@@ -166,10 +180,7 @@ export default function SharesSettingsPage() {
       setTokenInput("");
       setApiKey("");
       setPublishModalOpen(false);
-      setFeedback({
-        tone: "positive",
-        message: "共享发布成功！凭证明文已安全加密提交。",
-      });
+      toast.success("共享已发布", { description: "凭证明文已加密提交，任何接口都不会回显。" });
       await loadData(true);
     } catch (err) {
       setPublishError(
@@ -181,27 +192,22 @@ export default function SharesSettingsPage() {
   };
 
   const handleRevokeShare = async (share: GwShare) => {
-    if (
-      !window.confirm(
-        `确定撤销共享「${share.label}」？\n\n注意：撤销将级联移除所有已订阅用户的凭据注入。`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `撤销共享「${share.label}」？`,
+      description:
+        "所有已订阅用户的凭据注入会一并移除。撤销只能停止后续注入，已经被取走的凭据召不回来。",
+      confirmLabel: "撤销共享",
+      danger: true,
+    });
+    if (!ok) return;
 
     setActionBusyId(share.id);
     try {
       await deleteShare(share.id);
-      setFeedback({
-        tone: "positive",
-        message: `已撤销共享「${share.label}」并级联移除订阅注入。`,
-      });
+      toast.success(`已撤销共享「${share.label}」`, { description: "订阅方的凭据注入已一并移除。" });
       await loadData(true);
     } catch (err) {
-      setFeedback({
-        tone: "danger",
-        message: err instanceof Error ? err.message : "撤销失败",
-      });
+      toast.error("撤销失败", { description: err instanceof Error ? err.message : "稍后重试" });
     } finally {
       setActionBusyId(null);
     }
@@ -209,214 +215,188 @@ export default function SharesSettingsPage() {
 
   const executeSubscribe = async (share: GwAvailableShare) => {
     setActionBusyId(share.id);
-    setPendingSubscribeShare(null);
     try {
       const res = await subscribeShare(share.id);
       if (res.willRestart) {
-        setFeedback({
-          tone: "warn",
-          message: `订阅「${share.label}」成功！已触发租户容器重启以应用凭据，请稍候…`,
+        toast.warning(`已订阅「${share.label}」`, {
+          description: "租户容器正在重启以应用凭据，请稍候。",
         });
       } else {
-        setFeedback({
-          tone: "positive",
-          message: `订阅「${share.label}」成功！端点已注入您的 endpoints.yaml。`,
+        toast.success(`已订阅「${share.label}」`, {
+          description: "端点已写入你的 endpoints.yaml。",
         });
       }
       await loadData(true);
     } catch (err) {
-      setFeedback({
-        tone: "danger",
-        message: err instanceof Error ? err.message : "订阅失败",
-      });
+      toast.error("订阅失败", { description: err instanceof Error ? err.message : "稍后重试" });
     } finally {
       setActionBusyId(null);
     }
   };
 
-  const handleSubscribeClick = (share: GwAvailableShare) => {
+  // Claude Token 订阅会替换现有凭据并重启租户容器 —— 先确认。
+  const handleSubscribeClick = async (share: GwAvailableShare) => {
     if (share.type === "claude-token") {
-      setPendingSubscribeShare(share);
-    } else {
-      void executeSubscribe(share);
+      const ok = await confirm({
+        title: `订阅 Claude Token「${share.label}」？`,
+        description: `会替换你当前已激活的 Claude Code 凭据，并重启租户容器以应用配置。发布者：${share.owner}。`,
+        confirmLabel: "订阅并重启容器",
+      });
+      if (!ok) return;
     }
+    void executeSubscribe(share);
   };
 
   const handleUnsubscribe = async (share: GwAvailableShare) => {
-    if (!window.confirm(`确定退订「${share.label}」？`)) return;
+    const ok = await confirm({
+      title: `退订「${share.label}」？`,
+      description:
+        share.type === "claude-token"
+          ? "注入的 Claude Token 会被移除，租户容器会重启清理。"
+          : "这个端点会从你的 endpoints.yaml 里移除。",
+      confirmLabel: "退订",
+      danger: true,
+    });
+    if (!ok) return;
 
     setActionBusyId(share.id);
     try {
       const res = await unsubscribeShare(share.id);
       if (res.willRestart) {
-        setFeedback({
-          tone: "warn",
-          message: `已退订「${share.label}」，容器正在重启清理注入…`,
-        });
+        toast.warning(`已退订「${share.label}」`, { description: "容器正在重启清理注入。" });
       } else {
-        setFeedback({
-          tone: "positive",
-          message: `已退订「${share.label}」，已从 endpoints.yaml 移除标记块。`,
-        });
+        toast.success(`已退订「${share.label}」`, { description: "已从 endpoints.yaml 移除。" });
       }
       await loadData(true);
     } catch (err) {
-      setFeedback({
-        tone: "danger",
-        message: err instanceof Error ? err.message : "退订失败",
-      });
+      toast.error("退订失败", { description: err instanceof Error ? err.message : "稍后重试" });
     } finally {
       setActionBusyId(null);
     }
   };
 
+  const gatewayAbsent = gatewayError !== null && isGatewayAbsent(gatewayError);
+  const visibilityText = (v: GwShare["visibility"], long: boolean) =>
+    v === "all"
+      ? long ? "全员可见" : "全员"
+      : Array.isArray(v)
+        ? long ? `指定用户（${v.join(", ")}）` : `${v.length} 位用户`
+        : "指定";
+
+  const listSkeleton = (
+    <div role="status" aria-label="加载中" className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+      {[0, 1].map((i) => (
+        <div key={i} className="px-4 py-3 flex flex-col gap-2">
+          <Skeleton className="h-3.5 w-2/5" />
+          <Skeleton className="h-3 w-3/5" />
+        </div>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="flex flex-col gap-5 max-w-3xl">
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        title="共享池"
+        count={data ? data.available.length : undefined}
+        countUnit="个可用共享"
+        subtitle={data ? `我发布了 ${data.published.length} 个` : "发布与订阅 Claude Token 或大模型 API 端点"}
+        actions={
+          <>
+            <IconButton label="刷新" onClick={refresh} disabled={refreshing || loading}>
+              {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
+            </IconButton>
+            <Button variant="primary" onClick={handleOpenPublish} disabled={gatewayError !== null}>
+              <Icon icon={Plus} />
+              发布共享
+            </Button>
+          </>
+        }
+      />
+
       {/* 永久明示安全警示卡片 */}
-      <div className="rounded-card border border-warn-line bg-warn-muted p-3.5 text-ui text-warn-ink flex items-start gap-2.5">
-        <span className="text-base shrink-0 leading-tight">⚠️</span>
-        <div className="text-reading leading-relaxed">
+      <div className="rounded-card border border-warn-line bg-warn-muted px-3.5 py-3 text-ui text-warn-ink flex items-start gap-2.5">
+        <Icon icon={TriangleAlert} className="mt-0.5" />
+        <div className="leading-relaxed">
           <span className="font-semibold">安全须知：共享 = 交出。</span>
           订阅方容器内所有进程均可提取凭证明文；撤销仅保证停止后续注入，不能召回已泄出的凭据。请仅在信任的团队内共享。
         </div>
       </div>
 
-      {feedback && (
-        <div
-          className={`px-3 py-2 rounded-md border text-ui flex items-center justify-between ${
-            feedback.tone === "positive"
-              ? "bg-positive-muted text-positive-ink border-positive-line"
-              : feedback.tone === "warn"
-                ? "bg-warn-muted text-warn-ink border-warn-line"
-                : "bg-danger-muted text-danger-ink border-danger-line"
-          }`}
-        >
-          <span>{feedback.message}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-label ml-2 underline hover:opacity-75"
-          >
-            关闭
-          </button>
-        </div>
+      {/* 直连单人版：没有网关，/__gw/api/* 落到 Next 返回 404 —— 这是「不提供」，不是故障。 */}
+      {gatewayAbsent && (
+        <EmptyState
+          icon={Unplug}
+          title="单人版不提供共享池"
+          description="模型与凭证共享只在经多租户网关访问时可用；当前是直连的单人版。"
+          className="rounded-card border border-line"
+        />
       )}
 
-      {/* 网关不可达/单人模式静默降级提示 */}
-      {gatewayError && (
-        <div className="rounded-card border border-line bg-surface-muted/60 p-5 text-center">
-          <div className="text-2xl mb-2">🔌</div>
-          <div className="text-ui font-medium text-ink-strong mb-1">
-            未启用多租户网关服务
-          </div>
-          <div className="text-label text-ink-muted max-w-md mx-auto">
-            当前处于独立单人版模式或网关不可达（{gatewayError}）。
-            模型共享与凭证互助功能仅在多租户网关代理环境下可用。
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="mt-3"
-            onClick={() => void loadData()}
-            disabled={loading}
-          >
-            重试连接
-          </Button>
-        </div>
+      {gatewayError !== null && !gatewayAbsent && (
+        <ErrorCallout
+          error={gatewayError}
+          title="连不上多租户网关"
+          hint="共享池由多租户网关提供。确认网关在运行、且是经网关地址访问的，然后重试。"
+          onRetry={() => void loadData()}
+        />
       )}
 
-      {!gatewayError && (
+      {gatewayError === null && (
         <>
           {/* Section 1: 可用共享 */}
-          <section className="rounded-card border border-line bg-surface shadow-raise p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-ui font-semibold text-ink-strong">
-                  可用共享 (他人发布)
-                </h2>
-                <p className="text-label text-ink-faint">
-                  其他成员共享给你的 Claude Token 或 API 端点
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void loadData(true)}
-                disabled={loading}
-              >
-                刷新
-              </Button>
+          <section>
+            <div className="mb-2">
+              <h2 className="text-ui font-semibold text-ink-strong">可用共享（他人发布）</h2>
+              <p className="text-label text-ink-muted">其他成员共享给你的 Claude Token 或 API 端点</p>
             </div>
 
             {loading && !data ? (
-              <div className="py-6 text-center text-label text-ink-faint">
-                加载共享池中…
-              </div>
+              listSkeleton
             ) : data?.available.length === 0 ? (
-              <div className="py-6 text-center text-label text-ink-faint bg-surface-muted/30 rounded-lg border border-line-faint">
-                当前没有对你可见的共享凭证
-              </div>
+              <EmptyState
+                compact
+                icon={Share2}
+                title="还没有对你可见的共享"
+                description="其他成员发布并对你可见后，会出现在这里。"
+                className="rounded-card border border-line"
+              />
             ) : (
-              <div className="flex flex-col divide-y divide-line-faint">
+              <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
                 {data?.available.map((item) => {
                   const busy = actionBusyId === item.id;
                   return (
                     <div
                       key={item.id}
-                      className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-ui font-medium text-ink-strong">
-                            {item.label}
-                          </span>
-                          <Pill
-                            tone={
-                              item.type === "claude-token"
-                                ? "accent"
-                                : "neutral"
-                            }
-                          >
-                            {item.type === "claude-token"
-                              ? "Claude Token"
-                              : "API 端点"}
-                          </Pill>
-                          {item.subscribed && (
-                            <Pill tone="positive">✓ 已激活订阅</Pill>
-                          )}
+                          <span className="text-ui font-medium text-ink-strong">{item.label}</span>
+                          <Badge variant={item.type === "claude-token" ? "accent" : "neutral"}>
+                            {item.type === "claude-token" ? "Claude Token" : "API 端点"}
+                          </Badge>
+                          {item.subscribed && <Badge variant="positive">已订阅</Badge>}
                         </div>
-
-                        <div className="text-label text-ink-faint mt-1 flex items-center gap-3 flex-wrap">
-                          <span>发布者: {item.owner}</span>
-                          <span>·</span>
-                          <span>
-                            可见范围:{" "}
-                            {item.visibility === "all"
-                              ? "全员"
-                              : Array.isArray(item.visibility)
-                                ? `${item.visibility.length} 位租户`
-                                : "指定"}
-                          </span>
-                          <span>·</span>
-                          <span>订阅人数: {item.subscriberCount}</span>
+                        <div className="text-label text-ink-muted mt-1 flex items-center gap-x-2 flex-wrap">
+                          <span>发布者 {item.owner}</span>
+                          <span className="text-ink-faint">·</span>
+                          <span>可见范围 {visibilityText(item.visibility, false)}</span>
+                          <span className="text-ink-faint">·</span>
+                          <span className="tabular-nums">{item.subscriberCount} 人订阅</span>
                         </div>
                       </div>
 
                       <div className="shrink-0 flex items-center gap-2">
                         {item.subscribed ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => void handleUnsubscribe(item)}
-                            loading={busy}
-                          >
+                          <Button size="sm" onClick={() => void handleUnsubscribe(item)} loading={busy}>
                             退订
                           </Button>
                         ) : (
                           <Button
                             size="sm"
                             variant="primary"
-                            onClick={() => handleSubscribeClick(item)}
+                            onClick={() => void handleSubscribeClick(item)}
                             loading={busy}
                           >
                             订阅并注入
@@ -431,78 +411,55 @@ export default function SharesSettingsPage() {
           </section>
 
           {/* Section 2: 我发布的 */}
-          <section className="rounded-card border border-line bg-surface shadow-raise p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-ui font-semibold text-ink-strong">
-                  我发布的共享
-                </h2>
-                <p className="text-label text-ink-faint">
-                  你提供给团队成员使用的凭证（凭证明文绝不回显）
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={handleOpenPublish}
-              >
-                + 发布共享
-              </Button>
+          <section>
+            <div className="mb-2">
+              <h2 className="text-ui font-semibold text-ink-strong">我发布的共享</h2>
+              <p className="text-label text-ink-muted">你提供给团队成员使用的凭证（凭证明文绝不回显）</p>
             </div>
 
             {loading && !data ? (
-              <div className="py-6 text-center text-label text-ink-faint">
-                加载中…
-              </div>
+              listSkeleton
             ) : data?.published.length === 0 ? (
-              <div className="py-6 text-center text-label text-ink-faint bg-surface-muted/30 rounded-lg border border-line-faint">
-                你尚未发布过任何共享凭证
-              </div>
+              <EmptyState
+                compact
+                icon={Share2}
+                title="还没有发布过共享"
+                description="把自己的 Claude Token 或 API 端点共享给信任的团队成员。"
+                action={
+                  <Button size="sm" onClick={handleOpenPublish}>
+                    <Icon icon={Plus} size="sm" />
+                    发布共享
+                  </Button>
+                }
+                className="rounded-card border border-line"
+              />
             ) : (
-              <div className="flex flex-col divide-y divide-line-faint">
+              <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
                 {data?.published.map((item) => {
                   const busy = actionBusyId === item.id;
                   return (
                     <div
                       key={item.id}
-                      className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-ui font-medium text-ink-strong">
-                            {item.label}
-                          </span>
-                          <Pill
-                            tone={
-                              item.type === "claude-token"
-                                ? "accent"
-                                : "neutral"
-                            }
-                          >
-                            {item.type === "claude-token"
-                              ? "Claude Token"
-                              : "API 端点"}
-                          </Pill>
+                          <span className="text-ui font-medium text-ink-strong">{item.label}</span>
+                          <Badge variant={item.type === "claude-token" ? "accent" : "neutral"}>
+                            {item.type === "claude-token" ? "Claude Token" : "API 端点"}
+                          </Badge>
                         </div>
-                        <div className="text-label text-ink-faint mt-1 flex items-center gap-3 flex-wrap">
-                          <span>
-                            可见范围:{" "}
-                            {item.visibility === "all"
-                              ? "全员可见"
-                              : Array.isArray(item.visibility)
-                                ? `指定用户 (${item.visibility.join(", ")})`
-                                : "指定"}
-                          </span>
-                          <span>·</span>
-                          <span>已订阅用户数: {item.subscriberCount}</span>
+                        <div className="text-label text-ink-muted mt-1 flex items-center gap-x-2 flex-wrap">
+                          <span>{visibilityText(item.visibility, true)}</span>
+                          <span className="text-ink-faint">·</span>
+                          <span className="tabular-nums">{item.subscriberCount} 人订阅</span>
                         </div>
                       </div>
 
                       <div className="shrink-0">
                         <Button
                           size="sm"
-                          variant="ghost"
-                          className="text-danger hover:bg-danger-muted"
+                          variant="danger"
                           onClick={() => void handleRevokeShare(item)}
                           loading={busy}
                         >
@@ -523,238 +480,190 @@ export default function SharesSettingsPage() {
         <Modal
           onClose={() => !publishBusy && setPublishModalOpen(false)}
           size="lg"
+          title="发布新凭证共享"
           panelClassName="p-5 flex flex-col max-h-[90vh]"
         >
           <div className="flex items-center justify-between pb-3 border-b border-line">
-            <h3 className="text-base font-semibold text-ink-strong">
-              发布新凭证共享
-            </h3>
-            <button
-              type="button"
+            <h3 className="text-body font-semibold text-ink-strong">发布新凭证共享</h3>
+            <IconButton
+              label="关闭"
+              size="sm"
               onClick={() => setPublishModalOpen(false)}
               disabled={publishBusy}
-              className="text-ink-muted hover:text-ink text-sm"
             >
-              ✕
-            </button>
+              <Icon icon={X} size="sm" />
+            </IconButton>
           </div>
 
-          <form
-            onSubmit={handlePublishSubmit}
-            className="overflow-y-auto py-4 space-y-4 flex-1"
-          >
+          <form onSubmit={handlePublishSubmit} className="overflow-y-auto py-4 flex flex-col gap-4 flex-1">
             {publishError && (
-              <div className="p-2.5 rounded-md border border-danger-line bg-danger-muted text-danger-ink text-ui">
-                {publishError}
-              </div>
+              <ErrorCallout compact error="" title={publishError} hint="改好后再点确认发布。" />
             )}
 
-            <div>
-              <label className="text-label text-ink-muted block mb-1">
-                共享名称 / 描述 <span className="text-danger">*</span>
-              </label>
-              <input
-                className={FIELD}
+            <FormField label="共享名称 / 描述" required>
+              <Input
                 value={label}
                 placeholder="例如：个人自用 Claude Token / 团队 DeepSeek V3 额度"
                 onChange={(e) => setLabel(e.target.value)}
                 required
               />
-            </div>
+            </FormField>
 
-            <div>
-              <label className="text-label text-ink-muted block mb-1.5">
-                凭据类型 <span className="text-danger">*</span>
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShareType("claude-token")}
-                  className={`p-3 rounded-card border text-left transition-colors ${
-                    shareType === "claude-token"
-                      ? "border-accent-line bg-accent-muted/60 text-accent-ink"
-                      : "border-line bg-surface hover:bg-surface-muted text-ink"
-                  }`}
-                >
-                  <div className="text-ui font-semibold flex items-center gap-1.5">
-                    <span>🔑</span>
-                    <span>Claude Token</span>
-                  </div>
-                  <div className="text-nano text-ink-muted mt-1">
-                    订阅后将写入租户容器环境并自动重启生效
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShareType("endpoint")}
-                  className={`p-3 rounded-card border text-left transition-colors ${
-                    shareType === "endpoint"
-                      ? "border-accent-line bg-accent-muted/60 text-accent-ink"
-                      : "border-line bg-surface hover:bg-surface-muted text-ink"
-                  }`}
-                >
-                  <div className="text-ui font-semibold flex items-center gap-1.5">
-                    <span>🧠</span>
-                    <span>大模型 API 端点</span>
-                  </div>
-                  <div className="text-nano text-ink-muted mt-1">
-                    注入到租户 endpoints.yaml 标记块，无需重启
-                  </div>
-                </button>
+            <FormField label="凭据类型" required>
+              <div role="radiogroup" aria-label="凭据类型" className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    {
+                      value: "claude-token",
+                      icon: KeyRound,
+                      title: "Claude Token",
+                      desc: "订阅后写入租户容器环境并自动重启生效",
+                    },
+                    {
+                      value: "endpoint",
+                      icon: Cpu,
+                      title: "大模型 API 端点",
+                      desc: "写入租户 endpoints.yaml 的标记块，无需重启",
+                    },
+                  ] as const
+                ).map((opt) => {
+                  const on = shareType === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setShareType(opt.value)}
+                      className={`p-3 rounded-card border text-left transition-colors duration-100 ${
+                        on
+                          ? "border-accent-line bg-accent-muted text-accent-ink"
+                          : "border-line bg-surface hover:bg-surface-hover text-ink"
+                      }`}
+                    >
+                      <div className="text-ui font-semibold flex items-center gap-1.5">
+                        <Icon icon={opt.icon} size="sm" selected={on} />
+                        {opt.title}
+                      </div>
+                      <div className="text-label text-ink-muted mt-1">{opt.desc}</div>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
+            </FormField>
 
             {/* Type 1: Claude Token */}
             {shareType === "claude-token" && (
-              <div className="rounded-lg border border-line bg-surface-muted/40 p-3.5 space-y-2">
-                <label className="text-label text-ink-muted block">
-                  OAuth Token <span className="text-danger">*</span>
-                </label>
-                <input
-                  className={FIELD}
-                  type="password"
-                  autoComplete="off"
-                  value={tokenInput}
-                  placeholder="claude setup-token 产出的凭证明文"
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  required
-                />
-                <div className="text-nano text-ink-faint leading-relaxed">
-                  提示：可在终端运行 <code>claude setup-token</code> 完成授权获取 token。每位租户同一时间仅可激活一个 Claude Token 订阅。
+              <div className="rounded-card border border-line p-3.5 flex flex-col gap-2">
+                <FormField label="OAuth Token" required>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    className="font-mono"
+                    value={tokenInput}
+                    placeholder="claude setup-token 产出的凭证明文"
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    required
+                  />
+                </FormField>
+                <div className="text-label text-ink-faint leading-relaxed">
+                  在终端运行 <code className="font-mono">claude setup-token</code> 完成授权即可拿到。每位用户同一时间只能激活一个 Claude Token 订阅。
                 </div>
               </div>
             )}
 
             {/* Type 2: API Endpoint */}
             {shareType === "endpoint" && (
-              <div className="rounded-lg border border-line bg-surface-muted/40 p-3.5 space-y-3">
+              <div className="rounded-card border border-line p-3.5 flex flex-col gap-3">
                 <div className="grid sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-label text-ink-muted block mb-1">
-                      Provider 名称 <span className="text-danger">*</span>
-                    </label>
-                    <input
-                      className={FIELD}
+                  <FormField label="服务商名称" required>
+                    <Input
                       value={providerName}
                       placeholder="deepseek / kimi / qwen"
                       onChange={(e) => setProviderName(e.target.value)}
                       required
                     />
-                  </div>
-                  <div>
-                    <label className="text-label text-ink-muted block mb-1">
-                      环境变量名 (可选)
-                    </label>
-                    <input
-                      className={FIELD}
+                  </FormField>
+                  <FormField label="环境变量名（可选）">
+                    <Input
+                      className="font-mono"
                       value={apiKeyEnv}
                       placeholder="DEEPSEEK_API_KEY"
                       onChange={(e) => setApiKeyEnv(e.target.value)}
                     />
-                  </div>
+                  </FormField>
                 </div>
 
-                <div>
-                  <label className="text-label text-ink-muted block mb-1">
-                    Anthropic 兼容端点 (走 Claude CLI 必填)
-                  </label>
-                  <input
-                    className={FIELD}
+                <FormField label="Anthropic 兼容端点（走 Claude CLI 必填）">
+                  <Input
+                    className="font-mono"
                     value={anthropicUrl}
                     placeholder="https://api.deepseek.com/anthropic"
                     onChange={(e) => setAnthropicUrl(e.target.value)}
                   />
-                </div>
+                </FormField>
 
-                <div>
-                  <label className="text-label text-ink-muted block mb-1">
-                    OpenAI 兼容端点 (走 Responses API / Codex)
-                  </label>
-                  <input
-                    className={FIELD}
+                <FormField label="OpenAI 兼容端点（走 Responses API / Codex）">
+                  <Input
+                    className="font-mono"
                     value={openaiUrl}
                     placeholder="https://api.deepseek.com/v1"
                     onChange={(e) => setOpenaiUrl(e.target.value)}
                   />
-                </div>
+                </FormField>
 
-                <div>
-                  <label className="text-label text-ink-muted block mb-1">
-                    API Key 明文
-                  </label>
-                  <input
-                    className={FIELD}
+                <FormField label="API Key 明文">
+                  <Input
                     type="password"
                     autoComplete="off"
+                    className="font-mono"
                     value={apiKey}
                     placeholder="sk-..."
                     onChange={(e) => setApiKey(e.target.value)}
                   />
-                </div>
+                </FormField>
 
-                <div>
-                  <label className="text-label text-ink-muted block mb-1">
-                    支持的模型列表 <span className="text-danger">*</span>
-                  </label>
-                  <textarea
-                    className={`${FIELD} h-20 font-mono`}
+                <FormField label="支持的模型列表" required hint="每行一个模型名称，或用逗号分隔">
+                  <Textarea
+                    className="h-20 font-mono"
                     value={modelsText}
                     placeholder={"deepseek-chat\ndeepseek-reasoner"}
                     onChange={(e) => setModelsText(e.target.value)}
                     required
                   />
-                  <div className="text-nano text-ink-faint mt-0.5">
-                    每行一个模型名称，或用逗号分隔
-                  </div>
-                </div>
+                </FormField>
               </div>
             )}
 
             {/* 可见范围 */}
-            <div>
-              <label className="text-label text-ink-muted block mb-1.5">
-                可见范围 <span className="text-danger">*</span>
-              </label>
-              <div className="flex items-center gap-4 mb-2 text-ui">
-                <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="visibility"
-                    checked={visibilityType === "all"}
-                    onChange={() => setVisibilityType("all")}
-                  />
-                  <span>全员可见</span>
-                </label>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="visibility"
-                    checked={visibilityType === "custom"}
-                    onChange={() => setVisibilityType("custom")}
-                  />
-                  <span>指定租户 / 用户</span>
-                </label>
-              </div>
-
+            <FormField label="可见范围" required>
+              <SegmentedControl
+                aria-label="可见范围"
+                value={visibilityType}
+                onValueChange={setVisibilityType}
+                options={[
+                  { value: "all", label: "全员可见" },
+                  { value: "custom", label: "指定用户" },
+                ]}
+              />
               {visibilityType === "custom" && (
-                <div>
-                  <input
-                    className={FIELD}
+                <div className="mt-2 flex flex-col gap-1">
+                  <Input
                     value={customUsers}
-                    placeholder="输入用户名/租户名，用逗号或空格分隔（如 alice, bob）"
+                    placeholder="输入用户名，用逗号或空格分隔（如 alice, bob）"
                     onChange={(e) => setCustomUsers(e.target.value)}
                     required
                   />
-                  <div className="text-nano text-ink-faint mt-1">
-                    仅被指定的用户可在「可用共享」中看到并订阅此凭证
+                  <div className="text-label text-ink-faint">
+                    只有被指定的用户能在「可用共享」里看到并订阅
                   </div>
                 </div>
               )}
-            </div>
+            </FormField>
 
-            <div className="text-nano text-warn-ink bg-warn-muted/50 p-2.5 rounded border border-warn-line/50">
-              🔒 提交后明文凭据将由网关安全入库，前端立即清理输入，任何接口均不会回显明文。
+            <div className="flex items-start gap-2 text-label text-warn-ink bg-warn-muted px-3 py-2 rounded-card border border-warn-line">
+              <Icon icon={Lock} size="sm" className="mt-px" />
+              提交后明文凭据由网关加密入库，前端立即清空输入，任何接口都不会回显明文。
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-line">
@@ -766,59 +675,36 @@ export default function SharesSettingsPage() {
               >
                 取消
               </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                loading={publishBusy}
-              >
+              <Button type="submit" variant="primary" loading={publishBusy}>
                 确认发布
               </Button>
             </div>
           </form>
         </Modal>
       )}
+    </div>
+  );
+}
 
-      {/* Claude Token 订阅确认弹窗 */}
-      {pendingSubscribeShare && (
-        <Modal
-          onClose={() => setPendingSubscribeShare(null)}
-          size="md"
-          panelClassName="p-5"
-        >
-          <div className="text-base font-semibold text-ink-strong mb-2 flex items-center gap-2">
-            <span>⚠️</span>
-            <span>确认订阅 Claude Token</span>
-          </div>
-          <div className="text-ui text-ink leading-relaxed mb-4">
-            订阅「
-            <span className="font-semibold">
-              {pendingSubscribeShare.label}
-            </span>
-            」将替换您当前已激活的 Claude Code 凭据，并
-            <span className="font-semibold text-warn-ink">
-              触发租户容器重启
-            </span>
-            以应用配置。
-            <div className="mt-2 text-label text-ink-faint">
-              发布者：{pendingSubscribeShare.owner}
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setPendingSubscribeShare(null)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => void executeSubscribe(pendingSubscribeShare)}
-            >
-              确认并重启容器
-            </Button>
-          </div>
-        </Modal>
-      )}
+function FormField({
+  label,
+  required,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-label text-ink-muted">
+        {label}
+        {required && <span className="ml-0.5 text-danger-ink">*</span>}
+      </span>
+      {children}
+      {hint && <span className="text-label text-ink-faint">{hint}</span>}
     </div>
   );
 }

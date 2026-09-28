@@ -38,6 +38,8 @@ import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
 import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
+import { TriangleAlert } from "lucide-react";
+import { Icon, Spinner } from "@/components/ui";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
@@ -148,8 +150,8 @@ export default function Home() {
 
   if (!hydrated || isMobile === null) {
     return (
-      <div className="min-h-dvh flex items-center justify-center text-ink-faint text-sm">
-        加载中…
+      <div className="min-h-dvh flex items-center justify-center">
+        <Spinner size="lg" label="正在载入工作台" />
       </div>
     );
   }
@@ -162,8 +164,15 @@ export default function Home() {
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
-        <div className="fixed top-[var(--trellis-header-h)] md:top-[5.25rem] inset-x-0 z-40 bg-warn-muted border-b border-warn-line px-4 py-2 text-xs text-warn-ink">
-          ⚠️ 本地存储不可用：{hydrateError}。可以继续问答，但刷新会丢失历史。
+        <div
+          role="alert"
+          className="fixed top-[var(--trellis-header-h)] md:top-[5.25rem] inset-x-0 z-40 flex items-center gap-2 bg-warn-muted border-b border-warn-line px-4 py-2 text-label text-warn-ink"
+        >
+          <Icon icon={TriangleAlert} size="sm" />
+          <span>本地存储不可用，可以继续问答，但刷新后历史会丢失。</span>
+          <span className="truncate text-ink-faint" title={hydrateError}>
+            {hydrateError}
+          </span>
         </div>
       )}
       {!session && <QuestionInput isMobile={isMobile} />}
@@ -180,7 +189,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setViewMode("linear")}
-            className="fixed top-[60px] md:top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-muted active:scale-95 transition-transform"
+            className="fixed top-[60px] md:top-[108px] right-3 z-30 px-3 py-2 rounded-full bg-surface border border-line shadow-raise text-xs font-medium text-ink hover:bg-surface-hover transition-colors"
             title="切换到线性 thread"
           >
             线性

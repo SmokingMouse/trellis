@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ChevronRight, Plug } from "lucide-react";
+import { Icon } from "@/components/ui";
 import type { ThreadEvent } from "@/lib/as-thread-event";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { Thread } from "@smokingmouse/agent-server/protocol";
@@ -130,8 +132,8 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   return <div data-as-project={nodeId} className="min-w-0 max-w-full [overflow-wrap:anywhere]">
     {thread && <details data-as-system-log className="group/log mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
       <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11 max-md:flex-wrap">
-        <span className="text-ink-faint transition-transform shrink-0 group-open/log:rotate-90" aria-hidden>▸</span>
-        <span className="font-medium text-ink shrink-0">🔌 引擎</span>
+        <Icon icon={ChevronRight} size="sm" className="text-ink-faint transition-transform group-open/log:rotate-90" />
+        <span className="inline-flex items-center gap-1.5 font-medium text-ink shrink-0"><Icon icon={Plug} size="sm" className="text-ink-muted" />引擎</span>
         <span className="text-ink-muted tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
         <span data-as-source className="flex-1 min-w-0 text-ink-faint truncate max-md:basis-full max-md:order-last max-md:pl-5 max-md:whitespace-normal max-md:line-clamp-2">
           {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}

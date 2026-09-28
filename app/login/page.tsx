@@ -1,14 +1,21 @@
 "use client";
 import { useState } from "react";
+import { Button, ErrorCallout, Input } from "@/components/ui";
+
+type LoginError = { title: string; hint: string; raw: unknown };
 
 // Themed login page (replaces the browser's Basic-Auth prompt). Posts the
 // password to /api/login, which sets the session cookie; then a full navigation
 // to the original destination so middleware re-evaluates with the cookie set.
 // Inherits the app's theme automatically — the root layout's pre-hydration
 // script has already applied `html.dark`, so the dark: variants below match.
+//
+// W4：控件换原语（Input / Button / ErrorCallout），克制工具风；品牌渐变 logo 保留
+// （刻意裁决：品牌渐变不随皮肤变化）。#pw 与唯一的 button[type=submit] 是
+// scripts/mobile-verify/* 的登录钩子，别改。
 export default function LoginPage() {
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LoginError | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -29,10 +36,18 @@ export default function LoginPage() {
         return;
       }
       const data = await res.json().catch(() => ({}));
-      setError(data?.error || "登录失败");
+      setError(
+        res.status === 401
+          ? { title: "密码不对", hint: "检查大小写后再输一次。", raw: "" }
+          : {
+              title: "登录没有成功",
+              hint: "服务端出了问题，稍后再试。",
+              raw: data?.error || `HTTP ${res.status}`,
+            },
+      );
       setBusy(false);
-    } catch {
-      setError("网络错误，请重试");
+    } catch (cause) {
+      setError({ title: "连不上 Trellis 服务", hint: "检查网络或服务是否在运行，然后重试。", raw: cause });
       setBusy(false);
     }
   }
@@ -41,10 +56,10 @@ export default function LoginPage() {
     <div className="min-h-dvh flex items-center justify-center px-6 bg-surface-canvas text-ink-strong">
       <div className="w-full max-w-sm">
         {/* Brand */}
-        <div className="flex flex-col items-center mb-8">
+        <div className="flex flex-col items-center mb-7">
           {/* 品牌渐变固定色（原 indigo/fuchsia/amber 500·500·400 的 hex 原值） */}
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24] shadow-raise" />
-          <h1 className="mt-4 text-xl font-semibold tracking-tight">Trellis</h1>
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
+          <h1 className="mt-4 text-title font-semibold tracking-tight text-ink-strong">Trellis</h1>
           <p className="mt-1 text-ui text-ink-muted">
             图状的 AI 对话
           </p>
@@ -53,50 +68,39 @@ export default function LoginPage() {
         {/* Card */}
         <form
           onSubmit={submit}
-          className="rounded-card border border-line bg-surface shadow-raise p-6"
+          className="rounded-card border border-line bg-surface p-6 flex flex-col gap-4"
         >
-          <label
-            htmlFor="pw"
-            className="block text-ui font-medium text-ink-muted mb-1.5"
-          >
-            访问密码
-          </label>
-          <input
-            id="pw"
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (error) setError(null);
-            }}
-            placeholder="输入密码以继续"
-            className={`w-full h-11 px-3.5 rounded-field bg-surface-canvas border text-reading outline-none transition-colors ${
-              error
-                ? "border-danger focus:border-danger"
-                : "border-line-strong focus:border-accent"
-            }`}
-          />
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="pw" className="text-ui font-medium text-ink">
+              访问密码
+            </label>
+            <Input
+              id="pw"
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              value={password}
+              invalid={error !== null}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="输入密码以继续"
+              className="min-h-10"
+            />
+          </div>
           {error && (
-            <p className="mt-2 text-ui text-danger">
-              {error}
-            </p>
+            <ErrorCallout compact error={error.raw} title={error.title} hint={error.hint} />
           )}
-          <button
+          <Button
             type="submit"
-            disabled={busy || !password}
-            className="mt-4 w-full h-11 rounded-field bg-accent hover:bg-accent-strong text-ink-inverse text-body font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            variant="primary"
+            className="w-full min-h-10"
+            loading={busy}
+            disabled={!password}
           >
-            {busy ? (
-              <>
-                <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-                登录中…
-              </>
-            ) : (
-              "进入"
-            )}
-          </button>
+            进入
+          </Button>
         </form>
 
         <p className="mt-5 text-center text-label text-ink-faint">

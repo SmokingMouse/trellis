@@ -4,6 +4,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { MODE_STYLES } from "@/lib/mode-style";
 import { AGENT_UNSUPPORTED_HINT, agentSupported } from "@/lib/run-config";
 import type { ProviderId } from "@/lib/llm";
+import { Bot, ShieldCheck } from "lucide-react";
+import { Icon, StatusDot, Tooltip } from "@/components/ui";
 
 // Badge rendered in the Header for an active session. Shows
 // "Chat" / "Project · <shortName>" depending on the locked session mode.
@@ -12,8 +14,8 @@ import type { ProviderId } from "@/lib/llm";
 //
 // Hover reveals the full workspace path. Click is a no-op — mode +
 // workspace are locked at session creation; to use a different mode, open
-// a new session. (Browsing the workspace's files has its own 📁 Header
-// button — a status chip that secretly acts as a button proved
+// a new session. (Browsing the workspace's files lives on the breadcrumb and
+// the「更多」menu — a status chip that secretly acts as a button proved
 // undiscoverable.)
 export function ModeBadge() {
   const session = useSessionStore((s) => s.session);
@@ -50,109 +52,63 @@ export function ModeBadge() {
   const shortName = path ? basename(path) : null;
 
   return (
-    <div
-      role="status"
-      title={
+    <Tooltip
+      content={
         path
-          ? `${cfg.label} · ${path}\n模式与工作区在 session 创建时锁定`
-          : `${cfg.label}\nsession 创建时锁定 — 换语境请开新 session`
+          ? `${cfg.label} · ${path}（模式与工作区在会话创建时锁定）`
+          : `${cfg.label}（会话创建时锁定，换语境请开新会话）`
       }
-      className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md border ${cfg.badge}`}
     >
-      <cfg.Icon />
-      {/* Mode label hidden on mobile to save space — the icon already
-          encodes the mode (chat bubble / link). Desktop shows the word
-          for clarity. */}
-      <span className="hidden sm:inline text-label font-medium">
-        {cfg.label}
-      </span>
-      {shortName && (
-        <>
-          <span className="hidden sm:inline text-ink-faint">
-            ·
-          </span>
-          <span className="text-label font-mono truncate max-w-[6rem] sm:max-w-[10rem]">
+      <div
+        role="status"
+        tabIndex={0}
+        data-mode-badge={mode}
+        className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink"
+      >
+        <StatusDot tone={mode === "project" ? "project" : "chat"} />
+        {/* 手机上只留圆点省空间；桌面写出模式名。 */}
+        <span className="hidden sm:inline font-medium">{cfg.label}</span>
+        {shortName && (
+          <span className="min-w-0 truncate font-mono text-ink-muted max-w-[6rem] sm:max-w-[9rem]">
             {shortName}
           </span>
-        </>
-      )}
-      {/* S88 会话人设。两个真实 provider 都生效；mock 灰掉说明。 */}
-      {agentName && <AgentChip name={agentName} model={session.model} />}
-      {/* 权限确认会话：可变更工具逐个审批（创建时锁定）。 */}
-      {session.requireApproval && (
-        <span title="需确认：Bash/Write/Edit 等工具执行前弹卡等你允许" aria-label="需确认">
-          🛡️
-        </span>
-      )}
-    </div>
+        )}
+        {/* S88 会话人设。两个真实服务商都生效；mock 灰掉说明。 */}
+        {agentName && <AgentChip name={agentName} model={session.model} />}
+        {/* 权限确认会话：可变更工具逐个审批（创建时锁定）。 */}
+        {session.requireApproval && (
+          <span
+            role="img"
+            aria-label="需确认：执行命令、写文件等操作前先弹卡等你允许"
+            className="inline-flex text-ink-muted"
+          >
+            <Icon icon={ShieldCheck} size="sm" />
+          </span>
+        )}
+      </div>
+    </Tooltip>
   );
 }
 
 function AgentChip({ name, model }: { name: string; model: string | null }) {
-  // S89: 原来手写 `model.startsWith("codex")`，漏掉 mock —— 服务端的钳制条件是
-  // `providerFamily(...) === "claude"`（chat/route.ts），mock 会话同样拿不到 agent，
-  // 却会在这里显示成生效。判据统一走 lib/run-config.ts 的 agentSupported。
+  // S89: 判据统一走 lib/run-config.ts 的 agentSupported（mock 会话同样拿不到 agent）。
   const inactive = !model || !agentSupported(model as ProviderId);
   return (
     <span
-      title={
-        inactive
-          ? `${name}\n${AGENT_UNSUPPORTED_HINT}`
-          : `Agent：${name}（会话创建时锁定）`
-      }
-      className={`text-label truncate max-w-[7rem] ${inactive ? "text-ink-faint line-through" : ""}`}
+      aria-label={inactive ? `${name}：${AGENT_UNSUPPORTED_HINT}` : `Agent：${name}（会话创建时锁定）`}
+      className={`inline-flex min-w-0 items-center gap-1 border-l border-line pl-1.5 text-ink-muted ${inactive ? "text-ink-faint line-through" : ""}`}
     >
-      🎭 {name}
+      <Icon icon={Bot} size="sm" />
+      <span className="truncate max-w-[7rem]">{name}</span>
     </span>
   );
 }
 
-// Mode label + badge class come from the shared lib/mode-style.ts token
-// table (DRY with SessionTabs). Icons stay local to this component.
-const MODE_CONFIG: Record<
-  string,
-  { label: string; badge: string; Icon: () => React.ReactElement }
-> = {
-  chat: { ...MODE_STYLES.chat, Icon: ChatIcon },
-  project: { ...MODE_STYLES.project, Icon: ProjectIcon },
+// 模式名来自 lib/mode-style.ts（与 SessionTabs 共用）。
+const MODE_CONFIG: Record<string, { label: string }> = {
+  chat: MODE_STYLES.chat,
+  project: MODE_STYLES.project,
 };
-
-function ChatIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function ProjectIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-    </svg>
-  );
-}
 
 function basename(p: string): string {
   if (!p) return "";

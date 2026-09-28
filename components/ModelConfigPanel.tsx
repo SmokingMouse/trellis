@@ -1,8 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
+import { Plus, Sparkles, Star, X } from "lucide-react";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorCallout,
+  Icon,
+  Input,
+  Modal,
+  SkeletonText,
+  Textarea,
+  toast,
+  useConfirm,
+} from "@/components/ui";
 import { useSessionStore } from "@/stores/sessionStore";
 import { PROVIDER_PRESETS, type ProviderPreset } from "@/lib/llm";
 
@@ -10,7 +22,7 @@ import { PROVIDER_PRESETS, type ProviderPreset } from "@/lib/llm";
 // key 只进 env_file + process.env，接口永不回显；保存即热生效（picker 立刻刷新）。
 //
 // S89：拆成 Panel（内容）+ Modal（外壳）两层。
-// S112: 交互升级 —— 提供常用 Provider 预设模版一键填入、模型 Tag 交互增删与候选推荐、全局默认模型可视化设置。
+// S112: 交互升级 —— 提供常用服务商预设模版一键填入、模型 Tag 交互增删与候选推荐、全局默认模型可视化设置。
 
 type CfgProvider = {
   name: string;
@@ -46,9 +58,6 @@ type FormState = {
   hadKey: boolean;
 };
 
-const FIELD =
-  "w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line";
-
 export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
   const fetchProviderCatalog = useSessionStore((s) => s.fetchProviderCatalog);
   const [state, setState] = useState<CfgState | null>(null);
@@ -57,13 +66,14 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [settingDefault, setSettingDefault] = useState(false);
+  const confirm = useConfirm();
 
   useEffect(() => {
     let alive = true;
     fetch("/api/model-config")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((s: CfgState) => alive && setState(s))
-      .catch((e) => alive && setLoadError(String(e?.message ?? e)));
+      .catch((e) => alive && setLoadError(e instanceof Error ? e.message : String(e)));
     return () => {
       alive = false;
     };
@@ -210,7 +220,15 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
   const remove = async (name: string) => {
     if (busy) return;
-    if (!window.confirm(`删除 provider「${name}」？（env 文件里的 key 会保留）`)) return;
+    if (
+      !(await confirm({
+        title: `删除服务商「${name}」？`,
+        description: "它下面的模型会从模型选择里消失；env 文件里的 API 密钥会保留，重新添加同名服务商即可复用。",
+        confirmLabel: "删除",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const res = await fetch(`/api/model-config?name=${encodeURIComponent(name)}`, {
@@ -220,8 +238,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
       setState(body as CfgState);
       void fetchProviderCatalog();
+      toast.success(`已删除服务商「${name}」`);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
+      toast.error("删除失败", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -240,8 +259,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
       setState(body as CfgState);
       void fetchProviderCatalog();
+      toast.success("已设为默认模型", { description: model });
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
+      toast.error("设置默认模型失败", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setSettingDefault(false);
     }
@@ -275,21 +295,21 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
     <>
       <div className="px-5 pt-4 pb-3 border-b border-line shrink-0 flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium text-ink-strong">模型与 Provider 配置</div>
+          <div className="text-sm font-medium text-ink-strong">模型与服务商配置</div>
           <div className="text-label text-ink-faint mt-0.5 truncate">
             {state ? (
               <>
                 {state.exists ? "编辑" : "将创建"} {state.path}
-                {state.envFile ? ` · key 存 ${state.envFile}` : ""}
+                {state.envFile ? ` · 密钥存在 ${state.envFile}` : ""}
               </>
             ) : (
-              "加载中…"
+              "读取配置中…"
             )}
           </div>
         </div>
         {state?.defaultModel && (
           <div className="text-label text-ink-muted bg-surface-muted px-2.5 py-1 rounded-field border border-line flex items-center gap-1.5">
-            <span className="text-accent-ink">★</span>
+            <Icon icon={Star} size="sm" className="text-accent-ink" />
             <span>默认模型：</span>
             <span className="font-mono text-ink-strong">{state.defaultModel}</span>
           </div>
@@ -298,17 +318,22 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {loadError && (
-          <div className="text-ui text-danger mb-3">加载失败：{loadError}</div>
+          <ErrorCallout
+            className="mb-3"
+            title="读取模型配置失败"
+            error={loadError}
+          />
         )}
+        {!state && !loadError && <SkeletonText lines={4} />}
 
         {form ? (
           <div className="space-y-4">
             {/* 新建模式下的预设厂商选择 */}
             {!form.isEdit && (
-              <div className="rounded-lg border border-line bg-surface-muted/40 p-3">
+              <div className="rounded-card border border-line bg-surface-muted p-3">
                 <div className="text-label font-medium text-ink-strong mb-2 flex items-center gap-1.5">
-                  <span>⚡</span>
-                  <span>常用厂商预设模版（点击一键填入）</span>
+                  <Icon icon={Sparkles} size="sm" className="text-ink-muted" />
+                  <span>常用服务商模版（点击一键填入）</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {PROVIDER_PRESETS.map((preset) => {
@@ -320,8 +345,8 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                         onClick={() => applyPreset(preset)}
                         className={`px-2.5 py-1 text-label rounded-md border transition-colors ${
                           isSelected
-                            ? "bg-accent-muted text-accent-ink border-accent-line font-medium shadow-sm"
-                            : "bg-surface text-ink hover:bg-surface-muted border-line"
+                            ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
+                            : "bg-surface text-ink hover:bg-surface-hover border-line"
                         }`}
                       >
                         {preset.badge}
@@ -335,10 +360,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-label text-ink-muted block mb-1">
-                  provider 名 <span className="text-danger">*</span>
+                  服务商名称 <span className="text-danger-ink">*</span>
                 </label>
-                <input
-                  className={FIELD}
+                <Input
                   value={form.name}
                   disabled={form.isEdit}
                   placeholder="deepseek / kimi / qwen"
@@ -347,10 +371,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
               </div>
               <div>
                 <label className="text-label text-ink-muted block mb-1">
-                  key 环境变量名（留空自动生成）
+                  密钥环境变量名（留空自动生成）
                 </label>
-                <input
-                  className={FIELD}
+                <Input
                   value={form.apiKeyEnv}
                   placeholder="DEEPSEEK_API_KEY"
                   onChange={(e) => setForm({ ...form, apiKeyEnv: e.target.value })}
@@ -360,10 +383,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
             <div>
               <label className="text-label text-ink-muted block mb-1">
-                anthropic_url（走 claude CLI 必填；Anthropic 兼容端点）
+                Anthropic 兼容端点 anthropic_url（经 claude CLI 调用时必填）
               </label>
-              <input
-                className={FIELD}
+              <Input
                 value={form.anthropicUrl}
                 placeholder="https://api.deepseek.com/anthropic"
                 onChange={(e) => setForm({ ...form, anthropicUrl: e.target.value })}
@@ -372,10 +394,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
             <div>
               <label className="text-label text-ink-muted block mb-1">
-                openai_url（可选；仅 openai_url 的端点走 Responses API）
+                OpenAI 兼容端点 openai_url（可选；只填这一项时走 Responses API）
               </label>
-              <input
-                className={FIELD}
+              <Input
                 value={form.openaiUrl}
                 placeholder="https://api.deepseek.com/v1"
                 onChange={(e) => setForm({ ...form, openaiUrl: e.target.value })}
@@ -384,10 +405,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
             <div>
               <label className="text-label text-ink-muted block mb-1">
-                API Key {form.hadKey ? "（已配置，留空 = 保持不变）" : "（将加密存入 env 文件）"}
+                API 密钥 {form.hadKey ? "（已配置，留空 = 保持不变）" : "（将加密存入 env 文件）"}
               </label>
-              <input
-                className={FIELD}
+              <Input
                 type="password"
                 value={form.apiKey}
                 autoComplete="off"
@@ -397,10 +417,10 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
             </div>
 
             {/* 模型列表管理 */}
-            <div className="rounded-lg border border-line bg-surface p-3 space-y-2.5">
+            <div className="rounded-card border border-line bg-surface p-3 space-y-2.5">
               <div className="flex items-center justify-between">
                 <label className="text-label font-medium text-ink-strong">
-                  模型列表 ({form.modelsList.length}) <span className="text-danger">*</span>
+                  模型列表（{form.modelsList.length}） <span className="text-danger-ink">*</span>
                 </label>
                 <button
                   type="button"
@@ -413,8 +433,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
               {form.useRawText ? (
                 <div>
-                  <textarea
-                    className={`${FIELD} resize-none h-28 font-mono text-ui`}
+                  <Textarea
+                    aria-label="模型列表（每行一个）"
+                    className="resize-none h-28 font-mono"
                     value={form.modelsRawText}
                     placeholder={"deepseek-chat\ndeepseek-reasoner"}
                     onChange={(e) => handleRawTextChange(e.target.value)}
@@ -433,16 +454,17 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                       form.modelsList.map((m) => (
                         <span
                           key={m}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-surface border border-line text-ui font-mono text-ink-strong shadow-xs"
+                          className="inline-flex items-center gap-1 pl-2.5 pr-1 py-0.5 rounded-md bg-surface border border-line text-ui font-mono text-ink-strong"
                         >
                           <span>{m}</span>
                           <button
                             type="button"
                             onClick={() => removeModelChip(m)}
-                            className="text-ink-faint hover:text-danger ml-0.5"
+                            className="inline-flex rounded-sm p-0.5 text-ink-faint hover:bg-surface-hover hover:text-danger-ink"
+                            aria-label={`移除模型 ${m}`}
                             title="移除此模型"
                           >
-                            ×
+                            <Icon icon={X} size="sm" />
                           </button>
                         </span>
                       ))
@@ -451,8 +473,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
 
                   {/* 快速添加模型输入框 */}
                   <div className="flex gap-1.5">
-                    <input
-                      className={`${FIELD} font-mono`}
+                    <Input
+                      aria-label="新模型名称"
+                      className="font-mono"
                       value={form.newModelInput}
                       placeholder="输入新模型名，回车或点击添加"
                       onChange={(e) => setForm({ ...form, newModelInput: e.target.value })}
@@ -470,7 +493,8 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                       onClick={() => addModelChip(form.newModelInput)}
                       disabled={!form.newModelInput.trim()}
                     >
-                      + 添加
+                      <Icon icon={Plus} size="sm" />
+                      添加
                     </Button>
                   </div>
 
@@ -484,9 +508,10 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                             key={sug}
                             type="button"
                             onClick={() => addModelChip(sug)}
-                            className="px-2 py-0.5 text-nano rounded-md border border-line-faint bg-surface hover:bg-surface-muted hover:border-line text-ink-muted hover:text-ink font-mono transition-colors"
+                            className="inline-flex items-center gap-0.5 px-2 py-0.5 text-nano rounded-md border border-line-faint bg-surface hover:bg-surface-hover hover:border-line text-ink-muted hover:text-ink font-mono transition-colors"
                           >
-                            + {sug}
+                            <Icon icon={Plus} size="sm" />
+                            {sug}
                           </button>
                         ))}
                       </div>
@@ -496,7 +521,7 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
               )}
             </div>
 
-            {formError && <div className="text-ui text-danger">{formError}</div>}
+            {formError && <ErrorCallout title="保存失败" error={formError} />}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setForm(null)} disabled={busy}>
@@ -510,10 +535,11 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
         ) : (
           <>
             {state && state.providers.length === 0 && (
-              <div className="text-ui text-ink-muted mb-4 p-4 rounded-lg border border-line bg-surface-muted/30">
-                还没有配置文件 —— 原生 claude / codex 走 CLI 登录态即可用；要接入第三方
-                大模型端点（DeepSeek / Kimi / 通义千问 / 火山引擎等），请点击下方「添加 Provider」或快速从模版创建。
-              </div>
+              <EmptyState
+                compact
+                title="还没有配置第三方服务商"
+                description="原生 claude / codex 用 CLI 登录态即可使用；要接入 DeepSeek / Kimi / 通义千问 / 火山引擎等第三方端点，点下方「添加服务商」，可从模版一键填入。"
+              />
             )}
 
             <div className="space-y-3">
@@ -526,17 +552,13 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-ui font-semibold text-ink-strong">{p.name}</span>
                       {p.native ? (
-                        <span className="text-nano text-ink-faint border border-line rounded-full px-2 py-0.5">
-                          原生 CLI · 免 key
-                        </span>
+                        <Badge>原生 CLI · 免密钥</Badge>
                       ) : p.hasKey ? (
-                        <span className="text-nano text-positive font-medium bg-positive/10 border border-positive/30 rounded-full px-2 py-0.5">
-                          ✓ Key 已配置
-                        </span>
+                        <Badge variant="positive">密钥已配置</Badge>
                       ) : (
-                        <span className="text-nano text-danger font-medium bg-danger/10 border border-danger/30 rounded-full px-2 py-0.5">
-                          缺 Key ({p.api_key_env})
-                        </span>
+                        <Badge variant="danger" title={p.api_key_env}>
+                          缺少密钥（{p.api_key_env}）
+                        </Badge>
                       )}
                     </div>
 
@@ -558,7 +580,7 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                                 : "bg-surface-muted text-ink-strong border-line"
                             }`}
                           >
-                            {isDefault && <span>★</span>}
+                            {isDefault && <Icon icon={Star} size="sm" aria-label="默认模型" />}
                             <span>{m}</span>
                           </span>
                         );
@@ -607,7 +629,8 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
               </Button>
             )}
             <Button variant="primary" onClick={() => openAdd()} disabled={!state && !loadError}>
-              + 添加 Provider
+              <Icon icon={Plus} size="sm" />
+              添加服务商
             </Button>
           </div>
         </div>

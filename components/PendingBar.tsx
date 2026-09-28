@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSessionStore } from "@/stores/sessionStore";
 import { pendingKey, type PendingItem } from "@/lib/pending";
-import { Button } from "./ui/Button";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { Button, Icon } from "@/components/ui";
 import { openPendingItem } from "@/lib/pending-navigation";
 
 export function PendingBar({ mobile = false, hiddenChrome = false }: { mobile?: boolean; hiddenChrome?: boolean }) {
@@ -66,15 +67,15 @@ export function PendingBar({ mobile = false, hiddenChrome = false }: { mobile?: 
   </ul>;
   if (!items.length) return null;
   return <div ref={rail} data-pending-bar={mobile ? "mobile" : "desktop"}
-    className={mobile ? "relative z-20 shrink-0 bg-warn-muted transition-transform duration-200 motion-reduce:transition-none" : "fixed right-0 z-40 border-b border-warn-line bg-surface shadow-sm"}
+    className={mobile ? "relative z-20 shrink-0 bg-warn-muted transition-transform duration-200 motion-reduce:transition-none" : "fixed right-0 z-40 border-b border-warn-line bg-surface"}
     style={mobile ? { transform: hiddenChrome ? "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))" : undefined } : { top: "var(--trellis-header-h)", left: "var(--trellis-sb, 0px)" }}>
     {(mobile || items.length > 1) && <button ref={trigger} type="button" data-mobile-waiting-banner={mobile ? "" : undefined}
       data-pending-toggle aria-expanded={expanded} aria-controls={mobile ? "pending-mobile-list" : "pending-desktop-list"}
       onClick={() => setExpanded(value => !value)} className={`flex min-h-11 w-full items-center justify-between gap-2 bg-warn-muted px-4 text-ui font-medium text-warn-ink ${mobile ? "border-b border-warn-line" : ""}`}>
-      <span>有 {items.length} 项等你处理</span><span>{expanded ? "收起" : "查看待办"} <span aria-hidden>{expanded ? "↑" : "↓"}</span></span>
+      <span>有 {items.length} 项等你处理</span><span className="inline-flex items-center gap-1">{expanded ? "收起" : "查看待办"}<Icon icon={expanded ? ChevronUp : ChevronDown} size="sm" /></span>
     </button>}
     {!mobile && (items.length === 1 || expanded) && list}
-    {error && <p role="alert" className="px-4 py-2 text-ui text-danger">{error}</p>}
+    {error && <p role="alert" className="px-4 py-2 text-ui text-danger-ink">{error}</p>}
     {mobile && expanded && items.length > 0 && createPortal(<dialog ref={dialog} data-pending-sheet onCancel={close} onClose={close}
       onClick={e => { if (e.target === e.currentTarget) close(); }}
       className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[75dvh] w-full max-w-none rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-overlay backdrop:bg-scrim/50"

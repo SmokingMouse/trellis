@@ -33,7 +33,13 @@ fail() {
   exit 1
 }
 
+. "$ROOT/scripts/mobile-verify/lib-settle.sh"
+
 ab() {
+  # 点击前先等目标停稳（弹层进场动画 / Header 位移），见 lib-settle.sh；@ref 不处理
+  if [ "${1:-}" = click ] && [ $# -ge 2 ]; then
+    case $2 in @*) ;; *) mv_wait_settled "$2" ;; esac
+  fi
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
@@ -112,6 +118,7 @@ wait_for_js() {
   wait_try=0
   while :; do
     if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      mv_wait_idle soft
       echo "✓ $wait_label"
       return 0
     fi
@@ -306,8 +313,8 @@ ab eval "(() => { const p=document.querySelector('[data-herdr-pane=\"pane-claude
 wait_for_js "project collapse hides its session" "!document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
 ab screenshot "$OUT/desktop-herdr-collapsed.png"
 ab reload
-wait_for_js "project collapse survives reload" "Boolean(document.querySelector('[data-sidebar-project] button[aria-expanded=false]')) && !document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
-ab eval "document.querySelector('[data-sidebar-project] button[aria-expanded=false]').click(); true"
+wait_for_js "project collapse survives reload" "Boolean(document.querySelector('[data-sidebar-project] [data-sidebar-group] > button[aria-expanded=false]')) && !document.querySelector('[data-herdr-pane=\"pane-claude\"]')"
+ab eval "document.querySelector('[data-sidebar-project] [data-sidebar-group] > button[aria-expanded=false]').click(); true"
 wait_for_js "project expands" "Boolean(document.querySelector('[data-herdr-pane=\"pane-claude\"]'))"
 ab click '[data-herdr-pane="pane-claude"]'
 wait_for_js "Herdr session badge" "Boolean(document.querySelector('[data-herdr-badge]'))"
@@ -478,7 +485,9 @@ ab eval --stdin <<'JS'
     const rect = row.getBoundingClientRect();
     assert(rect.height >= 44 && rect.left >= 0 && rect.right <= innerWidth, 'session touch geometry');
   }
-  for (const target of drawer.querySelectorAll('[data-sidebar-toolbar] button, [data-sidebar-toolbar] select, [data-sidebar-toolbar] label')) {
+  // W4：来源 / 含已归档换成 Radix Select / Checkbox。复选框本体 16px，热区由外层
+  // <label>（手机 ≥44px）承担，所以量 label、跳过 role=checkbox 的方块本体。
+  for (const target of drawer.querySelectorAll('[data-sidebar-toolbar] button:not([role=checkbox]), [data-sidebar-toolbar] label')) {
     assert(target.getBoundingClientRect().height >= 44, 'toolbar touch height');
   }
   return { rows: rows.length, viewport: [innerWidth, innerHeight] };
@@ -528,10 +537,10 @@ ab set viewport 1440 900
 ab open "$BASE/"
 wait_for_js "desktop offline row hidden by default" "Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-claude\"]')) && !document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
 ab screenshot "$OUT/desktop-herdr-offline-hidden.png"
-ab eval "document.querySelector('[data-sidebar-toolbar] input[type=checkbox]').click(); true"
+ab eval "document.querySelector('[data-sidebar-toolbar] [role=checkbox]').click(); true"
 wait_for_js "offline row returns readable with its chip" "document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'offline' && Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"] [data-session-offline]'))"
 ab screenshot "$OUT/desktop-herdr-offline-chip.png"
-ab eval "document.querySelector('[data-sidebar-toolbar] input[type=checkbox]').click(); true"
+ab eval "document.querySelector('[data-sidebar-toolbar] [role=checkbox]').click(); true"
 wait_for_js "default list restored" "!document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
 ab set device "iPhone 15"
 ab set viewport 390 844
@@ -546,7 +555,7 @@ ab eval --stdin <<'JS'
 (() => {
   if (document.querySelector('[data-herdr-input]')) throw new Error('Herdr input remained after pane went down');
   if (document.querySelector('[data-thread-scroll] [data-herdr-card]')) throw new Error('stale interaction card remained after pane went down');
-  if (!document.querySelector('[data-herdr-badge]')?.textContent?.includes('offline')) throw new Error('Herdr badge did not switch to offline');
+  if (!document.querySelector('[data-herdr-badge]')?.textContent?.includes('已离线')) throw new Error('Herdr badge did not switch to offline');
   const button = document.querySelector('[data-herdr-reopen]');
   if (!button?.textContent?.includes('在 Herdr 里重新打开')) throw new Error('reopen copy missing');
   return button.getBoundingClientRect().toJSON();

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { ProviderInfo } from "@/lib/llm";
+import { Button, ErrorCallout, Input, Select, toast } from "@/components/ui";
 
 // 打标 / 起题模型配置卡（settings/models tab，与 AuthHealthCard 同级）。
 // 节点话题标签与会话自动命名共用一条 CLI spawn 管道（lib/llm/topic.ts），
@@ -11,8 +12,8 @@ import type { ProviderInfo } from "@/lib/llm";
 //
 // S112: 交互升级 —— 提供常用推荐快捷 Tag、可选下拉列表与自动填入，无需手动敲模型全称。
 
-const FIELD =
-  "w-full px-3 py-2 rounded-field border border-line bg-surface-muted text-ui text-ink placeholder:text-ink-faint outline-none focus:border-accent-line font-mono";
+// Radix Select 不允许空串 value：「未从列表选」用哨兵值占位。
+const NONE = "__none__";
 
 type Settings = {
   label_model_claude: string | null;
@@ -40,7 +41,7 @@ export function LabelModelCard() {
   const [codex, setCodex] = useState("");
   const [saved, setSaved] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [catalog, setCatalog] = useState<ProviderInfo[]>([]);
 
   useEffect(() => {
@@ -58,8 +59,8 @@ export function LabelModelCard() {
         setCatalog(providersData.providers ?? []);
         setLoaded(true);
       })
-      .catch(() => {
-        if (alive) setNotice("加载失败，稍后重试");
+      .catch((err: unknown) => {
+        if (alive) setLoadError(err);
       });
     return () => {
       alive = false;
@@ -73,7 +74,6 @@ export function LabelModelCard() {
 
   const save = async () => {
     setBusy(true);
-    setNotice(null);
     try {
       const entries: [keyof Settings, string][] = [
         ["label_model_claude", claude.trim()],
@@ -94,9 +94,11 @@ export function LabelModelCard() {
         next[key] = data.value;
       }
       setSaved(next);
-      setNotice("已保存 — 下一次打标/起题即生效");
+      toast.success("已保存", { description: "下一次打标 / 起题即生效" });
     } catch (err) {
-      setNotice(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+      toast.error("保存失败", {
+        description: err instanceof Error ? err.message : "稍后重试",
+      });
     } finally {
       setBusy(false);
     }
@@ -109,18 +111,21 @@ export function LabelModelCard() {
   const codexCompatibleFromCatalog = catalog.filter((p) => p.id.startsWith("codex"));
 
   return (
-    <div className="rounded-card border border-line bg-surface shadow-raise p-4 flex flex-col gap-3">
+    <div className="rounded-card border border-line bg-surface p-4 flex flex-col gap-3">
+      {loadError !== null && (
+        <ErrorCallout error={loadError} title="打标 / 起题模型配置加载失败" compact />
+      )}
       <div>
         <div className="text-ui font-medium text-ink-strong">打标 / 起题模型</div>
         <p className="text-label text-ink-muted mt-1 leading-relaxed">
-          节点话题标签与会话自动命名共用的小模型，按会话的 CLI
-          家族路由。留空走默认；生成失败只会静默保持原标题，不影响对话。
+          节点话题标签与会话自动命名共用的小模型，按会话所属的 CLI
+          （Claude / Codex）分别设置。留空走默认；生成失败只会静默保持原标题，不影响对话。
         </p>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
         {/* Claude 系 */}
-        <div className="flex flex-col gap-2 p-3 rounded-lg border border-line bg-surface-muted/30">
+        <div className="flex flex-col gap-2 p-3 rounded-card border border-line">
           <div className="flex items-center justify-between">
             <span className="text-ui font-medium text-ink-strong">
               Claude 系
@@ -130,8 +135,8 @@ export function LabelModelCard() {
             </span>
           </div>
 
-          <input
-            className={FIELD}
+          <Input
+            className="font-mono"
             value={claude}
             onChange={(e) => setClaude(e.target.value)}
             placeholder="默认 haiku"
@@ -140,7 +145,7 @@ export function LabelModelCard() {
 
           {/* 快捷预设 Tags */}
           <div className="space-y-1 pt-1">
-            <div className="text-nano text-ink-faint">快捷选择：</div>
+            <div className="text-nano text-ink-faint">快捷选择</div>
             <div className="flex flex-wrap gap-1">
               {CLAUDE_PRESETS.map((p) => {
                 const isSelected = claude === p.value;
@@ -153,7 +158,7 @@ export function LabelModelCard() {
                     className={`px-2 py-0.5 text-nano rounded-md border transition-colors ${
                       isSelected
                         ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
-                        : "bg-surface text-ink-muted hover:text-ink hover:bg-surface-muted border-line"
+                        : "bg-surface text-ink-muted hover:text-ink hover:bg-surface-hover border-line"
                     }`}
                   >
                     {p.label}
@@ -166,26 +171,30 @@ export function LabelModelCard() {
           {/* 从已配置的 Provider 列表中选择 */}
           {claudeCompatibleFromCatalog.length > 0 && (
             <div className="pt-1">
-              <label className="text-nano text-ink-faint block mb-1">已配端点快速选取：</label>
-              <select
-                className="w-full px-2 py-1 text-label rounded-field border border-line bg-surface text-ink outline-none"
-                value={claude}
-                onChange={(e) => setClaude(e.target.value)}
+              <div className="text-nano text-ink-faint mb-1">从已配端点选：</div>
+              <Select
+                size="sm"
+                aria-label="选择已配置的 Claude 兼容模型"
+                placeholder="选择已配置的 Claude 兼容模型"
+                value={claudeCompatibleFromCatalog.some((p) => p.shortLabel === claude) ? claude : NONE}
+                onValueChange={(v) => {
+                  if (v !== NONE) setClaude(v);
+                }}
                 disabled={!loaded || busy}
-              >
-                <option value="">-- 选择已配置的 Claude 兼容模型 --</option>
-                {claudeCompatibleFromCatalog.map((p) => (
-                  <option key={p.id} value={p.shortLabel}>
-                    {p.label} ({p.shortLabel})
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: NONE, label: "选择已配置的 Claude 兼容模型", disabled: true },
+                  ...claudeCompatibleFromCatalog.map((p) => ({
+                    value: p.shortLabel,
+                    label: `${p.label} (${p.shortLabel})`,
+                  })),
+                ]}
+              />
             </div>
           )}
         </div>
 
         {/* Codex 系 */}
-        <div className="flex flex-col gap-2 p-3 rounded-lg border border-line bg-surface-muted/30">
+        <div className="flex flex-col gap-2 p-3 rounded-card border border-line">
           <div className="flex items-center justify-between">
             <span className="text-ui font-medium text-ink-strong">
               Codex 系
@@ -195,8 +204,8 @@ export function LabelModelCard() {
             </span>
           </div>
 
-          <input
-            className={FIELD}
+          <Input
+            className="font-mono"
             value={codex}
             onChange={(e) => setCodex(e.target.value)}
             placeholder="默认用本机默认模型"
@@ -205,7 +214,7 @@ export function LabelModelCard() {
 
           {/* 快捷预设 Tags */}
           <div className="space-y-1 pt-1">
-            <div className="text-nano text-ink-faint">快捷选择：</div>
+            <div className="text-nano text-ink-faint">快捷选择</div>
             <div className="flex flex-wrap gap-1">
               {CODEX_PRESETS.map((p) => {
                 const isSelected = codex === p.value;
@@ -218,7 +227,7 @@ export function LabelModelCard() {
                     className={`px-2 py-0.5 text-nano rounded-md border transition-colors ${
                       isSelected
                         ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
-                        : "bg-surface text-ink-muted hover:text-ink hover:bg-surface-muted border-line"
+                        : "bg-surface text-ink-muted hover:text-ink hover:bg-surface-hover border-line"
                     }`}
                   >
                     {p.label}
@@ -231,41 +240,33 @@ export function LabelModelCard() {
           {/* 从已配置的 Codex 列表中选择 */}
           {codexCompatibleFromCatalog.length > 0 && (
             <div className="pt-1">
-              <label className="text-nano text-ink-faint block mb-1">已配端点快速选取：</label>
-              <select
-                className="w-full px-2 py-1 text-label rounded-field border border-line bg-surface text-ink outline-none"
-                value={codex}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  // If id is "codex:xxx", use the short model name or full id
-                  setCodex(val);
+              <div className="text-nano text-ink-faint mb-1">从已配端点选：</div>
+              <Select
+                size="sm"
+                aria-label="选择已配置的 Codex 模型"
+                placeholder="选择已配置的 Codex 模型"
+                value={codexCompatibleFromCatalog.some((p) => p.shortLabel === codex) ? codex : NONE}
+                onValueChange={(v) => {
+                  if (v !== NONE) setCodex(v);
                 }}
                 disabled={!loaded || busy}
-              >
-                <option value="">-- 选择已配置的 Codex 模型 --</option>
-                {codexCompatibleFromCatalog.map((p) => (
-                  <option key={p.id} value={p.shortLabel}>
-                    {p.label} ({p.shortLabel})
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: NONE, label: "选择已配置的 Codex 模型", disabled: true },
+                  ...codexCompatibleFromCatalog.map((p) => ({
+                    value: p.shortLabel,
+                    label: `${p.label} (${p.shortLabel})`,
+                  })),
+                ]}
+              />
             </div>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-3 pt-1">
-        <button
-          type="button"
-          onClick={save}
-          disabled={!loaded || busy || !dirty}
-          className="px-3 py-1.5 rounded-field border border-accent-line bg-accent-muted text-accent-ink text-ui font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-accent-muted/70 transition-colors"
-        >
-          {busy ? "保存中…" : "保存设置"}
-        </button>
-        {notice && (
-          <span className="text-label text-ink-muted">{notice}</span>
-        )}
+        <Button variant="primary" onClick={save} disabled={!loaded || !dirty} loading={busy}>
+          保存设置
+        </Button>
       </div>
     </div>
   );

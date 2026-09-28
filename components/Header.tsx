@@ -1,14 +1,40 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import {
+  Bookmark,
+  CalendarClock,
+  ChevronRight,
+  Download,
+  Ellipsis,
+  FolderOpen,
+  Keyboard,
+  Menu,
+  NotebookPen,
+  PanelLeftOpen,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ModelPicker } from "./ModelPicker";
-import { ExportMenu } from "./ExportMenu";
 import { ModeBadge } from "./ModeBadge";
 import { ThemeMenu } from "./ThemeMenu";
-import { Popover } from "@/components/ui/Popover";
-import { Modal } from "@/components/ui/Modal";
-import { IconButton } from "@/components/ui/IconButton";
-import { Button } from "@/components/ui/Button";
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Icon,
+  IconButton,
+  Kbd,
+  Modal,
+  Popover,
+  Tooltip,
+} from "@/components/ui";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
 import {
   setDesktopModeOverride,
@@ -18,16 +44,26 @@ import { useScrollHideState } from "@/hooks/useScrollHide";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import { ctxTokensOf, findLineageCtxTurn } from "@/lib/context-usage";
+import { openKeyboardHelp } from "@/lib/shortcuts";
+import {
+  downloadFile,
+  exportJSON,
+  exportMarkdown,
+  safeFilename,
+} from "@/lib/export";
 import type { ChatNode } from "@/lib/types";
 
-// The 🧠 context-occupancy % uses a per-provider window (contextWindowFor),
-// resolved in-component from the current model — see lib/llm/providers.ts.
-// (The CLI stream carries no real window field, so it's a per-model lookup.)
-
-// In project mode every node under a root resumes the same claude session,
-// so the model's working memory at any moment ≈ the input bundle of the
-// most recent turn that actually reported tokens. cache_read carries the
-// prior history bytes; cache_creation is whatever just got added.
+// W4：Header 分三组（照 docs/ui-redesign/mockups/01-workbench.html）——
+//   左 = 导航：（侧栏收起时的）展开键 + 品牌 + 面包屑（工作区 › 会话名）
+//   中 = 会话语境：模式 chip、模型选择、上下文用量（中性细进度条；token 明细收进浮层）
+//   右 = 系统：搜索、主题、「更多」菜单（笔记 / 稍后再读 / 工作区文件 / 导出 /
+//        增强模式 / 快捷键 / 自动化任务 / 管理后台）、设置
+// 原先右侧约 12 个同权重控件 + ⚡🧠⏱🛡️ 一堆 emoji（⚡ 一符三义）在这里收口。
+//
+// 上下文占用用的是按模型查的窗口（contextWindowFor）—— CLI 流里没有窗口字段。
+// Project 模式下同一话题的所有节点复用同一个 claude 会话，所以任一时刻的
+// 工作记忆 ≈ 最近一轮上报过 token 的输入包（cache_read = 历史，
+// cache_creation = 刚追加的）。
 function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | null {
   let cur: ChatNode | undefined = nodes[nodeId];
   for (let i = 0; i < 1000 && cur; i++) {
@@ -37,15 +73,42 @@ function findRoot(nodeId: string, nodes: Record<string, ChatNode>): ChatNode | n
   return null;
 }
 
+type Totals = { input: number; output: number; cacheRead: number; cacheCreation: number };
+
+function UsageStats({ totals, nodeCount }: { totals: Totals; nodeCount: number }) {
+  const rows: [string, string][] = [
+    ["输入", formatTokens(totals.input)],
+    ["输出", formatTokens(totals.output)],
+    ["缓存读取", formatTokens(totals.cacheRead)],
+  ];
+  if (totals.cacheCreation > 0) rows.push(["缓存写入", formatTokens(totals.cacheCreation)]);
+  return (
+    <div>
+      <div className="flex items-center justify-between text-label text-ink-faint">
+        <span>本会话累计</span>
+        <span className="tabular-nums">{nodeCount} 个节点</span>
+      </div>
+      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-label">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-ink-muted">{k}</dt>
+            <dd className="text-right font-mono tabular-nums text-ink">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function ContextUsageDetails({
-  rootLabel,
+  topicLabel,
   tokens,
   percent,
   contextWindow,
   actionable,
   onStartFresh,
 }: {
-  rootLabel: string;
+  topicLabel: string;
   tokens: number;
   percent: number;
   contextWindow: number;
@@ -53,37 +116,65 @@ function ContextUsageDetails({
   onStartFresh: () => void;
 }) {
   return (
-    <>
-      <div className="text-ui font-semibold text-ink-strong flex items-center gap-1.5">
-        🧠 上下文占用 {percent.toFixed(1)}%
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-ui font-medium text-ink-strong">上下文占用</span>
+        <span className="font-mono text-ui tabular-nums text-ink">
+          {percent.toFixed(1)}%
+        </span>
       </div>
-      <div className="text-ui text-ink-muted mt-1.5 leading-relaxed">
-        当前 root「{rootLabel}」的 Claude 会话已用 {formatTokens(tokens)} /{" "}
+      <div className="mt-1.5 text-label leading-relaxed text-ink-muted">
+        当前话题「{topicLabel}」的 Claude 会话已用 {formatTokens(tokens)} /{" "}
         {formatTokens(contextWindow)} tokens。占用越高，模型越慢、缓存越难增长。
       </div>
       {actionable ? (
         <>
-          <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
-            claude CLI 的{" "}
-            <code className="px-1 rounded bg-surface-muted">/compact</code>{" "}
-            在这里暂无原生支持。可改为开一条「新话题」——全新上下文的根问答，等价{" "}
-            <code className="px-1 rounded bg-surface-muted">/clear</code>。
+          <div className="mt-1.5 text-label leading-relaxed text-ink-faint">
+            这里暂不支持 claude CLI 的 <code className="rounded bg-surface-muted px-1">/compact</code>。
+            可以开一个「新话题」——全新上下文的根问答，等同{" "}
+            <code className="rounded bg-surface-muted px-1">/clear</code>。
           </div>
-          <Button
-            variant="primary"
-            className="mt-2.5 w-full"
-            onClick={onStartFresh}
-          >
-            🧹 开新话题（清空上下文）
+          <Button variant="primary" className="mt-2.5 w-full" onClick={onStartFresh}>
+            开新话题（清空上下文）
           </Button>
         </>
       ) : (
-        <div className="text-label text-ink-faint mt-1.5 leading-relaxed">
-          占用尚低，无需处理。≥50% 时这里会提供「🧹 开新话题」一键清空上下文。
+        <div className="mt-1.5 text-label leading-relaxed text-ink-faint">
+          占用尚低，无需处理。达到 50% 时这里会提供「开新话题」一键清空上下文。
         </div>
       )}
+    </div>
+  );
+}
+
+// 中性细进度条。≥80% 才换 warn 色 —— 那是真正需要注意的时候；其余时间不抢眼。
+function ContextMeter({ percent }: { percent: number }) {
+  const shown = percent < 10 ? percent.toFixed(1) : String(Math.round(percent));
+  return (
+    <>
+      <span className="text-ink-muted">上下文</span>
+      <span
+        aria-hidden
+        className="relative h-1 w-11 overflow-hidden rounded-full bg-line"
+      >
+        <span
+          className={`absolute inset-y-0 left-0 rounded-full ${
+            percent >= 80 ? "bg-warn" : "bg-ink-muted"
+          }`}
+          style={{ width: `${Math.max(2, Math.min(100, percent))}%` }}
+        />
+      </span>
+      <span className={`font-mono tabular-nums ${percent >= 80 ? "text-warn-ink" : "text-ink"}`}>
+        {shown}%
+      </span>
     </>
   );
+}
+
+function basename(p: string): string {
+  const stripped = p.replace(/\/+$/, "");
+  const idx = stripped.lastIndexOf("/");
+  return idx === -1 ? stripped : stripped.slice(idx + 1);
 }
 
 export function Header({ isMobile }: { isMobile: boolean }) {
@@ -94,9 +185,13 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const nodes = useSessionStore((s) => s.nodes);
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const noteCount = useSessionStore((s) => s.notes.length);
+  const bookmarkCount = useSessionStore((s) => s.bookmarksTotal);
   const setNotesOpen = useSessionStore((s) => s.setNotesOpen);
+  const setBookmarksOpen = useSessionStore((s) => s.setBookmarksOpen);
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
+  const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
+  const setSidebarOpen = useSessionStore((s) => s.setSidebarOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
@@ -104,13 +199,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const provider = useSessionStore((s) => s.provider);
   const nodeCount = Object.keys(nodes).length;
   const contextWindow = contextWindowFor(provider);
-  // Aggregate four buckets independently — total input vs total output vs
-  // total cache leverage. Computed via useMemo (NOT inside the Zustand
-  // selector) because returning a fresh object from a selector defeats
-  // its referential-equality bail-out and triggers an infinite render
-  // loop ("getSnapshot should be cached"). The selector returns the
-  // stable nodes map; useMemo only recomputes when that ref changes.
-  const totals = useMemo(
+  // 四个桶各自累加。放 useMemo 而不是 Zustand selector：selector 每次返回新对象
+  // 会打破引用相等的短路，触发「getSnapshot should be cached」无限渲染。
+  const totals = useMemo<Totals>(
     () =>
       Object.values(nodes).reduce(
         (acc, n) => {
@@ -125,9 +216,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     [nodes],
   );
 
-  // Project-mode context occupancy for the currently-focused root's claude
-  // session. Skipped in chat because every turn is independent
-  // there — % has no meaning.
+  // Project 模式下当前话题的上下文占用。Chat 每轮独立，百分比没有意义。
   const ctx = useMemo(() => {
     if (session?.mode !== "project") return null;
     if (!activeNodeId) return null;
@@ -144,26 +233,15 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     };
   }, [session?.mode, activeNodeId, nodes, contextWindow]);
 
-  // Three-band color: muted → amber → rose. 80% is when context pressure
-  // usually starts mattering (model gets slower; cache stops growing).
-  const ctxTone =
-    ctx == null
-      ? ""
-      : ctx.percent >= 80
-        ? "text-danger"
-        : ctx.percent >= 50
-          ? "text-warn"
-          : "text-ink-muted";
-
-  // B3 (/compact degradation): once the focused root's claude session is
-  // ≥ 50% full, the 🧠 badge becomes a clickable affordance that opens a
-  // small popover explaining context pressure + a one-click "开新话题清空"
-  // shortcut (which spawns a fresh-context root — there is no native compact
-  // in the claude CLI / @smokingmouse/agent SDK, confirmed by spike). Below 50% the
-  // badge stays a plain non-interactive readout to avoid nagging.
+  // B3（/compact 降级）：用量浮层恒为可点的按钮形态（「静默从只读变可点」是
+  // Session 53 批过的反模式）；<50% 只做只读解释，≥50% 附「开新话题」动作。
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const [mobileOverflowOpen, setMobileOverflowOpen] = useState(false);
   const ctxActionable = ctx != null && ctx.percent >= 50;
+  const startFresh = () => {
+    setCtxPopoverOpen(false);
+    setComposeRootOpen(true);
+  };
 
   const [gwMe, setGwMe] = useState<{ role?: string } | null>(null);
   useEffect(() => {
@@ -206,12 +284,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             data-mobile-target="header-session-drawer"
             onClick={() => setMobileNavOpen(true)}
             className="h-11 w-11 p-0"
+            tooltip={false}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
+            <Icon icon={Menu} size="lg" />
           </IconButton>
           <div className="min-w-0 flex-1 px-1 text-center">
             <span
@@ -226,9 +301,10 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             data-mobile-target="header-overflow"
             aria-expanded={mobileOverflowOpen}
             onClick={() => setMobileOverflowOpen(true)}
-            className="h-11 w-11 p-0 text-xl tracking-widest"
+            className="h-11 w-11 p-0"
+            tooltip={false}
           >
-            <span aria-hidden>…</span>
+            <Icon icon={Ellipsis} size="lg" />
           </IconButton>
         </header>
         {headerHidden && (
@@ -252,7 +328,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           }}
         />
         {ctx && ctxPopoverOpen && (
-          <Modal onClose={() => setCtxPopoverOpen(false)}>
+          <Modal onClose={() => setCtxPopoverOpen(false)} title="上下文占用详情">
             <section
               data-context-usage-dialog
               aria-label="上下文占用详情"
@@ -262,21 +338,22 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 <IconButton
                   label="关闭上下文占用详情"
                   onClick={() => setCtxPopoverOpen(false)}
+                  tooltip={false}
                 >
-                  ×
+                  <Icon icon={X} />
                 </IconButton>
               </div>
               <ContextUsageDetails
-                rootLabel={ctx.rootLabel}
+                topicLabel={ctx.rootLabel}
                 tokens={ctx.tokens}
                 percent={ctx.percent}
                 contextWindow={contextWindow}
                 actionable={ctxActionable}
-                onStartFresh={() => {
-                  setCtxPopoverOpen(false);
-                  setComposeRootOpen(true);
-                }}
+                onStartFresh={startFresh}
               />
+              <div className="mt-3 border-t border-line-faint pt-3">
+                <UsageStats totals={totals} nodeCount={nodeCount} />
+              </div>
             </section>
           </Modal>
         )}
@@ -285,225 +362,289 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   }
 
   const narrowDesktopOverride = isNarrowViewport;
+  const workspaceName = session?.workspacePath ? basename(session.workspacePath) : null;
+  const sessionTitle = session?.title.trim() || "新会话";
+
+  const exportAs = (format: "markdown" | "json") => {
+    if (!session) return;
+    const all = Object.values(nodes);
+    if (format === "markdown") {
+      downloadFile(`${safeFilename(session.title)}.md`, exportMarkdown(session, all), "text/markdown");
+    } else {
+      downloadFile(
+        `${safeFilename(session.title)}.trellis.json`,
+        exportJSON(session, all),
+        "application/json",
+      );
+    }
+  };
+
+  const usageTip = (
+    <span className="tabular-nums">
+      输入 {formatTokens(totals.input)} · 输出 {formatTokens(totals.output)} · 缓存读取{" "}
+      {formatTokens(totals.cacheRead)}
+      {totals.cacheCreation > 0 ? ` · 缓存写入 ${formatTokens(totals.cacheCreation)}` : ""}
+    </span>
+  );
 
   return (
     <header
       data-safe-area="header"
-      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-3 sm:px-4 z-40 gap-2 sm:gap-3"
+      data-header
+      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-2 sm:px-3 z-40 gap-3"
       style={{
         height: "var(--trellis-header-h)",
         paddingTop: "var(--safe-top)",
       }}
     >
-      <div className="flex items-center gap-2 shrink-0">
-        {/* Mobile-only: open the session-list drawer. The left sidebar is
-            hidden on phones, so this is the only way to see / switch between
-            sessions there. */}
+      {/* ── 左：导航 ── */}
+      <div data-header-group="nav" className="flex min-w-0 flex-1 items-center gap-1.5">
+        {/* 手机以外的窄屏也可能走到这里（md 以下的「转桌面版」）：侧栏不常驻，
+            汉堡键打开会话抽屉。 */}
         <IconButton
           label="会话列表"
           data-mobile-target="header-session-drawer"
           onClick={() => setMobileNavOpen(true)}
-          className="md:hidden -ml-1"
+          className="md:hidden"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+          <Icon icon={Menu} />
         </IconButton>
-        {/* 品牌渐变固定色（不随主题换肤）：#6366f1 → #d946ef → #fbbf24 */}
-        <div className="w-6 h-6 rounded bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
-        <span className="font-semibold tracking-tight hidden sm:inline">Trellis</span>
-        <span className="text-ink-faint hidden sm:inline">/</span>
+        {/* 侧栏展开时，收起键在侧栏顶部；收起后展开键落在这里（同 mockup）。 */}
+        {!sidebarOpen && (
+          <IconButton
+            label="展开侧栏"
+            data-header-sidebar-toggle
+            onClick={() => setSidebarOpen(true)}
+            // IconButton 自带 inline-flex，没有 tailwind-merge，所以用 max-md:hidden 而不是 hidden md:inline-flex
+            className="max-md:hidden"
+          >
+            <Icon icon={PanelLeftOpen} />
+          </IconButton>
+        )}
+        {/* 品牌渐变固定色（不随主题换肤，刻意裁决）：#6366f1 → #d946ef → #fbbf24 */}
+        <div
+          aria-hidden
+          className="ml-0.5 size-5 shrink-0 rounded-md bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]"
+        />
+        <span className="hidden shrink-0 text-ui font-semibold tracking-tight text-ink-strong lg:inline">
+          Trellis
+        </span>
+        {session && (
+          <nav
+            aria-label="当前位置"
+            data-header-breadcrumb
+            className="ml-1 flex min-w-0 items-center gap-1 text-ui text-ink-muted"
+          >
+            <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />
+            {workspaceName ? (
+              <Tooltip content={`${session.workspacePath}（点击浏览工作区文件）`}>
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceFilesOpen(true)}
+                  className="max-w-40 shrink truncate rounded-md px-1 hover:bg-surface-hover hover:text-ink"
+                >
+                  {workspaceName}
+                </button>
+              </Tooltip>
+            ) : (
+              <span className="shrink-0 px-1">对话</span>
+            )}
+            <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />
+            <Tooltip content={sessionTitle}>
+              <span
+                tabIndex={0}
+                className="min-w-0 truncate px-1 font-medium text-ink-strong"
+              >
+                {sessionTitle}
+              </span>
+            </Tooltip>
+          </nav>
+        )}
       </div>
-      {/* The session switcher now lives in the always-visible SessionTabs
-          bar just below the Header (Wave 1). This spacer keeps the
-          right-side controls pinned to the edge. */}
-      <div className="flex-1 min-w-0" />
-      <div className="flex items-center gap-2 sm:gap-3 text-xs text-ink-muted shrink-0">
+
+      {/* ── 中：会话语境 ── */}
+      {/* 窄屏（手机用户手动「转桌面版」）下这一组可以收缩：模式 chip 让位，模型名截断，
+          不能盖住左侧的汉堡键。 */}
+      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5">
+        <div className="contents max-md:hidden">
+          <ModeBadge />
+        </div>
+        <ModelPicker />
+        {session && (
+          <Popover
+            open={ctxPopoverOpen}
+            onClose={() => setCtxPopoverOpen(false)}
+            align="end"
+            panelClassName="w-72 p-3"
+            trigger={
+              <Tooltip content={ctxPopoverOpen ? null : usageTip}>
+                <button
+                  type="button"
+                  data-header-usage
+                  onClick={() => setCtxPopoverOpen((v) => !v)}
+                  aria-expanded={ctxPopoverOpen}
+                  aria-label={
+                    // 文案被 mobile-safe-area 当钩子用；百分比在按钮可见文字里，读屏照样念到。
+                    ctx ? "上下文占用，点击查看详情" : "用量，点击查看详情"
+                  }
+                  className="hidden h-7 items-center gap-2 rounded-field px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
+                >
+                  {ctx ? (
+                    <ContextMeter percent={ctx.percent} />
+                  ) : (
+                    <span className="tabular-nums">{nodeCount} 个节点</span>
+                  )}
+                </button>
+              </Tooltip>
+            }
+          >
+            {ctx && (
+              <div className="mb-3 border-b border-line-faint pb-3">
+                <ContextUsageDetails
+                  topicLabel={ctx.rootLabel}
+                  tokens={ctx.tokens}
+                  percent={ctx.percent}
+                  contextWindow={contextWindow}
+                  actionable={ctxActionable}
+                  onStartFresh={startFresh}
+                />
+              </div>
+            )}
+            <UsageStats totals={totals} nodeCount={nodeCount} />
+          </Popover>
+        )}
+      </div>
+
+      {/* ── 右：系统 ── */}
+      <div data-header-group="system" className="flex flex-1 items-center justify-end gap-1">
+        <Tooltip content="搜索会话与节点内容" shortcut="⌘P">
+          <button
+            type="button"
+            aria-label="搜索"
+            onClick={() => setSearchOpen(true)}
+            className="hidden h-8 w-44 items-center gap-2 rounded-field border border-line bg-surface px-2.5 text-ui text-ink-faint transition-colors hover:bg-surface-hover hover:text-ink-muted lg:inline-flex"
+          >
+            <Icon icon={Search} size="sm" />
+            <span className="flex-1 text-left">搜索</span>
+            <Kbd>⌘P</Kbd>
+          </button>
+        </Tooltip>
         <IconButton
           label="搜索"
-          title="搜索 (⌘P)"
+          shortcut="⌘P"
           onClick={() => setSearchOpen(true)}
-          className="px-2 py-1"
+          className="lg:hidden"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M21 21l-4.3-4.3" />
-          </svg>
+          <Icon icon={Search} />
         </IconButton>
-        {session && (
-          <>
-            {session.mode === "chat" && (
+        <ThemeMenu />
+        <DropdownMenu>
+          <Tooltip content="更多">
+            <DropdownMenuTrigger asChild>
               <button
-                onClick={() => setChatEnhanced(!chatEnhanced)}
-                title="增强模式：开启后 chat 能跑 skill + 联网（YOLO，无沙箱、能跑任意命令）。默认关 = 纯对话。"
-                aria-label="增强模式"
-                className={`px-2 py-1 rounded inline-flex items-center gap-1 transition-colors ${
-                  chatEnhanced
-                    ? /* boost 复用 warn hue */
-                      "bg-warn-muted text-warn-ink"
-                    : "text-ink-muted hover:bg-surface-muted"
-                }`}
+                type="button"
+                aria-label="更多"
+                data-header-more
+                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink"
               >
-                <span aria-hidden>⚡</span>
-                <span className="hidden sm:inline text-label">
-                  {chatEnhanced ? "增强·开" : "增强"}
-                </span>
+                <Icon icon={Ellipsis} />
               </button>
+            </DropdownMenuTrigger>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-60">
+            {session && (
+              <DropdownMenuItem
+                icon={<Icon icon={NotebookPen} />}
+                shortcut={noteCount > 0 ? noteCount : undefined}
+                onSelect={() => setNotesOpen(true)}
+              >
+                笔记
+              </DropdownMenuItem>
             )}
-            <span className="hidden md:inline">{nodeCount} 节点</span>
-            <span className="hidden md:inline text-ink-faint">·</span>
-            <span
-              className="hidden md:inline-flex items-center gap-1.5 tabular-nums"
-              title={`输入 ${totals.input} · 输出 ${totals.output} · 缓存命中 ${totals.cacheRead}${
-                totals.cacheCreation > 0
-                  ? ` · 缓存写入 ${totals.cacheCreation}`
-                  : ""
-              }`}
+            <DropdownMenuItem
+              icon={<Icon icon={Bookmark} />}
+              shortcut={bookmarkCount > 0 ? bookmarkCount : undefined}
+              onSelect={() => setBookmarksOpen(true)}
             >
-              <span>↑{formatTokens(totals.input)}</span>
-              <span>↓{formatTokens(totals.output)}</span>
-              {(totals.cacheRead > 0 || totals.cacheCreation > 0) && (
-                <span className="text-positive">
-                  ⚡{formatTokens(totals.cacheRead)}
-                  {totals.cacheCreation > 0
-                    ? `+${formatTokens(totals.cacheCreation)}`
-                    : ""}
-                </span>
-              )}
-            </span>
-            {ctx && (
+              稍后再读
+            </DropdownMenuItem>
+            {session?.workspacePath && (
+              <DropdownMenuItem
+                icon={<Icon icon={FolderOpen} />}
+                onSelect={() => setWorkspaceFilesOpen(true)}
+              >
+                工作区文件
+              </DropdownMenuItem>
+            )}
+            {session && (
               <>
-                <span className="hidden md:inline text-ink-faint">·</span>
-                {/* 恒为按钮形态（描边 + hover）——「静默从只读变可点」是
-                    Session 53 批过的反模式；<50% 时 popover 只做只读解释，
-                    ≥50% 才附「开新话题」动作。 */}
-                <Popover
-                  open={ctxPopoverOpen}
-                  onClose={() => setCtxPopoverOpen(false)}
-                  panelClassName="w-72 p-3 text-left text-xs text-ink-muted"
-                  trigger={
-                    <button
-                      onClick={() => setCtxPopoverOpen((v) => !v)}
-                      className={`inline-flex items-center gap-1 tabular-nums rounded border border-line px-1.5 py-0.5 hover:bg-surface-muted transition-colors ${ctxTone}`}
-                      title={`当前 root「${ctx.rootLabel}」的 Claude 会话占用 ${formatTokens(ctx.tokens)} / ${formatTokens(contextWindow)} tokens (${ctx.percent.toFixed(1)}%)。点击查看详情。`}
-                      aria-label="上下文占用，点击查看详情"
-                      aria-expanded={ctxPopoverOpen}
-                    >
-                      🧠 {ctx.percent < 10 ? ctx.percent.toFixed(1) : Math.round(ctx.percent)}%
-                      {ctx.percent >= 80 && <span aria-hidden>⚠️</span>}
-                    </button>
-                  }
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  icon={<Icon icon={Download} />}
+                  shortcut=".md"
+                  onSelect={() => exportAs("markdown")}
                 >
-                  <ContextUsageDetails
-                    rootLabel={ctx.rootLabel}
-                    tokens={ctx.tokens}
-                    percent={ctx.percent}
-                    contextWindow={contextWindow}
-                    actionable={ctxActionable}
-                    onStartFresh={() => {
-                      setCtxPopoverOpen(false);
-                      setComposeRootOpen(true);
-                    }}
-                  />
-                </Popover>
+                  导出为 Markdown
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  icon={<Icon icon={Download} />}
+                  shortcut=".json"
+                  onSelect={() => exportAs("json")}
+                >
+                  导出为 JSON（可往返）
+                </DropdownMenuItem>
               </>
             )}
-            {/* Workspace-files drawer entry — only for sessions with a cwd
-                (project). A dedicated button: hiding this behind
-                the ModeBadge chip proved undiscoverable. */}
-            {session.workspacePath && (
-              <IconButton
-                label="工作区文件"
-                title="工作区文件（只读浏览）"
-                onClick={() => setWorkspaceFilesOpen(true)}
-                className="px-2 py-1"
+            <DropdownMenuSeparator />
+            {session?.mode === "chat" && (
+              <DropdownMenuItem
+                icon={<Icon icon={Sparkles} />}
+                shortcut={chatEnhanced ? "开" : "关"}
+                title="开启后对话可以跑技能 + 联网（自动批准，无沙箱、能执行任意命令）。默认关 = 纯对话。"
+                onSelect={() => setChatEnhanced(!chatEnhanced)}
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-              </IconButton>
+                增强模式
+              </DropdownMenuItem>
             )}
-            <IconButton
-              label="笔记"
-              onClick={() => setNotesOpen(true)}
-              className="px-2 py-1 gap-1.5"
+            <DropdownMenuItem
+              icon={<Icon icon={Keyboard} />}
+              shortcut={<Kbd>?</Kbd>}
+              onSelect={() => openKeyboardHelp()}
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
+              快捷键
+            </DropdownMenuItem>
+            {/* 自动化任务：S89 起是管理台的一个 tab，但 Header 上**保留**入口 ——
+                「入口太深」是零使用的头号嫌疑（facts.md 第一条）。W4 把它从一个
+                独立的 ⏱ 图标收进「更多」，入口仍在一级菜单里。 */}
+            <DropdownMenuItem
+              icon={<Icon icon={CalendarClock} />}
+              onSelect={() => window.location.assign("/settings/tasks")}
+            >
+              自动化任务
+            </DropdownMenuItem>
+            {/* 管理员入口：调 GET /__gw/api/me 感知，role=admin 时露出 */}
+            {gwMe?.role === "admin" && (
+              <DropdownMenuItem
+                icon={<Icon icon={ShieldCheck} />}
+                onSelect={() => window.location.assign("/admin")}
               >
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              </svg>
-              {noteCount > 0 && (
-                <span className="tabular-nums text-label">
-                  {noteCount}
-                </span>
-              )}
-            </IconButton>
-            <ExportMenu />
-          </>
-        )}
-        <ModeBadge />
-        <ModelPicker />
-        <ThemeMenu />
-        {/* 自动化任务。S89 起它是管理台的一个 tab，但 Header 上这个 ⏱ **保留**。
-            原计划是等任务日常入口转移到侧栏（spec 批 4）后删掉它、Header 收敛到一个 ⚙；
-            但 S89 查真库发现 tasks / task_runs 全是 0 行（facts.md 第一条），批 4 已降级，
-            而「入口太深」正是零使用的头号嫌疑 —— 这时候把入口改深是反着来的。
-            删它的条件改成：任务真的被用起来、且侧栏有了替代入口。 */}
-        <a
-          href="/settings/tasks"
-          title="自动化任务"
-          aria-label="自动化任务"
-          className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"
-        >
-          <span aria-hidden className="text-[13px] leading-none">
-            ⏱
-          </span>
-        </a>
-        {/* 管理员入口：调 GET /__gw/api/me 感知，role=admin 时露出 */}
-        {gwMe?.role === "admin" && (
+                管理后台
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* 设置是整页而不是弹层：版本、落后的提交、部署进度、失败日志，没有一样
+            塞得进下拉。用 <a> 而不是 <Link> —— 从画布跳走时让浏览器真的换一页，
+            别把一整棵 React Flow 的状态背着走。 */}
+        <Tooltip content="设置">
           <a
-            href="/admin"
-            title="管理后台"
-            aria-label="管理后台"
-            className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"
+            href="/settings"
+            aria-label="设置"
+            className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
           >
-            <span aria-hidden className="text-[13px] leading-none">
-              🛡️
-            </span>
+            <Icon icon={Settings} />
           </a>
-        )}
+        </Tooltip>
         {narrowDesktopOverride && (
           <button
             type="button"
@@ -519,30 +660,6 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             回手机版
           </button>
         )}
-        {/* 设置是整页而不是 popover：版本、落后的 commit、部署进度、失败日志，
-            没有一样塞得进一个下拉。用 <a> 而不是 <Link> —— 从画布跳走时让浏览器
-            真的换一页，别把一整棵 React Flow 的状态背着走。 */}
-        <a
-          href="/settings"
-          title="设置"
-          aria-label="设置"
-          className="inline-flex items-center justify-center px-2 py-1 rounded-md text-ink-muted hover:text-ink hover:bg-surface-muted"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </a>
       </div>
     </header>
   );
