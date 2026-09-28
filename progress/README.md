@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-UI 重设计（克制工具风）W1–W5 已在 feat/ui-redesign 完成并全绿，待验收合 main；devbox 启动补齐窗口待收尾。
+UI 重设计（克制工具风）+ 工作台首页已上线（bb4491540）；devbox 启动补齐窗口待收尾。
 
 ## Goals
 
