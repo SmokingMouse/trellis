@@ -63,7 +63,7 @@ export const COMMANDS: Command[] = [
   },
   {
     name: "clear",
-    description: "新话题：当前会话内清空上下文 🧹（树保留）",
+    description: "新话题：当前会话内清空上下文（树保留）",
     requiresSession: true,
     run: (store) => {
       if (!store.session) return "没有当前 session — 先开一个对话再 /clear";

@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Eraser, FileText, type LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui/Icon";
 import { ReferencePicker } from "./ReferencePicker";
 import { NewQuestionPicker } from "./NewQuestionPicker";
 
@@ -45,13 +47,13 @@ export function AddNodeFAB() {
           <div className="absolute bottom-14 right-0 w-56 bg-surface-raised border border-line rounded-lg shadow-pop py-1 text-sm ui-enter-pop">
             <MenuItem
               onClick={() => open("question")}
-              icon="🧹"
+              icon={Eraser}
               title="新话题（清空上下文）"
               hint="等价 /clear · 不继承现有节点"
             />
             <MenuItem
               onClick={() => open("reference")}
-              icon="📄"
+              icon={FileText}
               title="参考卡片"
               hint="粘贴 / URL"
             />
@@ -96,7 +98,7 @@ function MenuItem({
   hint,
   onClick,
 }: {
-  icon: string;
+  icon: LucideIcon;
   title: string;
   hint: string;
   onClick: () => void;
@@ -106,9 +108,7 @@ function MenuItem({
       onClick={onClick}
       className="w-full flex items-center gap-3 px-3 py-2 hover:bg-surface-muted text-left"
     >
-      <span aria-hidden className="text-base leading-none">
-        {icon}
-      </span>
+      <Icon icon={icon} className="text-ink-muted" />
       <span className="flex-1">
         <span className="block text-ink-strong">{title}</span>
         <span className="block text-label text-ink-muted">

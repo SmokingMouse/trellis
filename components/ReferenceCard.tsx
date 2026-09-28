@@ -9,7 +9,8 @@ import {
 import { useSessionStore } from "@/stores/sessionStore";
 import type { ChatNode as ChatNodeData } from "@/lib/types";
 import { refIconKey, refSourceLabel } from "@/lib/ref-icon";
-import { RefIcon } from "@/components/ui/Icon";
+import { Icon, RefIcon } from "@/components/ui/Icon";
+import { TriangleAlert } from "lucide-react";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { CollapseChip } from "./CollapseChip";
 import { DeleteCardButton } from "./DeleteCardButton";
@@ -143,8 +144,9 @@ function ReferenceCardImpl({ data }: NodeProps<RefFlowNode>) {
               {fetchProgress || "启动中…"}
             </div>
           ) : fetchError ? (
-            <div className="mt-1 text-label text-danger truncate">
-              ⚠️ {fetchError}
+            <div className="mt-1 flex items-center gap-1 text-label text-danger">
+              <Icon icon={TriangleAlert} size="sm" className="shrink-0" />
+              <span className="truncate">{fetchError}</span>
             </div>
           ) : (
             <div className="mt-1 text-label text-ink-faint tabular-nums">

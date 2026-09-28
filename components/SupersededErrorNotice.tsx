@@ -1,6 +1,8 @@
 "use client";
 import { useSessionStore } from "@/stores/sessionStore";
 import { Button } from "./ui/Button";
+import { Icon } from "./ui/Icon";
+import { TriangleAlert } from "lucide-react";
 
 // 错误降级：本轮虽然中断/出错，但该节点已有子节点 —— 用户已经用追问续跑
 // 或另开分支绕过了它，红色横幅的「待处理」语义已经过时。降级成一条安静的
@@ -21,9 +23,7 @@ export function SupersededErrorNotice({
       onClick={(e) => e.stopPropagation()}
     >
       <summary className="cursor-pointer select-none inline-flex items-center gap-1.5 hover:text-ink-muted">
-        <span className="text-warn-ink" aria-hidden>
-          ⚠
-        </span>
+        <Icon icon={TriangleAlert} size="sm" className="text-warn-ink" />
         <span>{aborted ? "本轮已手动停止" : "本轮中途中断"} · 后续已继续</span>
       </summary>
       <div className="mt-1.5 p-2 rounded bg-surface-muted border border-line text-ink-muted flex items-start gap-2">

@@ -323,7 +323,7 @@ export async function checkAuthAlerts(): Promise<void> {
       await notify({
         kind: "auth_alert",
         title: c.title,
-        body: `${c.body}\n（设置 → 模型与 Provider 查看授权状态）`,
+        body: `${c.body}\n（设置 → 模型与服务商 查看授权状态）`,
       });
       state[c.key] = now;
       dirty = true;

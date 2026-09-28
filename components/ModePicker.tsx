@@ -10,6 +10,8 @@ import {
   workspaceRequired,
 } from "@/lib/run-config";
 import { WorkspaceField } from "./run-config/WorkspaceField";
+import { ShieldCheck, Zap } from "lucide-react";
+import { Icon } from "./ui/Icon";
 
 // Stage 14: the mode picker only appears in the new-session draft state
 // (the empty QuestionInput). It edits draftMode + draftWorkspacePath in
@@ -156,7 +158,7 @@ export function ModePicker() {
               : "border-line-strong bg-surface text-ink-faint hover:bg-surface-muted"
           }`}
         >
-          <span aria-hidden>{approval.icon}</span>
+          <Icon icon={approval.icon === "shield" ? ShieldCheck : Zap} size="sm" />
           <span>{approval.label}</span>
         </button>
       )}

@@ -1,14 +1,16 @@
 "use client";
 import { useState } from "react";
+import { Check, X } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
+import { Icon } from "@/components/ui/Icon";
 
-// Shared "copy to clipboard" button with a transient ✓ confirmation.
+// Shared "copy to clipboard" button with a transient check-mark confirmation.
 // Used for "copy whole reply" in ChatNode/NodeFullView footers. Code-block
 // copy lives in CodeBlock.tsx (different layout, same clipboard pattern).
 export function CopyButton({
   text,
   label = "复制",
-  copiedLabel = "✓ 已复制",
+  copiedLabel = "已复制",
   className,
   title = "复制全文（markdown 源）",
 }: {
@@ -47,7 +49,19 @@ export function CopyButton({
         "nodrag px-2 py-0.5 rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong transition-colors"
       }`}
     >
-      {failed ? "✗ 复制失败" : copied ? copiedLabel : label}
+      {failed ? (
+        <span className="inline-flex items-center gap-1">
+          <Icon icon={X} size="sm" />
+          复制失败
+        </span>
+      ) : copied ? (
+        <span className="inline-flex items-center gap-1">
+          <Icon icon={Check} size="sm" />
+          {copiedLabel}
+        </span>
+      ) : (
+        label
+      )}
     </button>
   );
 }

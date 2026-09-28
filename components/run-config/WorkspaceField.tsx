@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { WorkspacePicker } from "@/components/WorkspacePicker";
+import { Folder } from "lucide-react";
+import { Icon } from "@/components/ui/Icon";
 import { basename, middleEllipsisPath } from "@/lib/run-config";
 
 // S89: 「选一个工作目录」这个控件。新会话（ModePicker）和任务定义（/settings/tasks）
@@ -60,7 +62,7 @@ export function WorkspaceField({
             : "border-line-strong bg-surface text-ink hover:bg-surface-muted"
         } ${className}`}
       >
-        <span aria-hidden>📁</span>
+        <Icon icon={Folder} size="sm" />
         <span className="hidden md:inline truncate font-mono">
           {value ? basename(value) : placeholder}
         </span>

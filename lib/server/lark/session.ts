@@ -58,7 +58,7 @@ export function createRootInLarkChat(args: {
   createSessionWithRoot({
     sessionId,
     nodeId,
-    title: `💬 ${args.title}`,
+    title: args.title, // 来源由侧栏的飞书图标表达，标题不再前缀 emoji
     question: args.question,
     now: args.now,
     mode,
