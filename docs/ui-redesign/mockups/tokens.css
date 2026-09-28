@@ -1,0 +1,247 @@
+/* ─────────────────────────────────────────────────────────────────────
+   Trellis UI 重设计 · 克制工具风 · 设计 token（2026-09-28 静态稿）
+
+   用法：本文件是三份静态稿的唯一色值来源（构建时内联进各 HTML）。
+   变量名 = app/globals.css 的现有语义名，**只改取值不改名**；
+   标「新增」的是 globals.css 目前没有、落地时需要补进 :root / .dark
+   和 @theme inline 的变量。
+
+   原则
+   - 中性色承担 95% 的界面；强调色（低饱和蓝紫）只给主按钮 / 选中 / 焦点环。
+   - 状态色（positive / warn / danger）只做 6px 圆点与 1px 细描边，不做大面积填充。
+   - 六个语义拆开撞色（旧版：未读=成功、分叉=警告、Project=危险）：
+       unread   蓝紫偏亮（与强调同族——「等你处理」的提示）   h≈268
+       positive 绿                                              h≈155
+       fork     兰紫 / 洋红（不再用琥珀）                       h≈330
+       warn     琥珀                                            h≈70
+       mode-project 低饱和青（不再用红族）                      h≈195
+       danger   红                                              h≈25
+   - 卡片无阴影，1px ≈10% 描边；只有浮层（下拉、弹窗、树浮窗）用极轻阴影。
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* ── 字体（新增；globals.css 目前走 Tailwind 默认 font-sans） ── */
+  --font-sans: "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* ── 字号（对应 @theme 的 --text-*，整体上调到 13–14px 控件基线） ── */
+  --text-nano: 11px;    /* ← --text-nano（原 10px）：kbd / 角标 */
+  --text-label: 12px;   /* ← --text-label（原 11px）：meta / 时间 / 计数 */
+  --text-ui: 13px;      /* ← --text-ui（原 12.5px）：控件默认 */
+  --text-body: 14px;    /* ← --text-body：画布正文 / 输入框 */
+  --text-reading: 15px; /* ← --text-reading：线性正文 */
+  --text-title: 17px;   /* ← --text-title（原 18px） */
+
+  /* ── 圆角（对应 @theme 的 --radius-*，整体收紧一档） ── */
+  --radius-field: 6px;   /* ← --radius-field（原 8px）：按钮 / 输入 / chip = rounded-md */
+  --radius-card: 8px;    /* ← --radius-card（原 12px）：卡片 / 代码块 */
+  --radius-overlay: 10px;/* ← --radius-overlay（原 16px）：下拉 / 弹窗 / 浮窗 */
+
+  /* ── 尺寸（新增） ── */
+  --control-h: 32px;     /* 新增：所有桌面控件统一 h-8 */
+  --control-h-sm: 26px;  /* 新增：表格行内的次级小按钮 */
+  --touch-min: 44px;     /* 新增：手机热区下限（mobile-verify 依赖 44px） */
+
+  /* ── 表面 ── */
+  --surface-canvas: #fafafa;           /* ← --surface-canvas（原 stone-50） */
+  --surface: #ffffff;                  /* ← --surface */
+  --surface-raised: #ffffff;           /* ← --surface-raised：浮层底 */
+  --surface-muted: #f3f3f4;            /* ← --surface-muted：用户消息块 / 分段器底 */
+  --surface-hover: rgba(0, 0, 0, 0.04);/* 新增：行 hover，替代各处 hover:bg-stone-100 */
+  --scrim: rgba(9, 9, 11, 0.36);       /* ← --scrim（原配 /50 用，这里直接给成品值） */
+
+  /* ── 描边（改成半透明，深浅皮肤都是「约 10%」） ── */
+  --line: rgba(0, 0, 0, 0.09);         /* ← --line：卡片 / 分隔线 */
+  --line-strong: rgba(0, 0, 0, 0.16);  /* ← --line-strong：输入框 / 描边按钮 */
+  --line-faint: rgba(0, 0, 0, 0.05);   /* ← --line-faint：表格行内分隔 */
+
+  /* ── 文字：近黑 + 两档灰 ── */
+  --ink: #1b1b1f;                      /* ← --ink */
+  --ink-strong: #0b0b0d;               /* ← --ink-strong：标题 */
+  --ink-muted: #56565f;                /* ← --ink-muted：灰一档（7.1:1 on #fafafa） */
+  --ink-faint: #74747e;                /* ← --ink-faint：灰二档（4.6:1 on #fafafa，满足 AA） */
+  --ink-inverse: #ffffff;              /* ← --ink-inverse */
+
+  /* ── 强调：唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） ── */
+  --accent: oklch(52% 0.12 277);       /* ← --accent：主按钮底 / 选中指示 */
+  --accent-strong: oklch(46% 0.12 277);/* ← --accent-strong：主按钮 hover */
+  --accent-ink: oklch(42% 0.1 277);    /* ← --accent-ink：淡底上的强调文字 */
+  --accent-muted: oklch(96.5% 0.014 277);/* ← --accent-muted：选中行底 */
+  --accent-line: oklch(84% 0.045 277); /* ← --accent-line：选中描边 */
+  --accent-fg: #ffffff;                /* 新增：主按钮上的文字（深色皮肤不必是 ink-inverse） */
+  --focus-ring: oklch(52% 0.12 277 / 0.35); /* 新增：统一焦点环（2px） */
+
+  /* ── 状态色：只做圆点与细描边 ── */
+  --warn: oklch(72% 0.14 70);          /* ← --warn */
+  --warn-ink: oklch(45% 0.09 60);      /* ← --warn-ink */
+  --warn-muted: oklch(97.5% 0.02 80);  /* ← --warn-muted */
+  --warn-line: oklch(85% 0.08 75);     /* ← --warn-line */
+  --danger: oklch(58% 0.18 25);        /* ← --danger */
+  --danger-strong: oklch(52% 0.18 25); /* ← --danger-strong */
+  --danger-ink: oklch(46% 0.14 25);    /* ← --danger-ink */
+  --danger-muted: oklch(97% 0.012 25); /* ← --danger-muted */
+  --danger-line: oklch(86% 0.05 25);   /* ← --danger-line */
+  --positive: oklch(62% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(42% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(97.5% 0.015 155); /* ← --positive-muted */
+  --positive-line: oklch(85% 0.06 155);/* ← --positive-line */
+
+  /* ── 未读：与「成功」拆开，改用强调同族的亮蓝紫 ── */
+  --unread: oklch(60% 0.13 268);       /* ← --unread（原 emerald，与 positive 撞） */
+  --unread-ink: oklch(44% 0.1 268);    /* ← --unread-ink */
+  --unread-muted: oklch(96.5% 0.016 268); /* ← --unread-muted */
+  --unread-line: oklch(84% 0.05 268);  /* ← --unread-line */
+
+  /* ── 分叉：与「警告」拆开，改兰紫 ── */
+  --fork: oklch(58% 0.11 330);         /* ← --fork（原 amber，与 warn 撞） */
+  --fork-ink: oklch(44% 0.09 330);     /* ← --fork-ink */
+  --fork-muted: oklch(96.5% 0.02 330); /* ← --fork-muted */
+  --fork-line: oklch(84% 0.06 330);    /* ← --fork-line */
+
+  /* ── 模式：Chat 中性灰；Project 改低饱和青（原 rose，与 danger 撞） ── */
+  --mode-chat: #9a9aa3;                /* ← --mode-chat */
+  --mode-chat-ink: #3f3f46;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #f3f3f4;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(0, 0, 0, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(0, 0, 0, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(60% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(42% 0.06 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(97% 0.012 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(85% 0.04 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(70% 0.07 195); /* ← --mode-project-line-strong */
+
+  /* ── 画布 ── */
+  --accent-vivid: oklch(56% 0.13 277); /* ← --accent-vivid */
+  --edge: oklch(84% 0.02 277);         /* ← --edge：连线降到近中性 */
+  --edge-active: oklch(56% 0.12 277);  /* ← --edge-active */
+
+  /* ── 代码：浅色皮肤下代码块也浅（旧「代码块恒暗」待用户确认是否保留） ── */
+  --code-bg: #f6f6f7;                  /* ← --code-bg */
+  --code-ink: #1b1b1f;                 /* ← --code-ink */
+  --code-bar-bg: #f6f6f7;              /* ← --code-bar-bg：与正文同底，靠分隔线区分 */
+  --code-bar-line: rgba(0, 0, 0, 0.07);/* ← --code-bar-line */
+  --code-inline-ink: #1b1b1f;          /* ← --code-inline-ink（原 pink-700，去掉） */
+  --code-inline-bg: rgba(0, 0, 0, 0.05); /* 新增：行内 code 灰底 */
+  --code-comment: #8b8b94;             /* 新增：唯一的语法着色——注释降灰 */
+  --code-add-bg: oklch(62% 0.13 155 / 0.08); /* 新增：diff 新增行底 */
+  --code-del-bg: oklch(58% 0.18 25 / 0.07);  /* 新增：diff 删除行底 */
+
+  /* ── 正文划选标记 ── */
+  --mark-fork-bg: oklch(58% 0.11 330 / 0.12);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(58% 0.11 330 / 0.55); /* ← --mark-fork-line（下划线） */
+  --mark-fork-hover-bg: oklch(58% 0.11 330 / 0.2); /* ← --mark-fork-hover-bg */
+  --mark-fork-ink: inherit;                     /* ← --mark-fork-ink */
+  --mark-fork-pulse-bg: oklch(58% 0.11 330 / 0.3);   /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(58% 0.11 330 / 0.5); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(62% 0.13 155 / 0.1);    /* ← --mark-note-bg */
+  --mark-note-line: oklch(62% 0.13 155 / 0.5);  /* ← --mark-note-line */
+  --mark-note-ink: inherit;                     /* ← --mark-note-ink */
+  --mark-note-pulse-bg: oklch(62% 0.13 155 / 0.25);  /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(62% 0.13 155 / 0.5); /* ← --mark-note-pulse-ring */
+
+  /* ── 层级（新增）：只有浮层有阴影 ── */
+  --shadow-overlay: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px -8px rgba(0, 0, 0, 0.14);
+  --shadow-float: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 14px -6px rgba(0, 0, 0, 0.12);
+  --z-float: 20;   /* 新增：TreePanel 浮窗 */
+  --z-popover: 50; /* 新增：下拉 / 菜单（必须高于 TreePanel，修 d-14 遮挡） */
+  --z-modal: 60;   /* 新增：⌘K / 弹窗 */
+
+  /* ── 动效（新增）：弹层 100ms 淡入 + 0.97 缩放 ── */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface-canvas: #0b0b0c;           /* ← --surface-canvas（原 stone-950） */
+  --surface: #111113;                  /* ← --surface */
+  --surface-raised: #18181b;           /* ← --surface-raised */
+  --surface-muted: #1c1c20;            /* ← --surface-muted */
+  --surface-hover: rgba(255, 255, 255, 0.05); /* 新增 */
+  --scrim: rgba(0, 0, 0, 0.6);         /* ← --scrim */
+
+  --line: rgba(255, 255, 255, 0.09);   /* ← --line */
+  --line-strong: rgba(255, 255, 255, 0.16); /* ← --line-strong */
+  --line-faint: rgba(255, 255, 255, 0.05);  /* ← --line-faint */
+
+  --ink: #e8e8eb;                      /* ← --ink */
+  --ink-strong: #fafafa;               /* ← --ink-strong */
+  --ink-muted: #a3a3ac;                /* ← --ink-muted（8.3:1 on #0b0b0c） */
+  --ink-faint: #7e7e89;                /* ← --ink-faint（4.9:1 on #0b0b0c） */
+  --ink-inverse: #0b0b0c;              /* ← --ink-inverse */
+
+  --accent: oklch(57% 0.12 277);       /* ← --accent */
+  --accent-strong: oklch(62% 0.12 277);/* ← --accent-strong（深色 hover 变亮） */
+  --accent-ink: oklch(80% 0.08 277);   /* ← --accent-ink */
+  --accent-muted: oklch(25% 0.035 277);/* ← --accent-muted */
+  --accent-line: oklch(42% 0.07 277);  /* ← --accent-line */
+  --accent-fg: #ffffff;                /* 新增 */
+  --focus-ring: oklch(68% 0.12 277 / 0.45); /* 新增 */
+
+  --warn: oklch(78% 0.13 75);          /* ← --warn */
+  --warn-ink: oklch(86% 0.09 85);      /* ← --warn-ink */
+  --warn-muted: oklch(25% 0.03 70);    /* ← --warn-muted */
+  --warn-line: oklch(45% 0.07 70);     /* ← --warn-line */
+  --danger: oklch(66% 0.17 25);        /* ← --danger */
+  --danger-strong: oklch(71% 0.15 25); /* ← --danger-strong */
+  --danger-ink: oklch(84% 0.08 25);    /* ← --danger-ink */
+  --danger-muted: oklch(24% 0.04 25);  /* ← --danger-muted */
+  --danger-line: oklch(44% 0.09 25);   /* ← --danger-line */
+  --positive: oklch(72% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(85% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(24% 0.03 155); /* ← --positive-muted */
+  --positive-line: oklch(44% 0.07 155);/* ← --positive-line */
+
+  --unread: oklch(70% 0.12 268);       /* ← --unread */
+  --unread-ink: oklch(84% 0.07 268);   /* ← --unread-ink */
+  --unread-muted: oklch(25% 0.035 268);/* ← --unread-muted */
+  --unread-line: oklch(44% 0.07 268);  /* ← --unread-line */
+
+  --fork: oklch(70% 0.11 330);         /* ← --fork */
+  --fork-ink: oklch(84% 0.07 330);     /* ← --fork-ink */
+  --fork-muted: oklch(25% 0.035 330);  /* ← --fork-muted */
+  --fork-line: oklch(44% 0.07 330);    /* ← --fork-line */
+
+  --mode-chat: #7e7e89;                /* ← --mode-chat */
+  --mode-chat-ink: #d4d4d8;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #1c1c20;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(255, 255, 255, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(255, 255, 255, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(70% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(84% 0.05 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(24% 0.025 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(42% 0.05 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(56% 0.07 195); /* ← --mode-project-line-strong */
+
+  --accent-vivid: oklch(66% 0.12 277); /* ← --accent-vivid */
+  --edge: oklch(34% 0.03 277);         /* ← --edge */
+  --edge-active: oklch(66% 0.12 277);  /* ← --edge-active */
+
+  --code-bg: #141416;                  /* ← --code-bg */
+  --code-ink: #e4e4e7;                 /* ← --code-ink */
+  --code-bar-bg: #141416;              /* ← --code-bar-bg */
+  --code-bar-line: rgba(255, 255, 255, 0.07); /* ← --code-bar-line */
+  --code-inline-ink: #e8e8eb;          /* ← --code-inline-ink */
+  --code-inline-bg: rgba(255, 255, 255, 0.07); /* 新增 */
+  --code-comment: #6f6f7a;             /* 新增 */
+  --code-add-bg: oklch(72% 0.13 155 / 0.1);  /* 新增 */
+  --code-del-bg: oklch(66% 0.17 25 / 0.1);   /* 新增 */
+
+  --mark-fork-bg: oklch(70% 0.11 330 / 0.16);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(70% 0.11 330 / 0.6);  /* ← --mark-fork-line */
+  --mark-fork-hover-bg: oklch(70% 0.11 330 / 0.26); /* ← --mark-fork-hover-bg */
+  --mark-fork-pulse-bg: oklch(70% 0.11 330 / 0.35);  /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(70% 0.11 330 / 0.6); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(72% 0.13 155 / 0.14);   /* ← --mark-note-bg */
+  --mark-note-line: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-line */
+  --mark-note-pulse-bg: oklch(72% 0.13 155 / 0.3);   /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-pulse-ring */
+
+  --shadow-overlay: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
+}

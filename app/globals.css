@@ -45,168 +45,175 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --trellis-header-h: calc(3rem + var(--safe-top));
 
-  /* 中性族 —— stone */
-  --surface-canvas: oklch(98.5% 0.001 106.423); /* stone-50 */
+  /* ── 克制工具风（2026-09-28 重设计，docs/ui-redesign/）──
+     中性色承担 95% 的界面；强调色只给主按钮 / 选中 / 焦点环；
+     状态色只做圆点与细描边。六个语义拆开撞色：
+     unread 亮蓝紫 h268 · positive 绿 h155 · fork 兰紫 h330 ·
+     warn 琥珀 h70 · mode-project 低饱和青 h195 · danger 红 h25 */
+
+  /* 中性族 —— 近单色灰（描边半透明，深浅皮肤都是约 10%） */
+  --surface-canvas: #fafafa;
   --surface: #fff;
   --surface-raised: #fff;
-  --surface-muted: oklch(97% 0.001 106.424); /* stone-100 */
-  --scrim: oklch(14.7% 0.004 49.25); /* stone-950，配 /50 使用 */
-  --line: oklch(92.3% 0.003 48.717); /* stone-200 */
-  --line-strong: oklch(86.9% 0.005 56.366); /* stone-300 */
-  --line-faint: oklch(97% 0.001 106.424); /* stone-100 */
-  --ink: oklch(21.6% 0.006 56.043); /* stone-900 */
-  --ink-strong: oklch(21.6% 0.006 56.043); /* stone-900 */
-  --ink-muted: oklch(44.4% 0.011 73.639); /* stone-600 */
-  --ink-faint: oklch(70.9% 0.01 56.259); /* stone-400 */
+  --surface-muted: #f3f3f4;
+  --scrim: #09090b; /* 配 /50 使用，必须是实色 */
+  --line: rgb(0 0 0 / 0.09);
+  --line-strong: rgb(0 0 0 / 0.16);
+  --line-faint: rgb(0 0 0 / 0.05);
+  --ink: #1b1b1f;
+  --ink-strong: #0b0b0d;
+  --ink-muted: #56565f; /* 7.1:1 on canvas */
+  --ink-faint: #74747e; /* 4.6:1 on canvas，满足 AA */
   --ink-inverse: #fff;
 
-  /* accent —— indigo（主按钮/焦点/流式/选中） */
-  --accent: oklch(51.1% 0.262 276.966); /* indigo-600 */
-  --accent-strong: oklch(45.7% 0.24 277.023); /* indigo-700 */
-  --accent-ink: oklch(35.9% 0.144 278.697); /* indigo-900 */
-  --accent-muted: oklch(96.2% 0.018 272.314); /* indigo-50 */
-  --accent-line: oklch(87% 0.065 274.039); /* indigo-200 */
+  /* accent —— 唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） */
+  --accent: oklch(52% 0.12 277);
+  --accent-strong: oklch(46% 0.12 277);
+  --accent-ink: oklch(42% 0.1 277);
+  --accent-muted: oklch(96.5% 0.014 277);
+  --accent-line: oklch(84% 0.045 277);
 
-  /* 状态色 —— warn(amber) / danger(rose) / positive(emerald) / unread(=emerald) */
-  --warn: oklch(76.9% 0.188 70.08); /* amber-500 */
-  --warn-ink: oklch(41.4% 0.112 45.904); /* amber-900 */
-  --warn-muted: oklch(98.7% 0.022 95.277); /* amber-50 */
-  --warn-line: oklch(87.9% 0.169 91.605); /* amber-300 */
-  --danger: oklch(58.6% 0.253 17.585); /* rose-600 */
-  --danger-strong: oklch(51.4% 0.222 16.935); /* rose-700 */
-  --danger-ink: oklch(41% 0.159 10.272); /* rose-900 */
-  --danger-muted: oklch(96.9% 0.015 12.422); /* rose-50 */
-  --danger-line: oklch(89.2% 0.058 10.001); /* rose-200 */
-  --positive: oklch(69.6% 0.17 162.48); /* emerald-500 */
-  --positive-ink: oklch(37.8% 0.077 168.94); /* emerald-900 */
-  --positive-muted: oklch(97.9% 0.021 166.113); /* emerald-50 */
-  --positive-line: oklch(84.5% 0.143 164.978); /* emerald-300 */
-  --unread: oklch(69.6% 0.17 162.48); /* emerald-500 */
-  --unread-ink: oklch(37.8% 0.077 168.94); /* emerald-900 */
-  --unread-muted: oklch(97.9% 0.021 166.113); /* emerald-50 */
-  --unread-line: oklch(84.5% 0.143 164.978); /* emerald-300 */
+  /* 状态色 */
+  --warn: oklch(72% 0.14 70);
+  --warn-ink: oklch(45% 0.09 60);
+  --warn-muted: oklch(97.5% 0.02 80);
+  --warn-line: oklch(85% 0.08 75);
+  --danger: oklch(58% 0.18 25);
+  --danger-strong: oklch(52% 0.18 25);
+  --danger-ink: oklch(46% 0.14 25);
+  --danger-muted: oklch(97% 0.012 25);
+  --danger-line: oklch(86% 0.05 25);
+  --positive: oklch(62% 0.13 155);
+  --positive-ink: oklch(42% 0.08 155);
+  --positive-muted: oklch(97.5% 0.015 155);
+  --positive-line: oklch(85% 0.06 155);
+  /* unread —— 与 positive 拆开：强调同族的亮蓝紫 */
+  --unread: oklch(60% 0.13 268);
+  --unread-ink: oklch(44% 0.1 268);
+  --unread-muted: oklch(96.5% 0.016 268);
+  --unread-line: oklch(84% 0.05 268);
 
-  /* fork —— 分叉锚点（banner/badge），默认与 warn 同值但独立可换 */
-  --fork: oklch(76.9% 0.188 70.08); /* amber-500 */
-  --fork-ink: oklch(41.4% 0.112 45.904); /* amber-900 */
-  --fork-muted: oklch(98.7% 0.022 95.277); /* amber-50 */
-  --fork-line: oklch(87.9% 0.169 91.605); /* amber-300 */
+  /* fork —— 与 warn 拆开：兰紫 */
+  --fork: oklch(58% 0.11 330);
+  --fork-ink: oklch(44% 0.09 330);
+  --fork-muted: oklch(96.5% 0.02 330);
+  --fork-line: oklch(84% 0.06 330);
 
-  /* mode 双色 —— 与状态色解耦（值同 stone/rose 但独立变量） */
-  --mode-chat: oklch(70.9% 0.01 56.259); /* stone-400 */
-  --mode-chat-ink: oklch(37.4% 0.01 67.558); /* stone-700 */
-  --mode-chat-muted: oklch(97% 0.001 106.424); /* stone-100 */
-  --mode-chat-line: oklch(86.9% 0.005 56.366); /* stone-300 */
-  --mode-chat-line-strong: oklch(70.9% 0.01 56.259); /* stone-400 */
-  --mode-project: oklch(64.5% 0.246 16.439); /* rose-500 */
-  --mode-project-ink: oklch(41% 0.159 10.272); /* rose-900 */
-  --mode-project-muted: oklch(96.9% 0.015 12.422); /* rose-50 */
-  --mode-project-line: oklch(81% 0.117 11.638); /* rose-300 */
-  --mode-project-line-strong: oklch(71.2% 0.194 13.428); /* rose-400 */
+  /* mode —— chat 中性灰；project 低饱和青（与 danger 拆开） */
+  --mode-chat: #9a9aa3;
+  --mode-chat-ink: #3f3f46;
+  --mode-chat-muted: #f3f3f4;
+  --mode-chat-line: rgb(0 0 0 / 0.12);
+  --mode-chat-line-strong: rgb(0 0 0 / 0.24);
+  --mode-project: oklch(60% 0.08 195);
+  --mode-project-ink: oklch(42% 0.06 195);
+  --mode-project-muted: oklch(97% 0.012 195);
+  --mode-project-line: oklch(85% 0.04 195);
+  --mode-project-line-strong: oklch(70% 0.07 195);
 
   /* ── CSS-only 变量（不注册 utility，globals 结构性样式专用） ──
-     accent-vivid：比 accent 亮半档的「光效」档——焦点环/流式光标/
-     run-bar/dots 共用（原值 indigo-500/400，与按钮填充的 600/500 分开） */
-  --accent-vivid: oklch(58.5% 0.233 277.117); /* indigo-500 */
-  --edge: oklch(87% 0.065 274.039); /* indigo-200，react-flow 连线 */
-  --edge-active: oklch(67.3% 0.182 276.935); /* indigo-400 */
+     accent-vivid：焦点环/流式光标/run-bar/dots 共用的「光效」档 */
+  --accent-vivid: oklch(56% 0.13 277);
+  --edge: oklch(84% 0.02 277); /* react-flow 连线，降到近中性 */
+  --edge-active: oklch(56% 0.12 277);
 
-  /* 代码块（恒暗）*/
-  --code-bg: #1c1917;
-  --code-ink: #e7e5e4;
-  --code-bar-bg: #292524;
-  --code-bar-line: #0c0a09;
-  --code-inline-ink: #be185d; /* 行内 code 的强调色 */
+  /* 代码块（恒暗，hljs 只装 github-dark）；去掉暖色 stone 与粉色行内码 */
+  --code-bg: #18181b;
+  --code-ink: #e4e4e7;
+  --code-bar-bg: #1f1f23;
+  --code-bar-line: #09090b;
+  --code-inline-ink: var(--ink);
 
-  /* 文内 mark：fork=分叉锚点(amber 系)，note=笔记/搜索(emerald 系) */
-  --mark-fork-bg: #fde68a;
-  --mark-fork-line: #fbbf24;
-  --mark-fork-hover-bg: #fde68a;
-  --mark-fork-pulse-bg: #fbbf24;
-  --mark-fork-pulse-ring: #f59e0b;
-  --mark-note-bg: #d1fae5;
-  --mark-note-line: #34d399;
-  --mark-note-pulse-bg: #6ee7b7;
-  --mark-note-pulse-ring: #10b981;
+  /* 文内 mark：fork=分叉锚点(兰紫)，note=笔记/搜索(绿) —— 淡底 + 下划线 */
+  --mark-fork-bg: oklch(58% 0.11 330 / 0.12);
+  --mark-fork-line: oklch(58% 0.11 330 / 0.55);
+  --mark-fork-hover-bg: oklch(58% 0.11 330 / 0.2);
+  --mark-fork-pulse-bg: oklch(58% 0.11 330 / 0.3);
+  --mark-fork-pulse-ring: oklch(58% 0.11 330 / 0.5);
+  --mark-note-bg: oklch(62% 0.13 155 / 0.1);
+  --mark-note-line: oklch(62% 0.13 155 / 0.5);
+  --mark-note-pulse-bg: oklch(62% 0.13 155 / 0.25);
+  --mark-note-pulse-ring: oklch(62% 0.13 155 / 0.5);
 }
 
 .dark {
   color-scheme: dark;
 
-  --surface-canvas: oklch(14.7% 0.004 49.25); /* stone-950 */
-  --surface: oklch(21.6% 0.006 56.043); /* stone-900 */
-  --surface-raised: oklch(26.8% 0.007 34.298); /* stone-800 */
-  --surface-muted: oklch(26.8% 0.007 34.298); /* stone-800 */
-  --line: oklch(26.8% 0.007 34.298); /* stone-800 */
-  --line-strong: oklch(37.4% 0.01 67.558); /* stone-700 */
-  --line-faint: oklch(21.6% 0.006 56.043); /* stone-900 */
-  --ink: oklch(92.3% 0.003 48.717); /* stone-200 */
-  --ink-strong: oklch(97% 0.001 106.424); /* stone-100 */
-  --ink-muted: oklch(70.9% 0.01 56.259); /* stone-400 */
-  --ink-faint: oklch(55.3% 0.013 58.071); /* stone-500 */
-  --ink-inverse: oklch(21.6% 0.006 56.043); /* stone-900 */
+  --surface-canvas: #0b0b0c;
+  --surface: #111113;
+  --surface-raised: #18181b;
+  --surface-muted: #1c1c20;
+  --scrim: #000;
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.16);
+  --line-faint: rgb(255 255 255 / 0.05);
+  --ink: #e8e8eb;
+  --ink-strong: #fafafa;
+  --ink-muted: #a3a3ac; /* 8.3:1 on canvas */
+  --ink-faint: #7e7e89; /* 4.9:1 on canvas */
+  --ink-inverse: #0b0b0c;
 
-  --accent: oklch(58.5% 0.233 277.117); /* indigo-500 */
-  --accent-strong: oklch(67.3% 0.182 276.935); /* indigo-400，dark hover 变亮 */
-  --accent-ink: oklch(78.5% 0.115 274.713); /* indigo-300 */
-  --accent-muted: oklch(25.7% 0.09 281.288); /* indigo-950 */
-  --accent-line: oklch(35.9% 0.144 278.697); /* indigo-900 */
+  --accent: oklch(57% 0.12 277);
+  --accent-strong: oklch(62% 0.12 277); /* dark hover 变亮 */
+  --accent-ink: oklch(80% 0.08 277);
+  --accent-muted: oklch(25% 0.035 277);
+  --accent-line: oklch(42% 0.07 277);
 
-  --warn: oklch(82.8% 0.189 84.429); /* amber-400 */
-  --warn-ink: oklch(92.4% 0.12 95.746); /* amber-200 */
-  --warn-muted: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); /* amber-950/40 */
-  --warn-line: oklch(47.3% 0.137 46.201); /* amber-800 */
-  --danger: oklch(64.5% 0.246 16.439); /* rose-500 */
-  --danger-strong: oklch(71.2% 0.194 13.428); /* rose-400 */
-  --danger-ink: oklch(89.2% 0.058 10.001); /* rose-200 */
-  --danger-muted: color-mix(in oklab, oklch(27.1% 0.105 12.094) 40%, transparent); /* rose-950/40 */
-  --danger-line: oklch(41% 0.159 10.272); /* rose-900 */
-  --positive: oklch(76.5% 0.177 163.223); /* emerald-400 */
-  --positive-ink: oklch(90.5% 0.093 164.15); /* emerald-200 */
-  --positive-muted: color-mix(in oklab, oklch(26.2% 0.051 172.552) 40%, transparent); /* emerald-950/40 */
-  --positive-line: oklch(43.2% 0.095 166.913); /* emerald-800 */
-  --unread: oklch(76.5% 0.177 163.223); /* emerald-400 */
-  --unread-ink: oklch(90.5% 0.093 164.15); /* emerald-200 */
-  --unread-muted: color-mix(in oklab, oklch(26.2% 0.051 172.552) 40%, transparent); /* emerald-950/40 */
-  --unread-line: oklch(43.2% 0.095 166.913); /* emerald-800 */
+  --warn: oklch(78% 0.13 75);
+  --warn-ink: oklch(86% 0.09 85);
+  --warn-muted: oklch(25% 0.03 70);
+  --warn-line: oklch(45% 0.07 70);
+  --danger: oklch(66% 0.17 25);
+  --danger-strong: oklch(71% 0.15 25);
+  --danger-ink: oklch(84% 0.08 25);
+  --danger-muted: oklch(24% 0.04 25);
+  --danger-line: oklch(44% 0.09 25);
+  --positive: oklch(72% 0.13 155);
+  --positive-ink: oklch(85% 0.08 155);
+  --positive-muted: oklch(24% 0.03 155);
+  --positive-line: oklch(44% 0.07 155);
+  --unread: oklch(70% 0.12 268);
+  --unread-ink: oklch(84% 0.07 268);
+  --unread-muted: oklch(25% 0.035 268);
+  --unread-line: oklch(44% 0.07 268);
 
-  --fork: oklch(82.8% 0.189 84.429); /* amber-400 */
-  --fork-ink: oklch(92.4% 0.12 95.746); /* amber-200 */
-  --fork-muted: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); /* amber-950/40 */
-  --fork-line: oklch(47.3% 0.137 46.201); /* amber-800 */
+  --fork: oklch(70% 0.11 330);
+  --fork-ink: oklch(84% 0.07 330);
+  --fork-muted: oklch(25% 0.035 330);
+  --fork-line: oklch(44% 0.07 330);
 
-  --mode-chat: oklch(55.3% 0.013 58.071); /* stone-500 */
-  --mode-chat-ink: oklch(92.3% 0.003 48.717); /* stone-200 */
-  --mode-chat-muted: oklch(26.8% 0.007 34.298); /* stone-800 */
-  --mode-chat-line: oklch(37.4% 0.01 67.558); /* stone-700 */
-  --mode-chat-line-strong: oklch(55.3% 0.013 58.071); /* stone-500 */
-  --mode-project: oklch(71.2% 0.194 13.428); /* rose-400 */
-  --mode-project-ink: oklch(89.2% 0.058 10.001); /* rose-200 */
-  --mode-project-muted: color-mix(in oklab, oklch(27.1% 0.105 12.094) 40%, transparent); /* rose-950/40 */
-  --mode-project-line: oklch(45.5% 0.188 13.697); /* rose-800 */
-  --mode-project-line-strong: oklch(51.4% 0.222 16.935); /* rose-700 */
+  --mode-chat: #7e7e89;
+  --mode-chat-ink: #d4d4d8;
+  --mode-chat-muted: #1c1c20;
+  --mode-chat-line: rgb(255 255 255 / 0.12);
+  --mode-chat-line-strong: rgb(255 255 255 / 0.24);
+  --mode-project: oklch(70% 0.08 195);
+  --mode-project-ink: oklch(84% 0.05 195);
+  --mode-project-muted: oklch(24% 0.025 195);
+  --mode-project-line: oklch(42% 0.05 195);
+  --mode-project-line-strong: oklch(56% 0.07 195);
 
   /* CSS-only 变量的 dark 档 */
-  --accent-vivid: oklch(67.3% 0.182 276.935); /* indigo-400 */
-  --edge: oklch(39.8% 0.195 277.366); /* indigo-800 */
-  --edge-active: oklch(67.3% 0.182 276.935); /* indigo-400 */
+  --accent-vivid: oklch(66% 0.12 277);
+  --edge: oklch(34% 0.03 277);
+  --edge-active: oklch(66% 0.12 277);
 
-  --code-bg: #0c0a09;
-  --code-bar-bg: #1c1917;
+  --code-bg: #141416;
+  --code-bar-bg: #1c1c20;
   --code-bar-line: #000;
-  --code-inline-ink: #f9a8d4;
+  --code-inline-ink: var(--ink);
 
-  --mark-fork-bg: #78350f;
-  --mark-fork-line: #b45309;
-  --mark-fork-hover-bg: #92400e;
-  --mark-fork-ink: #fef3c7;
-  --mark-fork-pulse-bg: #b45309;
-  --mark-fork-pulse-ring: #d97706;
-  --mark-note-bg: #064e3b;
-  --mark-note-line: #047857;
-  --mark-note-ink: #d1fae5;
-  --mark-note-pulse-bg: #047857;
-  --mark-note-pulse-ring: #10b981;
+  --mark-fork-bg: oklch(70% 0.11 330 / 0.16);
+  --mark-fork-line: oklch(70% 0.11 330 / 0.6);
+  --mark-fork-hover-bg: oklch(70% 0.11 330 / 0.26);
+  --mark-fork-ink: inherit;
+  --mark-fork-pulse-bg: oklch(70% 0.11 330 / 0.35);
+  --mark-fork-pulse-ring: oklch(70% 0.11 330 / 0.6);
+  --mark-note-bg: oklch(72% 0.13 155 / 0.14);
+  --mark-note-line: oklch(72% 0.13 155 / 0.55);
+  --mark-note-ink: inherit;
+  --mark-note-pulse-bg: oklch(72% 0.13 155 / 0.3);
+  --mark-note-pulse-ring: oklch(72% 0.13 155 / 0.55);
 }
 
 /* ───────────────── 主题皮肤（palette）覆盖块 ─────────────────
@@ -581,41 +588,43 @@
   --color-mode-project-line-strong: var(--mode-project-line-strong);
 
   /* 字号阶梯：19 个任意 px 档收敛为 6 档 */
-  --text-nano: 10px; /* 徽标/kbd/角标（原 8~10.5px） */
+  --text-nano: 11px; /* 徽标/kbd/角标（原 8~10.5px） */
   --text-nano--line-height: 1.35;
-  --text-label: 11px; /* meta/标签（原 11/11.5px） */
+  --text-label: 12px; /* meta/标签（原 11/11.5px） */
   --text-label--line-height: 1.4;
-  --text-ui: 12.5px; /* UI 默认（原 12/12.5/13px） */
+  --text-ui: 13px; /* UI 默认（原 12/12.5/13px） */
   --text-ui--line-height: 1.5;
   --text-body: 14px; /* 画布正文（原 13.5/14/14.5px） */
   --text-body--line-height: 1.6;
   --text-reading: 15px; /* 线性正文（原 15/16px） */
   --text-reading--line-height: 1.7;
-  --text-title: 18px; /* 标题（原 18/19px） */
+  --text-title: 17px; /* 标题（原 18/19px） */
   --text-title--line-height: 1.4;
 
   /* 圆角阶梯：field=按钮/输入，card=卡片/popover，overlay=modal/sheet */
-  --radius-field: 8px;
-  --radius-card: 12px;
-  --radius-overlay: 16px;
+  --radius-field: 6px;
+  --radius-card: 8px;
+  --radius-overlay: 10px;
 
   /* 阴影阶梯：raise=卡片，pop=dropdown/popover，overlay=modal/drawer/toast */
-  --shadow-raise: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-  --shadow-pop: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-raise: 0 0 0 0 transparent; /* 克制工具风：卡片不投影，靠 1px 描边 */
+  --shadow-pop: 0 4px 14px -6px rgb(0 0 0 / 0.14);
+  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.22);
 
   /* 等宽字体归一：globals 声明与组件 font-mono 从此同源（原 CSS 声明
      JetBrains Mono 但从未加载、实际回退 Menlo；组件 font-mono 又是
      ui-monospace——双源不一致就此终结） */
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 html, body {
   height: 100%;
   height: 100dvh;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
-    "Helvetica Neue", "Segoe UI", sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
   background: var(--surface-canvas);
   color: var(--ink);
   /* Prevent iOS rubber-banding on body */

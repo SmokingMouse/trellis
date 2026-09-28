@@ -22,7 +22,7 @@ export const PALETTES: PaletteDef[] = [
   {
     id: "default",
     label: "默认",
-    preview: ["#fafaf9", "#ffffff", "#4f46e5"],
+    preview: ["#fafafa", "#ffffff", "#5b5fa8"],
   },
   {
     id: "paper",

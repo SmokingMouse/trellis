@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
 import { PREF_KEYS } from "@/lib/prefs";
 
@@ -48,13 +49,28 @@ const themeScript = `
 })();
 `;
 
+// Geist（OFL，app/fonts/Geist-OFL.txt）本地托管：不依赖外网字体 CDN。
+// 只覆盖拉丁字符，中文按 globals.css 的 font-family 回退到 PingFang。
+const geistSans = localFont({
+  src: "./fonts/Geist-Variable.woff2",
+  variable: "--font-geist-sans",
+  weight: "100 900",
+  display: "swap",
+});
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
+  variable: "--font-geist-mono",
+  weight: "100 900",
+  display: "swap",
+});
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className="h-full antialiased" suppressHydrationWarning>
+    <html lang="zh-CN" className={`h-full antialiased ${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

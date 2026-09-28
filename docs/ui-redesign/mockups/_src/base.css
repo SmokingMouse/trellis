@@ -1,0 +1,178 @@
+/* ── 共享原语（落地时对应 shadcn/Radix 组件：Button / Input / Tabs / Tooltip / DropdownMenu / Dialog / Badge / Skeleton） ── */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface-canvas);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "liga", "calt";
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+.muted { color: var(--ink-muted); }
+.faint { color: var(--ink-faint); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* 图标：lucide 1.33（构建时从 lucide-react 抽成 sprite 内联） */
+.i {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.i.sm { width: 14px; height: 14px; }
+.i.xs { width: 12px; height: 12px; stroke-width: 2; }
+.i.lg { width: 18px; height: 18px; }
+
+/* 焦点环：唯一的 2px 蓝紫环 */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Button ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-h); padding: 0 12px;
+  border-radius: var(--radius-field);
+  font-size: var(--text-ui); font-weight: 500; white-space: nowrap;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn-primary { background: var(--accent); color: var(--accent-fg); }
+.btn-primary:hover { background: var(--accent-strong); }
+.btn-outline { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.btn-outline:hover { background: var(--surface-hover); }
+.btn-ghost { color: var(--ink-muted); }
+.btn-ghost:hover { background: var(--surface-hover); color: var(--ink); }
+.btn-danger-outline { border: 1px solid var(--danger-line); color: var(--danger-ink); background: transparent; }
+.btn-danger-outline:hover { background: var(--danger-muted); }
+.btn-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--text-label); }
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: var(--control-h); height: var(--control-h);
+  border-radius: var(--radius-field); color: var(--ink-muted);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
+.icon-btn.sm { width: 26px; height: 26px; }
+
+/* ── Input ── */
+.input {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--control-h); padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-field);
+  background: var(--surface); color: var(--ink-faint);
+}
+.input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: var(--text-ui); }
+.input input::placeholder { color: var(--ink-faint); }
+.input:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* ── Kbd ── */
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border: 1px solid var(--line); border-radius: 4px;
+  font-family: var(--font-mono); font-size: var(--text-nano); color: var(--ink-faint);
+  background: var(--surface);
+}
+
+/* ── Dot（状态色唯一的出场方式之一） ── */
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.dot.positive { background: var(--positive); }
+.dot.warn { background: var(--warn); }
+.dot.danger { background: var(--danger); }
+.dot.unread { background: var(--unread); }
+.dot.fork { background: var(--fork); }
+.dot.project { background: var(--mode-project); }
+.dot.chat { background: var(--mode-chat); }
+.dot.idle { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+.dot.live { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ── Badge（中性底 + 可选状态点；不做彩色实心 badge） ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 7px;
+  border: 1px solid var(--line); border-radius: 5px;
+  font-size: var(--text-label); color: var(--ink-muted); white-space: nowrap;
+}
+.badge.positive { border-color: var(--positive-line); }
+.badge.danger { border-color: var(--danger-line); }
+.badge.warn { border-color: var(--warn-line); }
+
+/* ── Segmented（Tabs 原语） ── */
+.seg {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--surface-muted); border-radius: var(--radius-field);
+}
+.seg button {
+  height: 26px; padding: 0 10px; border-radius: 4px;
+  font-size: var(--text-ui); color: var(--ink-muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-selected="true"] {
+  background: var(--surface); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* ── Popover / Menu（浮层：唯一允许阴影的地方） ── */
+.pop {
+  position: absolute; z-index: var(--z-popover);
+  background: var(--surface-raised); border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay); padding: 4px;
+  opacity: 0; transform: scale(0.97); pointer-events: none;
+  transform-origin: top center;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.pop.open { opacity: 1; transform: none; pointer-events: auto; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: 32px; padding: 0 8px; border-radius: 6px;
+  font-size: var(--text-ui); color: var(--ink); text-align: left;
+}
+.menu-item .i { color: var(--ink-muted); }
+.menu-item:hover, .menu-item.active { background: var(--surface-hover); }
+.menu-item .end { margin-left: auto; color: var(--ink-faint); font-size: var(--text-label); display: inline-flex; gap: 4px; align-items: center; }
+.menu-sep { height: 1px; background: var(--line); margin: 4px -4px; }
+.menu-label { padding: 6px 8px 4px; font-size: var(--text-label); color: var(--ink-faint); }
+
+/* ── Tooltip（hover 触发，纯 CSS） ── */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; top: calc(100% + 6px); transform: translate(-50%, -2px);
+  padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+  background: var(--ink-strong); color: var(--surface-canvas);
+  font-size: var(--text-label); font-weight: 400; line-height: 1.4;
+  opacity: 0; pointer-events: none; z-index: var(--z-modal);
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+[data-tip]:hover::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; }
+[data-tip-pos="top"]::after { top: auto; bottom: calc(100% + 6px); }
+
+/* ── Skeleton ── */
+.sk {
+  background: linear-gradient(90deg, var(--surface-muted) 0%, var(--surface-hover) 50%, var(--surface-muted) 100%);
+  background-size: 200% 100%; border-radius: 4px;
+  animation: sk 1.4s linear infinite;
+}
+@keyframes sk { to { background-position: -200% 0; } }
+
+/* ── Spinner ── */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 滚动条 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}

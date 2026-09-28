@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis 重设计稿 · 02 设置</title>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("trellis-mock-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (t === "dark") document.documentElement.classList.add("dark");
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   Trellis UI 重设计 · 克制工具风 · 设计 token（2026-09-28 静态稿）
+
+   用法：本文件是三份静态稿的唯一色值来源（构建时内联进各 HTML）。
+   变量名 = app/globals.css 的现有语义名，**只改取值不改名**；
+   标「新增」的是 globals.css 目前没有、落地时需要补进 :root / .dark
+   和 @theme inline 的变量。
+
+   原则
+   - 中性色承担 95% 的界面；强调色（低饱和蓝紫）只给主按钮 / 选中 / 焦点环。
+   - 状态色（positive / warn / danger）只做 6px 圆点与 1px 细描边，不做大面积填充。
+   - 六个语义拆开撞色（旧版：未读=成功、分叉=警告、Project=危险）：
+       unread   蓝紫偏亮（与强调同族——「等你处理」的提示）   h≈268
+       positive 绿                                              h≈155
+       fork     兰紫 / 洋红（不再用琥珀）                       h≈330
+       warn     琥珀                                            h≈70
+       mode-project 低饱和青（不再用红族）                      h≈195
+       danger   红                                              h≈25
+   - 卡片无阴影，1px ≈10% 描边；只有浮层（下拉、弹窗、树浮窗）用极轻阴影。
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* ── 字体（新增；globals.css 目前走 Tailwind 默认 font-sans） ── */
+  --font-sans: "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* ── 字号（对应 @theme 的 --text-*，整体上调到 13–14px 控件基线） ── */
+  --text-nano: 11px;    /* ← --text-nano（原 10px）：kbd / 角标 */
+  --text-label: 12px;   /* ← --text-label（原 11px）：meta / 时间 / 计数 */
+  --text-ui: 13px;      /* ← --text-ui（原 12.5px）：控件默认 */
+  --text-body: 14px;    /* ← --text-body：画布正文 / 输入框 */
+  --text-reading: 15px; /* ← --text-reading：线性正文 */
+  --text-title: 17px;   /* ← --text-title（原 18px） */
+
+  /* ── 圆角（对应 @theme 的 --radius-*，整体收紧一档） ── */
+  --radius-field: 6px;   /* ← --radius-field（原 8px）：按钮 / 输入 / chip = rounded-md */
+  --radius-card: 8px;    /* ← --radius-card（原 12px）：卡片 / 代码块 */
+  --radius-overlay: 10px;/* ← --radius-overlay（原 16px）：下拉 / 弹窗 / 浮窗 */
+
+  /* ── 尺寸（新增） ── */
+  --control-h: 32px;     /* 新增：所有桌面控件统一 h-8 */
+  --control-h-sm: 26px;  /* 新增：表格行内的次级小按钮 */
+  --touch-min: 44px;     /* 新增：手机热区下限（mobile-verify 依赖 44px） */
+
+  /* ── 表面 ── */
+  --surface-canvas: #fafafa;           /* ← --surface-canvas（原 stone-50） */
+  --surface: #ffffff;                  /* ← --surface */
+  --surface-raised: #ffffff;           /* ← --surface-raised：浮层底 */
+  --surface-muted: #f3f3f4;            /* ← --surface-muted：用户消息块 / 分段器底 */
+  --surface-hover: rgba(0, 0, 0, 0.04);/* 新增：行 hover，替代各处 hover:bg-stone-100 */
+  --scrim: rgba(9, 9, 11, 0.36);       /* ← --scrim（原配 /50 用，这里直接给成品值） */
+
+  /* ── 描边（改成半透明，深浅皮肤都是「约 10%」） ── */
+  --line: rgba(0, 0, 0, 0.09);         /* ← --line：卡片 / 分隔线 */
+  --line-strong: rgba(0, 0, 0, 0.16);  /* ← --line-strong：输入框 / 描边按钮 */
+  --line-faint: rgba(0, 0, 0, 0.05);   /* ← --line-faint：表格行内分隔 */
+
+  /* ── 文字：近黑 + 两档灰 ── */
+  --ink: #1b1b1f;                      /* ← --ink */
+  --ink-strong: #0b0b0d;               /* ← --ink-strong：标题 */
+  --ink-muted: #56565f;                /* ← --ink-muted：灰一档（7.1:1 on #fafafa） */
+  --ink-faint: #74747e;                /* ← --ink-faint：灰二档（4.6:1 on #fafafa，满足 AA） */
+  --ink-inverse: #ffffff;              /* ← --ink-inverse */
+
+  /* ── 强调：唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） ── */
+  --accent: oklch(52% 0.12 277);       /* ← --accent：主按钮底 / 选中指示 */
+  --accent-strong: oklch(46% 0.12 277);/* ← --accent-strong：主按钮 hover */
+  --accent-ink: oklch(42% 0.1 277);    /* ← --accent-ink：淡底上的强调文字 */
+  --accent-muted: oklch(96.5% 0.014 277);/* ← --accent-muted：选中行底 */
+  --accent-line: oklch(84% 0.045 277); /* ← --accent-line：选中描边 */
+  --accent-fg: #ffffff;                /* 新增：主按钮上的文字（深色皮肤不必是 ink-inverse） */
+  --focus-ring: oklch(52% 0.12 277 / 0.35); /* 新增：统一焦点环（2px） */
+
+  /* ── 状态色：只做圆点与细描边 ── */
+  --warn: oklch(72% 0.14 70);          /* ← --warn */
+  --warn-ink: oklch(45% 0.09 60);      /* ← --warn-ink */
+  --warn-muted: oklch(97.5% 0.02 80);  /* ← --warn-muted */
+  --warn-line: oklch(85% 0.08 75);     /* ← --warn-line */
+  --danger: oklch(58% 0.18 25);        /* ← --danger */
+  --danger-strong: oklch(52% 0.18 25); /* ← --danger-strong */
+  --danger-ink: oklch(46% 0.14 25);    /* ← --danger-ink */
+  --danger-muted: oklch(97% 0.012 25); /* ← --danger-muted */
+  --danger-line: oklch(86% 0.05 25);   /* ← --danger-line */
+  --positive: oklch(62% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(42% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(97.5% 0.015 155); /* ← --positive-muted */
+  --positive-line: oklch(85% 0.06 155);/* ← --positive-line */
+
+  /* ── 未读：与「成功」拆开，改用强调同族的亮蓝紫 ── */
+  --unread: oklch(60% 0.13 268);       /* ← --unread（原 emerald，与 positive 撞） */
+  --unread-ink: oklch(44% 0.1 268);    /* ← --unread-ink */
+  --unread-muted: oklch(96.5% 0.016 268); /* ← --unread-muted */
+  --unread-line: oklch(84% 0.05 268);  /* ← --unread-line */
+
+  /* ── 分叉：与「警告」拆开，改兰紫 ── */
+  --fork: oklch(58% 0.11 330);         /* ← --fork（原 amber，与 warn 撞） */
+  --fork-ink: oklch(44% 0.09 330);     /* ← --fork-ink */
+  --fork-muted: oklch(96.5% 0.02 330); /* ← --fork-muted */
+  --fork-line: oklch(84% 0.06 330);    /* ← --fork-line */
+
+  /* ── 模式：Chat 中性灰；Project 改低饱和青（原 rose，与 danger 撞） ── */
+  --mode-chat: #9a9aa3;                /* ← --mode-chat */
+  --mode-chat-ink: #3f3f46;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #f3f3f4;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(0, 0, 0, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(0, 0, 0, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(60% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(42% 0.06 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(97% 0.012 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(85% 0.04 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(70% 0.07 195); /* ← --mode-project-line-strong */
+
+  /* ── 画布 ── */
+  --accent-vivid: oklch(56% 0.13 277); /* ← --accent-vivid */
+  --edge: oklch(84% 0.02 277);         /* ← --edge：连线降到近中性 */
+  --edge-active: oklch(56% 0.12 277);  /* ← --edge-active */
+
+  /* ── 代码：浅色皮肤下代码块也浅（旧「代码块恒暗」待用户确认是否保留） ── */
+  --code-bg: #f6f6f7;                  /* ← --code-bg */
+  --code-ink: #1b1b1f;                 /* ← --code-ink */
+  --code-bar-bg: #f6f6f7;              /* ← --code-bar-bg：与正文同底，靠分隔线区分 */
+  --code-bar-line: rgba(0, 0, 0, 0.07);/* ← --code-bar-line */
+  --code-inline-ink: #1b1b1f;          /* ← --code-inline-ink（原 pink-700，去掉） */
+  --code-inline-bg: rgba(0, 0, 0, 0.05); /* 新增：行内 code 灰底 */
+  --code-comment: #8b8b94;             /* 新增：唯一的语法着色——注释降灰 */
+  --code-add-bg: oklch(62% 0.13 155 / 0.08); /* 新增：diff 新增行底 */
+  --code-del-bg: oklch(58% 0.18 25 / 0.07);  /* 新增：diff 删除行底 */
+
+  /* ── 正文划选标记 ── */
+  --mark-fork-bg: oklch(58% 0.11 330 / 0.12);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(58% 0.11 330 / 0.55); /* ← --mark-fork-line（下划线） */
+  --mark-fork-hover-bg: oklch(58% 0.11 330 / 0.2); /* ← --mark-fork-hover-bg */
+  --mark-fork-ink: inherit;                     /* ← --mark-fork-ink */
+  --mark-fork-pulse-bg: oklch(58% 0.11 330 / 0.3);   /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(58% 0.11 330 / 0.5); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(62% 0.13 155 / 0.1);    /* ← --mark-note-bg */
+  --mark-note-line: oklch(62% 0.13 155 / 0.5);  /* ← --mark-note-line */
+  --mark-note-ink: inherit;                     /* ← --mark-note-ink */
+  --mark-note-pulse-bg: oklch(62% 0.13 155 / 0.25);  /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(62% 0.13 155 / 0.5); /* ← --mark-note-pulse-ring */
+
+  /* ── 层级（新增）：只有浮层有阴影 ── */
+  --shadow-overlay: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px -8px rgba(0, 0, 0, 0.14);
+  --shadow-float: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 14px -6px rgba(0, 0, 0, 0.12);
+  --z-float: 20;   /* 新增：TreePanel 浮窗 */
+  --z-popover: 50; /* 新增：下拉 / 菜单（必须高于 TreePanel，修 d-14 遮挡） */
+  --z-modal: 60;   /* 新增：⌘K / 弹窗 */
+
+  /* ── 动效（新增）：弹层 100ms 淡入 + 0.97 缩放 ── */
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface-canvas: #0b0b0c;           /* ← --surface-canvas（原 stone-950） */
+  --surface: #111113;                  /* ← --surface */
+  --surface-raised: #18181b;           /* ← --surface-raised */
+  --surface-muted: #1c1c20;            /* ← --surface-muted */
+  --surface-hover: rgba(255, 255, 255, 0.05); /* 新增 */
+  --scrim: rgba(0, 0, 0, 0.6);         /* ← --scrim */
+
+  --line: rgba(255, 255, 255, 0.09);   /* ← --line */
+  --line-strong: rgba(255, 255, 255, 0.16); /* ← --line-strong */
+  --line-faint: rgba(255, 255, 255, 0.05);  /* ← --line-faint */
+
+  --ink: #e8e8eb;                      /* ← --ink */
+  --ink-strong: #fafafa;               /* ← --ink-strong */
+  --ink-muted: #a3a3ac;                /* ← --ink-muted（8.3:1 on #0b0b0c） */
+  --ink-faint: #7e7e89;                /* ← --ink-faint（4.9:1 on #0b0b0c） */
+  --ink-inverse: #0b0b0c;              /* ← --ink-inverse */
+
+  --accent: oklch(57% 0.12 277);       /* ← --accent */
+  --accent-strong: oklch(62% 0.12 277);/* ← --accent-strong（深色 hover 变亮） */
+  --accent-ink: oklch(80% 0.08 277);   /* ← --accent-ink */
+  --accent-muted: oklch(25% 0.035 277);/* ← --accent-muted */
+  --accent-line: oklch(42% 0.07 277);  /* ← --accent-line */
+  --accent-fg: #ffffff;                /* 新增 */
+  --focus-ring: oklch(68% 0.12 277 / 0.45); /* 新增 */
+
+  --warn: oklch(78% 0.13 75);          /* ← --warn */
+  --warn-ink: oklch(86% 0.09 85);      /* ← --warn-ink */
+  --warn-muted: oklch(25% 0.03 70);    /* ← --warn-muted */
+  --warn-line: oklch(45% 0.07 70);     /* ← --warn-line */
+  --danger: oklch(66% 0.17 25);        /* ← --danger */
+  --danger-strong: oklch(71% 0.15 25); /* ← --danger-strong */
+  --danger-ink: oklch(84% 0.08 25);    /* ← --danger-ink */
+  --danger-muted: oklch(24% 0.04 25);  /* ← --danger-muted */
+  --danger-line: oklch(44% 0.09 25);   /* ← --danger-line */
+  --positive: oklch(72% 0.13 155);     /* ← --positive */
+  --positive-ink: oklch(85% 0.08 155); /* ← --positive-ink */
+  --positive-muted: oklch(24% 0.03 155); /* ← --positive-muted */
+  --positive-line: oklch(44% 0.07 155);/* ← --positive-line */
+
+  --unread: oklch(70% 0.12 268);       /* ← --unread */
+  --unread-ink: oklch(84% 0.07 268);   /* ← --unread-ink */
+  --unread-muted: oklch(25% 0.035 268);/* ← --unread-muted */
+  --unread-line: oklch(44% 0.07 268);  /* ← --unread-line */
+
+  --fork: oklch(70% 0.11 330);         /* ← --fork */
+  --fork-ink: oklch(84% 0.07 330);     /* ← --fork-ink */
+  --fork-muted: oklch(25% 0.035 330);  /* ← --fork-muted */
+  --fork-line: oklch(44% 0.07 330);    /* ← --fork-line */
+
+  --mode-chat: #7e7e89;                /* ← --mode-chat */
+  --mode-chat-ink: #d4d4d8;            /* ← --mode-chat-ink */
+  --mode-chat-muted: #1c1c20;          /* ← --mode-chat-muted */
+  --mode-chat-line: rgba(255, 255, 255, 0.12);       /* ← --mode-chat-line */
+  --mode-chat-line-strong: rgba(255, 255, 255, 0.24);/* ← --mode-chat-line-strong */
+  --mode-project: oklch(70% 0.08 195);         /* ← --mode-project */
+  --mode-project-ink: oklch(84% 0.05 195);     /* ← --mode-project-ink */
+  --mode-project-muted: oklch(24% 0.025 195);  /* ← --mode-project-muted */
+  --mode-project-line: oklch(42% 0.05 195);    /* ← --mode-project-line */
+  --mode-project-line-strong: oklch(56% 0.07 195); /* ← --mode-project-line-strong */
+
+  --accent-vivid: oklch(66% 0.12 277); /* ← --accent-vivid */
+  --edge: oklch(34% 0.03 277);         /* ← --edge */
+  --edge-active: oklch(66% 0.12 277);  /* ← --edge-active */
+
+  --code-bg: #141416;                  /* ← --code-bg */
+  --code-ink: #e4e4e7;                 /* ← --code-ink */
+  --code-bar-bg: #141416;              /* ← --code-bar-bg */
+  --code-bar-line: rgba(255, 255, 255, 0.07); /* ← --code-bar-line */
+  --code-inline-ink: #e8e8eb;          /* ← --code-inline-ink */
+  --code-inline-bg: rgba(255, 255, 255, 0.07); /* 新增 */
+  --code-comment: #6f6f7a;             /* 新增 */
+  --code-add-bg: oklch(72% 0.13 155 / 0.1);  /* 新增 */
+  --code-del-bg: oklch(66% 0.17 25 / 0.1);   /* 新增 */
+
+  --mark-fork-bg: oklch(70% 0.11 330 / 0.16);   /* ← --mark-fork-bg */
+  --mark-fork-line: oklch(70% 0.11 330 / 0.6);  /* ← --mark-fork-line */
+  --mark-fork-hover-bg: oklch(70% 0.11 330 / 0.26); /* ← --mark-fork-hover-bg */
+  --mark-fork-pulse-bg: oklch(70% 0.11 330 / 0.35);  /* ← --mark-fork-pulse-bg */
+  --mark-fork-pulse-ring: oklch(70% 0.11 330 / 0.6); /* ← --mark-fork-pulse-ring */
+  --mark-note-bg: oklch(72% 0.13 155 / 0.14);   /* ← --mark-note-bg */
+  --mark-note-line: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-line */
+  --mark-note-pulse-bg: oklch(72% 0.13 155 / 0.3);   /* ← --mark-note-pulse-bg */
+  --mark-note-pulse-ring: oklch(72% 0.13 155 / 0.55); /* ← --mark-note-pulse-ring */
+
+  --shadow-overlay: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 18px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* ── 共享原语（落地时对应 shadcn/Radix 组件：Button / Input / Tabs / Tooltip / DropdownMenu / Dialog / Badge / Skeleton） ── */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface-canvas);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "liga", "calt";
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+.muted { color: var(--ink-muted); }
+.faint { color: var(--ink-faint); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* 图标：lucide 1.33（构建时从 lucide-react 抽成 sprite 内联） */
+.i {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.i.sm { width: 14px; height: 14px; }
+.i.xs { width: 12px; height: 12px; stroke-width: 2; }
+.i.lg { width: 18px; height: 18px; }
+
+/* 焦点环：唯一的 2px 蓝紫环 */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Button ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-h); padding: 0 12px;
+  border-radius: var(--radius-field);
+  font-size: var(--text-ui); font-weight: 500; white-space: nowrap;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn-primary { background: var(--accent); color: var(--accent-fg); }
+.btn-primary:hover { background: var(--accent-strong); }
+.btn-outline { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.btn-outline:hover { background: var(--surface-hover); }
+.btn-ghost { color: var(--ink-muted); }
+.btn-ghost:hover { background: var(--surface-hover); color: var(--ink); }
+.btn-danger-outline { border: 1px solid var(--danger-line); color: var(--danger-ink); background: transparent; }
+.btn-danger-outline:hover { background: var(--danger-muted); }
+.btn-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--text-label); }
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: var(--control-h); height: var(--control-h);
+  border-radius: var(--radius-field); color: var(--ink-muted);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
+.icon-btn.sm { width: 26px; height: 26px; }
+
+/* ── Input ── */
+.input {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--control-h); padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-field);
+  background: var(--surface); color: var(--ink-faint);
+}
+.input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: var(--text-ui); }
+.input input::placeholder { color: var(--ink-faint); }
+.input:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* ── Kbd ── */
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border: 1px solid var(--line); border-radius: 4px;
+  font-family: var(--font-mono); font-size: var(--text-nano); color: var(--ink-faint);
+  background: var(--surface);
+}
+
+/* ── Dot（状态色唯一的出场方式之一） ── */
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.dot.positive { background: var(--positive); }
+.dot.warn { background: var(--warn); }
+.dot.danger { background: var(--danger); }
+.dot.unread { background: var(--unread); }
+.dot.fork { background: var(--fork); }
+.dot.project { background: var(--mode-project); }
+.dot.chat { background: var(--mode-chat); }
+.dot.idle { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+.dot.live { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ── Badge（中性底 + 可选状态点；不做彩色实心 badge） ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 7px;
+  border: 1px solid var(--line); border-radius: 5px;
+  font-size: var(--text-label); color: var(--ink-muted); white-space: nowrap;
+}
+.badge.positive { border-color: var(--positive-line); }
+.badge.danger { border-color: var(--danger-line); }
+.badge.warn { border-color: var(--warn-line); }
+
+/* ── Segmented（Tabs 原语） ── */
+.seg {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: var(--surface-muted); border-radius: var(--radius-field);
+}
+.seg button {
+  height: 26px; padding: 0 10px; border-radius: 4px;
+  font-size: var(--text-ui); color: var(--ink-muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-selected="true"] {
+  background: var(--surface); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* ── Popover / Menu（浮层：唯一允许阴影的地方） ── */
+.pop {
+  position: absolute; z-index: var(--z-popover);
+  background: var(--surface-raised); border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay); padding: 4px;
+  opacity: 0; transform: scale(0.97); pointer-events: none;
+  transform-origin: top center;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.pop.open { opacity: 1; transform: none; pointer-events: auto; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: 32px; padding: 0 8px; border-radius: 6px;
+  font-size: var(--text-ui); color: var(--ink); text-align: left;
+}
+.menu-item .i { color: var(--ink-muted); }
+.menu-item:hover, .menu-item.active { background: var(--surface-hover); }
+.menu-item .end { margin-left: auto; color: var(--ink-faint); font-size: var(--text-label); display: inline-flex; gap: 4px; align-items: center; }
+.menu-sep { height: 1px; background: var(--line); margin: 4px -4px; }
+.menu-label { padding: 6px 8px 4px; font-size: var(--text-label); color: var(--ink-faint); }
+
+/* ── Tooltip（hover 触发，纯 CSS） ── */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; top: calc(100% + 6px); transform: translate(-50%, -2px);
+  padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+  background: var(--ink-strong); color: var(--surface-canvas);
+  font-size: var(--text-label); font-weight: 400; line-height: 1.4;
+  opacity: 0; pointer-events: none; z-index: var(--z-modal);
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+[data-tip]:hover::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 350ms; }
+[data-tip-pos="top"]::after { top: auto; bottom: calc(100% + 6px); }
+
+/* ── Skeleton ── */
+.sk {
+  background: linear-gradient(90deg, var(--surface-muted) 0%, var(--surface-hover) 50%, var(--surface-muted) 100%);
+  background-size: 200% 100%; border-radius: 4px;
+  animation: sk 1.4s linear infinite;
+}
+@keyframes sk { to { background-position: -200% 0; } }
+
+/* ── Spinner ── */
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 滚动条 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+
+body { min-height: 100vh; }
+.top { position: sticky; top: 0; z-index: 10; height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-canvas); }
+.top .back { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 8px; border-radius: var(--radius-field); color: var(--ink-muted); }
+.top .back:hover { background: var(--surface-hover); color: var(--ink); }
+.top .vr { width: 1px; height: 18px; background: var(--line); }
+.top h1 { margin: 0 0 0 6px; font-size: 14px; font-weight: 600; color: var(--ink-strong); }
+.top .r { margin-left: auto; display: flex; gap: 4px; }
+
+.wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; max-width: 1180px; margin: 0 auto; padding: 28px 32px 96px; }
+.snav { position: sticky; top: 76px; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+.snav .grp { padding: 14px 10px 6px; font-size: var(--text-label); color: var(--ink-faint); }
+.snav .grp:first-child { padding-top: 0; }
+.snav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--radius-field); color: var(--ink-muted); font-size: var(--text-ui); position: relative; }
+.snav a .i { color: var(--ink-faint); }
+.snav a:hover { background: var(--surface-hover); color: var(--ink); }
+.snav a[aria-current="page"] { background: var(--accent-muted); color: var(--accent-ink); font-weight: 500; }
+.snav a[aria-current="page"] .i { color: var(--accent-ink); }
+.snav a .n { margin-left: auto; font-size: var(--text-label); color: var(--ink-faint); }
+.snav a .dot { margin-left: auto; }
+
+/* PageShell：标题 + 实时计数副标题 + 刷新 / 主操作；统一内容宽度 */
+.page { max-width: 880px; }
+.ph { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 24px; }
+.ph h2 { margin: 0; font-size: var(--text-title); font-weight: 600; color: var(--ink-strong); letter-spacing: -0.01em; }
+.ph .sub { margin-top: 4px; font-size: var(--text-ui); color: var(--ink-muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ph .sub .sep { color: var(--ink-faint); }
+.ph .act { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.sec { margin-bottom: 32px; }
+.sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.sec-h h3 { margin: 0; font-size: var(--text-ui); font-weight: 600; color: var(--ink); }
+.sec-h .d { font-size: var(--text-label); color: var(--ink-faint); }
+.sec-h .end { margin-left: auto; }
+.box { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.box > .row + .row { border-top: 1px solid var(--line-faint); }
+
+/* ── 定时任务 ── */
+.tasks { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
+.tlist .row { display: flex; gap: 10px; padding: 12px 14px; cursor: pointer; align-items: flex-start; position: relative; }
+.tlist .row:hover { background: var(--surface-hover); }
+.tlist .row:first-child { border-radius: var(--radius-card) var(--radius-card) 0 0; }
+.tlist .row:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+.tlist .row[aria-selected="true"] { background: var(--accent-muted); }
+.tlist .row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--accent); }
+.tlist .row .dot { margin-top: 7px; }
+.tlist .nm { font-weight: 500; color: var(--ink); font-size: var(--text-ui); }
+.tlist .ds { font-size: var(--text-label); color: var(--ink-muted); margin-top: 2px; }
+.tlist .nx { font-size: var(--text-label); color: var(--ink-faint); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+.tlist .off .nm { color: var(--ink-faint); }
+
+.dhead { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.dhead h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink-strong); }
+.dhead .act { margin-left: auto; display: flex; gap: 6px; }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); }
+.kv > div { padding: 10px 14px; font-size: var(--text-ui); border-top: 1px solid var(--line-faint); }
+.kv > div:nth-child(-n+2) { border-top: 0; }
+.kv .k { color: var(--ink-faint); }
+.kv .v { color: var(--ink); min-width: 0; }
+.kv .v .mono { color: var(--ink-muted); }
+.prompt { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--ink-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cron { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cron code { font-family: var(--font-mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--code-inline-bg); }
+
+table { width: 100%; border-collapse: collapse; font-size: var(--text-ui); }
+th { text-align: left; font-weight: 400; color: var(--ink-faint); font-size: var(--text-label); padding: 8px 14px; border-bottom: 1px solid var(--line); }
+td { padding: 0 14px; height: 40px; border-top: 1px solid var(--line-faint); color: var(--ink); white-space: nowrap; }
+tr:first-child td { border-top: 0; }
+td.num { font-family: var(--font-mono); font-size: 12px; color: var(--ink-muted); }
+.st { display: inline-flex; align-items: center; gap: 7px; }
+.st.gray { color: var(--ink-muted); }
+.st .i { color: var(--ink-faint); }
+tr.err-row td { height: auto; padding-bottom: 10px; border-top: 0; white-space: normal; }
+.errline { display: flex; gap: 8px; align-items: flex-start; font-size: var(--text-label); color: var(--ink-muted); padding: 6px 10px; border-left: 2px solid var(--danger-line); margin-left: 14px; }
+td .link { color: var(--ink-muted); display: inline-flex; align-items: center; gap: 4px; }
+td .link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+td.end { text-align: right; }
+
+/* 空状态 */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 56px 24px; }
+.empty .ico { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--ink-muted); margin-bottom: 14px; }
+.empty h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.empty p { margin: 6px 0 18px; max-width: 360px; color: var(--ink-muted); font-size: var(--text-ui); line-height: 1.6; }
+.empty .ctas { display: flex; gap: 8px; }
+
+/* ── 模型 ── */
+.cli .row { display: grid; grid-template-columns: 20px 1fr auto; gap: 4px 12px; padding: 14px; align-items: start; }
+.cli .row .dot { margin-top: 7px; }
+.cli .t { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); }
+.cli .t b { font-weight: 600; color: var(--ink); }
+.cli .meta { grid-column: 2 / 4; font-size: var(--text-label); color: var(--ink-faint); display: flex; gap: 16px; flex-wrap: wrap; }
+.cli .meta .mono { color: var(--ink-muted); }
+.callout { grid-column: 2 / 4; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--warn-line); border-radius: var(--radius-field); font-size: var(--text-ui); color: var(--ink); display: flex; gap: 10px; }
+.callout .i { color: var(--warn); margin-top: 2px; }
+.callout code { font-family: var(--font-mono); font-size: 12px; background: var(--code-inline-bg); padding: 1px 5px; border-radius: 4px; }
+.prov .row { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; padding: 14px; }
+.prov .t { display: flex; align-items: center; gap: 8px; }
+.prov .t b { font-weight: 600; color: var(--ink); font-size: var(--text-ui); }
+.prov .ep { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); margin-top: 3px; }
+.prov .ms { grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 6px; }
+.mchip { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); display: inline-flex; align-items: center; gap: 5px; }
+.mchip.def { border-color: var(--accent-line); color: var(--accent-ink); }
+.mchip.more { color: var(--ink-faint); font-family: var(--font-sans); }
+.prov .acts { display: flex; gap: 2px; align-items: center; }
+.badge.def { border-color: var(--accent-line); color: var(--accent-ink); }
+
+/* 稿件控制条：不是产品 UI */
+.mockbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: var(--text-label); color: var(--ink-faint); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol><symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol><symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol><symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol><symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol><symbol id="i-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/></symbol><symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol><symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol><symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/></symbol><symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol><symbol id="i-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol><symbol id="i-layout-panel-left" viewBox="0 0 24 24"><rect width="7" height="18" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/></symbol><symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol><symbol id="i-messages-square" viewBox="0 0 24 24"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></symbol><symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></symbol><symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol><symbol id="i-play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol><symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol><symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></symbol><symbol id="i-share-2" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></symbol><symbol id="i-skip-forward" viewBox="0 0 24 24"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></symbol><symbol id="i-sliders-horizontal" viewBox="0 0 24 24"><path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/></symbol><symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol><symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol><symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol><symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol><symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol></svg>
+<!--icons: refresh-cw play loader-circle -->
+
+<header class="top">
+  <a class="back" href="01-workbench.html"><svg class="i"><use href="#i-arrow-left"/></svg>返回工作台</a>
+  <span class="vr"></span>
+  <h1>设置</h1>
+  <div class="r">
+    <button class="icon-btn" aria-label="切换主题" data-tip="切换明暗" id="themeBtn"><svg class="i"><use href="#i-sun" id="themeIcon"/></svg></button>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="snav" aria-label="设置分组" id="snav">
+    <div class="grp">Agent 与自动化</div>
+    <a href="#agents" data-p="agents"><svg class="i"><use href="#i-bot"/></svg>Agent<span class="n">3</span></a>
+    <a href="#tasks" data-p="tasks" aria-current="page"><svg class="i"><use href="#i-calendar-clock"/></svg>定时任务<span class="n">3</span></a>
+    <a href="#models" data-p="models"><svg class="i"><use href="#i-cpu"/></svg>模型<span class="dot" style="background:var(--ink-muted)" data-tip="claude 凭证 4 天后过期"></span></a>
+    <div class="grp">连接</div>
+    <a href="#bots" data-p="bots"><svg class="i"><use href="#i-messages-square"/></svg>飞书机器人</a>
+    <a href="#shares" data-p="shares"><svg class="i"><use href="#i-share-2"/></svg>共享池</a>
+    <a href="#workspaces" data-p="workspaces"><svg class="i"><use href="#i-square-terminal"/></svg>工作区与 CLI</a>
+    <div class="grp">系统</div>
+    <a href="#machine" data-p="machine"><svg class="i"><use href="#i-server"/></svg>机器资源</a>
+    <a href="#prefs" data-p="prefs"><svg class="i"><use href="#i-sliders-horizontal"/></svg>偏好</a>
+    <a href="#update" data-p="update"><svg class="i"><use href="#i-circle-arrow-up"/></svg>版本与更新</a>
+  </nav>
+
+  <main>
+    <!-- ═════════ 定时任务 ═════════ -->
+    <section class="page" id="p-tasks">
+      <div class="ph">
+        <div>
+          <h2>定时任务</h2>
+          <div class="sub" data-state="data"><span>3 个任务</span><span class="sep">·</span><span>2 个启用定时</span><span class="sep">·</span><span>1 个正在执行</span><span class="sep">·</span><span>最近 24 小时运行 4 次</span></div>
+          <div class="sub" data-state="empty" hidden><span>还没有任务</span></div>
+          <div class="sub" data-state="loading" hidden><span class="sk" style="width:260px;height:14px;display:inline-block"></span></div>
+        </div>
+        <div class="act">
+          <button class="icon-btn" aria-label="刷新" data-tip="刷新" data-refresh><svg class="i"><use href="#i-refresh-cw"/></svg></button>
+          <button class="btn btn-primary" id="hdrNew"><svg class="i"><use href="#i-plus"/></svg>新建任务</button>
+        </div>
+      </div>
+
+      <!-- 数据态 -->
+      <div class="tasks" data-state="data">
+        <div class="box tlist" role="listbox" aria-label="任务列表">
+          <div class="row" aria-selected="true"><span class="dot live"></span><div><div class="nm">仓库日报</div><div class="ds">默认 Agent · trellis</div><div class="nx"><svg class="i xs"><use href="#i-clock"/></svg>每天 09:00 · 下次 明天 09:00</div></div></div>
+          <div class="row"><span class="dot idle"></span><div><div class="nm">authfix-verify</div><div class="ds">默认 Agent · .claude</div><div class="nx">仅手动运行</div></div></div>
+          <div class="row off"><span class="dot idle"></span><div><div class="nm">周报汇总</div><div class="ds">写作 Agent · notes</div><div class="nx"><svg class="i xs"><use href="#i-clock"/></svg>每周五 18:00 · 已停用</div></div></div>
+        </div>
+
+        <div>
+          <div class="dhead">
+            <h3>仓库日报</h3>
+            <span class="badge"><svg class="i xs"><use href="#i-clock"/></svg>定时</span>
+            <div class="act">
+              <button class="btn btn-outline"><svg class="i sm"><use href="#i-play"/></svg>立即运行</button>
+              <button class="btn btn-ghost"><svg class="i sm"><use href="#i-pencil"/></svg>编辑</button>
+              <button class="icon-btn" aria-label="更多"><svg class="i"><use href="#i-ellipsis"/></svg></button>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="box kv">
+              <div class="k">Agent</div><div class="v">默认 Agent</div>
+              <div class="k">工作目录</div><div class="v"><span class="mono">~/python/learning/trellis</span></div>
+              <div class="k">模型</div><div class="v"><span class="mono">claude-sonnet-5</span></div>
+              <div class="k">提示词</div><div class="v"><div class="prompt">跑 git log --since=yesterday，按模块归类昨天的提交；标出没有测试覆盖的改动，最后给出今天建议优先处理的三件事。</div></div>
+              <div class="k">触发</div><div class="v"><div class="cron"><code>0 9 * * *</code><span>每天 09:00</span><span class="faint">· 下次：明天 09:00</span><button class="btn btn-ghost btn-sm" style="margin-left:auto"><svg class="i xs"><use href="#i-plus"/></svg>添加触发器</button></div></div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-h"><h3>运行记录</h3><span class="d">保留最近 30 次</span></div>
+            <div class="box">
+              <table>
+                <thead><tr><th style="width:170px">状态</th><th>开始</th><th>耗时</th><th>触发</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td><span class="st"><span class="dot live"></span>执行中</span></td><td class="num">今天 14:02</td><td class="num">1m 12s</td><td>手动</td><td class="end"><a class="link" href="01-workbench.html">打开会话<svg class="i xs"><use href="#i-arrow-up-right"/></svg></a>&nbsp;&nbsp;<button class="btn btn-ghost btn-sm">中止</button></td></tr>
+                  <tr><td><span class="st gray" data-tip="服务器重启时被收尾，不是任务本身失败"><span class="dot"></span>中断（服务重启）</span></td><td class="num">今天 09:00</td><td class="num">3m 40s</td><td>定时</td><td class="end"><a class="link" href="01-workbench.html">打开会话<svg class="i xs"><use href="#i-arrow-up-right"/></svg></a></td></tr>
+                  <tr><td><span class="st"><svg class="i sm"><use href="#i-check"/></svg>完成</span></td><td class="num">昨天 09:00</td><td class="num">4m 02s</td><td>定时</td><td class="end"><a class="link" href="01-workbench.html">打开会话<svg class="i xs"><use href="#i-arrow-up-right"/></svg></a></td></tr>
+                  <tr><td><span class="st"><span class="dot danger"></span>失败</span></td><td class="num">9/26 09:00</td><td class="num">0.8s</td><td>定时</td><td class="end"><button class="btn btn-ghost btn-sm">重试</button></td></tr>
+                  <tr class="err-row"><td colspan="5"><div class="errline"><svg class="i xs" style="margin-top:2px;color:var(--danger)"><use href="#i-circle-alert"/></svg><span>claude 登录已失效：refresh token 过期。到「模型」页按提示重新登录后重试。</span></div></td></tr>
+                  <tr><td><span class="st"><svg class="i sm"><use href="#i-check"/></svg>完成</span></td><td class="num">9/25 09:00</td><td class="num">3m 51s</td><td>定时</td><td class="end"><a class="link" href="01-workbench.html">打开会话<svg class="i xs"><use href="#i-arrow-up-right"/></svg></a></td></tr>
+                  <tr><td><span class="st gray"><svg class="i sm"><use href="#i-skip-forward"/></svg>跳过</span></td><td class="num">9/24 09:00</td><td class="num">—</td><td>定时</td><td class="end faint" style="font-size:12px">上一次仍在执行</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 空状态 -->
+      <div class="box" data-state="empty" hidden>
+        <div class="empty">
+          <div class="ico"><svg class="i lg"><use href="#i-calendar-clock"/></svg></div>
+          <h4>还没有定时任务</h4>
+          <p>把重复的活交给 Agent：每天早上拉一份仓库日报、每晚跑一遍回归验证。任务会在后台执行，结果留在会话里。</p>
+          <div class="ctas"><button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>新建任务</button><button class="btn btn-outline">从模板开始</button></div>
+        </div>
+      </div>
+
+      <!-- 骨架加载态 -->
+      <div class="tasks" data-state="loading" hidden aria-busy="true">
+        <div class="box tlist">
+          <div class="row"><span class="sk" style="width:8px;height:8px;border-radius:50%;margin-top:5px"></span><div style="flex:1"><div class="sk" style="width:60%;height:13px"></div><div class="sk" style="width:80%;height:11px;margin-top:8px"></div></div></div>
+          <div class="row"><span class="sk" style="width:8px;height:8px;border-radius:50%;margin-top:5px"></span><div style="flex:1"><div class="sk" style="width:45%;height:13px"></div><div class="sk" style="width:70%;height:11px;margin-top:8px"></div></div></div>
+          <div class="row"><span class="sk" style="width:8px;height:8px;border-radius:50%;margin-top:5px"></span><div style="flex:1"><div class="sk" style="width:55%;height:13px"></div><div class="sk" style="width:65%;height:11px;margin-top:8px"></div></div></div>
+        </div>
+        <div>
+          <div class="sk" style="width:140px;height:18px;margin:6px 0 22px"></div>
+          <div class="box" style="padding:14px;display:grid;gap:14px">
+            <div class="sk" style="width:70%;height:12px"></div><div class="sk" style="width:50%;height:12px"></div><div class="sk" style="width:85%;height:12px"></div><div class="sk" style="width:40%;height:12px"></div>
+          </div>
+          <div class="sk" style="width:80px;height:13px;margin:32px 0 12px"></div>
+          <div class="box" style="padding:14px;display:grid;gap:18px">
+            <div class="sk" style="height:12px"></div><div class="sk" style="height:12px"></div><div class="sk" style="height:12px"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════ 模型 ═════════ -->
+    <section class="page" id="p-models" hidden>
+      <div class="ph">
+        <div>
+          <h2>模型</h2>
+          <div class="sub"><span>2 个 CLI 登录</span><span class="sep">·</span><span>4 个 Provider</span><span class="sep">·</span><span>169 个可用模型</span><span class="sep">·</span><span>默认 <span class="mono">gpt-5.6-sol</span></span></div>
+        </div>
+        <div class="act">
+          <button class="icon-btn" aria-label="重新探测" data-tip="重新探测" data-refresh><svg class="i"><use href="#i-refresh-cw"/></svg></button>
+          <button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>添加 Provider</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h3>CLI 登录状态</h3><span class="d">新会话用的就是这两份本机登录态；每小时检查一次，快过期会提醒</span></div>
+        <div class="box cli">
+          <div class="row">
+            <span class="dot warn"></span>
+            <div class="t"><b>claude</b><span class="muted">已登录 · claude.ai Max</span></div>
+            <span class="faint" style="font-size:12px">m150…863@gmail.com</span>
+            <div class="meta"><span>refresh token <span class="mono">4 天后过期</span></span><span>access token 至 <span class="mono">9-28 22:30</span></span><span>凭证更新于 <span class="mono">9-28 14:30</span></span></div>
+            <div class="callout"><svg class="i"><use href="#i-triangle-alert"/></svg><div>Keychain 里还有一份停更的凭证副本（落后文件 48 小时以上），后台启动的 claude 可能读到失效凭证。执行 <code>security delete-generic-password -s "Claude Code-credentials"</code> 后重新探测。
+              <div style="margin-top:8px;display:flex;gap:6px"><button class="btn btn-outline btn-sm"><svg class="i xs"><use href="#i-copy"/></svg>复制命令</button><button class="btn btn-ghost btn-sm">了解原因</button></div></div></div>
+          </div>
+          <div class="row">
+            <svg class="i sm faint" style="margin-top:2px"><use href="#i-check"/></svg>
+            <div class="t"><b>codex</b><span class="muted">已登录 · ChatGPT 账号</span></div>
+            <span></span>
+            <div class="meta"><span>凭证更新于 <span class="mono">9-19 15:13</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h3>Provider</h3><span class="d">配置文件 <span class="mono">~/.claude/global/endpoints.yaml</span> · Key 存于 <span class="mono">~/.agent-gateway.env</span></span></div>
+        <div class="box prov">
+          <div class="row">
+            <div><div class="t"><b>claude</b><span class="badge"><svg class="i xs"><use href="#i-square-terminal"/></svg>原生 CLI · 免 Key</span></div></div>
+            <div class="acts"><button class="btn btn-ghost btn-sm">设为默认</button><button class="icon-btn sm" aria-label="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button></div>
+            <div class="ms"><span class="mchip">claude-opus-5-5[1m]</span><span class="mchip">claude-fable-5-1[1m]</span><span class="mchip">claude-sonnet-5[1m]</span><span class="mchip">claude-opus-4-8[1m]</span><span class="mchip">claude-opus-5-5</span><span class="mchip">claude-sonnet-5</span><span class="mchip more">+7</span></div>
+          </div>
+          <div class="row">
+            <div><div class="t"><b>codex</b><span class="badge def"><svg class="i xs"><use href="#i-star"/></svg>默认</span><span class="badge"><svg class="i xs"><use href="#i-square-terminal"/></svg>原生 CLI</span></div></div>
+            <div class="acts"><button class="icon-btn sm" aria-label="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button></div>
+            <div class="ms"><span class="mchip def">gpt-5.6-sol</span><span class="mchip">gpt-5.5-codex</span><span class="mchip">gpt-5.5</span></div>
+          </div>
+          <div class="row">
+            <div><div class="t"><b>deepseek</b><span class="badge"><svg class="i xs"><use href="#i-key-round"/></svg>Key 已配置</span></div><div class="ep">https://api.deepseek.com/anthropic</div></div>
+            <div class="acts"><button class="btn btn-ghost btn-sm">设为默认</button><button class="icon-btn sm" aria-label="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button><button class="icon-btn sm" aria-label="删除" data-tip="删除"><svg class="i sm"><use href="#i-trash-2"/></svg></button></div>
+            <div class="ms"><span class="mchip">deepseek-v4-flash</span><span class="mchip">deepseek-v4-pro</span></div>
+          </div>
+          <div class="row">
+            <div><div class="t"><b>gemini</b><span class="badge"><svg class="i xs"><use href="#i-key-round"/></svg>Key 已配置</span></div><div class="ep">https://generativelanguage.googleapis.com/v1beta/openai</div></div>
+            <div class="acts"><button class="btn btn-ghost btn-sm">设为默认</button><button class="icon-btn sm" aria-label="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button><button class="icon-btn sm" aria-label="删除"><svg class="i sm"><use href="#i-trash-2"/></svg></button></div>
+            <div class="ms"><span class="mchip">gemini-2.5-flash</span></div>
+          </div>
+          <div class="row">
+            <div><div class="t"><b>ark-coding</b><span class="badge"><svg class="i xs"><use href="#i-key-round"/></svg>Key 已配置</span></div><div class="ep">https://ark.cn-beijing.volces.com/api/coding</div></div>
+            <div class="acts"><button class="btn btn-ghost btn-sm">设为默认</button><button class="icon-btn sm" aria-label="编辑"><svg class="i sm"><use href="#i-pencil"/></svg></button><button class="icon-btn sm" aria-label="删除"><svg class="i sm"><use href="#i-trash-2"/></svg></button></div>
+            <div class="ms"><span class="mchip">ark-code-latest</span><span class="mchip">doubao-seed-2.0-code</span><span class="mchip">doubao-seed-2.0-pro</span><span class="mchip more">+3</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 其余页：同一 PageShell，本稿不展开 -->
+    <section class="page" id="p-other" hidden>
+      <div class="ph"><div><h2 id="otherTitle">Agent</h2><div class="sub"><span>本稿只展开「定时任务」和「模型」两页；其余页沿用同一 PageShell 骨架</span></div></div>
+        <div class="act"><button class="icon-btn" aria-label="刷新"><svg class="i"><use href="#i-refresh-cw"/></svg></button></div></div>
+      <div class="box"><div class="empty"><div class="ico"><svg class="i lg"><use href="#i-layout-panel-left"/></svg></div><h4>此页未在稿中展开</h4><p>标题 + 实时计数副标题 + 刷新 / 主操作，内容区四态（加载 / 出错 / 空 / 列表）。</p></div></div>
+    </section>
+  </main>
+</div>
+
+<div class="mockbar" id="mockbar">
+  <span>稿件预览状态</span>
+  <div class="seg" role="tablist" id="stateSeg">
+    <button aria-selected="true" data-s="data">有数据</button>
+    <button aria-selected="false" data-s="empty">空状态</button>
+    <button aria-selected="false" data-s="loading">加载中</button>
+  </div>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const root = document.documentElement;
+function syncTheme() { $("#themeIcon").setAttribute("href", root.classList.contains("dark") ? "#i-moon" : "#i-sun"); }
+syncTheme();
+$("#themeBtn").onclick = () => { root.classList.toggle("dark"); localStorage.setItem("trellis-mock-theme", root.classList.contains("dark") ? "dark" : "light"); syncTheme(); };
+
+const names = { agents: "Agent", bots: "飞书机器人", shares: "共享池", workspaces: "工作区与 CLI", machine: "机器资源", prefs: "偏好", update: "版本与更新" };
+function route() {
+  const p = (location.hash || "#tasks").slice(1);
+  $$("#snav a").forEach(a => { if (a.dataset.p === p) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  $("#p-tasks").hidden = p !== "tasks"; $("#p-models").hidden = p !== "models";
+  $("#p-other").hidden = p === "tasks" || p === "models";
+  if (names[p]) $("#otherTitle").textContent = names[p];
+  $("#mockbar").hidden = p !== "tasks";
+}
+addEventListener("hashchange", route); route();
+
+function setState(s) {
+  $$("#stateSeg button").forEach(b => b.setAttribute("aria-selected", b.dataset.s === s));
+  $$("#p-tasks [data-state]").forEach(el => el.hidden = el.dataset.state !== s);
+  $("#hdrNew").hidden = s === "empty";               // 空状态时主操作只出现一次
+  $('#snav a[data-p="tasks"] .n').textContent = s === "empty" ? "" : "3";
+}
+$("#stateSeg").onclick = (e) => { const b = e.target.closest("button"); if (b) setState(b.dataset.s); };
+$$("[data-refresh]").forEach(b => b.onclick = () => { const u = b.querySelector("svg"); u.classList.add("spin"); if (!$("#p-tasks").hidden) setState("loading"); setTimeout(() => { u.classList.remove("spin"); if (!$("#p-tasks").hidden) setState("data"); }, 1200); });
+$$(".tlist .row").forEach(r => r.onclick = () => { $$(".tlist .row").forEach(x => x.setAttribute("aria-selected", x === r)); });
+const st = new URLSearchParams(location.search).get("state"); if (st) setState(st);
+</script>
+</body>
+</html>
