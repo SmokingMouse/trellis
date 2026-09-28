@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-devbox prod 卡顿五个根因 A–E 全部上线并闭环（e80951a94，稳态 p50 8ms）；残留一条：重启后约 2 分钟启动补齐窗口，正在做水位跳过。
+UI 重设计（克制工具风）W1–W5 已在 feat/ui-redesign 完成并全绿，待用户验收后合 main 部署；devbox 卡顿残留的启动补齐窗口仍待收尾。
 
 ## Goals
 
@@ -20,7 +20,8 @@ devbox prod 卡顿五个根因 A–E 全部上线并闭环（e80951a94，稳态 
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S179） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 一条一文件、倒序读最近 5 个（最新 S180） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `../docs/ui-redesign/` UI 重设计调研 / 稿子 / 原语用法表
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
