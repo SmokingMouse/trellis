@@ -842,8 +842,8 @@ html, body {
   outline: none;
 }
 
-/* Canvas (ReactFlow) polish: transparent container so the gradient bg shows
-   through; indigo-tinted smoothstep edges, softer than the default gray. */
+/* Canvas (ReactFlow) polish: transparent container so the canvas bg shows
+   through; near-neutral smoothstep edges (--edge). */
 .react-flow {
   background: transparent !important;
 }
@@ -855,6 +855,33 @@ html, body {
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
   stroke: var(--edge-active);
+}
+
+/* 画布 / 地图的话题色：只用于卡片左侧 3px 细条与话题框标记，低 chroma，
+   亮暗两套（卡片本体一律 surface + 细描边，不再用 pastel 填充）。 */
+:root {
+  --topic-0: oklch(62% 0.06 250);
+  --topic-1: oklch(62% 0.06 160);
+  --topic-2: oklch(66% 0.07 85);
+  --topic-3: oklch(62% 0.06 20);
+  --topic-4: oklch(60% 0.06 300);
+  --topic-5: oklch(64% 0.05 200);
+  --topic-6: oklch(64% 0.07 55);
+  --topic-7: oklch(64% 0.06 125);
+  --topic-8: oklch(62% 0.06 335);
+  --topic-9: oklch(60% 0.01 260);
+}
+.dark {
+  --topic-0: oklch(70% 0.06 250);
+  --topic-1: oklch(70% 0.06 160);
+  --topic-2: oklch(74% 0.06 85);
+  --topic-3: oklch(70% 0.06 20);
+  --topic-4: oklch(70% 0.06 300);
+  --topic-5: oklch(72% 0.05 200);
+  --topic-6: oklch(72% 0.06 55);
+  --topic-7: oklch(72% 0.06 125);
+  --topic-8: oklch(70% 0.06 335);
+  --topic-9: oklch(66% 0.01 260);
 }
 .md-body h1, .md-body h2, .md-body h3 {
   font-weight: 600;

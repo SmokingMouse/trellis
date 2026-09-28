@@ -14,8 +14,13 @@ import {
   type ContextMenuTriggerBindings,
 } from "@/components/ui/ContextMenu";
 import type { ChatNode } from "@/lib/types";
+import { Map as MapIcon, Maximize, X } from "lucide-react";
+import { Button, Icon, IconButton, StatusDot } from "@/components/ui";
 
-const colors = ["#bfdbfe", "#a7f3d0", "#fde68a", "#fecdd3", "#ddd6fe", "#a5f3fc", "#fed7aa", "#d9f99d", "#f5d0fe", "#cbd5e1"];
+// 话题色只做左侧细条 / 话题框标记（低 chroma，亮暗两套，见 globals.css 的
+// --topic-N）；节点本体一律 surface + 细描边，深色模式下不再是浅色 pastel 块。
+const TOPIC_COUNT = 10;
+const topicColor = (topic: number) => `var(--topic-${topic % TOPIC_COUNT})`;
 type MapData = {
   node: ChatNode;
   index: number;
@@ -37,17 +42,22 @@ function MapNode({ data: d }: NodeProps<Node<MapData>>) {
       onFocus={() => d.peek(d.node.id)} onBlur={() => d.peek(null)} onMouseEnter={() => d.peek(d.node.id)} onMouseLeave={() => d.peek(null)}
       onClick={() => d.select(d.node.id)}
       {...trigger}
-      className="nodrag nopan relative flex items-center justify-center rounded border text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
-      style={{ width: d.width, height: d.height, background: colors[d.topic % colors.length], borderColor: d.active ? "#1d4ed8" : "#33415555", outline: d.active ? "3px solid #1d4ed8" : undefined, outlineOffset: 1, fontSize: compact ? 26 : 16 }}>
-      <span className={compact ? "truncate px-3 font-medium" : "line-clamp-3 whitespace-normal break-words px-3 text-left leading-[22px]"}>{compact ? treeLabel(d.node, 16) : `#${d.index} ${treeLabel(d.node, 160)}`}</span>
-      {(isWaitingNode(d.node) || isUnreadNode(d.node)) && <span aria-label={isWaitingNode(d.node) ? "等待处理" : "未读"} className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white" style={{ background: isWaitingNode(d.node) ? "#d97706" : "#2563eb" }} />}
+      className={`nodrag nopan relative flex items-center justify-center overflow-hidden rounded-field border bg-surface-raised text-ink transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${d.active ? "border-accent outline-3 outline-accent" : "border-line-strong"}`}
+      // 宽高 / 字号是地图坐标系里的值（随缩放），不是界面尺寸，所以走 style。
+      style={{ width: d.width, height: d.height, outlineOffset: 1, fontSize: compact ? 26 : 16 }}>
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ background: topicColor(d.topic) }} />
+      <span className={compact ? "truncate px-3 font-medium" : "line-clamp-3 whitespace-normal break-words px-3 text-left"} style={compact ? undefined : { lineHeight: "22px" }}>{compact ? treeLabel(d.node, 16) : `#${d.index} ${treeLabel(d.node, 160)}`}</span>
+      {(isWaitingNode(d.node) || isUnreadNode(d.node)) && <StatusDot tone={isWaitingNode(d.node) ? "warn" : "unread"} label={isWaitingNode(d.node) ? "等待处理" : "未读"} className="absolute right-1 top-1 size-2 ring-2 ring-surface-raised" />}
     </button>
     <Handle type="source" position={Position.Bottom} className="!opacity-0" />
   </>;
 }
 function TopicNode({ data }: NodeProps<Node<{ label: string; width: number; height: number; topic: number }>>) {
-  return <div className="pointer-events-none rounded-lg border border-line text-ink" style={{ width: data.width, height: data.height, background: "var(--color-surface)" }}>
-    <div className="truncate px-4 py-2 text-[18px] font-semibold"><span style={{ color: colors[data.topic % colors.length] }}>■ </span>{data.label}</div>
+  return <div className="pointer-events-none rounded-card border border-line bg-surface text-ink" style={{ width: data.width, height: data.height }}>
+    <div className="flex items-center gap-2 truncate px-4 py-2 text-lg font-semibold">
+      <span aria-hidden className="size-2.5 shrink-0 rounded-sm" style={{ background: topicColor(data.topic) }} />
+      <span className="truncate">{data.label}</span>
+    </div>
   </div>;
 }
 const nodeTypes = { map: MapNode, topic: TopicNode };
@@ -174,7 +184,7 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
   ], [model, nodes, indices, activeId, select, bindTrigger]);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(derivedNodes);
   useEffect(() => setFlowNodes(derivedNodes), [derivedNodes, setFlowNodes]);
-  const edges = useMemo(() => model.edges.map(e => ({ ...e, type: "map", data: { points: e.points }, style: { stroke: "#64748b", strokeWidth: 2 }, zIndex: 0 })), [model]);
+  const edges = useMemo(() => model.edges.map(e => ({ ...e, type: "map", data: { points: e.points }, style: { stroke: "var(--edge)", strokeWidth: 2 }, zIndex: 0 })), [model]);
   const ready = useNodesInitialized();
   const { setViewport } = useReactFlow();
   const fitted = useRef<string | null>(null);
@@ -197,7 +207,7 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
   }, [reveal]);
   const peek = peekId ? nodes[peekId] : null;
   return <div ref={dialog} role="dialog" aria-modal="true" aria-label="会话地图" data-canvas-map data-map-fit-count={fitCount} data-keys-yield
-    className="fixed z-[70] flex flex-col bg-surface-canvas text-ink shadow-raise md:rounded-xl md:border md:border-line"
+    className="fixed z-60 flex flex-col bg-surface-canvas text-ink shadow-overlay md:rounded-overlay md:border md:border-line"
     style={{ inset: mobile ? 0 : 24, paddingTop: mobile ? "var(--safe-top)" : undefined, paddingBottom: mobile ? "var(--safe-bottom)" : undefined }}
     onKeyDown={e => {
       e.stopPropagation();
@@ -210,18 +220,24 @@ function MapInner({ mobile, close }: { mobile: boolean; close: () => void }) {
       }
     }}>
     <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-3">
-      <strong>🗺 地图</strong><span className="flex-1 text-xs text-ink-muted">{model.topics.length} 话题 · {model.positions.size} 节点</span>
-      <button aria-label="地图全貌" onClick={fit} className="min-h-11 px-2 text-xs">全貌</button>
-      <button ref={closeButton} aria-label="关闭地图" onClick={close} className="min-h-11 min-w-11 text-xl">×</button>
+      <strong className="inline-flex items-center gap-1.5 text-ui font-semibold"><Icon icon={MapIcon} className="text-ink-muted" />地图</strong><span className="flex-1 text-label text-ink-faint">{model.topics.length} 话题 · {model.positions.size} 节点</span>
+      <Button variant="ghost" size="sm" aria-label="地图全貌" onClick={fit}><Icon icon={Maximize} size="sm" />全貌</Button>
+      <IconButton ref={closeButton} label="关闭地图" shortcut="Esc" onClick={close}><Icon icon={X} /></IconButton>
     </div>
     <div ref={viewportRef} className="relative min-h-0 flex-1" data-map-viewport style={{ touchAction: "none" }}>
       <ReactFlow nodes={flowNodes} onNodesChange={onNodesChange} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.01} maxZoom={2} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} proOptions={{ hideAttribution: true }} />
-      {peek && <div data-map-detail className="pointer-events-none absolute bottom-3 left-3 right-3 z-10 max-w-sm rounded-lg border border-line bg-surface p-3 text-sm shadow-raise">
-        <div className="mb-1 text-xs text-ink-muted">#{indices[peek.id]} · {treeLabel(peek, 80)}{peek.parentId ? ` · 接续 #${indices[peek.parentId]}` : " · 话题起点"}</div>
-        <strong className="line-clamp-2">{peek.question}</strong><p className="mt-2 line-clamp-3 text-xs text-ink-muted">{peek.response || (isWaitingNode(peek) ? "等待你处理" : "尚无回复")}</p>
+      {peek && <div data-map-detail className="pointer-events-none absolute bottom-3 left-3 right-3 z-10 max-w-sm rounded-card border border-line bg-surface-raised p-3 text-ui shadow-pop">
+        <div className="mb-1 text-label text-ink-faint">#{indices[peek.id]} · {treeLabel(peek, 80)}{peek.parentId ? ` · 接续 #${indices[peek.parentId]}` : " · 话题起点"}</div>
+        <strong className="line-clamp-2">{peek.question}</strong><p className="mt-2 line-clamp-3 text-label text-ink-muted">{peek.response || (isWaitingNode(peek) ? "等待你处理" : "尚无回复")}</p>
       </div>}
     </div>
-    <p className="shrink-0 border-t border-line px-3 py-2 text-[11px] text-ink-muted">选节点回到正文 · 蓝框：当前位置 · <span className="text-blue-600">● 未读</span> · <span className="text-warn">● 等待处理</span></p>
+    <p className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line px-3 py-2 text-label text-ink-faint">
+      <span>选节点回到正文</span>
+      <span aria-hidden>·</span>
+      <span className="inline-flex items-center gap-1"><span aria-hidden className="size-2.5 rounded-sm border-2 border-accent" />当前位置</span>
+      <span className="inline-flex items-center gap-1"><StatusDot tone="unread" />未读</span>
+      <span className="inline-flex items-center gap-1"><StatusDot tone="warn" />等待处理</span>
+    </p>
     <ContextMenu
       {...menuProps}
       label="地图节点菜单"

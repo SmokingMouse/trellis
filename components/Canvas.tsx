@@ -26,6 +26,8 @@ import {
 import { layoutNodes, COMPACT_ZOOM_THRESHOLD } from "@/lib/layout";
 import { buildNodeIndex } from "@/lib/node-index";
 import { hiddenCanvasNodeIds } from "@/lib/collapsed";
+import { Maximize } from "lucide-react";
+import { Icon, IconButton } from "@/components/ui";
 
 const nodeTypes = { chat: ChatNode, reference: ReferenceCard };
 const NODE_WIDTH = 600;
@@ -405,7 +407,7 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
     <>
       <div
         data-canvas-surface
-        className={`w-screen h-dvh pt-[var(--trellis-header-h)] md:pt-[5.25rem] bg-gradient-to-b from-surface-canvas via-surface to-surface-muted${
+        className={`w-screen h-dvh pt-(--trellis-header-h) md:pt-21 bg-surface-canvas${
           layoutReady ? " canvas-layout-ready" : ""
         }`}
         // Wave 4: shift the canvas right of the explorer sidebar (var set in
@@ -433,20 +435,20 @@ function CanvasInner({ onNodeFocus }: { onNodeFocus?: () => void }) {
           }}
           onPaneClick={() => fitView({ padding: 0.15, duration: 400 })}
         >
-          <Background gap={22} size={1} color="#d6d3d1" className="opacity-60 dark:opacity-[0.18]" />
+          <Background gap={22} size={1} color="var(--line-strong)" />
         </ReactFlow>
       </div>
       {/* Always-visible "fit view" floating button — replaces F key on mobile */}
-      <button
+      <IconButton
+        label="回到全局视图"
+        title="回到全局视图（F / 点击空白）"
+        shortcut="F"
+        tooltipSide="left"
         onClick={() => fitView({ padding: 0.15, duration: 400 })}
-        className="fixed top-[60px] right-3 z-30 w-10 h-10 rounded-full bg-surface border border-line shadow-raise flex items-center justify-center text-ink-muted hover:bg-surface-muted active:scale-95 transition-transform"
-        title="回到全局视图 (F / 点击空白)"
-        aria-label="回到全局视图"
+        className="fixed top-15 right-3 z-20 size-10 rounded-full border border-line bg-surface shadow-pop"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />
-        </svg>
-      </button>
+        <Icon icon={Maximize} size="lg" />
+      </IconButton>
       {popover?.selection && (
         <BranchPopover
           selection={popover.selection}
