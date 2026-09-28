@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { PREF_ITEMS, readRaw, writeRaw, type PrefItem } from "@/lib/prefs";
+import { PageHeader, Select, Skeleton, Switch } from "@/components/ui";
 
 // S89: 偏好的「可穷举清单」。
 //
@@ -34,22 +35,21 @@ export default function PrefsSettingsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl">
-      <div className="px-3 py-2 rounded-md border border-line bg-surface-muted text-label text-ink-muted">
-        这些偏好各自都有就近的入口（每行右侧标注了在哪），这里只是一份能一次看全的清单。
-        改动存在本浏览器，换设备不同步。部分改动要刷新页面才完全生效。
-      </div>
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        title="偏好"
+        count={PREF_ITEMS.length}
+        countUnit="项"
+        subtitle="各自都有就近入口（每行标注了在哪改），这里是一次看全的清单；存在本浏览器，换设备不同步，部分改动要刷新页面才完全生效"
+      />
 
       {GROUPS.map((g) => {
         const items = PREF_ITEMS.filter((i) => i.group === g);
         if (!items.length) return null;
         return (
-          <section
-            key={g}
-            className="rounded-card border border-line bg-surface shadow-raise p-4"
-          >
-            <h2 className="text-ui font-medium mb-3">{g}</h2>
-            <div className="flex flex-col divide-y divide-line-faint">
+          <section key={g}>
+            <h2 className="text-ui font-semibold text-ink-strong mb-2">{g}</h2>
+            <div className="flex flex-col divide-y divide-line-faint rounded-card border border-line bg-surface px-4">
               {items.map((it) => (
                 <Row
                   key={it.key}
@@ -79,33 +79,29 @@ function Row({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="py-2.5 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
+    <div className="py-3 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
       <div className="min-w-0 flex-1">
         <div className="text-ui">{item.label}</div>
         <div className="text-label text-ink-faint">在这改：{item.where}</div>
       </div>
       <div className="shrink-0 max-md:w-full">
         {!ready ? (
-          <span className="text-label text-ink-faint">…</span>
+          <Skeleton className="h-6 w-28" />
         ) : item.kind === "enum" ? (
-          <select
-            className="px-2 py-1 max-md:w-full rounded-field border border-line bg-surface-muted text-ui text-ink outline-none"
+          <Select
+            aria-label={item.label}
+            className="md:w-44"
             value={raw ?? item.fallback}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            {item.options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            onValueChange={onChange}
+            options={item.options.map((o) => ({ value: o.value, label: o.label }))}
+          />
         ) : item.kind === "bool" ? (
-          <input
-            type="checkbox"
+          <Switch
+            aria-label={item.label}
             checked={raw === null ? item.fallback : raw === "1" || raw === "true"}
             // 值的写法跟着既有存储走：这些 key 历史上存的是 "1"/"0"，
             // 不趁机改格式 —— 改了老浏览器里的旧值会被读成 false。
-            onChange={(e) => onChange(e.target.checked ? "1" : "0")}
+            onCheckedChange={(v) => onChange(v ? "1" : "0")}
           />
         ) : (
           // 新会话默认值：只读。在这里改没有意义 —— 那三个 picker 才是真入口，

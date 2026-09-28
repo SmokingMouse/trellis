@@ -1,5 +1,17 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CircleArrowUp, RefreshCw, TriangleAlert, Undo2 } from "lucide-react";
+import {
+  Button,
+  Checkbox,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  PageHeader,
+  SkeletonText,
+  toast,
+  useConfirm,
+} from "@/components/ui";
 
 // 管理台的「版本与更新」tab。曾经这一页就是整个 /settings，文件头写着「刻意不做偏好中心」
 // —— S89 修订了那条取舍的一半：偏好仍不从原地控件搬走，但会在管理台多一份可穷举的镜像
@@ -58,7 +70,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const confirm = useConfirm();
   const [force, setForce] = useState(false);
   // 切换阶段服务会重启，轮询必然连续失败几次。用它区分「短暂重启」和「真的没了」。
   const [offline, setOffline] = useState(false);
@@ -101,7 +113,6 @@ export default function SettingsPage() {
   const post = useCallback(
     async (body: Record<string, unknown>) => {
       setBusy(true);
-      setMsg(null);
       try {
         const r = await fetch("/api/update", {
           method: "POST",
@@ -110,13 +121,13 @@ export default function SettingsPage() {
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) {
-          setMsg(d?.error ?? "操作失败");
+          toast.error("操作没有开始", { description: d?.error ?? "服务端拒绝了这次请求" });
         } else {
-          setMsg("已开始，下面会实时显示进度");
+          toast.success("已开始", { description: "下面会实时显示进度" });
           offlineSince.current = null;
         }
       } catch {
-        setMsg("请求失败");
+        toast.error("请求失败", { description: "连不上服务，稍后重试" });
       } finally {
         setBusy(false);
         void load(false);
@@ -127,7 +138,6 @@ export default function SettingsPage() {
 
   const check = useCallback(async () => {
     setChecking(true);
-    setMsg(null);
     await load(true);
     setChecking(false);
   }, [load]);
@@ -137,17 +147,71 @@ export default function SettingsPage() {
   const repoOk = Boolean(st?.repo.dir);
   const canUpdate = repoOk && !st?.running && !busy;
 
+  const rollback = async () => {
+    const prev = st?.deploy?.previousSha;
+    if (!prev) return;
+    const ok = await confirm({
+      title: "回滚到上一版？",
+      description: `服务会切回 ${prev} 并短暂重启；正在生成的会话会被中断。`,
+      confirmLabel: "回滚",
+      danger: true,
+    });
+    if (ok) void post({ action: "rollback" });
+  };
+
+  const subtitle = st?.current ? (
+    <>
+      当前 <span className="font-mono">{st.current.sha}</span>
+      {st.behind !== null && repoOk && (
+        <>
+          <span className="px-1.5 text-ink-faint">·</span>
+          {st.behind === 0 ? "已是最新" : `落后 ${st.behind} 个提交`}
+        </>
+      )}
+    </>
+  ) : st ? (
+    "当前版本未知"
+  ) : undefined;
+
   return (
     // S89: 滚动容器与页头由 app/settings/layout.tsx 接管，这里只剩内容。
-    <div className="max-w-3xl">
-        <section className="rounded-card border border-line bg-surface shadow-raise p-5">
-          <h2 className="text-ui font-medium mb-4">版本与更新</h2>
-
+    <div className="flex flex-col gap-4">
+        <PageHeader
+          title="版本与更新"
+          subtitle={subtitle}
+          actions={
+            <>
+              <IconButton
+                label="检查更新"
+                onClick={check}
+                disabled={!repoOk || checking}
+              >
+                <Icon icon={RefreshCw} className={checking ? "animate-spin" : undefined} />
+              </IconButton>
+              <Button
+                variant="primary"
+                onClick={() => post({ action: "update", ref: "origin/main", force })}
+                disabled={!canUpdate || st?.behind === 0}
+                loading={busy}
+              >
+                <Icon icon={CircleArrowUp} />
+                更新到最新
+              </Button>
+            </>
+          }
+        />
+        <section className="rounded-card border border-line bg-surface p-5">
           {loadError && (
-            <div className="mb-4 rounded-md border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink">
-              {loadError}
-            </div>
+            <ErrorCallout
+              className="mb-4"
+              error={null}
+              title="服务长时间无响应"
+              hint="超过 60 秒没连上服务。页面仍在自动重试；若一直这样，去机器上看服务进程。"
+              onRetry={() => void load(false)}
+            />
           )}
+
+          {!st && !loadError && <SkeletonText lines={3} className="mb-4" />}
 
           {/* 当前版本 */}
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-ui mb-4">
@@ -170,11 +234,14 @@ export default function SettingsPage() {
 
           {/* 仓库没配好时，把话说全：按钮为什么点不了、该往哪儿加什么 */}
           {!repoOk && st && (
-            <div className="mb-4 rounded-md border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink">
-              <div className="font-medium">无法从界面更新</div>
+            <div className="mb-4 rounded-card border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink">
+              <div className="flex items-center gap-1.5 font-medium">
+                <Icon icon={TriangleAlert} size="sm" />
+                无法从界面更新
+              </div>
               <div className="mt-1">{st.repo.problem?.hint}</div>
               <div className="mt-1 text-nano opacity-80">
-                原因：上线用的 release 是 `git archive` 导出的，里面没有 .git，
+                原因：上线用的版本包是 `git archive` 导出的，里面没有 .git，
                 部署脚本只能在开发仓库里跑。
               </div>
             </div>
@@ -209,7 +276,7 @@ export default function SettingsPage() {
 
           {/* 落后的 commit */}
           {st && st.commits.length > 0 && (
-            <ul className="mb-4 rounded-md border border-line-faint divide-y divide-line-faint">
+            <ul className="mb-4 rounded-card border border-line divide-y divide-line-faint">
               {st.commits.map((c) => (
                 <li key={c.sha} className="px-3 py-1.5 text-label flex gap-3">
                   <span className="font-mono text-ink-faint shrink-0">{c.sha}</span>
@@ -221,11 +288,10 @@ export default function SettingsPage() {
 
           {/* 正在生成的会话 —— 切换会掐断它们，得先说清楚再让人勾 */}
           {st && st.activeRuns > 0 && !st.running && (
-            <label className="mb-4 flex items-start gap-2 rounded-md border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink cursor-pointer">
-              <input
-                type="checkbox"
+            <label className="mb-4 flex items-start gap-2 rounded-card border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink cursor-pointer">
+              <Checkbox
                 checked={force}
-                onChange={(e) => setForce(e.target.checked)}
+                onCheckedChange={(v) => setForce(v === true)}
                 className="mt-0.5"
               />
               <span>
@@ -235,34 +301,15 @@ export default function SettingsPage() {
             </label>
           )}
 
-          {/* 动作 */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={check}
-              disabled={!repoOk || checking}
-              className="h-8 px-3 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
-            >
-              {checking ? "检查中…" : "检查更新"}
-            </button>
-            <button
-              onClick={() => post({ action: "update", ref: "origin/main", force })}
-              disabled={!canUpdate || st?.behind === 0}
-              className="h-8 px-3 rounded-md bg-accent text-ink-inverse text-label font-medium hover:opacity-90 disabled:opacity-50"
-            >
-              更新到最新
-            </button>
-            {st?.deploy?.previousSha && !st.running && (
-              <button
-                onClick={() => post({ action: "rollback" })}
-                disabled={!canUpdate}
-                className="h-8 px-3 rounded-md border border-line text-label text-ink-muted hover:text-ink hover:bg-surface-muted disabled:opacity-50"
-                title={`回到 ${st.deploy.previousSha}`}
-              >
-                回滚
-              </button>
-            )}
-            {msg && <span className="text-label text-ink-faint">{msg}</span>}
-          </div>
+          {/* 动作：检查 / 更新在页头；回滚是低频的破坏性动作，留在这里并走确认框 */}
+          {st?.deploy?.previousSha && !st.running && (
+            <div className="flex items-center gap-2">
+              <Button variant="danger" size="sm" onClick={() => void rollback()} disabled={!canUpdate}>
+                <Icon icon={Undo2} size="sm" />
+                回滚到 <span className="font-mono">{st.deploy.previousSha}</span>
+              </Button>
+            </div>
+          )}
 
           {/* 部署进度 */}
           {showDeploy && st?.deploy && (
@@ -306,7 +353,7 @@ export default function SettingsPage() {
               )}
 
               {st.logTail && (
-                <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-surface-canvas border border-line-faint p-3 text-nano font-mono whitespace-pre-wrap">
+                <pre className="mt-3 max-h-64 overflow-auto rounded-card bg-surface-canvas border border-line p-3 text-nano font-mono whitespace-pre-wrap">
                   {st.logTail}
                 </pre>
               )}
