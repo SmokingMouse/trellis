@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
+import { PencilLine, X } from "lucide-react";
+import { Button, Icon, IconButton, useConfirm } from "@/components/ui";
 
 // The multi-MB Excalidraw bundle loads only on first open — the modal is
 // conditionally mounted by its callers, so idle sessions pay nothing.
@@ -22,7 +24,7 @@ const Excalidraw = dynamic(
 // 画板：嵌 Excalidraw 画草图，导出 PNG 交给 composer 的附件链路（vision）。
 // 布局走 FilePreview 模式（portal + 近全屏）而非 ui/Modal——画板需要全屏
 // 工作区，且 Excalidraw 内部重度使用 Esc（取消选择/收起面板），Esc-close
-// 会误伤，只允许 ✕ 关闭；画布非空时 ✕ 先 confirm 防误丢。
+// 会误伤，只允许关闭按钮关闭；画布非空时先 useConfirm 防误丢。
 // 根节点标 data-keys-yield：app 的全局单字母/Esc 快捷键在画板内全部让位
 // （Excalidraw 自带整套键盘交互，r/o/a/t/Esc… 与 J/K/B/F 会互相踩）。
 export function SketchModal({
@@ -44,8 +46,18 @@ export function SketchModal({
       document.documentElement.classList.contains("dark"),
   );
 
-  const close = () => {
-    if (hasContent && !window.confirm("丢弃当前草图？")) return;
+  const confirm = useConfirm();
+  const close = async () => {
+    if (
+      hasContent &&
+      !(await confirm({
+        title: "丢弃当前草图？",
+        description: "画板上的内容不会保存，关闭后无法找回。",
+        confirmLabel: "丢弃",
+        danger: true,
+      }))
+    )
+      return;
     onClose();
   };
 
@@ -81,14 +93,12 @@ export function SketchModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex flex-col bg-scrim/70 backdrop-blur-sm"
+      className="fixed inset-0 z-60 flex flex-col bg-scrim/50"
       data-keys-yield
     >
       {/* top bar */}
       <div className="shrink-0 flex items-center gap-3 px-4 h-12 bg-surface border-b border-line">
-        <span className="text-sm" aria-hidden>
-          ✏️
-        </span>
+        <Icon icon={PencilLine} className="text-ink-muted" />
         <span className="flex-1 truncate text-ui font-medium text-ink-strong">
           画个草图
           <span className="ml-2 text-label font-normal text-ink-faint hidden sm:inline">
@@ -97,26 +107,24 @@ export function SketchModal({
         </span>
         {error && (
           <span
-            className="text-label text-danger truncate max-w-[40%]"
+            className="text-label text-danger-ink truncate max-w-2/5"
             title={error}
           >
             导出失败：{error}
           </span>
         )}
-        <button
+        <Button
+          variant="primary"
           onClick={insert}
-          disabled={!hasContent || exporting}
+          disabled={!hasContent}
+          loading={exporting}
           title={hasContent ? undefined : "画布还是空的"}
-          className="px-3 py-1 rounded bg-accent text-ink-inverse text-ui disabled:opacity-30 hover:bg-accent-strong"
         >
-          {exporting ? "导出中…" : "插入草图"}
-        </button>
-        <button
-          onClick={close}
-          className="px-2.5 py-1 rounded border border-line text-ui text-ink-muted hover:bg-surface-muted"
-        >
-          ✕ 关闭
-        </button>
+          插入草图
+        </Button>
+        <IconButton label="关闭画板" onClick={() => void close()}>
+          <Icon icon={X} />
+        </IconButton>
       </div>
       {/* board */}
       <div className="flex-1 min-h-0">

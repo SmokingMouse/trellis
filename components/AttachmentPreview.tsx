@@ -1,5 +1,14 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import {
+  ArrowUp,
+  FileArchive,
+  FileSpreadsheet,
+  FileText,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { Icon, Modal } from "@/components/ui";
 import type { NodeAttachment } from "@/lib/types";
 
 // Input-time variant: a pending attachment that hasn't finished uploading
@@ -44,7 +53,7 @@ function blobUrl(hash: string, filename: string | null): string {
   return `/api/uploads/${hash}${filename ? `?name=${encodeURIComponent(filename)}` : ""}`;
 }
 
-function fileIcon(mime: string): string {
+function fileIcon(mime: string): LucideIcon {
   if (
     mime === "text/csv" ||
     mime === "text/tab-separated-values" ||
@@ -52,10 +61,9 @@ function fileIcon(mime: string): string {
     mime === "application/vnd.ms-excel" ||
     mime === "application/vnd.apache.parquet"
   )
-    return "📊";
-  if (mime === "application/pdf") return "📕";
-  if (mime === "application/zip" || mime === "application/gzip") return "🗜️";
-  return "📄";
+    return FileSpreadsheet;
+  if (mime === "application/zip" || mime === "application/gzip") return FileArchive;
+  return FileText;
 }
 
 function fmtSize(n: number | undefined): string | null {
@@ -67,15 +75,6 @@ function fmtSize(n: number | undefined): string | null {
 
 export function AttachmentPreview(props: Props) {
   const [lightbox, setLightbox] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightbox(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightbox]);
 
   // Normalize both shapes into a uniform render list.
   const items =
@@ -119,8 +118,8 @@ export function AttachmentPreview(props: Props) {
           return (
             <div
               key={it.key}
-              className={`relative w-20 h-20 rounded-md overflow-hidden border ${
-                it.status === "error" ? "border-danger" : "border-line"
+              className={`group/att relative w-20 h-20 rounded-field overflow-hidden border ${
+                it.status === "error" ? "border-danger-line" : "border-line"
               } bg-surface-muted`}
             >
               <button
@@ -155,9 +154,7 @@ export function AttachmentPreview(props: Props) {
                       it.status === "uploading" ? "opacity-50" : ""
                     }`}
                   >
-                    <span className="text-xl leading-none" aria-hidden>
-                      {fileIcon(it.mime)}
-                    </span>
+                    <Icon icon={fileIcon(it.mime)} size="lg" className="text-ink-faint" />
                     <span className="text-nano leading-tight text-ink-muted break-all line-clamp-2 text-center">
                       {it.filename ?? "file"}
                     </span>
@@ -169,8 +166,8 @@ export function AttachmentPreview(props: Props) {
                   </span>
                 )}
                 {it.status === "uploading" && (
-                  <span className="absolute inset-0 flex items-center justify-center text-nano text-ink bg-surface/40">
-                    ↑
+                  <span className="absolute inset-0 flex items-center justify-center text-ink bg-surface/40">
+                    <Icon icon={ArrowUp} size="sm" className="animate-pulse motion-reduce:animate-none" aria-label="上传中" />
                   </span>
                 )}
                 {it.status === "error" && (
@@ -183,10 +180,11 @@ export function AttachmentPreview(props: Props) {
                 <button
                   type="button"
                   onClick={() => onRemove(it.localId)}
+                  aria-label="移除附件"
                   title="移除"
-                  className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 hover:bg-black/80 text-white text-xs flex items-center justify-center leading-none"
+                  className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-scrim/60 hover:bg-scrim/80 text-white flex items-center justify-center"
                 >
-                  ✕
+                  <Icon icon={X} size="sm" />
                 </button>
               )}
             </div>
@@ -195,18 +193,21 @@ export function AttachmentPreview(props: Props) {
       </div>
 
       {lightbox && (
-        <div
-          className="fixed inset-0 z-50 bg-scrim/80 flex items-center justify-center p-6 cursor-zoom-out"
-          onClick={() => setLightbox(null)}
+        <Modal
+          onClose={() => setLightbox(null)}
+          size="lg"
+          title="附件预览"
+          closeOnEsc="always"
+          panelClassName="relative md:max-w-5xl bg-surface-muted"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightbox}
-            alt="attachment"
-            className="max-w-full max-h-full object-contain"
-            onClick={(e) => e.stopPropagation()}
+            alt="附件预览"
+            className="block max-w-full max-h-[85dvh] mx-auto object-contain cursor-zoom-out"
+            onClick={() => setLightbox(null)}
           />
-        </div>
+        </Modal>
       )}
     </>
   );
