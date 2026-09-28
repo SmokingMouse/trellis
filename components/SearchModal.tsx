@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   FileText,
@@ -18,6 +18,7 @@ import {
   Icon,
   Kbd,
   Modal,
+  SearchSnippet,
   SegmentedControl,
   Spinner,
   cn,
@@ -28,12 +29,11 @@ import { modeStyle } from "@/lib/mode-style";
 // it from anywhere; the global keydown listener is owned by this
 // component so the rest of the app doesn't have to know about its state.
 //
-// 最短 3 个字：后端 search_index 是 FTS5 trigram 分词（三字滑窗），短于 3 字的
-// MATCH 必然零命中，lib/server/repo.ts 的 buildFtsQuery 也直接短路返回 []。
-// 所以 1–2 个字（「向量」「AI」）在这里给提示、不发请求；后端若补上 <3 字的
-// LIKE 回退，把 MIN_QUERY 调到 1 即可。
+// 1 个字起搜：后端 search_index 是 FTS5 trigram（三字滑窗），≥3 字走 MATCH；
+// 1–2 字（「向量」「AI」「钱」）由 lib/server/repo.ts 的 searchAll 回退到参数化
+// LIKE，返回结构一致。
 
-const MIN_QUERY = 3;
+const MIN_QUERY = 1;
 const DEBOUNCE_MS = 200;
 
 type Hit = {
@@ -93,8 +93,8 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     inputRef.current?.focus();
   }, []);
 
-  // Debounce 200ms; below MIN_QUERY chars short-circuits to "" so the
-  // server isn't pinged and the empty state explains why.
+  // Debounce 200ms; an empty query short-circuits to "" so the server
+  // isn't pinged.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY) {
@@ -216,8 +216,6 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     el?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
-  const trimmedLen = query.trim().length;
-  const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY;
   const empty =
     !loading && !error && debounced.length > 0 && filtered.length === 0;
 
@@ -264,20 +262,12 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
 
       {/* Results */}
       <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
-        {tooShort && (
-          <EmptyState
-            compact
-            icon={Search}
-            title={`再输入 ${MIN_QUERY - trimmedLen} 个字就能搜`}
-            description={`全文搜索至少需要 ${MIN_QUERY} 个字（中英文都按字数算）。两个字的词可以带上前后一个字，比如「向量库」。`}
-          />
-        )}
-        {!tooShort && !debounced && (
+        {!debounced && (
           <EmptyState
             compact
             icon={Search}
             title="搜索所有会话"
-            description="会话里的提问、回复、参考材料和笔记都能搜到，至少输入 3 个字。"
+            description="会话里的提问、回复、参考材料和笔记都能搜到。"
           />
         )}
         {!!error && debounced && (
@@ -326,7 +316,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
                   <Icon icon={kind.icon} className="mt-0.5 text-ink-faint" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-ui text-ink leading-relaxed line-clamp-2">
-                      <Snippet html={h.snippet} />
+                      <SearchSnippet html={h.snippet} />
                     </span>
                     <span className="block text-label text-ink-faint">{kind.label}</span>
                   </span>
@@ -370,35 +360,6 @@ function SessionHeading({ result: r }: { result: Result }) {
       )}
     </div>
   );
-}
-
-// 片段来自 FTS5 snippet()：它只在命中处插 <mark>，**不转义原文**——索引里存的是
-// 原始提问 / 回复文本，回复里的 HTML 会原样出现。所以这里不走
-// dangerouslySetInnerHTML，而是只认 <mark> / </mark> 两个标记，其余一律当文本。
-function Snippet({ html }: { html: string }) {
-  const parts: ReactNode[] = [];
-  let marked = false;
-  html.split(/(<mark>|<\/mark>)/).forEach((seg, i) => {
-    if (seg === "<mark>") {
-      marked = true;
-      return;
-    }
-    if (seg === "</mark>") {
-      marked = false;
-      return;
-    }
-    if (!seg) return;
-    parts.push(
-      marked ? (
-        <mark key={i} className="rounded-sm bg-accent-muted px-0.5 text-accent-ink">
-          {seg}
-        </mark>
-      ) : (
-        <Fragment key={i}>{seg}</Fragment>
-      ),
-    );
-  });
-  return <>{parts}</>;
 }
 
 const HIT_KIND: Record<Hit["sourceKind"], { icon: LucideIcon; label: string }> = {

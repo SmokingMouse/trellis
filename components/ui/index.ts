@@ -12,6 +12,7 @@ export { IconButton } from "./IconButton";
 export { StopButton } from "./StopButton";
 export { Tooltip, TooltipProvider, type TooltipProps } from "./Tooltip";
 export { Kbd } from "./Kbd";
+export { SearchSnippet } from "./SearchSnippet";
 
 // 表单族
 export { Input, Textarea, type InputProps } from "./Input";

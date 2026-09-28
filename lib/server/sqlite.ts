@@ -997,8 +997,8 @@ function migrate(db: Database) {
   // Linear). UNINDEXED meta columns let us filter/JOIN without paying
   // inverted-index cost. See progress/fts-search.md for the data model.
   //
-  // Min-query constraint: trigram needs ≥ 3 chars per token, so the API
-  // and UI both short-circuit shorter queries with a hint.
+  // Min-query constraint: trigram needs ≥ 3 chars per token; repo.searchAll
+  // falls back to a parameterized LIKE scan for 1–2 char queries.
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
       text,
