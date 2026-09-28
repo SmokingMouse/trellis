@@ -43,6 +43,8 @@ export const PREF_KEYS = {
   systemPrompt: "trellis-system-prompt",
   agentId: "trellis-agent-id",
   requireApproval: "trellis-require-approval",
+  // 启动
+  startupView: "trellis-startup-view",
   // 其它
   pinnedSessions: "trellis-pinned-sessions",
 } as const;
@@ -56,6 +58,21 @@ export const sessionScopedKey = {
   view: (sid: string) => `trellis-view:${sid}`,
 };
 
+// ── 启动视图 ─────────────────────────────────────────────────────────────────
+// 不带会话参数打开 `/` 时落在哪：首页（默认），或像以前一样直接进最近一个会话。
+// 带 ?session= 的深链不受影响 —— 它永远直达阅读位置。
+
+export type StartupView = "home" | "last";
+export const STARTUP_VIEW_DEFAULT: StartupView = "home";
+
+export function parseStartupView(raw: string | null | undefined): StartupView {
+  return raw === "last" ? "last" : STARTUP_VIEW_DEFAULT;
+}
+
+export function loadStartupView(): StartupView {
+  return parseStartupView(readRaw(PREF_KEYS.startupView));
+}
+
 // ── 镜像清单的元数据 ─────────────────────────────────────────────────────────
 
 export type PrefItem = {
@@ -63,7 +80,7 @@ export type PrefItem = {
   label: string;
   /** 这个偏好原本在哪改。清单的作用是**指路**，不是取代 —— 说清出处比自己再实现一遍重要。 */
   where: string;
-  group: "外观" | "输入" | "版式" | "新会话默认";
+  group: "外观" | "启动" | "输入" | "版式" | "新会话默认";
 } & (
   | { kind: "enum"; options: { value: string; label: string }[]; fallback: string }
   | { kind: "bool"; fallback: boolean }
@@ -92,6 +109,18 @@ export const PREF_ITEMS: PrefItem[] = [
     kind: "enum",
     fallback: "default",
     options: PALETTES.map((p) => ({ value: p.id, label: p.label })),
+  },
+  {
+    key: PREF_KEYS.startupView,
+    label: "启动时打开",
+    where: "本页（首页随时可从 Logo、侧栏「首页」或 H 键回来）",
+    group: "启动",
+    kind: "enum",
+    fallback: STARTUP_VIEW_DEFAULT,
+    options: [
+      { value: "home", label: "首页" },
+      { value: "last", label: "上次的会话" },
+    ],
   },
   {
     key: PREF_KEYS.sendKey,

@@ -34,6 +34,7 @@ import type {
 
 export type ApiSession = {
   treeCount?: number;
+  nodeCount?: number;
   backend?: string;
   externalStatus?: string;
   bindingType?: "legacy" | "pane" | "thread";
@@ -397,12 +398,14 @@ export function listSessions(opts?: { archived?: boolean }): ApiSession[] {
       // 来源只决定行内 chip；所有来源共享活跃 / 归档语义。
       `SELECT ${SESSION_COLS},
        (SELECT COUNT(*) FROM nodes n WHERE n.session_id = sessions.id
-        AND n.parent_id IS NULL AND n.hidden_at IS NULL) AS tree_count FROM sessions
+        AND n.parent_id IS NULL AND n.hidden_at IS NULL) AS tree_count,
+       -- 首页「最近会话」行的节点数；走 nodes_session 索引，只读。
+       (SELECT COUNT(*) FROM nodes n WHERE n.session_id = sessions.id) AS node_count FROM sessions
        WHERE archived = ? AND ${sessionSourcePredicate()}
        ORDER BY updated_at DESC`,
     )
-    .all(want) as (SessionRow & { tree_count: number })[];
-  return rows.map(row => ({ ...rowToSession(row), treeCount: row.tree_count }));
+    .all(want) as (SessionRow & { tree_count: number; node_count: number })[];
+  return rows.map(row => ({ ...rowToSession(row), treeCount: row.tree_count, nodeCount: row.node_count }));
 }
 
 // 任务专用列表，保留现有 API / tab 消费方兼容。
