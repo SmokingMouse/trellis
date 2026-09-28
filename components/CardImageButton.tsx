@@ -168,12 +168,14 @@ function CardPreviewDialog({
 
       // 7. Rasterize via html-to-image toCanvas
       const { toCanvas } = await import("html-to-image");
-      const isDark =
-        typeof document !== "undefined" &&
-        document.documentElement.classList.contains("dark");
+      // 衬底取当前皮肤的 surface token（跟随明暗 / 皮肤），不写死 hex。
+      const surface =
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--surface")
+          .trim() || undefined;
       const canvas = await toCanvas(cardEl, {
         pixelRatio,
-        backgroundColor: isDark ? "#1c1917" : "#ffffff",
+        backgroundColor: surface,
         cacheBust: false,
         imagePlaceholder: TRANSPARENT_IMAGE_DATA_URL,
         includeQueryParams: true,

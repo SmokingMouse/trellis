@@ -139,7 +139,7 @@ function PreviewBody({
   }
   if (kind === "image") {
     return (
-      <div className="w-full h-full overflow-auto flex items-center justify-center p-6 [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/20px_20px] dark:[background:none] dark:bg-surface">
+      <div className="w-full h-full overflow-auto flex items-center justify-center p-6 [background:repeating-conic-gradient(var(--surface-muted)_0%_25%,white_0%_50%)_50%/20px_20px] dark:[background:none] dark:bg-surface">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt={name} className="max-w-full max-h-full object-contain" />
       </div>
@@ -156,9 +156,9 @@ type BgMode = "checkered" | "white" | "dark";
 // 透明图的衬底：刻意用固定的黑 / 白 / 棋盘格（看图用的「画布」，不随皮肤走）。
 const BG_CLASSES: Record<BgMode, string> = {
   checkered:
-    "[background:repeating-conic-gradient(var(--surface-muted)_0%_25%,#fff_0%_50%)_50%/20px_20px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.3)_0%_50%)_50%/20px_20px]",
+    "[background:repeating-conic-gradient(var(--surface-muted)_0%_25%,white_0%_50%)_50%/20px_20px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.3)_0%_50%)_50%/20px_20px]",
   white: "bg-white",
-  dark: "bg-[#141414]",
+  dark: "bg-[#141414]", // ui-guard-allow(hex): 看图用的固定深色画布，不随皮肤
 };
 const BG_LABEL: Record<BgMode, string> = { checkered: "棋盘格底", white: "白底", dark: "深色底" };
 const NEXT_BG: Record<BgMode, BgMode> = { checkered: "white", white: "dark", dark: "checkered" };

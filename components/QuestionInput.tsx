@@ -272,6 +272,7 @@ export function QuestionInput({ isMobile }: { isMobile: boolean }) {
       <div className="w-full max-w-2xl">
         <div className="flex items-center gap-3 mb-8 max-md:mb-3 justify-center">
           {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
+          {/* ui-guard-allow(hex): 品牌渐变 logo（不随皮肤，刻意裁决） */}
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
           <h1 className="text-2xl font-semibold tracking-tight">Trellis</h1>
         </div>

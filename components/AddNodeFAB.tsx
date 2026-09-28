@@ -61,7 +61,7 @@ export function AddNodeFAB() {
         )}
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="h-12 px-4 rounded-full bg-accent text-ink-inverse shadow-pop hover:bg-accent-strong active:scale-95 transition-transform flex items-center gap-2 text-sm"
+          className="h-12 px-4 rounded-full bg-accent text-ink-inverse shadow-pop hover:bg-accent-strong transition-colors flex items-center gap-2 text-sm"
           title="新建节点"
           aria-label="新建节点"
           aria-expanded={menuOpen}

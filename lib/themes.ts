@@ -18,6 +18,7 @@ export type PaletteDef = {
 
 export const DEFAULT_PALETTE = "default";
 
+// ui-guard-allow-file(hex): 皮肤选择器的 swatch 预览色，本身就是各皮肤的取值样本
 export const PALETTES: PaletteDef[] = [
   {
     id: "default",

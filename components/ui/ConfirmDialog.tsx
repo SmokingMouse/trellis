@@ -1,6 +1,6 @@
 "use client";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { buttonVariants } from "./Button";
 import { cn } from "./cn";
 
@@ -91,7 +91,6 @@ type Pending = ConfirmOptions & { id: number; resolve: (ok: boolean) => void };
 
 let queue: Pending[] = [];
 let nextId = 1;
-let hosts = 0;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => {
@@ -102,11 +101,9 @@ const current = () => queue[0] ?? null;
 
 /** 弹一个确认框，用户点确认 → true，取消 / Esc / 点外面 → false。 */
 export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
-  if (hosts === 0) {
-    if (typeof window === "undefined") return Promise.resolve(false);
-    const text = typeof options.description === "string" ? `${options.title}\n\n${options.description}` : options.title;
-    return Promise.resolve(window.confirm(text));
-  }
+  if (typeof window === "undefined") return Promise.resolve(false);
+  // 不再回退原生 window.confirm：ConfirmHost 在根布局（AppProviders）常驻，
+  // 挂载前入队的请求会在它挂载后由 useSyncExternalStore 读到并弹出。
   return new Promise<boolean>((resolve) => {
     queue = [...queue, { ...options, id: nextId++, resolve }];
     emit();
@@ -128,12 +125,6 @@ function settle(id: number, ok: boolean) {
 
 export function ConfirmHost() {
   const pending = useSyncExternalStore(subscribe, current, () => null);
-  useEffect(() => {
-    hosts += 1;
-    return () => {
-      hosts -= 1;
-    };
-  }, []);
   if (!pending) return null;
   return (
     <ConfirmDialog

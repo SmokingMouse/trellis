@@ -21,8 +21,8 @@ export const viewport: Viewport = {
   maximumScale: 5,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafaf9" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f1115" },
+    { media: "(prefers-color-scheme: light)", color: "#fafaf9" }, // ui-guard-allow(hex): viewport themeColor 是 <meta>，读不到 CSS 变量
+    { media: "(prefers-color-scheme: dark)", color: "#0f1115" }, // ui-guard-allow(hex): 同上
   ],
   // Keep document zoom accessible; the React Flow surface owns gestures
   // locally via touch-action instead of disabling zoom for the whole app.

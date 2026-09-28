@@ -58,6 +58,7 @@ export default function LoginPage() {
         {/* Brand */}
         <div className="flex flex-col items-center mb-7">
           {/* 品牌渐变固定色（原 indigo/fuchsia/amber 500·500·400 的 hex 原值） */}
+          {/* ui-guard-allow(hex): 品牌渐变 logo（不随皮肤，刻意裁决） */}
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]" />
           <h1 className="mt-4 text-title font-semibold tracking-tight text-ink-strong">Trellis</h1>
           <p className="mt-1 text-ui text-ink-muted">

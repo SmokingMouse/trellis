@@ -189,10 +189,8 @@ export function RegisterBotModal({
         const svgString = await QRCode.toString(data.url, {
           type: "svg",
           margin: 1,
-          color: {
-            dark: "#000000",
-            light: "#ffffff",
-          },
+          // ui-guard-allow(hex): 二维码必须纯黑白才好扫，不随皮肤
+          color: { dark: "#000000", light: "#ffffff" },
         });
 
         setQrSvg(svgString);

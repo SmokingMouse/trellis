@@ -421,7 +421,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             <Icon icon={PanelLeftOpen} />
           </IconButton>
         )}
-        {/* 品牌渐变固定色（不随主题换肤，刻意裁决）：#6366f1 → #d946ef → #fbbf24 */}
+        {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，刻意裁决） */}
         <div
           aria-hidden
           className="ml-0.5 size-5 shrink-0 rounded-md bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]"
