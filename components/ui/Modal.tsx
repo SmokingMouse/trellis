@@ -2,7 +2,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useRef, useState, type ReactNode } from "react";
 import { cn } from "./cn";
-import { focusPanelIfIdle, restoreFocus, trapTabKey } from "./focus";
+import { focusPanelIfIdle, portalBody, restoreFocus, trapTabKey } from "./focus";
 import { LayerContainerContext } from "./Layer";
 
 // 居中弹窗原语（W2 起内部是 Radix Dialog）：portal 到 body、z-60、role=dialog、
@@ -48,7 +48,7 @@ export function Modal({
         if (!open) onClose();
       }}
     >
-      <DialogPrimitive.Portal>
+      <DialogPrimitive.Portal container={portalBody()}>
         <div
           ref={setShell}
           data-safe-area="modal-shell"
@@ -67,6 +67,7 @@ export function Modal({
             <DialogPrimitive.Content
               ref={panelRef}
               aria-modal="true"
+              data-focus-panel
               aria-describedby={undefined}
               onEscapeKeyDown={(e) => {
                 if (closeOnEsc === false) {

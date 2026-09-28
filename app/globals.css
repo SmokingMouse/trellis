@@ -800,6 +800,11 @@ html, body {
   outline-offset: 2px;
   border-radius: 3px;
 }
+/* Modal / Drawer 打开时把焦点落在面板本身（tabindex=-1）以便 Tab 进入——面板
+   整块不画焦点环（全局规则不在 layer 里，utility 的 outline-none 压不住它）。 */
+[data-focus-panel]:focus-visible {
+  outline: none;
+}
 
 /* Canvas (ReactFlow) polish: transparent container so the gradient bg shows
    through; indigo-tinted smoothstep edges, softer than the default gray. */

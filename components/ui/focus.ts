@@ -47,3 +47,12 @@ export function restoreFocus(prev: Element | null) {
   if (active && active !== document.body) return;
   if (prev instanceof HTMLElement && prev.isConnected) prev.focus({ preventScroll: true });
 }
+
+/**
+ * 显式把 document.body 交给 Radix Portal。不传 container 时 Radix Portal 要等
+ * 一次 layout effect 才挂载内容，比消费方的 useEffect 晚一拍——SearchModal 这类
+ * 「在 Modal 外层组件的 effect 里 inputRef.focus()」会拿到 null（W2 活体验证踩到）。
+ */
+export function portalBody(): HTMLElement | undefined {
+  return typeof document === "undefined" ? undefined : document.body;
+}
