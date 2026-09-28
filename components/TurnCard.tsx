@@ -7,7 +7,9 @@ import {
   getStreamPending,
   thinkingChannel,
 } from "@/lib/stream-bus";
-import { refIcon } from "@/lib/ref-icon";
+import { refIconKey } from "@/lib/ref-icon";
+import { RefIcon } from "@/components/ui/Icon";
+import { Spinner } from "@/components/ui/Spinner";
 import { isAuthErrorMessage } from "@/lib/auth-error";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
 import {
@@ -707,7 +709,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
         }`}
       >
         <span className="text-title leading-none mt-0.5" aria-hidden>
-          {isStreaming ? "⏳" : refIcon(ref)}
+          {isStreaming ? <Spinner size="sm" label={null} /> : <RefIcon name={refIconKey(ref)} size="lg" />}
         </span>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-ink-strong truncate">

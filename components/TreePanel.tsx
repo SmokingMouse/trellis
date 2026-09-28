@@ -5,7 +5,8 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
 import { ancestorsOf, hiddenByCollapse } from "@/lib/collapsed";
 import { layoutNodes } from "@/lib/layout";
-import { refIcon } from "@/lib/ref-icon";
+import { refIconKey } from "@/lib/ref-icon";
+import { RefIcon } from "@/components/ui/Icon";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import {
@@ -547,7 +548,7 @@ export function TreePanel() {
         >
           {entry.root.kind === "reference" && (
             <span className="shrink-0" aria-hidden>
-              {refIcon(entry.root.reference)}
+              <RefIcon name={refIconKey(entry.root.reference)} />
             </span>
           )}
           <span className="truncate">{treeLabel(entry.root)}</span>
@@ -866,7 +867,7 @@ export function TreePanel() {
             >
               {entry.root.kind === "reference" && (
                 <span className="shrink-0" aria-hidden>
-                  {refIcon(entry.root.reference)}
+                  <RefIcon name={refIconKey(entry.root.reference)} />
                 </span>
               )}
               <span className="truncate font-medium text-ink-strong">
@@ -985,7 +986,7 @@ export function TreePanel() {
                 )}
                 {node.kind === "reference" && (
                   <span className="shrink-0" aria-hidden>
-                    {refIcon(node.reference)}
+                    <RefIcon name={refIconKey(node.reference)} />
                   </span>
                 )}
                 <span className="truncate">{nodeRowLabel(node)}</span>

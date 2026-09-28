@@ -22,10 +22,20 @@ import {
   Timer,
   Toolbox,
   Workflow,
+  AtSign,
+  BookOpen,
+  ClipboardPaste,
+  Code,
+  FileType,
+  Link as LinkIcon,
+  NotebookText,
+  Tv,
+  Video,
   type LucideIcon,
   type LucideProps,
 } from "lucide-react";
 import type { ToolIconKey } from "@/lib/tool-registry";
+import type { RefIconKey } from "@/lib/ref-icon";
 import { cn } from "./cn";
 
 // 图标原语：全站 lucide 图标统一走这里，尺寸与线宽只有这几档。
@@ -95,4 +105,29 @@ export function ToolIcon({
   className?: string;
 }) {
   return <Icon icon={TOOL_ICONS[name] ?? Dot} size={size} className={className} />;
+}
+
+// 参考材料（链接 / 粘贴）的来源图标。key 由 lib/ref-icon.ts 的 refIconKey() 给出。
+export const REF_ICONS: Record<RefIconKey, LucideIcon> = {
+  doc: BookOpen,
+  video: Video,
+  tv: Tv,
+  social: AtSign,
+  code: Code,
+  pdf: FileType,
+  notebook: NotebookText,
+  paste: ClipboardPaste,
+  link: LinkIcon,
+};
+
+export function RefIcon({
+  name,
+  size = "sm",
+  className,
+}: {
+  name: RefIconKey;
+  size?: IconSize;
+  className?: string;
+}) {
+  return <Icon icon={REF_ICONS[name] ?? LinkIcon} size={size} className={className} />;
 }

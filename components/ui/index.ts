@@ -4,7 +4,7 @@
 // 基础
 export { cn } from "./cn";
 export { LayerContainerContext, useLayerContainer } from "./Layer";
-export { Icon, ToolIcon, TOOL_ICONS, ICON_SIZE, type IconProps, type IconSize } from "./Icon";
+export { Icon, ToolIcon, TOOL_ICONS, RefIcon, REF_ICONS, ICON_SIZE, type IconProps, type IconSize } from "./Icon";
 
 // 按钮族
 export { Button, buttonVariants, type ButtonProps, type ButtonVariant, type ButtonSize } from "./Button";

@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { refIcon } from "@/lib/ref-icon";
+import { refIconKey } from "@/lib/ref-icon";
+import { RefIcon } from "@/components/ui/Icon";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, isUnreadNode } from "@/lib/tree-panel";
 import { ancestorsOf } from "@/lib/collapsed";
@@ -344,7 +345,7 @@ function TreeRow({
           )}
           {isReference && (
             <span className="shrink-0" aria-hidden>
-              {refIcon(node.reference)}
+              <RefIcon name={refIconKey(node.reference)} />
             </span>
           )}
           <span className="truncate">
