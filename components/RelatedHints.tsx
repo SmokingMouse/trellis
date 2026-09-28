@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { formatRelativeTime } from "@/lib/relative-time";
+import { GitBranch, X } from "lucide-react";
+import { Icon, IconButton, SearchSnippet } from "@/components/ui";
 
 // 体验 A：发问时相似检测的旁路提示条（挂在首屏 QuestionInput 输入卡下方）。
 // ⌘P 搜索是 pull 式 —— 得先想起来「我可能聊过」；这条是 push 式：正要新开
@@ -90,17 +92,16 @@ export function RelatedHints({ query }: { query: string }) {
   return (
     <div className="mt-2 border border-line rounded-lg bg-surface/80 overflow-hidden">
       <div className="px-3 pt-2 pb-1 flex items-center gap-1.5 text-label text-ink-faint">
-        <span aria-hidden>🌿</span>
+        <Icon icon={GitBranch} size="sm" />
         <span>之前聊过相关的 —— 点行去原树续聊，不理会就是新开</span>
         <div className="flex-1" />
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          label="本次输入不再提示"
           onClick={() => setDismissed(true)}
-          title="本次输入不再提示"
-          className="px-1 rounded hover:bg-surface-muted hover:text-ink-muted"
         >
-          ✕
-        </button>
+          <Icon icon={X} size="sm" />
+        </IconButton>
       </div>
       {hits.map((h) => (
         <button
@@ -112,12 +113,10 @@ export function RelatedHints({ query }: { query: string }) {
           <span className="text-ui text-ink font-medium shrink-0 max-w-[38%] truncate">
             {h.sessionTitle}
           </span>
-          <span
-            className="text-ui text-ink-muted flex-1 min-w-0 truncate"
-            // FTS5 snippet 服务端已转义，<mark> 是唯一注入的 HTML（与
-            // SearchModal 同一信任模型）。
-            dangerouslySetInnerHTML={{ __html: h.snippet }}
-          />
+          <span className="text-ui text-ink-muted flex-1 min-w-0 truncate">
+            {/* FTS5 snippet 不转义原文：只认 <mark>，其余当文本（同 SearchModal）。 */}
+            <SearchSnippet html={h.snippet} />
+          </span>
           <span className="text-label text-ink-faint shrink-0">
             {formatRelativeTime(h.sessionUpdatedAt)}
           </span>
