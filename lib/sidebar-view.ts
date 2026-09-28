@@ -2,7 +2,6 @@ import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY, type ProjectSummary, type Sessio
 
 export type SidebarSource = "all" | "web" | "herdr" | "task" | "lark" | "external";
 export type SidebarLayout = "project" | "time";
-export const SIDEBAR_V2 = process.env.NEXT_PUBLIC_TRELLIS_SIDEBAR_V2 !== "off" && process.env.NEXT_PUBLIC_TRELLIS_SIDEBAR_V2 !== "0";
 
 export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSource {
   if (s.origin === "external") return "external";
@@ -16,7 +15,7 @@ export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSourc
  *  Only while Herdr itself answers — when it is down every session looks dead and
  *  hiding them would break the "already-synced history stays readable" promise. */
 export function herdrOffline(s: Pick<Session, "kind" | "origin">, herdrAvailable: boolean, alive: boolean | undefined): boolean {
-  return SIDEBAR_V2 && herdrAvailable && sidebarSource(s) === "herdr" && !alive;
+  return herdrAvailable && sidebarSource(s) === "herdr" && !alive;
 }
 
 export function selectSidebarSessions(sessions: Session[], archived: Session[], source: SidebarSource, includeArchived: boolean, isOffline: (s: Session) => boolean = () => false): Session[] {

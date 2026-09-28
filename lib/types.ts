@@ -396,7 +396,7 @@ export type SidebarTask = {
   enabled: boolean;
 };
 
-// S133：侧栏「最近」分组的骨架（GET /api/recent）。粒度到链：一条链 = 根→叶子
+// S133：侧栏「最近」分组的骨架（/api/recent 已随 W5 删除，现由 /api/runs 与侧栏链行复用）。粒度到链：一条链 = 根→叶子
 // 的 lineage（线性视图展示的那种），由叶子 tipId 唯一标识；点链落到链尾。
 // 纯数据层（归组 / 截断 / 打标签）在 lib/recent.ts，SQL 真源在 repo.listRecentChains。
 export type RecentChainStatus =

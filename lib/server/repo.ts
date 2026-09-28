@@ -2682,24 +2682,6 @@ export function listSessionChains(sessionId: string, limit = 200): RecentChainRo
   return queryChainRows("s.id = ?", [sessionId], limit);
 }
 
-// 会话内未雪藏的树数 —— 最近分组据此决定链行要不要带树名前缀（单树会话
-// 的树名就是会话标题的另一种说法，前缀是噪音）。
-export function countVisibleTrees(sessionIds: string[]): Map<string, number> {
-  const out = new Map<string, number>();
-  if (sessionIds.length === 0) return out;
-  const db = getDB();
-  const rows = db
-    .prepare(
-      `SELECT session_id, COUNT(*) AS n FROM nodes
-        WHERE parent_id IS NULL AND hidden_at IS NULL
-          AND session_id IN (${sessionIds.map(() => "?").join(",")})
-        GROUP BY session_id`,
-    )
-    .all(...sessionIds) as Array<{ session_id: string; n: number }>;
-  for (const r of rows) out.set(r.session_id, r.n);
-  return out;
-}
-
 function refTitleOf(metaJson: string | null): string | null {
   if (!metaJson) return null;
   try {

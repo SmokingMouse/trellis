@@ -63,7 +63,6 @@ export { ConfirmDialog, ConfirmHost, confirmDialog, useConfirm, type ConfirmOpti
 
 // 反馈族
 export { toast, Toaster } from "./Toaster";
-export { ToastShell } from "./Toast";
 export { Badge, type BadgeVariant } from "./Badge";
 export { Pill } from "./Pill";
 export { StatusDot, type StatusTone } from "./StatusDot";
