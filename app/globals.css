@@ -716,7 +716,8 @@ html, body {
 }
 .md-body a:hover { text-decoration-color: currentColor; }
 .md-body code:not(pre code) {
-  background: var(--surface-muted);
+  /* 中性灰底：随 ink 取值，明暗主题自动跟随，不带色相 */
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
   color: var(--code-inline-ink);
   padding: 1px 5px;
   border-radius: 4px;
@@ -744,10 +745,14 @@ html, body {
 }
 /* Code block frame: language label + copy button bar above the <pre>.
    The wrapper owns the rounded corners so the bar + pre read as one unit
-   (A3 copy / B2 language label). */
+   (A3 copy / B2 language label). 代码块恒暗（设计决策），内部灰阶取中性
+   zinc 档（原来的 stone 暖灰已去）。指针设备上语言标签 + 复制按钮 hover /
+   聚焦时才出现；触屏常显。 */
 .md-body .md-codeblock {
+  position: relative;
   margin: 0.7em 0;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--line);
   overflow: hidden;
 }
 .md-body .md-codeblock pre {
@@ -759,9 +764,10 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 10px 4px 12px;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
   background: var(--code-bar-bg);
-  color: #a8a29e; /* 恒暗代码块的内部灰阶，theme 无关 */
+  color: rgb(255 255 255 / 0.5); /* 恒暗代码块的内部灰阶，theme 无关 */
   font-size: 11px;
   font-family: var(--font-mono);
   border-bottom: 1px solid var(--code-bar-line);
@@ -771,25 +777,55 @@ html, body {
   text-transform: lowercase;
 }
 .md-body .md-codeblock-copy {
-  padding: 1px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
   border-radius: 4px;
-  color: #d6d3d1;
-  background: rgba(255, 255, 255, 0.06);
+  color: rgb(255 255 255 / 0.62);
+  font-family: var(--font-sans);
   cursor: pointer;
-  transition: background-color 120ms, color 120ms;
+  transition: background-color 100ms, color 100ms, opacity 100ms;
 }
 .md-body .md-codeblock-copy:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(255 255 255 / 0.92);
+}
+/* 指针设备：普通代码块的标签条收成右上角浮层，平时透明、hover / 键盘聚焦
+   才出现，不占正文高度。图表块（.md-codeblock-diagram）的工具条照常常显。 */
+@media (hover: hover) and (pointer: fine) {
+  .md-body .md-codeblock:not(.md-codeblock-diagram) .md-codeblock-bar {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 1;
+    padding: 2px 2px 2px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--code-bar-bg);
+    opacity: 0;
+    transition: opacity 100ms;
+  }
+  .md-body .md-codeblock:not(.md-codeblock-diagram):hover .md-codeblock-bar,
+  .md-body .md-codeblock:not(.md-codeblock-diagram):focus-within .md-codeblock-bar {
+    opacity: 1;
+  }
 }
 @media (max-width: 767px) {
   .md-body .md-codeblock-copy {
     min-width: 44px;
     min-height: 44px;
-    display: inline-flex;
-    align-items: center;
     justify-content: center;
   }
+}
+/* 图表预览的网格底（CodeBlock 的 SVG / Mermaid 预览） */
+.diagram-bg-checkered {
+  background: repeating-conic-gradient(var(--surface-muted) 0% 25%, var(--surface) 0% 50%) 50% / 16px 16px;
+}
+/* 恒暗代码面（Herdr 终端读屏等非 markdown 场景复用） */
+.code-surface {
+  background: var(--code-bg);
+  color: var(--code-ink);
 }
 
 /* B5 (a11y): visible keyboard-focus ring. Pointer clicks don't trigger
