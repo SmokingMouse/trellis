@@ -1363,11 +1363,13 @@ function GroupRow({
             } ${toggleable ? "" : "opacity-0"}`}
           />
           {icon && <Icon icon={icon} size="sm" className="text-ink-muted" />}
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          <span className="min-w-8 flex-1 truncate">{label}</span>
         </button>
-        <span className={`flex shrink-0 items-center gap-1.5 ${hasActions ? META_FADE : ""}`}>
+        <span className={`flex min-w-0 shrink items-center gap-1.5 ${hasActions ? META_FADE : ""}`}>
           {tag && (
-            <span className="max-w-20 truncate font-mono text-nano text-ink-faint">{tag}</span>
+            <span className="min-w-0 max-w-16 truncate font-mono text-nano text-ink-faint" title={tag}>
+              {tag}
+            </span>
           )}
           {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
           {badge && <span className="text-nano tabular-nums text-ink-faint">{badge}</span>}
@@ -1577,9 +1579,6 @@ function SidebarRow({
         </span>,
       );
     }
-    if (indicatorStatus === "waiting") {
-      meta.push(<span key="wait" className="text-accent-ink">等你回答</span>);
-    }
     if (session.archived) meta.push(<span key="arch">已归档</span>);
     if (offline) {
       meta.push(
@@ -1628,7 +1627,11 @@ function SidebarRow({
             e.stopPropagation();
             onToggle?.();
           }}
-          className="-ml-1 flex size-3.5 shrink-0 items-center justify-center text-ink-faint hover:text-ink"
+          // 折叠态的三角只在 hover / 键盘聚焦时出现：一栏几十行、每行一个三角是噪音；
+          // 展开态常显，标明「下面挂着的是它的树 / 链」。
+          className={`-ml-1 flex size-3.5 shrink-0 items-center justify-center text-ink-faint hover:text-ink focus-visible:opacity-100 ${
+            collapsed ? "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" : ""
+          }`}
         >
           <Icon
             icon={ChevronRight}

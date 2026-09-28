@@ -10,7 +10,6 @@ import {
   Keyboard,
   Menu,
   NotebookPen,
-  PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings,
@@ -55,7 +54,7 @@ import {
 import type { ChatNode } from "@/lib/types";
 
 // W4：Header 分三组（照 docs/ui-redesign/mockups/01-workbench.html）——
-//   左 = 导航：侧栏开关 + 品牌 + 面包屑（工作区 › 会话名）
+//   左 = 导航：（侧栏收起时的）展开键 + 品牌 + 面包屑（工作区 › 会话名）
 //   中 = 会话语境：模式 chip、模型选择、上下文用量（中性细进度条；token 明细收进浮层）
 //   右 = 系统：搜索、主题、「更多」菜单（笔记 / 稍后再读 / 工作区文件 / 导出 /
 //        增强模式 / 快捷键 / 自动化任务 / 管理后台）、设置
@@ -410,14 +409,17 @@ export function Header({ isMobile }: { isMobile: boolean }) {
         >
           <Icon icon={Menu} />
         </IconButton>
-        <IconButton
-          label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
-          data-header-sidebar-toggle
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="hidden md:inline-flex"
-        >
-          <Icon icon={sidebarOpen ? PanelLeftClose : PanelLeftOpen} />
-        </IconButton>
+        {/* 侧栏展开时，收起键在侧栏顶部；收起后展开键落在这里（同 mockup）。 */}
+        {!sidebarOpen && (
+          <IconButton
+            label="展开侧栏"
+            data-header-sidebar-toggle
+            onClick={() => setSidebarOpen(true)}
+            className="hidden md:inline-flex"
+          >
+            <Icon icon={PanelLeftOpen} />
+          </IconButton>
+        )}
         {/* 品牌渐变固定色（不随主题换肤，刻意裁决）：#6366f1 → #d946ef → #fbbf24 */}
         <div
           aria-hidden
