@@ -8,6 +8,8 @@ import {
   MAX_ATTACHMENTS,
 } from "@/hooks/useAttachmentUploads";
 import { useIsMobile, useIsNarrowViewport } from "@/hooks/useIsMobile";
+import { Ellipsis, GitBranch, Paperclip, Pin } from "lucide-react";
+import { Button, Icon, IconButton } from "@/components/ui";
 
 type Props = {
   selection: SelectionInfo;
@@ -145,8 +147,8 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
   return (
     <div
       data-branch-popover
-      className="fixed z-50 max-w-[calc(100vw-16px)]"
-      style={positionStyle}
+      className="fixed z-50"
+      style={{ ...positionStyle, maxWidth: "calc(100vw - 16px)" }}
       // Collapsed: swallow mousedown so clicking the ⌘K / note buttons keeps
       // the document text selection alive (the buttons act on it). Expanded:
       // the selection is already snapshotted into `selection.text`, and this
@@ -156,15 +158,21 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
       onPointerDown={expanded ? undefined : (e) => e.preventDefault()}
     >
       {expanded ? (
-        <div className="bg-surface border border-line rounded-lg shadow-pop w-[min(420px,calc(100vw-16px))] overflow-hidden">
-          <div className="px-3 py-1.5 bg-fork-muted border-b border-fork-line text-label text-fork-ink truncate">
-            针对「
-            <span className="font-medium">
-              {selection.text.length > 60
-                ? selection.text.slice(0, 60) + "…"
-                : selection.text}
+        <div
+          className="bg-surface-raised border border-line rounded-overlay shadow-pop overflow-hidden"
+          style={{ width: "min(420px, calc(100vw - 16px))" }}
+        >
+          <div className="px-3 py-1.5 bg-fork-muted border-b border-fork-line text-label text-fork-ink flex items-center gap-1.5 min-w-0">
+            <Icon icon={GitBranch} size="sm" className="text-fork" />
+            <span className="truncate">
+              针对「
+              <span className="font-medium">
+                {selection.text.length > 60
+                  ? selection.text.slice(0, 60) + "…"
+                  : selection.text}
+              </span>
+              」
             </span>
-            」
           </div>
           {att.pending.length > 0 && (
             <div className="px-3 pt-2">
@@ -195,7 +203,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             }}
             placeholder="进一步追问…（可粘贴图片 / 文件）"
             rows={2}
-            className="w-full px-3 py-2 bg-transparent text-ink-strong outline-none resize-none text-sm placeholder:text-ink-faint"
+            className="w-full px-3 py-2 bg-transparent text-ink-strong outline-none resize-none text-ui placeholder:text-ink-faint"
           />
           <input
             ref={fileInputRef}
@@ -210,52 +218,59 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
               {att.notice}
             </div>
           )}
-          <div className="border-t border-line-faint px-2.5 py-1.5 flex items-center justify-end gap-2 text-xs">
-            <button
+          <div className="border-t border-line-faint px-2 py-1.5 flex items-center justify-end gap-1.5">
+            <IconButton
               type="button"
+              size="sm"
               data-mobile-target="branch-attach"
+              label="添加图片 / 文件"
+              title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : undefined}
               onClick={() => fileInputRef.current?.click()}
               disabled={att.atLimit}
-              title={att.atLimit ? `已到 ${MAX_ATTACHMENTS} 个上限` : "添加图片 / 文件"}
-              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1 mr-auto"
+              className="mr-auto"
             >
-              <span aria-hidden>📎</span>
-            </button>
-            <button
+              <Icon icon={Paperclip} size="sm" />
+            </IconButton>
+            <Button
+              variant="ghost"
+              size="sm"
               data-mobile-target="branch-cancel"
               onClick={onClose}
-              className="px-2 py-0.5 max-md:min-h-11 max-md:min-w-11 text-ink-muted hover:text-ink-strong"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               data-mobile-target="branch-submit"
               onClick={submit}
-              disabled={!q.trim() || hasUploading}
+              disabled={!q.trim()}
+              loading={hasUploading}
               title={hasUploading ? "等待附件上传…" : undefined}
-              className="px-2.5 py-0.5 max-md:min-h-11 max-md:min-w-11 rounded bg-accent text-ink-inverse disabled:opacity-40 hover:bg-accent-strong"
             >
-              {hasUploading ? "上传中…" : "提问"}
-            </button>
+              提问
+            </Button>
           </div>
         </div>
       ) : (
         <div className="relative flex items-center justify-center gap-1.5 md:justify-start">
-          <button
+          <Button
+            variant="primary"
             data-mobile-target="branch-open"
             onPointerDown={(e) => {
               e.preventDefault();
               setMobileMoreOpen(false);
               onExpand();
             }}
-            className="bg-accent text-ink-inverse text-xs rounded-lg shadow-pop px-3 py-2 max-md:min-h-11 max-md:min-w-11 hover:bg-accent-strong flex items-center justify-center gap-2 ring-1 ring-accent-strong"
+            className="shadow-pop"
           >
-            <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
+            <Icon icon={GitBranch} size="sm" />
+            针对此处提问
+            <kbd className="hidden sm:inline rounded-sm border border-current/30 px-1 font-mono text-nano opacity-80">
               ⌘K
             </kbd>
-            针对此处提问
-          </button>
-          <button
+          </Button>
+          <Button
             data-mobile-target="branch-note"
             onPointerDown={(e) => {
               e.preventDefault();
@@ -264,39 +279,32 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             disabled={savingNote}
             title="摘到笔记 (⌘D)"
             aria-label="摘到笔记"
-            /* 笔记 UI 归一 positive（amber→emerald 有意视觉变化）；positive 无 -strong 档，hover 用 opacity 近似 */
-            className="hidden md:flex bg-positive text-ink-inverse text-xs rounded-lg shadow-pop px-2.5 py-2 hover:opacity-90 disabled:opacity-50 items-center justify-center gap-1.5 ring-1 ring-positive-line"
+            // 笔记语义归 positive：只给图标上色，按钮本体是中性描边。
+            className="hidden md:inline-flex shadow-pop"
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden
-            >
-              <path d="M12 2C9.243 2 7 4.243 7 7v6.5l-2.707 2.707A1 1 0 0 0 5 18h4v3a1 1 0 1 0 2 0v-3h2v3a1 1 0 1 0 2 0v-3h4a1 1 0 0 0 .707-1.707L17 13.5V7c0-2.757-2.243-5-5-5z" />
-            </svg>
-            <kbd className="hidden sm:inline bg-scrim/25 px-1.5 py-0.5 rounded text-nano font-mono">
+            <Icon icon={Pin} size="sm" className="text-positive" />
+            <kbd className="hidden sm:inline rounded-sm border border-line px-1 font-mono text-nano text-ink-faint">
               ⌘D
             </kbd>
-          </button>
-          <button
+          </Button>
+          <IconButton
             type="button"
             data-mobile-target="branch-more"
+            label="更多选区操作"
+            tooltip={false}
             onPointerDown={(e) => {
               e.preventDefault();
               setMobileMoreOpen((open) => !open);
             }}
-            aria-label="更多选区操作"
             aria-expanded={mobileMoreOpen}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-line-strong bg-surface text-lg text-ink-muted shadow-pop md:hidden"
+            className="border border-line-strong bg-surface shadow-pop md:hidden"
           >
-            <span aria-hidden>…</span>
-          </button>
+            <Icon icon={Ellipsis} />
+          </IconButton>
           {mobileMoreOpen && (
             <div
               data-mobile-branch-menu
-              className="absolute bottom-full right-0 mb-2 min-w-40 overflow-hidden rounded-lg border border-line bg-surface p-1 shadow-pop md:hidden"
+              className="absolute bottom-full right-0 mb-2 min-w-40 overflow-hidden rounded-overlay border border-line bg-surface-raised p-1 shadow-pop md:hidden"
             >
               <button
                 type="button"
@@ -306,9 +314,9 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
                   void captureNote();
                 }}
                 disabled={savingNote}
-                className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-ink hover:bg-surface-muted disabled:opacity-50"
+                className="flex min-h-11 w-full items-center gap-2 rounded-field px-3 text-left text-ui text-ink hover:bg-surface-hover disabled:opacity-50"
               >
-                <span aria-hidden>📌</span>
+                <Icon icon={Pin} size="sm" className="text-positive" />
                 摘到笔记
               </button>
             </div>
