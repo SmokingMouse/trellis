@@ -33,6 +33,7 @@ import {
   TabsTrigger,
   toast,
   useConfirm,
+  Spinner,
 } from "@/components/ui";
 import {
   fetchAdminUsers,
@@ -324,7 +325,7 @@ export function AdminDashboard() {
             allAbsent ? undefined : (
               <>
                 <IconButton label="刷新当前页" onClick={refreshActive} disabled={refreshing}>
-                  <Icon icon={RefreshCw} className={refreshing ? "animate-spin" : undefined} />
+                  {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
                 </IconButton>
                 {activeTab === "invites" && (
                   <Button

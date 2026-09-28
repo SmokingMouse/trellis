@@ -32,6 +32,7 @@ import {
   cn,
   toast,
   useConfirm,
+  Spinner,
 } from "@/components/ui";
 import { describeCron, nextFireAfter, parseCron } from "@/lib/cron";
 import { WorkspaceField } from "@/components/run-config/WorkspaceField";
@@ -347,7 +348,7 @@ export default function TasksPage() {
         actions={
           <>
             <IconButton label="刷新" onClick={refresh} disabled={refreshing}>
-              <Icon icon={RefreshCw} className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={startNew}>
               <Icon icon={Plus} />

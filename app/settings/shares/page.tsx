@@ -17,6 +17,7 @@ import {
   Textarea,
   toast,
   useConfirm,
+  Spinner,
 } from "@/components/ui";
 import {
   fetchShares,
@@ -303,7 +304,7 @@ export default function SharesSettingsPage() {
         actions={
           <>
             <IconButton label="刷新" onClick={refresh} disabled={refreshing || loading}>
-              <Icon icon={RefreshCw} className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={handleOpenPublish} disabled={gatewayError !== null}>
               <Icon icon={Plus} />

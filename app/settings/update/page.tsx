@@ -11,6 +11,7 @@ import {
   SkeletonText,
   toast,
   useConfirm,
+  Spinner,
 } from "@/components/ui";
 
 // 管理台的「版本与更新」tab。曾经这一页就是整个 /settings，文件头写着「刻意不做偏好中心」
@@ -186,7 +187,7 @@ export default function SettingsPage() {
                 onClick={check}
                 disabled={!repoOk || checking}
               >
-                <Icon icon={RefreshCw} className={checking ? "animate-spin" : undefined} />
+                {checking ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
               </IconButton>
               <Button
                 variant="primary"

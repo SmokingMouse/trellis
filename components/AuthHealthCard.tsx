@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Check, CircleAlert, RefreshCw, TriangleAlert } from "lucide-react";
-import { ErrorCallout, Icon, IconButton, SkeletonText } from "@/components/ui";
+import { ErrorCallout, Icon, IconButton, SkeletonText, Spinner } from "@/components/ui";
 
 // S95: CLI 授权状态卡（claude / codex），挂在设置「模型与服务商」tab 顶部。
 // 动机：S90-S93 的 OAuth 故障挂了 6 天没人知道 —— 凭证时效此前在界面上无处可见。
@@ -143,7 +143,7 @@ export function AuthHealthCard() {
           onClick={() => void load(true)}
           disabled={busy}
         >
-          <Icon icon={RefreshCw} size="sm" className={busy ? "animate-spin" : undefined} />
+          {busy ? <Spinner size="sm" label={null} /> : <Icon icon={RefreshCw} size="sm" />}
         </IconButton>
       </div>
       <div className="rounded-card border border-line bg-surface px-4">

@@ -31,6 +31,7 @@ import {
   cn,
   toast,
   useConfirm,
+  Spinner,
 } from "@/components/ui";
 import type { ProviderInfo } from "@/lib/llm";
 import type { LarkBot } from "@/lib/lark-types";
@@ -343,7 +344,7 @@ export default function AgentsSettingsPage() {
               }}
               disabled={loading}
             >
-              <Icon icon={RefreshCw} className={loading ? "animate-spin" : undefined} />
+              {loading ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={startNew}>
               <Icon icon={Plus} />

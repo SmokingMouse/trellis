@@ -796,7 +796,7 @@ export default function LarkBotsSettingsPage() {
         actions={
           <>
             <IconButton label="刷新" onClick={doRefresh} disabled={refreshing}>
-              <Icon icon={RefreshCw} className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button onClick={() => create()} className="max-md:hidden">
               <Icon icon={Settings2} />
