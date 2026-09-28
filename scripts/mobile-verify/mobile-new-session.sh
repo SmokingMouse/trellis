@@ -21,7 +21,13 @@ fail() {
   exit 1
 }
 
+. "$ROOT/scripts/mobile-verify/lib-settle.sh"
+
 ab() {
+  # 点击前先等目标停稳（弹层进场动画 / Header 位移），见 lib-settle.sh；@ref 不处理
+  if [ "${1:-}" = click ] && [ $# -ge 2 ]; then
+    case $2 in @*) ;; *) mv_wait_settled "$2" ;; esac
+  fi
   AGENT_BROWSER_SESSION="$SESSION" agent-browser "$@"
 }
 
@@ -96,6 +102,7 @@ wait_for_js() {
   wait_try=0
   while :; do
     if ab eval "$wait_expression" 2>/dev/null | grep -q '^true$'; then
+      mv_wait_idle soft
       echo "✓ $wait_label"
       return 0
     fi
@@ -293,18 +300,22 @@ ab eval --stdin <<'JS'
   const section = (title) => [...sheet.querySelectorAll('section')]
     .find((candidate) => candidate.querySelector('h2')?.textContent?.trim() === title);
   const pickerButtons = [
-    ['ModePicker', section('模式与工作区')?.querySelector('button[role="radio"]'), 44],
-    ['ModelPicker', section('模型')?.querySelector('button'), 24],
-    ['AgentPicker', section('Agent')?.querySelector('button'), 32.75],
-  ].map(([name, button, expectedHeight]) => {
+    ['ModePicker', section('模式与工作区')?.querySelector('button[role="radio"]')],
+    ['ModelPicker', section('模型')?.querySelector('button')],
+    ['AgentPicker', section('Agent')?.querySelector('button')],
+  ].map(([name, button]) => {
     assert(button, `${name} button missing`);
     const rect = button.getBoundingClientRect();
     const minHeight = getComputedStyle(button).minHeight;
     assert(minHeight !== '44px', `${name} inherited the sheet-wide 44px minimum`);
     if (name === 'ModePicker') {
-      assert(rect.height >= expectedHeight, `${name} height=${rect.height}`);
+      // 模式单选是手机主操作：44px 热区是硬下限
+      assert(rect.height >= 44, `${name} height=${rect.height}`);
     } else {
-      assert(Math.abs(rect.height - expectedHeight) <= 0.25, `${name} height=${rect.height}`);
+      // Model / Agent 是紧凑胶囊：只要求没被 sheet 的 44px 下限撑高、也没塌掉。
+      // 不钉精确像素——W1 把 text-ui 12.5→13px 后 AgentPicker 32.75→33.5，
+      // 字号 token 再动也不该让这条挂。
+      assert(rect.height >= 20 && rect.height < 40, `${name} height=${rect.height} (expected compact 20–40px)`);
     }
     return { name, width: rect.width, height: rect.height, minHeight };
   });
@@ -462,31 +473,21 @@ ab eval --stdin <<'JS'
   const panel = textarea.closest('.max-w-2xl');
   const panelRect = panel.getBoundingClientRect();
   const controls = [...panel.querySelectorAll('button,input,textarea')].filter(visible);
-  const expected = [
-    ['BUTTON', 60.25, 26],
-    ['BUTTON', 74.203125, 26],
-    ['BUTTON', 156.828125, 32.75],
-    ['BUTTON', 98, 32.75],
-    ['TEXTAREA', 670, 129.5],
-    ['BUTTON', 115.1875, 16],
-    ['BUTTON', 82.375, 16],
-    ['BUTTON', 77.8125, 24],
-    ['BUTTON', 59, 24],
-    ['BUTTON', 59, 24],
-    ['BUTTON', 88, 32],
-    ['BUTTON', 215.390625, 32.75],
-    ['BUTTON', 209.484375, 32.75],
-    ['BUTTON', 213.109375, 32.75],
-    ['BUTTON', 151, 32.75],
-    ['BUTTON', 252.671875, 38],
-  ];
-  assert(near(panelRect.width, 672) && near(panelRect.height, 590.75), `desktop panel=${JSON.stringify(panelRect.toJSON())}`);
-  assert(controls.length === expected.length, `desktop control count=${controls.length}/${expected.length}`);
-  controls.forEach((control, index) => {
+  // 原先这里逐个钉死 16 个控件的像素宽高（W0 基线），W1 换字号 token 后整排失效，
+  // W4 还会继续改这些控件。桌面「不回归」真正要守的是：手机端的 44px 热区 /
+  // 手机专属入口没漏到桌面，面板仍是 max-w-2xl 的 672px 宽。
+  assert(near(panelRect.width, 672), `desktop panel width=${panelRect.width}, expected 672 (max-w-2xl)`);
+  assert(controls.filter((control) => control.tagName === 'TEXTAREA').length === 1, 'desktop prompt textarea missing');
+  assert(controls.filter((control) => control.tagName === 'BUTTON').length >= 8, `desktop button count=${controls.filter((control) => control.tagName === 'BUTTON').length}`);
+  const oversized = controls
+    .filter((control) => control.tagName !== 'TEXTAREA')
+    .map((control) => ({ control, rect: control.getBoundingClientRect(), minHeight: getComputedStyle(control).minHeight }))
+    .filter(({ rect, minHeight }) => rect.height >= 44 || minHeight === '44px')
+    .map(({ control, rect, minHeight }) => `${control.tagName}「${(control.getAttribute('aria-label') || control.textContent || '').trim().slice(0, 20)}」${rect.width}x${rect.height} min-h=${minHeight}`);
+  assert(oversized.length === 0, `mobile 44px target leaked onto desktop: ${oversized.join('; ')}`);
+  const expected = controls.map((control) => {
     const rect = control.getBoundingClientRect();
-    const [tag, width, height] = expected[index];
-    assert(control.tagName === tag, `desktop control ${index} tag=${control.tagName}/${tag}`);
-    assert(near(rect.width, width) && near(rect.height, height), `desktop control ${index}=${rect.width}x${rect.height}, expected ${width}x${height}`);
+    return [control.tagName, rect.width, rect.height];
   });
   assert(!document.querySelector('[data-mobile-target="new-session-config-summary"]'), 'mobile summary mounted on desktop');
   assert(!document.querySelector('[data-mobile-target="new-session-more-settings"]'), 'mobile settings trigger mounted on desktop');
