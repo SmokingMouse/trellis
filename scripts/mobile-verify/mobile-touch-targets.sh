@@ -288,9 +288,11 @@ ab eval --stdin <<'JS'
     ['drawer attach', '[role="dialog"] [data-mobile-target="drawer-attach"]'],
     ['drawer session rows', '[role="dialog"] [data-mobile-target="session-row"]', true],
     // Wave 2 retires sidebar chains; verify the replacement toolbar targets.
-    ['drawer layout buttons', '[role="dialog"] [data-sidebar-toolbar] button', true],
-    ['drawer source filter', '[role="dialog"] [data-sidebar-toolbar] select'],
-    ['drawer archive filter', '[role="dialog"] [data-sidebar-toolbar] label:has(input[type="checkbox"])'],
+    // W4：排布 = SegmentedControl（radiogroup），来源 = Radix Select 触发键，
+    // 含已归档 = Checkbox，热区在外层 label 上。
+    ['drawer layout buttons', '[role="dialog"] [data-sidebar-toolbar] [role="radiogroup"] button', true],
+    ['drawer source filter', '[role="dialog"] [data-sidebar-toolbar] button[aria-label="来源"]'],
+    ['drawer archive filter', '[role="dialog"] [data-sidebar-toolbar] label[data-sidebar-archived-filter]'],
   ];
   const results = [];
   for (const [name, selector, all] of specs) {
