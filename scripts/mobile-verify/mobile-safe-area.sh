@@ -437,8 +437,9 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   // 桌面 safe-area 基线：原先钉死 Header 48 高、Composer left=210（侧栏宽）/ 71 高等 W0 像素，
   // W4 重做 Header / 侧栏必然漂移。这里只守 safe-area 本身的约束：Header 贴顶满宽、没被
   // safe-top 撑高（手机端是 95px）；Composer 贴底贴右、没被 safe-bottom 垫高。
+  // W5：W3 composer 多了模式 chip + ModelPicker 工具行与脚注，实高约 137px，上限放到 200。
   assert(near(hr.top, 0) && near(hr.width, 1280) && hr.height >= 32 && hr.height < 64, `Header 偏离桌面 safe-area 基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
-  assert(cr.left > 0 && near(cr.right, 1280) && near(cr.bottom, 800) && cr.height < 120, `Composer 偏离桌面 safe-area 基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
+  assert(cr.left > 0 && near(cr.right, 1280) && near(cr.bottom, 800) && cr.height <= 200, `Composer 偏离桌面 safe-area 基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
   assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;
@@ -454,14 +455,20 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   const leaked = actualHeader.filter((button) => button.height >= 44 || button.minHeight === '44px');
   assert(leaked.length === 0, `手机 44px 热区漏到桌面 Header: ${JSON.stringify(leaked)}`);
 
+  // W5：新 composer 左下多了模式 chip + ModelPicker，不再钉 [附件, 草图, 发送] 与 44x44
+  // （桌面 IconButton 是 32px）。约束：三个关键按钮都在、在视口内、发送最右；
+  // 桌面不继承手机 44px 热区。
   const composerButtons = [...composer.querySelectorAll('button')].filter(visible);
   const expectedComposer = ['添加附件', '画个草图', '发送'];
-  assert(composerButtons.length === expectedComposer.length, `Composer 可见按钮数量变化: ${composerButtons.length}`);
-  composerButtons.forEach((button, index) => {
+  for (const name of expectedComposer) {
+    const button = composerButtons.find((b) => label(b) === name);
+    assert(button, `Composer 缺 ${name}: ${JSON.stringify(composerButtons.map(label))}`);
     const rect = button.getBoundingClientRect();
-    assert(label(button) === expectedComposer[index], `Composer 按钮清单变化: ${label(button)}`);
-    assert(near(rect.width, 44) && near(rect.height, 44), `Composer 按钮尺寸变化: ${label(button)} ${rect.width}x${rect.height}`);
-  });
+    assert(rect.right <= innerWidth && rect.bottom <= innerHeight && rect.width > 0, `Composer ${name} 不可达: ${JSON.stringify(rect.toJSON())}`);
+    assert(rect.height >= 24 && rect.height < 44 && getComputedStyle(button).minHeight !== '44px', `Composer ${name} 桌面尺寸异常（44px 热区漏到桌面？）: ${rect.width}x${rect.height}`);
+  }
+  const rightmost = composerButtons.reduce((a, b) => (b.getBoundingClientRect().right > a.getBoundingClientRect().right ? b : a));
+  assert(label(rightmost) === '发送', `Composer 最右按钮不是发送: ${label(rightmost)}`);
 
   return { safe, header: { width: hr.width, height: hr.height }, composer: { left: cr.left, top: cr.top, width: cr.width, height: cr.height, fontSize: desktopComposerFontSize }, headerButtons: actualHeader, composerButtons: expectedComposer };
 })()

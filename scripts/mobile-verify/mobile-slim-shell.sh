@@ -272,10 +272,15 @@ ab eval --stdin <<'JS'
 JS
 
 echo "== mobile reading chrome follows scroll direction =="
+# W5：useScrollHide 在会话挂载后 400ms 才开始认滚动（readyDelayMs），会话数据
+# 到得晚时脚本那一次性的 0 → 300 会落在就绪之前被忽略（实测 scroll 事件发生在
+# 导航后 ~200ms，之后再不收起 → 偶发超时）。改成与 followup-approval 同款：等待
+# 条件里没收起就再往下推 24px，直到 hook 就绪后认到一次向下滚动。
 sleep 1
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset"'
-ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down"'
-wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
+mv_wait_idle soft
+ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; window.__mvScrollBeforeHide = 300; "scrolled down"'
+wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); if (h?.dataset.headerHidden !== 'true') { const sc=document.querySelector('[data-thread-scroll]'); if (sc) { sc.scrollTop=Math.min(sc.scrollTop + 24, sc.scrollHeight - sc.clientHeight); window.__mvScrollBeforeHide = sc.scrollTop; sc.dispatchEvent(new Event('scroll')); } return false; } const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
 ab eval --stdin <<'JS'
 (() => {
   const scroll = document.querySelector('[data-thread-scroll]');
@@ -283,7 +288,8 @@ ab eval --stdin <<'JS'
   const title = document.querySelector('[data-thread-header]');
   const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
   const shift = header.getBoundingClientRect().height + title.getBoundingClientRect().height - safe;
-  const expected = 300 - shift;
+  // 收起那一刻的 scrollTop：通常是 300，就绪前被推过几次则更大（见上方等待条件）。
+  const expected = (window.__mvScrollBeforeHide ?? 300) - shift;
   if (Math.abs(scroll.scrollTop - expected) > 2) {
     throw new Error(`H-1 anchor compensation scrollTop=${scroll.scrollTop}, expected=${expected}, shift=${shift}`);
   }
