@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { refIcon } from "@/lib/ref-icon";
+import { ChevronRight, CornerDownRight, EyeOff, FileText, Link2, X } from "lucide-react";
+import { Icon, StatusDot } from "@/components/ui";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, isUnreadNode } from "@/lib/tree-panel";
 import { ancestorsOf } from "@/lib/collapsed";
@@ -185,7 +186,7 @@ export function Outline() {
               }`}
               title={unreadOnly ? "显示全部" : "只看未读"}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-unread" aria-hidden />
+              <StatusDot tone="unread" />
               {unreadCount} 未读
             </button>
           )}
@@ -217,8 +218,9 @@ export function Outline() {
   return (
     <>
       <aside
-        className="hidden md:block fixed top-[96px] w-60 bg-surface/90 backdrop-blur border border-line rounded-lg p-2 text-xs shadow-raise z-30 max-h-[calc(100dvh-108px)] overflow-y-auto"
-        style={{ left: "calc(var(--trellis-sb, 0px) + 12px)" }}
+        className="hidden md:block fixed top-24 w-60 bg-surface-raised border border-line rounded-card p-2 text-label shadow-pop z-20 overflow-y-auto"
+        // 左缘跟随侧栏宽度变量、高度扣掉头部 —— 都是运行时变量算式，走 style。
+        style={{ left: "calc(var(--trellis-sb, 0px) + 12px)", maxHeight: "calc(100dvh - 108px)" }}
       >
         {body}
       </aside>
@@ -282,7 +284,7 @@ function TreeRow({
         className={`group w-full rounded transition-colors flex items-center ${
           isActive
             ? "bg-accent-muted"
-            : "hover:bg-surface-muted"
+            : "hover:bg-surface-hover"
         }`}
         style={{ paddingLeft: `${4 + branchDepth * 12}px` }}
       >
@@ -296,16 +298,11 @@ function TreeRow({
             title={collapsed ? "展开" : "折叠"}
             aria-label={collapsed ? "展开" : "折叠"}
           >
-            <svg
-              width="9"
-              height="9"
-              viewBox="0 0 12 12"
+            <Icon
+              icon={ChevronRight}
+              size="sm"
               className={`transition-transform ${collapsed ? "" : "rotate-90"}`}
-              fill="currentColor"
-              aria-hidden
-            >
-              <path d="M3 2 L9 6 L3 10 Z" />
-            </svg>
+            />
           </button>
         ) : (
           <span className="shrink-0 w-4 h-5" aria-hidden />
@@ -329,7 +326,7 @@ function TreeRow({
           }
         >
           {isBranch && (
-            <span className="text-ink-faint">↳</span>
+            <Icon icon={CornerDownRight} size="sm" className="text-fork" />
           )}
           {index ? (
             <span className="font-mono text-nano text-ink-faint tabular-nums">
@@ -337,15 +334,14 @@ function TreeRow({
             </span>
           ) : null}
           {unread && (
-            <span
-              className="w-1.5 h-1.5 rounded-full bg-unread shrink-0"
-              aria-label="未读"
-            />
+            <StatusDot tone="unread" label="未读" />
           )}
           {isReference && (
-            <span className="shrink-0" aria-hidden>
-              {refIcon(node.reference)}
-            </span>
+            <Icon
+              icon={node.reference?.sourceType === "paste" ? FileText : Link2}
+              size="sm"
+              className="text-ink-faint"
+            />
           )}
           <span className="truncate">
             {node.topicLabel ??
@@ -389,18 +385,14 @@ function TreeRow({
             }}
             className={`shrink-0 px-1.5 py-1 text-nano rounded transition-opacity ${
               isHiddenRoot
-                ? "text-ink-muted hover:text-ink hover:bg-surface-muted"
-                : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-muted"
+                ? "text-ink-muted hover:text-ink hover:bg-surface-hover"
+                : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 text-ink-faint hover:text-ink hover:bg-surface-hover"
             }`}
             title={isHiddenRoot ? "恢复显示" : "隐藏这棵树（数据保留，可随时恢复）"}
             aria-label={isHiddenRoot ? "恢复显示" : "隐藏这棵树"}
           >
             {isHiddenRoot ? "恢复" : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
+              <Icon icon={EyeOff} size="sm" />
             )}
           </button>
         )}
@@ -412,20 +404,9 @@ function TreeRow({
             }}
             title="删除节点（含子树）"
             aria-label="删除节点"
-            className="shrink-0 w-5 h-5 mr-0.5 flex items-center justify-center rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-danger-muted hover:text-danger transition-opacity"
+            className="shrink-0 size-5 mr-0.5 flex items-center justify-center rounded-field text-ink-faint opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-danger-muted hover:text-danger-ink transition-opacity"
           >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              aria-hidden
-            >
-              <path d="M3 3 L9 9 M9 3 L3 9" />
-            </svg>
+            <Icon icon={X} size="sm" />
           </button>
         )}
       </div>
