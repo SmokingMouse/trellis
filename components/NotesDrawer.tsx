@@ -2,8 +2,8 @@
 import { useMemo } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
-import { Drawer } from "@/components/ui/Drawer";
-import { IconButton } from "@/components/ui/IconButton";
+import { ArrowUpRight, NotebookPen, Trash2, X } from "lucide-react";
+import { Drawer, EmptyState, Icon, IconButton, Kbd } from "@/components/ui";
 import type { Note } from "@/lib/types";
 
 // Right-side drawer (mobile = bottom sheet) listing the session's
@@ -28,28 +28,32 @@ export function NotesDrawer() {
   const onJump = (note: Note) => jumpToNoteSource(note.id);
 
   return (
-    <Drawer open={open} onClose={() => setNotesOpen(false)}>
+    <Drawer open={open} onClose={() => setNotesOpen(false)} title="笔记">
       <div className="px-4 py-3 border-b border-line flex items-center gap-2 shrink-0">
-        <div className="text-ink-faint uppercase tracking-wider text-nano font-medium">
-          笔记
-        </div>
-        <div className="text-ink-faint text-xs">· {notes.length} 条</div>
+        <h2 className="text-ui font-semibold text-ink-strong">笔记</h2>
+        <div className="text-label text-ink-faint">{notes.length} 条</div>
         <IconButton
           label="关闭"
           size="sm"
           className="ml-auto"
           onClick={() => setNotesOpen(false)}
         >
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
       <div className="flex-1 overflow-y-auto py-2 px-3">
         {notes.length === 0 ? (
-          <div className="text-ink-faint text-xs text-center py-8 leading-relaxed">
-            还没有笔记。
-            <br />
-            在阅读时选中文字 → ⌘D 或 📌 按钮即可摘录。
-          </div>
+          <EmptyState
+            compact
+            icon={NotebookPen}
+            title="还没有笔记"
+            description={
+              <>
+                阅读时选中一段文字，按 <Kbd>⌘</Kbd>
+                <Kbd>D</Kbd> 或点浮出的「摘到笔记」即可记下。
+              </>
+            }
+          />
         ) : (
           <ul className="flex flex-col gap-2">
             {notes.map((note) => (
@@ -86,7 +90,7 @@ function NoteRow({
     <li className="rounded-card border border-positive-line/70 bg-positive-muted/60 overflow-hidden">
       <button
         onClick={onJump}
-        className="w-full text-left px-3 py-2 hover:bg-positive-muted active:scale-[0.99] transition-transform"
+        className="w-full text-left px-3 py-2 hover:bg-positive-muted transition-colors"
       >
         <div className="text-ui text-ink leading-relaxed whitespace-pre-wrap break-words">
           {note.quotedText}
@@ -100,22 +104,12 @@ function NoteRow({
         <span className="flex-1 truncate" title={sourceTopic}>
           {sourceTopic}
         </span>
-        <button
-          onClick={onJump}
-          className="shrink-0 text-positive hover:text-positive-ink"
-          title="跳到原文"
-          aria-label="跳到原文"
-        >
-          ↗
-        </button>
-        <button
-          onClick={onDelete}
-          className="shrink-0 text-ink-faint hover:text-danger"
-          title="删除"
-          aria-label="删除"
-        >
-          ×
-        </button>
+        <IconButton label="跳到原文" size="sm" onClick={onJump}>
+          <Icon icon={ArrowUpRight} size="sm" />
+        </IconButton>
+        <IconButton label="删除笔记" size="sm" tone="danger" onClick={onDelete}>
+          <Icon icon={Trash2} size="sm" />
+        </IconButton>
       </div>
     </li>
   );

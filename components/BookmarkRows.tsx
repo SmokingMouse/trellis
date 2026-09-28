@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { Icon, Spinner, StatusDot } from "@/components/ui";
 
 export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
@@ -20,7 +22,7 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
           key={bookmark.nodeId}
           data-mobile-target="bookmark-row"
           data-bookmark-node-id={bookmark.nodeId}
-          className="mx-1 flex min-h-11 items-stretch rounded-md text-ui text-ink-muted hover:bg-surface-muted"
+          className="mx-1 flex min-h-11 items-stretch rounded-field text-ui text-ink-muted hover:bg-surface-hover"
         >
           <button
             type="button"
@@ -37,11 +39,7 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
             }}
           >
             {bookmark.readAt == null && (
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-unread"
-                role="img"
-                aria-label="未读"
-              />
+              <StatusDot tone="unread" label="未读" />
             )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-ui text-ink">
@@ -57,12 +55,13 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
           <button
             type="button"
             data-mobile-target="bookmark-done"
-            className="min-h-11 shrink-0 rounded-md px-2 text-label text-ink-faint hover:bg-accent-muted hover:text-accent"
+            className="min-h-11 shrink-0 inline-flex items-center gap-1 rounded-field px-2 text-label text-ink-faint hover:bg-accent-muted hover:text-accent-ink"
             aria-label={`读完并移除：${bookmark.question}`}
             title="从稍后再读移除（不改变已读状态）"
             onClick={() => void toggleBookmark(bookmark.nodeId, false)}
           >
-            读完 ✓
+            <Icon icon={Check} size="sm" />
+            读完
           </button>
         </div>
       ))}
@@ -72,12 +71,11 @@ export function BookmarkRows({ onNavigate }: { onNavigate?: () => void }) {
           data-mobile-target="bookmark-load-more"
           data-bookmark-remaining
           disabled={bookmarksLoadingMore}
-          className="min-h-11 w-full px-3 flex items-center justify-center text-label text-accent hover:bg-surface-muted disabled:opacity-60"
+          className="min-h-11 w-full px-3 flex items-center justify-center gap-1.5 text-label text-accent-ink hover:bg-surface-hover disabled:opacity-60"
           onClick={() => void loadMoreBookmarks()}
         >
-          {bookmarksLoadingMore
-            ? "加载中…"
-            : `加载更多（还有 ${bookmarksTotal - bookmarks.length} 条）`}
+          {bookmarksLoadingMore && <Spinner size="sm" label={null} />}
+          加载更多（还有 {bookmarksTotal - bookmarks.length} 条）
         </button>
       )}
     </div>

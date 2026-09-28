@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { BookmarkRows } from "@/components/BookmarkRows";
-import { Drawer } from "@/components/ui/Drawer";
+import { X, BookmarkCheck } from "lucide-react";
+import { Drawer, EmptyState, Icon } from "@/components/ui";
 import { useSessionStore } from "@/stores/sessionStore";
 
 export function BookmarksDrawer() {
@@ -32,7 +33,7 @@ export function BookmarksDrawer() {
   }, [open]);
 
   return (
-    <Drawer open={open} onClose={() => setOpen(false)}>
+    <Drawer open={open} onClose={() => setOpen(false)} title="稍后再读">
       <section
         role="dialog"
         aria-modal="true"
@@ -48,20 +49,23 @@ export function BookmarksDrawer() {
             ref={closeRef}
             type="button"
             data-mobile-target="bookmarks-close"
-            className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted"
+            className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-muted hover:bg-surface-hover hover:text-ink"
             aria-label="关闭稍后再读"
             onClick={() => setOpen(false)}
           >
-            ×
+            <Icon icon={X} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
           {bookmarks.length > 0 ? (
             <BookmarkRows onNavigate={() => setOpen(false)} />
           ) : (
-            <div className="px-4 py-8 text-center text-ui text-ink-faint">
-              还没有稍后再读的卡片
-            </div>
+            <EmptyState
+              compact
+              icon={BookmarkCheck}
+              title="还没有稍后再读的卡片"
+              description="在卡片上点「稍后再读」，它会出现在这里。"
+            />
           )}
         </div>
       </section>
