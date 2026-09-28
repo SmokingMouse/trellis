@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { isEditableTarget } from "@/lib/shortcuts";
-import { Dots } from "@/components/ui/Dots";
+import { Plus, X } from "lucide-react";
+import { Dots, Icon, IconButton, StatusDot } from "@/components/ui";
 import type { Session } from "@/lib/types";
 
 // Workbench Wave 4 — VSCode-style editor tab strip (rewrite of Wave 1).
@@ -21,8 +22,8 @@ import type { Session } from "@/lib/types";
 //   • each tab has a × close → closeTab (removes from pinned / clears
 //     preview; if it was active, switches to a neighbor)
 //   • ⌘1–9 jump to the Nth OPEN tab (pinned then preview) — not all sessions
-//   • emerald unread dot when a run finished here while the user was away
-//     (R3), distinct from the blue running pulse.
+//   • unread dot (unread hue) when a run finished here while the user was
+//     away (R3), distinct from the running Dots + sweep bar.
 //
 // The full session list lives in the left SessionSidebar (incl. its archived
 // view). The strip only renders pinned + preview tabs plus a "＋" new entry.
@@ -109,13 +110,13 @@ export function SessionTabs() {
   // 功能重叠，还吃掉 2.25rem 纵向空间——手机上会话切换走抽屉。
   return (
     <div
-      className="hidden md:block fixed top-12 right-0 z-30 h-9 bg-surface-canvas/85 backdrop-blur border-b border-line"
+      className="hidden md:block fixed top-12 right-0 z-30 h-9 bg-surface-canvas border-b border-line"
       style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
       <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
-          <div className="self-center pl-1 text-label text-ink-faint italic">
-            搜索或＋新建打开会话，双击标签固定
+          <div className="self-center pl-1 text-label text-ink-faint">
+            从侧栏或搜索打开会话；单击是预览，双击标签固定
           </div>
         )}
         {openIds.map((id, i) => {
@@ -143,14 +144,9 @@ export function SessionTabs() {
         })}
         <div className="self-center ml-auto pl-1 shrink-0 flex items-center gap-1">
           {/* Redundant secondary new-session entry. */}
-          <button
-            onClick={() => newConversation()}
-            title="新会话（全新树）"
-            aria-label="新会话"
-            className="w-6 h-6 flex items-center justify-center rounded text-ink-muted hover:bg-surface-muted hover:text-ink-strong"
-          >
-            <span aria-hidden className="text-reading leading-none">＋</span>
-          </button>
+          <IconButton label="新会话（全新的树）" size="sm" onClick={() => newConversation()}>
+            <Icon icon={Plus} size="sm" />
+          </IconButton>
         </div>
       </div>
     </div>
@@ -200,36 +196,27 @@ function Tab({
           ? `${style.label} · ${session.title}  (⌘${shortcut})${preview ? "\n双击固定" : ""}`
           : `${style.label} · ${session.title}`
       }
-      className={`group relative self-center flex items-center gap-1.5 h-7 pl-2.5 pr-1.5 rounded-md border text-ui shrink-0 max-w-[12rem] cursor-pointer transition-colors ${
-        running
-          ? // Running tint (accent) overrides mode bg so "in progress" reads
-            // unmistakably, active or not. Bottom sweep bar added below.
-            "bg-accent-muted border-accent-line text-accent-ink font-medium"
-          : unread
-            ? // Finished-unread tint (unread hue) — loud but static.
-              "bg-unread-muted border-unread-line text-unread-ink font-medium"
-            : active
-              ? `${style.activeBg} ${style.activeBorder} ${style.text} font-medium`
-              : "border-transparent text-ink-muted hover:bg-surface-muted"
-      }`}
+      data-session-tab={session.id}
+      data-tab-status={running ? "streaming" : unread ? "unread" : "done"}
+      className={`group relative self-center flex items-center gap-1.5 h-7 pl-2.5 pr-1 rounded-md text-ui shrink-0 max-w-[13rem] cursor-pointer transition-colors ${
+        active
+          ? "bg-surface-muted text-ink-strong"
+          : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+      } ${unread && !running ? "font-medium" : ""}`}
     >
-      {/* Leading indicator: spinner while running, else the mode color dot. */}
-      {running ? (
-        <Dots />
-      ) : (
-        <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} aria-hidden />
-      )}
+      {/* 行首一个状态槽：生成中 Dots > 未读点 > 模式点。不再给整个标签染色。 */}
+      <span className="flex w-3 shrink-0 items-center justify-center">
+        {running ? (
+          <Dots />
+        ) : unread ? (
+          <StatusDot tone="unread" label="完成·未读" />
+        ) : (
+          <StatusDot tone={session.mode === "project" ? "project" : "chat"} />
+        )}
+      </span>
       <span className={`truncate ${preview ? "italic" : ""}`}>
         {session.title}
       </span>
-      {/* R3 unread (unread hue) — louder than before: solid dot + ring + 「新」.
-          Distinct from the accent running state; hidden while running again. */}
-      {unread && !running && (
-        <span className="shrink-0 inline-flex items-center gap-1 pl-0.5 pr-1 h-4 rounded-full bg-unread text-ink-inverse text-nano font-semibold leading-none ring-1 ring-unread-line" aria-label="完成·未读">
-          <span className="w-1.5 h-1.5 rounded-full bg-ink-inverse" aria-hidden />
-          新
-        </span>
-      )}
       {/* Accent sliding underline bar — peripheral "this one is running" cue. */}
       {running && <span className="trellis-run-bar" aria-hidden />}
       {/* × close — always present, dims until hover to avoid noise. */}
@@ -241,11 +228,11 @@ function Tab({
         onDoubleClick={(e) => e.stopPropagation()}
         title="关闭标签"
         aria-label="关闭标签"
-        className="shrink-0 w-4 h-4 flex items-center justify-center rounded text-ink-faint opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-muted hover:text-ink transition-opacity"
+        className={`shrink-0 size-5 flex items-center justify-center rounded-sm text-ink-faint group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-hover hover:text-ink transition-opacity ${
+          active ? "opacity-100" : "opacity-0"
+        }`}
       >
-        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
-          <path d="M3 3 L9 9 M9 3 L3 9" />
-        </svg>
+        <Icon icon={X} size="sm" />
       </button>
     </div>
   );

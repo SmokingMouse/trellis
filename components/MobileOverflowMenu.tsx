@@ -2,7 +2,28 @@
 
 import { useState, type ReactNode } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Drawer } from "@/components/ui/Drawer";
+import {
+  Bookmark,
+  CalendarClock,
+  Check,
+  ChevronRight,
+  Cpu,
+  Download,
+  FolderOpen,
+  Gauge,
+  GitFork,
+  Layers,
+  Map as MapIcon,
+  Monitor,
+  NotebookPen,
+  Palette,
+  Search,
+  Settings,
+  ShieldCheck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { Drawer, Icon } from "@/components/ui";
 import { modeStyle } from "@/lib/mode-style";
 import {
   blockedFamilySwitch,
@@ -28,7 +49,7 @@ type MobileOverflowMenuProps = {
 };
 
 const rowClass =
-  "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink hover:bg-surface-muted transition-colors";
+  "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink hover:bg-surface-hover transition-colors";
 const statusRowClass =
   "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink-muted";
 
@@ -40,7 +61,7 @@ function MenuButton({
   onClick,
 }: {
   target: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   children: ReactNode;
   detail?: ReactNode;
   onClick: () => void;
@@ -52,9 +73,7 @@ function MenuButton({
       className={rowClass}
       onClick={onClick}
     >
-      <span className="w-5 shrink-0 text-center text-base" aria-hidden>
-        {icon}
-      </span>
+      <Icon icon={icon} className="text-ink-muted" />
       <span className="min-w-0 flex-1">{children}</span>
       {detail && (
         <span className="max-w-[48%] truncate text-label text-ink-faint">
@@ -73,18 +92,14 @@ function MenuLink({
 }: {
   target: string;
   href: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   children: ReactNode;
 }) {
   return (
     <a data-mobile-target={target} className={rowClass} href={href}>
-      <span className="w-5 shrink-0 text-center text-base" aria-hidden>
-        {icon}
-      </span>
+      <Icon icon={icon} className="text-ink-muted" />
       <span className="min-w-0 flex-1">{children}</span>
-      <span className="text-ink-faint" aria-hidden>
-        ›
-      </span>
+      <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />
     </a>
   );
 }
@@ -167,14 +182,14 @@ export function MobileOverflowMenu({
             className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted"
             aria-label="关闭更多功能"
           >
-            ×
+            <Icon icon={X} size="lg" />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 divide-y divide-line-faint overflow-y-auto overscroll-contain py-1">
           <MenuButton
             target="overflow-search"
-            icon="⌕"
+            icon={Search}
             onClick={() => act(() => setSearchOpen(true))}
           >
             搜索
@@ -182,7 +197,7 @@ export function MobileOverflowMenu({
 
           <MenuButton
             target="overflow-bookmarks"
-            icon="🔖"
+            icon={Bookmark}
             onClick={() => act(() => setBookmarksOpen(true))}
           >
             稍后再读 ({bookmarkCount})
@@ -192,7 +207,7 @@ export function MobileOverflowMenu({
             <>
               <MenuButton
                 target="overflow-tree"
-                icon="⑂"
+                icon={GitFork}
                 onClick={() =>
                   act(() => {
                     setViewMode("linear");
@@ -204,7 +219,7 @@ export function MobileOverflowMenu({
               </MenuButton>
               <MenuButton
                 target="overflow-canvas"
-                icon="🗺"
+                icon={MapIcon}
                 onClick={() => act(() => setViewMode("canvas"))}
               >
                 画布
@@ -212,7 +227,7 @@ export function MobileOverflowMenu({
               {session.workspacePath && (
                 <MenuButton
                   target="overflow-workspace-files"
-                  icon="▣"
+                  icon={FolderOpen}
                   onClick={() => act(() => setWorkspaceFilesOpen(true))}
                 >
                   工作区文件
@@ -220,7 +235,7 @@ export function MobileOverflowMenu({
               )}
               <MenuButton
                 target="overflow-notes"
-                icon="▤"
+                icon={NotebookPen}
                 detail={notes.length > 0 ? `${notes.length} 条` : undefined}
                 onClick={() => act(() => setNotesOpen(true))}
               >
@@ -228,7 +243,7 @@ export function MobileOverflowMenu({
               </MenuButton>
               <MenuButton
                 target="overflow-export"
-                icon="⇩"
+                icon={Download}
                 detail={exportOpen ? "收起" : "Markdown / JSON"}
                 onClick={() => setExportOpen((value) => !value)}
               >
@@ -259,9 +274,7 @@ export function MobileOverflowMenu({
                 className={statusRowClass}
                 role="status"
               >
-                <span className="w-5 shrink-0 text-center text-base" aria-hidden>
-                  ◈
-                </span>
+                <Icon icon={Layers} className="text-ink-muted" />
                 <span className="flex-1">模式</span>
                 <span className="truncate text-label text-ink-faint">
                   {currentMode}
@@ -273,7 +286,7 @@ export function MobileOverflowMenu({
               {contextUsage && (
                 <MenuButton
                   target="overflow-context"
-                  icon="🧠"
+                  icon={Gauge}
                   detail={`${contextUsage.percent < 10 ? contextUsage.percent.toFixed(1) : Math.round(contextUsage.percent)}%`}
                   onClick={() => act(onOpenContext)}
                 >
@@ -285,7 +298,7 @@ export function MobileOverflowMenu({
 
           <MenuButton
             target="overflow-models"
-            icon="◆"
+            icon={Cpu}
             detail={currentProvider?.shortLabel ?? provider}
             onClick={() => setModelsOpen((value) => !value)}
           >
@@ -312,12 +325,12 @@ export function MobileOverflowMenu({
                     }}
                   >
                     <span className="text-nano text-ink-faint">
-                      [{getProviderBadge(candidate.id)}]
+                      {getProviderBadge(candidate.id)}
                     </span>
                     <span className="min-w-0 flex-1 truncate">
                       {candidate.shortLabel}
                     </span>
-                    {candidate.id === provider && <span aria-hidden>✓</span>}
+                    {candidate.id === provider && <Icon icon={Check} size="sm" className="text-accent-ink" />}
                   </button>
                 );
               })}
@@ -333,7 +346,7 @@ export function MobileOverflowMenu({
 
           <MenuButton
             target="overflow-theme"
-            icon="◐"
+            icon={Palette}
             detail={themeOpen ? "收起" : "主题与外观"}
             onClick={() => setThemeOpen((value) => !value)}
           >
@@ -382,20 +395,20 @@ export function MobileOverflowMenu({
             </div>
           )}
 
-          <MenuLink target="overflow-tasks" href="/settings/tasks" icon="◷">
+          <MenuLink target="overflow-tasks" href="/settings/tasks" icon={CalendarClock}>
             任务
           </MenuLink>
-          <MenuLink target="overflow-settings" href="/settings" icon="⚙">
+          <MenuLink target="overflow-settings" href="/settings" icon={Settings}>
             设置
           </MenuLink>
           {showAdmin && (
-            <MenuLink target="overflow-admin" href="/admin" icon="♜">
+            <MenuLink target="overflow-admin" href="/admin" icon={ShieldCheck}>
               管理后台
             </MenuLink>
           )}
           <MenuButton
             target="overflow-desktop-mode"
-            icon="▰"
+            icon={Monitor}
             onClick={() => {
               setDesktopModeOverride(true);
               window.location.reload();
