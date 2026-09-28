@@ -16,6 +16,8 @@ import {
 } from "@/lib/workflow-view";
 import { OutputView, Section, StderrView } from "../RawView";
 import { AgentStateIcon } from "./WorkflowChrome";
+import { ChevronRight } from "lucide-react";
+import { Icon } from "@/components/ui";
 
 // The Workflow tool's phase tree — 那条工具行展开后的正文。
 //
@@ -151,13 +153,11 @@ function PhaseBlock({ phase }: { phase: WorkflowPhaseVM }) {
           toggleable ? "cursor-pointer hover:text-ink-muted" : ""
         }`}
       >
-        <span
-          className="shrink-0 text-ink-faint transition-transform motion-reduce:transition-none"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0)" }}
-          aria-hidden
-        >
-          ▸
-        </span>
+        <Icon
+          icon={ChevronRight}
+          size="sm"
+          className={`text-ink-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
         <span className="min-w-0 truncate font-medium text-ink-muted">
           {phase.title}
         </span>

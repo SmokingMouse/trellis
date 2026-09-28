@@ -268,9 +268,8 @@ function TurnToolbar({
           data-mobile-target="node-branch"
           aria-pressed={branchArmed}
           onClick={() => onBranch!(node.id)}
-          className={branchArmed ? "text-fork-ink bg-fork-muted" : undefined}
         >
-          <Icon icon={GitBranch} size="sm" />
+          <Icon icon={GitBranch} size="sm" className={branchArmed ? "text-fork" : undefined} />
         </IconButton>
       )}
       {done && <BookmarkButton node={node} />}

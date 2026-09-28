@@ -210,7 +210,7 @@ export function ToolRow({
         data-workflow-head={workflow ? "" : undefined}
         className={`w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left hover:bg-surface-hover transition-colors ${
           workflow
-            ? "flex-wrap py-1 pointer-coarse:min-h-11"
+            ? "flex-wrap py-1 pointer-coarse:min-h-[44px]"
             : ""
         }`}
       >
