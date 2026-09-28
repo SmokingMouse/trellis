@@ -1028,12 +1028,13 @@ html, body {
    latches onto the source sentence. Hue switches by mark kind. */
 /* keyframes 内的 var() 按应用元素的级联解析，dark 值随变量走——
    原来 amber/emerald × light/dark 四套 keyframes 折半成两套。 */
+/* W3：静止帧与 mark 常态一致（淡底 + 底部细线），只在中间帧外扩一圈。 */
 @keyframes anchor-pulse-fork {
-  0%, 100% { background-color: var(--mark-fork-bg); box-shadow: 0 0 0 1px var(--mark-fork-line); }
+  0%, 100% { background-color: var(--mark-fork-bg); box-shadow: inset 0 -1.5px 0 var(--mark-fork-line); }
   50%      { background-color: var(--mark-fork-pulse-bg); box-shadow: 0 0 0 3px var(--mark-fork-pulse-ring); }
 }
 @keyframes anchor-pulse-note {
-  0%, 100% { background-color: var(--mark-note-bg); box-shadow: 0 0 0 1px var(--mark-note-line); }
+  0%, 100% { background-color: var(--mark-note-bg); box-shadow: inset 0 -1.5px 0 var(--mark-note-line); }
   50%      { background-color: var(--mark-note-pulse-bg); box-shadow: 0 0 0 3px var(--mark-note-pulse-ring); }
 }
 .md-body mark.anchor-pulse {
