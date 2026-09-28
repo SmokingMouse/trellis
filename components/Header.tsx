@@ -392,7 +392,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 <Popover
                   open={ctxPopoverOpen}
                   onClose={() => setCtxPopoverOpen(false)}
-                  panelClassName="w-72 p-3 text-left"
+                  panelClassName="w-72 p-3 text-left text-xs text-ink-muted"
                   trigger={
                     <button
                       onClick={() => setCtxPopoverOpen((v) => !v)}
