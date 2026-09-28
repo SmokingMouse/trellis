@@ -1,14 +1,37 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Bot,
+  FileText,
+  FolderGit2,
+  MessageSquare,
+  NotebookPen,
+  Search,
+  SearchX,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Modal } from "@/components/ui/Modal";
+import {
+  EmptyState,
+  ErrorCallout,
+  Icon,
+  Kbd,
+  Modal,
+  SegmentedControl,
+  Spinner,
+  cn,
+} from "@/components/ui";
 import { modeStyle } from "@/lib/mode-style";
 
 // Stage 16: cross-session full-text search modal. ⌘P (Cmd/Ctrl+P) opens
 // it from anywhere; the global keydown listener is owned by this
 // component so the rest of the app doesn't have to know about its state.
-// trigram tokenizer means queries < 3 chars match nothing — we render a
-// "type more" hint and skip the round-trip below that threshold.
+//
+// 最短 3 个字：后端 search_index 是 FTS5 trigram 分词（三字滑窗），短于 3 字的
+// MATCH 必然零命中，lib/server/repo.ts 的 buildFtsQuery 也直接短路返回 []。
+// 所以 1–2 个字（「向量」「AI」）在这里给提示、不发请求；后端若补上 <3 字的
+// LIKE 回退，把 MIN_QUERY 调到 1 即可。
 
 const MIN_QUERY = 3;
 const DEBOUNCE_MS = 200;
@@ -35,7 +58,7 @@ export function SearchModal() {
   const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   // Global ⌘P / Ctrl+P listener. We intercept the browser's print
   // shortcut — users can still print via the browser menu. Both the
-  // keydown and the Header 🔍 button (mobile) toggle the same
+  // keydown and the Header search button (mobile) toggle the same
   // store-backed open state.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,6 +82,8 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
   const [debounced, setDebounced] = useState("");
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [facet, setFacet] = useState<FacetKey>("all");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,19 +108,26 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (!debounced) {
       setResults([]);
+      setError(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
     fetch(`/api/search?q=${encodeURIComponent(debounced)}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         if (cancelled) return;
         setResults((data.results as Result[]) ?? []);
+        setError(null);
         setCursor(0);
       })
-      .catch(() => {
-        if (!cancelled) setResults([]);
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setResults([]);
+        setError(e);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -103,7 +135,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [debounced]);
+  }, [debounced, retryKey]);
 
   const filtered = useMemo(() => {
     if (facet === "all") return results;
@@ -165,6 +197,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       return;
     }
     if (e.key === "Enter") {
+      if (e.nativeEvent.isComposing) return;
       e.preventDefault();
       const target = flatHits[cursor];
       if (!target) return;
@@ -183,9 +216,15 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     el?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
-  const tooShort = query.trim().length > 0 && query.trim().length < MIN_QUERY;
+  const trimmedLen = query.trim().length;
+  const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY;
   const empty =
-    !loading && debounced.length > 0 && filtered.length === 0;
+    !loading && !error && debounced.length > 0 && filtered.length === 0;
+
+  const facetOptions = (["all", "chat", "project"] as FacetKey[]).map((f) => ({
+    value: f,
+    label: facetLabel(f),
+  }));
 
   return (
     // closeOnEsc={false}：Esc 由输入框的 onInputKey 自管（避免与键盘导航双触发）。
@@ -193,175 +232,185 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       size="lg"
       closeOnEsc={false}
+      title="搜索"
       panelClassName="flex flex-col max-h-[80vh]"
     >
-        {/* Input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-line-faint">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-ink-faint shrink-0"
-            aria-hidden
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M21 21l-4.3-4.3" />
-          </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onInputKey}
-            placeholder="搜索所有对话、笔记、参考材料…"
-            className="flex-1 bg-transparent outline-none text-body text-ink-strong placeholder:text-ink-faint"
+      {/* Input */}
+      <div className="flex items-center gap-2.5 px-4 min-h-12 border-b border-line">
+        <Icon icon={Search} className="text-ink-faint" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onInputKey}
+          placeholder="搜索会话里的提问、回复、参考材料和笔记…"
+          aria-label="搜索"
+          className="flex-1 min-w-0 bg-transparent outline-none text-body text-ink-strong placeholder:text-ink-faint"
+        />
+        {loading ? <Spinner size="sm" label="搜索中" /> : null}
+        <Kbd>Esc</Kbd>
+      </div>
+
+      {/* Facets */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line-faint">
+        <SegmentedControl
+          size="sm"
+          aria-label="按会话类型筛选"
+          value={facet}
+          onValueChange={setFacet}
+          options={facetOptions}
+        />
+      </div>
+
+      {/* Results */}
+      <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
+        {tooShort && (
+          <EmptyState
+            compact
+            icon={Search}
+            title={`再输入 ${MIN_QUERY - trimmedLen} 个字就能搜`}
+            description={`全文搜索至少需要 ${MIN_QUERY} 个字（中英文都按字数算）。两个字的词可以带上前后一个字，比如「向量库」。`}
           />
-          <kbd className="text-nano px-1.5 py-0.5 rounded bg-surface-muted text-ink-muted shrink-0">
-            Esc
-          </kbd>
-        </div>
-
-        {/* Facet chips */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-line-faint text-ui">
-          {(["all", "chat", "project"] as FacetKey[]).map(
-            (f) => (
-              <button
-                key={f}
-                onClick={() => setFacet(f)}
-                className={`px-2 py-0.5 rounded-full transition-colors ${
-                  facet === f
-                    ? "bg-accent text-ink-inverse"
-                    : "text-ink-muted hover:bg-surface-muted"
-                }`}
-              >
-                {facetLabel(f)}
-              </button>
-            ),
-          )}
-          <div className="flex-1" />
-          {loading && (
-            <span className="text-label text-ink-faint italic">
-              搜索中…
-            </span>
-          )}
-        </div>
-
-        {/* Results */}
-        <div
-          ref={listRef}
-          className="flex-1 overflow-y-auto"
-        >
-          {tooShort && (
-            <div className="px-4 py-6 text-ui text-ink-faint italic">
-              至少输入 {MIN_QUERY} 个字符（trigram 分词器限制）
-            </div>
-          )}
-          {!tooShort && !debounced && (
-            <div className="px-4 py-6 text-ui text-ink-faint italic">
-              输入关键词搜索所有 session、笔记、参考材料。⌘P 打开 / 关闭。
-            </div>
-          )}
-          {empty && (
-            <div className="px-4 py-6 text-ui text-ink-faint italic">
-              没有结果
-            </div>
-          )}
-          {filtered.map((r, ri) => (
-            <div
-              key={r.sessionId}
-              className="border-b border-line-faint last:border-b-0"
-            >
-              <div className="px-4 pt-2.5 pb-1.5 flex items-center gap-2 text-label">
-                <span className="text-ink font-medium truncate">
-                  {r.sessionTitle}
-                </span>
-                <ModeChip mode={r.sessionMode} />
-                {r.sessionWorkspacePath && (
-                  <span className="text-ink-faint truncate">
-                    {basename(r.sessionWorkspacePath)}
-                  </span>
-                )}
-              </div>
-              {r.hits.map((h, hi) => {
-                const flatIdx = flatHits.findIndex(
-                  (x) => x.resultIdx === ri && x.hitIdx === hi,
-                );
-                const active = flatIdx === cursor;
-                return (
-                  <button
-                    key={`${h.sourceKind}:${h.sourceId}:${hi}`}
-                    data-cursor={flatIdx}
-                    onMouseEnter={() => setCursor(flatIdx)}
-                    onClick={() => onJump(r, h)}
-                    className={`w-full text-left px-4 py-2 flex items-start gap-2 transition-colors ${
-                      active
-                        ? "bg-accent-muted/70"
-                        : "hover:bg-surface-muted"
-                    }`}
-                  >
-                    <span className="shrink-0 mt-0.5">
-                      {hitIcon(h.sourceKind)}
+        )}
+        {!tooShort && !debounced && (
+          <EmptyState
+            compact
+            icon={Search}
+            title="搜索所有会话"
+            description="会话里的提问、回复、参考材料和笔记都能搜到，至少输入 3 个字。"
+          />
+        )}
+        {!!error && debounced && (
+          <div className="px-3 py-2">
+            <ErrorCallout
+              compact
+              error={error}
+              title="搜索失败"
+              onRetry={() => setRetryKey((k) => k + 1)}
+            />
+          </div>
+        )}
+        {empty && (
+          <EmptyState
+            compact
+            icon={SearchX}
+            title={`没有找到「${debounced}」`}
+            description={
+              facet === "all"
+                ? "换个说法试试；搜索按原文字面匹配。"
+                : "当前只看一种会话类型，切到「全部」看看。"
+            }
+          />
+        )}
+        {filtered.map((r, ri) => (
+          <div key={r.sessionId} className="px-1.5 pb-1">
+            <SessionHeading result={r} />
+            {r.hits.map((h, hi) => {
+              const flatIdx = flatHits.findIndex(
+                (x) => x.resultIdx === ri && x.hitIdx === hi,
+              );
+              const active = flatIdx === cursor;
+              const kind = HIT_KIND[h.sourceKind];
+              return (
+                <button
+                  key={`${h.sourceKind}:${h.sourceId}:${hi}`}
+                  type="button"
+                  data-cursor={flatIdx}
+                  onMouseEnter={() => setCursor(flatIdx)}
+                  onClick={() => onJump(r, h)}
+                  className={cn(
+                    "w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors duration-100",
+                    active ? "bg-surface-hover" : "hover:bg-surface-hover",
+                  )}
+                >
+                  <Icon icon={kind.icon} className="mt-0.5 text-ink-faint" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-ui text-ink leading-relaxed line-clamp-2">
+                      <Snippet html={h.snippet} />
                     </span>
-                    <span
-                      className="text-ui text-ink-muted leading-relaxed line-clamp-2"
-                      // FTS5 already escapes content; <mark> tags are
-                      // the only HTML we injected. Trusted.
-                      dangerouslySetInnerHTML={{ __html: h.snippet }}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+                    <span className="block text-label text-ink-faint">{kind.label}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
-        {/* Footer hints */}
-        <div className="px-4 py-2 border-t border-line-faint text-label text-ink-faint flex items-center gap-3">
-          <span>↑↓ 选择</span>
-          <span>⏎ 跳转</span>
-          <span>Esc 关闭</span>
-        </div>
+      {/* Footer hints */}
+      <div className="px-4 py-2 border-t border-line-faint text-label text-ink-faint flex items-center gap-4">
+        <span className="flex items-center gap-1">
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd> 选择
+        </span>
+        <span className="flex items-center gap-1">
+          <Kbd>↩</Kbd> 跳转
+        </span>
+        <span className="flex items-center gap-1">
+          <Kbd>Esc</Kbd> 关闭
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          <Kbd keys={["⌘", "P"]} /> 打开 / 关闭
+        </span>
+      </div>
     </Modal>
   );
 }
 
-function ModeChip({ mode }: { mode: string }) {
-  // 复用 lib/mode-style 的模式配色（badge 含 border-*，故补 border class）。
-  const st = modeStyle(mode);
+function SessionHeading({ result: r }: { result: Result }) {
+  const st = modeStyle(r.sessionMode);
+  const isProject = r.sessionMode === "project";
   return (
-    <span className={`px-1.5 py-0.5 rounded border text-nano uppercase ${st.badge}`}>
-      {mode}
-    </span>
+    <div className="px-2.5 pt-2.5 pb-1 flex items-center gap-2 text-label min-w-0">
+      <Icon icon={isProject ? FolderGit2 : MessageSquare} size="sm" className="text-ink-faint" />
+      <span className="text-ink font-medium truncate">{r.sessionTitle}</span>
+      <span className={cn("shrink-0", st.text)}>{st.label}</span>
+      {r.sessionWorkspacePath && (
+        <span className="text-ink-faint truncate">{basename(r.sessionWorkspacePath)}</span>
+      )}
+    </div>
   );
 }
 
-function hitIcon(kind: Hit["sourceKind"]): React.ReactNode {
-  switch (kind) {
-    case "node_question":
-      return <span className="text-accent">💬</span>;
-    case "node_response":
-      return <span className="text-positive">💭</span>;
-    case "node_reference":
-      return <span className="text-warn">📄</span>;
-    case "note":
-      // 笔记 UI 归一 positive（与正文 emerald note mark 一致）
-      return <span className="text-positive">📝</span>;
-  }
+// 片段来自 FTS5 snippet()：它只在命中处插 <mark>，**不转义原文**——索引里存的是
+// 原始提问 / 回复文本，回复里的 HTML 会原样出现。所以这里不走
+// dangerouslySetInnerHTML，而是只认 <mark> / </mark> 两个标记，其余一律当文本。
+function Snippet({ html }: { html: string }) {
+  const parts: ReactNode[] = [];
+  let marked = false;
+  html.split(/(<mark>|<\/mark>)/).forEach((seg, i) => {
+    if (seg === "<mark>") {
+      marked = true;
+      return;
+    }
+    if (seg === "</mark>") {
+      marked = false;
+      return;
+    }
+    if (!seg) return;
+    parts.push(
+      marked ? (
+        <mark key={i} className="rounded-sm bg-accent-muted px-0.5 text-accent-ink">
+          {seg}
+        </mark>
+      ) : (
+        <Fragment key={i}>{seg}</Fragment>
+      ),
+    );
+  });
+  return <>{parts}</>;
 }
 
+const HIT_KIND: Record<Hit["sourceKind"], { icon: LucideIcon; label: string }> = {
+  node_question: { icon: User, label: "提问" },
+  node_response: { icon: Bot, label: "回复" },
+  node_reference: { icon: FileText, label: "参考材料" },
+  note: { icon: NotebookPen, label: "笔记" },
+};
+
 function facetLabel(f: FacetKey): string {
-  switch (f) {
-    case "all":
-      return "全部";
-    case "chat":
-      return "Chat";
-    case "project":
-      return "Project";
-  }
+  if (f === "all") return "全部";
+  return modeStyle(f).label;
 }
 
 function basename(p: string): string {
