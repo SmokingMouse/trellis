@@ -874,12 +874,13 @@ html, body {
 
 .md-body mark[data-child-id] { cursor: pointer; transition: background-color 120ms; }
 .md-body mark[data-child-id]:hover { background-color: var(--mark-fork-hover-bg); }
+/* 分叉锚点：淡 fork 底 + 底部细线（稿子 mark.fork），不再四周描框 */
 .md-body mark {
   background: var(--mark-fork-bg);
   color: inherit;
-  padding: 1px 3px;
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px var(--mark-fork-line);
+  padding: 0 1px;
+  border-radius: 2px 2px 0 0;
+  box-shadow: inset 0 -1.5px 0 var(--mark-fork-line);
 }
 .dark .md-body mark {
   color: var(--mark-fork-ink);
@@ -898,14 +899,14 @@ html, body {
    eye; the mark unmounts when clearScrollAnchor fires. */
 .md-body mark[data-search-id] {
   background: var(--mark-note-bg);
-  box-shadow: 0 0 0 1px var(--mark-note-line);
+  box-shadow: inset 0 -1.5px 0 var(--mark-note-line);
 }
 .dark .md-body mark[data-search-id] {
   color: var(--mark-note-ink);
 }
 .md-body mark[data-note-id]:not([data-child-id]) {
   background: var(--mark-note-bg);
-  box-shadow: 0 0 0 1px var(--mark-note-line);
+  box-shadow: inset 0 -1.5px 0 var(--mark-note-line);
   cursor: default;
 }
 .dark .md-body mark[data-note-id]:not([data-child-id]) {
@@ -920,7 +921,7 @@ html, body {
   overflow-x: auto;
   margin: 0.85em 0;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface);
   /* tasteful subtle scrollbar */
   scrollbar-width: thin;
@@ -960,23 +961,14 @@ html, body {
   top: 0;
   z-index: 1;
 }
-.md-body tbody tr:nth-child(even) td {
-  background: var(--surface-canvas);
-}
-.dark .md-body tbody tr:nth-child(even) td {
-  background: var(--surface); /* dark 原值 = stone-900，即 dark surface */
-}
+/* 不做斑马纹：行分隔线已够，交替底色在克制风里是噪音 */
 
 /* Blockquote */
 .md-body blockquote {
-  border-left: 3px solid var(--line-strong);
-  background: var(--surface-canvas);
+  border-left: 2px solid var(--line-strong);
   margin: 0.7em 0;
-  padding: 0.4em 0.9em;
+  padding: 0.1em 0 0.1em 0.9em;
   color: var(--ink-muted);
-}
-.dark .md-body blockquote {
-  background: var(--surface); /* dark 原值 = stone-900，即 dark surface */
 }
 .md-body blockquote p { margin: 0.3em 0; }
 
