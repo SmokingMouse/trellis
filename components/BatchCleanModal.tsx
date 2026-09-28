@@ -1,8 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
-import { IconButton } from "@/components/ui/IconButton";
+import { FolderCheck, X } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  ErrorCallout,
+  Icon,
+  IconButton,
+  Modal,
+  SkeletonText,
+  toast,
+} from "@/components/ui";
 import type { CleanItemPreview } from "@/app/api/workspaces/worktree/clean/route";
 
 export type BatchCleanModalProps = {
@@ -33,7 +43,9 @@ export function BatchCleanModal({
   const [cleaning, setCleaning] = useState(false);
   const [items, setItems] = useState<CleanItemPreview[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [cleanError, setCleanError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // 1. 请求预览
   useEffect(() => {
@@ -59,9 +71,9 @@ export function BatchCleanModal({
           setSelectedIds(safeIds);
         }
       })
-      .catch(() => setError("网络请求失败"))
+      .catch((e: unknown) => setError(e))
       .finally(() => setLoading(false));
-  }, [open, workspaceIds]);
+  }, [open, workspaceIds, reloadKey]);
 
   if (!open) return null;
 
@@ -90,7 +102,7 @@ export function BatchCleanModal({
   const handleClean = async () => {
     if (selectedIds.size === 0) return;
     setCleaning(true);
-    setError(null);
+    setCleanError(null);
     try {
       const r = await fetch("/api/workspaces/worktree/clean", {
         method: "POST",
@@ -102,13 +114,22 @@ export function BatchCleanModal({
       }).then((x) => x.json());
 
       if (r.error) {
-        setError(r.error);
+        setCleanError(r.error);
       } else {
+        const failed: Array<{ name: string; error: string }> = r.errors ?? [];
+        if (failed.length > 0) {
+          toast.warning(`清理了 ${r.removedCount ?? 0} 个工作区，${failed.length} 个没清掉`, {
+            description: failed.map((f) => `${f.name}：${f.error}`).join("\n"),
+            duration: 10000,
+          });
+        } else {
+          toast.success(`已清理 ${r.removedCount ?? selectedIds.size} 个工作区`);
+        }
         onSuccess();
         onClose();
       }
-    } catch {
-      setError("批量清理失败，请重试");
+    } catch (e) {
+      setCleanError(e);
     } finally {
       setCleaning(false);
     }
@@ -116,141 +137,145 @@ export function BatchCleanModal({
 
   const totalSafe = items.filter(isRecommended).length;
 
+  const recommended = items.filter(isRecommended);
+  const allChecked = totalSafe > 0 && recommended.every((it) => selectedIds.has(it.id));
+  const someChecked = !allChecked && recommended.some((it) => selectedIds.has(it.id));
+
   return (
-    <Modal onClose={onClose} size="md" panelClassName="max-h-[85vh] flex flex-col">
+    <Modal
+      onClose={onClose}
+      size="md"
+      title="批量清理已合并工作区"
+      panelClassName="max-h-[85vh] flex flex-col"
+    >
       {/* Header */}
       <div className="px-4 py-3 border-b border-line flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-semibold text-ui text-ink-strong truncate">
-            🧹 批量清理已合并工作区
-          </span>
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="font-semibold text-ui text-ink-strong truncate">
+            批量清理已合并工作区
+          </h2>
           {projectName && (
-            <span className="text-nano text-ink-faint truncate">· {projectName}</span>
+            <span className="text-label text-ink-faint truncate">{projectName}</span>
           )}
         </div>
         <IconButton label="关闭" size="sm" onClick={onClose}>
-          ✕
+          <Icon icon={X} />
         </IconButton>
       </div>
 
       {/* Notice info */}
-      <div className="px-4 py-2.5 bg-surface-muted/50 border-b border-line-faint text-nano text-ink-muted shrink-0 leading-relaxed">
-        已合并到主干且无未提交修改的工作区可安全回收。清理将执行{" "}
-        <code className="font-mono text-ink-faint">git worktree remove</code>{" "}
-        并移除对应本地目录，释放磁盘空间。分支本身不受影响。
+      <div className="px-4 py-2.5 bg-surface-muted border-b border-line-faint text-label text-ink-muted shrink-0 leading-relaxed">
+        已合并到主干、且没有未提交修改的工作区可以安全回收：清理会删除对应的本地目录（
+        <code className="font-mono text-ink-faint">git worktree remove</code>
+        ），释放磁盘空间，分支本身保留。
       </div>
 
       {/* Items list */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {loading ? (
-          <div className="py-12 text-center text-ink-faint text-ui italic">
-            正在预检可清理工作区…
-          </div>
+          <SkeletonText lines={4} className="py-2" />
         ) : error ? (
-          <div className="py-8 text-center text-danger text-ui">
-            预检失败：{error}
-          </div>
+          <ErrorCallout
+            error={error}
+            title="检查可清理的工作区失败"
+            onRetry={() => setReloadKey((k) => k + 1)}
+          />
         ) : items.length === 0 ? (
-          <div className="py-12 text-center text-ink-faint text-ui">
-            暂无需要清理的工作区
-          </div>
+          <EmptyState
+            compact
+            icon={FolderCheck}
+            title="没有需要清理的工作区"
+            description="已合并的工作区都已回收。"
+          />
         ) : (
           <div className="space-y-3">
             {/* Toolbar */}
-            <div className="flex items-center justify-between text-nano pb-1 border-b border-line-faint">
-              <label className="flex items-center gap-1.5 cursor-pointer text-ink font-medium select-none">
-                <input
-                  type="checkbox"
-                  checked={
-                    totalSafe > 0 &&
-                    items.filter(isRecommended).every((it) => selectedIds.has(it.id))
-                  }
-                  onChange={toggleSelectAll}
-                  className="rounded border-line"
+            <div className="flex items-center justify-between text-label pb-2 border-b border-line-faint">
+              <label className="flex items-center gap-2 cursor-pointer text-ink font-medium select-none">
+                <Checkbox
+                  checked={allChecked ? true : someChecked ? "indeterminate" : false}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={totalSafe === 0}
                 />
-                全选建议清理项 ({selectedIds.size}/{totalSafe})
+                全选建议清理项（{selectedIds.size}/{totalSafe}）
               </label>
               <span className="text-ink-faint tabular-nums">
-                共 {items.length} 个候选工作区
+                共 {items.length} 个候选
               </span>
             </div>
 
             {/* List */}
-            <div className="divide-y divide-line-faint border border-line rounded-md bg-surface-canvas overflow-hidden">
+            <div className="divide-y divide-line-faint border border-line rounded-card overflow-hidden">
               {items.map((it) => {
                 const checked = selectedIds.has(it.id);
-                const isWarning = it.dirtyCount > 0 || it.ignoredCount > 0;
                 return (
                   <div
                     key={it.id}
-                    className={`px-3 py-2 flex items-center gap-2 text-nano transition-colors ${
-                      it.canClean ? "hover:bg-surface-muted cursor-pointer" : "opacity-50"
+                    className={`px-3 py-2 flex items-center gap-2.5 text-label transition-colors ${
+                      it.canClean ? "hover:bg-surface-hover cursor-pointer" : "opacity-50"
                     }`}
                     onClick={() => it.canClean && toggleSelect(it.id)}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={checked}
                       disabled={!it.canClean}
-                      onChange={() => {}}
+                      onCheckedChange={() => toggleSelect(it.id)}
                       onClick={(e) => e.stopPropagation()}
-                      className="rounded border-line shrink-0"
+                      aria-label={`选择 ${it.name}`}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-ink truncate">{it.name}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium text-ui text-ink truncate">{it.name}</span>
                         {it.branch && it.branch !== it.name && (
-                          <span className="text-nano font-mono text-ink-faint truncate max-w-40">
+                          <span className="font-mono text-ink-faint truncate max-w-40">
                             {it.branch}
                           </span>
                         )}
-                        {!it.exists && (
-                          <span className="text-nano px-1 rounded bg-surface-muted text-ink-faint">
-                            目录已删除
-                          </span>
-                        )}
-                        {it.sessionCount > 0 && (
-                          <span className="text-warn text-nano shrink-0 font-medium">
-                            {it.sessionCount} 个会话
-                          </span>
-                        )}
                       </div>
-                      <div className="text-nano text-ink-faint font-mono truncate mt-0.5">
+                      <div className="font-mono text-nano text-ink-faint truncate mt-0.5">
                         {it.path}
                       </div>
                     </div>
-                    {isWarning && (
-                      <span className="text-warn text-nano shrink-0 font-medium" title="存在未提交改动">
-                        ● {it.dirtyCount} 改动
-                      </span>
-                    )}
-                    {it.reason && (
-                      <span className="text-danger text-nano shrink-0">{it.reason}</span>
-                    )}
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                      {!it.exists && <Badge>目录已删除</Badge>}
+                      {it.sessionCount > 0 && (
+                        <Badge variant="warn">{it.sessionCount} 个会话</Badge>
+                      )}
+                      {it.dirtyCount > 0 && (
+                        <Badge variant="warn">{it.dirtyCount} 处未提交改动</Badge>
+                      )}
+                      {it.ignoredCount > 0 && (
+                        <Badge variant="warn">{it.ignoredCount} 个被忽略的文件</Badge>
+                      )}
+                      {it.reason && <Badge variant="danger">{it.reason}</Badge>}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+        {!!cleanError && (
+          <ErrorCallout compact className="mt-3" error={cleanError} title="清理失败" />
+        )}
       </div>
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-line flex items-center justify-between gap-2 shrink-0 bg-surface">
-        <span className="text-nano text-ink-faint">
-          已选择 {selectedIds.size} 个工作区
+        <span className="text-label text-ink-faint">
+          已选 {selectedIds.size} 个工作区
         </span>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose} disabled={cleaning}>
+          <Button variant="ghost" onClick={onClose} disabled={cleaning}>
             取消
           </Button>
           <Button
             variant="danger"
-            size="sm"
             onClick={handleClean}
+            loading={cleaning}
             disabled={selectedIds.size === 0 || cleaning}
           >
-            {cleaning ? "清理中…" : `确认清理 (${selectedIds.size})`}
+            清理 {selectedIds.size} 个
           </Button>
         </div>
       </div>
