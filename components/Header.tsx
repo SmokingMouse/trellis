@@ -193,6 +193,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const setSidebarOpen = useSessionStore((s) => s.setSidebarOpen);
   const openHome = useSessionStore((s) => s.openHome);
+  const homeOpen = useSessionStore((s) => s.homeOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
@@ -261,7 +262,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   }, []);
 
   if (isMobile) {
-    const title = session?.title.trim() || "新会话";
+    const title = session?.title.trim() || (homeOpen ? "首页" : "新会话");
     const headerHidden = scrollHidden;
     return (
       <>

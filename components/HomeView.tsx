@@ -12,7 +12,6 @@ import {
   Plug,
   Scale,
   Sprout,
-  TerminalSquare,
 } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { QuestionInput, type QuestionInputHandle } from "@/components/QuestionInput";
@@ -156,17 +155,18 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
     () => [...runningIds].map((id) => byId.get(id)).filter((s): s is Session => Boolean(s)),
     [runningIds, byId],
   );
-  // 在线坐席；已经作为「生成中会话」列出的不重复列。
-  const herdrPanes = useMemo(
-    () =>
-      buildHerdrWorkspaceViews(fleet, hooks)
-        .flatMap((w) => w.panes)
-        .filter((p) => {
-          const sid = p.binding?.trellisSessionId ?? p.binding?.sessionId;
-          return p.alive && !(sid && runningIds.has(sid));
-        }),
-    [fleet, hooks, runningIds],
-  );
+  // 在线坐席：只逐行列「在干活 / 等你」的，空闲的收成一行计数（常驻坐席动辄十几个，
+  // 全列出来会把真正在跑的淹掉）。已经作为「生成中会话」列出的不重复列。
+  const { herdrPanes, idlePaneCount } = useMemo(() => {
+    const alive = buildHerdrWorkspaceViews(fleet, hooks)
+      .flatMap((w) => w.panes)
+      .filter((p) => {
+        const sid = p.binding?.trellisSessionId ?? p.binding?.sessionId;
+        return p.alive && !(sid && runningIds.has(sid));
+      });
+    const busy = alive.filter((p) => p.status === "working" || p.status === "waiting" || p.status === "blocked");
+    return { herdrPanes: busy, idlePaneCount: alive.length - busy.length };
+  }, [fleet, hooks, runningIds]);
 
   const upcoming = useMemo(() => upcomingTasks(tasks ?? [], now), [tasks, now]);
   const problem = useMemo(() => latestProblemRun(tasks ?? []), [tasks]);
@@ -195,15 +195,19 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
   return (
     <main
       data-home
-      className="min-h-dvh"
-      style={{ paddingLeft: isMobile ? undefined : "var(--trellis-sb, 0px)" }}
+      // body / html 是 overflow:hidden（工作台各视图各管各的滚动），首页自己当滚动容器：
+      // 桌面落在侧栏右侧、tab 条下方；手机落在 Header 下方。
+      className="fixed inset-x-0 bottom-0 overflow-y-auto overscroll-contain"
+      style={
+        isMobile
+          ? { top: "var(--trellis-header-h)", paddingBottom: "var(--safe-bottom)" }
+          : { top: "calc(3rem + 2.25rem)", left: "var(--trellis-sb, 0px)" }
+      }
     >
       <div
         className={cn(
           "mx-auto w-full max-w-[880px] px-6 pb-16 max-md:px-4",
-          isMobile
-            ? "pt-[calc(var(--trellis-header-h)+1.25rem)]"
-            : "pt-[calc(var(--trellis-header-h)+2.25rem+3rem)]",
+          isMobile ? "pt-5" : "pt-12",
         )}
       >
         {/* ── 问候 + 新会话输入 ── */}
@@ -221,7 +225,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
               : "从一个新问题开始，或接着处理下面的事。"}
           </p>
           <QuestionInput isMobile={isMobile} variant="home" autoFocus={!isMobile} controlRef={inputRef} />
-          <div data-home-quick className="mt-3 flex w-full max-w-2xl flex-wrap justify-center gap-2 max-md:justify-start">
+          <div data-home-quick className="mt-3 flex w-full max-w-2xl flex-wrap justify-center gap-2 max-md:grid max-md:grid-cols-2">
             <Button
               size="sm"
               variant="secondary"
@@ -321,7 +325,12 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
             )}
 
             {(runningSessions.length > 0 || herdrPanes.length > 0) && (
-              <HomeSection id="running" title="正在运行" count={runningSessions.length + herdrPanes.length}>
+              <HomeSection
+                id="running"
+                title="正在运行"
+                count={runningSessions.length + herdrPanes.length}
+                action={idlePaneCount > 0 ? <Meta className="px-2">另有 {idlePaneCount} 个 Herdr 坐席在线空闲</Meta> : undefined}
+              >
                 {runningSessions.map((s) => (
                   <RowButton key={s.id} data-home-running={s.id} onClick={() => open(s.id)}>
                     <span className="grid w-4 shrink-0 place-items-center"><Dots label="生成中" /></span>
@@ -338,7 +347,6 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                       <span className="grid w-4 shrink-0 place-items-center">
                         <StatusDot tone={herdrTone(pane.status)} label={HERDR_STATUS_TEXT[pane.status]} />
                       </span>
-                      <Icon icon={TerminalSquare} size="sm" className="shrink-0 text-ink-faint" />
                       <span className="min-w-0 flex-1 truncate text-ui text-ink">{target ? byId.get(target)!.title : pane.label}</span>
                       <Meta className="max-md:hidden">Herdr · {pane.workspaceLabel}</Meta>
                       <Meta className={cn("w-14 text-right", (pane.status === "waiting" || pane.status === "blocked") && "text-warn-ink")}>
@@ -402,7 +410,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                 {upcoming.length === 0 && (
                   <li className={cn(ROW_CLASS, "text-ui text-ink-faint")}>
                     <span className="w-4 shrink-0" />
-                    没有排定的下一次运行（任务都停用了，或只手动运行）
+                    暂无排定的运行（任务已停用或只手动运行）
                   </li>
                 )}
                 {upcoming.map(({ task, at }) => (
@@ -517,7 +525,7 @@ function Welcome({ onPick }: { onPick: (text: string) => void }) {
         </div>
         <h2 id="home-welcome" className="text-ui font-medium text-ink">还没有会话</h2>
         <p className="mt-1 max-w-md text-label text-ink-muted">
-          每次提问会长成一棵树：选中回答里的任意一段接着问，就多出一个分支。可以从下面挑一个起点——点一下只会填进输入框，改好再发。
+          可以从下面挑一个起点：点一下只会填进输入框，改好再发。
         </p>
       </div>
       <div className="mt-6 grid gap-2.5 sm:grid-cols-2">
