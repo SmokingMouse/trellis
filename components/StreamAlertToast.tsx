@@ -1,45 +1,42 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { ToastShell } from "@/components/ui/Toast";
+import { toast } from "@/components/ui";
 
 const AUTO_DISMISS_MS = 8000;
+let seq = 0;
 
-// #5: surface for stream failures that happen BEFORE the server creates a
-// node (fetch refused / non-2xx / server restart). Those errors used to be
-// silently dropped (handleStreamEvent's error branch needs a nodeId), which
-// left composers looking dead with no explanation. Bottom-center so it's
-// visible from both the first-screen composer and the docked composers.
+// #5: 服务端还没建节点就失败的流（请求被拒 / 非 2xx / 服务重启）。以前这类错误
+// 被静默丢掉（handleStreamEvent 的 error 分支需要 nodeId），输入框看起来像死了。
+// W4 起不自己画 UI：store.streamAlert 同步成一条 sonner 错误提示，8 秒自动消失；
+// 关掉 / 超时后清 store。
 export function StreamAlertToast() {
   const alert = useSessionStore((s) => s.streamAlert);
-  const setStreamAlert = useSessionStore((s) => s.setStreamAlert);
+  const current = useRef<string | null>(null);
+  const seen = useRef<string | null>(null);
 
   useEffect(() => {
+    if (seen.current === alert) return;
+    seen.current = alert;
+    if (current.current) toast.dismiss(current.current);
+    current.current = null;
     if (!alert) return;
-    const t = window.setTimeout(() => setStreamAlert(null), AUTO_DISMISS_MS);
-    return () => window.clearTimeout(t);
-  }, [alert, setStreamAlert]);
+    const id = `stream-alert:${++seq}`;
+    current.current = id;
+    const clear = () => {
+      const st = useSessionStore.getState();
+      if (st.streamAlert === alert) st.setStreamAlert(null);
+      if (current.current === id) current.current = null;
+    };
+    // store 里的文案形如「发送失败：…」「数据库写入失败…」，本身就是完整的一句话，
+    // 直接当标题；不另拼 description。
+    toast.error(alert, {
+      id,
+      duration: AUTO_DISMISS_MS,
+      onDismiss: clear,
+      onAutoClose: clear,
+    });
+  }, [alert]);
 
-  if (!alert) return null;
-
-  return (
-    <div data-legacy-toast className="fixed bottom-20 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
-      <ToastShell
-        tone="danger"
-        className="max-w-md w-full px-3 py-2 flex items-start gap-2.5"
-      >
-        <span className="shrink-0 mt-0.5" aria-hidden>
-          ⚠️
-        </span>
-        <div className="flex-1 min-w-0 text-ui break-words">{alert}</div>
-        <button
-          onClick={() => setStreamAlert(null)}
-          className="shrink-0 -mt-0.5 -mr-1 px-1.5 py-0.5 text-danger/60 hover:text-danger text-sm leading-none"
-          aria-label="关闭"
-        >
-          ×
-        </button>
-      </ToastShell>
-    </div>
-  );
+  return null;
 }
