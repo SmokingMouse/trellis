@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-UI 重设计（克制工具风）W1–W5 已在 feat/ui-redesign 完成并全绿，待用户验收后合 main 部署；devbox 卡顿残留的启动补齐窗口仍待收尾。
+UI 重设计（克制工具风）W1–W5 已在 feat/ui-redesign 完成并全绿，待验收合 main；devbox 启动补齐窗口待收尾。
 
 ## Goals
 
@@ -19,12 +19,12 @@ UI 重设计（克制工具风）W1–W5 已在 feat/ui-redesign 完成并全绿
 ## 指针区
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
-- `backlog.md` 需求侧摩擦队列（定活前读，open ≤10 条）
-- `sessions/` 一条一文件、倒序读最近 5 个（最新 S180） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
-- `../docs/ui-redesign/` UI 重设计调研 / 稿子 / 原语用法表
+- `backlog.md` 需求侧摩擦队列（定活前读）
+- `sessions/` 倒序读最近 5 个（最新 S180） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `../docs/ui-redesign/` UI 重设计
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
 - `decisions.md` · `decisions/` 轻量决策 / ADR · `blocks/` 并行 worktree 独占块
 - `im-entry-layer.md` IM 入口层 spec
-- `sidebar-tree-ia.md` 侧栏与工作树统一 IA 方案（方案 A 已拍板，四波；静态稿在 `.fenjue/archive/fj-sidebar-tree-ia-4784/out/mockups/`）
+- `sidebar-tree-ia.md` 侧栏与工作树统一 IA 方案（方案 A 已落地）
 - 其余 `*.md` 为按需读取的 feature spec
