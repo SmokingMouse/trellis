@@ -392,6 +392,9 @@ export function Composer({
             onPaste={att.handlePaste}
             onFocus={expandMobile}
             rows={1}
+            // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 不在
+            // layer 里、utility 压不住，只能内联去掉输入框自己的那一圈。
+            style={{ outline: "none" }}
             disabled={noTarget || externalEnded}
             placeholder={externalEnded ? "外部线程已结束" : compact ? "追问…" : (placeholder ?? "继续对话…")}
             className={`block w-full min-w-0 resize-none bg-transparent text-body text-ink-strong outline-none placeholder:text-ink-faint disabled:opacity-50 ${

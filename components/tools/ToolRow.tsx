@@ -219,7 +219,7 @@ export function ToolRow({
         ) : (
           <>
             <ToolIcon name={rowIcon(node)} className="text-ink-faint" />
-            <span className="shrink-0 max-w-40 truncate font-medium text-ink">
+            <span className="shrink-0 min-w-11 max-w-40 truncate font-medium text-ink">
               {rowTitle(node)}
             </span>
             <span className="flex-1 min-w-0 truncate font-mono text-label text-ink-muted">

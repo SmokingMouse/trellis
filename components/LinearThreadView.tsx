@@ -603,18 +603,19 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             </h1>
           </div>
           {/* 移动端卡片本就贴满屏宽，宽度切换无意义，藏起来省空间 */}
-          <SegmentedControl
-            size="sm"
-            aria-label="内容宽度"
-            value={threadWidth}
-            onValueChange={setThreadWidth}
-            options={THREAD_WIDTH_OPTIONS.map((opt) => ({
-              value: opt.value,
-              label: opt.label,
-              title: `内容宽度：${opt.label}`,
-            }))}
-            className="hidden md:inline-flex shrink-0"
-          />
+          <div className="hidden md:block shrink-0">
+            <SegmentedControl
+              size="sm"
+              aria-label="内容宽度"
+              value={threadWidth}
+              onValueChange={setThreadWidth}
+              options={THREAD_WIDTH_OPTIONS.map((opt) => ({
+                value: opt.value,
+                label: opt.label,
+                title: `内容宽度：${opt.label}`,
+              }))}
+            />
+          </div>
           {!isMobile && !isHerdr && (
             <Button
               variant="secondary"
