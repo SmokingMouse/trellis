@@ -150,7 +150,7 @@ export function AuthHealthCard() {
         {failed && !data && (
           <div className="py-3">
             <ErrorCallout
-              error={null}
+              error=""
               title="登录状态探测失败"
               hint="稍后点右上角重新探测；若一直失败，看服务端日志。"
               onRetry={() => void load(true)}

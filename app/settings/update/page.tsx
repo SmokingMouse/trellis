@@ -204,7 +204,7 @@ export default function SettingsPage() {
           {loadError && (
             <ErrorCallout
               className="mb-4"
-              error={null}
+              error=""
               title="服务长时间无响应"
               hint="超过 60 秒没连上服务。页面仍在自动重试；若一直这样，去机器上看服务进程。"
               onRetry={() => void load(false)}

@@ -205,7 +205,7 @@ export default function WorkspacesSettingsPage() {
       {gitFailed && (
         <ErrorCallout
           compact
-          error={null}
+          error=""
           title="git 状态拉取失败"
           hint="分支、改动数与「可回收」标记暂不可用；工作区列表不受影响。"
           onRetry={refresh}
