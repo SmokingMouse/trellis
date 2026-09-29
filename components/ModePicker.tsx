@@ -140,7 +140,7 @@ export function ModePicker() {
         <WorkspaceField
           value={workspacePath}
           onChange={setWorkspacePath}
-          required
+          placeholder="空白沙箱（自动）"
           className="max-w-[10rem] max-md:max-w-none max-md:w-full"
           open={pickerOpen}
           onOpenChange={setPickerOpen}

@@ -84,10 +84,10 @@ import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
 import { isButlerSession } from "@/lib/butler";
-import { herdrOffline, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
+import { herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
-const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "task", "lark", "external"].includes(v as string);
+const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "herdr", "task", "lark", "external"].includes(v as string);
 
 // 左侧会话侧栏（方案 A：一棵树 + 一条工具条，见 progress/sidebar-tree-ia.md）。
 //
@@ -103,7 +103,7 @@ const isSource = (v: unknown): v is SidebarSource => ["all", "web", "herdr", "ta
 
 export function SessionSidebar() {
   const [layout, setLayout] = useSidebarPreference("layout", "project" as SidebarLayout, isLayout);
-  const [source, setSource] = useSidebarPreference("source", "all" as SidebarSource, isSource);
+  const [source, setSource] = useSidebarPreference("source-v2", "mine" as SidebarSource, isSource);
   const [includeArchived, setIncludeArchived] = useSidebarPreference("include-archived", false, isBoolean);
   const { statuses: herdrStatus, available: herdrAvailable, unavailableText } = useHerdrSessionStatuses();
   const fleetSessionKey = [...herdrStatus.keys()].sort().join(",");
@@ -114,6 +114,7 @@ export function SessionSidebar() {
   const unpinSession = useSessionStore((s) => s.unpinSession);
   const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const newConversation = useSessionStore((s) => s.newConversation);
+  const newSandboxConversation = useSessionStore((s) => s.newSandboxConversation);
   const openHome = useSessionStore((s) => s.openHome);
   const homeActive = useSessionStore((s) => !s.session && s.homeOpen && !s.butlerDraft);
   const butlerActive = useSessionStore((s) => s.butlerDraft ? !s.session : isButlerSession(s.session));
@@ -438,12 +439,15 @@ export function SessionSidebar() {
   //   projects  —— 按 workspace_id 归位
   //   orphans   —— 有 workspace_path 但归不了组（目录已被删）。不能默默吞掉，
   //                否则用户会以为会话丢了。
-  const { chat, byWorkspace, orphans } = useMemo(() => {
+  //   foreign   —— herdr / 外部 CLI 的孤儿（多是 ~/.herdr/worktrees/*），单独成组，
+  //                不挤进「暂存区」。
+  const { chat, byWorkspace, orphans, foreign } = useMemo(() => {
     const known = new Set(
       projects.flatMap((p) => p.workspaces.map((w) => w.id)),
     );
     const chat: Session[] = [];
     const orphans: Session[] = [];
+    const foreign: Session[] = [];
     const byWorkspace = new Map<string, Session[]>();
     for (const s of visibleSessions) {
       if ((s.mode || "chat") === "chat" && !s.workspaceId) {
@@ -455,11 +459,13 @@ export function SessionSidebar() {
         const list = byWorkspace.get(wid) ?? [];
         list.push(s);
         byWorkspace.set(wid, list);
-      } else {
+      } else if (isOwnSession(s)) {
         orphans.push(s);
+      } else {
+        foreign.push(s);
       }
     }
-    return { chat, byWorkspace, orphans };
+    return { chat, byWorkspace, orphans, foreign };
   }, [visibleSessions, projects]);
 
   // 落到「在这个目录下开新会话」的草稿态。侧栏里所有「＋」最终都汇到这里 ——
@@ -573,7 +579,7 @@ export function SessionSidebar() {
   };
 
   const onNew = () => {
-    newConversation();
+    newSandboxConversation();
     setEditingId(null);
     setMobileNavOpen(false);
   };
@@ -1105,6 +1111,7 @@ export function SessionSidebar() {
           <>
             {renderProjects()}
             {renderGroup("__chat", "速记（无工作区）", chat, MessageSquare)}
+            {renderGroup("__foreign", "其它来源", foreign, Anchor)}
           </>
         )}
       </div>
@@ -1443,6 +1450,7 @@ const SOURCE_ICON: Partial<Record<SidebarSource, LucideIcon>> = {
 };
 
 const SOURCE_OPTIONS: { value: SidebarSource; label: string }[] = [
+  { value: "mine", label: "我的会话" },
   { value: "all", label: "全部来源" },
   { value: "web", label: "网页" },
   { value: "herdr", label: "Herdr" },

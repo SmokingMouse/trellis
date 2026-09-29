@@ -92,6 +92,7 @@ export function QuestionInput({
   const draftMode = useSessionStore((s) => s.draftMode);
   const draftSystemPrompt = useSessionStore((s) => s.draftSystemPrompt);
   const draftWorkspacePath = useSessionStore((s) => s.draftWorkspacePath);
+  const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
   const draftAgentId = useSessionStore((s) => s.draftAgentId);
   // 费曼考官角色：输入框从「问问题」翻转成「讲解你的理解」。
   // S88 后费曼有两种来源：内置 agent（builtin-feynman）或存量的裸 systemPrompt。
@@ -164,9 +165,10 @@ export function QuestionInput({
     };
   }, [draftWorkspacePath, family, skillProvider]);
 
-  // Stage 14: the Project draft mode needs a workspace path chosen
-  // before submit.
-  const needsWorkspace = !butler && draftMode !== "chat" && !draftWorkspacePath;
+  // Project 模式没选工作区不再拦发送：发送时自动建一个空白沙箱
+  // （~/.trellis/scratch/ 下），学习问答不用先挑目录。
+  const needsWorkspace = false;
+  const autoSandbox = !butler && draftMode !== "chat" && !draftWorkspacePath;
   // Attachments: tool-capable modes take any whitelisted file (staged to
   // disk for the agent); pure chat is limited to images + inlineable text.
   const att = useAttachmentUploads(skillCapable ? "all" : "chat-safe");
@@ -260,6 +262,18 @@ export function QuestionInput({
     }
     if (busy || needsWorkspace || hasUploading) return;
     setBusy(true);
+    if (autoSandbox) {
+      try {
+        const res = await fetch("/api/workspaces/scratch", { method: "POST" });
+        const body = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+        if (!res.ok || !body.path) throw new Error(body.error ?? `HTTP ${res.status}`);
+        setDraftWorkspacePath(body.path);
+      } catch (err) {
+        setBusy(false);
+        setCmdNotice(`建空白沙箱失败：${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
     // #5: always release busy when the stream settles. On success the
     // component unmounts first (`created` sets the session), so the reset is
     // invisible; on failure (server unreachable / non-2xx — surfaced via the

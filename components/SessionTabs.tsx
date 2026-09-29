@@ -36,7 +36,7 @@ export function SessionTabs() {
   const loadSession = useSessionStore((s) => s.loadSession);
   const pinSession = useSessionStore((s) => s.pinSession);
   const closeTab = useSessionStore((s) => s.closeTab);
-  const newConversation = useSessionStore((s) => s.newConversation);
+  const newSandboxConversation = useSessionStore((s) => s.newSandboxConversation);
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const runningIds = useSessionStore((s) => s.runningSessionIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
@@ -144,7 +144,7 @@ export function SessionTabs() {
         })}
         <div className="self-center ml-auto pl-1 shrink-0 flex items-center gap-1">
           {/* Redundant secondary new-session entry. */}
-          <IconButton label="新会话（全新的树）" size="sm" onClick={() => newConversation()}>
+          <IconButton label="新会话（全新的树）" size="sm" onClick={() => newSandboxConversation()}>
             <Icon icon={Plus} size="sm" />
           </IconButton>
         </div>

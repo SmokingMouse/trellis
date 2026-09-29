@@ -714,7 +714,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   tabIndex={-1}
                   style={mapHighlight === node.id ? { outline: "3px solid var(--color-accent-ink)", outlineOffset: 3 } : undefined}
                   data-thread-active={isActive || undefined}
-                  className="group/turn scroll-mt-3 py-4 outline-none"
+                  // Faint rule between turns so where one answer ends is
+                  // visible without bringing card frames back.
+                  className={`group/turn scroll-mt-3 py-4 outline-none${idx > 0 && !isCompacted ? " border-t border-line" : ""}`}
                 >
                   <TurnCard
                     node={node}

@@ -591,6 +591,10 @@ type Actions = {
   hydrate: (sessionId?: string) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   newConversation: () => void;
+  // 「新会话」按钮：不沿用上次的模式和目录 —— 落 Project 模式 + 未选工作区，
+  // 发送时自动建空白沙箱（QuestionInput）。显式挑目录走 WorkspacePicker /
+  // 侧栏工作区行的「＋」。
+  newSandboxConversation: () => void;
   // 回首页：与 newConversation 同样清空当前会话（中断在途导航），再亮出首页。
   openHome: () => void;
   // /butler 入口：有管家会话就打开最近那条，没有就落到管家草稿首页。
@@ -1062,6 +1066,12 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       butlerDraft: false,
     });
     set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
+  },
+
+  newSandboxConversation: () => {
+    get().setDraftMode("project");
+    get().setDraftWorkspacePath(null);
+    get().newConversation();
   },
 
   openHome: () => {

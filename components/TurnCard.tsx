@@ -258,7 +258,7 @@ function TurnToolbar({
   return (
     <div
       data-turn-toolbar=""
-      className="mt-2 -ml-1.5 flex min-h-7 flex-wrap items-center gap-0.5 transition-opacity duration-100 md:pointer-fine:opacity-0 md:pointer-fine:group-hover/turn:opacity-100 md:pointer-fine:focus-within:opacity-100"
+      className="mt-2 -ml-1.5 flex min-h-7 flex-wrap items-center gap-0.5 transition-opacity duration-100 md:pointer-fine:opacity-40 md:pointer-fine:group-hover/turn:opacity-100 md:pointer-fine:focus-within:opacity-100"
     >
       {hasResponse && <CopyIconButton text={node.response} />}
       {showBranch && (

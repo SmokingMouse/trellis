@@ -686,6 +686,10 @@ function BrowseTab({
                   <Button size="sm" onClick={() => setDir(data.path)}>
                     回到上次的位置
                   </Button>
+                ) : dir ? (
+                  <Button size="sm" onClick={() => setDir(null)}>
+                    回到主目录
+                  </Button>
                 ) : undefined
               }
             />

@@ -1,6 +1,12 @@
 import { HOME_CLUSTER_KEY, SCRATCH_CLUSTER_KEY, type ProjectSummary, type Session, type WorkspaceSummary } from "./types";
 
-export type SidebarSource = "all" | "web" | "herdr" | "task" | "lark" | "external";
+export type SidebarSource = "mine" | "all" | "web" | "herdr" | "task" | "lark" | "external";
+
+/** 「我的会话」= 在 Trellis 里自己开的（网页 / 定时任务 / 飞书），不含 herdr 与外部 CLI。 */
+export function isOwnSession(s: Pick<Session, "kind" | "origin">): boolean {
+  const src = sidebarSource(s);
+  return src !== "herdr" && src !== "external";
+}
 export type SidebarLayout = "project" | "time";
 
 export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSource {
@@ -22,7 +28,7 @@ export function selectSidebarSessions(sessions: Session[], archived: Session[], 
   // A restored session may briefly remain in the lazy archive response.
   // The active list wins that overlap so a successful restore stays visible.
   return [...new Map([...(includeArchived ? archived : []), ...sessions].map(s => [s.id, s])).values()]
-    .filter(s => (includeArchived || !(s.archived || isOffline(s))) && (source === "all" || sidebarSource(s) === source))
+    .filter(s => (includeArchived || !(s.archived || isOffline(s))) && (source === "all" || (source === "mine" ? isOwnSession(s) : sidebarSource(s) === source)))
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
 }
 
@@ -41,5 +47,6 @@ export function sessionLocation(s: Session, projects: ProjectSummary[]): string 
     const w = p.workspaces.find(w => w.id === s.workspaceId);
     if (w) return `${projectPresentation(p).name} / ${w.name}`;
   }
-  return (s.mode || "chat") === "chat" && !s.workspaceId ? "速记（无工作区）" : "暂存区（临时目录）";
+  if ((s.mode || "chat") === "chat" && !s.workspaceId) return "速记（无工作区）";
+  return isOwnSession(s) ? "暂存区（临时目录）" : "其它来源";
 }

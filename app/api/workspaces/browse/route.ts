@@ -47,8 +47,18 @@ export async function GET(req: Request) {
 
   // No path → start at $HOME. Relative paths rejected (the picker is
   // strictly absolute-path oriented).
-  const target =
+  // A stale path (e.g. a deleted worktree remembered as the last workspace)
+  // falls back to its nearest existing ancestor, then $HOME, instead of 404.
+  let target =
     raw && path.isAbsolute(raw) ? path.resolve(raw) : os.homedir();
+  while (!fs.existsSync(target)) {
+    const up = path.dirname(target);
+    if (up === path.parse(target).root) {
+      target = os.homedir();
+      break;
+    }
+    target = up;
+  }
 
   let stat: fs.Stats;
   try {
