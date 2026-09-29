@@ -9,4 +9,4 @@
 - [decision] 会话撤销会丢任务 home_session 绑定，接受。
 
 ## Next
-commit + 合 main + 部署；再议排队 / steer（S180 因后端不支持没做）。
+已上线 prod e7a18374e；再议排队 / steer（S180 因后端不支持没做）。
