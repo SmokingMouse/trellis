@@ -4,7 +4,7 @@ import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import fs from "node:fs";
-import { BUILTIN_AGENT_SEEDS } from "@/lib/agent-presets";
+import { BUILTIN_AGENT_SEEDS, PREVIOUS_BUILTIN_PROMPTS } from "@/lib/agent-presets";
 import { trellisDbPath } from "@/lib/disk-space";
 import { dbWaitBudgetMs } from "./db-error";
 
@@ -745,6 +745,7 @@ function migrate(db: Database) {
   `);
 
   seedBuiltinAgents(db);
+  upgradeBuiltinPrompts(db);
 
   // ON DELETE SET NULL 而非 CASCADE，理由同 workspace_id：删一个 agent 不该连坐删掉
   // 用它聊过的全部历史，退回默认人设即可。
@@ -1153,4 +1154,19 @@ function seedBuiltinAgents(db: Database) {
     });
   });
   tx();
+}
+
+// 内置人设升级：库里仍是某个旧版原文（用户没改过）才换成当前版。与 seed 的
+// INSERT OR IGNORE 互补 —— 那条保证「用户改过的不覆盖」，这条保证「没改过的能跟上」。
+export function upgradeBuiltinPrompts(db: Database) {
+  const stmt = db.prepare(
+    `UPDATE agents SET system_prompt = ?, updated_at = ?
+      WHERE id = ? AND builtin = 1 AND system_prompt = ?`,
+  );
+  const now = Date.now();
+  for (const seed of BUILTIN_AGENT_SEEDS) {
+    for (const old of PREVIOUS_BUILTIN_PROMPTS[seed.slug] ?? []) {
+      stmt.run(seed.systemPrompt, now, `builtin-${seed.slug}`, old);
+    }
+  }
 }

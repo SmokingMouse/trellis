@@ -15,6 +15,7 @@ import {
   FolderGit2,
   GitBranch,
   House,
+  ConciergeBell,
   Inbox,
   MessageSquare,
   PanelLeftClose,
@@ -82,6 +83,7 @@ import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
+import { isButlerSession } from "@/lib/butler";
 import { herdrOffline, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
@@ -113,7 +115,9 @@ export function SessionSidebar() {
   const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const newConversation = useSessionStore((s) => s.newConversation);
   const openHome = useSessionStore((s) => s.openHome);
-  const homeActive = useSessionStore((s) => !s.session && s.homeOpen);
+  const homeActive = useSessionStore((s) => !s.session && s.homeOpen && !s.butlerDraft);
+  const butlerActive = useSessionStore((s) => s.butlerDraft ? !s.session : isButlerSession(s.session));
+  const openButler = useSessionStore((s) => s.openButler);
   const renameSession = useSessionStore((s) => s.renameSession);
   const archiveSession = useSessionStore((s) => s.archiveSession);
   const deleteSession = useSessionStore((s) => s.deleteSession);
@@ -982,6 +986,16 @@ export function SessionSidebar() {
             className={homeActive ? "border border-line bg-surface-hover" : "border border-line"}
           >
             <Icon icon={House} selected={homeActive} />
+          </IconButton>
+          <IconButton
+            label="管家：用对话配置 Trellis"
+            data-sidebar-butler
+            data-mobile-target="drawer-butler"
+            aria-current={butlerActive ? "page" : undefined}
+            onClick={() => void openButler()}
+            className={butlerActive ? "border border-line bg-surface-hover" : "border border-line"}
+          >
+            <Icon icon={ConciergeBell} selected={butlerActive} />
           </IconButton>
           {/* CLI 同步：接入本机 Claude Code / Codex 会话（双向）。手机端收在「高级操作」里。 */}
           <IconButton

@@ -1,3 +1,4 @@
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 import {
   isProviderId,
   DEFAULT_PROVIDER,
@@ -509,8 +510,11 @@ export async function POST(req: Request) {
   // codex falls back to window mode (folded history). project folds nothing
   // either (history in the resumed root session).
   const reqDepth = clampDepth((body as { historyDepth?: number }).historyDepth);
+  // 管家会话恒为增强档：它的全部工作都靠 Bash 跑 trellisctl，纯 chat 档没有工具，
+  // 用户在偏好里关掉「增强对话」不该让管家变哑巴。
   const chatEnhanced =
-    (body as { chatEnhanced?: boolean }).chatEnhanced === true;
+    (body as { chatEnhanced?: boolean }).chatEnhanced === true ||
+    resolvedAgentId === BUTLER_AGENT_ID;
   // Generic file attachments → prompt text. Keep the pre-suffix question
   // for topic labeling so an inlined 100KB CSV doesn't pollute the label
   // prompt. Injected only into THIS turn (matches images: not re-sent in

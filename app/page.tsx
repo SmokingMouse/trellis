@@ -28,6 +28,9 @@ import { FilePreview } from "@/components/FilePreview";
 import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { HomeView } from "@/components/HomeView";
+import { ButlerHome } from "@/components/ButlerHome";
+import { ButlerPanel } from "@/components/ButlerPanel";
+import { isButlerSession } from "@/lib/butler";
 import { useHomeShortcut } from "@/hooks/useHomeShortcut";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ScrollHideProvider } from "@/hooks/useScrollHide";
@@ -58,6 +61,14 @@ export default function Home() {
   const composeRootOpen = useSessionStore((s) => s.composeRootOpen);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const homeOpen = useSessionStore((s) => s.homeOpen);
+  const butlerDraft = useSessionStore((s) => s.butlerDraft);
+  const openButler = useSessionStore((s) => s.openButler);
+  const butler = isButlerSession(session);
+  // 管家右栏的刷新信号：本会话里已结束的轮次数 —— 管家每答完一轮（多半刚改了
+  // 配置）右栏就重拉一次总览。
+  const butlerSettled = useSessionStore((s) =>
+    butler ? Object.values(s.nodes).filter((n) => n.status !== "streaming").length : 0,
+  );
   const isMobile = useIsMobile();
   const showHome = !session && homeOpen;
   useEscapeAbort();
@@ -116,6 +127,19 @@ export default function Home() {
       .finally(() => setDeepLinkApplied(true));
   }, [hydrated, previewDeepSession, setActiveNode]);
 
+  // /butler → /?butler=1：hydrate 完再开管家（有会话打开最近一条，没有落草稿首页），
+  // 然后把参数抹掉，刷新不会被反复拽回管家。
+  const butlerHandledRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || !deepLinkApplied || butlerHandledRef.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("butler") !== "1") return;
+    butlerHandledRef.current = true;
+    url.searchParams.delete("butler");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    void openButler();
+  }, [hydrated, deepLinkApplied, openButler]);
+
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
   // 这里再按常量发一份就会打架）。
 
@@ -148,10 +172,10 @@ export default function Home() {
   }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
 
   useEffect(() => {
-    if ((isMobile || herdrControlled) && sessionId) {
+    if ((isMobile || herdrControlled || butler) && sessionId) {
       setViewMode("linear");
     }
-  }, [isMobile, herdrControlled, sessionId, setViewMode]);
+  }, [isMobile, herdrControlled, butler, sessionId, setViewMode]);
 
   if (!hydrated || isMobile === null) {
     return (
@@ -181,12 +205,14 @@ export default function Home() {
           </span>
         </div>
       )}
-      {showHome && <HomeView isMobile={isMobile} />}
+      {showHome && (butlerDraft ? <ButlerHome isMobile={isMobile} /> : <HomeView isMobile={isMobile} />)}
       {!session && !showHome && <QuestionInput isMobile={isMobile} />}
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}
-      {session && viewMode === "linear" && <TreePanel />}
+      {/* 管家会话：右栏换成「当前配置」，树浮窗让位（管家是一条线的对话，不需要树导航） */}
+      {session && viewMode === "linear" && !butler && <TreePanel />}
+      {session && butler && !isMobile && <ButlerPanel refreshKey={`${session.id}:${butlerSettled}`} />}
       {session && <SessionMap isMobile={isMobile} />}
       {session && !CANVAS_MAP && viewMode === "canvas" && (
         <>

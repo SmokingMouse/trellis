@@ -66,6 +66,21 @@ bun <skill目录>/scripts/trellisctl.ts whoami   # 我是哪个会话的哪个�
 
 与任务面的分工：`ask` 是「现在、替我问一句 / 干一件」，`tasks` 是「反复、无人值守」。一次性的事不建任务。组合技：`ask --new` 跑长活拿到 sessionId，再建任务挂 `session_done` 触发器 = 「那个会话跑完后自动做 X」。
 
+## 配置只读面：模型 / 登录 / 机器人 / 版本
+
+「现在 Trellis 什么情况」「体检一下」—— 先跑 `overview`，一屏看完 agents / tasks / 默认模型与缺 key 的 provider / claude·codex 登录态 / 飞书机器人 / 版本落后几个提交。它和管家页（`/butler`）右栏同源（`GET /api/butler/overview`），某一节读挂了只标那一节。要细看再下钻：`models` · `auth [--force]` · `bots [get <id>]` · `machine` · `version [--fetch]`。
+
+**这一面刻意只读。** 下面这些只告诉用户去哪个设置页亲手点，不代写、也不绕过 trellisctl 直接调接口：
+
+| 想改 | 为什么不代做 | 让用户去 |
+|---|---|---|
+| provider / API key / 默认模型 | 请求体带明文 key，会写进 endpoints.yaml 与 env | `/settings/models` |
+| 飞书机器人新建 / 删除 / appSecret | 新建要扫码；secret 是凭证；删除不可逆 | `/settings/bots` |
+| 升级 / 回滚 | 会切换服务、掐断所有在跑的会话 | `/settings/update` |
+| 删 worktree / 批量清理 | 删磁盘，不可逆 | 工作区面板 |
+
+CLI 未登录 / 凭证快过期：只能用户本人在终端跑对应 CLI 的 login，管家修不了。
+
 ## 三个概念
 
 - **Agent** = 冻成一个 id 的「人设 + 能力面」：提示词、模型、工具白/黑名单、绑哪些本机技能、隔离还是继承本机环境。会话可以选它，任务可以引用它。

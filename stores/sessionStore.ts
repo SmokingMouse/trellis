@@ -35,6 +35,7 @@ import {
 } from "@/lib/thread-width";
 import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
 import { uuid } from "@/lib/uuid";
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 import { loadStartupView } from "@/lib/prefs";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
@@ -580,6 +581,10 @@ type State = {
   homeOpen: boolean;
   // 每次 newConversation 自增，首页据此把光标送进输入框（已在首页时也生效）。
   homeFocusNonce: number;
+  // 管家草稿：首页换成「跟管家说」的变体，下一次 streamRoot 新建会话时把 agent
+  // 钉成内置管家、mode 钉成 chat。不落 localStorage —— 它是一次性的入口态，
+  // 不能污染用户自己选的 draftAgentId。任何 newConversation / 切会话都清掉。
+  butlerDraft: boolean;
 };
 
 type Actions = {
@@ -588,6 +593,8 @@ type Actions = {
   newConversation: () => void;
   // 回首页：与 newConversation 同样清空当前会话（中断在途导航），再亮出首页。
   openHome: () => void;
+  // /butler 入口：有管家会话就打开最近那条，没有就落到管家草稿首页。
+  openButler: () => Promise<void>;
   // ── Workbench Wave 4: VSCode tab management ─────────────────────────
   // Single-click a sidebar item: load it + mark it as the (transient)
   // preview tab unless it's already pinned. Replaces any prior preview.
@@ -946,6 +953,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   mobileNavOpen: false,
   homeOpen: false,
   homeFocusNonce: 0,
+  butlerDraft: false,
 
   hydrate: async (sessionId) => {
     // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
@@ -1022,6 +1030,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   loadSession: async (sessionId) => {
     set(s => ({ navigationVersion: s.navigationVersion + 1 }));
     if (!await loadSessionInternal(sessionId, set)) return;
+    if (get().butlerDraft) set({ butlerDraft: false });
     // Wave 4: landing on a session clears its "finished while away" badge.
     set((s) => {
       if (!s.unreadSessionIds.has(sessionId)) return s;
@@ -1050,6 +1059,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // state — leave the preview tab cleared so the bar doesn't keep an
       // orphan italic tab pointing at nothing.
       previewSessionId: null,
+      butlerDraft: false,
     });
     set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
   },
@@ -1057,6 +1067,23 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   openHome: () => {
     get().newConversation();
     set({ homeOpen: true, mobileNavOpen: false });
+  },
+
+  openButler: async () => {
+    let sessionId: string | null = null;
+    try {
+      const res = await fetch("/api/butler/session", { cache: "no-store" });
+      if (res.ok) sessionId = ((await res.json()) as { sessionId: string | null }).sessionId;
+    } catch {
+      // 查不到就当没有 —— 落草稿首页，发第一句时照样建出管家会话。
+    }
+    if (sessionId) {
+      await get().previewSession(sessionId);
+      set({ mobileNavOpen: false });
+      return;
+    }
+    get().newConversation();
+    set({ butlerDraft: true, homeOpen: true, mobileNavOpen: false });
   },
 
   // ── Workbench Wave 4: VSCode tab management ───────────────────────────
@@ -1477,6 +1504,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftWorkspacePath,
       draftSystemPrompt,
       draftAgentId,
+      butlerDraft,
       session,
     } = get();
     const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
@@ -1485,7 +1513,9 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // from the locked session row. systemPrompt only applies to chat mode.
     const modeFields = sessionId
       ? {}
-      : {
+      : butlerDraft
+        ? { mode: "chat" as const, agentId: BUTLER_AGENT_ID }
+        : {
           mode: draftMode,
           workspacePath: draftWorkspacePath,
           // S88: 选了 agent 就以 agent 为准，systemPrompt 不再发 —— 服务端
