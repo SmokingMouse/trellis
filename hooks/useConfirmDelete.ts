@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { subtreeIds } from "@/lib/collapsed";
 import { toast, useConfirm } from "@/components/ui";
+import { deleteWithUndo } from "@/lib/undoable";
 
 // Returns a single click-handler-friendly function: pass it a nodeId and
 // it asks for confirmation with the cascade preview ("N 个节点 + M 条笔记"),
@@ -11,8 +12,9 @@ import { toast, useConfirm } from "@/components/ui";
 // wording and the same set of refusal cases (session root, streaming).
 //
 // W4：原生 confirm / alert 换成 ConfirmDialog + toast。
+// 确认后先本地摘掉，6 秒内 toast 上可「撤销」，窗口结束才真发 DELETE。
 export function useConfirmDelete(): (nodeId: string) => void {
-  const deleteNode = useSessionStore((s) => s.deleteNode);
+  const stageDeleteNode = useSessionStore((s) => s.stageDeleteNode);
   const confirm = useConfirm();
   return useCallback(
     (nodeId: string) => {
@@ -35,17 +37,20 @@ export function useConfirmDelete(): (nodeId: string) => void {
       const title = ids.length === 1 ? "删除这个节点？" : `删除整棵子树（${ids.length} 个节点）？`;
       const description =
         ids.length === 1
-          ? `${noteCount ? `它的 ${noteCount} 条笔记会一起删除，` : ""}无法撤销。`
-          : `从这里往下的所有追问和回答${noteCount ? `，以及 ${noteCount} 条笔记` : ""}都会删除，无法撤销。`;
+          ? `${noteCount ? `它的 ${noteCount} 条笔记会一起删除。` : ""}删除后几秒内可以撤销。`
+          : `从这里往下的所有追问和回答${noteCount ? `，以及 ${noteCount} 条笔记` : ""}都会删除。删除后几秒内可以撤销。`;
       void (async () => {
         if (!(await confirm({ title, description, confirmLabel: "删除", danger: true }))) return;
-        deleteNode(nodeId).catch((err) => {
-          toast.error("删除失败", {
-            description: err instanceof Error ? err.message : String(err),
-          });
+        const staged = stageDeleteNode(nodeId);
+        if (!staged) return;
+        deleteWithUndo({
+          title:
+            staged.nodeCount === 1 ? "已删除节点" : `已删除 ${staged.nodeCount} 个节点`,
+          commit: staged.commit,
+          undo: staged.undo,
         });
       })();
     },
-    [deleteNode, confirm],
+    [stageDeleteNode, confirm],
   );
 }

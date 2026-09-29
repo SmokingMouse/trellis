@@ -644,7 +644,7 @@ type Actions = {
       attachToCurrentSession?: boolean;
       attachments?: NodeAttachment[];
     },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   // Stream a new branch from an existing parent.
   streamBranch: (
     parentId: string,
@@ -656,7 +656,7 @@ type Actions = {
       focusNew?: boolean;
       fork?: boolean;
     },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   // Re-run an existing node in place: server keeps the same id, wipes the
   // response/usage/error, and re-streams against the original question +
   // parent context. Avoids polluting the tree with retry siblings.
@@ -790,6 +790,16 @@ type Actions = {
     | { deletedNodeIds: string[]; deletedNoteIds: string[] }
     | null
   >;
+  // deleteNode split in two for undo: removes the subtree locally now,
+  // `commit` sends the DELETE later, `undo` puts it back. Same refusal
+  // cases as deleteNode (null). Whichever of commit / undo runs first wins.
+  stageDeleteNode: (nodeId: string) => {
+    nodeCount: number;
+    commit: () => Promise<
+      { deletedNodeIds: string[]; deletedNoteIds: string[] } | null
+    >;
+    undo: () => void;
+  } | null;
   toggleCollapse: (nodeId: string) => void;
   // Force-expand the entire ancestor chain of `nodeId` so the node is
   // reachable on the canvas. Called whenever something navigates to a
@@ -1173,7 +1183,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
 
   deleteSession: async (sessionId) => {
-    await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+    // keepalive: may be flushed from pagehide at the end of the undo window.
+    await fetch(`/api/sessions/${sessionId}`, { method: "DELETE", keepalive: true });
     if (typeof window !== "undefined") {
       window.sessionStorage.removeItem(COLLAPSED_KEY(sessionId));
     }
@@ -1505,6 +1516,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         })
       : null;
     const controller = new AbortController();
+    const created = trackCreated();
     try {
       await runStream(
         {
@@ -1516,7 +1528,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...modeFields,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
-        handleStreamEvent(set, get, { controller, optimisticId }),
+        created.wrap(handleStreamEvent(set, get, { controller, optimisticId })),
         controller.signal,
       );
     } finally {
@@ -1533,6 +1545,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+    return created.seen;
   },
 
   streamBranch: async (parentId, question, anchor, opts) => {
@@ -1555,6 +1568,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         })
       : null;
     const controller = new AbortController();
+    const created = trackCreated();
     try {
       await runStream(
         {
@@ -1570,7 +1584,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           ...(opts?.mentionAgentSlug ? { mentionAgentSlug: opts.mentionAgentSlug } : {}),
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
-        handleStreamEvent(set, get, { focusNew, controller, optimisticId }),
+        created.wrap(handleStreamEvent(set, get, { focusNew, controller, optimisticId })),
         controller.signal,
       );
     } finally {
@@ -1585,6 +1599,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       }
     }
     set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+    return created.seen;
   },
 
   retryNode: async (nodeId) => {
@@ -2059,6 +2074,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   setComposeRootOpen: (open) => set({ composeRootOpen: open }),
 
   deleteNode: async (nodeId) => {
+    const staged = get().stageDeleteNode(nodeId);
+    return staged ? staged.commit() : null;
+  },
+
+  stageDeleteNode: (nodeId) => {
     const state = get();
     const target = state.nodes[nodeId];
     if (!target) return null;
@@ -2073,6 +2093,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       if (state.nodes[id]?.status === "streaming") return null;
     }
 
+    const sessionId = state.session?.id;
     const prevNodes = state.nodes;
     const prevNotes = state.notes;
     const prevActive = state.activeNodeId;
@@ -2111,22 +2132,13 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       lastEditedNodeId: nextLastEdited,
     });
     if (nextCollapsed !== prevCollapsed) {
-      persistCollapsed(state.session?.id, nextCollapsed);
+      persistCollapsed(sessionId, nextCollapsed);
     }
 
-    try {
-      const res = await fetch(`/api/nodes/${nodeId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${text || "delete failed"}`);
-      }
-      const body = (await res.json()) as {
-        deletedNodeIds: string[];
-        deletedNoteIds: string[];
-      };
-      set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
-      return body;
-    } catch (err) {
+    // Put the subtree back — only while the same session is still loaded;
+    // after a switch the server copy (never deleted) comes back on reload.
+    const restore = () => {
+      if (get().session?.id !== sessionId) return;
       set({
         nodes: prevNodes,
         notes: prevNotes,
@@ -2135,10 +2147,43 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         lastEditedNodeId: prevLastEdited,
       });
       if (nextCollapsed !== prevCollapsed) {
-        persistCollapsed(state.session?.id, prevCollapsed);
+        persistCollapsed(sessionId, prevCollapsed);
       }
-      throw err;
-    }
+    };
+
+    let settled = false;
+    return {
+      nodeCount: ids.length,
+      undo: () => {
+        if (settled) return;
+        settled = true;
+        restore();
+      },
+      commit: async () => {
+        if (settled) return null;
+        settled = true;
+        try {
+          // keepalive: the undo window may be flushed from pagehide.
+          const res = await fetch(`/api/nodes/${nodeId}`, {
+            method: "DELETE",
+            keepalive: true,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status}: ${text || "delete failed"}`);
+          }
+          const body = (await res.json()) as {
+            deletedNodeIds: string[];
+            deletedNoteIds: string[];
+          };
+          set((s) => ({ sessionsRevision: s.sessionsRevision + 1 }));
+          return body;
+        } catch (err) {
+          restore();
+          throw err;
+        }
+      },
+    };
   },
 
   toggleCollapse: (nodeId) => {
@@ -2727,6 +2772,27 @@ function reviveTreeLocally(set: Setter, get: Getter, nodeId: string): void {
   });
 }
 
+// A backgrounded tab isn't "watching" even its active node — toast it so the
+// desktop notification (DoneToast) has something to fire on.
+function pageHidden(): boolean {
+  return typeof document !== "undefined" && document.hidden;
+}
+
+// Did the server ever acknowledge the turn (`created`)? false = the question
+// never landed, so the composer can hand the text back instead of losing it.
+function trackCreated() {
+  const t = {
+    seen: false,
+    wrap:
+      (onEvent: (event: StreamEvent) => void) =>
+      (event: StreamEvent) => {
+        if (event.type === "created") t.seen = true;
+        onEvent(event);
+      },
+  };
+  return t;
+}
+
 // Remove a placeholder that was never replaced by a server row. No-op when
 // `created` already swapped it out. Optionally surfaces a streamAlert (pass
 // null for silent removal, e.g. user-initiated abort).
@@ -3207,7 +3273,7 @@ function handleStreamEvent(
         // moves on before done still gets a toast for what they kicked
         // off and walked away from. De-dupe by id in case retry / branch
         // cycles emit twice.
-        const shouldToast = s.activeNodeId !== id;
+        const shouldToast = s.activeNodeId !== id || pageHidden();
         // Always drop any lingering waiting-toast for this node (run 终结了，
         // "等你回答"过时)；shouldToast 时再叠上 done toast。
         const others = s.doneToasts.filter((t) => t.nodeId !== id);
@@ -3399,7 +3465,7 @@ function handleStreamEvent(
         if (!n) return s;
         // 与 done toast 同规：事件到达瞬间不在焦点上就提醒。waiting toast
         // 不设自动消失（run 阻塞在等用户），回答 / 终结时由 store 清除。
-        const shouldToast = s.activeNodeId !== id;
+        const shouldToast = s.activeNodeId !== id || pageHidden();
         const nextToasts = shouldToast
           ? [
               ...s.doneToasts.filter((t) => t.nodeId !== id),

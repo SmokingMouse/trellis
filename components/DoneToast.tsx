@@ -5,6 +5,12 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { buildNodeIndex } from "@/lib/node-index";
 import { Icon, toast } from "@/components/ui";
 import type { ChatNode } from "@/lib/types";
+import {
+  enableDesktopNotify,
+  markDesktopNotifyOffered,
+  shouldOfferDesktopNotify,
+  showDesktopNotification,
+} from "@/lib/desktop-notify";
 
 // 用户没盯着的节点跑完 / 停下来等人时的提醒。W4 起不自己画 UI：只把
 // store.doneToasts 同步进全站 sonner 队列（右下角，与其他 toast 同一堆叠）。
@@ -14,6 +20,7 @@ import type { ChatNode } from "@/lib/types";
 //   回答。不自动消失——run 阻塞着，提醒消失了用户就再也不知道有事等他。
 //   回答 / 终结后由 store 清除，这里跟着 dismiss。
 // 「查看」→ 聚焦该节点、切回线性视图、关掉提醒。
+// 页面在后台时同一条提醒再发一份系统通知（lib/desktop-notify.ts），点开等同「查看」。
 //
 // 为什么 6 秒：典型场景是「问完一个问题、分叉出去、回头读另一张卡」，用户需要
 // 时间注意到提醒再决定要不要打断手头的阅读。6s 落在常见 toast 时长的偏长一端。
@@ -60,6 +67,30 @@ export function DoneToast() {
           st.dismissDoneToast(nodeId);
         }
       };
+      const view = () => {
+        const st = useSessionStore.getState();
+        st.setActiveNode(nodeId);
+        st.setViewMode("linear");
+        clear();
+      };
+      if (document.hidden) {
+        showDesktopNotification({
+          title: `${index ? `#${index} ` : ""}${title}`,
+          body: label || undefined,
+          tag: toastId,
+          onClick: view,
+        });
+      } else if (shouldOfferDesktopNotify()) {
+        markDesktopNotifyOffered();
+        toast.info("页面在后台时也提醒你？", {
+          description: "跑完或等你处理时弹系统通知；偏好页里随时可关",
+          duration: 10000,
+          action: {
+            label: "开启",
+            onClick: () => void enableDesktopNotify(),
+          },
+        });
+      }
       const titleNode = (
         <span className="flex items-center gap-1.5">
           {index ? <span className="font-mono tabular-nums text-ink-faint">#{index}</span> : null}
@@ -72,12 +103,7 @@ export function DoneToast() {
         duration: waiting ? Infinity : Math.max(1000, AUTO_DISMISS_MS - (Date.now() - emittedAt)),
         action: {
           label: waiting ? "去处理" : "查看",
-          onClick: () => {
-            const st = useSessionStore.getState();
-            st.setActiveNode(nodeId);
-            st.setViewMode("linear");
-            clear();
-          },
+          onClick: view,
         },
         onDismiss: clear,
         onAutoClose: clear,

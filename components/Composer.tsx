@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, GitBranch, Paperclip, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { sessionScopedKey } from "@/lib/prefs";
 import { isSendCombo, sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
@@ -26,6 +27,28 @@ import type { ChatNode } from "@/lib/types";
 // 主按钮）；卡外一行弱化提示（状态 + 快捷键）。主按钮三态合一：空闲 = 发送、
 // 流式 = 停止、连接中 / 上传中 = 加载。流式时输入框不再被停止按钮替换 ——
 // 可以先写好下一条，回合结束再发（没有排队后端，所以流式中不发送）。
+// 草稿按会话存 localStorage：切会话 / 刷新都不丢；发送没落地（服务端没回
+// `created`）时把原文放回输入框。
+
+function readDraft(key: string | null): string {
+  if (!key) return "";
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDraft(key: string | null, value: string): void {
+  if (!key) return;
+  try {
+    if (value.trim()) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* private mode / quota — drafts are best-effort */
+  }
+}
+
 export function Composer({
   targetNode,
   placeholder,
@@ -61,6 +84,7 @@ export function Composer({
   banner?: ReactNode;
 }) {
   const [text, setText] = useState("");
+  const [dragOver, setDragOver] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
@@ -121,6 +145,25 @@ export function Composer({
   // its usage. Cleared on the next keystroke.
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
   const matchedCommands = matchCommands(text);
+
+  // Drafts: `loadedKey` is the session the current text belongs to. Swapping
+  // it during render (not in an effect) means text and key always change in
+  // the same pass, so the save effect can never write the previous session's
+  // text under the new key.
+  const draftKey = session?.id ? sessionScopedKey.draft(session.id) : null;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  if (loadedKey !== draftKey) {
+    setLoadedKey(draftKey);
+    setText(readDraft(draftKey));
+  }
+  useEffect(() => {
+    writeDraft(loadedKey, text);
+  }, [text, loadedKey]);
+  // For async callbacks (send-failure refill) to see the live session.
+  const loadedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    loadedKeyRef.current = loadedKey;
+  }, [loadedKey]);
 
   const commandStore: CommandStore = {
     session,
@@ -248,8 +291,16 @@ export function Composer({
     att.clear();
     // S88: 剥出开头的 `@slug` —— slug 走 body 字段，剩下的才是问题本身。
     const [mentionAgentSlug, question] = splitMention(trimmed);
-    if (targetNode) streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork });
-    else void streamRoot(trimmed,{attachToCurrentSession:true,attachments});
+    const sent = targetNode
+      ? streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork })
+      : streamRoot(trimmed, { attachToCurrentSession: true, attachments });
+    // Never acknowledged → hand the text back, unless the user has already
+    // started something new or moved to another session meanwhile.
+    const key = loadedKey;
+    void sent.then((ok) => {
+      if (ok || loadedKeyRef.current !== key) return;
+      setText((cur) => (cur.trim() ? cur : text));
+    });
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
   };
@@ -266,7 +317,7 @@ export function Composer({
     ? isPending
       ? "正在建立连接…"
       : "回复进行中：可以先写下一条，结束后再发送 · Esc 停止"
-    : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · 可粘贴图片 / 文件");
+    : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · 可粘贴 / 拖入图片与文件");
 
   // 主按钮三态合一：发送 / 停止 / 加载。停止态 aria-label 固定「停止生成」
   // （mobile-followup-approval.sh 依赖），手机 ≥44px。
@@ -356,7 +407,25 @@ export function Composer({
       />
       <div
         data-composer-card=""
-        className="rounded-card border border-line-strong bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring"
+        className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
+          dragOver ? "border-accent ring-3 ring-accent-line" : "border-line-strong"
+        }`}
+        onDragOver={(e) => {
+          // Only react to file drags (Files type), ignore text drags.
+          if (noTarget || externalEnded || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          // Moving between children fires dragleave on the card too.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+        }}
+        onDrop={(e) => {
+          setDragOver(false);
+          if (noTarget || externalEnded) return;
+          att.handleDrop(e);
+          if (mobileCompact) setMobileExpanded(true);
+        }}
       >
         {banner}
         {!compact && att.pending.length > 0 && (

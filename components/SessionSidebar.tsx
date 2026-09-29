@@ -81,6 +81,7 @@ import { sessionSourceChip } from "@/lib/session-source";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
+import { deleteWithUndo } from "@/lib/undoable";
 import { herdrOffline, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
@@ -613,12 +614,22 @@ export function SessionSidebar() {
             if (
               await confirm({
                 title: `删除会话「${s.title || "未命名"}」？`,
-                description: "会话里的所有节点和笔记会一起删除，无法恢复。只想收起来可以用「归档」。",
+                description: "会话里的所有节点和笔记会一起删除，删除后几秒内可以撤销。只想收起来可以用「归档」。",
                 confirmLabel: "删除",
                 danger: true,
               })
             ) {
-              deleteSession(s.id);
+              // 撤销窗口内先归档（立刻从列表 / 标签消失、可逆），窗口结束才真删；
+              // 中途关页面也最多停在「已归档」，不会丢。
+              const wasArchived = !!s.archived;
+              if (!wasArchived) await archiveSession(s.id);
+              deleteWithUndo({
+                title: `已删除会话「${s.title || "未命名"}」`,
+                commit: () => deleteSession(s.id),
+                undo: () => {
+                  if (!wasArchived) void unarchiveSession(s.id);
+                },
+              });
             }
           }}
         />

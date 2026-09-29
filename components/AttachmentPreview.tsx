@@ -31,6 +31,8 @@ export type PendingAttachment = {
   attachment?: NodeAttachment;
   // Surfaced on "error" status so the user knows what went wrong.
   errorMessage?: string;
+  // Set while an "uploading" item is on a retry round, e.g. "重试 2/3".
+  retryLabel?: string;
 };
 
 type Props =
@@ -90,6 +92,7 @@ export function AttachmentPreview(props: Props) {
           removable: false,
           localId: a.hash,
           errorMessage: undefined as string | undefined,
+          retryLabel: undefined as string | undefined,
         }))
       : props.pending.map((p) => ({
           key: p.localId,
@@ -102,6 +105,7 @@ export function AttachmentPreview(props: Props) {
           removable: true,
           localId: p.localId,
           errorMessage: p.errorMessage,
+          retryLabel: p.retryLabel,
         }));
 
   if (items.length === 0) return null;
@@ -134,6 +138,7 @@ export function AttachmentPreview(props: Props) {
                 disabled={it.status !== "done"}
                 title={
                   it.errorMessage ??
+                  it.retryLabel ??
                   it.filename ??
                   (it.status === "uploading" ? "uploading…" : "attachment")
                 }
@@ -167,7 +172,11 @@ export function AttachmentPreview(props: Props) {
                 )}
                 {it.status === "uploading" && (
                   <span className="absolute inset-0 flex items-center justify-center text-ink bg-surface/40">
-                    <Icon icon={ArrowUp} size="sm" className="animate-pulse motion-reduce:animate-none" aria-label="上传中" />
+                    {it.retryLabel ? (
+                      <span className="text-nano">{it.retryLabel}</span>
+                    ) : (
+                      <Icon icon={ArrowUp} size="sm" className="animate-pulse motion-reduce:animate-none" aria-label="上传中" />
+                    )}
                   </span>
                 )}
                 {it.status === "error" && (
@@ -217,21 +226,42 @@ export function AttachmentPreview(props: Props) {
 // Images ship as a raw body (paste flow often has a bare Blob); generic
 // files go multipart so the server gets a filename to derive the
 // extension from — that's what validates them against the whitelist.
-export async function uploadAttachment(
+// Transport-level blips (reverse-proxy 408, upstream 502-504, dropped
+// connection) are common on phones and through the tenancy gateway; a
+// single miss used to fail the attachment outright. Only those retry —
+// 400/413/415/500 are real answers the user should see immediately.
+const UPLOAD_RETRY_DELAYS_MS = [2000, 5000];
+const RETRYABLE_STATUS = new Set([408, 502, 503, 504]);
+
+class UploadError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+  }
+}
+
+async function uploadOnce(
   file: File | Blob,
   filename: string | null,
 ): Promise<NodeAttachment> {
   let res: Response;
-  if (file.type.startsWith("image/")) {
-    res = await fetch("/api/uploads", {
-      method: "POST",
-      headers: { "Content-Type": file.type },
-      body: file,
-    });
-  } else {
-    const fd = new FormData();
-    fd.append("file", file, filename ?? "file");
-    res = await fetch("/api/uploads", { method: "POST", body: fd });
+  try {
+    if (file.type.startsWith("image/")) {
+      res = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+    } else {
+      // Rebuilt per attempt: a consumed FormData body can't be resent.
+      const fd = new FormData();
+      fd.append("file", file, filename ?? "file");
+      res = await fetch("/api/uploads", { method: "POST", body: fd });
+    }
+  } catch {
+    throw new UploadError("网络中断", true);
   }
   if (!res.ok) {
     let msg = "";
@@ -241,7 +271,10 @@ export async function uploadAttachment(
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(msg || `HTTP ${res.status}`);
+    throw new UploadError(
+      msg ? `${msg}（HTTP ${res.status}）` : `HTTP ${res.status}`,
+      RETRYABLE_STATUS.has(res.status),
+    );
   }
   const data = (await res.json()) as NodeAttachment;
   // Server doesn't always echo filename for raw uploads; fill from
@@ -250,6 +283,26 @@ export async function uploadAttachment(
     return { ...data, filename };
   }
   return data;
+}
+
+export async function uploadAttachment(
+  file: File | Blob,
+  filename: string | null,
+  onRetry?: (attempt: number, total: number) => void,
+): Promise<NodeAttachment> {
+  const total = UPLOAD_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await uploadOnce(file, filename);
+    } catch (err) {
+      const retryable = err instanceof UploadError && err.retryable;
+      if (!retryable || attempt >= total) throw err;
+      await new Promise((r) =>
+        setTimeout(r, UPLOAD_RETRY_DELAYS_MS[attempt - 1]),
+      );
+      onRetry?.(attempt + 1, total);
+    }
+  }
 }
 
 let _localIdCounter = 0;

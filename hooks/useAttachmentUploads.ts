@@ -62,12 +62,20 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
       ...prev,
       { localId, status: "uploading", previewUrl, filename, mime },
     ]);
-    uploadAttachment(file, filename)
+    uploadAttachment(file, filename, (attempt, total) =>
+      setPending((prev) =>
+        prev.map((p) =>
+          p.localId === localId
+            ? { ...p, retryLabel: `重试 ${attempt}/${total}` }
+            : p,
+        ),
+      ),
+    )
       .then((att) =>
         setPending((prev) =>
           prev.map((p) =>
             p.localId === localId
-              ? { ...p, status: "done", attachment: att }
+              ? { ...p, status: "done", attachment: att, retryLabel: undefined }
               : p,
           ),
         ),
@@ -79,6 +87,7 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
               ? {
                   ...p,
                   status: "error",
+                  retryLabel: undefined,
                   errorMessage:
                     err instanceof Error ? err.message : String(err),
                 }
@@ -91,12 +100,28 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const files: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       if (it.kind !== "file") continue; // strings (typed/pasted text) pass through
       const file = it.getAsFile();
-      if (!file) continue;
-      e.preventDefault();
+      if (file) files.push(file);
+    }
+    if (files.length === 0) return;
+    // Notes / Word / spreadsheets put the text AND a rendered image on the
+    // clipboard; blanket preventDefault used to drop the text. Let the
+    // browser insert it (native undo, React onChange) unless it's only the
+    // file names Finder adds when copying files.
+    const text = e.clipboardData.getData("text/plain");
+    const names = new Set(files.map((f) => f.name).filter(Boolean));
+    const onlyNames =
+      text
+        .split(/[\r\n]+/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .every((l) => names.has(l) || names.has(l.split("/").pop() ?? ""));
+    if (onlyNames) e.preventDefault();
+    for (const file of files) {
       // Screenshot pastes are nameless image blobs; Finder-copied files
       // carry a real name the server needs for extension validation.
       startUpload(file, file.name || null);

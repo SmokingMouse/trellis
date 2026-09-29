@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { PREF_ITEMS, readRaw, writeRaw, type PrefItem } from "@/lib/prefs";
+import { PREF_ITEMS, PREF_KEYS, readRaw, writeRaw, type PrefItem } from "@/lib/prefs";
+import { enableDesktopNotify } from "@/lib/desktop-notify";
 import { PageHeader, Select, Skeleton, Switch } from "@/components/ui";
 
 // S89: 偏好的「可穷举清单」。
@@ -13,7 +14,7 @@ import { PageHeader, Select, Skeleton, Switch } from "@/components/ui";
 // 见 decisions/2026-07-31-console-ia.md 决策 5：这修订了 decisions.md 2026-07-29
 // 「偏好类不搬进来」的一半（不搬家仍然对，"偏好少所以不需要穷举"已经不成立）。
 
-const GROUPS = ["外观", "启动", "输入", "版式", "新会话默认"] as const;
+const GROUPS = ["外观", "启动", "输入", "提醒", "版式", "新会话默认"] as const;
 
 export default function PrefsSettingsPage() {
   // localStorage 只在浏览器里有。先渲染骨架、挂载后再读，避免 SSR / 水合不一致。
@@ -30,6 +31,8 @@ export default function PrefsSettingsPage() {
   }, []);
 
   const set = (key: string, value: string) => {
+    // 打开开关是一次用户手势 —— 浏览器只在手势里放行授权弹窗。
+    if (key === PREF_KEYS.desktopNotify && value === "1") void enableDesktopNotify();
     writeRaw(key, value);
     setValues((v) => ({ ...(v ?? {}), [key]: value }));
   };

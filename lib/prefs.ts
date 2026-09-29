@@ -45,6 +45,9 @@ export const PREF_KEYS = {
   requireApproval: "trellis-require-approval",
   // 启动
   startupView: "trellis-startup-view",
+  // 提醒
+  desktopNotify: "trellis-desktop-notify",
+  desktopNotifyOffered: "trellis-desktop-notify-offered",
   // 其它
   pinnedSessions: "trellis-pinned-sessions",
 } as const;
@@ -56,6 +59,7 @@ export const sessionScopedKey = {
   collapsed: (sid: string) => `trellis-collapsed:${sid}`,
   treeVisits: (sid: string) => `trellis-tree-visits:${sid}`,
   view: (sid: string) => `trellis-view:${sid}`,
+  draft: (sid: string) => `trellis-draft:${sid}`,
 };
 
 // ── 启动视图 ─────────────────────────────────────────────────────────────────
@@ -80,7 +84,7 @@ export type PrefItem = {
   label: string;
   /** 这个偏好原本在哪改。清单的作用是**指路**，不是取代 —— 说清出处比自己再实现一遍重要。 */
   where: string;
-  group: "外观" | "启动" | "输入" | "版式" | "新会话默认";
+  group: "外观" | "启动" | "输入" | "提醒" | "版式" | "新会话默认";
 } & (
   | { kind: "enum"; options: { value: string; label: string }[]; fallback: string }
   | { kind: "bool"; fallback: boolean }
@@ -156,6 +160,14 @@ export const PREF_ITEMS: PrefItem[] = [
     group: "输入",
     kind: "bool",
     fallback: false,
+  },
+  {
+    key: PREF_KEYS.desktopNotify,
+    label: "页面在后台时弹系统通知（完成 / 等你处理）",
+    where: "第一次出完成提醒时的「开启」按钮；浏览器拒绝过授权要去地址栏的站点设置放开",
+    group: "提醒",
+    kind: "bool",
+    fallback: true,
   },
   {
     key: PREF_KEYS.threadWidth,
