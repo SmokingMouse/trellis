@@ -65,8 +65,11 @@ export function QuestionInput({
   variant = "screen",
   autoFocus = true,
   controlRef,
+  butler = false,
 }: {
   isMobile: boolean;
+  /** 管家草稿：mode / agent / 增强档都由管家钉死，藏掉这几个选择器免得误导 */
+  butler?: boolean;
   /** screen = 独占的新会话首屏（原样）；home = 嵌进首页，去掉品牌头、起步词和底部入口 */
   variant?: "screen" | "home";
   autoFocus?: boolean;
@@ -163,7 +166,7 @@ export function QuestionInput({
 
   // Stage 14: the Project draft mode needs a workspace path chosen
   // before submit.
-  const needsWorkspace = draftMode !== "chat" && !draftWorkspacePath;
+  const needsWorkspace = !butler && draftMode !== "chat" && !draftWorkspacePath;
   // Attachments: tool-capable modes take any whitelisted file (staged to
   // disk for the agent); pure chat is limited to images + inlineable text.
   const att = useAttachmentUploads(skillCapable ? "all" : "chat-safe");
@@ -287,7 +290,9 @@ export function QuestionInput({
       ? "先选工作区"
       : hasUploading
         ? "等待附件上传…"
-        : "开始探索";
+        : butler
+          ? "发给管家"
+          : "开始探索";
 
   return (
     <div
@@ -309,7 +314,7 @@ export function QuestionInput({
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
         </>}
-        {isMobile ? (
+        {butler ? null : isMobile ? (
           <button
             type="button"
             data-mobile-target="new-session-config-summary"
@@ -341,7 +346,7 @@ export function QuestionInput({
             AgentPicker 内部仍然只在 chat 时露出自定义 system prompt 的 textarea
             （project 的人设来自 CLAUDE.md，服务端会把 systemPrompt 钳成 null）。
             增强模式是 chat 专属，留在下面的条件块里。 */}
-        {isMobile === false && (
+        {!butler && isMobile === false && (
           <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
             <AgentPicker />
             {draftMode === "chat" && (
@@ -402,7 +407,9 @@ export function QuestionInput({
             onKeyDown={onKey}
             onPaste={att.handlePaste}
             placeholder={
-              isFeynman
+              butler
+                ? "比如：每天 9 点跑一次仓库日报；给写作 Agent 加上 web-fetch 技能"
+                : isFeynman
                 ? "讲讲你对某个概念的理解——AI 会复述、挑漏洞、追问你没讲清的地方。讲不清的点，选中它 ⌘K 开子节点继续深讲。"
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
             }

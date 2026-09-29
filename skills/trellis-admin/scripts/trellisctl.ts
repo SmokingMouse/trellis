@@ -813,6 +813,97 @@ async function cmdSearch() {
   console.log(`\n看会话全貌：sessions get <id>；读某节点：node read <nodeId>`);
 }
 
+// ── 配置只读面（管家页第 1 步）：模型 / CLI 登录 / 飞书机器人 / 机器 / 版本 ──
+// 只读。写入口刻意不在这里开：provider 与 API key、机器人 appSecret、升级回滚
+// 要么带密钥、要么不可逆，交给用户在设置页亲手点（见 SKILL.md「配置只读面」）。
+
+function mark(ok: boolean | null | undefined, warn = false): string {
+  return ok === false ? "✗" : warn ? "!" : ok ? "✓" : "?";
+}
+
+/** 一屏总览：开场先跑这一个，别逐项翻。与管家页右栏同源（/api/butler/overview）。 */
+async function cmdOverview() {
+  const { status, body } = await api("GET", "/api/butler/overview", undefined, { tolerate: [404] });
+  if (status === 404) die("这个实例还没有 /api/butler/overview（旧版本）—— 逐项用 agents list / tasks list / models / auth / bots / version");
+  if (has("--json")) return out(body);
+  const line = (k: string, sec: any, f: (v: any) => string) =>
+    console.log(`${pad(k, 10)} ${sec?.ok ? f(sec) : `✗ 读取失败：${sec?.error ?? "?"}`}`);
+  line("Agent", body.agents, (a) => `${a.total} 个（自定义 ${a.custom}${a.disabled ? `，停用 ${a.disabled}` : ""}）`);
+  line("定时任务", body.tasks, (t) =>
+    `${t.total} 个 · 启用 ${t.enabled} · 挂了触发器 ${t.scheduled}${t.running ? ` · 在跑 ${t.running}` : ""}` +
+    t.failing.map((f: any) => `\n           ✗ ${f.name}（${f.id}）上次 ${f.status}：${clip(f.error ?? "", 80)}`).join(""));
+  line("模型", body.models, (m) =>
+    `默认 ${m.defaultModel ?? "（未设）"} · provider ${m.providers} 个${m.missingKey.length ? ` · 缺 key：${m.missingKey.join("、")}` : ""}`);
+  line("CLI 登录", body.auth, (a) =>
+    a.clis.map((c: any) =>
+      `${c.name} ${c.installed ? mark(c.loggedIn, c.warnings.length > 0) : "未装"}${c.refreshExpiresAt ? `（refresh 到 ${ts(c.refreshExpiresAt)}）` : ""}`).join("  ") +
+    a.clis.flatMap((c: any) => [...c.errors, ...c.warnings].map((w: string) => `\n           ${c.name}：${w}`)).join(""));
+  line("飞书机器人", body.bots, (b) =>
+    b.total ? `${b.total} 个 · 启用 ${b.enabled}` + b.errored.map((e: any) => `\n           ✗ ${e.name}：${clip(e.error, 80)}`).join("") : "未配置");
+  line("版本", body.version, (v) =>
+    v.sha ? `${String(v.sha).slice(0, 7)}（${v.builtAt ?? "?"}）${v.behind ? ` · 落后 origin/main ${v.behind} 个提交` : ""}${v.deployPhase ? ` · 部署 ${v.deployPhase}` : ""}` : "非发布目录（开发模式）");
+}
+
+async function cmdModels() {
+  const { body } = await api("GET", "/api/model-config");
+  if (has("--json")) return out(body);
+  if (!body.exists) return console.log(`（没有模型配置文件：${body.path}）`);
+  console.log(`默认模型：${body.defaultModel ?? "（未设）"}    配置：${body.path}`);
+  for (const p of body.providers ?? []) {
+    console.log(`\n${p.hasKey ? "✓" : "✗ 缺 key"} ${p.name}  ${p.anthropic_url ?? p.openai_url ?? ""}${p.api_key_env ? `  key=$${p.api_key_env}` : ""}`);
+    console.log(`   ${(p.models ?? []).join("  ")}`);
+  }
+  console.log(`\n改默认模型 / 增删 provider / 填 key：请用户在 /settings/models 操作（带密钥，管家不代写）。`);
+}
+
+async function cmdAuth() {
+  const { body } = await api("GET", "/api/auth-health" + (has("--force") ? "?force=1" : ""));
+  if (has("--json")) return out(body);
+  for (const name of ["claude", "codex"]) {
+    const c = body[name];
+    if (!c) continue;
+    if (!c.installed) { console.log(`${pad(name, 7)} 未安装`); continue; }
+    const exp = c.refreshExpiresAt ? `refresh 到 ${ts(c.refreshExpiresAt)}` : "refresh 过期时间未知";
+    console.log(`${pad(name, 7)} ${mark(c.loggedIn, c.warnings.length > 0)} ${c.loggedIn === false ? "未登录" : c.account ?? c.method ?? ""}  ${exp}`);
+    for (const e of c.errors ?? []) console.log(`        ✗ ${e}`);
+    for (const w of c.warnings ?? []) console.log(`        ! ${w}`);
+  }
+  console.log(`\n（30 秒缓存；--force 现探。重新登录要用户本人在终端跑 CLI 的 login）`);
+}
+
+async function cmdBots(sub: string) {
+  if (sub === "get") {
+    const id = pos[2] ?? die("bots get <id>");
+    const { body } = await api("GET", `/api/lark-bots/${id}`);
+    return out(body);
+  }
+  const { body } = await api("GET", "/api/lark-bots");
+  const list: any[] = body?.bots ?? body ?? [];
+  if (has("--json")) return out(list);
+  if (!list.length) return console.log("（没有飞书机器人。新建要扫码，请用户在 /settings/bots 操作）");
+  for (const b of list) {
+    const st = !b.enabled ? "停用" : b.lastError ? `✗ ${clip(b.lastError, 60)}` : b.lastConnectedAt ? `✓ 连上 ${ago(b.lastConnectedAt)}` : "未连上";
+    console.log(`${pad(b.name, 18)} ${pad(b.id, 10)} agent=${b.agentId ?? "默认"}  群 ${b.chats?.length ?? 0}  ${st}`);
+  }
+}
+
+async function cmdMachine() {
+  const { body } = await api("GET", "/api/machine-resources");
+  out(body);
+}
+
+async function cmdVersion() {
+  const { body } = await api("GET", "/api/update" + (has("--fetch") ? "?fetch=1" : ""));
+  if (has("--json")) return out(body);
+  const c = body.current;
+  console.log(c ? `当前：${String(c.sha).slice(0, 7)} ${c.ref ?? ""}（构建于 ${c.builtAt}）` : "当前：非发布目录（开发模式）");
+  if (body.candidate) console.log(`origin/main：${String(body.candidate.sha).slice(0, 7)} · 落后 ${body.behind ?? "?"} 个提交`);
+  for (const cm of (body.commits ?? []).slice(0, 10)) console.log(`   ${String(cm.sha).slice(0, 7)} ${clip(cm.subject ?? "", 70)}`);
+  if (body.deploy) console.log(`部署状态：${body.deploy.phase}`);
+  if (body.fetchError) console.log(`fetch 失败：${body.fetchError}`);
+  console.log(`\n（--fetch 先拉远端再比。升级 / 回滚请用户在 /settings/update 点，管家不代点）`);
+}
+
 /** 最近工作目录（trellis 会话用过的 + 本机 claude 用过的 + 刚建的 worktree），
  *  开新 project 会话前先看这里，别凭记忆拼路径。 */
 async function cmdWorkspaces() {
@@ -1192,6 +1283,14 @@ const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
   skills [关键词]                           本机可给 agent 绑的技能名
   cron "<expr>"                            校验 + 人话回显 + 未来三次触发时间
 
+配置只读面（改这些请用户去设置页：带密钥或不可逆）：
+  overview [--json]                        一屏总览：agents / tasks / 模型 / CLI 登录 / 机器人 / 版本
+  models [--json]                          默认模型 + 各 provider 与 key 是否就绪
+  auth [--force] [--json]                  claude / codex CLI 登录态与凭证过期时间
+  bots [--json] | bots get <id>            飞书机器人：连接状态、绑的 agent、群
+  machine                                  本机资源（CPU / 内存 / 磁盘）
+  version [--fetch] [--json]               当前版本、落后 origin/main 几个提交、部署状态
+
 JSON / 长文本参数可以是内联串、@文件路径、或 '-'（从 stdin 读，带引号换行时用这个）。`;
 
 async function main() {
@@ -1210,6 +1309,12 @@ async function main() {
     case "whoami": return cmdWhoami();
     case "search": return cmdSearch();
     case "workspaces": return cmdWorkspaces();
+    case "overview": return cmdOverview();
+    case "models": return cmdModels();
+    case "auth": return cmdAuth();
+    case "bots": return cmdBots(pos[1]);
+    case "machine": return cmdMachine();
+    case "version": return cmdVersion();
     case "node": return cmdNode(pos[1]);
     case "ask": return cmdAsk();
     case "retry": return cmdRetry();

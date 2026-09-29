@@ -569,6 +569,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       // 是 0px，等于没这回事。
       style={{
         left: "var(--trellis-sb, 0px)",
+        // 管家右栏（ButlerPanel 发布 --trellis-rp）；其余会话恒为 0。
+        right: "var(--trellis-rp, 0px)",
         bottom: "var(--trellis-term-h, 0px)",
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
