@@ -178,7 +178,6 @@ export const TurnCard = memo(function TurnCard({
           stats={node.toolCallStats ?? null}
           live={node.status === "streaming"}
         />
-        <AsProjectControls nodeId={node.id} />
       </div>
       {/* key={node.id} forces a fresh ResponseBody fiber per node: the
           imperative <mark> injection inside react-markdown's output diverges
@@ -208,6 +207,9 @@ export const TurnCard = memo(function TurnCard({
       ) : (
         toolbar
       )}
+      {/* 引擎事件 / 权限切换是控制面板，不是对话内容：放到本轮最末一行浅色小字，
+          不再以卡片形态夹在工具卡和正文之间。 */}
+      <AsProjectControls nodeId={node.id} />
     </>
   );
 });
@@ -775,7 +777,13 @@ function ResponseBody({
           噪音，那个显示在 Header 的 ModeBadge 上。 */}
       {node.agentScope === "mention" && <MentionChip />}
       {isStreaming && liveThinking && (
-        <ThinkingBlock text={liveThinking} answering={Boolean(liveText)} />
+        <ThinkingBlock
+          text={liveThinking}
+          // 想完去跑工具了也算「想完」：否则 Bash 跑一分钟，这里一直挂「思考中…」。
+          answering={
+            Boolean(liveText) || node.toolCalls.some((c) => c.status === "running")
+          }
+        />
       )}
       {isStreaming ? (
         liveText ? (

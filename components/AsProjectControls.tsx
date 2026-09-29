@@ -130,35 +130,34 @@ export function AsProjectControls({ nodeId }: { nodeId: string }) {
   // `[data-as-system-log] > summary` 并读 `.open`，所以表头必须是它的直接子元素。
   // 提示行（fallback / 已处理 / 错误）在折叠态也要能读到，只能落在卡外。
   return <div data-as-project={nodeId} className="min-w-0 max-w-full [overflow-wrap:anywhere]">
-    {thread && <details data-as-system-log className="group/log mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60">
-      <summary className="px-3 py-2 flex items-center gap-2 text-ui cursor-pointer hover:bg-surface-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11 max-md:flex-wrap">
-        <Icon icon={ChevronRight} size="sm" className="text-ink-faint transition-transform group-open/log:rotate-90" />
-        <span className="inline-flex items-center gap-1.5 font-medium text-ink shrink-0"><Icon icon={Plug} size="sm" className="text-ink-muted" />引擎</span>
-        <span className="text-ink-muted tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
-        <span data-as-source className="flex-1 min-w-0 text-ink-faint truncate max-md:basis-full max-md:order-last max-md:pl-5 max-md:whitespace-normal max-md:line-clamp-2">
-          {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}
+    {thread && <details data-as-system-log className="group/log mt-1.5">
+      {/* 一行浅色 meta（和轮底工具栏同一档），不是卡片：它是控制面板，不该和工具卡、
+          正文同等抢眼。展开后的事件列表才有框。 */}
+      <summary className="-ml-1.5 px-1.5 min-h-7 flex items-center gap-2 rounded-field text-label text-ink-faint cursor-pointer hover:bg-surface-hover hover:text-ink-muted transition-colors list-none [&::-webkit-details-marker]:hidden max-md:min-h-11 max-md:flex-wrap">
+        <Icon icon={ChevronRight} size="sm" className="transition-transform group-open/log:rotate-90" />
+        <span className="inline-flex items-center gap-1 shrink-0"><Icon icon={Plug} size="sm" />引擎</span>
+        <span className="tabular-nums shrink-0">{visibleLogs.length} 条事件</span>
+        <span data-as-source className="min-w-0 truncate max-md:basis-full max-md:order-last max-md:pl-5 max-md:whitespace-normal max-md:line-clamp-2">
+          · {thread.backend}{external ? " · 外部会话" : ""} · {thread.title ?? "Agent 会话"}{thread.status.type === "closed" ? " · 已结束" : ""}
           {!showAll && debugCount > 0 ? ` · 已折叠 ${debugCount} 条调试事件` : ""}
         </span>
-        <span className="text-nano text-ink-faint hidden sm:inline shrink-0">
-          <span className="group-open/log:hidden">展开</span>
-          <span className="hidden group-open/log:inline">收起</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-1.5 text-ink-muted max-md:ml-auto">权限
+        <span className="flex-1 max-md:hidden" />
+        <span className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">权限
           {external ? <>
-            <span data-as-permission className="rounded-field border border-line bg-surface px-2 py-0.5 text-ink">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
+            <span data-as-permission className="rounded-field border border-line bg-surface px-1.5 py-0.5 text-ink-muted">{labels[thread.permission ?? "default"] ?? thread.permission}</span>
             <span className="text-ink-faint">只读</span>
           </> : <select data-as-permission aria-label="权限模式" title="Shift+Tab 切换权限模式"
             value={thread.permission ?? "default"} disabled={!supported || busy}
             onClick={e => e.preventDefault()}
             onChange={e => void change(e.target.value)} onKeyDown={e => {
               if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); void change(modes[(modes.indexOf(thread.permission ?? "default") + 1) % modes.length]); }
-            }} className="max-w-full rounded-field border border-line bg-surface px-2 py-0 text-ui text-ink md:-my-0.5 max-md:min-h-11 max-md:min-w-11 max-md:px-3">
+            }} className="max-w-full rounded-field border border-line bg-surface px-1.5 py-0 text-label text-ink-muted hover:text-ink max-md:min-h-11 max-md:min-w-11 max-md:px-3 max-md:text-ui">
             {!modes.includes(thread.permission ?? "default") && <option value={thread.permission} disabled>{labels[thread.permission!] ?? thread.permission}</option>}
             {modes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}
           </select>}
         </span>
       </summary>
-      <div className="border-t border-line divide-y divide-line/70">
+      <div className="mt-1 border border-line rounded-card overflow-hidden bg-surface-muted/60 divide-y divide-line/70">
         <label className="px-3 py-2 flex items-center gap-2 text-ui text-ink-muted cursor-pointer max-md:min-h-11">
           <input data-as-show-all type="checkbox" checked={showAll} onChange={e => {
             setShowAll(e.target.checked);

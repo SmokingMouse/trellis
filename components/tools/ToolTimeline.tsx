@@ -19,7 +19,7 @@ import {
   hasValidWorkflowProgress,
 } from "@/lib/workflow-view";
 import { useSessionStore } from "@/stores/sessionStore";
-import { TimelineList, useElapsed } from "./ToolRow";
+import { TimelineList } from "./ToolRow";
 
 // The turn's whole tool timeline, in chronological order.
 //
@@ -109,7 +109,8 @@ export function ToolTimeline({
           </>
         )}
         <span className="flex-1" />
-        {span !== null && chain.length === 0 && (
+        {/* 流式中计时归底部 RunLine；跑完才在这里给工具段总耗时。 */}
+        {span !== null && !live && (
           <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
             {formatDuration(span)}
           </span>
@@ -168,20 +169,22 @@ function LiveHeader({
   parallel: number;
 }) {
   const leaf = chain[chain.length - 1];
-  const elapsed = useElapsed(leaf.call.startedAt);
   const crumbs = chain.map(crumbLabel);
   const step = leafStep(leaf);
   if (step) crumbs.push({ kind: "step", label: step });
   const doing = leafDoing(leaf);
-  const stat = [
-    leaf.meta.totalTokens ? formatTokens(leaf.meta.totalTokens) : null,
-    elapsed !== null ? `${Math.round(elapsed / 1000)}s` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // 计时和转圈只在每轮底部的 RunLine 出现一次（「流式状态只留一种」，research
+  // 根因 #4）：这里再挂一个「本条命令 46s」会和底部「本轮 1m22s」打架。
+  const stat = leaf.meta.totalTokens ? formatTokens(leaf.meta.totalTokens) : null;
   return (
     <>
-      <span className="flex items-center gap-1 min-w-0 font-medium text-ink">
+      {/* 单格时整段不许压（否则 shrink-0 的叶子溢出、压到右边的命令上叠字）；
+          多格时外层可压但必须裁切，先牺牲上游环节。 */}
+      <span
+        className={`flex items-center gap-1 font-medium text-ink ${
+          crumbs.length === 1 ? "shrink-0" : "min-w-0 overflow-hidden"
+        }`}
+      >
         {crumbs.map((c, i) => (
           <Fragment key={i}>
             {i > 0 && (
@@ -213,7 +216,6 @@ function LiveHeader({
       {parallel > 0 && (
         <span className="text-ink-faint shrink-0">+{parallel} 并行</span>
       )}
-      <Spinner size="sm" label="运行中" />
     </>
   );
 }
