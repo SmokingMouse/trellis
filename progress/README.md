@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-UI 重设计（克制工具风）+ 工作台首页已上线（bb4491540）；devbox 启动补齐窗口待收尾。
+管家页（对话配置 Trellis：总览 + 改动提案卡 + 撤销）已上线；余偏好迁服务端与设置页入口，devbox 启动补齐窗口待收尾。
 
 ## Goals
 
@@ -20,7 +20,7 @@ UI 重设计（克制工具风）+ 工作台首页已上线（bb4491540）；dev
 
 - `facts.md` 已验证事实 · `failures.md` 待查 / 已结案
 - `backlog.md` 需求侧摩擦队列（定活前读）
-- `sessions/` 倒序读最近 5 个（最新 S180） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
+- `sessions/` 倒序读最近 5 个（最新 S182） · `archive.md` 更早 log + Goals 归档 + 历史 Focus 栈
 - `../docs/ui-redesign/` UI 重设计
 - `happyclaw-contrast.md` 对照剖析；开新方向前查「已排除」节
 - **待验收**：`console-ia-spec.md` · `skills/trellis-admin/` · S91/S94/S95
