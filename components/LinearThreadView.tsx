@@ -20,6 +20,7 @@ import { modeStyle } from "@/lib/mode-style";
 import {
   THREAD_WIDTH_CLASS,
   THREAD_WIDTH_OPTIONS,
+  treeSafePadding,
 } from "@/lib/thread-width";
 import { isEditableTarget } from "@/lib/shortcuts";
 import {
@@ -675,9 +676,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               }
             : isMobile
               ? undefined
-              : // 树浮窗展开时右侧让出安全区（TreePanel 发布 --trellis-tree-safe），
-                // 正文列在剩余宽度里居中，不再被浮窗压住。
-                { paddingRight: "var(--trellis-tree-safe, 0px)" }
+              : // 树浮窗（TreePanel 发布 --trellis-tree-safe）只在会盖住正文时才让位，
+                // 宽屏下正文列左右对称居中；算法见 treeSafePadding。
+                { paddingRight: treeSafePadding(threadWidth) }
         }
       >
         <main className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
@@ -810,7 +811,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         }`}
         style={{
           paddingBottom: "var(--safe-bottom)",
-          paddingRight: isMobile ? undefined : "var(--trellis-tree-safe, 0px)",
+          paddingRight: isMobile ? undefined : treeSafePadding(threadWidth),
         }}
       >
         <div className={`${widthClass} mx-auto px-4 md:px-8`}>
