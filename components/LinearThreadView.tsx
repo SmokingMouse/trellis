@@ -52,6 +52,8 @@ import {
   HerdrSessionBadge,
 } from "./HerdrSessionControls";
 import { HerdrInteractionCard } from "./HerdrInteractionCard";
+import { ButlerChangeCards } from "./ButlerChangeCards";
+import { isButlerSession } from "@/lib/butler";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -112,6 +114,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     ],
   );
   const isHerdr = isHerdrSession(session, herdrSnapshot.fleet);
+  const butler = isButlerSession(session);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -724,6 +727,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                     canDelete={canDelete}
                     onDelete={confirmDelete}
                   />
+                  {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
 
                   {branches.length > 0 && (
                     <div className="mt-2">

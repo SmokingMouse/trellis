@@ -28,11 +28,13 @@ const prevDbPath = process.env.TRELLIS_DB_PATH;
 process.env.TRELLIS_DB_PATH = path.join(testDir, "butler.db");
 
 const sqlite = await import("./sqlite");
+sqlite.resetDBForTests();
 const butler = await import("./butler");
 const { BUTLER_AGENT_ID } = await import("../butler");
 const presets = await import("../agent-presets");
 
 afterAll(() => {
+  sqlite.resetDBForTests();
   if (prevDbPath === undefined) delete process.env.TRELLIS_DB_PATH;
   else process.env.TRELLIS_DB_PATH = prevDbPath;
   rmSync(testDir, { recursive: true, force: true });

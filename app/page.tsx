@@ -30,6 +30,7 @@ import { KeyboardHelp } from "@/components/KeyboardHelp";
 import { HomeView } from "@/components/HomeView";
 import { ButlerHome } from "@/components/ButlerHome";
 import { ButlerPanel } from "@/components/ButlerPanel";
+import { ButlerChangesSync } from "@/components/ButlerChangesSync";
 import { isButlerSession } from "@/lib/butler";
 import { useHomeShortcut } from "@/hooks/useHomeShortcut";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -213,6 +214,7 @@ export default function Home() {
       {/* 管家会话：右栏换成「当前配置」，树浮窗让位（管家是一条线的对话，不需要树导航） */}
       {session && viewMode === "linear" && !butler && <TreePanel />}
       {session && butler && !isMobile && <ButlerPanel refreshKey={`${session.id}:${butlerSettled}`} />}
+      {session && butler && <ButlerChangesSync sessionId={session.id} />}
       {session && <SessionMap isMobile={isMobile} />}
       {session && !CANVAS_MAP && viewMode === "canvas" && (
         <>

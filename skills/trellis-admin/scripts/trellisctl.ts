@@ -137,8 +137,9 @@ async function api(
   method: string,
   p: string,
   body?: unknown,
-  opts?: { tolerate?: number[] },
+  opts?: { tolerate?: number[]; direct?: boolean },
 ): Promise<ApiResult> {
+  if (method !== "GET" && CONFIG_WRITE.test(p) && !opts?.direct) await maybePropose(method, p, body);
   const base = await resolveBase();
   const r = await fetch(base + p, {
     method,
@@ -159,6 +160,31 @@ async function api(
     die(`${method} ${p} → ${r.status}: ${j?.error ?? text.slice(0, 400)}`);
   }
   return { status: r.status, body: j };
+}
+
+// ── 管家改动提案 ─────────────────────────────────────────────────────────
+// 平台内（TRELLIS_ENV=1）的配置写请求先交给服务端判：是管家会话就存成待确认
+// 提案、这里直接收尾退出；不是就原样放行。trellisctl 其余逻辑因此不用分叉。
+const CONFIG_WRITE = /^\/api\/(agents(\/[^/?]+)?|tasks(\/[^/?]+)?|tasks\/[^/?]+\/triggers)(\?.*)?$/;
+
+async function maybePropose(method: string, p: string, body: unknown): Promise<void> {
+  const sessionId = process.env.TRELLIS_SESSION_ID;
+  if (process.env.TRELLIS_ENV !== "1" || !sessionId) return;
+  const { status, body: r } = await api(
+    "POST",
+    "/api/butler/changes",
+    { sessionId, nodeId: process.env.TRELLIS_NODE_ID ?? null, method, path: p, body: body ?? null },
+    { tolerate: [404], direct: true },
+  );
+  if (status === 404 || !r?.proposed) return; // 旧实例 / 非管家会话 → 直连
+  const c = r.change;
+  console.log(
+    `⏸ 已提交改动提案 ${c.id.slice(0, 8)}（${c.targetLabel}）。它现在**没有生效**，` +
+      `要等用户在对话里的卡片上点确认${c.risk === "high" ? "（高危：还要输入名字）" : ""}。\n` +
+      `不要重试、不要换别的写法绕过。这一轮到此收尾：用一句话告诉用户改了什么、请在卡片上确认。\n` +
+      `之后看结果：trellisctl changes`,
+  );
+  process.exit(0);
 }
 
 /** SSE 请求：返回原始 Response，交给 sseEvents() 逐事件消费。timeoutMs 是
@@ -904,6 +930,25 @@ async function cmdVersion() {
   console.log(`\n（--fetch 先拉远端再比。升级 / 回滚请用户在 /settings/update 点，管家不代点）`);
 }
 
+/** 当前管家会话的改动提案与结局（pending / applied / rejected / failed / reverted）。 */
+async function cmdChanges() {
+  const sid = flagVal("--session") ?? process.env.TRELLIS_SESSION_ID;
+  const q = sid ? `?sessionId=${encodeURIComponent(resolveSessionArg(sid))}` : "?recent=1&limit=20";
+  const { body } = await api("GET", "/api/butler/changes" + q);
+  const list: any[] = body.changes ?? [];
+  if (has("--json")) return out(list);
+  if (!list.length) return console.log("（没有改动提案）");
+  const icon: Record<string, string> = { pending: "⏸", applied: "✓", rejected: "✗ 拒绝", failed: "✗ 失败", reverted: "↶ 已撤销" };
+  for (const c of list) {
+    const made = c.result?.agent?.id ?? c.result?.task?.id ?? c.result?.trigger?.id;
+    console.log(
+      `${pad(icon[c.status] ?? c.status, 8)} ${c.id.slice(0, 8)}  ${pad(c.kind, 15)} ${c.targetLabel}` +
+        (made ? `  → ${made}` : "") +
+        (c.error ? `\n         ${clip(c.error, 100)}` : ""),
+    );
+  }
+}
+
 /** 最近工作目录（trellis 会话用过的 + 本机 claude 用过的 + 刚建的 worktree），
  *  开新 project 会话前先看这里，别凭记忆拼路径。 */
 async function cmdWorkspaces() {
@@ -1291,10 +1336,15 @@ const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
   machine                                  本机资源（CPU / 内存 / 磁盘）
   version [--fetch] [--json]               当前版本、落后 origin/main 几个提交、部署状态
 
+管家改动提案（在管家会话里，agents / tasks / triggers 的写命令不直接生效，先成提案等用户确认）：
+  changes [--session <id>] [--json]        本会话提案与结局；平台外不带 --session = 全局最近已应用
+
 JSON / 长文本参数可以是内联串、@文件路径、或 '-'（从 stdin 读，带引号换行时用这个）。`;
 
 async function main() {
   const cmd = pos[0];
+  // 「删」的常见拼法都认成 rm —— agent 猜 delete / remove 猜错一次就是一轮白跑。
+  if (["agents", "tasks", "triggers"].includes(cmd) && ["delete", "remove", "del"].includes(pos[1])) pos[1] = "rm";
   switch (cmd) {
     case "health": return cmdHealth();
     case "agents": return cmdAgents(pos[1]);
@@ -1310,6 +1360,7 @@ async function main() {
     case "search": return cmdSearch();
     case "workspaces": return cmdWorkspaces();
     case "overview": return cmdOverview();
+    case "changes": return cmdChanges();
     case "models": return cmdModels();
     case "auth": return cmdAuth();
     case "bots": return cmdBots(pos[1]);

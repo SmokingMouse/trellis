@@ -50,3 +50,53 @@ export type ButlerOverview = {
   }>;
   generatedAt: number;
 };
+
+// ── 改动提案（第 2 步）────────────────────────────────────────────────────
+// 管家会话里 trellisctl 的配置写请求 = 一条提案；用户在卡片上确认才落库。
+export type ButlerChangeKind =
+  | "agent.create" | "agent.update" | "agent.delete"
+  | "task.create" | "task.update" | "task.delete"
+  | "trigger.add" | "trigger.remove";
+
+export type ButlerChangeStatus = "pending" | "applied" | "rejected" | "failed" | "reverted";
+
+export type ButlerChange = {
+  id: string;
+  sessionId: string;
+  nodeId: string | null;
+  method: string;
+  path: string;
+  body: Record<string, unknown> | null;
+  kind: ButlerChangeKind;
+  targetId: string | null;
+  /** 人读的对象名：agent 名 / 任务名 / 「任务名 · cron 触发器」 */
+  targetLabel: string;
+  /** high = 不可撤销（删除 agent / 任务），卡片要输入对象名二次确认 */
+  risk: "normal" | "high";
+  status: ButlerChangeStatus;
+  /** 目标对象改之前的样子（提案时取一次，应用那一刻再刷新成真快照）；create 为 null */
+  before: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: number;
+  decidedAt: number | null;
+  revertedAt: number | null;
+  /** 已应用且能构造出逆请求 */
+  revertible: boolean;
+};
+
+export const CHANGE_KIND_LABEL: Record<ButlerChangeKind, string> = {
+  "agent.create": "新建 Agent",
+  "agent.update": "修改 Agent",
+  "agent.delete": "删除 Agent",
+  "task.create": "新建定时任务",
+  "task.update": "修改定时任务",
+  "task.delete": "删除定时任务",
+  "trigger.add": "添加触发器",
+  "trigger.remove": "移除触发器",
+};
+
+/** 高危确认口令：要求用户输入的名字（去掉「任务名 · xxx」这类后缀修饰）。 */
+export function confirmPhrase(c: Pick<ButlerChange, "targetLabel">): string {
+  return c.targetLabel.split(" · ")[0];
+}
