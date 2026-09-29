@@ -34,6 +34,7 @@ import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   buildHerdrWorkspaceViews,
   findHerdrPaneForSession,
+  herdrRunLabel,
   isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
@@ -206,6 +207,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       : null;
   const tipStreamingId =
     tipNode && tipNode.status === "streaming" ? tipNode.id : null;
+  // Herdr 镜像的最后一轮：库里是 done，运行态看窗格（S184 hook 驱动）。
+  const mirrorRunLabel = isHerdr ? herdrRunLabel(herdrPane) : null;
   const anchorNode = threadData.anchorId ? nodes[threadData.anchorId] : null;
   // Armed branch target — falls back to null (→ composer targets the tip)
   // if the node got deleted out from under the chip.
@@ -750,6 +753,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                     onBranch={armBranch}
                     canDelete={canDelete}
                     onDelete={confirmDelete}
+                    mirrorRun={node.id === tipNode?.id ? mirrorRunLabel : null}
                   />
                   {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
 

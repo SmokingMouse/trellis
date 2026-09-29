@@ -135,6 +135,23 @@ export type HerdrWorkspaceView = {
   panes: HerdrPaneView[];
 };
 
+/**
+ * Herdr 镜像会话最后一轮的运行态文案；null = 没在跑（按 jsonl 快照的完成态渲染）。
+ * 镜像节点在库里恒为 done，真实运行态只有窗格状态（herdr 自己的探测 + hook 的 waiting）
+ * 知道。窗格离线一律 null —— 进程都没了，不能把最后一轮挂成「生成中」。
+ * hook 的 toolName 在工具结束后不清（normalize.ts 只在 Stop / 新一轮清），所以只说
+ * 「最近一步」，不说「正在运行」，免得工具早跑完了还挂着。
+ */
+export function herdrRunLabel(pane: HerdrPaneView | null): string | null {
+  if (!pane?.alive) return null;
+  if (pane.status === "waiting" || pane.status === "blocked") {
+    return pane.hook?.toolName === "AskUserQuestion" ? "等待你回答" : "等待你批准";
+  }
+  if (pane.status !== "working") return null;
+  const tool = pane.hook?.state === "working" ? pane.hook.toolName : null;
+  return tool ? `正在工作 · 最近一步 ${tool}` : "正在生成";
+}
+
 export const HERDR_HOOK_TTL_MS = 5 * 60_000;
 
 function freshHook(hook: HerdrHookRecord | null | undefined, now: number): HerdrHookRecord | null {

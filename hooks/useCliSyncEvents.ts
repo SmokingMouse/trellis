@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { bindPageStream } from "@/lib/page-stream";
+import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 
 type CliSyncEvent =
   | ({ type: "pending_snapshot" } & import("@/lib/pending").PendingSnapshot)
@@ -55,6 +56,11 @@ export function useCliSyncEvents(): void {
               useSessionStore.getState().session?.id
             ) {
               void loadSession(event.sessionId);
+              // Herdr 镜像的运行态在 fleet 里（2.5s 轮询）；内容刚变就顺手拉一次，
+              // 让「正在生成 / 已完成」和正文一起翻，不各走各的。ETag 兜底，没变就是 304。
+              if (useSessionStore.getState().session?.origin === "herdr") {
+                void refreshHerdrFleet();
+              }
             }
           }
         }

@@ -5,7 +5,9 @@ import {
   groupHerdrWorkspaces,
   findHerdrPaneForSession,
   HERDR_HOOK_TTL_MS,
+  herdrRunLabel,
   type HerdrFleetResponse,
+  type HerdrPaneView,
   type HerdrHookRecord,
 } from "./herdr-ui";
 
@@ -200,5 +202,36 @@ describe("Herdr UI fleet projection", () => {
     ).toBe(
       "p-working",
     );
+  });
+});
+
+describe("herdrRunLabel（镜像会话最后一轮的运行态）", () => {
+  const pane = (over: Partial<HerdrPaneView>, hook: Partial<HerdrHookRecord> | null = null) =>
+    ({
+      alive: true,
+      status: "working",
+      hook: hook ? { sessionId: "s", state: "working", toolName: null, interactivePrompt: null, paneKey: null, updatedAt: 0, ...hook } : null,
+      ...over,
+    }) as HerdrPaneView;
+
+  test("没窗格 / 窗格离线 → 不算在跑", () => {
+    expect(herdrRunLabel(null)).toBeNull();
+    expect(herdrRunLabel(pane({ alive: false }))).toBeNull();
+  });
+  test("空闲 / 完成 / 未知 → 不算在跑", () => {
+    for (const status of ["idle", "done", "unknown"] as const) {
+      expect(herdrRunLabel(pane({ status }))).toBeNull();
+    }
+  });
+  test("working：有 hook 工具名说最近一步，没有就是正在生成", () => {
+    expect(herdrRunLabel(pane({}))).toBe("正在生成");
+    expect(herdrRunLabel(pane({}, { toolName: "Bash" }))).toBe("正在工作 · 最近一步 Bash");
+    // hook 已经 done 但 herdr 还报 working（Stop 刚到、fleet 没刷新）：不挂旧工具名
+    expect(herdrRunLabel(pane({}, { state: "done", toolName: "Bash" }))).toBe("正在生成");
+  });
+  test("waiting / blocked：区分问答和批准", () => {
+    expect(herdrRunLabel(pane({ status: "waiting" }, { state: "waiting", toolName: "AskUserQuestion" }))).toBe("等待你回答");
+    expect(herdrRunLabel(pane({ status: "waiting" }, { state: "waiting", toolName: "Bash" }))).toBe("等待你批准");
+    expect(herdrRunLabel(pane({ status: "blocked" }))).toBe("等待你批准");
   });
 });

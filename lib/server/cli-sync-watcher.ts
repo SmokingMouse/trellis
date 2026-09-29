@@ -293,6 +293,16 @@ type PendingSync = {
   firstEventAt: number;
   running: boolean;
   dirtyWhileRunning: boolean;
+  /** 当前定时器的触发时刻。 */
+  dueAt: number;
+  /**
+   * 这次的截止时间是 hook 定的（HOOK_NUDGE_DELAY_MS）。hook 往往比 jsonl 真正落盘
+   * 早几十 ms 到，随后的 fs.watch 事件若照常 trailing 去抖，会把 150ms 又推回 600ms
+   * （实测 911ms，与不催一样）。所以 urgent 时文件事件只许提前、不许推后。
+   */
+  urgent: boolean;
+  /** 运行中又被 hook 催过：跑完那一次补跑也按 hook 的短延迟。 */
+  urgentWhileRunning: boolean;
 };
 const pending = new Map<string, PendingSync>(); // file → 去抖状态
 
@@ -534,7 +544,7 @@ export async function reimport(full: string): Promise<void> {
 //   · trailing-only —— 事件流里不解析，安静下来才解析一次；
 //   · 封顶 MAX_DEBOUNCE_WAIT_MS —— 再吵也保证这个周期内解析一次，不饿死 UI；
 //   · 解析进行中到来的事件只标脏，等这次跑完再排一次，绝不并发叠加。
-function scheduleReimport(full: string): void {
+function scheduleReimport(full: string, delayMs?: number): void {
   let state = pending.get(full);
   if (!state) {
     state = {
@@ -542,16 +552,27 @@ function scheduleReimport(full: string): void {
       firstEventAt: Date.now(),
       running: false,
       dirtyWhileRunning: false,
+      dueAt: 0,
+      urgent: false,
+      urgentWhileRunning: false,
     };
     pending.set(full, state);
   }
   if (state.running) {
     state.dirtyWhileRunning = true;
+    if (delayMs !== undefined) state.urgentWhileRunning = true;
     return;
   }
   const waited = Date.now() - state.firstEventAt;
-  const delay = Math.max(0, Math.min(DEBOUNCE_MS, MAX_DEBOUNCE_WAIT_MS - waited));
+  const delay = Math.max(
+    0,
+    Math.min(delayMs ?? DEBOUNCE_MS, MAX_DEBOUNCE_WAIT_MS - waited),
+  );
+  const dueAt = Date.now() + delay;
+  if (state.timer && state.urgent && state.dueAt <= dueAt) return;
+  if (delayMs !== undefined) state.urgent = true;
   if (state.timer) clearTimeout(state.timer);
+  state.dueAt = dueAt;
   state.timer = setTimeout(() => void runPendingReimport(full), delay);
 }
 
@@ -561,14 +582,18 @@ async function runPendingReimport(full: string): Promise<void> {
   state.timer = null;
   state.running = true;
   state.dirtyWhileRunning = false;
+  state.urgent = false;
+  state.urgentWhileRunning = false;
   try {
     await reimport(full);
   } finally {
     state.running = false;
     if (state.dirtyWhileRunning) {
+      const urgent = state.urgentWhileRunning;
       state.dirtyWhileRunning = false;
+      state.urgentWhileRunning = false;
       state.firstEventAt = Date.now();
-      scheduleReimport(full);
+      scheduleReimport(full, urgent ? HOOK_NUDGE_DELAY_MS : undefined);
     } else {
       pending.delete(full);
     }
@@ -697,9 +722,37 @@ export function detachSession(sessionId: string): void {
 
 let started = false;
 
+// Hook 驱动（S184）：Claude Code 的 hook 事件（提交问题 / 工具前后 / 本轮结束）是
+// 「jsonl 刚写了东西」的即时信号，比 fs.watch + 600ms 去抖早得多。hook 路由和本模块
+// 可能不在同一个 bundle（见 notify.ts:42），模块级 pending/watchers 不共享，所以经
+// globalThis 转发到**持有 watcher 的那份**实例。只认已 attach 的文件：未知路径交给
+// fs.watch 那条老路（fork 匹配），hook 不替它做决定。
+export const HOOK_NUDGE_DELAY_MS = 150;
+type CliSyncNudge = (transcriptPath: string) => boolean;
+const nudgeHost = globalThis as typeof globalThis & {
+  __trellisCliSyncNudge?: CliSyncNudge;
+};
+
+/** hook 路由调用：jsonl 刚被写，尽快重导。返回 false = 不是镜像中的文件（或 watcher 没起）。 */
+export function nudgeCliTranscript(transcriptPath: string): boolean {
+  return nudgeHost.__trellisCliSyncNudge?.(transcriptPath) ?? false;
+}
+
+function nudgeAttached(transcriptPath: string): boolean {
+  // attach 时存的是 CLI 自报的路径形式，hook 的 transcript_path 同源，通常直接命中；
+  // 万一一边走了软链（$HOME 链接那次事故），再按 realpath 对一次。
+  const attached = attachedPathMap();
+  const resolved = path.resolve(transcriptPath);
+  const full = attached.has(resolved) ? resolved : canonicalPath(resolved);
+  if (!attached.has(full)) return false;
+  scheduleReimport(full, HOOK_NUDGE_DELAY_MS);
+  return true;
+}
+
 export function startCliSyncWatcher(): void {
   if (started) return;
   started = true;
+  nudgeHost.__trellisCliSyncNudge = nudgeAttached;
   // Observe changes immediately; offline catchup must not hold instrumentation
   // (and every first HTTP request) behind all persisted transcript histories.
   void catchUpAttachedSessions();

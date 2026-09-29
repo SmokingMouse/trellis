@@ -181,3 +181,46 @@ describe("端点文件没写时这个口是关的", () => {
     }
   });
 });
+
+describe("hook 驱动同步：每个事件都催镜像重导（S184）", () => {
+  const host = globalThis as typeof globalThis & { __trellisCliSyncNudge?: (p: string) => boolean };
+
+  test("带 transcript_path 的事件转给持有 watcher 的那份实例", async () => {
+    const seen: string[] = [];
+    host.__trellisCliSyncNudge = (p) => {
+      seen.push(p);
+      return true;
+    };
+    try {
+      const r = await post({
+        hook_event_name: "PostToolUse",
+        session_id: "nudge-1",
+        transcript_path: "/tmp/x/nudge-1.jsonl",
+        tool_name: "Bash",
+      });
+      expect(r.status).toBe(200);
+      expect((await r.json()).nudged).toBe(true);
+      expect(seen).toEqual(["/tmp/x/nudge-1.jsonl"]);
+      // 不带路径的事件不催
+      await post({ hook_event_name: "Notification", session_id: "nudge-1" });
+      expect(seen.length).toBe(1);
+    } finally {
+      delete host.__trellisCliSyncNudge;
+    }
+  });
+
+  test("重导入口抛错也不影响 hook 应答；watcher 没起时静默", async () => {
+    host.__trellisCliSyncNudge = () => {
+      throw new Error("boom");
+    };
+    try {
+      const r = await post({ hook_event_name: "Stop", session_id: "nudge-2", transcript_path: "/tmp/x/n2.jsonl" });
+      expect(r.status).toBe(200);
+    } finally {
+      delete host.__trellisCliSyncNudge;
+    }
+    const r2 = await post({ hook_event_name: "Stop", session_id: "nudge-3", transcript_path: "/tmp/x/n3.jsonl" });
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).nudged).toBe(false);
+  });
+});

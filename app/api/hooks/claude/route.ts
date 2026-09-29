@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readHookToken } from "@/lib/server/agent-hooks/endpoint";
 import { recordClaudeHook } from "@/lib/server/agent-hooks/store";
+import { nudgeCliTranscript } from "@/lib/server/cli-sync-watcher";
 import type { ClaudeHookPayload } from "@/lib/server/agent-hooks/types";
 
 export const runtime = "nodejs";
@@ -59,9 +60,22 @@ export async function POST(req: Request) {
   const paneKey = typeof paneKeyField === "string" ? paneKeyField : null;
 
   const record = recordClaudeHook(payload, { paneKey });
+  // Hook 驱动同步：每个事件都意味着 transcript 刚追加过（或马上追加），让镜像立刻
+  // 重导，而不是等 fs.watch 的 600ms 去抖。只对已镜像的文件生效；失败不影响应答。
+  const transcriptPath =
+    typeof payload.transcript_path === "string" ? payload.transcript_path : null;
+  let nudged = false;
+  if (transcriptPath) {
+    try {
+      nudged = nudgeCliTranscript(transcriptPath);
+    } catch {
+      /* 同步是锦上添花，hook 应答必须快且稳 */
+    }
+  }
   if (!record) {
     // 没有 session_id 就没法归属。不是错误（有些事件确实不带），静默认账。
     return Response.json({ ok: true, ignored: "no session_id" });
   }
-  return Response.json({ ok: true, sessionId: record.sessionId, state: record.state });
+  // nudged：这次事件是否催动了镜像重导（排查「为什么没同步」时看这个）。
+  return Response.json({ ok: true, sessionId: record.sessionId, state: record.state, nudged });
 }

@@ -90,6 +90,12 @@ export type TurnCardProps = {
   onBranch?: (nodeId: string) => void;
   canDelete?: boolean;
   onDelete?: (nodeId: string) => void;
+  /**
+   * 镜像会话（Herdr 窗格里的 Claude Code）这一轮还在跑时的状态文案。镜像节点在库里
+   * 恒为 done（内容来自 jsonl 快照），真实运行态来自 hook / 窗格状态，由线性视图算好
+   * 传进来：有值 = 按进行中渲染（底部 RunLine、不出「暂无文本回复」和 tok/s）。
+   */
+  mirrorRun?: string | null;
 };
 
 export const TurnCard = memo(function TurnCard({
@@ -102,6 +108,7 @@ export const TurnCard = memo(function TurnCard({
   onBranch,
   canDelete = false,
   onDelete,
+  mirrorRun = null,
 }: TurnCardProps) {
   const jumpToParentAtAnchor = useSessionStore((s) => s.jumpToParentAtAnchor);
   const hasParent = useSessionStore((s) =>
@@ -180,7 +187,12 @@ export const TurnCard = memo(function TurnCard({
           re-parented under our marks and throws NotFoundError. Unmounting
           cleanly lets the cleanup clearMarks() run before React touches the
           DOM. */}
-      <ResponseBody key={node.id} node={node} readOnly={readOnly} />
+      <ResponseBody
+        key={node.id}
+        node={node}
+        readOnly={readOnly}
+        mirrorLive={mirrorRun !== null}
+      />
       {/* A路③: when this node's run is paused on an interactive tool, render
           the answer form below the response so the user can reply in place
           and the model continues. */}
@@ -191,25 +203,29 @@ export const TurnCard = memo(function TurnCard({
         />
       )}
       {node.status === "streaming" && <RunLine node={node} />}
-      {toolbar}
+      {mirrorRun !== null && node.status !== "streaming" ? (
+        <RunLine node={node} label={mirrorRun} />
+      ) : (
+        toolbar
+      )}
     </>
   );
 });
 
 // 流式状态全页只有一种写法：每轮底部一行「圆点 + 状态文案 + 计时」。
 // 不再三点跳动 + 闪烁光标 + 脉冲点并存（research 根因 #4）。
-function RunLine({ node }: { node: ChatNode }) {
+function RunLine({ node, label: override }: { node: ChatNode; label?: string }) {
   const elapsed = useElapsed(node.createdAt ?? null, true);
   const runningTool = [...node.toolCalls]
     .reverse()
     .find((c) => c.status === "running");
-  const label = node.pendingInteraction
+  const label = override ?? (node.pendingInteraction
     ? node.pendingInteraction.toolName === "AskUserQuestion"
       ? "等待你回答"
       : "等待你批准"
     : runningTool
       ? `正在运行 ${toolTitle(runningTool)}`
-      : "正在生成";
+      : "正在生成");
   return (
     <div
       data-turn-runline=""
@@ -659,9 +675,12 @@ function MentionChip() {
 function ResponseBody({
   node,
   readOnly,
+  mirrorLive = false,
 }: {
   node: ChatNode;
   readOnly: boolean;
+  /** 镜像会话本轮仍在跑：空 response 只是还没写到，不出「暂无输出」。 */
+  mirrorLive?: boolean;
 }) {
   const retryNode = useSessionStore((s) => s.retryNode);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -782,7 +801,7 @@ function ResponseBody({
             {node.response}
           </div>
         )
-      ) : (
+      ) : mirrorLive ? null : (
         <EmptyResponseNotice
           hasToolCalls={
             node.toolCalls.length > 0 || (node.toolCallStats?.total ?? 0) > 0
