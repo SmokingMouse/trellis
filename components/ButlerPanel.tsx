@@ -11,8 +11,9 @@ import {
   RefreshCw,
   type LucideIcon,
 } from "lucide-react";
-import { IconButton, Icon, Skeleton, StatusDot, type StatusTone } from "@/components/ui";
-import type { ButlerOverview, ButlerSection } from "@/lib/butler";
+import { Button, IconButton, Icon, Skeleton, StatusDot, type StatusTone } from "@/components/ui";
+import { CHANGE_KIND_LABEL, type ButlerChange, type ButlerOverview, type ButlerSection } from "@/lib/butler";
+import { useButlerStore } from "@/stores/butlerStore";
 
 // 管家会话右栏：「当前配置」只读镜像 + 管家的规矩。数据走 /api/butler/overview
 // （与 `trellisctl overview` 同源），管家每轮答完自动刷新一次 —— 它刚改的东西
@@ -79,6 +80,9 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
   const [data, setData] = useState<ButlerOverview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const recent = useButlerStore((s) => s.recent);
+  // 卡片上确认 / 撤销之后，配置镜像要跟着变。
+  const lastDecided = recent[0] ? `${recent[0].id}:${recent[0].status}` : "";
 
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
@@ -130,7 +134,7 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
     return () => {
       alive = false;
     };
-  }, [wide, refreshKey]);
+  }, [wide, refreshKey, lastDecided]);
 
   const refresh = () => {
     setLoading(true);
@@ -183,12 +187,16 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
           ))}
       </div>
 
+      <h2 className="mt-6 mb-2 px-0.5 text-label font-medium text-ink-faint">变更记录</h2>
+      <ChangeLog changes={recent} />
+
       <h2 className="mt-6 mb-2 px-0.5 text-label font-medium text-ink-faint">管家的规矩</h2>
       <div className="space-y-1 rounded-card border border-line bg-surface px-3 py-2.5 text-label leading-relaxed text-ink-muted">
         <Rule tag="读">随便查，不打扰你</Rule>
-        <Rule tag="改">先用人话讲清要改什么，你说确认才写</Rule>
+        <Rule tag="改">出一张预览卡，你点确认才生效；能撤销</Rule>
+        <Rule tag="删" tone="danger">删 Agent / 任务：输入名字二次确认，撤销不了</Rule>
         <Rule tag="建任务">先手动跑一次看结果，满意了再挂定时</Rule>
-        <Rule tag="不碰" tone="danger">密钥、升级回滚、删机器人、Trellis 自身代码</Rule>
+        <Rule tag="不碰">密钥、升级回滚、删机器人：只告诉你去哪改</Rule>
       </div>
       {data && (
         <div className="mt-3 px-0.5 text-nano text-ink-faint">
@@ -204,6 +212,51 @@ function Rule({ tag, tone, children }: { tag: string; tone?: "danger"; children:
     <div className="flex items-baseline gap-2">
       <span className={tone === "danger" ? "w-12 shrink-0 text-danger-ink" : "w-12 shrink-0 text-ink-faint"}>{tag}</span>
       <span>{children}</span>
+    </div>
+  );
+}
+
+function ChangeLog({ changes }: { changes: ButlerChange[] }) {
+  const act = useButlerStore((s) => s.act);
+  const busy = useButlerStore((s) => s.busy);
+  if (changes.length === 0) {
+    return (
+      <div className="rounded-card border border-line bg-surface px-3 py-3 text-label text-ink-faint">
+        还没有经管家改过的配置
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-card border border-line bg-surface">
+      {changes.map((c) => {
+        const reverted = c.status === "reverted";
+        const at = reverted ? c.revertedAt : c.decidedAt;
+        return (
+          <div
+            key={c.id}
+            data-butler-log={c.id}
+            className="grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 px-3 py-2.5 text-ui [&+&]:border-t [&+&]:border-line-faint"
+          >
+            <StatusDot tone={reverted ? "idle" : "positive"} />
+            <div className="min-w-0">
+              <div className={reverted ? "truncate text-ink-faint line-through" : "truncate font-medium text-ink"}>
+                {CHANGE_KIND_LABEL[c.kind]}「{c.targetLabel}」
+              </div>
+              <div className="text-label text-ink-faint">
+                {at ? new Date(at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}
+                {reverted ? " · 已撤销" : ""}
+              </div>
+            </div>
+            {c.revertible ? (
+              <Button size="sm" variant="ghost" disabled={!!busy[c.id]} onClick={() => void act(c, "revert")}>
+                撤销
+              </Button>
+            ) : (
+              <span />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

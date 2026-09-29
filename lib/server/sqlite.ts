@@ -747,6 +747,34 @@ function migrate(db: Database) {
   seedBuiltinAgents(db);
   upgradeBuiltinPrompts(db);
 
+  // 管家改动提案：管家会话里 trellisctl 的配置写请求不直接落库，先存成一条
+  // pending 提案（原样的 method/path/body），用户在卡片上确认后才进程内重放
+  // 对应路由。before_json = 应用那一刻的快照，撤销据此构造逆请求。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS butler_changes (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      node_id TEXT,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      body_json TEXT,
+      kind TEXT NOT NULL,
+      target_id TEXT,
+      target_label TEXT NOT NULL,
+      risk TEXT NOT NULL DEFAULT 'normal' CHECK(risk IN ('normal','high')),
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','applied','rejected','failed','reverted')),
+      before_json TEXT,
+      result_json TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      reverted_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS butler_changes_session ON butler_changes(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS butler_changes_decided ON butler_changes(decided_at);
+  `);
+
   // ON DELETE SET NULL 而非 CASCADE，理由同 workspace_id：删一个 agent 不该连坐删掉
   // 用它聊过的全部历史，退回默认人设即可。
   const hasSessionAgentId = db
