@@ -110,10 +110,10 @@ export function SessionTabs() {
   // 功能重叠，还吃掉 2.25rem 纵向空间——手机上会话切换走抽屉。
   return (
     <div
-      className="hidden md:block fixed top-12 right-0 z-30 h-9 bg-surface-canvas border-b border-line"
+      className="hidden md:flex fixed top-12 right-0 z-30 h-9 bg-surface-canvas border-b border-line"
       style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
-      <div className="h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
+      <div className="min-w-0 flex-1 h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
           <div className="self-center pl-1 text-label text-ink-faint">
             从侧栏或搜索打开会话；单击是预览，双击标签固定
@@ -142,13 +142,18 @@ export function SessionTabs() {
             />
           );
         })}
-        <div className="self-center ml-auto pl-1 shrink-0 flex items-center gap-1">
-          {/* Redundant secondary new-session entry. */}
+        {/* Redundant secondary new-session entry — sits right after the last tab, browser-style. */}
+        <div className="self-center pl-0.5 shrink-0 flex items-center">
           <IconButton label="新会话（全新的树）" size="sm" onClick={() => newSandboxConversation()}>
             <Icon icon={Plus} size="sm" />
           </IconButton>
         </div>
       </div>
+      {/* LinearThreadView portals 宽度切换 / 画布 / Herdr 标识 into this slot. */}
+      <div
+        id="trellis-tab-actions"
+        className="shrink-0 flex items-center pl-3 pr-3 empty:hidden"
+      />
     </div>
   );
 }
@@ -217,6 +222,10 @@ function Tab({
       <span className={`truncate ${preview ? "italic" : ""}`}>
         {session.title}
       </span>
+      {/* 当前标签顶部一道主色细条（强调色点缀，2026-09-29）；运行条在底部，互不打架。 */}
+      {active && (
+        <span aria-hidden className="absolute inset-x-2 -top-1 h-0.5 rounded-full bg-accent" />
+      )}
       {/* Accent sliding underline bar — peripheral "this one is running" cue. */}
       {running && <span className="trellis-run-bar" aria-hidden />}
       {/* × close — always present, dims until hover to avoid noise. */}

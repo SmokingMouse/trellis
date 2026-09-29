@@ -895,6 +895,23 @@ html, body {
 .md-body h1 { font-size: 1.2em; }
 .md-body h2 { font-size: 1.1em; }
 .md-body h3 { font-size: 1.0em; }
+/* 强调色点缀（2026-09-29 用户拍板）：h1/h2 前一道主色短标、h3 用浅一档，
+   让长回答的段落骨架一眼可扫；不给标题整行上色，克制风不破。 */
+.md-body h1, .md-body h2, .md-body h3 {
+  position: relative;
+  padding-left: 0.7em;
+}
+.md-body h1::before, .md-body h2::before, .md-body h3::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.22em;
+  bottom: 0.22em;
+  width: 3px;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+.md-body h3::before { background: var(--accent-line); }
 /* Branch popover: source-text highlight while composing (CSS Custom
    Highlight API — painted from BranchPopover so it survives the native
    selection collapsing on textarea click). Accent-tinted to read like a
@@ -996,7 +1013,7 @@ html, body {
 
 /* Blockquote */
 .md-body blockquote {
-  border-left: 2px solid var(--line-strong);
+  border-left: 2px solid var(--accent-line);
   margin: 0.7em 0;
   padding: 0.1em 0 0.1em 0.9em;
   color: var(--ink-muted);

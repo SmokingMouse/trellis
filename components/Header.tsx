@@ -393,14 +393,22 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     <header
       data-safe-area="header"
       data-header
-      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-2 sm:px-3 z-40 gap-3"
+      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-2 sm:px-3 md:pl-0 z-40 gap-3"
       style={{
         height: "var(--trellis-header-h)",
         paddingTop: "var(--safe-top)",
       }}
     >
       {/* ── 左：导航 ── */}
-      <div data-header-group="nav" className="flex min-w-0 flex-1 items-center gap-1.5">
+      <div data-header-group="nav" className="flex min-w-0 shrink items-center gap-2 md:self-stretch">
+        {/* 品牌格：侧栏展开时宽度 = 侧栏宽度并接上侧栏右边线，面包屑从边线起排，
+            与下方标签条、正文列同一条竖线（照 mockups/01-workbench.html）。 */}
+        <div
+          data-header-brand
+          className={`flex shrink-0 items-center gap-1.5 md:self-stretch md:pl-3 ${
+            sidebarOpen ? "md:w-(--trellis-sb) md:border-r md:border-line" : ""
+          }`}
+        >
         {/* 手机以外的窄屏也可能走到这里（md 以下的「转桌面版」）：侧栏不常驻，
             汉堡键打开会话抽屉。 */}
         <IconButton
@@ -442,19 +450,20 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             </span>
           </button>
         </Tooltip>
+        </div>
         {session && (
           <nav
             aria-label="当前位置"
             data-header-breadcrumb
-            className="ml-1 flex min-w-0 items-center gap-1 text-ui text-ink-muted"
+            className="flex min-w-0 items-center gap-1 text-ui text-ink-muted"
           >
-            <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />
+            {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
             {workspaceName ? (
               <Tooltip content={`${session.workspacePath}（点击浏览工作区文件）`}>
                 <button
                   type="button"
                   onClick={() => setWorkspaceFilesOpen(true)}
-                  className="max-w-40 shrink truncate rounded-md px-1 hover:bg-surface-hover hover:text-ink"
+                  className="max-w-40 shrink-0 truncate rounded-md px-1 hover:bg-surface-hover hover:text-ink"
                 >
                   {workspaceName}
                 </button>
@@ -478,7 +487,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       {/* ── 中：会话语境 ── */}
       {/* 窄屏（手机用户手动「转桌面版」）下这一组可以收缩：模式 chip 让位，模型名截断，
           不能盖住左侧的汉堡键。 */}
-      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5">
+      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5 md:shrink-0 md:border-l md:border-line-faint md:pl-3">
         <div className="contents max-md:hidden">
           <ModeBadge />
         </div>
@@ -500,7 +509,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                     // 文案被 mobile-safe-area 当钩子用；百分比在按钮可见文字里，读屏照样念到。
                     ctx ? "上下文占用，点击查看详情" : "用量，点击查看详情"
                   }
-                  className="hidden h-7 items-center gap-2 rounded-field px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
+                  className="hidden h-7 items-center gap-2 whitespace-nowrap rounded-field px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
                 >
                   {ctx ? (
                     <ContextMeter percent={ctx.percent} />
@@ -529,7 +538,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       </div>
 
       {/* ── 右：系统 ── */}
-      <div data-header-group="system" className="flex flex-1 items-center justify-end gap-1">
+      <div data-header-group="system" className="ml-auto flex shrink-0 items-center justify-end gap-1">
         <Tooltip content="搜索会话与节点内容" shortcut="⌘P">
           <button
             type="button"

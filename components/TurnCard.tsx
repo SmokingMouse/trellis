@@ -550,8 +550,10 @@ function QuestionBlock({
   return (
     <div
       data-turn-question=""
-      className="group/q relative rounded-card bg-surface-muted px-3.5 py-2.5 pr-10"
+      className="group/q relative rounded-card bg-surface-muted pl-4.5 pr-10 py-2.5"
     >
+      {/* 提问的主色竖条：和助手正文一眼分开（强调色点缀，2026-09-29）。 */}
+      <span aria-hidden className="absolute left-1.5 top-2.5 bottom-2.5 w-0.75 rounded-full bg-accent" />
       {/* 左侧槽位：未读点常显；序号 hover / 当前锚点时显示（手机端没有槽位，只留点）。 */}
       <span className="absolute right-full top-3 mr-2 flex items-center gap-1.5 whitespace-nowrap">
         {index !== undefined && (

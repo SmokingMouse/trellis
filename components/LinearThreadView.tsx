@@ -9,6 +9,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
@@ -114,6 +115,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     ],
   );
   const isHerdr = isHerdrSession(session, herdrSnapshot.fleet);
+  // SessionTabs 渲染 #trellis-tab-actions 占位；它先于本组件挂载，所以 effect 里一定取得到。
+  const [tabActionsSlot, setTabActionsSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setTabActionsSlot(document.getElementById("trellis-tab-actions"));
+  }, []);
   const butler = isButlerSession(session);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
@@ -583,7 +589,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         data-thread-header-hidden={mobileHeaderHidden ? "true" : undefined}
         aria-hidden={mobileHeaderHidden ? true : undefined}
         inert={mobileHeaderHidden ? true : undefined}
-        className="shrink-0 z-30 max-md:h-14 border-b border-line/80 bg-surface-canvas/90 backdrop-blur transition-transform duration-200 motion-reduce:transition-none"
+        className="shrink-0 z-30 max-md:h-14 md:hidden border-b border-line/80 bg-surface-canvas/90 backdrop-blur transition-transform duration-200 motion-reduce:transition-none"
         style={{
           transform: mobileHeaderHidden
             ? "translateY(calc(-100% - var(--trellis-header-h)))"
@@ -607,8 +613,23 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               {session.title}
             </h1>
           </div>
-          {/* 移动端卡片本就贴满屏宽，宽度切换无意义，藏起来省空间 */}
-          <div className="hidden md:block shrink-0">
+        </div>
+      </div>
+
+      {/* 桌面端：标题已在面包屑和标签里，不再单独占一行；Herdr 标识、宽度切换、
+          画布入口收进标签条右端（照 mockups/01-workbench.html），和正文列不再错位。 */}
+      {!isMobile &&
+        tabActionsSlot &&
+        createPortal(
+          <div data-thread-actions className="flex min-w-0 items-center gap-2">
+            {isHerdr && (
+              <div className="min-w-0 max-w-80">
+                <HerdrSessionBadge
+                  pane={herdrPane}
+                  loading={herdrSnapshot.loading}
+                />
+              </div>
+            )}
             <SegmentedControl
               size="sm"
               aria-label="内容宽度"
@@ -620,21 +641,21 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 title: `内容宽度：${opt.label}`,
               }))}
             />
-          </div>
-          {!isMobile && !isHerdr && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setViewMode("canvas")}
-              data-map-open
-              className="shrink-0"
-            >
-              <Icon icon={Workflow} size="sm" />
-              画布
-            </Button>
-          )}
-        </div>
-      </div>
+            {!isHerdr && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewMode("canvas")}
+                data-map-open
+                className="shrink-0"
+              >
+                <Icon icon={Workflow} size="sm" />
+                画布
+              </Button>
+            )}
+          </div>,
+          tabActionsSlot,
+        )}
 
       {isMobile && <PendingBar mobile hiddenChrome={mobileHeaderHidden} />}
 
