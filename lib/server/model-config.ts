@@ -86,6 +86,9 @@ export function readModelConfigState(): ModelConfigState {
     default?: string;
     env_file?: string;
   };
+  // key 真正住在 env_file 里；process.env 只有在某次 LLM 调用触发 loadEnvFile
+  // 之后才有。只看 process.env 会在服务刚启动时把所有第三方 provider 误报成缺 key。
+  const fileKeys = js.env_file ? envFileKeys(expandHome(js.env_file)) : new Set<string>();
   const providers: ModelConfigProvider[] = Object.entries(js.providers ?? {}).map(
     ([name, prov]) => {
       const apiKeyEnv = prov?.api_key_env ?? defaultKeyEnv(name);
@@ -96,7 +99,7 @@ export function readModelConfigState(): ModelConfigState {
         openai_url: prov?.openai_url,
         api_key_env: apiKeyEnv,
         models: (prov?.models ?? []).map(String),
-        hasKey: native || !!process.env[apiKeyEnv],
+        hasKey: native || !!process.env[apiKeyEnv] || fileKeys.has(apiKeyEnv),
         native,
       };
     },
@@ -108,6 +111,24 @@ export function readModelConfigState(): ModelConfigState {
     defaultModel: js.default ?? null,
     providers,
   };
+}
+
+/** env_file 里值非空的变量名（`KEY=v` / `export KEY=v`；注释与空值不算）。只读名字不碰值。 */
+export function envFileKeys(file: string): Set<string> {
+  const out = new Set<string>();
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return out;
+  }
+  for (const line of text.split("\n")) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const v = m[2].trim().replace(/^(['"])(.*)\1$/, "$2");
+    if (v) out.add(m[1]);
+  }
+  return out;
 }
 
 function defaultKeyEnv(name: string): string {
