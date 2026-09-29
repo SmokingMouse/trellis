@@ -54,24 +54,12 @@ import {
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
 import { useIsDesktopViewport } from "@/hooks/useIsMobile";
-import { formatRelativeTimeShort } from "@/lib/relative-time";
 import { ContextMenu, useContextMenuWithTarget, type ContextMenuItem } from "@/components/ui/ContextMenu";
-import {
-  STATUS_PRIORITY,
-  deriveRecentChainStatus,
-  resolveSessionCollapsed,
-  resolveTreeExpanded,
-  toggleSessionCollapsedState,
-  toggleTreeExpandedState,
-  type RecentChainStatus,
-  type SessionTree,
-  type SessionTreeChain,
-} from "@/lib/recent";
+import { type RecentChainStatus } from "@/lib/recent";
 import {
   HOME_CLUSTER_KEY,
   SCRATCH_CLUSTER_KEY,
   type ProjectSummary,
-  type RecentChain,
   type WorkspaceSummary,
   type Session,
   type WorkspaceGitStatus,
@@ -84,7 +72,7 @@ import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
 import { isButlerSession } from "@/lib/butler";
-import { herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, partitionEmptyWorkspaces, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
+import { herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
 const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "herdr", "task", "lark", "external"].includes(v as string);
@@ -128,17 +116,12 @@ export function SessionSidebar() {
   const setMobileNavOpen = useSessionStore((s) => s.setMobileNavOpen);
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const runningIds = useSessionStore((s) => s.runningSessionIds);
-  const runningNodeIds = useSessionStore((s) => s.runningNodeIds);
-  const waitingNodeIds = useSessionStore((s) => s.waitingNodeIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
   const unarchiveSession = useSessionStore((s) => s.unarchiveSession);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
   const setDraftMode = useSessionStore((s) => s.setDraftMode);
   const setDraftWorkspacePath = useSessionStore((s) => s.setDraftWorkspacePath);
-  const openNodeInSession = useSessionStore((s) => s.openNodeInSession);
-  const setViewMode = useSessionStore((s) => s.setViewMode);
-  const activeNodeId = useSessionStore((s) => s.activeNodeId);
   const [attachOpen, setAttachOpen] = useState(false);
   const [mobileAdvancedOpen, setMobileAdvancedOpen] = useState(false);
   const [diffTarget, setDiffTarget] = useState<{
@@ -209,70 +192,6 @@ export function SessionSidebar() {
     });
   };
 
-  // 会话结构（树与链）缓存与刷新
-  const [structures, setStructures] = useState<Map<string, SessionTree[]>>(() => new Map());
-  const structuresRef = useRef(structures);
-  structuresRef.current = structures;
-  const [structureNonce, setStructureNonce] = useState(0);
-  const fetchingStructureRef = useRef<Set<string>>(new Set());
-
-  const fetchStructure = useCallback(async (sessionId: string, force = false) => {
-    if (fetchingStructureRef.current.has(sessionId)) return;
-    if (!force && structuresRef.current.has(sessionId)) return;
-    fetchingStructureRef.current.add(sessionId);
-    try {
-      const r = await fetch(`/api/sessions/${sessionId}/structure`);
-      if (r.ok) {
-        const data = await r.json();
-        setStructures((prev) => {
-          const next = new Map(prev);
-          next.set(sessionId, (data.trees ?? []) as SessionTree[]);
-          return next;
-        });
-      }
-    } catch {
-      /* 静默处理 */
-    } finally {
-      fetchingStructureRef.current.delete(sessionId);
-    }
-  }, []);
-
-  // 默认折叠状态由树数决定（SN-1）：多树展开到树行（collapsed=false），单树折叠（collapsed=true）
-  const isSessionCollapsed = useCallback(
-    (sessionId: string, treeCount: number) =>
-      resolveSessionCollapsed(sessionId, treeCount, collapsed),
-    [collapsed],
-  );
-
-  const toggleSessionCollapsed = useCallback(
-    (sessionId: string, treeCount: number) => {
-      const isCurrentCollapsed = resolveSessionCollapsed(sessionId, treeCount, collapsed);
-      setCollapsedIds((prev) =>
-        toggleSessionCollapsedState(sessionId, isCurrentCollapsed, prev),
-      );
-      // 展开时立即拉取该会话结构
-      if (isCurrentCollapsed) {
-        void fetchStructure(sessionId);
-      }
-    },
-    [collapsed, setCollapsedIds, fetchStructure],
-  );
-
-  const isTreeExpanded = useCallback(
-    (sessionId: string, rootId: string) =>
-      resolveTreeExpanded(sessionId, rootId, collapsed),
-    [collapsed],
-  );
-
-  const toggleTreeCollapsed = useCallback(
-    (sessionId: string, rootId: string) => {
-      const isCurrentExpanded = resolveTreeExpanded(sessionId, rootId, collapsed);
-      setCollapsedIds((prev) =>
-        toggleTreeExpandedState(sessionId, rootId, isCurrentExpanded, prev),
-      );
-    },
-    [collapsed, setCollapsedIds],
-  );
   // 已归档：勾「含已归档」时才懒加载归档行；计数随主列表免费带回。
   const [archivedCount, setArchivedCount] = useState(0);
   const [archived, setArchived] = useState<Session[]>([]);
@@ -301,18 +220,6 @@ export function SessionSidebar() {
       cancelled = true;
     };
   }, [activeId, sessionsRevision, fleetSessionKey]);
-
-  // 会话结构的刷新触发 —— 切会话 / 列表变更之外，还看 node 级 key：它能分辨
-  // 「同会话 A 刚结束、B 接着运行」与 waiting 状态切换；session 级集合在这两种
-  // 情况下都不变。集合每 tick 都是新 Set，折成内容 key。
-  const runKey = useMemo(
-    () =>
-      [
-        ...[...waitingNodeIds].sort().map((id) => `w:${id}`),
-        ...[...runningNodeIds].sort().map((id) => `r:${id}`),
-      ].join(","),
-    [runningNodeIds, waitingNodeIds],
-  );
 
   // S1 P2：git 状态（分支 / 脏文件数 / 能不能回收）走独立一路，回来再填角标。
   //
@@ -361,11 +268,9 @@ export function SessionSidebar() {
 
   // 切回浏览器时刷一次 —— git 状态几乎总是在**别处**（终端里）被改变的，
   // 而「从终端切回来」正是它可能已经变了的那一刻。比定时轮询精准且省。
-  // 会话嵌套结构同样在切回时刷新 —— 活动可能刚在 CLI / 别的标签页里发生。
   useEffect(() => {
     const onFocus = () => {
       setGitNonce((n) => n + 1);
-      setStructureNonce((n) => n + 1);
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
@@ -398,31 +303,6 @@ export function SessionSidebar() {
     () => selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr),
     [sessions, archived, source, includeArchived, isOfflineHerdr],
   );
-
-  // 会话结构（树与链）懒加载与刷新（SN-2）：
-  // 只对当前展开的会话发结构请求；sessionsRevision 变化、运行集合变化、窗口聚焦时刷新已展开会话
-  const lastRefreshTriggerRef = useRef("");
-  useEffect(() => {
-    const currentRefreshTrigger = `${sessionsRevision}:${runKey}:${structureNonce}`;
-    const isExplicitRefresh =
-      lastRefreshTriggerRef.current !== "" &&
-      lastRefreshTriggerRef.current !== currentRefreshTrigger;
-    lastRefreshTriggerRef.current = currentRefreshTrigger;
-
-    for (const s of visibleSessions) {
-      const treeCount = s.treeCount ?? structuresRef.current.get(s.id)?.length ?? 1;
-      if (!isSessionCollapsed(s.id, treeCount)) {
-        void fetchStructure(s.id, isExplicitRefresh);
-      }
-    }
-  }, [
-    visibleSessions,
-    isSessionCollapsed,
-    sessionsRevision,
-    runKey,
-    structureNonce,
-    fetchStructure,
-  ]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -584,12 +464,9 @@ export function SessionSidebar() {
     setMobileNavOpen(false);
   };
 
-  // 会话行及其嵌套「树 → 链」两层渲染。
-  // 会话行可折叠：多树会话默认展开到树行（树行折叠），单树会话默认折叠。
-  const renderRow = (s: Session, indent = 0) => {
-    const treeCount = s.treeCount ?? structures.get(s.id)?.length ?? 1;
-    const isCollapsed = isSessionCollapsed(s.id, treeCount);
-    const sessionTrees = structures.get(s.id);
+  // 会话行。侧栏固定两层（分组 → 会话，S184）：树 / 链不再在侧栏展开，
+  // 行尾只回显话题数 / 分叉数，进会话后在思维树面板切换；工作区降为行尾分支标签。
+  const renderRow = (s: Session, indent = 0, workspaceTag?: string | null) => {
 
     return (
       <div key={s.id} data-sidebar-session-item={s.id}>
@@ -600,9 +477,8 @@ export function SessionSidebar() {
           preview={s.id === previewId}
           running={isRunning(s.id)}
           unread={unreadIds.has(s.id)}
-          collapsed={isCollapsed}
           isPinned={pinnedIds.includes(s.id)}
-          onToggle={() => toggleSessionCollapsed(s.id, treeCount)}
+          workspaceTag={workspaceTag}
           location={layout === "time" ? sessionLocation(s, projects) : undefined}
           herdr={sidebarSource(s) === "herdr" ? herdrStatus.get(s.id) ?? { status: "unknown", alive: false, paneId: "" } : undefined}
           offline={isOfflineHerdr(s)}
@@ -643,93 +519,6 @@ export function SessionSidebar() {
             }
           }}
         />
-        {!isCollapsed && sessionTrees && sessionTrees.length > 0 && (
-          sessionTrees.length === 1 ? (
-            // 只有一棵树的会话不画树行，展开直接列出它的链
-            <div data-session-single-tree={s.id}>
-              <IndentGuide level={indent}>
-                {sessionTrees[0].chains.map((chain) => {
-                  const chainLiveStatus = deriveRecentChainStatus(chain, runningNodeIds, waitingNodeIds);
-                  return (
-                    <ChainRow
-                      key={chain.tipId}
-                      chain={chain}
-                      status={chainLiveStatus}
-                      showTree={false}
-                      indent={indent + 1}
-                      active={s.id === activeId && chain.tipId === activeNodeId}
-                      onOpen={() => {
-                        setEditingId(null);
-                        if (mobileNavOpen) setViewMode("linear");
-                        setMobileNavOpen(false);
-                        void openNodeInSession(s.id, chain.tipId).catch(() => {});
-                      }}
-                    />
-                  );
-                })}
-              </IndentGuide>
-            </div>
-          ) : (
-            // 多树会话：列出树行，树行展开下列出链
-            <div data-session-trees={s.id}>
-              <IndentGuide level={indent}>
-                {sessionTrees.map((tree) => {
-                  const isTreeOpen = isTreeExpanded(s.id, tree.rootId);
-                  let treeLiveStatus: RecentChainStatus = "done";
-                  for (const c of tree.chains) {
-                    const st = deriveRecentChainStatus(c, runningNodeIds, waitingNodeIds);
-                    if (STATUS_PRIORITY[st] > STATUS_PRIORITY[treeLiveStatus]) {
-                      treeLiveStatus = st;
-                    }
-                  }
-                  return (
-                    <div key={tree.rootId} data-sidebar-tree={tree.rootId}>
-                      <TreeRow
-                        tree={tree}
-                        status={treeLiveStatus}
-                        indent={indent + 1}
-                        collapsed={!isTreeOpen}
-                        active={s.id === activeId && tree.chains.some((c) => c.tipId === activeNodeId)}
-                        onToggle={() => toggleTreeCollapsed(s.id, tree.rootId)}
-                        onOpen={() => {
-                          setEditingId(null);
-                          if (mobileNavOpen) setViewMode("linear");
-                          setMobileNavOpen(false);
-                          if (tree.chains.length > 0) {
-                            void openNodeInSession(s.id, tree.chains[0].tipId).catch(() => {});
-                          }
-                        }}
-                      />
-                      {isTreeOpen && (
-                        <IndentGuide level={indent + 1}>
-                          {tree.chains.map((chain) => {
-                            const chainLiveStatus = deriveRecentChainStatus(chain, runningNodeIds, waitingNodeIds);
-                            return (
-                              <ChainRow
-                                key={chain.tipId}
-                                chain={chain}
-                                status={chainLiveStatus}
-                                showTree={false}
-                                indent={indent + 2}
-                                active={s.id === activeId && chain.tipId === activeNodeId}
-                                onOpen={() => {
-                                  setEditingId(null);
-                                  if (mobileNavOpen) setViewMode("linear");
-                                  setMobileNavOpen(false);
-                                  void openNodeInSession(s.id, chain.tipId).catch(() => {});
-                                }}
-                              />
-                            );
-                          })}
-                        </IndentGuide>
-                      )}
-                    </div>
-                  );
-                })}
-              </IndentGuide>
-            </div>
-          )
-        )}
       </div>
     );
   };
@@ -757,27 +546,22 @@ export function SessionSidebar() {
     );
   };
 
-  // S1 三级：Project → Workspace → Session。折叠子树时把「藏了几个会话」
-  // 回显出来（与树面板折叠行同语义 —— 折叠不该把状态一起藏掉）。
-  //
-  // 但三级不是恒定的：workspace 那一层**不带信息时就该消失**，否则它只是
-  // 白占一级缩进、把真正要扫的会话往里推。两种不带信息的情形（见 isFlat）
-  // 走两级渲染 —— Project → Session 直挂。
+  // 工作区管理行（S184）：侧栏固定两层后，工作区不再是会话的父级，只在项目下
+  // 默认折叠的「工作区」组里出现，承载 新会话 / 看改动 / 删 worktree / 回收。
+  // 会话所在工作区改由会话行尾的分支标签表达。
   const renderWorkspaceItem = (w: WorkspaceSummary, isReclaimable = false) => {
     const list = byWorkspace.get(w.id) ?? [];
-    const wCollapsed = collapsed.has(w.id);
     const g = gitStatus.get(w.id);
     const br = g?.branch ?? w.gitBranch;
 
     return (
       <div key={w.id} data-sidebar-workspace={w.id}>
         <GroupRow
-          level={isReclaimable ? 2 : 1}
+          level={isReclaimable ? 3 : 2}
           icon={GitBranch}
-          collapsed={wCollapsed}
+          collapsed
           label={w.name}
-          // 有 session 才可折叠；空的没有子内容，给三角就是个骗人的开关。
-          toggleable={list.length > 0}
+          toggleable={false}
           tag={w.kind === "worktree" && !br ? "已脱离" : br && br !== w.name ? br : null}
           git={g ?? null}
           muted={list.length === 0 || isReclaimable}
@@ -791,8 +575,8 @@ export function SessionSidebar() {
               g?.reclaimable ? "\n已并入主干且工作区干净 —— 可以安全回收" : "",
             ].join("");
           })()}\n${list.length} 个会话${list.length === 0 ? "（还没在这里开过会话）" : ""}`}
-          badge={wCollapsed && list.length > 0 ? String(list.length) : null}
-          onToggle={() => toggleCollapsed(w.id)}
+          badge={list.length > 0 ? String(list.length) : null}
+          onToggle={() => {}}
           onInspectDiff={
             g?.dirty && g.dirty > 0
               ? () => setDiffTarget({ id: w.id, name: w.name, path: w.path })
@@ -806,11 +590,6 @@ export function SessionSidebar() {
               : undefined
           }
         />
-        {!wCollapsed && list.length > 0 && (
-          <IndentGuide level={isReclaimable ? 2 : 1}>
-            {list.map((s) => renderRow(s, isReclaimable ? 3 : 2))}
-          </IndentGuide>
-        )}
       </div>
     );
   };
@@ -823,43 +602,38 @@ export function SessionSidebar() {
       const presentation = projectPresentation(p);
       const unassigned = p.clusterKey === SCRATCH_CLUSTER_KEY ? orphans : [];
       const pCollapsed = collapsed.has(p.id);
-      const pCount = p.workspaces.reduce(
-        (n, w) => n + (byWorkspace.get(w.id)?.length ?? 0),
-        unassigned.length,
-      );
-      if (source !== "all" && pCount === 0) return null;
-      const { empty: emptyWorkspaces } = partitionEmptyWorkspaces(p.workspaces, byWorkspace);
-      const emptyKey = `__empty_${p.id}`;
-      const emptyOpen = collapsed.has(emptyKey);
-      // 平铺时各 workspace 的会话汇到一起，重新按最近活跃排 —— 每个 list
-      // 内部有序不代表拼起来有序。
-      const flatList = isFlat(p)
-        ? [...p.workspaces.flatMap((w) => byWorkspace.get(w.id) ?? []), ...unassigned]
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-        : [];
-      // 一个会话都没有就别平铺 —— 那会剩下个底下空无一物的项目行，
-      // 还不如留着那条灰的 workspace 行说明「这里还没开过会话」。
-      const flat = flatList.length > 0;
+      // 固定两层（S184）：项目下直挂会话，各工作区的会话汇到一起按最近活跃排
+      // （每个 list 内部有序不代表拼起来有序）。
+      const sessionList = [...p.workspaces.flatMap((w) => byWorkspace.get(w.id) ?? []), ...unassigned]
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      const pCount = sessionList.length;
+      // 管理组只在项目有多个工作区时出现；单工作区项目没会话就整组不画。
+      const hasWorkspaceGroup = !isFlat(p) && p.workspaces.length > 1;
+      if (pCount === 0 && (source !== "all" || !hasWorkspaceGroup)) return null;
+      // 分支标签只标 worktree 上的会话：主 checkout 是默认去处，标了等于每行都挂 main。
+      const wsTag = new Map<string, string>();
+      for (const w of p.workspaces) {
+        if (w.kind === "worktree") {
+          wsTag.set(w.id, gitStatus.get(w.id)?.branch ?? w.gitBranch ?? w.name);
+        }
+      }
 
-      // 划分活跃工作区 vs 已合并/可清理工作区
+      // 管理组里：活跃工作区 vs 已合并可清理
       const activeWorkspaces: WorkspaceSummary[] = [];
       const reclaimableWorkspaces: WorkspaceSummary[] = [];
-
       for (const w of p.workspaces) {
-        if (emptyWorkspaces.includes(w)) continue;
         const g = gitStatus.get(w.id);
-        const sessionList = byWorkspace.get(w.id) ?? [];
-        const hasRunning = sessionList.some((s) => isRunning(s.id));
-        // 已合并且本地无改动、无正在运行会话
+        const hasRunning = (byWorkspace.get(w.id) ?? []).some((s) => isRunning(s.id));
         if (g?.reclaimable && !hasRunning && (g?.dirty ?? 0) === 0) {
           reclaimableWorkspaces.push(w);
         } else {
           activeWorkspaces.push(w);
         }
       }
-
+      const wsKey = `__ws_${p.id}`;
+      // 默认折叠（不在 collapsed 集合内算折叠）
+      const wsOpen = collapsed.has(wsKey);
       const reclaimKey = `__reclaim_${p.id}`;
-      // 默认折叠已合并分组（不在 collapsed 集合内算折叠）
       const isReclaimCollapsed = !collapsed.has(reclaimKey);
 
       return (
@@ -876,8 +650,8 @@ export function SessionSidebar() {
             collapsed={pCollapsed}
             label={presentation.name}
             title={`${presentation.description || p.name}${p.gitRemote ? `\n${p.gitRemote}` : ""}\n${
-              flat && p.workspaces.length === 1
-                ? `${p.workspaces[0].path}\n`
+              !hasWorkspaceGroup
+                ? p.workspaces.length === 1 ? `${p.workspaces[0].path}\n` : ""
                 : `${p.workspaces.length} 个工作区 (${activeWorkspaces.length} 活跃 · ${reclaimableWorkspaces.length} 已合并) · `
             }${pCount} 个会话`}
             badge={pCount > 0 ? String(pCount) : null}
@@ -918,48 +692,54 @@ export function SessionSidebar() {
               </div>
             </div>
           )}
-          {!pCollapsed && flat && (
+          {!pCollapsed && sessionList.length > 0 && (
             <IndentGuide level={0}>
-              {flatList.map((s) => renderRow(s, 1))}
+              {sessionList.map((s) => renderRow(s, 1, s.workspaceId ? wsTag.get(s.workspaceId) : null))}
             </IndentGuide>
           )}
-          {!pCollapsed && !flat && (
+          {!pCollapsed && hasWorkspaceGroup && (
             <IndentGuide level={0}>
-              {activeWorkspaces.map((w) => renderWorkspaceItem(w, false))}
-              {reclaimableWorkspaces.length > 0 && (
-                <div>
-                  <GroupRow
-                    level={1}
-                    collapsed={isReclaimCollapsed}
-                    icon={Check}
-                    label="已合并"
-                    badge={String(reclaimableWorkspaces.length)}
-                    muted
-                    title={`已合并的工作区 · ${reclaimableWorkspaces.length} 个\n分支已并入主干且本地干净，可安全批量清理`}
-                    onToggle={() => toggleCollapsed(reclaimKey)}
-                    onBatchClean={() =>
-                      setBatchCleanTarget({
-                        ids: reclaimableWorkspaces.map((w) => w.id),
-                        projectName: p.name,
-                      })
-                    }
-                    batchCleanTitle="批量清理这组已合并工作区"
-                  />
-                  {!isReclaimCollapsed && (
-                    <IndentGuide level={1}>
-                      {reclaimableWorkspaces.map((w) =>
-                        renderWorkspaceItem(w, true),
+              <GroupRow
+                level={1}
+                icon={GitBranch}
+                collapsed={!wsOpen}
+                label={`工作区 ${p.workspaces.length}`}
+                title="这个项目的目录 / worktree：展开可在某个工作区开新会话、看改动、清理已合并的 worktree"
+                badge={null}
+                muted
+                onToggle={() => toggleCollapsed(wsKey)}
+              />
+              {wsOpen && (
+                <IndentGuide level={1}>
+                  {activeWorkspaces.map((w) => renderWorkspaceItem(w, false))}
+                  {reclaimableWorkspaces.length > 0 && (
+                    <div>
+                      <GroupRow
+                        level={2}
+                        collapsed={isReclaimCollapsed}
+                        icon={Check}
+                        label="已合并"
+                        badge={String(reclaimableWorkspaces.length)}
+                        muted
+                        title={`已合并的工作区 · ${reclaimableWorkspaces.length} 个\n分支已并入主干且本地干净，可安全批量清理`}
+                        onToggle={() => toggleCollapsed(reclaimKey)}
+                        onBatchClean={() =>
+                          setBatchCleanTarget({
+                            ids: reclaimableWorkspaces.map((w) => w.id),
+                            projectName: p.name,
+                          })
+                        }
+                        batchCleanTitle="批量清理这组已合并工作区"
+                      />
+                      {!isReclaimCollapsed && (
+                        <IndentGuide level={2}>
+                          {reclaimableWorkspaces.map((w) => renderWorkspaceItem(w, true))}
+                        </IndentGuide>
                       )}
-                    </IndentGuide>
+                    </div>
                   )}
-                </div>
+                </IndentGuide>
               )}
-            </IndentGuide>
-          )}
-          {!pCollapsed && emptyWorkspaces.length > 0 && (
-            <IndentGuide level={0}>
-              <GroupRow level={1} collapsed={!emptyOpen} label={`其它 ${emptyWorkspaces.length} 个工作区`} title="这些工作区没有符合当前筛选的会话；展开可新建会话、查看分支和清理已合并工作区" badge={null} muted onToggle={() => toggleCollapsed(emptyKey)} />
-              {emptyOpen && emptyWorkspaces.map(w => renderWorkspaceItem(w, Boolean(gitStatus.get(w.id)?.reclaimable)))}
             </IndentGuide>
           )}
         </div>
@@ -1484,9 +1264,8 @@ function SidebarRow({
   preview,
   running,
   unread,
-  collapsed,
   isPinned,
-  onToggle,
+  workspaceTag,
   location,
   herdr,
   offline,
@@ -1508,9 +1287,9 @@ function SidebarRow({
   preview: boolean;
   running: boolean;
   unread: boolean;
-  collapsed?: boolean;
   isPinned?: boolean;
-  onToggle?: () => void;
+  /** 所在工作区（分支 / worktree 名）。项目只有一个工作区时不传 —— 标签不带信息。 */
+  workspaceTag?: string | null;
   location?: string;
   herdr?: HerdrSessionStatus;
   /** Herdr 在线但这个会话的窗格已不存在 —— 与 archived 同档对待。 */
@@ -1625,6 +1404,17 @@ function SidebarRow({
         </span>,
       );
     }
+    if (workspaceTag) {
+      meta.push(
+        <span
+          key="ws"
+          className="max-w-[5rem] truncate rounded bg-surface-muted px-1 font-mono"
+          title={`工作区：${workspaceTag}`}
+        >
+          {workspaceTag}
+        </span>,
+      );
+    }
     if (session.archived) meta.push(<span key="arch">已归档</span>);
     if (offline) {
       meta.push(
@@ -1665,26 +1455,6 @@ function SidebarRow({
         {active && (
           <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent" aria-hidden />
         )}
-        <button
-          type="button"
-          data-testid="session-collapse-toggle"
-          aria-label={collapsed ? "展开会话结构" : "收起会话结构"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle?.();
-          }}
-          // 折叠态的三角只在 hover / 键盘聚焦时出现：一栏几十行、每行一个三角是噪音；
-          // 展开态常显，标明「下面挂着的是它的树 / 链」。
-          className={`-ml-1 flex size-3.5 shrink-0 items-center justify-center text-ink-faint hover:text-ink focus-visible:opacity-100 ${
-            collapsed ? "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" : ""
-          }`}
-        >
-          <Icon
-            icon={ChevronRight}
-            size="sm"
-            className={`transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
-          />
-        </button>
         <StatusSlot status={indicatorStatus} />
 
         {editing ? (
@@ -1800,134 +1570,6 @@ function SessionRowMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function TreeRow({
-  tree,
-  status,
-  indent = 2,
-  collapsed,
-  active,
-  onToggle,
-  onOpen,
-}: {
-  tree: SessionTree;
-  status: RecentChain["status"];
-  indent?: number;
-  collapsed: boolean;
-  active: boolean;
-  onToggle: () => void;
-  onOpen: () => void;
-}) {
-  const time = formatRelativeTimeShort(tree.activityAt);
-  const menu = useContextMenuWithTarget<SessionTree>();
-  const menuItems = useMemo<ContextMenuItem[]>(() => [
-    { label: "打开该树", onSelect: onOpen },
-    { label: collapsed ? "展开树分支" : "收起树分支", onSelect: onToggle },
-  ], [collapsed, onOpen, onToggle]);
-
-  return (
-    <>
-      <div
-        data-sidebar-tree-row
-        data-root-id={tree.rootId}
-        {...menu.bindTrigger(tree)}
-        onClick={onOpen}
-        style={{ paddingLeft: PAD(indent) }}
-        className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-md pr-1.5 transition-colors ${
-          active ? "bg-surface-hover text-ink-strong" : "text-ink hover:bg-surface-hover"
-        }`}
-        title={`${tree.treeLabel}\n${tree.nodeCount} 个节点 · ${time}\n点击打开该树最近的链尾`}
-      >
-        <button
-          type="button"
-          data-testid="tree-collapse-toggle"
-          aria-label={collapsed ? "展开树分支" : "收起树分支"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle();
-          }}
-          className="-ml-1 flex size-3.5 shrink-0 items-center justify-center text-ink-faint hover:text-ink"
-        >
-          <Icon
-            icon={ChevronRight}
-            size="sm"
-            className={`transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
-          />
-        </button>
-        <StatusSlot status={status} />
-        <span className="min-w-0 flex-1 truncate text-ui">{tree.treeLabel}</span>
-        <span className="shrink-0 text-nano tabular-nums text-ink-faint">
-          {tree.nodeCount} 节 · {time}
-        </span>
-      </div>
-      <ContextMenu {...menu.props} items={menuItems} label={`${tree.treeLabel} 菜单`} />
-    </>
-  );
-}
-
-// 会话 / 树展开后的链行：「[树名 › ]链尾标签 · 时间」。状态编码整条 lineage，
-// 紧急度降序：等你回答 > 生成中 > 出错 > 未读点 —— 与树面板树行的 rollup 同一套读法。
-function ChainRow({
-  chain,
-  status,
-  showTree,
-  active,
-  indent = 2,
-  onOpen,
-}: {
-  chain: RecentChain | SessionTreeChain;
-  status: RecentChain["status"];
-  showTree: boolean;
-  active: boolean;
-  indent?: number;
-  onOpen: () => void;
-}) {
-  const time = formatRelativeTimeShort(chain.activityAt);
-  // 单节点树的链尾就是根：树名 = 链尾标签，前缀只会把同一句话说两遍。
-  const withTree = showTree && chain.tipId !== chain.rootId;
-  const statusNote =
-    status === "waiting"
-      ? " · 等你回答"
-      : status === "streaming"
-        ? " · 生成中"
-        : status === "error"
-          ? " · 出错"
-          : status === "unread"
-            ? " · 未读"
-            : "";
-
-  const menu = useContextMenuWithTarget<RecentChain | SessionTreeChain>();
-  const menuItems = useMemo<ContextMenuItem[]>(() => [{ label: "打开此链", onSelect: onOpen }], [onOpen]);
-
-  return (
-    <>
-      <button
-        type="button"
-        data-mobile-target="session-chain-row"
-        data-tip-id={chain.tipId}
-        onClick={onOpen}
-        {...menu.bindTrigger(chain)}
-        style={{ paddingLeft: PAD(indent) }}
-        // button 的 display:flex 只让它成为 flex 容器，宽度仍按内容算（不像 div
-        // 会撑满）；不显式给宽，长标签就不 truncate、时间被挤出侧栏右缘。
-        className={`${ROW_HEIGHT_CLASS} mx-1 flex w-[calc(100%-0.5rem)] items-center gap-1.5 rounded-md pr-1.5 text-left transition-colors ${
-          active ? "bg-surface-hover text-ink-strong" : "text-ink-muted hover:bg-surface-hover hover:text-ink"
-        }`}
-        title={`${withTree && "treeLabel" in chain ? `${chain.treeLabel} › ` : ""}${chain.label}\n${chain.depth} 轮${statusNote} · ${time}\n点击落到这条链的链尾`}
-      >
-        <StatusSlot status={status} />
-        <span className="min-w-0 flex-1 truncate text-ui">
-          {withTree && "treeLabel" in chain && (
-            <span className="text-ink-faint">{chain.treeLabel} › </span>
-          )}
-          {chain.label}
-        </span>
-        <span className="shrink-0 text-nano tabular-nums text-ink-faint">{time}</span>
-      </button>
-      <ContextMenu {...menu.props} items={menuItems} label={`${chain.label} 菜单`} />
-    </>
   );
 }
 
