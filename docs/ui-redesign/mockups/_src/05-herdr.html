@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis 重设计稿 · 05 Herdr 操作台</title>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search).get("theme");
+    var t = q || localStorage.getItem("trellis-mock-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (t === "dark") document.documentElement.classList.add("dark");
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/*@WORKBENCH*/
+
+/* ═════════ 05 增量：只写工作台稿里没有的 ═════════ */
+[hidden] { display: none !important; }
+
+/* 侧栏：Herdr 入口 + 置顶区 */
+.sb-nav { padding: 0 6px 4px; display: flex; flex-direction: column; gap: 1px; }
+.nav-row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; font-size: var(--text-ui); color: var(--ink); position: relative; width: 100%; text-align: left; }
+.nav-row:hover { background: var(--surface-hover); }
+.nav-row.sel { background: var(--accent-muted); color: var(--accent-ink); }
+.nav-row .i { color: var(--ink-muted); }
+.nav-row .cnts { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; font-size: var(--text-label); color: var(--ink-faint); }
+.nav-row .cnts span { display: inline-flex; gap: 4px; align-items: center; }
+.nav-row .cnts .w { color: var(--warn-ink); font-weight: 500; }
+.t-row .slot .dot.warn { box-shadow: 0 0 0 3px var(--warn-muted); }
+
+/* 顶栏里的 Herdr 语境 */
+.hbadge { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-field); font-size: var(--text-label); color: var(--ink-muted); }
+.hbadge .i { color: var(--ink-faint); }
+.hbadge b { font-weight: 500; color: var(--ink); }
+.hbadge.need { border-color: var(--warn-line); }
+.icon-btn.on { background: var(--surface-muted); color: var(--ink); }
+
+/* 窗格切换条（新增） */
+.pstrip { flex: none; height: 38px; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--surface-canvas); overflow-x: auto; scrollbar-width: none; }
+.pstrip .lab { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-label); color: var(--ink-faint); padding: 0 8px 0 2px; }
+.pchip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; max-width: 200px; border-radius: 6px; font-size: var(--text-label); color: var(--ink-muted); border: 1px solid transparent; }
+.pchip:hover { background: var(--surface-hover); color: var(--ink); }
+.pchip[aria-current="true"] { background: var(--surface); border-color: var(--line-strong); color: var(--ink-strong); }
+.pchip .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pchip .ws { color: var(--ink-faint); }
+.pchip.need { color: var(--warn-ink); }
+.pchip .kbd { height: 16px; min-width: 16px; font-size: 10px; }
+.pchip.flash { animation: flash 1s ease-in-out 3; }
+@keyframes flash { 50% { background: var(--warn-muted); } }
+.pstrip .r { margin-left: auto; flex: none; display: inline-flex; gap: 10px; align-items: center; font-size: var(--text-label); color: var(--ink-faint); padding-left: 12px; }
+.pstrip .r span { display: inline-flex; gap: 3px; align-items: center; }
+
+/* 总览（新增） */
+.ov { flex: 1; overflow-y: auto; padding: 22px 24px 120px; }
+.ov .wrap { max-width: 1040px; margin: 0 auto; }
+.ov-h { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.ov-h h2 { margin: 0; font-size: var(--text-title); font-weight: 600; color: var(--ink-strong); }
+.ov-h .sum { display: flex; gap: 14px; font-size: var(--text-label); color: var(--ink-muted); }
+.ov-h .sum b { color: var(--ink-strong); font-weight: 600; margin-right: 2px; }
+.ov-h .r { margin-left: auto; font-size: var(--text-label); color: var(--ink-faint); display: inline-flex; gap: 6px; align-items: center; }
+.lane { margin-bottom: 26px; }
+.lane-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: var(--text-label); color: var(--ink-muted); font-weight: 500; }
+.lane-h .n { color: var(--ink-faint); font-weight: 400; }
+.lane-h .i { color: var(--warn); }
+.need-card { border: 1px solid var(--warn-line); border-radius: var(--radius-card); background: var(--surface); margin-bottom: 10px; transition: opacity var(--dur-base), transform var(--dur-base); }
+.need-card.leaving { opacity: 0; transform: translateY(-6px); }
+.need-card.pulse { animation: flash 1s ease-in-out 3; }
+.nc-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px 8px; cursor: pointer; }
+.nc-h .ttl { font-size: var(--text-ui); font-weight: 600; color: var(--ink); }
+.nc-h:hover .ttl { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+.where { font-size: var(--text-label); color: var(--ink-faint); white-space: nowrap; }
+.nc-h .r { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.nc-b { margin: 0 14px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--code-ink); white-space: pre-wrap; }
+.nc-f { display: flex; align-items: center; gap: 6px; padding: 10px 14px 12px; }
+.nc-f .hint { margin-left: auto; font-size: var(--text-label); color: var(--ink-faint); }
+.nc-reply { display: flex; gap: 6px; padding: 0 14px 12px; }
+.nc-reply .input { flex: 1; }
+.opts { display: flex; flex-direction: column; gap: 4px; margin: 0 14px; }
+.opt { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; font-size: var(--text-ui); color: var(--ink); text-align: left; width: 100%; }
+.opt:hover { background: var(--surface-hover); }
+.opt[aria-checked="true"] { border-color: var(--accent-line); background: var(--accent-muted); color: var(--accent-ink); }
+.opt .k { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); width: 14px; }
+.opt small { margin-left: auto; color: var(--ink-faint); font-size: var(--text-label); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.card { position: relative; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); padding: 11px 13px 9px; cursor: pointer; transition: border-color var(--dur-fast); animation: cin var(--dur-base) var(--ease-out); }
+.card:hover { border-color: var(--line-strong); }
+@keyframes cin { from { opacity: 0; transform: translateY(4px); } }
+.card .w { display: flex; align-items: center; gap: 6px; font-size: var(--text-label); color: var(--ink-faint); margin-bottom: 5px; }
+.card .ttl { font-size: var(--text-ui); font-weight: 600; color: var(--ink); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; }
+.card .tail { margin-top: 7px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .meta { margin-top: 7px; display: flex; gap: 6px; align-items: center; font-size: var(--text-label); color: var(--ink-faint); }
+.card .meta .q { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; color: var(--ink-muted); }
+.peek { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: var(--z-popover); padding: 10px 12px; border-radius: 8px; background: var(--code-bg); border: 1px solid var(--line); color: var(--code-ink); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; white-space: pre; overflow: hidden; box-shadow: var(--shadow-float); opacity: 0; pointer-events: none; transition: opacity var(--dur-fast); }
+.card:hover .peek { opacity: 1; transition-delay: 450ms; }
+.rows { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); overflow: hidden; }
+.row { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 14px; border-top: 1px solid var(--line-faint); cursor: pointer; font-size: var(--text-ui); }
+.row:first-child { border-top: 0; }
+.row:hover { background: var(--surface-hover); }
+.row .ws { width: 130px; flex: none; font-size: var(--text-label); color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .ttl { flex: 1; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .ago { font-size: var(--text-label); color: var(--ink-faint); }
+.row.off .ttl { color: var(--ink-faint); }
+.fold { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-top: 1px solid var(--line-faint); font-size: var(--text-label); color: var(--ink-faint); width: 100%; }
+.fold:hover { color: var(--ink); background: var(--surface-hover); }
+
+/* 会话内：Herdr 审批 / 提问卡沿用工作台 .approve，只补差异 */
+.approve.need { border-color: var(--warn-line); }
+.approve.need .approve-h .i { color: var(--warn); }
+.approve .src { margin-left: auto; font-size: var(--text-label); color: var(--ink-faint); }
+.approve .opts { margin: 10px 0 12px; }
+.screen { margin-top: 10px; }
+.screen summary { font-size: var(--text-label); color: var(--ink-faint); cursor: pointer; list-style: none; display: inline-flex; gap: 4px; align-items: center; }
+.screen pre { margin: 8px 0 0; max-height: 160px; overflow: auto; }
+.offline { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-card); background: var(--surface-muted); font-size: var(--text-ui); }
+.offline b { font-weight: 600; color: var(--ink-strong); }
+.offline p { margin: 4px 0 10px; color: var(--ink-muted); font-size: var(--text-label); }
+.c-bar .tgt { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--radius-field); border: 1px solid var(--line); font-size: var(--text-label); color: var(--ink-muted); }
+.c-bar .tgt .mono { color: var(--ink); }
+.queue .st { font-size: var(--text-label); color: var(--ink-faint); flex: none; }
+.composer.disabled { opacity: .55; pointer-events: none; }
+
+/* 终端抽屉（新增）：读屏最后 200 行 + 发按键 */
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 380px; border-left: 1px solid var(--line); background: var(--surface-canvas); display: flex; flex-direction: column; z-index: 5; transform: translateX(100%); transition: transform var(--dur-base) var(--ease-out); }
+.stage[data-term="open"] .drawer { transform: none; }
+.stage[data-term="open"] { --safe-r: 404px; }
+.drawer-h { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); font-size: var(--text-ui); }
+.drawer-h b { font-weight: 500; }
+.drawer-h .where { margin-right: auto; }
+.drawer pre { flex: 1; margin: 0; padding: 12px; overflow: auto; background: var(--code-bg); color: var(--code-ink); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6; }
+.drawer .keys { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 10px; border-top: 1px solid var(--line); }
+.drawer .keys .btn { font-family: var(--font-mono); }
+
+/* 跨窗格通知（新增） */
+.notif { position: fixed; right: 18px; bottom: 18px; z-index: var(--z-float); width: 340px; border: 1px solid var(--warn-line); border-radius: var(--radius-card); background: var(--surface-raised); box-shadow: var(--shadow-overlay); padding: 12px 14px; animation: nin var(--dur-base) var(--ease-out); }
+@keyframes nin { from { opacity: 0; transform: translateY(8px); } }
+.notif .h { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); }
+.notif .h b { font-weight: 600; }
+.notif .h .i { color: var(--warn); }
+.notif p { margin: 6px 0 10px; font-size: var(--text-label); color: var(--ink-muted); }
+.notif .a { display: flex; gap: 6px; }
+.notif .a .btn-primary .kbd { background: transparent; border-color: rgba(255,255,255,.3); color: rgba(255,255,255,.85); }
+
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 8px); opacity: 0; z-index: calc(var(--z-modal) + 2); display: flex; gap: 8px; align-items: center; padding: 8px 14px; border-radius: var(--radius-field); background: var(--ink-strong); color: var(--ink-inverse); font-size: var(--text-ui); transition: opacity var(--dur-base), transform var(--dur-base); pointer-events: none; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ⌘K 跳转 */
+.pal-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-modal); display: grid; place-items: start center; padding-top: 12vh; }
+.pal { width: 580px; max-width: calc(100vw - 32px); border-radius: var(--radius-overlay); background: var(--surface-raised); box-shadow: var(--shadow-overlay); border: 1px solid var(--line); overflow: hidden; }
+.pal .cmdk-in { border-bottom: 1px solid var(--line); }
+.pal ul { list-style: none; margin: 0; padding: 6px; max-height: 360px; overflow-y: auto; }
+.pal li { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; cursor: pointer; font-size: var(--text-ui); }
+.pal li .ws { width: 120px; color: var(--ink-faint); font-size: var(--text-label); }
+.pal li .ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal li .st { font-size: var(--text-label); color: var(--ink-faint); }
+.pal li.on { background: var(--surface-hover); }
+
+/* ═════════ 设计稿辅助：演示步骤 + 标注（非产品 UI） ═════════ */
+.demo { position: fixed; left: 6px; bottom: 6px; z-index: calc(var(--z-modal) + 1); width: 252px; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); background: var(--surface-canvas); box-shadow: var(--shadow-float); font-size: var(--text-label); color: var(--ink-muted); }
+.demo-h { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; border-bottom: 1px dashed var(--line); }
+.demo-h b { color: var(--ink); font-weight: 600; margin-right: auto; }
+.demo ol { margin: 0; padding: 6px; list-style: none; counter-reset: s; }
+.demo li { counter-increment: s; display: flex; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; color: var(--ink-muted); }
+.demo li::before { content: counter(s); width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-strong); font-size: 10px; font-family: var(--font-mono); }
+.demo li:hover { background: var(--surface-hover); }
+.demo li.on { color: var(--ink-strong); background: var(--accent-muted); }
+.demo li.on::before { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.demo .cap { padding: 10px 12px; border-top: 1px dashed var(--line); line-height: 1.6; color: var(--ink); }
+.demo .ft { display: flex; gap: 6px; padding: 0 10px 10px; }
+.demo.min ol, .demo.min .cap, .demo.min .ft { display: none; }
+.anno [data-anno] { outline: 1.5px dashed var(--accent); outline-offset: 2px; }
+.anno [data-anno][data-k="old"] { outline-color: var(--ink-faint); }
+.anno-tag { position: absolute; z-index: calc(var(--z-modal) + 1); pointer-events: none; font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: 3px; background: var(--accent); color: var(--accent-fg); white-space: nowrap; font-weight: 500; }
+.anno-tag.old { background: var(--ink-muted); color: var(--surface); }
+</style>
+</head>
+<body>
+<!--@SPRITE-->
+<!--icons: sun moon check x ellipsis message-square square-terminal circle-alert loader-circle chevron-down chevron-up chevron-right layout-grid search git-branch pin anchor file-text shield-check clock corner-down-right pencil arrow-up folder-git-2 panel-left-close plus plug list-filter archive bookmark settings keyboard rotate-ccw circle-help bell hand terminal copy cpu -->
+
+<div class="app" id="app" data-sidebar="open">
+  <aside class="sb" aria-label="会话导航">
+    <div class="sb-top">
+      <div class="brand"><span class="logo" aria-hidden="true"></span><b>Trellis</b>
+        <button class="icon-btn" aria-label="收起侧栏"><svg class="i"><use href="#i-panel-left-close"/></svg></button></div>
+      <div class="sb-actions">
+        <button class="btn btn-primary"><svg class="i"><use href="#i-plus"/></svg>新会话<span class="kbd">⌘N</span></button>
+        <button class="icon-btn" style="border:1px solid var(--line)" aria-label="接入 CLI 会话"><svg class="i"><use href="#i-plug"/></svg></button>
+      </div>
+      <label class="input"><svg class="i sm"><use href="#i-search"/></svg><input placeholder="筛选会话"><span class="kbd">/</span></label>
+    </div>
+    <div class="sb-nav" id="sbNav"></div>
+    <nav class="tree" id="tree"></nav>
+    <div class="sb-foot">
+      <button class="btn btn-ghost btn-sm"><svg class="i sm"><use href="#i-archive"/></svg>已归档 12</button>
+      <button class="btn btn-ghost btn-sm"><svg class="i sm"><use href="#i-bookmark"/></svg>稍后再读 3</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="hd">
+      <div class="hd-l"><div class="crumb" id="crumb"></div></div>
+      <div class="hd-c" id="hdc"></div>
+      <div class="hd-r">
+        <button class="search-trigger" id="palBtn"><svg class="i sm"><use href="#i-search"/></svg>跳转<span class="kbd">⌘K</span></button>
+        <button class="icon-btn" aria-label="切换主题" id="themeBtn"><svg class="i"><use href="#i-sun" id="themeIcon"/></svg></button>
+        <a class="icon-btn" href="02-settings.html" aria-label="设置"><svg class="i"><use href="#i-settings"/></svg></a>
+      </div>
+    </header>
+
+    <nav class="pstrip" id="pstrip" data-anno="新增 · 窗格切换条（⌘1-9 / ⌘[ ⌘] / ⌘J）"></nav>
+
+    <div class="ov" id="ov" data-anno="新增 · /herdr 总览"></div>
+
+    <div class="stage" id="stage" data-tree="dot" data-term="closed" hidden>
+      <div class="scroll" id="scroll"><div class="col" id="thread"></div></div>
+      <div class="composer-wrap"><div class="col">
+        <div class="composer" id="composer" data-anno="已有 · HerdrComposer（工作中自动排队）" data-k="old">
+          <div id="queue"></div>
+          <textarea id="input" rows="2" placeholder="发给 Herdr…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <div class="c-bar">
+            <span class="tgt" id="tgt"></span>
+            <button class="icon-btn" id="termBtn2" aria-label="终端" data-tip="打开终端抽屉" data-tip-pos="top"><svg class="i"><use href="#i-square-terminal"/></svg></button>
+            <span class="to" id="cstate"></span>
+            <button class="send" id="send" aria-label="发送到 Herdr"><svg class="i sm"><use href="#i-arrow-up"/></svg></button>
+          </div>
+        </div>
+        <div class="c-hint"><span id="chint"></span><span>↵ 发送 · ⇧↵ 换行</span></div>
+      </div></div>
+      <aside class="drawer" id="drawer" data-anno="新增 · 终端抽屉（读屏 + 发按键）">
+        <div class="drawer-h"><svg class="i sm"><use href="#i-square-terminal"/></svg><b>终端</b><span class="where" id="dwWhere"></span>
+          <button class="icon-btn sm" aria-label="刷新" data-tip="重新读屏"><svg class="i sm"><use href="#i-rotate-ccw"/></svg></button>
+          <button class="icon-btn sm" id="dwX" aria-label="关闭"><svg class="i sm"><use href="#i-x"/></svg></button></div>
+        <pre id="dwPre"></pre>
+        <div class="keys"><button class="btn btn-outline btn-sm">1</button><button class="btn btn-outline btn-sm">2</button><button class="btn btn-outline btn-sm">3</button><button class="btn btn-outline btn-sm">Enter</button><button class="btn btn-outline btn-sm">Esc</button><button class="btn btn-outline btn-sm">↑</button><button class="btn btn-outline btn-sm">↓</button><button class="btn btn-outline btn-sm">Ctrl-C</button></div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<div id="notifSlot"></div>
+<div class="pal-scrim" id="pal" hidden><div class="pal">
+  <div class="cmdk-in"><svg class="i"><use href="#i-search"/></svg><input id="palIn" placeholder="跳到窗格：工作区 / 任务名…" autocomplete="off"></div>
+  <ul id="palList"></ul>
+  <div class="cmdk-foot"><span><span class="kbd">↑↓</span>选择</span><span><span class="kbd">↵</span>打开会话</span><span><span class="kbd">⌘J</span>下一个需要你的</span><span><span class="kbd">esc</span>关闭</span></div>
+</div></div>
+<div class="toast" id="toast"><svg class="i sm"><use href="#i-check"/></svg><span></span></div>
+
+<aside class="demo" id="demo">
+  <div class="demo-h"><b>交互演示</b>
+    <button class="btn btn-ghost btn-sm" id="annoBtn">标注：开</button>
+    <button class="icon-btn sm" id="demoMin" aria-label="收起"><svg class="i sm"><use href="#i-chevron-down"/></svg></button></div>
+  <ol id="steps"></ol>
+  <div class="cap" id="cap"></div>
+  <div class="ft"><button class="btn btn-outline btn-sm" id="prev">上一步</button><button class="btn btn-primary btn-sm" id="next">下一步</button><span style="margin-left:auto;align-self:center" class="faint">也可以自己点</span></div>
+</aside>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const root = document.documentElement;
+const ic = (n, c = "i sm") => `<svg class="${c}"><use href="#i-${n}"/></svg>`;
+function syncTheme() { $("#themeIcon").setAttribute("href", root.classList.contains("dark") ? "#i-moon" : "#i-sun"); }
+syncTheme();
+$("#themeBtn").onclick = () => { root.classList.toggle("dark"); localStorage.setItem("trellis-mock-theme", root.classList.contains("dark") ? "dark" : "light"); syncTheme(); annotate(); };
+
+// ── 数据：2026-09-30 本机 herdr pane list 快照 ──
+const SEED = [
+  { id: "w3:p2", ws: "harbor", tab: "t2", st: "need", kind: "bash", title: "Harbor 价值与迭代方向", ago: "4m", branch: "main", pinned: false,
+    cmd: "git push origin main", desc: "推送 3 个提交到 origin/main" },
+  { id: "w4:p1", ws: "trellis", tab: "t1", st: "run", title: "Agent workflow 交互展示优化", ago: "12m", branch: "main", pinned: true, tail: "Agent(工具调用渲染扁平化) · 23 步" },
+  { id: "w6:p1", ws: "fisher", tab: "t1", st: "run", title: "闲鱼开源项目调研", ago: "3m", branch: "main", tail: "WebFetch(github.com/…/goofish-api)" },
+  { id: "w3M:p1", ws: "tools", tab: "t1", st: "run", title: "德州仪器逆向工程难点与社区方案", ago: "25m", tail: "Read(dzyq/notes/protocol.md)" },
+  { id: "w3M:p3", ws: "tools", tab: "t3", st: "run", title: "电吉他学习辅助应用", ago: "1m", tail: "Write(guitar/src/Fretboard.tsx)" },
+  { id: "w3M:p2", ws: "tools", tab: "t2", st: "idle", title: "德州仪器自动下单方案", ago: "40m" },
+  { id: "w5:p1", ws: "trader", tab: "t1", st: "idle", title: "策略层优化空间", ago: "2h", pinned: true },
+  { id: "wR:p1", ws: "sm-toolkit", tab: "t1", st: "idle", title: "新站点配置", ago: "5h" },
+  { id: "w3J:p1", ws: ".claude", tab: "t1", st: "idle", title: "本机文件夹、服务与定时任务清理", ago: "6h" },
+  { id: "w3J:p2", ws: ".claude", tab: "t2", st: "idle", title: "MuseAI-Skills 技能设计与编排", ago: "8h" },
+  { id: "w3P:p1", ws: "open-lark", tab: "t1", st: "idle", title: "Main 分支部署", ago: "1d" },
+  { id: "w3N:p1", ws: "web3-arb", tab: "t1", st: "idle", title: "Web3 套利与基建考量", ago: "2d" },
+  { id: "w2X:p1", ws: "herdr-leader", tab: "t1", st: "off", title: "Leader role-play", ago: "3d" },
+  { id: "w3:p1", ws: "harbor", tab: "t1", st: "shell", title: "~/harbor", ago: "" },
+  { id: "wR:p3", ws: "sm-toolkit", tab: "t2", st: "shell", title: "~/sm-toolkit", ago: "" },
+  { id: "w3K:p1", ws: "~", tab: "t1", st: "shell", title: "~", ago: "" },
+];
+let P, S;
+function preAllow() { Object.assign(byId("w3:p2"), { st: "run", ago: "刚刚", tail: "Bash(git push origin main)  ⎿ 3 commits pushed", resolved: "allow" }); }
+function reset() {
+  P = SEED.map(p => ({ ...p, queue: [] }));
+  S = { view: "ov", cur: "w4:p1", term: false, notif: null, showMore: false, sent: {}, answer: {} };
+}
+const ORDER = { need: 0, run: 1, idle: 2, off: 3, shell: 4 };
+const byId = (id) => P.find(p => p.id === id);
+const live = () => [...P].filter(p => p.st !== "shell" && p.st !== "off").sort((a, b) => ORDER[a.st] - ORDER[b.st]);
+const dot = (st) => st === "need" ? '<span class="dot warn"></span>' : st === "run" ? ic("loader-circle", "i xs spin") : st === "off" ? '<span class="dot" style="background:var(--line-strong)"></span>' : '<span class="dot idle"></span>';
+const stTxt = { need: "需要你", run: "在跑", idle: "空闲", off: "已离线", shell: "shell" };
+const PEEK = "  ⎿  Read 142 lines\n● 状态口径有两套，先统一成一个 helper\n● Edit(lib/tool-tree.ts)\n  ⎿  Updated with 6 additions and 3 removals\n● Bash(bunx tsc --noEmit)\n  ⎿  (no output)\n✻ Thinking… (esc to interrupt)";
+
+function toast(t) { const el = $("#toast"); el.querySelector("span").textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2200); }
+
+// ── 侧栏 ──
+function renderSidebar() {
+  const need = P.filter(p => p.st === "need").length, run = P.filter(p => p.st === "run").length;
+  const pinned = P.filter(p => p.pinned);
+  $("#sbNav").innerHTML = `
+    <button class="nav-row ${S.view === "ov" ? "sel" : ""}" data-go="ov" data-anno="新增 · Herdr 入口（带待处理计数）">${ic("layout-grid")}Herdr
+      <span class="cnts">${need ? `<span class="w"><span class="dot warn"></span>${need}</span>` : ""}<span>${ic("loader-circle", "i xs spin")}${run}</span></span></button>
+    <div class="t-label" style="padding:10px 8px 4px">置顶</div>
+    <div data-anno="新增 · 置顶区（pin 已做完，待合并）" data-ap="b">${pinned.map(p => `<div class="t-row sess ${S.view === "sess" && S.cur === p.id ? "sel" : ""}" style="--lv:0" data-id="${p.id}"><span class="slot">${p.st === "idle" ? "" : dot(p.st)}</span><span class="name">${p.title}</span><span class="meta">${ic("pin", "i xs")}</span></div>`).join("")}</div>`;
+  const groups = {};
+  P.filter(p => p.st !== "shell").forEach(p => (groups[p.ws] ||= []).push(p));
+  const wsOrder = Object.keys(groups).sort((a, b) => Math.min(...groups[a].map(p => ORDER[p.st])) - Math.min(...groups[b].map(p => ORDER[p.st])));
+  $("#tree").innerHTML = `<div class="t-label" style="padding:10px 8px 4px">项目</div>` + wsOrder.map(ws => `
+    <div class="t-row proj" style="--lv:0" aria-expanded="true">${ic("chevron-down", "i xs chev")}${ic("folder-git-2")}<span class="name">${ws}</span><span class="meta">${groups[ws].length}</span></div>
+    <div class="t-children">${groups[ws].map(p => `<div class="t-row sess ${S.view === "sess" && S.cur === p.id ? "sel" : ""}" style="--lv:1" data-id="${p.id}"><span class="slot">${p.st === "idle" ? "" : dot(p.st)}</span><span class="name" style="${p.st === "off" ? "color:var(--ink-faint)" : ""}">${p.title}</span><span class="meta" data-tip="Herdr 托管 · ${p.id}">${ic("anchor", "i xs")}</span></div>`).join("")}</div>`).join("");
+}
+document.querySelector(".sb").addEventListener("click", (e) => {
+  if (e.target.closest("[data-go=ov]")) return go("ov");
+  const r = e.target.closest("[data-id]"); if (r) openSess(r.dataset.id);
+});
+
+// ── 顶栏 + 切换条 ──
+function renderHeader() {
+  if (S.view === "ov") {
+    $("#crumb").innerHTML = `<span class="cur" style="display:inline-flex;gap:6px;align-items:center">${ic("layout-grid")}<span>Herdr 总览</span></span>`;
+    $("#hdc").innerHTML = `<span class="hbadge"><span class="dot positive"></span>已连接 · 14 工作区 · 19 窗格</span>`;
+  } else {
+    const p = byId(S.cur);
+    $("#crumb").innerHTML = `<a href="#">${p.ws}</a>${ic("chevron-right", "i xs sep")}<a href="#">${p.branch || "main"}</a>${ic("chevron-right", "i xs sep")}<button class="cur"><span>${p.title}</span></button>`;
+    $("#hdc").innerHTML = p.st === "shell" ? `<span class="hbadge">${ic("square-terminal", "i xs")}纯 shell · ${p.id}</span>` :
+      `<span class="hbadge ${p.st === "need" ? "need" : ""}" data-anno="已有 · HerdrSessionBadge" data-k="old">${ic("anchor", "i xs")}<b>${p.ws}</b>· ${p.id} · claude · ${dot(p.st)}${stTxt[p.st]}</span>
+       <button class="icon-btn ${S.term ? "on" : ""}" id="termBtn" aria-label="终端抽屉" data-tip="终端抽屉  ⌘\`">${ic("square-terminal", "i")}</button>`;
+    const tb = $("#termBtn"); if (tb) tb.onclick = toggleTerm;
+  }
+}
+function renderStrip() {
+  const el = $("#pstrip"); el.hidden = S.view !== "sess";
+  if (el.hidden) return;
+  const list = live();
+  el.innerHTML = `<span class="lab">${ic("anchor", "i xs")}Herdr</span>` + list.map((p, i) => `<button class="pchip ${p.st === "need" ? "need" : ""} ${p.flash ? "flash" : ""}" data-id="${p.id}" aria-current="${p.id === S.cur}" title="${p.ws} · ${p.tab} · ${p.title}">${dot(p.st)}<span class="ws">${p.ws}</span><span class="nm">${p.title}</span>${i < 9 ? `<span class="kbd">${i + 1}</span>` : ""}</button>`).join("")
+    + `<span class="r"><span><span class="kbd">⌘J</span>下一个需要你</span><span><span class="kbd">⌘[</span><span class="kbd">⌘]</span></span></span>`;
+  const on = el.querySelector("[aria-current=true]"); if (on) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+$("#pstrip").addEventListener("click", (e) => { const c = e.target.closest(".pchip"); if (c) openSess(c.dataset.id); });
+
+// ── 总览 ──
+function needCard(p) {
+  const body = p.kind === "ask"
+    ? `<div class="opts">${p.opts.map((o, i) => `<button class="opt" role="radio" aria-checked="${S.answer[p.id] === i}" data-opt="${i}"><span class="k">${i + 1}</span>${o[0]}<small>${o[1]}</small></button>`).join("")}</div>`
+    : `<div class="nc-b">● Bash(${p.cmd})\n  └ ${p.desc}</div>`;
+  const acts = p.kind === "ask"
+    ? `<button class="btn btn-primary btn-sm" data-act="answer">${ic("check", "i xs")}提交回答</button><button class="btn btn-ghost btn-sm" data-act="reply">${ic("message-square", "i xs")}其他（打字）</button>`
+    : `<button class="btn btn-primary btn-sm" data-act="allow">${ic("check", "i xs")}允许</button><button class="btn btn-outline btn-sm" data-act="always">总是允许 ${p.cmd.split(" ").slice(0, 2).join(" ")}</button><button class="btn btn-ghost btn-sm" data-act="deny">${ic("x", "i xs")}拒绝</button><button class="btn btn-ghost btn-sm" data-act="reply">${ic("message-square", "i xs")}回复…</button>`;
+  return `<article class="need-card ${p.pulse ? "pulse" : ""}" data-id="${p.id}">
+    <div class="nc-h" data-open>${dot("need")}<span class="ttl">${p.title}</span><span class="where">${p.ws} · ${p.tab} · ${p.kind === "ask" ? "提问" : "要执行 Bash"}</span>
+      <span class="r"><span class="where">等了 ${p.ago}</span><span class="where">进会话 ${ic("chevron-right", "i xs")}</span></span></div>
+    ${p.kind === "ask" ? `<div style="padding:0 14px 8px;font-size:var(--text-ui)">${p.q}</div>` : ""}
+    ${body}
+    <div class="nc-f">${acts}<span class="hint">发按键到窗格，不用进终端</span></div>
+    <div class="nc-reply" hidden><label class="input"><input placeholder="告诉它换个做法，Enter 发进 ${p.ws} · ${p.tab}"></label><button class="btn btn-primary btn-sm" data-act="send">发送</button></div>
+  </article>`;
+}
+function renderOv() {
+  const el = $("#ov"); el.hidden = S.view !== "ov"; if (el.hidden) return;
+  const need = P.filter(p => p.st === "need"), run = P.filter(p => p.st === "run"), idle = P.filter(p => p.st === "idle"), off = P.filter(p => p.st === "off"), sh = P.filter(p => p.st === "shell");
+  const idleShow = S.showMore ? idle : idle.slice(0, 5);
+  el.innerHTML = `<div class="wrap">
+    <div class="ov-h"><h2>Herdr</h2><div class="sum"><span><b>${need.length}</b>需要你</span><span><b>${run.length}</b>在跑</span><span><b>${idle.length}</b>空闲</span></div>
+      <span class="r"><span class="dot live"></span>实时 · hook 镜像</span></div>
+    ${need.length ? `<section class="lane"><div class="lane-h">${ic("circle-alert")}需要你<span class="n">${need.length}</span></div>${need.map(needCard).join("")}</section>` : ""}
+    <section class="lane"><div class="lane-h">${ic("loader-circle", "i xs spin")}在跑<span class="n">${run.length}</span><span class="n" style="margin-left:auto">悬停看最后几行输出</span></div>
+      <div class="grid">${run.map(p => `<article class="card" data-id="${p.id}"><div class="w">${p.ws} · ${p.tab}</div><div class="ttl">${p.title}</div><div class="tail">● ${p.tail || "Thinking…"}</div>
+        <div class="meta"><span>claude</span><span>·</span><span>${p.ago}</span>${p.queue.length ? `<span class="q">${ic("clock", "i xs")}排队 ${p.queue.length}</span>` : ""}</div><div class="peek">${PEEK}</div></article>`).join("")}</div></section>
+    <section class="lane"><div class="lane-h"><span class="dot idle"></span>空闲<span class="n">${idle.length}</span><span class="n" style="margin-left:auto">按最近活动</span></div>
+      <div class="rows">${idleShow.map(p => `<div class="row" data-id="${p.id}"><span class="dot idle"></span><span class="ws">${p.ws}${p.tab !== "t1" ? " · " + p.tab : ""}</span><span class="ttl">${p.title}</span><span class="ago">${p.ago}</span></div>`).join("")}
+      ${S.showMore ? off.map(p => `<div class="row off" data-id="${p.id}">${dot("off")}<span class="ws">${p.ws}</span><span class="ttl">${p.title}</span><span class="ago">已离线</span></div>`).join("") + sh.map(p => `<div class="row off" data-id="${p.id}">${ic("square-terminal", "i xs faint")}<span class="ws">${p.ws} · ${p.tab}</span><span class="ttl mono">${p.title}</span><span class="ago">shell</span></div>`).join("") : ""}
+      <button class="fold" data-more>${ic(S.showMore ? "chevron-up" : "chevron-down", "i xs")}${S.showMore ? "收起" : `还有 ${idle.length - 5} 个空闲 · ${off.length} 个离线 · ${sh.length} 个纯 shell`}</button></div></section>
+  </div>`;
+}
+$("#ov").addEventListener("click", (e) => {
+  if (e.target.closest("[data-more]")) { S.showMore = !S.showMore; return renderOv(); }
+  const card = e.target.closest("[data-id]"); if (!card) return;
+  const id = card.dataset.id, a = e.target.closest("[data-act]"), opt = e.target.closest("[data-opt]");
+  if (opt) { S.answer[id] = +opt.dataset.opt; return renderOv(); }
+  if (a) return act(id, a.dataset.act, card);
+  if (e.target.closest(".nc-reply")) return;
+  if (card.classList.contains("need-card") && !e.target.closest("[data-open]")) return;
+  openSess(id);
+});
+$("#ov").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches(".nc-reply input")) act(e.target.closest("[data-id]").dataset.id, "send", e.target.closest("[data-id]")); });
+
+// 处理「需要你」：总览卡片和会话内审批卡共用
+function act(id, how, scope) {
+  const p = byId(id);
+  if (how === "reply") { const r = scope.querySelector(".nc-reply"); if (r) { r.hidden = !r.hidden; r.querySelector("input").focus(); } else $("#input").focus(); return; }
+  let text = "";
+  if (how === "send") { text = scope.querySelector(".nc-reply input").value.trim(); if (!text) return; }
+  if (how === "answer" && S.answer[id] == null) { toast("先选一个选项"); return; }
+  const done = () => {
+    p.st = how === "deny" ? "idle" : "run"; p.ago = "刚刚"; p.pulse = false; p.flash = false;
+    p.tail = p.kind === "ask" ? `WebSearch(${p.opts[S.answer[id] ?? 0][0]})` : how === "deny" ? "" : `Bash(${p.cmd})  ⎿ 3 commits pushed`;
+    p.resolved = how; if (S.notif === id) S.notif = null; render();
+  };
+  const card = document.querySelector(`.need-card[data-id="${id}"]`);
+  if (card) { card.classList.add("leaving"); setTimeout(done, 220); } else done();
+  toast({ allow: `已允许 · 按键 1 → ${p.ws} · ${p.tab}`, always: `已允许并记住 · 按键 2 → ${p.ws} · ${p.tab}`, deny: `已拒绝 · Esc → ${p.ws} · ${p.tab}`, send: `已发进 ${p.ws} · ${p.tab}：${text}`, answer: `已回答 · 按键 ${(S.answer[id] ?? 0) + 1} → ${p.ws} · ${p.tab}` }[how]);
+}
+
+// ── 会话 ──
+function threadFor(p) {
+  if (p.st === "shell") return `<div style="height:22px"></div><div class="asst"><p class="faint" style="font-size:var(--text-ui)">纯 shell 窗格，没有绑定会话——右侧终端抽屉就是它的全部内容。</p></div>`;
+  const prev = `<section class="turn"><div class="msg-user"><span class="idx">#1</span>${p.ws === "harbor" ? "盘一下 harbor 现在的价值和接下来的迭代方向" : p.ws === "fisher" ? "调研一下闲鱼相关的开源项目，看看哪些能直接用" : "先把现状摸一遍，给我一份问题清单"}</div>
+    <div class="trace" data-open="false"><button class="trace-head" data-t>${ic("chevron-right", "i xs chev")}<span class="sum"><b>6 步</b> · Read ×4 · Grep · Bash</span><span class="dur">14.2s</span></button>
+      <div class="trace-body"><div class="step"><div class="step-row">${ic("file-text")}<span class="tool">Read</span><span class="arg">progress/README.md</span><span class="ms">0.1s</span><span class="st ok">${ic("check", "i xs")}</span></div></div><div class="step"><div class="step-row">${ic("search")}<span class="tool">Grep</span><span class="arg">"herdr" components/</span><span class="ms">0.3s</span><span class="st ok">${ic("check", "i xs")}</span></div></div></div></div>
+    <div class="asst"><p>摸完了，主要是三块：${p.ws === "fisher" ? "现成的 <code>goofish-api</code> 逆向库、两个 IM 自动回复框架，以及一个已停更的上架脚本" : "入口分散、状态口径不一、缺一个能一眼看全局的地方"}。下面逐条展开，最后给建议顺序。</p>
+      <div class="tb"><button class="icon-btn sm">${ic("copy")}</button><span class="meta">1m 12s</span></div></div></section>`;
+  const cur = `<section class="turn"><div class="msg-user"><span class="idx">#2</span>${p.ws === "harbor" ? "把这轮整理好的迭代方向提交并推上去" : p.ws === "fisher" ? "按你的建议往下挖，重点看能不能直接接进来" : "继续，按刚才定的方案做"}</div>`;
+  const steps = `<div class="trace" data-open="true"><button class="trace-head" data-t>${ic("chevron-right", "i xs chev")}<span class="sum"><b>3 步</b> · Bash ×2 · ${p.st === "need" && p.kind === "bash" ? "等待批准" : "Read"}</span><span class="dur">${p.st === "run" ? "42s" : "8.1s"}</span></button><div class="trace-body">
+    <div class="step"><div class="step-row">${ic("square-terminal")}<span class="tool">Bash</span><span class="arg">git status</span><span class="ms">0.2s</span><span class="st ok">${ic("check", "i xs")}</span></div></div>
+    <div class="step"><div class="step-row">${ic("square-terminal")}<span class="tool">Bash</span><span class="arg">git log --oneline -3</span><span class="ms">0.1s</span><span class="st ok">${ic("check", "i xs")}</span></div></div>
+    ${p.st === "need" && p.kind === "bash" ? `<div class="step wait"><div class="step-row">${ic("square-terminal")}<span class="tool">Bash</span><span class="arg">${p.cmd}</span><span class="ms">—</span><span class="st">${ic("hand", "i xs")}</span></div></div>`
+      : p.st === "run" ? `<div class="step"><div class="step-row">${ic("file-text")}<span class="tool">${(p.tail || "Read").split("(")[0]}</span><span class="arg">${((p.tail || "").match(/\((.*)\)/) || [, "…"])[1]}</span><span class="ms">…</span><span class="st">${ic("loader-circle", "i xs spin")}</span></div></div>`
+      : `<div class="step"><div class="step-row">${ic("file-text")}<span class="tool">Read</span><span class="arg">notes/summary.md</span><span class="ms">0.1s</span><span class="st ok">${ic("check", "i xs")}</span></div></div>`}
+    </div></div>`;
+  let tail = "";
+  if (p.st === "need" && p.kind === "bash") tail = `<div class="asst"><p>工作区干净，3 个提交待推送。准备推到 <code>origin/main</code>——</p>
+    <div class="approve need" data-id="${p.id}" data-anno="已有 · HerdrInteractionCard（发按键放行）" data-k="old">
+      <div class="approve-h">${ic("shield-check")}<b style="font-weight:500">需要你批准</b><span class="tool">Bash</span><span class="desc">${p.desc}</span><span class="src">Herdr 正在等你回答 · ${p.ago}</span></div>
+      <pre>${p.cmd}</pre>
+      <div class="approve-act"><button class="btn btn-primary" data-act="allow">允许<span class="kbd">1</span></button><button class="btn btn-outline" data-act="deny">拒绝<span class="kbd">Esc</span></button>
+        <button class="btn btn-ghost btn-sm always" data-act="always">总是允许 git push<span class="kbd">2</span></button></div>
+      <details class="screen"><summary>${ic("chevron-right", "i xs")}读屏：最近 40 行</summary><pre>● Bash(${p.cmd})\n  └ ${p.desc}\n\n  Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again for git push\n  3. No, and tell Claude what to do differently</pre></details>
+    </div><div class="runline"><span class="dot warn"></span><span>等你批准</span><span class="t">${p.ago}</span></div></div>`;
+  else if (p.st === "need" && p.kind === "ask") tail = `<div class="asst"><p>找到 7 个相关仓库，方向分叉比较大，先跟你对齐——</p>
+    <div class="approve need" data-id="${p.id}" data-anno="已有 · 提问卡（AskUserQuestion）" data-k="old">
+      <div class="approve-h">${ic("circle-help")}<b style="font-weight:500">${p.q}</b><span class="src">Herdr 正在等你回答</span></div>
+      <div class="opts">${p.opts.map((o, i) => `<button class="opt" role="radio" aria-checked="${S.answer[p.id] === i}" data-opt="${i}"><span class="k">${i + 1}</span>${o[0]}<small>${o[1]}</small></button>`).join("")}</div>
+      <div class="approve-act"><button class="btn btn-primary" data-act="answer">提交回答<span class="kbd">↵</span></button><span class="faint" style="font-size:var(--text-label)">或直接在下方输入框打字作答</span></div>
+    </div><div class="runline"><span class="dot warn"></span><span>等你回答</span><span class="t">${p.ago}</span></div></div>`;
+  else if (p.st === "run") tail = `<div class="asst"><p>${p.resolved ? "已放行，继续执行。" : "按计划开始改第一批文件，先统一状态口径。"}</p><div class="runline" data-anno="已有 · 末轮运行态（S184 hook 驱动）" data-k="old">${ic("loader-circle", "i xs spin")}<span>在跑 · ${p.tail || "Thinking…"}</span><span class="t">42s</span></div></div>`;
+  else tail = `<div class="asst"><p>${p.resolved === "deny" ? "收到，不推送。改动留在本地，你确认后再推。" : "这一轮做完了，改动已提交，下一步见上面的清单。"}</p><div class="tb"><button class="icon-btn sm">${ic("copy")}</button><span class="meta">本轮结束 · ${p.ago}</span></div></div>`;
+  const off = p.st === "off" ? `<div class="offline" data-anno="已有 · 离线横幅 + 重新打开" data-k="old"><b>这个 Herdr 窗格已离线，会话现为只读</b><p>历史记录仍可阅读；Trellis 不会接管这个 agent 进程。</p><button class="btn btn-outline btn-sm" data-act="reopen">${ic("rotate-ccw", "i xs")}在 Herdr 里重新打开</button></div>` : "";
+  const sent = (S.sent[p.id] || []).map(t => `<section class="turn"><div class="msg-user"><span class="idx">#3</span>${t}</div><div class="asst"><div class="runline">${ic("loader-circle", "i xs spin")}<span>已送达 Herdr · 在跑</span></div></div></section>`).join("");
+  return `<div style="height:8px"></div>${prev}${cur}${steps}${tail}</section>${sent}${off}<div style="height:24px"></div>`;
+}
+function renderSess() {
+  const st = $("#stage"); st.hidden = S.view !== "sess"; if (st.hidden) return;
+  const p = byId(S.cur);
+  st.dataset.term = S.term || p.st === "shell" ? "open" : "closed";
+  $("#thread").innerHTML = threadFor(p);
+  $("#queue").innerHTML = p.queue.map((t, i) => `<div class="queue"><span class="lab">${ic("clock", "i xs")}排队中</span><span class="txt">${t}</span><span class="st">空闲后自动发送</span>
+    <button class="icon-btn sm" data-q="now" data-i="${i}" data-tip="打断并立即发送">${ic("corner-down-right")}</button><button class="icon-btn sm" data-q="rm" data-i="${i}" data-tip="移除">${ic("x")}</button></div>`).join("");
+  $("#tgt").innerHTML = `${ic("anchor", "i xs")}发往 <span class="mono">${p.ws} · ${p.tab}</span><span class="faint mono">${p.id}</span>`;
+  $("#composer").classList.toggle("disabled", p.st === "off");
+  $("#cstate").textContent = { run: "Agent 正在工作；这条消息会在 Herdr 中排队", need: "直接打字 = 选「No」并附上说明", idle: "直接发给 Herdr 窗格", off: "窗格已离线", shell: "作为文本发进 shell" }[p.st];
+  $("#chint").textContent = p.st === "run" ? "排队的消息会在本轮结束后自动发出，可随时打断" : "Trellis 只转发输入，不接管 agent 进程";
+  $("#dwWhere").textContent = `${p.ws} · ${p.tab} · 最近 200 行`;
+  $("#dwPre").textContent = p.st === "shell" ? `smokingmouse@Mac-mini ${p.title} % git status\nOn branch main\nnothing to commit, working tree clean\nsmokingmouse@Mac-mini ${p.title} % ▍`
+    : `╭──────────────────────────────────────╮\n│ ✻ Claude Code                         │\n│   cwd: ~/code/agent/${p.ws.padEnd(18)}│\n╰──────────────────────────────────────╯\n\n> ${p.ws === "harbor" ? "把这轮整理好的迭代方向提交并推上去" : "继续，按刚才定的方案做"}\n\n● Bash(git status)\n  ⎿  nothing to commit, working tree clean\n● Bash(git log --oneline -3)\n  ⎿  a1c2e3f docs: 迭代方向\n${p.st === "need" && p.kind === "bash" ? `\n● Bash(${p.cmd})\n\n  Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again\n  3. No, and tell Claude what to do` : p.st === "run" ? `\n● ${p.tail}\n\n✻ Brewing… (42s · esc to interrupt)` : "\n> ▍"}`;
+}
+$("#thread").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-t]"); if (t) { const tr = t.closest(".trace"); tr.dataset.open = tr.dataset.open !== "true"; return; }
+  const box = e.target.closest(".approve[data-id]"), opt = e.target.closest("[data-opt]"), a = e.target.closest("[data-act]");
+  if (opt && box) { S.answer[box.dataset.id] = +opt.dataset.opt; return renderSess(); }
+  if (a && a.dataset.act === "reopen") { const p = byId(S.cur); p.st = "idle"; p.ago = "刚刚"; toast(`已在 Herdr 里重新打开：split + claude --resume`); return render(); }
+  if (a && box) act(box.dataset.id, a.dataset.act, box);
+});
+$("#queue").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]"); if (!b) return; const p = byId(S.cur), t = p.queue.splice(+b.dataset.i, 1)[0];
+  if (b.dataset.q === "now") { (S.sent[p.id] ||= []).push(t); toast("已打断并发送"); }
+  render();
+});
+function send() {
+  const v = $("#input").value.trim(); if (!v) return; const p = byId(S.cur); $("#input").value = "";
+  if (p.st === "need") { $$(".need-card").length; act(p.id, "send", { querySelector: () => ({ value: v }) }); return; }
+  if (p.st === "run") { p.queue.push(v); toast(`已排队 · ${p.ws} 空闲后自动发送`); }
+  else { (S.sent[p.id] ||= []).push(v); p.st = "run"; p.ago = "刚刚"; p.tail = "Thinking…"; toast(`已送达 ${p.ws} · ${p.tab}`); }
+  render();
+}
+$("#send").onclick = send;
+$("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+function toggleTerm() { S.term = !S.term; render(); }
+$("#termBtn2").onclick = toggleTerm; $("#dwX").onclick = () => { S.term = false; render(); };
+
+// ── 跨窗格通知 ──
+function renderNotif() {
+  const p = S.notif && byId(S.notif);
+  $("#notifSlot").innerHTML = !p || (S.view === "sess" && S.cur === p.id) ? "" : `<div class="notif" data-anno="新增 · 跨窗格通知" style="${S.view === "ov" ? "display:none" : ""}">
+    <div class="h">${ic("bell")}<b>${p.ws} · ${p.tab}</b><span class="where">需要你 · 刚刚</span></div>
+    <p>${p.kind === "ask" ? "提问：" + p.q : "要执行 Bash：" + p.cmd}</p>
+    <div class="a"><button class="btn btn-primary btn-sm" data-n="go">去处理<span class="kbd">⌘J</span></button><button class="btn btn-ghost btn-sm" data-n="later">稍后</button></div></div>`;
+}
+$("#notifSlot").addEventListener("click", (e) => { const b = e.target.closest("[data-n]"); if (!b) return; if (b.dataset.n === "go") openSess(S.notif); else { S.notif = null; render(); } });
+function raise(id) {
+  const p = byId(id); Object.assign(p, { st: "need", kind: "ask", ago: "刚刚", flash: true, pulse: true, q: "要往哪个方向深挖？",
+    opts: [["goofish-api 逆向库", "最快能接进来"], ["IM 自动回复框架", "改造量中等"], ["两个都看，出对比表", "多花 10 分钟"]] });
+  S.notif = id; render();
+}
+
+// ── 导航 ──
+function go(v) { S.view = v; render(); }
+function openSess(id) { S.cur = id; S.view = "sess"; const p = byId(id); p.flash = false; if (S.notif === id) S.notif = null; render(); $("#scroll").scrollTop = 1e5; }
+function render() { renderSidebar(); renderHeader(); renderStrip(); renderOv(); renderSess(); renderNotif(); annotate(); }
+
+// ── ⌘K ──
+let palSel = 0;
+function palItems() { const q = $("#palIn").value.trim().toLowerCase(); return [...P].sort((a, b) => ORDER[a.st] - ORDER[b.st]).filter(p => !q || (p.ws + p.title + p.tab).toLowerCase().includes(q)); }
+function renderPal() { const it = palItems(); palSel = Math.min(palSel, Math.max(0, it.length - 1));
+  $("#palList").innerHTML = it.map((p, i) => `<li class="${i === palSel ? "on" : ""}" data-id="${p.id}">${p.st === "shell" ? ic("square-terminal", "i xs faint") : dot(p.st)}<span class="ws">${p.ws} · ${p.tab}</span><span class="ttl">${p.title}</span><span class="st">${stTxt[p.st]}${p.ago ? " · " + p.ago : ""}</span></li>`).join("") || `<li class="faint">没有匹配的窗格</li>`; }
+function openPal() { $("#pal").hidden = false; $("#palIn").value = ""; palSel = 0; renderPal(); $("#palIn").focus(); }
+const closePal = () => $("#pal").hidden = true;
+$("#palBtn").onclick = openPal; $("#palIn").oninput = () => { palSel = 0; renderPal(); };
+$("#palList").onclick = (e) => { const li = e.target.closest("li[data-id]"); if (li) { closePal(); openSess(li.dataset.id); } };
+$("#pal").onclick = (e) => { if (e.target.id === "pal") closePal(); };
+function nextNeed() { const n = P.find(p => p.st === "need" && p.id !== S.cur) || P.find(p => p.st === "need"); if (n) openSess(n.id); else toast("没有需要你处理的窗格"); }
+document.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+  if (mod && k === "k") { e.preventDefault(); $("#pal").hidden ? openPal() : closePal(); return; }
+  if (!$("#pal").hidden) { const it = palItems();
+    if (e.key === "Escape") closePal();
+    else if (e.key === "ArrowDown") { palSel = Math.min(palSel + 1, it.length - 1); renderPal(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { palSel = Math.max(palSel - 1, 0); renderPal(); e.preventDefault(); }
+    else if (e.key === "Enter" && it[palSel]) { closePal(); openSess(it[palSel].id); }
+    return; }
+  if (!mod) return;
+  if (k === "j") { e.preventDefault(); return nextNeed(); }
+  if (k === "`") { e.preventDefault(); return toggleTerm(); }
+  if (S.view !== "sess") return;
+  const list = live(), i = list.findIndex(p => p.id === S.cur);
+  if (/^[1-9]$/.test(e.key) && list[+e.key - 1]) { e.preventDefault(); openSess(list[+e.key - 1].id); }
+  if (e.key === "]" && list[i + 1]) { e.preventDefault(); openSess(list[i + 1].id); }
+  if (e.key === "[" && list[i - 1]) { e.preventDefault(); openSess(list[i - 1].id); }
+});
+
+// ── 标注：给 data-anno 元素贴标签（设计稿辅助） ──
+let annoOn = true;
+function annotate() {
+  $$(".anno-tag").forEach(t => t.remove());
+  document.body.classList.toggle("anno", annoOn);
+  if (!annoOn) return;
+  requestAnimationFrame(() => $$("[data-anno]").forEach(el => {
+    if (el.hidden || el.closest("[hidden]") || !el.offsetParent && getComputedStyle(el).position !== "fixed") return;
+    const r = el.getBoundingClientRect(); if (!r.width || r.bottom < 0 || r.top > innerHeight || r.left >= innerWidth - 4 || r.right <= 0) return;
+    const t = document.createElement("span"); t.className = "anno-tag" + (el.dataset.k === "old" ? " old" : ""); t.textContent = el.dataset.anno;
+    t.style.left = Math.max(4, Math.min(r.left + 6, innerWidth - 280)) + "px"; t.style.top = (el.dataset.ap === "b" ? r.bottom - 8 : Math.max(2, r.top - 9)) + "px";
+    document.body.appendChild(t);
+  }));
+}
+addEventListener("resize", annotate);
+document.addEventListener("scroll", () => annotate(), true);
+$("#annoBtn").onclick = () => { annoOn = !annoOn; $("#annoBtn").textContent = "标注：" + (annoOn ? "开" : "关"); annotate(); };
+$("#demoMin").onclick = () => { $("#demo").classList.toggle("min"); };
+
+// ── 演示步骤 ──
+const STEPS = [
+  ["总览：一眼看全局", "从侧栏「Herdr」进入总览（/herdr）。三道泳道：需要你 / 在跑 / 空闲。harbor 卡在 git push 审批，侧栏入口也亮着计数。", () => { reset(); go("ov"); }],
+  ["就地放行", "不进会话、不回终端：在卡片上点「允许」。Trellis 给窗格发按键 1，卡片滑进「在跑」。拒绝 = Esc，回复 = 打字发进窗格。", () => { reset(); go("ov"); setTimeout(() => act("w3:p2", "allow"), 500); }],
+  ["点卡片 → 进会话", "点任一卡片，在工作台主区打开对应会话（hook 实时镜像，已有）。顶部多一行窗格切换条，所有活着的窗格按状态排，⌘1-9 直达。", () => { reset(); preAllow(); openSess("w4:p1"); }],
+  ["它在跑，你也能说话", "trellis 正在跑。输入框直接发：消息进排队，窗格空闲后自动发出（已有 HerdrComposer）；可随时「打断并立即发送」。", () => { reset(); preAllow(); byId("w4:p1").queue.push("做完顺手把 agent-flow-rendering.md 的面包屑描述同步一下"); openSess("w4:p1"); }],
+  ["别处卡住了", "你还在 trellis 里，fisher 抛出一个提问：右下角弹通知，切换条上 fisher 闪黄并排到最前，侧栏计数 +1。不用轮询各个窗格。", () => { reset(); preAllow(); openSess("w4:p1"); setTimeout(() => raise("w6:p1"), 600); }],
+  ["⌘J 跳过去作答", "⌘J（或点「去处理」）跳到下一个需要你的窗格。提问卡直接选选项提交（已有）；答完 ⌘[ 回到刚才的 trellis。", () => { reset(); preAllow(); raise("w6:p1"); openSess("w6:p1"); }],
+  ["看原始终端", "镜像跟不上、或者想看 TUI 原貌：⌘` 打开右侧终端抽屉，读屏最近 200 行，下面一排按键可直接发（Esc / 方向键 / Ctrl-C）。", () => { reset(); preAllow(); S.term = true; openSess("w3M:p3"); }],
+  ["离线的会话", "窗格已经关掉的会话：只读 + 横幅，一键「在 Herdr 里重新打开」（split + claude --resume，已有）。", () => { reset(); openSess("w2X:p1"); }],
+];
+let step = 0;
+function setStep(i) {
+  step = Math.max(0, Math.min(STEPS.length - 1, i));
+  $("#steps").innerHTML = STEPS.map((s, j) => `<li class="${j === step ? "on" : ""}" data-s="${j}">${s[0]}</li>`).join("");
+  $("#cap").textContent = STEPS[step][1];
+  $("#prev").disabled = step === 0; $("#next").textContent = step === STEPS.length - 1 ? "重来" : "下一步";
+  $("#toast").classList.remove("on"); STEPS[step][2]();
+}
+$("#steps").onclick = (e) => { const li = e.target.closest("[data-s]"); if (li) setStep(+li.dataset.s); };
+$("#prev").onclick = () => setStep(step - 1);
+$("#next").onclick = () => setStep(step === STEPS.length - 1 ? 0 : step + 1);
+
+reset();
+const q = new URLSearchParams(location.search);
+if (q.get("anno") === "off") { annoOn = false; $("#annoBtn").textContent = "标注：关"; }
+setStep(+(q.get("step") || 1) - 1);
+</script>
+</body>
+</html>
