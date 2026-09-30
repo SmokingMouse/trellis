@@ -68,6 +68,7 @@ import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { sessionSourceChip } from "@/lib/session-source";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
+import { HerdrSidebarEntry } from "@/components/herdr/HerdrSidebarEntry";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
@@ -924,6 +925,7 @@ export function SessionSidebar() {
             </p>
           </div>
         )}
+        <HerdrSidebarEntry />
         {renderPinned()}
         {visibleSessions.length === 0 ? (
           pinnedSessions.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
