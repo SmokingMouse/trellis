@@ -37,6 +37,7 @@ type CfgProvider = {
 type CfgState = {
   path: string;
   exists: boolean;
+  remote: boolean;
   envFile: string | null;
   defaultModel: string | null;
   providers: CfgProvider[];
@@ -299,7 +300,8 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
           <div className="text-label text-ink-faint mt-0.5 truncate">
             {state ? (
               <>
-                {state.exists ? "编辑" : "将创建"} {state.path}
+                {state.remote ? "远端配置 · 本机改动写入 " : state.exists ? "编辑 " : "将创建 "}
+                {state.path}
                 {state.envFile ? ` · 密钥存在 ${state.envFile}` : ""}
               </>
             ) : (
@@ -620,7 +622,9 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
       {!form && (
         <div className="px-5 py-3 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0 bg-surface">
           <div className="text-label text-ink-faint">
-            改动即时生效，其他 sm-toolkit 工具共用同一份 endpoints.yaml
+            {state?.remote
+              ? "改动即时生效，只作用于本机；改远端共享配置用 llm config edit"
+              : "改动即时生效，其他 sm-toolkit 工具共用同一份 endpoints.yaml"}
           </div>
           <div className="flex gap-2">
             {onClose && (

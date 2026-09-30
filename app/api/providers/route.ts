@@ -130,7 +130,8 @@ function codexYamlProviders(): ProviderInfo[] {
   for (const [name, prov] of Object.entries(config.providers)) {
     if (prov.codex?.wire_api !== "responses") continue;
     const hasKey = Boolean(process.env[prov.api_key_env]);
-    for (const model of prov.models) {
+    for (const entry of prov.models) {
+      const model = typeof entry === "string" ? entry : entry.name;
       const id = `codex:${model}`;
       if (seen.has(id)) continue;
       seen.add(id);

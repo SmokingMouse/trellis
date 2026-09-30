@@ -9,7 +9,11 @@ test("P0-1/P1-1/P2-4/P2-5 vendor is self-contained without workspace overrides o
   const project = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const vendor = JSON.parse(readFileSync(join(root, "vendor/agent-server/package.json"), "utf8"));
   expect(project.dependencies["@smokingmouse/agent-server"]).toBe("file:./vendor/agent-server");
-  expect(project.overrides).toBeUndefined();
+  // Only a registry-version pin for llm is tolerated (agent ≤0.8.4 declares an
+  // llm range without remote endpoints); drop it once agent 0.8.5 is published.
+  const overrides = (project.overrides ?? {}) as Record<string, string>;
+  expect(Object.keys(overrides).every(k => k === "@smokingmouse/llm")).toBe(true);
+  expect(Object.values(overrides).every(v => !/^(workspace|file|link):/.test(v))).toBe(true);
   expect(project.scripts.postinstall).toBeUndefined();
   expect(project.scripts.build).not.toContain("prepare-as-dependency");
   expect(vendor.scripts).toBeUndefined();
