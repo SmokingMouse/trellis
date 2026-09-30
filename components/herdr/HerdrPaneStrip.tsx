@@ -49,7 +49,18 @@ export function HerdrPaneStrip() {
     return () => timers.forEach(clearTimeout);
   }, [flash, clearFlash]);
 
-  if (strip.length === 0) return null;
+  // 发布切换条高度：跨窗格通知贴在它正下方（与 --trellis-sb / --trellis-rp 同一模式）。
+  const visible = strip.length > 0;
+  useEffect(() => {
+    if (!visible) return;
+    const root = document.documentElement;
+    root.style.setProperty("--trellis-herdr-strip-h", "2.375rem");
+    return () => {
+      root.style.removeProperty("--trellis-herdr-strip-h");
+    };
+  }, [visible]);
+
+  if (!visible) return null;
   return (
     // 「Herdr」标签和右侧提示放在滚动容器外，只有 chip 行横向滚动，标签永远不被截。
     <nav

@@ -11,6 +11,7 @@ import {
 } from "@/lib/herdr-console";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
 // 跨窗格通知：从 fleet / hook 镜像的状态变化派生（lib/herdr-console diffHerdrAttention）。
@@ -21,6 +22,7 @@ export function HerdrAttentionNotifier() {
   const current = useCurrentHerdrPane(hc.panes);
   const onOverview = useSessionStore((s) => !s.session && s.herdrOpen);
   const notice = useHerdrConsoleStore((s) => s.notice);
+  const isMobile = useIsMobile();
   const prev = useRef<HerdrAttentionState | null>(null);
   const context = useRef({ current: current?.key ?? null, onOverview });
   useEffect(() => {
@@ -52,15 +54,21 @@ export function HerdrAttentionNotifier() {
     if (pane) openHerdrConsolePane(pane);
   };
   return (
+    // 会话区右上角、窗格切换条正下方（切换条上的 chip 同时在闪，空间相邻）。右下角已被
+    // 输入框、会话树浮窗、终端把手占满，不再在底部避让：top = 标签条下沿 + 待办条
+    // + 切换条（--trellis-herdr-strip-h，非 Herdr 会话为 0）+ 8px；右边距只让终端抽屉。
+    // 从上方滑入（@starting-style）。
     <div
       role="status"
       aria-live="polite"
       data-herdr-notice={notice.paneId}
-      className="fixed bottom-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-card border border-warn-line bg-surface-raised p-3 shadow-overlay max-md:inset-x-3 max-md:w-auto"
-      // 避让右侧浮层，与正文 / composer 同一套安全区：--trellis-tree-safe（会话树浮窗
-      // 展开 19.5rem / 收成圆点 3.5rem，已含右边距与间隙，终端把手也在这一列里）
-      // + --trellis-herdr-dw（终端抽屉）。通知放在树的左侧，不再压住它。
-      style={{ right: "calc(var(--trellis-herdr-dw, 0px) + var(--trellis-tree-safe, 0.25rem) + 0.75rem)" }}
+      className="fixed z-50 w-[320px] max-w-[calc(100vw-2rem)] rounded-card border border-warn-line bg-surface-raised p-3 shadow-overlay transition-[opacity,translate] duration-200 ease-out starting:-translate-y-2 starting:opacity-0 motion-reduce:transition-none max-md:inset-x-3 max-md:w-auto"
+      style={{
+        top: isMobile
+          ? "calc(var(--trellis-header-h) + 0.5rem)"
+          : "calc(5.25rem + var(--trellis-pending-h, 0px) + var(--trellis-herdr-strip-h, 0px) + 0.5rem)",
+        right: isMobile ? undefined : "calc(var(--trellis-rp, 0px) + var(--trellis-herdr-dw, 0px) + 1rem)",
+      }}
     >
       <div className="flex items-center gap-2 text-ui">
         <Icon icon={Bell} size="sm" className="text-warn" />
