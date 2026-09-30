@@ -121,6 +121,7 @@ function WorkspaceGroup({
   readOnly: boolean;
   available: boolean;
 }) {
+  const multiTab = new Set([...g.rows, ...g.shells].map((r) => r.pane.tabId)).size > 1;
   return (
     <div data-herdr-sidebar-group={g.id} className="mb-1.5">
       <button
@@ -160,10 +161,10 @@ function WorkspaceGroup({
         <div className="relative">
           <span aria-hidden className="absolute inset-y-0 w-px bg-line" style={{ left: 15 }} />
           {g.rows.map((row) => (
-            <PaneRow key={row.pane.key} row={row} active={row.pane.key === currentKey} onOpen={onOpen} readOnly={readOnly} available={available} />
+            <PaneRow key={row.pane.key} row={row} showTab={multiTab} active={row.pane.key === currentKey} onOpen={onOpen} readOnly={readOnly} available={available} />
           ))}
           {g.shells.map((row) => (
-            <PaneRow key={row.pane.key} row={row} active={false} onOpen={onOpen} readOnly={readOnly} available={available} />
+            <PaneRow key={row.pane.key} row={row} showTab={multiTab} active={false} onOpen={onOpen} readOnly={readOnly} available={available} />
           ))}
         </div>
       )}
@@ -173,18 +174,21 @@ function WorkspaceGroup({
 
 function PaneRow({
   row,
+  showTab,
   active,
   onOpen,
   readOnly,
   available,
 }: {
   row: HerdrModeRow;
+  showTab: boolean;
   active: boolean;
   onOpen: (row: HerdrModeRow) => void;
   readOnly: boolean;
   available: boolean;
 }) {
   const { pane } = row;
+  // tab 名只在组里有多个 tab 时才有区分意义；单 tab 组里每行都挂「t1」是噪音。
   return (
     <div
       role="button"
@@ -219,7 +223,7 @@ function PaneRow({
         </span>
       )}
       <span className="shrink-0 text-nano text-ink-faint transition-opacity md:group-hover:opacity-0 md:group-focus-within:opacity-0">
-        {pane.tabLabel}
+        {showTab ? pane.tabLabel : null}
       </span>
       <span className="absolute inset-y-0 right-1 hidden items-center md:group-hover:flex md:group-focus-within:flex md:has-[[aria-expanded=true]]:flex max-md:!hidden">
         <HerdrPaneMenu pane={pane} readOnly={readOnly} available={available} className={active ? "bg-accent-muted" : "bg-surface-hover"} />

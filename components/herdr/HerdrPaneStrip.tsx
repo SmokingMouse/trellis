@@ -21,7 +21,7 @@ export function HerdrLaneDot({ pane }: { pane: HerdrConsolePane }) {
 // Herdr 模式的标签行：整行替换普通会话标签（SessionTabs 在 Herdr 模式下只渲染它）。
 // 同一行里按 workspace 分组：组名（sticky，横向滚动时贴左不被截）+ 该组的窗格 chip。
 // 组序 / 编号与侧栏一致（lib/herdr-mode.ts）：⌥1-9 直达、⌥[ ⌥] 前后切、⌥J 下一个需要你。
-// 窄屏（< lg）有当前窗格时只显示当前组。
+// 窄屏（< xl，右侧还挂着会话动作槽）有当前窗格时只显示当前组。
 export function HerdrPaneStrip({ sessionTitle }: { sessionTitle?: (sessionId: string) => string | null | undefined }) {
   const { fleet, panes, strip } = useHerdrConsole();
   const groups = useMemo(() => buildHerdrModeGroups(fleet, panes, sessionTitle), [fleet, panes, sessionTitle]);
@@ -84,7 +84,7 @@ export function HerdrPaneStrip({ sessionTitle }: { sessionTitle?: (sessionId: st
               data-herdr-strip-group={g.id}
               className={cn(
                 "flex h-full shrink-0 items-center gap-0.5 border-l border-line-faint pr-1.5",
-                current && !hasCurrent && "max-lg:hidden",
+                current && !hasCurrent && "max-xl:hidden",
               )}
             >
               <span
@@ -132,7 +132,7 @@ export function HerdrPaneStrip({ sessionTitle }: { sessionTitle?: (sessionId: st
           );
         })}
       </div>
-      <span className="inline-flex shrink-0 items-center gap-2.5 border-l border-line-faint pl-3 text-label text-ink-faint max-xl:hidden">
+      <span className="inline-flex shrink-0 items-center gap-2.5 border-l border-line-faint pl-3 text-label text-ink-faint max-2xl:hidden">
         <span className="inline-flex items-center gap-1"><Kbd keys={["⌥", "J"]} />下一个需要你</span>
         <span className="inline-flex items-center gap-1"><Kbd keys={["⌥", "["]} /><Kbd keys={["⌥", "]"]} /></span>
       </span>
