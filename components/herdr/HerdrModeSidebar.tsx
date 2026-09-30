@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { ChevronRight, LayoutGrid, SquareTerminal } from "lucide-react";
 import { Icon, Spinner, StatusDot, cn } from "@/components/ui";
 import { HerdrLaneDot } from "./HerdrPaneStrip";
@@ -8,8 +8,7 @@ import { HerdrPaneMenu } from "./HerdrPaneMenu";
 import { openHerdrConsolePane, useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { HERDR_LANE_LABEL, herdrLaneCounts } from "@/lib/herdr-console";
-import { buildHerdrModeGroups, herdrGroupName, type HerdrModeGroup, type HerdrModeRow } from "@/lib/herdr-mode";
-import type { Session } from "@/lib/types";
+import { herdrGroupName, type HerdrModeGroup, type HerdrModeRow } from "@/lib/herdr-mode";
 import { useSessionStore } from "@/stores/sessionStore";
 
 // 侧栏 Herdr 模式：按 Herdr 自己的结构排 —— 总览 → 置顶（只列 Herdr 会话）→
@@ -19,21 +18,16 @@ import { useSessionStore } from "@/stores/sessionStore";
 const ROW = "h-7 max-md:h-11";
 
 export function HerdrModeSidebar({
-  sessions,
   pinned,
   onNavigate,
 }: {
-  /** 用来给「Claude Code」这类默认终端标题兜底取会话标题 */
-  sessions: Session[];
   /** 置顶区（SessionSidebar 渲染，已只含 Herdr 会话） */
   pinned: ReactNode;
   /** 手机抽屉里点了行要收起抽屉 */
   onNavigate: () => void;
 }) {
   const hc = useHerdrConsole();
-  const titles = useMemo(() => new Map(sessions.map((s) => [s.id, s.title])), [sessions]);
-  const sessionTitle = useCallback((id: string) => titles.get(id) ?? null, [titles]);
-  const groups = useMemo(() => buildHerdrModeGroups(hc.fleet, hc.panes, sessionTitle), [hc.fleet, hc.panes, sessionTitle]);
+  const groups = hc.groups;
   const current = useCurrentHerdrPane(hc.panes);
   const overviewActive = useSessionStore((s) => !s.session && s.herdrOpen);
   const counts = herdrLaneCounts(hc.panes);
@@ -222,8 +216,9 @@ function PaneRow({
           +{pane.queued}
         </span>
       )}
-      <span className="shrink-0 text-nano text-ink-faint transition-opacity md:group-hover:opacity-0 md:group-focus-within:opacity-0">
-        {showTab ? pane.tabLabel : null}
+      {/* 行尾弱色 meta：没被用作标题的 pane label（角色名）· 多 tab 组里的 tab 名 */}
+      <span className="min-w-0 max-w-16 shrink truncate text-nano text-ink-faint transition-opacity md:group-hover:opacity-0 md:group-focus-within:opacity-0">
+        {[row.labelMeta, showTab ? pane.tabLabel : null].filter(Boolean).join(" · ")}
       </span>
       <span className="absolute inset-y-0 right-1 hidden items-center md:group-hover:flex md:group-focus-within:flex md:has-[[aria-expanded=true]]:flex max-md:!hidden">
         <HerdrPaneMenu pane={pane} readOnly={readOnly} available={available} className={active ? "bg-accent-muted" : "bg-surface-hover"} />

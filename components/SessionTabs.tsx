@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { isEditableTarget } from "@/lib/shortcuts";
@@ -10,6 +10,7 @@ import { useAppMode } from "@/hooks/useAppMode";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
 import { HerdrPaneStrip } from "@/components/herdr/HerdrPaneStrip";
+import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
 
 // Workbench Wave 4 — VSCode-style editor tab strip (rewrite of Wave 1).
 //
@@ -79,6 +80,7 @@ export function SessionTabs() {
         ] as Session[];
         for (const s of all) map[s.id] = s;
         setById(map);
+        useSessionTitlesStore.getState().ingest(all);
         // 常驻标签 = 服务端置顶集合（sessions.pinned_at）。
         useSessionStore.getState().syncPinnedFromServer(all, requestedAt);
       })
@@ -101,8 +103,6 @@ export function SessionTabs() {
     return ids.filter((id) => byId[id] && !isHerdrSession(byId[id], fleet));
   }, [pinnedIds, previewId, byId, fleet]);
 
-  // 窗格条的行标题兜底要用会话标题（终端标题是「Claude Code」这类默认值时）。
-  const sessionTitle = useCallback((id: string) => byId[id]?.title ?? null, [byId]);
 
   // ⌘1–9 (and Ctrl+1–9 off-mac) jump to the Nth open tab. Ignored while
   // typing so digits with a held modifier still reach inputs.
@@ -133,7 +133,7 @@ export function SessionTabs() {
       style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
       {mode === "herdr" ? (
-        <HerdrPaneStrip sessionTitle={sessionTitle} />
+        <HerdrPaneStrip />
       ) : (
       <div className="min-w-0 flex-1 h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (

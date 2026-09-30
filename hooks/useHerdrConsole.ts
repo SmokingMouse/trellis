@@ -1,26 +1,30 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { herdrUnavailableText, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   buildHerdrConsole,
   findConsolePaneForSession,
   type HerdrConsolePane,
 } from "@/lib/herdr-console";
-import { buildHerdrModeGroups, herdrModeStrip } from "@/lib/herdr-mode";
+import { applyHerdrTitles, buildHerdrModeGroups, herdrModeStrip } from "@/lib/herdr-mode";
+import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
 /** 操作台共用投影：fleet + hook 镜像 → 带泳道的窗格列表（含纯 shell 与离线会话）。 */
 export function useHerdrConsole() {
   const snapshot = useHerdrFleet();
+  // 标题统一走 lib/herdr-mode.ts 的 herdrPaneTitle：侧栏、窗格条、⌥K、总览卡片、跨窗格通知
+  // 都从这里拿 panes，不会再各自出现「Claude Code」。
+  const titles = useSessionTitlesStore((s) => s.titles);
+  const sessionTitle = useCallback((id: string) => titles[id] ?? null, [titles]);
   const panes = useMemo(
-    () => buildHerdrConsole(snapshot.fleet, snapshot.hooks),
-    [snapshot.fleet, snapshot.hooks],
+    () => applyHerdrTitles(buildHerdrConsole(snapshot.fleet, snapshot.hooks), sessionTitle),
+    [snapshot.fleet, snapshot.hooks, sessionTitle],
   );
   // 窗格条 / ⌥1-9 / ⌥J 的顺序跟 Herdr 模式的分组走（组序 → 组内 tab 序），与侧栏、标签行一致。
-  // 顺序不依赖标题，所以这里不带会话标题；要显示标题的组件自己带标题再算一遍。
-  const groups = useMemo(() => buildHerdrModeGroups(snapshot.fleet, panes), [snapshot.fleet, panes]);
+  const groups = useMemo(() => buildHerdrModeGroups(snapshot.fleet, panes, sessionTitle), [snapshot.fleet, panes, sessionTitle]);
   const strip = useMemo(() => herdrModeStrip(groups), [groups]);
   const available = Boolean(snapshot.fleet?.available && !snapshot.error);
   return {

@@ -60,7 +60,11 @@ export function basename(path: string | null | undefined): string {
   return parts[parts.length - 1] || path;
 }
 
-/** 行标题：pane label > 终端标题（去前缀符号、跳过默认标题）> 绑定会话标题 > cwd basename。 */
+/**
+ * 行标题：终端标题（去前缀符号、跳过默认标题）> 绑定会话标题 > pane label > cwd basename。
+ * pane label（claude-leader / leader）是角色名不是任务名，所以排在任务信息之后；
+ * 没被用作标题时由 herdrPaneLabelMeta 作为行尾弱色 meta 显示。
+ */
 export function herdrRowTitle(input: {
   label?: string | null;
   terminalTitle?: string | null;
@@ -68,13 +72,48 @@ export function herdrRowTitle(input: {
   cwd?: string | null;
   agentKind?: string | null;
 }): string {
-  const label = input.label?.trim();
-  if (label) return label;
   const terminal = cleanTerminalTitle(input.terminalTitle);
   if (terminal && !isDefaultTerminalTitle(terminal, input.agentKind)) return terminal;
   const session = input.sessionTitle?.trim();
   if (session) return session;
+  const label = input.label?.trim();
+  if (label) return label;
   return basename(input.cwd) || input.agentKind || "窗格";
+}
+
+/** pane label 没被用作标题时，作为行尾 meta（角色名）；用作标题了就不重复。 */
+export function herdrPaneLabelMeta(label: string | null | undefined, title: string): string | null {
+  const l = label?.trim();
+  return l && l !== title ? l : null;
+}
+
+type SessionTitleFn = (sessionId: string) => string | null | undefined;
+
+/**
+ * 一个 Herdr 窗格在所有界面（侧栏、窗格条、⌥K、总览卡片、跨窗格通知）的唯一标题。
+ * agent 窗格按 herdrRowTitle；离线会话优先会话标题；纯 shell 沿用路径标题。
+ */
+export function herdrPaneTitle(pane: HerdrConsolePane, sessionTitle: SessionTitleFn = () => null): string {
+  const fp = pane.view?.pane;
+  if (fp) {
+    return herdrRowTitle({
+      label: fp.label,
+      terminalTitle: fp.terminal_title,
+      sessionTitle: pane.sessionId ? sessionTitle(pane.sessionId) : null,
+      cwd: fp.cwd,
+      agentKind: pane.agentKind,
+    });
+  }
+  if (pane.lane === "off" && pane.sessionId) return sessionTitle(pane.sessionId)?.trim() || pane.title;
+  return pane.title;
+}
+
+/** 把 buildHerdrConsole 的 title 统一换成 herdrPaneTitle（其余字段原样）。 */
+export function applyHerdrTitles(panes: HerdrConsolePane[], sessionTitle: SessionTitleFn = () => null): HerdrConsolePane[] {
+  return panes.map((pane) => {
+    const title = herdrPaneTitle(pane, sessionTitle);
+    return title === pane.title ? pane : { ...pane, title };
+  });
 }
 
 /** ~/code/agent/harbor → …/agent/harbor；~/.claude → ~/.claude。只给同名工作区做区分。 */
@@ -93,6 +132,8 @@ export function shortPath(path: string | null | undefined, home?: string | null)
 export type HerdrModeRow = {
   pane: HerdrConsolePane;
   title: string;
+  /** pane label（角色名）没被用作标题时的行尾 meta */
+  labelMeta: string | null;
   /** 纯 shell 窗格：弱化显示在组末，不进窗格条与 ⌥ 编号 */
   shell: boolean;
 };
@@ -158,23 +199,15 @@ export function buildHerdrModeGroups(
             pane,
             shell: true,
             title: fp.label?.trim() || pane.title,
+            labelMeta: null,
           });
           continue;
         }
         if (pane.lane === "need") need++;
         if (pane.lane === "run") run++;
         if (pane.activityAt != null && (activityAt == null || pane.activityAt > activityAt)) activityAt = pane.activityAt;
-        rows.push({
-          pane,
-          shell: false,
-          title: herdrRowTitle({
-            label: fp.label,
-            terminalTitle: fp.terminal_title,
-            sessionTitle: pane.sessionId ? sessionTitle(pane.sessionId) : null,
-            cwd: fp.cwd,
-            agentKind: pane.agentKind,
-          }),
-        });
+        const title = herdrPaneTitle(pane, sessionTitle);
+        rows.push({ pane, shell: false, title, labelMeta: herdrPaneLabelMeta(fp.label, title) });
       }
     }
     if (!rows.length && !shells.length) return;

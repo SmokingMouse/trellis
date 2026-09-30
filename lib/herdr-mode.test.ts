@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { buildHerdrConsole } from "./herdr-console";
 import {
   appModeFor,
+  applyHerdrTitles,
+  herdrPaneLabelMeta,
+  herdrPaneTitle,
   buildHerdrModeGroups,
   herdrGroupName,
   herdrModeStrip,
@@ -54,8 +57,16 @@ describe("模式判定", () => {
 });
 
 describe("行标题派生", () => {
-  test("pane label 优先", () => {
-    expect(herdrRowTitle({ label: "claude-leader", terminalTitle: "✳ 任务名", sessionTitle: "会话" })).toBe("claude-leader");
+  test("终端标题 > 会话标题 > pane label（角色名）> cwd", () => {
+    expect(herdrRowTitle({ label: "claude-leader", terminalTitle: "✳ 任务名", sessionTitle: "会话" })).toBe("任务名");
+    expect(herdrRowTitle({ label: "claude-leader", terminalTitle: "✳ Claude Code", sessionTitle: "会话" })).toBe("会话");
+    expect(herdrRowTitle({ label: "claude-leader", terminalTitle: "✳ Claude Code", cwd: "/r/app" })).toBe("claude-leader");
+  });
+
+  test("label 没被用作标题才作 meta", () => {
+    expect(herdrPaneLabelMeta("leader", "重构")).toBe("leader");
+    expect(herdrPaneLabelMeta("leader", "leader")).toBeNull();
+    expect(herdrPaneLabelMeta(null, "x")).toBeNull();
   });
 
   test("终端标题去掉 spinner 前缀", () => {
@@ -135,9 +146,10 @@ describe("分组与排序", () => {
     expect(groups.find((g) => g.id === "w3")!.branch).toBeNull();
   });
 
-  test("行标题：Claude Code 落到会话标题；label 优先；shell 放组末", () => {
+  test("行标题：Claude Code 落到会话标题；终端标题压过 label，label 进 meta；shell 放组末", () => {
     expect(groups.find((g) => g.id === "w1")!.rows[0].title).toBe("修 skill 路由");
-    expect(groups.find((g) => g.id === "w4")!.rows[0].title).toBe("leader");
+    expect(groups.find((g) => g.id === "w4")!.rows[0].title).toBe("重构");
+    expect(groups.find((g) => g.id === "w4")!.rows[0].labelMeta).toBe("leader");
     const w2 = groups.find((g) => g.id === "w2")!;
     expect(w2.rows.map((r) => r.title)).toEqual(["评测设计"]);
     expect(w2.shells.map((r) => r.pane.paneId)).toEqual(["w2:p2"]);
@@ -154,6 +166,23 @@ describe("分组与排序", () => {
     ]);
     const g = buildHerdrModeGroups(f, buildHerdrConsole(f, [], NOW));
     expect(g.map((x) => x.hint)).toEqual(["…/one/app", "…/two/app"]);
+  });
+
+  test("applyHerdrTitles：所有界面共用的标题里不再有 Claude Code", () => {
+    const titled = applyHerdrTitles(panes, (id) => titles[id]);
+    const byPane = new Map(titled.map((p) => [p.paneId, p.title]));
+    expect(byPane.get("w1:p1")).toBe("修 skill 路由");
+    expect(byPane.get("w4:p1")).toBe("重构");
+    expect(byPane.get("w3:p1")).toBe("价值与方向");
+    expect(titled.some((p) => /claude code/i.test(p.title))).toBe(false);
+    // 未变的对象原样复用
+    expect(titled.find((p) => p.paneId === "w2:p2")).toBe(panes.find((p) => p.paneId === "w2:p2")!);
+  });
+
+  test("herdrPaneTitle：离线会话优先会话标题，缺了沿用原标题", () => {
+    const off = { ...panes[0], lane: "off" as const, view: null, sessionId: "s-x", title: "旧标题" };
+    expect(herdrPaneTitle(off, () => "会话标题")).toBe("会话标题");
+    expect(herdrPaneTitle(off)).toBe("旧标题");
   });
 
   test("没有 fleet → 空", () => {

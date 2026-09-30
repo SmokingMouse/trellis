@@ -71,6 +71,7 @@ import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { useAppMode } from "@/hooks/useAppMode";
+import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
 import { herdrStatusLabel } from "@/lib/herdr-console";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
@@ -225,6 +226,7 @@ export function SessionSidebar() {
         if (!cancelled) {
           setSessions(data.sessions ?? []);
           setTaskSessions(data.taskSessions ?? []);
+          useSessionTitlesStore.getState().ingest([...(data.sessions ?? []), ...(data.taskSessions ?? [])]);
           useSessionStore.getState().syncPinnedFromServer(
             [...(data.sessions ?? []), ...(data.taskSessions ?? [])],
             requestedAt,
@@ -936,7 +938,7 @@ export function SessionSidebar() {
         className="flex-1 overflow-y-auto border-t border-line-faint py-1.5"
       >
         {mode === "herdr" ? (
-          <HerdrModeSidebar sessions={sessions} pinned={renderPinned()} onNavigate={() => setMobileNavOpen(false)} />
+          <HerdrModeSidebar pinned={renderPinned()} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
         <>
         {renderPinned()}

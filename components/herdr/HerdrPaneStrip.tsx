@@ -5,7 +5,7 @@ import { LayoutGrid } from "lucide-react";
 import { Icon, Kbd, Spinner, StatusDot, cn } from "@/components/ui";
 import { openHerdrConsolePane, useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { HERDR_LANE_LABEL, type HerdrConsolePane } from "@/lib/herdr-console";
-import { buildHerdrModeGroups, herdrGroupName } from "@/lib/herdr-mode";
+import { herdrGroupName } from "@/lib/herdr-mode";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { useSessionStore } from "@/stores/sessionStore";
 
@@ -22,9 +22,8 @@ export function HerdrLaneDot({ pane }: { pane: HerdrConsolePane }) {
 // 同一行里按 workspace 分组：组名（sticky，横向滚动时贴左不被截）+ 该组的窗格 chip。
 // 组序 / 编号与侧栏一致（lib/herdr-mode.ts）：⌥1-9 直达、⌥[ ⌥] 前后切、⌥J 下一个需要你。
 // 窄屏（< xl，右侧还挂着会话动作槽）有当前窗格时只显示当前组。
-export function HerdrPaneStrip({ sessionTitle }: { sessionTitle?: (sessionId: string) => string | null | undefined }) {
-  const { fleet, panes, strip } = useHerdrConsole();
-  const groups = useMemo(() => buildHerdrModeGroups(fleet, panes, sessionTitle), [fleet, panes, sessionTitle]);
+export function HerdrPaneStrip() {
+  const { panes, strip, groups } = useHerdrConsole();
   const current = useCurrentHerdrPane(panes);
   const overviewActive = useSessionStore((s) => !s.session && s.herdrOpen);
   const flash = useHerdrConsoleStore((s) => s.flash);
