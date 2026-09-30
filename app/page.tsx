@@ -48,6 +48,7 @@ import { HerdrOverview } from "@/components/herdr/HerdrOverview";
 import { useHerdrShortcuts } from "@/hooks/useHerdrShortcuts";
 import { HerdrAttentionNotifier } from "@/components/herdr/HerdrAttentionNotifier";
 import { HerdrTerminalDrawer } from "@/components/herdr/HerdrTerminalDrawer";
+import { HerdrJumpPalette } from "@/components/herdr/HerdrJumpPalette";
 import { TriangleAlert } from "lucide-react";
 import { Icon, Spinner } from "@/components/ui";
 
@@ -269,6 +270,7 @@ export default function Home() {
       <NotesDrawer />
       <WorkspaceFilesDrawer />
       <SearchModal />
+      <HerdrJumpPalette />
       <FilePreview />
       <BookmarksDrawer />
       <KeyboardHelp />
