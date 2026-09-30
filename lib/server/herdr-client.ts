@@ -187,6 +187,8 @@ export class HerdrClient {
   private readonly agents = new Map<string, HerdrAgent>();
   private readonly inputTails = new Map<string, Promise<unknown>>();
   private readonly deliveries = new Map<string, HerdrInputDelivery>();
+  // 已撤回、但 worker 还卡在 agent.wait 里的排队输入：醒来后看到就跳过发送。
+  private readonly cancelledInputs = new Set<string>();
 
   get inputDeliveries(): HerdrInputDelivery[] {
     return [...this.deliveries.values()];
@@ -338,6 +340,9 @@ export class HerdrClient {
           timeout_ms: timeoutMs,
         }, timeoutMs + 5_000);
       }
+      if (this.cancelledInputs.has(receipt.inputId)) {
+        throw new HerdrApiError("queued input cancelled", "input_cancelled");
+      }
       const target = this.requireAgentPane(paneId);
       if (this.stopped || target.terminal_id !== acceptedPane.terminal_id ||
           JSON.stringify(target.agent_session) !== JSON.stringify(acceptedPane.agent_session)) {
@@ -354,6 +359,8 @@ export class HerdrClient {
     });
     this.publishDelivery(receipt);
     void run.catch((error) => {
+      // 撤回时已经发布过 cancelled 回执，别再被 failed 覆盖。
+      if (this.cancelledInputs.delete(receipt.inputId)) return;
       this.publishDelivery({ ...receipt, status: "failed", error: error instanceof Error ? error.message : String(error) });
     });
     // Both idle waits belong to the background worker. A busy pane (or an
@@ -374,6 +381,18 @@ export class HerdrClient {
       },
     );
     return queued ? receipt : run;
+  }
+
+  /**
+   * 撤回一条还在排队的输入：立刻发布 cancelled 回执；worker 在等窗格空闲，醒来后跳过发送，
+   * 后面排着的输入照常按序送达。已送达 / 已失败 / 不属于该窗格 → false。
+   */
+  cancelInput(paneId: string, inputId: string): boolean {
+    const delivery = this.deliveries.get(inputId);
+    if (!delivery || delivery.paneId !== paneId || delivery.status !== "queued") return false;
+    this.cancelledInputs.add(inputId);
+    this.publishDelivery({ ...delivery, status: "cancelled" });
+    return true;
   }
 
   async sendKeys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {

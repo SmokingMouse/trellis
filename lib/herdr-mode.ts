@@ -278,3 +278,18 @@ export function herdrModeStrip(groups: HerdrModeGroup[]): HerdrConsolePane[] {
 export function herdrGroupName(g: Pick<HerdrModeGroup, "label" | "hint">): string {
   return g.hint ? `${g.label} ${g.hint}` : g.label;
 }
+
+/**
+ * Herdr 输入框「发往 ⚓ <工作区> · <tab>」：工作区名与侧栏分组同源（撞名带区分后缀），
+ * tab 用 herdr-console 的 tabLabelOf（纯数字 → t2）。窗格不在任何分组里 → null。
+ */
+export function herdrSendTarget(
+  groups: Pick<HerdrModeGroup, "label" | "hint" | "rows">[],
+  paneId: string,
+): { workspace: string; tab: string } | null {
+  for (const g of groups) {
+    const row = g.rows.find((r) => r.pane.paneId === paneId);
+    if (row) return { workspace: herdrGroupName(g), tab: row.pane.tabLabel };
+  }
+  return null;
+}

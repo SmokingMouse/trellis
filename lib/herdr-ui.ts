@@ -78,6 +78,8 @@ export type HerdrFleetPane = {
   agent_session?: { value?: string | null } | null;
   /** 服务端从 jsonl 尾部认出的待答（仅 blocked 的 claude 窗格），见 transcript-pending.ts */
   transcript_prompt?: HerdrTranscriptPrompt | null;
+  /** claude 窗格当前模型（jsonl 最近一条 assistant 的 message.model），读不到为 null */
+  model?: string | null;
 };
 
 /** jsonl 里未完成的 tool_use 派生出的待答卡；interactivePrompt 与 hook 路径同形状。 */

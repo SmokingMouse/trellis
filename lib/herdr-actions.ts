@@ -35,6 +35,13 @@ export async function sendHerdrInput(paneId: string, text: string): Promise<Herd
   return ((await response.json()) as { result: HerdrInputDelivery }).result;
 }
 
+/** 撤回一条排队中的输入（已送达 / 已失败时服务端回 409 → 抛错）。 */
+export async function cancelHerdrInput(paneId: string, inputId: string): Promise<void> {
+  await ensureOk(await fetch(`${paneUrl(paneId, "input")}?inputId=${encodeURIComponent(inputId)}`, {
+    method: "DELETE",
+  }));
+}
+
 /** 立即打字进窗格（不排队）；submit 时文字后跟一个 Enter，原子送出。 */
 export async function sendHerdrText(paneId: string, text: string, submit = true): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "text"), {

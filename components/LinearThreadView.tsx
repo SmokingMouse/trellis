@@ -828,7 +828,15 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       >
         <div className={`${widthClass} mx-auto px-4 md:px-8`}>
           {isHerdr ? (
-            herdrPane?.alive ? <HerdrComposer pane={herdrPane} /> : null
+            session ? (
+              <HerdrComposer
+                sessionId={session.id}
+                pane={herdrPane}
+                loading={herdrSnapshot.loading}
+                mobileCompact={isMobile}
+                onMobileExpandedChange={onComposerExpandedChange}
+              />
+            ) : null
           ) : (
             <Composer
               targetNode={branchFromNode ?? tipNode}

@@ -426,6 +426,26 @@ describe("HerdrClient", () => {
     expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["second"]);
   });
 
+  test("cancelled queued input is skipped; later inputs still deliver in order", async () => {
+    const server = new FakeHerdr();
+    server.snapshot.panes = [pane(5, "working")];
+    server.waitDelayMs = 30;
+    servers.push(server);
+    const client = clientFor(server);
+    await client.start();
+    const first = await client.enqueueInput("w1:p1", "first", 500);
+    const second = await client.enqueueInput("w1:p1", "second", 500);
+    expect(client.cancelInput("w1:p2", first.inputId)).toBeFalse(); // 别的窗格
+    expect(client.cancelInput("w1:p1", first.inputId)).toBeTrue();
+    expect(client.cancelInput("w1:p1", first.inputId)).toBeFalse(); // 已不在排队
+    expect(client.inputDeliveries.find(input => input.inputId === first.inputId)?.status).toBe("cancelled");
+    const deadline = Date.now() + 1000;
+    while (client.inputDeliveries.some(input => input.status === "queued") && Date.now() < deadline) await Bun.sleep(10);
+    expect(client.inputDeliveries.find(input => input.inputId === first.inputId)?.status).toBe("cancelled");
+    expect(client.inputDeliveries.find(input => input.inputId === second.inputId)?.status).toBe("delivered");
+    expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["second"]);
+  });
+
   test("serializes input per pane", async () => {
     const server = new FakeHerdr();
     server.waitDelayMs = 30;

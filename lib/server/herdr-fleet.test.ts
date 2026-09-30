@@ -474,6 +474,15 @@ describe("HerdrFleetService", () => {
     expect(paneOf().transcript_prompt).toBeNull();
   });
 
+  test("claude 窗格带上 transcript 最近一条 assistant 的模型；读不到为 null", async () => {
+    const harness = createHarness();
+    await harness.service.ensureStarted();
+    const paneOf = () => ((harness.service.fleet().workspaces[0].tabs as Record<string, unknown>[])[0].panes as Record<string, unknown>[])[0];
+    expect(paneOf().model).toBeNull();
+    fs.appendFileSync(harness.transcript, `${JSON.stringify({ type: "assistant", message: { id: "m1", model: "claude-opus-5-5", content: [] } })}\n`);
+    expect(paneOf().model).toBe("claude-opus-5-5");
+  });
+
   test("ETag generation changes with an important fleet update", async () => {
     const harness = createHarness();
     await harness.service.ensureStarted();

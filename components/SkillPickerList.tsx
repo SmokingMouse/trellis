@@ -25,6 +25,8 @@ export function SkillPickerList({
   activeIndex = -1,
   skillPrefix = "/",
   placement = "above",
+  slashItems = [],
+  onPickSlashItem,
 }: {
   skills: { name: string; description: string }[];
   onPick: (name: string) => void;
@@ -38,8 +40,12 @@ export function SkillPickerList({
   activeIndex?: number;
   skillPrefix?: "/" | "$";
   placement?: "above" | "inline";
+  // Herdr 输入框：Claude Code 自己的斜杠命令（内置 / 技能 / 自定义命令），名字已含前缀。
+  // 排在 commands + skills 之后（Herdr 里那两组为空，索引即从 0 起）。
+  slashItems?: { name: string; description: string; kindLabel: string; kind: "command" | "skill" }[];
+  onPickSlashItem?: (index: number) => void;
 }) {
-  if (!skills.length && !commands.length && !agents.length) return null;
+  if (!skills.length && !commands.length && !agents.length && !slashItems.length) return null;
   // Keep the keyboard highlight visible inside the scrollable list. Ref
   // callbacks re-run per render, but scrollIntoView(nearest) on an already
   // visible element is a no-op.
@@ -130,6 +136,17 @@ export function SkillPickerList({
           name: `${skillPrefix}${s.name}`,
           kind: "技能",
           description: s.description,
+        }),
+      )}
+      {slashItems.map((item, i) =>
+        row({
+          key: `slash-${item.name}`,
+          active: commands.length + skills.length + i === activeIndex,
+          onClick: () => onPickSlashItem?.(i),
+          icon: item.kind === "skill" ? Sparkles : SquareSlash,
+          name: item.name,
+          kind: item.kindLabel,
+          description: item.description,
         }),
       )}
     </div>

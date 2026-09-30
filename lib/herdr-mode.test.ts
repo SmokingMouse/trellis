@@ -9,6 +9,7 @@ import {
   herdrGroupName,
   herdrModeStrip,
   herdrRowTitle,
+  herdrSendTarget,
   isDefaultTerminalTitle,
   parseAppMode,
   shortPath,
@@ -183,6 +184,17 @@ describe("分组与排序", () => {
     const off = { ...panes[0], lane: "off" as const, view: null, sessionId: "s-x", title: "旧标题" };
     expect(herdrPaneTitle(off, () => "会话标题")).toBe("会话标题");
     expect(herdrPaneTitle(off)).toBe("旧标题");
+  });
+
+  test("herdrSendTarget：发往 = 分组名（撞名带后缀）· tab 标签（纯数字 → t2）", () => {
+    const f = fleetOf([
+      { workspace_id: "a", label: "app", tabs: [{ tab_id: "a:t1", label: "2", panes: [pane("a:p1", "claude", "idle", null, { cwd: "/Users/x/one/app" })] }] },
+      { workspace_id: "b", label: "app", tabs: [{ tab_id: "b:t1", label: "review", panes: [pane("b:p1", "claude", "idle", null, { cwd: "/Users/x/two/app" })] }] },
+    ]);
+    const g = buildHerdrModeGroups(f, buildHerdrConsole(f, [], NOW));
+    expect(herdrSendTarget(g, "a:p1")).toEqual({ workspace: "app …/one/app", tab: "t2" });
+    expect(herdrSendTarget(g, "b:p1")).toEqual({ workspace: "app …/two/app", tab: "review" });
+    expect(herdrSendTarget(g, "nope")).toBeNull();
   });
 
   test("没有 fleet → 空", () => {

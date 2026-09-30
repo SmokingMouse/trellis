@@ -25,6 +25,7 @@ import {
   TranscriptPromptCache,
   type TranscriptPrompt,
 } from "./agent-hooks/transcript-pending";
+import { TranscriptModelCache } from "./agent-hooks/transcript-model";
 
 // 路径规范化只此一家（./canonical-path）：fleet 这边 realpath、discover 那边
 // os.homedir() 原样，正是根因 C 的形状。差别只在 fallback —— herdr 报上来的路径
@@ -76,6 +77,8 @@ export class HerdrFleetService {
   private readonly detach: () => void;
   // blocked 窗格的 transcript 待答（hook > transcript > 读屏 的中间一档），按 jsonl size+mtime 失效。
   private readonly transcriptPrompts = new TranscriptPromptCache();
+  // claude 窗格当前模型（jsonl 最近一条 assistant 的 message.model），给 Herdr 输入框的只读 chip。
+  private readonly transcriptModels = new TranscriptModelCache();
 
   constructor(
     readonly client = new HerdrClient(),
@@ -271,6 +274,24 @@ export class HerdrFleetService {
     return result;
   }
 
+  /** claude 窗格 → 当前模型（读不到的窗格不出现在结果里）。 */
+  transcriptModelsByPane(
+    bindings: ReturnType<typeof listHerdrBindings>,
+  ): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const pane of this.client.state.panes) {
+      if (pane.agent !== "claude") continue;
+      const current = pane.agent_session?.value;
+      const binding = current
+        ? bindings.find((b) => b.paneId === pane.pane_id && b.sessionId === current)
+        : bindings.find((b) => b.paneId === pane.pane_id);
+      if (!binding?.transcriptPath || binding.agentKind !== "claude") continue;
+      const model = this.transcriptModels.get(binding.transcriptPath);
+      if (model) result.set(pane.pane_id, model);
+    }
+    return result;
+  }
+
   /** 发键前的核对：窗格此刻的 herdr 状态 + transcript 待答（现读，不走 fleet 的 ETag）。 */
   paneTranscriptPrompt(paneId: string): { status: string | null; prompt: TranscriptPrompt | null } {
     const pane = this.client.state.panes.find((candidate) => candidate.pane_id === paneId);
@@ -313,6 +334,7 @@ export class HerdrFleetService {
     const state = this.client.state;
     const sessions = listHerdrBindings(this.options.db);
     const prompts = this.transcriptPromptsByPane(sessions);
+    const models = this.transcriptModelsByPane(sessions);
     const workspaces = state.workspaces.map((workspace) => ({
       ...workspace,
       worktree: this.worktrees.get(workspace.workspace_id) ?? null,
@@ -334,6 +356,7 @@ export class HerdrFleetService {
               terminal_title: pane.terminal_title ?? null,
               revision: pane.revision,
               transcript_prompt: prompts.get(pane.pane_id) ?? null,
+              model: models.get(pane.pane_id) ?? null,
             })),
           layout: state.layouts.find((layout) => layout.tab_id === tab.tab_id) ?? null,
         })),
@@ -362,6 +385,11 @@ export class HerdrFleetService {
 
   input(paneId: string, text: string): Promise<HerdrInputDelivery> {
     return this.client.enqueueInput(paneId, text);
+  }
+
+  /** 撤回排队中的输入，见 HerdrClient.cancelInput。 */
+  cancelInput(paneId: string, inputId: string): boolean {
+    return this.client.cancelInput(paneId, inputId);
   }
 
   /** 立即打字（不排队），见 HerdrClient.sendText。 */

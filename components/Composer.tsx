@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, GitBranch, Paperclip, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { sessionScopedKey } from "@/lib/prefs";
-import { isSendCombo, sendHint } from "@/lib/send-key";
+import { sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import { useAgentMentions, splitMention } from "@/hooks/useAgentMentions";
@@ -12,6 +12,7 @@ import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { ComposerShell } from "./ComposerShell";
 import { SketchModal } from "./SketchModal";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
 import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
@@ -84,7 +85,6 @@ export function Composer({
   banner?: ReactNode;
 }) {
   const [text, setText] = useState("");
-  const [dragOver, setDragOver] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
@@ -96,10 +96,6 @@ export function Composer({
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
-  // 输入法组字保护：组字中的 Enter（isComposing / keyCode 229）不发送；
-  // Safari 在 compositionend 之后还会补发一次 keydown(Enter)，再挡 100ms。
-  const compositionEndAt = useRef(0);
-  const rootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
   // Before the server's `created` event lands, the streaming card is a local
@@ -230,46 +226,8 @@ export function Composer({
   );
 
   useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = "auto";
-      ref.current.style.height = `${Math.min(ref.current.scrollHeight, 160)}px`;
-    }
-  }, [text, mobileCompact, mobileExpanded]);
-
-  useEffect(() => {
     onMobileExpandedChange?.(mobileCompact && mobileExpanded);
   }, [mobileCompact, mobileExpanded, onMobileExpandedChange]);
-
-  useEffect(() => {
-    if (focusToken == null) return;
-    const id = window.requestAnimationFrame(() => {
-      if (mobileCompact) setMobileExpanded(true);
-      ref.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [focusToken, mobileCompact]);
-
-  const expandMobile = () => {
-    if (mobileCompact) setMobileExpanded(true);
-  };
-
-  const collapseMobileIfEmpty = () => {
-    if (!mobileCompact) return;
-    window.requestAnimationFrame(() => {
-      if (rootRef.current?.contains(document.activeElement)) return;
-      if (
-        text.trim() ||
-        att.pending.length > 0 ||
-        att.doneAttachments.length > 0 ||
-        att.notice ||
-        cmdNotice ||
-        sketchOpen
-      ) {
-        return;
-      }
-      setMobileExpanded(false);
-    });
-  };
 
   const submit = () => {
     const trimmed = text.trim();
@@ -376,168 +334,119 @@ export function Composer({
   );
 
   return (
-    <div
-      ref={rootRef}
-      data-mobile-composer
-      data-composer-state={streaming ? "stopping" : compact ? "compact" : "expanded"}
-      className={`relative ${compact ? "py-1" : "pt-2 pb-3 max-md:py-2"}`}
-      onBlur={collapseMobileIfEmpty}
-    >
-      {(matchedCommands.length > 0 ||
-        matchedSkills.length > 0 ||
-        matchedAgents.length > 0) && (
-        <SkillPickerList
-          skills={matchedSkills}
-          onPick={pickSkill}
-          commands={matchedCommands}
-          onPickCommand={pickCommand}
-          agents={matchedAgents}
-          onPickAgent={pickAgent}
-          activeIndex={slashNav.active}
-          skillPrefix={skillPrefix}
-        />
+    <ComposerShell
+      textareaRef={ref}
+      value={text}
+      onValueChange={(value) => {
+        setText(value);
+        if (cmdNotice) setCmdNotice(null);
+      }}
+      onSubmit={submit}
+      onEscape={onEscape}
+      sendKey={sendKey}
+      onSlashKeyDown={slashNav.handleKeyDown}
+      suggestions={
+        (matchedCommands.length > 0 ||
+          matchedSkills.length > 0 ||
+          matchedAgents.length > 0) && (
+          <SkillPickerList
+            skills={matchedSkills}
+            onPick={pickSkill}
+            commands={matchedCommands}
+            onPickCommand={pickCommand}
+            agents={matchedAgents}
+            onPickAgent={pickAgent}
+            activeIndex={slashNav.active}
+            skillPrefix={skillPrefix}
+          />
+        )
+      }
+      disabled={noTarget || externalEnded}
+      placeholder={externalEnded ? "外部线程已结束" : (placeholder ?? "继续对话…")}
+      compactPlaceholder={externalEnded ? "外部线程已结束" : "追问…"}
+      mobileCompact={mobileCompact}
+      mobileExpanded={mobileExpanded}
+      onMobileExpandedChange={setMobileExpanded}
+      keepExpanded={Boolean(
+        text.trim() ||
+          att.pending.length > 0 ||
+          att.doneAttachments.length > 0 ||
+          att.notice ||
+          cmdNotice ||
+          sketchOpen,
       )}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={att.accept}
-        multiple
-        onChange={att.handlePicked}
-        className="hidden"
-      />
-      <div
-        data-composer-card=""
-        className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
-          dragOver ? "border-accent ring-3 ring-accent-line" : "border-line-strong"
-        }`}
-        onDragOver={(e) => {
-          // Only react to file drags (Files type), ignore text drags.
-          if (noTarget || externalEnded || !e.dataTransfer.types.includes("Files")) return;
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={(e) => {
-          // Moving between children fires dragleave on the card too.
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
-        }}
-        onDrop={(e) => {
-          setDragOver(false);
-          if (noTarget || externalEnded) return;
-          att.handleDrop(e);
-          if (mobileCompact) setMobileExpanded(true);
-        }}
-      >
-        {banner}
-        {!compact && att.pending.length > 0 && (
+      focusToken={focusToken}
+      banner={banner}
+      attachments={
+        att.pending.length > 0 && (
           <div className="px-3 pt-2.5">
             <AttachmentPreview pending={att.pending} onRemove={att.remove} />
           </div>
-        )}
-        <div className={compact ? "flex items-center gap-1 pr-1" : undefined}>
-          <textarea
-            data-composer-input
-            ref={ref}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              if (cmdNotice) setCmdNotice(null);
-            }}
-            onCompositionEnd={() => {
-              compositionEndAt.current = Date.now();
-            }}
-            onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              if (e.key === "Enter" && Date.now() - compositionEndAt.current < 100) return;
-              // Suggestion navigation first — while the "/" dropdown is open,
-              // Enter picks the highlighted item instead of sending.
-              if (slashNav.handleKeyDown(e)) return;
-              if (isSendCombo(e, sendKey)) {
-                e.preventDefault();
-                submit();
-              } else if (e.key === "Escape" && onEscape) {
-                e.preventDefault();
-                onEscape();
-              }
-            }}
-            onPaste={att.handlePaste}
-            onFocus={expandMobile}
-            rows={1}
-            // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 不在
-            // layer 里、utility 压不住，只能内联去掉输入框自己的那一圈。
-            style={{ outline: "none" }}
-            disabled={noTarget || externalEnded}
-            placeholder={externalEnded ? "外部线程已结束" : compact ? "追问…" : (placeholder ?? "继续对话…")}
-            className={`block w-full min-w-0 resize-none bg-transparent text-body text-ink-strong outline-none placeholder:text-ink-faint disabled:opacity-50 ${
-              compact
-                ? "flex-1 h-11 min-h-11 max-h-11 px-3 py-2.5"
-                : "min-h-12 max-h-40 px-3.5 pt-3 pb-1 leading-relaxed max-md:min-h-18"
-            }`}
-          />
-          {compact && (
-            <>
-              {attachButton}
-              {primary}
-            </>
-          )}
-        </div>
-        {!compact && (
-          <div className="flex items-center gap-1 px-2 pb-2 pt-1">
-            {!mobileCompact && (
-              <div className="flex min-w-0 items-center gap-1.5 mr-1" data-composer-context="">
-                <ModeBadge />
-                <ModelPicker />
-              </div>
-            )}
-            {attachButton}
-            <IconButton
-              label="画个草图"
-              title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
-              onClick={() => setSketchOpen(true)}
-              disabled={noTarget || att.atLimit}
+        )
+      }
+      onPaste={att.handlePaste}
+      onDropFiles={att.handleDrop}
+      chips={
+        <>
+          <ModeBadge />
+          <ModelPicker />
+        </>
+      }
+      tools={
+        <>
+          {attachButton}
+          <IconButton
+            label="画个草图"
+            title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
+            onClick={() => setSketchOpen(true)}
+            disabled={noTarget || att.atLimit}
+          >
+            <Icon icon={PenLine} />
+          </IconButton>
+        </>
+      }
+      compactTools={attachButton}
+      sendTo={
+        targetLabel && (
+          <Tooltip content="新消息会接在这个节点之后" side="top">
+            <span
+              tabIndex={0}
+              data-composer-send-to=""
+              className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 text-label text-ink-faint"
             >
-              <Icon icon={PenLine} />
-            </IconButton>
-            <span className="flex-1" />
-            {targetLabel && (
-              <Tooltip content="新消息会接在这个节点之后" side="top">
-                <span
-                  tabIndex={0}
-                  data-composer-send-to=""
-                  className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 text-label text-ink-faint"
-                >
-                  <Icon icon={GitBranch} size="sm" className={fork ? "text-fork" : undefined} />
-                  <span className="shrink-0">发送到：</span>
-                  <b className="min-w-0 truncate font-medium text-ink-muted">{targetLabel}</b>
-                  {targetIndex !== undefined && (
-                    <span className="shrink-0 font-mono tabular-nums">#{targetIndex}</span>
-                  )}
-                </span>
-              </Tooltip>
-            )}
-            {primary}
-          </div>
-        )}
-      </div>
-      {sketchOpen && (
-        <SketchModal
-          onClose={() => setSketchOpen(false)}
-          onExport={(blob) => att.startUpload(blob, "sketch.png")}
+              <Icon icon={GitBranch} size="sm" className={fork ? "text-fork" : undefined} />
+              <span className="shrink-0">发送到：</span>
+              <b className="min-w-0 truncate font-medium text-ink-muted">{targetLabel}</b>
+              {targetIndex !== undefined && (
+                <span className="shrink-0 font-mono tabular-nums">#{targetIndex}</span>
+              )}
+            </span>
+          </Tooltip>
+        )
+      }
+      primary={primary}
+      state={streaming ? "stopping" : compact ? "compact" : "expanded"}
+      notice={cmdNotice ?? att.notice}
+      hintLeft={streaming ? hint : ""}
+      hintRight={streaming ? "" : hint}
+      beforeCard={
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={att.accept}
+          multiple
+          onChange={att.handlePicked}
+          className="hidden"
         />
-      )}
-      {(cmdNotice || att.notice) && (
-        <div className="mt-1.5 px-1 text-label text-warn-ink" role="status">
-          {cmdNotice ?? att.notice}
-        </div>
-      )}
-      {!compact && (
-        <div
-          data-composer-hint=""
-          className="mt-1.5 flex items-center justify-between gap-3 px-1 text-label text-ink-faint max-md:hidden"
-        >
-          <span className="min-w-0 truncate">{streaming ? hint : ""}</span>
-          <span className="shrink-0">{streaming ? "" : hint}</span>
-        </div>
-      )}
-    </div>
+      }
+      afterCard={
+        sketchOpen && (
+          <SketchModal
+            onClose={() => setSketchOpen(false)}
+            onExport={(blob) => att.startUpload(blob, "sketch.png")}
+          />
+        )
+      }
+    />
   );
 }

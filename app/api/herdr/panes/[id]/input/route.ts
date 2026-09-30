@@ -49,3 +49,21 @@ export async function POST(
     );
   }
 }
+
+// 撤回一条排队中的输入（HerdrComposer 排队列表的「撤回」）。已送达 / 已失败的返回 409。
+export async function DELETE(
+  req: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const inputId = new URL(req.url).searchParams.get("inputId");
+  if (!inputId || inputId.length > 64) {
+    return Response.json({ error: "expected ?inputId=" }, { status: 400 });
+  }
+  const { id } = await context.params;
+  const service = getHerdrFleetService();
+  await service.ensureStarted();
+  const cancelled = service.cancelInput(id, inputId);
+  return cancelled
+    ? Response.json({ ok: true })
+    : Response.json({ error: "input is no longer queued" }, { status: 409 });
+}

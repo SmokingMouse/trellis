@@ -1,0 +1,331 @@
+"use client";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type HTMLAttributes,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { Clock3 } from "lucide-react";
+import { Button, Icon } from "@/components/ui";
+import { resolveComposerKey } from "@/lib/composer-keys";
+import type { SendKey } from "@/lib/send-key";
+
+// 输入框外壳：常规会话（Composer）与 Herdr 会话（HerdrComposer）共用同一副外观与交互，
+// 各自只填语义内容。
+//
+// 外壳负责：
+//   - 描边卡片 + focus-within 描边环、拖入文件时的高亮；
+//   - 自动长高的 textarea（最高 160px）、输入法组字保护、发送键判定（lib/composer-keys.ts）；
+//   - 底栏布局：左 chip 行（chips，手机收起时隐藏）→ 工具图标（tools）→ 右侧「发送到」（sendTo）→ 主按钮（primary）；
+//   - 手机端 mobileCompact：收成一行（输入框 + compactTools + primary），聚焦 / 拖入展开，
+//     失焦且没有未完成内容（keepExpanded=false）时收回；
+//   - 卡外：提示 / 通知行、排队列表、补全面板（suggestions，浮在卡片上方）。
+// 调用方负责：文字状态、发送 / 停止语义、补全数据、附件上传。
+//
+// 手机展开态是受控的（mobileExpanded + onMobileExpandedChange）：发送后收回、拖入后展开
+// 这类决定属于调用方的提交流程。
+
+export type ComposerQueueItem = {
+  id: string;
+  text: string;
+  /** 行尾动作（撤回 / 打断后立即发送…），按顺序渲染成 ghost 小按钮 */
+  actions: { label: string; onClick: () => void; disabled?: boolean; tone?: "neutral" | "danger" }[];
+};
+
+type DataAttributes = { [key: `data-${string}`]: string | undefined };
+
+export function ComposerShell({
+  textareaRef,
+  value,
+  onValueChange,
+  onSubmit,
+  onEscape,
+  sendKey,
+  onSlashKeyDown,
+  suggestions,
+  disabled,
+  dropDisabled = disabled,
+  placeholder,
+  compactPlaceholder = "追问…",
+  mobileCompact = false,
+  mobileExpanded = false,
+  onMobileExpandedChange,
+  keepExpanded = false,
+  focusToken,
+  banner,
+  attachments,
+  onPaste,
+  onDropFiles,
+  chips,
+  tools,
+  compactTools,
+  sendTo,
+  primary,
+  state,
+  notice,
+  hintLeft,
+  hintRight,
+  queue,
+  beforeCard,
+  afterCard,
+  rootProps,
+  textareaProps,
+}: {
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  onValueChange: (value: string) => void;
+  onSubmit: () => void;
+  /** 输入框内的 Esc（本地语义）；不传则 Esc 交给全局处理 */
+  onEscape?: () => void;
+  sendKey: SendKey;
+  /** 补全面板的键盘导航（useSlashNav.handleKeyDown）；返回 true 表示已消费 */
+  onSlashKeyDown?: (e: KeyboardEvent) => boolean;
+  /** 补全面板（绝对定位在卡片上方） */
+  suggestions?: ReactNode;
+  disabled: boolean;
+  /** 拖入是否禁用；默认同 disabled */
+  dropDisabled?: boolean;
+  placeholder: string;
+  compactPlaceholder?: string;
+  mobileCompact?: boolean;
+  mobileExpanded?: boolean;
+  onMobileExpandedChange?: (expanded: boolean) => void;
+  /** 手机端失焦时仍有未完成内容（文字 / 附件 / 通知 / 弹窗）→ 不收回 */
+  keepExpanded?: boolean;
+  /** 变化时把焦点拉进输入框（手机端顺便展开） */
+  focusToken?: number | null;
+  /** 卡内顶部横幅 */
+  banner?: ReactNode;
+  /** 卡内输入框上方（附件预览），手机收起时隐藏 */
+  attachments?: ReactNode;
+  onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /** 拖入文件（只响应 Files 拖拽） */
+  onDropFiles?: (e: DragEvent<HTMLDivElement>) => void;
+  /** 左侧 chip 行（模式 / 模型）；手机端（mobileCompact）不显示 */
+  chips?: ReactNode;
+  /** chip 之后的工具图标（附件 / 草图） */
+  tools?: ReactNode;
+  /** 手机收起态里、主按钮之前的工具图标 */
+  compactTools?: ReactNode;
+  /** 右侧「发送到 / 发往」 */
+  sendTo?: ReactNode;
+  /** 主按钮（发送 / 停止 / 加载） */
+  primary: ReactNode;
+  /** data-composer-state：由调用方给出（stopping / compact / expanded） */
+  state: string;
+  notice?: ReactNode;
+  hintLeft?: ReactNode;
+  hintRight?: ReactNode;
+  queue?: ComposerQueueItem[];
+  beforeCard?: ReactNode;
+  afterCard?: ReactNode;
+  rootProps?: DataAttributes;
+  textareaProps?: DataAttributes & Pick<HTMLAttributes<HTMLTextAreaElement>, "aria-label">;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const compositionEndAt = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const compact = mobileCompact && !mobileExpanded;
+  const setExpanded = (next: boolean) => onMobileExpandedChange?.(next);
+  const setExpandedRef = useRef(setExpanded);
+  useEffect(() => {
+    setExpandedRef.current = setExpanded;
+  });
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }
+  }, [textareaRef, value, mobileCompact, mobileExpanded]);
+
+  useEffect(() => {
+    if (focusToken == null) return;
+    const id = window.requestAnimationFrame(() => {
+      if (mobileCompact) setExpandedRef.current(true);
+      textareaRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [focusToken, mobileCompact, textareaRef]);
+
+  const expandMobile = () => {
+    if (mobileCompact) setExpanded(true);
+  };
+
+  const collapseMobileIfEmpty = () => {
+    if (!mobileCompact) return;
+    window.requestAnimationFrame(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      if (keepExpanded) return;
+      setExpanded(false);
+    });
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    const action = resolveComposerKey(
+      {
+        key: e.key,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        keyCode: e.keyCode,
+        isComposing: e.nativeEvent.isComposing,
+      },
+      { sendKey, compositionEndAt: compositionEndAt.current, now: Date.now(), handlesEscape: !!onEscape },
+    );
+    if (action === "ignore") return;
+    // Suggestion navigation first — while the "/" dropdown is open,
+    // Enter picks the highlighted item instead of sending.
+    if (onSlashKeyDown?.(e)) return;
+    if (action === "send") {
+      e.preventDefault();
+      onSubmit();
+    } else if (action === "escape") {
+      e.preventDefault();
+      onEscape?.();
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      data-mobile-composer
+      data-composer-state={state}
+      {...rootProps}
+      className={`relative ${compact ? "py-1" : "pt-2 pb-3 max-md:py-2"}`}
+      onBlur={collapseMobileIfEmpty}
+    >
+      {suggestions}
+      {beforeCard}
+      {queue && queue.length > 0 && <ComposerQueueList items={queue} />}
+      <div
+        data-composer-card=""
+        className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
+          dragOver ? "border-accent ring-3 ring-accent-line" : "border-line-strong"
+        }`}
+        onDragOver={(e) => {
+          // Only react to file drags (Files type), ignore text drags.
+          if (!onDropFiles || dropDisabled || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          // Moving between children fires dragleave on the card too.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+        }}
+        onDrop={(e) => {
+          setDragOver(false);
+          if (!onDropFiles || dropDisabled) return;
+          onDropFiles(e);
+          if (mobileCompact) setExpanded(true);
+        }}
+      >
+        {banner}
+        {!compact && attachments}
+        <div className={compact ? "flex items-center gap-1 pr-1" : undefined}>
+          <textarea
+            data-composer-input
+            {...textareaProps}
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onValueChange(e.target.value)}
+            onCompositionEnd={() => {
+              compositionEndAt.current = Date.now();
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onFocus={expandMobile}
+            rows={1}
+            // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 不在
+            // layer 里、utility 压不住，只能内联去掉输入框自己的那一圈。
+            style={{ outline: "none" }}
+            disabled={disabled}
+            placeholder={compact ? compactPlaceholder : placeholder}
+            className={`block w-full min-w-0 resize-none bg-transparent text-body text-ink-strong outline-none placeholder:text-ink-faint disabled:opacity-50 ${
+              compact
+                ? "flex-1 h-11 min-h-11 max-h-11 px-3 py-2.5"
+                : "min-h-12 max-h-40 px-3.5 pt-3 pb-1 leading-relaxed max-md:min-h-18"
+            }`}
+          />
+          {compact && (
+            <>
+              {compactTools}
+              {primary}
+            </>
+          )}
+        </div>
+        {!compact && (
+          <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+            {!mobileCompact && chips && (
+              <div className="flex min-w-0 items-center gap-1.5 mr-1" data-composer-context="">
+                {chips}
+              </div>
+            )}
+            {tools}
+            <span className="flex-1" />
+            {sendTo}
+            {primary}
+          </div>
+        )}
+      </div>
+      {afterCard}
+      {notice && (
+        <div className="mt-1.5 px-1 text-label text-warn-ink" role="status">
+          {notice}
+        </div>
+      )}
+      {!compact && (
+        <div
+          data-composer-hint=""
+          className="mt-1.5 flex items-center justify-between gap-3 px-1 text-label text-ink-faint max-md:hidden"
+        >
+          <span className="min-w-0 truncate">{hintLeft}</span>
+          <span className="shrink-0">{hintRight}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 排队列表：卡片正上方一组弱化行，每行 = 时钟 · 文本（截断）· 行尾动作。 */
+function ComposerQueueList({ items }: { items: ComposerQueueItem[] }) {
+  return (
+    <ul
+      data-composer-queue=""
+      aria-label="排队中的消息"
+      className="mb-1.5 space-y-0.5 rounded-card border border-line bg-surface p-1"
+    >
+      {items.map((item) => (
+        <li
+          key={item.id}
+          data-composer-queue-item={item.id}
+          className="flex min-h-8 items-center gap-2 rounded-field pl-2 pr-0.5 text-ui max-md:min-h-11"
+        >
+          <Icon icon={Clock3} size="sm" className="shrink-0 text-ink-faint" />
+          <span className="shrink-0 text-label text-ink-faint">排队中</span>
+          <span className="min-w-0 flex-1 truncate text-ink" title={item.text}>
+            {item.text.replace(/\s+/g, " ").trim()}
+          </span>
+          {item.actions.map((action) => (
+            <Button
+              key={action.label}
+              variant="ghost"
+              size="sm"
+              onClick={action.onClick}
+              disabled={action.disabled}
+              className={`shrink-0 ${action.tone === "danger" ? "hover:text-danger-ink" : ""}`}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}

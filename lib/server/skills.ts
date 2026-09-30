@@ -16,7 +16,7 @@ export type DiscoveredSkill = {
   path: string;
 };
 
-function parseFrontmatter(
+export function parseFrontmatter(
   raw: string,
   fallbackName: string,
 ): { name: string; description: string } {
@@ -58,7 +58,7 @@ function readSkill(skillDir: string): DiscoveredSkill | null {
 }
 
 /** Read direct skills plus one grouping layer such as `$CODEX_HOME/skills/.system`. */
-function scanSkillRoot(root: string): DiscoveredSkill[] {
+export function scanSkillRoot(root: string): DiscoveredSkill[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(root, { withFileTypes: true });
