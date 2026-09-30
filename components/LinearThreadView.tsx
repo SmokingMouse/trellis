@@ -56,6 +56,7 @@ import {
 } from "./HerdrSessionControls";
 import { HerdrInteractionCard } from "./HerdrInteractionCard";
 import { HerdrPaneStrip } from "./herdr/HerdrPaneStrip";
+import { HerdrDrawerToggle } from "./herdr/HerdrDrawerToggle";
 import { ButlerChangeCards } from "./ButlerChangeCards";
 import { isButlerSession } from "@/lib/butler";
 
@@ -584,7 +585,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       style={{
         left: "var(--trellis-sb, 0px)",
         // 管家右栏（ButlerPanel 发布 --trellis-rp）；其余会话恒为 0。
-        right: "var(--trellis-rp, 0px)",
+        right: "calc(var(--trellis-rp, 0px) + var(--trellis-herdr-dw, 0px))",
         bottom: "var(--trellis-term-h, 0px)",
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
@@ -636,6 +637,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 />
               </div>
             )}
+            {isHerdr && herdrPane?.alive && <HerdrDrawerToggle />}
             <SegmentedControl
               size="sm"
               aria-label="内容宽度"
