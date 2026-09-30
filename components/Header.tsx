@@ -4,6 +4,7 @@ import {
   Bookmark,
   CalendarClock,
   ChevronRight,
+  LayoutGrid,
   Download,
   Ellipsis,
   FolderOpen,
@@ -194,6 +195,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const setSidebarOpen = useSessionStore((s) => s.setSidebarOpen);
   const openHome = useSessionStore((s) => s.openHome);
   const homeOpen = useSessionStore((s) => s.homeOpen);
+  const herdrOpen = useSessionStore((s) => s.herdrOpen);
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
@@ -262,7 +264,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   }, []);
 
   if (isMobile) {
-    const title = session?.title.trim() || (homeOpen ? "首页" : "新会话");
+    const title = session?.title.trim() || (herdrOpen ? "Herdr 总览" : homeOpen ? "首页" : "新会话");
     const headerHidden = scrollHidden;
     return (
       <>
@@ -480,6 +482,15 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 {sessionTitle}
               </span>
             </Tooltip>
+          </nav>
+        )}
+        {!session && herdrOpen && (
+          <nav aria-label="当前位置" data-header-breadcrumb className="flex min-w-0 items-center gap-1 text-ui text-ink-muted">
+            {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
+            <span className="inline-flex items-center gap-1.5 px-1 font-medium text-ink-strong">
+              <Icon icon={LayoutGrid} size="sm" className="text-ink-muted" />
+              Herdr 总览
+            </span>
           </nav>
         )}
       </div>

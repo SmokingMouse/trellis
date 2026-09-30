@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   CircleCheck,
@@ -13,59 +13,57 @@ import {
 import { Button, Icon } from "@/components/ui";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
+import {
+  herdrApproval,
+  herdrAskQuestions,
+  type HerdrAskOption,
+  type HerdrAskQuestion,
+} from "@/lib/herdr-console";
+import { readHerdrPane, sendHerdrKeys } from "@/lib/herdr-actions";
 
-type AskOption = { label?: unknown; description?: unknown };
-type AskQuestion = {
-  question?: unknown;
-  header?: unknown;
-  options?: unknown;
-  multiSelect?: unknown;
-};
-
-function askQuestions(prompt: unknown): AskQuestion[] {
-  if (!prompt || typeof prompt !== "object" || !("questions" in prompt)) {
-    return [];
-  }
-  const questions = (prompt as { questions?: unknown }).questions;
-  return Array.isArray(questions) ? (questions as AskQuestion[]) : [];
-}
-
-function approval(prompt: unknown): { tool: string; summary: string } | null {
-  if (!prompt || typeof prompt !== "object" || !("approval" in prompt)) {
-    return null;
-  }
-  const value = (prompt as { approval?: unknown }).approval;
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return {
-    tool: typeof record.tool === "string" ? record.tool : "操作",
-    summary: typeof record.summary === "string" ? record.summary : "",
-  };
-}
-
-function options(question: AskQuestion): AskOption[] {
+function options(question: HerdrAskQuestion): HerdrAskOption[] {
   return Array.isArray(question.options)
-    ? (question.options as AskOption[])
+    ? (question.options as HerdrAskOption[])
     : [];
+}
+
+/** 「总是允许」按钮上的对象：Bash 取命令前两个词，其余用工具名。 */
+function alwaysTarget(prompt: { tool: string; summary: string }): string {
+  if (prompt.tool === "Bash" && prompt.summary) {
+    return prompt.summary.trim().split(/\s+/).slice(0, 2).join(" ");
+  }
+  return prompt.tool;
 }
 
 export function HerdrInteractionCard({
   pane,
   compact = false,
+  embedded = false,
+  terminalFallback = false,
+  footer,
 }: {
   pane: HerdrPaneView;
   compact?: boolean;
+  /** 嵌进 /herdr 总览的「需要你」卡：外框和标题行由宿主卡片画，这里只出内容 + 动作 */
+  embedded?: boolean;
+  /** 任何 agent 卡在 blocked 却没有 hook 提示时，也退回读屏 + 按键（默认只对 codex） */
+  terminalFallback?: boolean;
+  /** 动作区尾部的附加内容（总览卡的「回复…」） */
+  footer?: ReactNode;
 }) {
   const questions = useMemo(
-    () => askQuestions(pane.hook?.interactivePrompt),
+    () => herdrAskQuestions(pane.hook?.interactivePrompt),
     [pane.hook?.interactivePrompt],
   );
   const approvalPrompt = useMemo(
-    () => approval(pane.hook?.interactivePrompt),
+    () => herdrApproval(pane.hook?.interactivePrompt),
     [pane.hook?.interactivePrompt],
   );
   const codexBlocked =
-    pane.agentKind === "codex" && pane.status === "blocked" && !pane.hook;
+    pane.status === "blocked" &&
+    (terminalFallback
+      ? pane.hook?.state !== "waiting"
+      : pane.agentKind === "codex" && !pane.hook);
   const waiting = pane.status === "waiting";
   const visible = pane.alive && (waiting || codexBlocked);
   const [step, setStep] = useState(0);
@@ -87,13 +85,7 @@ export function HerdrInteractionCard({
   const loadScreen = async () => {
     setScreenError(false);
     try {
-      const response = await fetch(
-        `/api/herdr/panes/${encodeURIComponent(pane.paneId)}/read`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = (await response.json()) as { text?: string };
-      setScreen(data.text ?? "");
+      setScreen(await readHerdrPane(pane.paneId, 40));
     } catch {
       setScreenError(true);
     }
@@ -119,15 +111,7 @@ export function HerdrInteractionCard({
     sending.current = true;
     setAnswerState("sending");
     try {
-      const response = await fetch(
-        `/api/herdr/panes/${encodeURIComponent(pane.paneId)}/keys`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ keys }),
-        },
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await sendHerdrKeys(pane.paneId, keys);
       if (finalAnswer) setAnswerState("answered");
       else setAnswerState("idle");
       if (advanceQuestion) {
@@ -149,7 +133,7 @@ export function HerdrInteractionCard({
       <div
         data-herdr-card
         data-herdr-card-state="answered"
-        className={`${compact ? "mx-2 mb-2 px-3 py-2" : "px-3.5 py-2.5 max-md:px-3"} flex items-center gap-2 rounded-card border border-line bg-surface text-ui text-ink-muted`}
+        className={embedded ? "flex items-center gap-2 px-3.5 pb-3 text-ui text-ink-muted" : `${compact ? "mx-2 mb-2 px-3 py-2" : "px-3.5 py-2.5 max-md:px-3"} flex items-center gap-2 rounded-card border border-line bg-surface text-ui text-ink-muted`}
         aria-live="polite"
       >
         <Icon icon={CircleCheck} size="sm" className="text-positive" />
@@ -181,9 +165,9 @@ export function HerdrInteractionCard({
     <div
       data-herdr-card
       data-herdr-card-kind={codexBlocked ? "terminal" : approvalPrompt ? "permission" : "question"}
-      className={`${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`}
+      className={embedded ? "px-3.5 pb-3 text-ink" : `${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`}
     >
-      <div className="flex items-center gap-2 text-ui">
+      <div className={`${embedded ? "hidden" : "flex"} items-center gap-2 text-ui`}>
         <Icon
           icon={codexBlocked ? SquareTerminal : approvalPrompt ? ShieldCheck : MessageCircleQuestion}
           className="text-accent"
@@ -303,9 +287,21 @@ export function HerdrInteractionCard({
             >
               允许
             </Button>
+            {/* Claude Code 权限卡第 2 项 = 「Yes, and don't ask again …」。 */}
             <Button
               type="button"
               variant="secondary"
+              data-herdr-permission-always
+              disabled={answerState === "sending"}
+              onClick={() => void sendKeys(["2"])}
+              className="min-h-11 min-w-0 sm:min-h-8"
+              title="发按键 2：允许并记住，下次不再问"
+            >
+              <span className="truncate">总是允许 {alwaysTarget(approvalPrompt)}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
               data-mobile-target="herdr-permission-deny"
               disabled={answerState === "sending"}
               onClick={() => void sendKeys(["Escape"])}
@@ -313,9 +309,11 @@ export function HerdrInteractionCard({
             >
               拒绝
             </Button>
+            {footer}
           </div>
         </div>
       )}
+      {!approvalPrompt && footer && <div className="mt-2.5 flex flex-wrap gap-2">{footer}</div>}
 
       {codexBlocked && (
         <div className="mt-2">

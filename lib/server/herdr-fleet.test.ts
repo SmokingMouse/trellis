@@ -595,6 +595,26 @@ describe("HerdrFleetService", () => {
     expect(
       harness.requests.find((request) => request.method === "pane.read")?.params,
     ).toEqual({ pane_id: "w1:p1", source: "recent", lines: 200 });
+    // 终端抽屉读 200 行、悬停预览读几行：同一份缓存按请求切尾，越界夹紧。
+    const drawer = await readRoute.GET(
+      new Request("http://trellis/api/herdr/panes/w1:p1/read?lines=500"),
+      { params: Promise.resolve({ id: "w1:p1" }) },
+    );
+    expect(((await drawer.json()) as { text: string }).text.split("\n").length).toBeGreaterThan(40);
+    const peek = await readRoute.GET(
+      new Request("http://trellis/api/herdr/panes/w1:p1/read?lines=6"),
+      { params: Promise.resolve({ id: "w1:p1" }) },
+    );
+    expect(((await peek.json()) as { text: string }).text.split("\n")).toHaveLength(6);
+    expect(harness.requests.filter((request) => request.method === "pane.read")).toHaveLength(1);
+
+    const focusRoute = await import("../../app/api/herdr/panes/[id]/focus/route");
+    const focused = await focusRoute.POST(
+      new Request("http://trellis/api/herdr/panes/w1:p1/focus", { method: "POST" }),
+      { params: Promise.resolve({ id: "w1:p1" }) },
+    );
+    expect(focused.status).toBe(200);
+    expect(harness.requests.find((request) => request.method === "pane.focus")?.params).toEqual({ pane_id: "w1:p1" });
 
     const reopened = await reopenRoute.POST(
       new Request(`http://trellis/api/herdr/sessions/${harness.sessionId}/reopen`, {

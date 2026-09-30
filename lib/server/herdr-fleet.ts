@@ -320,6 +320,11 @@ export class HerdrFleetService {
     return this.client.sendKeys(paneId, keys);
   }
 
+  /** 在 Herdr 终端里把焦点切到该窗格（次要操作；只读降级时 request 会拒绝写方法）。 */
+  focus(paneId: string): Promise<Record<string, unknown>> {
+    return this.client.request("pane.focus", { pane_id: paneId });
+  }
+
   read(paneId: string): Promise<{ type: "pane_read"; read: { text: string } }> {
     return this.client.request("pane.read", {
       pane_id: paneId,

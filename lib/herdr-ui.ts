@@ -61,6 +61,7 @@ export type HerdrSessionBinding = {
   agentStatus: string;
   revision: number;
   alive: boolean;
+  lastSeenAt?: number;
 };
 
 export type HerdrFleetPane = {
@@ -73,6 +74,8 @@ export type HerdrFleetPane = {
   label: string | null;
   terminal_title: string | null;
   revision: number;
+  /** herdr 上报的当前 agent 会话（同一窗格可能先后跑过多个会话，绑定表里会有多行）。 */
+  agent_session?: { value?: string | null } | null;
 };
 
 export type HerdrFleetTab = {
@@ -195,9 +198,20 @@ export function buildHerdrWorkspaceViews(
   now = Date.now(),
 ): HerdrWorkspaceView[] {
   if (!fleet) return [];
-  const bindingByPane = new Map(
-    fleet.sessions.map((binding) => [binding.paneId, binding]),
-  );
+  // 同一窗格先后跑过的会话都留在绑定表里：优先取 herdr 报告的当前 agent 会话，
+  // 报告缺席时沿用旧规则（列表里最后一条）。
+  const bindingsByPane = new Map<string, HerdrSessionBinding[]>();
+  for (const binding of fleet.sessions) {
+    const list = bindingsByPane.get(binding.paneId);
+    if (list) list.push(binding);
+    else bindingsByPane.set(binding.paneId, [binding]);
+  }
+  const bindingFor = (pane: HerdrFleetPane): HerdrSessionBinding | null => {
+    const list = bindingsByPane.get(pane.pane_id);
+    if (!list) return null;
+    const current = pane.agent_session?.value;
+    return (current && list.find((binding) => binding.sessionId === current)) || list[list.length - 1];
+  };
   const hookBySession = new Map(hooks.map((hook) => [hook.sessionId, hook]));
   const hookByPane = new Map(
     hooks
@@ -212,7 +226,7 @@ export function buildHerdrWorkspaceViews(
         .flatMap((tab) => tab.panes)
         .filter((pane) => Boolean(pane.agent))
         .map((pane): HerdrPaneView => {
-          const binding = bindingByPane.get(pane.pane_id) ?? null;
+          const binding = bindingFor(pane);
           const hook = freshHook(
             binding ? hookBySession.get(binding.sessionId) : hookByPane.get(pane.pane_id),
             now,

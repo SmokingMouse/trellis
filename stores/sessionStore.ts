@@ -611,6 +611,9 @@ type State = {
   // 钉成内置管家、mode 钉成 chat。不落 localStorage —— 它是一次性的入口态，
   // 不能污染用户自己选的 draftAgentId。任何 newConversation / 切会话都清掉。
   butlerDraft: boolean;
+  // Herdr 操作台总览（/herdr）：和首页一样是 session 为空时的一个视图。进任何会话
+  // 后自然让位；newConversation / openHome 清掉。
+  herdrOpen: boolean;
 };
 
 type Actions = {
@@ -625,13 +628,16 @@ type Actions = {
   openHome: () => void;
   // /butler 入口：有管家会话就打开最近那条，没有就落到管家草稿首页。
   openButler: () => Promise<void>;
+  // /herdr 入口：清空当前会话（同 openHome），亮出 Herdr 总览。
+  openHerdr: () => void;
   // ── Workbench Wave 4: VSCode tab management ─────────────────────────
   // Single-click a sidebar item: load it + mark it as the (transient)
   // preview tab unless it's already pinned. Replaces any prior preview.
   previewSession: (sessionId: string) => Promise<void>;
   // Double-click / "keep open": move into pinned (deduped, appended) +
   // clear preview if it was previewing this id + load it.
-  pinSession: (sessionId: string) => Promise<void>;
+  // opts.load=false：只置顶不切过去（Herdr 总览卡片的 ⋯ 菜单）。
+  pinSession: (sessionId: string, opts?: { load?: boolean }) => Promise<void>;
   // Remove from pinned tabs without closing or switching the active tab.
   unpinSession: (sessionId: string) => Promise<void>;
   // 用 GET /api/sessions 的结果（sessions + taskSessions）刷新置顶集合。
@@ -988,6 +994,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   homeOpen: false,
   homeFocusNonce: 0,
   butlerDraft: false,
+  herdrOpen: false,
 
   hydrate: async (sessionId) => {
     // S117: store 是模块级的，从 /settings 等路由返回主页会重新 mount 并再调
@@ -1094,6 +1101,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // orphan italic tab pointing at nothing.
       previewSessionId: null,
       butlerDraft: false,
+      herdrOpen: false,
     });
     set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
   },
@@ -1107,6 +1115,11 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   openHome: () => {
     get().newConversation();
     set({ homeOpen: true, mobileNavOpen: false });
+  },
+
+  openHerdr: () => {
+    get().newConversation();
+    set({ homeOpen: false, herdrOpen: true, mobileNavOpen: false });
   },
 
   openButler: async () => {
@@ -1143,7 +1156,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     if (get().session?.id !== sessionId) await get().loadSession(sessionId);
   },
 
-  pinSession: async (sessionId) => {
+  pinSession: async (sessionId, opts) => {
     const wasPinned = get().pinnedSessionIds.includes(sessionId);
     const prevPreview = get().previewSessionId;
     set((s) => ({
@@ -1175,7 +1188,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // Pinning the already-active (previewed) session must NOT reload — that
     // would reset node positions to (0,0) without changing layoutKey, leaving
     // every node stacked at the origin. Only switch when it's a different one.
-    if (get().session?.id !== sessionId) await get().loadSession(sessionId);
+    if (opts?.load !== false && get().session?.id !== sessionId) await get().loadSession(sessionId);
   },
 
   unpinSession: async (sessionId) => {

@@ -44,6 +44,7 @@ import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
 import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
+import { HerdrOverview } from "@/components/herdr/HerdrOverview";
 import { TriangleAlert } from "lucide-react";
 import { Icon, Spinner } from "@/components/ui";
 
@@ -72,6 +73,9 @@ export default function Home() {
   );
   const isMobile = useIsMobile();
   const showHome = !session && homeOpen;
+  const herdrOpen = useSessionStore((s) => s.herdrOpen);
+  const openHerdr = useSessionStore((s) => s.openHerdr);
+  const showHerdr = !session && herdrOpen;
   useEscapeAbort();
   useHomeShortcut();
   useUnreadNavigation();
@@ -141,6 +145,16 @@ export default function Home() {
     void openButler();
   }, [hydrated, deepLinkApplied, openButler]);
 
+  // /herdr → /?view=herdr：hydrate 完打开 Herdr 总览。参数在总览期间保留（下面的
+  // URL 同步负责），刷新仍落回总览；进任何会话后参数随之消失。
+  const herdrHandledRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || !deepLinkApplied || herdrHandledRef.current) return;
+    herdrHandledRef.current = true;
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("view") === "herdr" && !q.get("session")) openHerdr();
+  }, [hydrated, deepLinkApplied, openHerdr]);
+
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
   // 这里再按常量发一份就会打架）。
 
@@ -161,8 +175,11 @@ export default function Home() {
     if (!sessionId) {
       url.searchParams.delete("session");
       url.searchParams.delete("node");
+      if (herdrOpen) url.searchParams.set("view", "herdr");
+      else if (herdrHandledRef.current) url.searchParams.delete("view");
     } else {
       if (activeNodeId && isOptimisticNodeId(activeNodeId)) return;
+      url.searchParams.delete("view");
       url.searchParams.set("session", sessionId);
       if (activeNodeId) url.searchParams.set("node", activeNodeId);
       else url.searchParams.delete("node");
@@ -170,7 +187,7 @@ export default function Home() {
     const next = `${url.pathname}${url.search}${url.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) window.history.replaceState(window.history.state, "", next);
-  }, [activeNodeId, deepLinkApplied, hydrated, sessionId]);
+  }, [activeNodeId, deepLinkApplied, hydrated, sessionId, herdrOpen]);
 
   useEffect(() => {
     if ((isMobile || herdrControlled || butler) && sessionId) {
@@ -190,8 +207,8 @@ export default function Home() {
     <ScrollHideProvider>
       <Header isMobile={isMobile} />
       {/* 首页自带「等你处理」列表，顶部待办条让位，不重复出现两份 */}
-      {!isMobile && !showHome && <PendingBar />}
-      {isMobile && !session && !showHome && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
+      {!isMobile && !showHome && !showHerdr && <PendingBar />}
+      {isMobile && !session && !showHome && !showHerdr && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
       <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
@@ -207,7 +224,8 @@ export default function Home() {
         </div>
       )}
       {showHome && (butlerDraft ? <ButlerHome isMobile={isMobile} /> : <HomeView isMobile={isMobile} />)}
-      {!session && !showHome && <QuestionInput isMobile={isMobile} />}
+      {showHerdr && <HerdrOverview isMobile={isMobile} />}
+      {!session && !showHome && !showHerdr && <QuestionInput isMobile={isMobile} />}
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}
