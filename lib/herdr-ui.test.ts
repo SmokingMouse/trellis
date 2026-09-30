@@ -179,6 +179,18 @@ describe("Herdr UI fleet projection", () => {
     expect(views[0].panes.find(p => p.paneId === "p-waiting")?.status).toBe("working");
   });
 
+  test("unbound pane with several hook rows follows the newest, whatever the list order", () => {
+    const now = 1_000_000;
+    const unbound = { ...structuredClone(fleet), sessions: [] };
+    const newer: HerdrHookRecord = { sessionId: "s-new", agent: "claude", state: "working", toolName: null, interactivePrompt: {}, paneKey: "p-waiting", updatedAt: now - 1_000 };
+    const older: HerdrHookRecord = { ...newer, sessionId: "s-old", state: "waiting", updatedAt: now - 60_000 };
+    for (const hooks of [[newer, older], [older, newer]]) {
+      const pane = buildHerdrWorkspaceViews(unbound, hooks, now)[0].panes.find(p => p.paneId === "p-waiting");
+      expect(pane?.hook?.sessionId).toBe("s-new");
+      expect(pane?.status).not.toBe("waiting");
+    }
+  });
+
   test("P1-1 overlays hook state without moving waiting panes", () => {
     const hooks: HerdrHookRecord[] = [
       {

@@ -265,11 +265,13 @@ export function buildHerdrWorkspaceViews(
     return (current && list.find((binding) => binding.sessionId === current)) || list[list.length - 1];
   };
   const hookBySession = new Map(hooks.map((hook) => [hook.sessionId, hook]));
-  const hookByPane = new Map(
-    hooks
-      .filter((hook) => hook.paneKey)
-      .map((hook) => [hook.paneKey!, hook]),
-  );
+  // 同一窗格可能留有多条 hook 记录（换过会话）：取最新那条，不依赖列表顺序。
+  const hookByPane = new Map<string, (typeof hooks)[number]>();
+  for (const hook of hooks) {
+    if (!hook.paneKey) continue;
+    const prev = hookByPane.get(hook.paneKey);
+    if (!prev || hook.updatedAt > prev.updatedAt) hookByPane.set(hook.paneKey, hook);
+  }
 
   return fleet.workspaces
     .map((workspace) => {
