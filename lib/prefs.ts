@@ -45,6 +45,8 @@ export const PREF_KEYS = {
   requireApproval: "trellis-require-approval",
   // 启动
   startupView: "trellis-startup-view",
+  /** 对话 / Herdr 模式：当前视图的投影，这里只记「上次在哪个模式」，刷新时落回去。 */
+  appMode: "trellis-app-mode",
   // 提醒
   desktopNotify: "trellis-desktop-notify",
   desktopNotifyOffered: "trellis-desktop-notify-offered",
@@ -126,6 +128,18 @@ export const PREF_ITEMS: PrefItem[] = [
     options: [
       { value: "home", label: "首页" },
       { value: "last", label: "上次的会话" },
+    ],
+  },
+  {
+    key: PREF_KEYS.appMode,
+    label: "刷新后落回的模式",
+    where: "侧栏顶部的「对话 | Herdr」切换（自动记住上次所在的模式）",
+    group: "启动",
+    kind: "enum",
+    fallback: "chat",
+    options: [
+      { value: "chat", label: "对话" },
+      { value: "herdr", label: "Herdr" },
     ],
   },
   {

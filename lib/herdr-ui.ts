@@ -89,6 +89,8 @@ export type HerdrFleetWorkspace = {
   worktree?: HerdrWorktree | null;
   label?: string | null;
   name?: string | null;
+  /** herdr 自己的工作区编号（侧栏 1、2、3…），同名工作区靠它区分。 */
+  number?: number | null;
   tabs: HerdrFleetTab[];
 };
 

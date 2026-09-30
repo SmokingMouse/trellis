@@ -17,6 +17,12 @@ export function sidebarSource(s: Pick<Session, "kind" | "origin">): SidebarSourc
   return "web";
 }
 
+/** 对话 / Herdr 模式分家后，对话模式要藏起来的会话：Herdr 镜像，或正被活窗格绑定的
+ *  接入会话（与 isHerdrSession 同口径，打开它们会自动切到 Herdr 模式）。 */
+export function belongsToHerdrMode(s: Pick<Session, "kind" | "origin">, liveBinding?: boolean): boolean {
+  return sidebarSource(s) === "herdr" || !!liveBinding;
+}
+
 /** A Herdr session whose pane is gone reads as archived: hidden unless asked for.
  *  Only while Herdr itself answers — when it is down every session looks dead and
  *  hiding them would break the "already-synced history stays readable" promise. */
