@@ -21,6 +21,10 @@ import { canonicalPath } from "./canonical-path";
 import { getDB } from "./sqlite";
 import type { HerdrWorktree } from "../herdr-ui";
 import { normalizeHerdrPath } from "../herdr-ui";
+import {
+  TranscriptPromptCache,
+  type TranscriptPrompt,
+} from "./agent-hooks/transcript-pending";
 
 // 路径规范化只此一家（./canonical-path）：fleet 这边 realpath、discover 那边
 // os.homedir() 原样，正是根因 C 的形状。差别只在 fallback —— herdr 报上来的路径
@@ -70,6 +74,8 @@ export class HerdrFleetService {
   // 所以只有文件真的变了才值得再试一次（空会话长出第一轮对话就是这么被接回来的）。
   private readonly skippedTranscripts = new Map<string, string | null>();
   private readonly detach: () => void;
+  // blocked 窗格的 transcript 待答（hook > transcript > 读屏 的中间一档），按 jsonl size+mtime 失效。
+  private readonly transcriptPrompts = new TranscriptPromptCache();
 
   constructor(
     readonly client = new HerdrClient(),
@@ -239,6 +245,41 @@ export class HerdrFleetService {
       });
   };
 
+  /**
+   * Herdr 报 blocked 的 claude 窗格 → 其当前会话 jsonl 里未完成的 tool_use（paneId → 待答）。
+   * 窗格在跑（working / idle）时一律不算待答：未完成的 tool_use 只是工具还在执行。
+   */
+  transcriptPromptsByPane(
+    bindings?: ReturnType<typeof listHerdrBindings>,
+  ): Map<string, TranscriptPrompt> {
+    const result = new Map<string, TranscriptPrompt>();
+    const blocked = this.client.state.panes.filter(
+      (pane) => pane.agent === "claude" && pane.agent_status === "blocked",
+    );
+    if (blocked.length === 0) return result;
+    const all = bindings ?? listHerdrBindings(this.options.db);
+    for (const pane of blocked) {
+      const current = pane.agent_session?.value;
+      // 绑定表按 alive / last_seen 倒序：herdr 没报当前会话时取这个窗格最近的一条
+      const binding = current
+        ? all.find((b) => b.paneId === pane.pane_id && b.sessionId === current)
+        : all.find((b) => b.paneId === pane.pane_id);
+      if (!binding?.transcriptPath || binding.agentKind !== "claude") continue;
+      const prompt = this.transcriptPrompts.get(binding.transcriptPath);
+      if (prompt) result.set(pane.pane_id, prompt);
+    }
+    return result;
+  }
+
+  /** 发键前的核对：窗格此刻的 herdr 状态 + transcript 待答（现读，不走 fleet 的 ETag）。 */
+  paneTranscriptPrompt(paneId: string): { status: string | null; prompt: TranscriptPrompt | null } {
+    const pane = this.client.state.panes.find((candidate) => candidate.pane_id === paneId);
+    return {
+      status: pane?.agent_status ?? null,
+      prompt: this.transcriptPromptsByPane().get(paneId) ?? null,
+    };
+  }
+
   ensureStarted(): Promise<void> {
     if (!this.startPromise) {
       this.startPromise = this.client.start().catch((error) => {
@@ -270,6 +311,8 @@ export class HerdrFleetService {
     inputDeliveries: HerdrInputDelivery[];
   } {
     const state = this.client.state;
+    const sessions = listHerdrBindings(this.options.db);
+    const prompts = this.transcriptPromptsByPane(sessions);
     const workspaces = state.workspaces.map((workspace) => ({
       ...workspace,
       worktree: this.worktrees.get(workspace.workspace_id) ?? null,
@@ -290,6 +333,7 @@ export class HerdrFleetService {
               label: pane.label ?? null,
               terminal_title: pane.terminal_title ?? null,
               revision: pane.revision,
+              transcript_prompt: prompts.get(pane.pane_id) ?? null,
             })),
           layout: state.layouts.find((layout) => layout.tab_id === tab.tab_id) ?? null,
         })),
@@ -303,13 +347,17 @@ export class HerdrFleetService {
       version: state.version,
       lastError: state.lastError,
       workspaces,
-      sessions: listHerdrBindings(this.options.db),
+      sessions,
       inputDeliveries: this.client.inputDeliveries,
     };
   }
 
   etag(): string {
-    return `W/"herdr-${this.client.state.generation}-${this.bindingVersion}"`;
+    // transcript 待答不走 herdr 事件：jsonl 写完 tool_use 可能晚于窗格转 blocked，把它并进指纹
+    const prompts = [...this.transcriptPromptsByPane()]
+      .map(([paneId, prompt]) => `${paneId}=${prompt.toolUseId}`)
+      .join(",");
+    return `W/"herdr-${this.client.state.generation}-${this.bindingVersion}${prompts ? `-${prompts}` : ""}"`;
   }
 
   input(paneId: string, text: string): Promise<HerdrInputDelivery> {

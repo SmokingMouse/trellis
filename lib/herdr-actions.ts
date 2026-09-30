@@ -44,6 +44,12 @@ export async function sendHerdrText(paneId: string, text: string, submit = true)
   }));
 }
 
+/** transcript 待答卡发键前的核对：窗格此刻的 herdr 状态 + jsonl 里仍未完成的 tool_use id。 */
+export async function readHerdrPanePending(paneId: string): Promise<{ status: string | null; toolUseId: string | null }> {
+  const response = await ensureOk(await fetch(paneUrl(paneId, "pending"), { cache: "no-store" }));
+  return (await response.json()) as { status: string | null; toolUseId: string | null };
+}
+
 export async function focusHerdrPane(paneId: string): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "focus"), { method: "POST" }));
 }

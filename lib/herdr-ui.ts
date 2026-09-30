@@ -76,6 +76,15 @@ export type HerdrFleetPane = {
   revision: number;
   /** herdr 上报的当前 agent 会话（同一窗格可能先后跑过多个会话，绑定表里会有多行）。 */
   agent_session?: { value?: string | null } | null;
+  /** 服务端从 jsonl 尾部认出的待答（仅 blocked 的 claude 窗格），见 transcript-pending.ts */
+  transcript_prompt?: HerdrTranscriptPrompt | null;
+};
+
+/** jsonl 里未完成的 tool_use 派生出的待答卡；interactivePrompt 与 hook 路径同形状。 */
+export type HerdrTranscriptPrompt = {
+  toolUseId: string;
+  toolName: string;
+  interactivePrompt: unknown;
 };
 
 export type HerdrFleetTab = {
@@ -131,7 +140,42 @@ export type HerdrPaneView = {
   pane: HerdrFleetPane;
   binding: HerdrSessionBinding | null;
   hook: HerdrHookRecord | null;
+  /** hook 缺席时的第二数据源（窗格 blocked 且 jsonl 有未完成的 tool_use） */
+  transcript?: HerdrTranscriptPrompt | null;
 };
+
+/** 「需要你」的结构化数据：hook > transcript；都没有 → null（卡片退回读屏）。 */
+export type HerdrPanePrompt = {
+  source: "hook" | "transcript";
+  prompt: unknown;
+  toolName: string | null;
+  toolUseId: string | null;
+};
+
+function isCardPrompt(prompt: unknown): boolean {
+  if (!prompt || typeof prompt !== "object") return false;
+  const record = prompt as Record<string, unknown>;
+  return (Array.isArray(record.questions) && record.questions.length > 0) ||
+    Boolean(record.approval && typeof record.approval === "object");
+}
+
+export function herdrPanePrompt(pane: Pick<HerdrPaneView, "hook" | "transcript"> | null | undefined): HerdrPanePrompt | null {
+  const hookPrompt = pane?.hook?.interactivePrompt;
+  if (isCardPrompt(hookPrompt)) {
+    const owner = hookPrompt as Record<string, unknown>;
+    return {
+      source: "hook",
+      prompt: hookPrompt,
+      toolName: pane?.hook?.toolName ?? null,
+      toolUseId: typeof owner.tool_use_id === "string" ? owner.tool_use_id : null,
+    };
+  }
+  const transcript = pane?.transcript;
+  if (transcript && isCardPrompt(transcript.interactivePrompt)) {
+    return { source: "transcript", prompt: transcript.interactivePrompt, toolName: transcript.toolName, toolUseId: transcript.toolUseId };
+  }
+  return null;
+}
 
 export type HerdrWorkspaceView = {
   id: string;
@@ -150,7 +194,8 @@ export type HerdrWorkspaceView = {
 export function herdrRunLabel(pane: HerdrPaneView | null): string | null {
   if (!pane?.alive) return null;
   if (pane.status === "waiting" || pane.status === "blocked") {
-    return pane.hook?.toolName === "AskUserQuestion" ? "等待你回答" : "等待你批准";
+    const tool = herdrPanePrompt(pane)?.toolName ?? pane.hook?.toolName;
+    return tool === "AskUserQuestion" ? "等待你回答" : "等待你批准";
   }
   if (pane.status !== "working") return null;
   const tool = pane.hook?.state === "working" ? pane.hook.toolName : null;
@@ -163,8 +208,11 @@ function freshHook(hook: HerdrHookRecord | null | undefined, now: number): Herdr
   return hook && now - hook.updatedAt < HERDR_HOOK_TTL_MS ? hook : null;
 }
 
-function liveStatus(hook: HerdrHookRecord | null, status: string): HerdrUiStatus {
-  return hook?.state === "waiting" ? "waiting" : paneStatus(status);
+/** hook 报 waiting，或窗格 blocked 且 transcript 认出了待答卡 → waiting（结构化卡片，不读屏）。 */
+function liveStatus(hook: HerdrHookRecord | null, status: string, transcript?: HerdrTranscriptPrompt | null): HerdrUiStatus {
+  if (hook?.state === "waiting") return "waiting";
+  if (transcript && status === "blocked") return "waiting";
+  return paneStatus(status);
 }
 
 const KNOWN_STATUSES = new Set<HerdrUiStatus>([
@@ -245,11 +293,12 @@ export function buildHerdrWorkspaceViews(
               agentKind,
             agentKind,
             agentName: binding?.agentName ?? null,
-            status: liveStatus(hook, pane.agent_status),
+            status: liveStatus(hook, pane.agent_status, pane.transcript_prompt),
             alive: fleet.available && (binding?.alive ?? true),
             pane,
             binding,
             hook,
+            transcript: pane.agent_status === "blocked" ? pane.transcript_prompt ?? null : null,
           };
         })
         .sort(comparePanes);

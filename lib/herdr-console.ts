@@ -10,12 +10,14 @@
 //   shell = 没有 agent 的纯 shell 窗格（默认折叠）
 import {
   buildHerdrWorkspaceViews,
+  herdrPanePrompt,
   type HerdrFleetResponse,
   type HerdrHookRecord,
   type HerdrPaneView,
   type HerdrSessionBinding,
   type HerdrUiStatus,
 } from "./herdr-ui";
+import type { HerdrScreenPrompt } from "./herdr-screen-parse";
 
 export type HerdrLane = "need" | "run" | "idle" | "off" | "shell";
 
@@ -299,7 +301,7 @@ export function herdrApproval(prompt: unknown): { tool: string; summary: string 
 }
 
 export function herdrAttentionKind(pane: HerdrConsolePane): "approval" | "question" | "terminal" {
-  const prompt = pane.view?.hook?.interactivePrompt;
+  const prompt = herdrPanePrompt(pane.view)?.prompt;
   if (herdrApproval(prompt)) return "approval";
   if (herdrAskQuestions(prompt).length) return "question";
   return "terminal";
@@ -307,7 +309,7 @@ export function herdrAttentionKind(pane: HerdrConsolePane): "approval" | "questi
 
 /** 通知 / 卡片副标题一行话：要执行什么 / 问了什么。 */
 export function herdrAttentionText(pane: HerdrConsolePane): string {
-  const prompt = pane.view?.hook?.interactivePrompt;
+  const prompt = herdrPanePrompt(pane.view)?.prompt;
   const approval = herdrApproval(prompt);
   if (approval) {
     const summary = approval.summary.split("\n")[0].trim();
@@ -358,4 +360,36 @@ export function herdrLaneCounts(panes: HerdrConsolePane[]): Record<HerdrLane, nu
   const counts: Record<HerdrLane, number> = { need: 0, run: 0, idle: 0, off: 0, shell: 0 };
   for (const pane of panes) counts[pane.lane]++;
   return counts;
+}
+
+// ── transcript 多题：终端此刻停在第几题 ──
+
+const REVIEW_TITLE = /submit your answers|review your answers/i;
+
+function squash(text: string): string {
+  return text.replace(/\s+/g, "").toLowerCase();
+}
+
+/**
+ * transcript 路径的多题 AskUserQuestion：从读屏认出的卡推断终端当前在第几题（0 起；
+ * = questions.length 表示停在 Review / Submit 页）。认不准返回 null —— 调用方据此拒发。
+ *
+ * 先按题目文字对（用户可能用方向键跳回已答的题，标签行的「第一个未答」就不准了），
+ * 标题被截断拿不到时才退回标签行的「第一个未答」；标签数必须和题数一致。
+ */
+export function herdrScreenQuestionStep(
+  parsed: Pick<HerdrScreenPrompt, "kind" | "title" | "multiQuestion"> | null,
+  questions: HerdrAskQuestion[],
+): number | null {
+  if (!parsed || parsed.kind !== "question" || questions.length === 0) return null;
+  if (parsed.multiQuestion && parsed.multiQuestion.total !== questions.length) return null;
+  if (parsed.title && REVIEW_TITLE.test(parsed.title)) return questions.length;
+  const title = parsed.title ? squash(parsed.title) : "";
+  if (title) {
+    const hits = questions
+      .map((question, index) => ({ index, text: typeof question.question === "string" ? squash(question.question) : "" }))
+      .filter(({ text }) => text && (text === title || text.startsWith(title) || title.startsWith(text)));
+    return hits.length === 1 ? hits[0].index : null;
+  }
+  return parsed.multiQuestion ? parsed.multiQuestion.current - 1 : null;
 }

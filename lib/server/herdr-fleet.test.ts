@@ -449,6 +449,31 @@ describe("HerdrFleetService", () => {
     expect(harness.attached).toEqual([harness.transcript]);
   });
 
+  test("blocked 窗格带上 transcript 待答；jsonl 写入 tool_result 后 ETag 变、待答消失；working 不算", async () => {
+    const harness = createHarness();
+    const ask = { type: "assistant", message: { id: "m1", role: "assistant", content: [{ type: "tool_use", id: "toolu_q", name: "AskUserQuestion", input: { questions: [{ question: "Q?", options: [{ label: "a" }, { label: "b" }] }] } }] } };
+    fs.appendFileSync(harness.transcript, `${JSON.stringify(ask)}\n`);
+    await harness.service.ensureStarted();
+    const paneOf = () => ((harness.service.fleet().workspaces[0].tabs as Record<string, unknown>[])[0].panes as Record<string, unknown>[])[0];
+    expect(paneOf().transcript_prompt).toBeNull(); // idle：不算待答
+
+    harness.emit({ event: "pane_updated", data: { type: "pane_updated", pane: { ...harness.basePane, revision: 2, agent_status: "blocked" } } });
+    await Bun.sleep(30);
+    expect(paneOf().transcript_prompt).toMatchObject({ toolUseId: "toolu_q", toolName: "AskUserQuestion" });
+    expect(harness.service.paneTranscriptPrompt("w1:p1")).toMatchObject({ status: "blocked", prompt: { toolUseId: "toolu_q" } });
+    const before = harness.service.etag();
+    expect(before).toContain("toolu_q");
+
+    fs.appendFileSync(harness.transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_q", content: "a" }] } })}\n`);
+    expect(harness.service.etag()).not.toBe(before);
+    expect(paneOf().transcript_prompt).toBeNull();
+
+    fs.appendFileSync(harness.transcript, `${JSON.stringify({ ...ask, message: { ...ask.message, id: "m2", content: [{ ...ask.message.content[0], id: "toolu_q2" }] } })}\n`);
+    harness.emit({ event: "pane_updated", data: { type: "pane_updated", pane: { ...harness.basePane, revision: 3, agent_status: "working" } } });
+    await Bun.sleep(30);
+    expect(paneOf().transcript_prompt).toBeNull();
+  });
+
   test("ETag generation changes with an important fleet update", async () => {
     const harness = createHarness();
     await harness.service.ensureStarted();

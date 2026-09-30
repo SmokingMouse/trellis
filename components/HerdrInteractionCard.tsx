@@ -13,15 +13,16 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { Badge, Button, Icon, Input, cn } from "@/components/ui";
-import type { HerdrPaneView } from "@/lib/herdr-ui";
+import { herdrPanePrompt, type HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   herdrApproval,
   herdrAskQuestions,
+  herdrScreenQuestionStep,
   type HerdrAskOption,
   type HerdrAskQuestion,
 } from "@/lib/herdr-console";
-import { readHerdrPane, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
+import { readHerdrPane, readHerdrPanePending, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
 import {
   herdrFreeTextReady,
   herdrOptionKeys,
@@ -29,6 +30,15 @@ import {
   parseHerdrScreen,
   type HerdrScreenPrompt,
 } from "@/lib/herdr-screen-parse";
+
+type CardSource = "hook" | "transcript" | "screen" | "terminal";
+const SOURCE_BADGE: Record<CardSource, string> = { hook: "H", transcript: "J", screen: "S", terminal: "T" };
+const SOURCE_TITLE: Record<CardSource, string> = {
+  hook: "数据来源：hook（PreToolUse / PermissionRequest）",
+  transcript: "数据来源：transcript（jsonl 里未完成的 tool_use）",
+  screen: "数据来源：读屏解析",
+  terminal: "数据来源：原始终端",
+};
 
 export type HerdrScreenPromptSummary = { kind: "approval" | "question"; tool: string | null };
 
@@ -192,23 +202,24 @@ export function HerdrInteractionCard({
   /** 读屏认出（或不再认出）选择卡时通知宿主——总览卡标题行据此显示「提问」/「要执行 Bash」 */
   onScreenPrompt?: (prompt: HerdrScreenPromptSummary | null) => void;
 }) {
-  const questions = useMemo(
-    () => herdrAskQuestions(pane.hook?.interactivePrompt),
-    [pane.hook?.interactivePrompt],
+  // 数据源优先级 hook > transcript（jsonl 里未完成的 tool_use）> 读屏。前两者同一形状、同一套渲染。
+  const panePrompt = useMemo(
+    () => herdrPanePrompt({ hook: pane.hook, transcript: pane.transcript }),
+    [pane.hook, pane.transcript],
   );
-  const hookApproval = useMemo(
-    () => herdrApproval(pane.hook?.interactivePrompt),
-    [pane.hook?.interactivePrompt],
-  );
-  // 没有 hook 的「等人」数据（hook 装之前起的进程 / 记录丢了），但 Herdr 报 blocked：读屏。
-  const screenMode = pane.status === "blocked" && pane.hook?.state !== "waiting";
+  const structured = panePrompt?.prompt;
+  const transcriptMode = panePrompt?.source === "transcript";
+  const questions = useMemo(() => herdrAskQuestions(structured), [structured]);
+  const hookApproval = useMemo(() => herdrApproval(structured), [structured]);
+  // 没有 hook / transcript 的「等人」数据，但 Herdr 报 blocked：读屏。
+  const screenMode = pane.status === "blocked" && pane.hook?.state !== "waiting" && !transcriptMode;
   // 读屏认不出选择卡时，是否退回原始终端 + 按键
   const rawAllowed = terminalFallback || (pane.agentKind === "codex" && !pane.hook);
   const waiting = pane.status === "waiting";
   const [step, setStep] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
   const sending = useRef(false);
-  const promptKey = JSON.stringify(pane.hook?.interactivePrompt);
+  const promptKey = JSON.stringify(structured);
   const [answerState, setAnswerState] = useState<
     "idle" | "sending" | "answered" | "error"
   >("idle");
@@ -266,16 +277,64 @@ export function HerdrInteractionCard({
     }
   };
 
+  // transcript 多题：jsonl 只给题目，不知道终端停在第几题（用户可能已在终端里答了几题）——
+  // 读屏认题号，对齐本地的 step。
+  const trackScreenStep = transcriptMode && questions.length > 1;
   useEffect(() => {
-    if (!screenMode) return;
+    if (!screenMode && !trackScreenStep) return;
     void loadScreen();
     const timer = setInterval(() => void loadScreen(), 4_000);
     return () => clearInterval(timer);
     // pane revision/state changes remount the logical blocked prompt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screenMode, pane.paneId, pane.pane.revision]);
+  }, [screenMode, trackScreenStep, pane.paneId, pane.pane.revision]);
+
+  const screenStep = useMemo(
+    () => (trackScreenStep && screen ? herdrScreenQuestionStep(parseHerdrScreen(screen), questions) : null),
+    [trackScreenStep, screen, questions],
+  );
+  // 只跟着「屏幕变了」走：本地刚按完数字 step+1、屏幕还没重绘时不能被旧屏拉回去。
+  // 声明在复位 effect 之后 —— 同一轮里复位成 0 之后再被它纠正回屏幕上的题号。
+  useEffect(() => {
+    if (screenStep === null || sending.current) return;
+    setStep(screenStep);
+    setSelected([]);
+  }, [screenStep, promptKey, pane.status]);
 
   if (!visible) return null;
+
+  /**
+   * transcript 卡的发键前核对（对应读屏卡的「重读屏幕核对指纹」）：
+   *   ① 窗格仍 blocked，且 jsonl 里还是这个 tool_use 没完成；
+   *   ② 多题：重读屏幕认出终端停在第几题，必须和卡上正显示的这一题一致。
+   * 返回拒发原因；null = 可以发。
+   */
+  const verifyTranscript = async (): Promise<string | null> => {
+    const expectedTool = panePrompt?.toolUseId ?? null;
+    let pending: Awaited<ReturnType<typeof readHerdrPanePending>>;
+    try {
+      pending = await readHerdrPanePending(pane.paneId);
+    } catch {
+      return "核对窗格状态失败，没有发送";
+    }
+    if (pending.status !== "blocked" || !expectedTool || pending.toolUseId !== expectedTool) {
+      void refreshHerdrFleet();
+      return "终端里的请求已经变了（可能已在终端作答或被取消），没有发送";
+    }
+    if (questions.length > 1) {
+      const fresh = await loadScreen();
+      const current = fresh === null ? null : herdrScreenQuestionStep(parseHerdrScreen(fresh), questions);
+      if (current === null) return "认不出终端当前停在第几题，没有发送；请展开「查看终端原文」确认";
+      if (current !== step) {
+        setStep(current);
+        setSelected([]);
+        return current >= questions.length
+          ? "终端已在最后确认页，请看清再点"
+          : `终端当前在第 ${current + 1} 题，已切过去，请看清再选`;
+      }
+    }
+    return null;
+  };
 
   const sendKeys = async (
     keys: string[],
@@ -286,6 +345,14 @@ export function HerdrInteractionCard({
     sending.current = true;
     setAnswerState("sending");
     try {
+      if (transcriptMode) {
+        const problem = await verifyTranscript();
+        if (problem) {
+          setErrorText(problem);
+          setAnswerState("error");
+          return false;
+        }
+      }
       await sendHerdrKeys(pane.paneId, keys);
       if (finalAnswer) setAnswerState("answered");
       else setAnswerState("idle");
@@ -435,9 +502,9 @@ export function HerdrInteractionCard({
   const screenIsReview = Boolean(screenQuestion && /submit your answers|review your answers/i.test(screenQuestion.title ?? ""));
   const kind = showRaw ? "terminal" : approval ? "permission" : "question";
   const pickSend = (keys: string[]) => (screenPrompt ? sendScreenKeys(keys) : sendKeys(keys));
+  const cardSource: CardSource = screenPrompt ? "screen" : showRaw ? "terminal" : transcriptMode ? "transcript" : "hook";
 
-  const rawTerminal = (
-    <>
+  const rawScreen = (
       <pre
         data-herdr-screen
         className={`${embedded ? "max-h-56" : compact ? "max-h-36" : "max-h-64"} code-surface overflow-auto whitespace-pre-wrap break-words rounded-field p-3 font-mono text-nano`}
@@ -446,6 +513,10 @@ export function HerdrInteractionCard({
           ? "读屏暂不可用"
           : screen || `正在读取最近 ${SCREEN_LINES} 行…`}
       </pre>
+  );
+  const rawTerminal = (
+    <>
+      {rawScreen}
       {/* 嵌在总览卡里时收成一排小键，不让一张卡吃掉半屏。 */}
       <div className={embedded ? "mt-2 flex flex-wrap gap-1.5 [&>button]:min-h-8 [&>button]:min-w-9 [&>button]:px-2.5 max-md:[&>button]:min-h-11" : "mt-2 grid grid-cols-5 gap-1.5 sm:grid-cols-6"}>
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
@@ -485,9 +556,17 @@ export function HerdrInteractionCard({
     <div
       data-herdr-card
       data-herdr-card-kind={kind}
-      data-herdr-card-source={screenPrompt ? "screen" : showRaw ? "terminal" : "hook"}
-      className={embedded ? "px-3.5 pb-3 text-ink" : `${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`}
+      data-herdr-card-source={cardSource}
+      className={cn("relative", embedded ? "px-3.5 pb-3 text-ink" : `${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`)}
     >
+      {/* 调试用来源角标：平时几乎看不见，悬停才显形 */}
+      <span
+        data-herdr-card-source-badge
+        title={SOURCE_TITLE[cardSource]}
+        className="absolute bottom-1 right-1.5 cursor-default select-none font-mono text-nano leading-none text-ink-faint opacity-25 transition-opacity hover:opacity-100"
+      >
+        {SOURCE_BADGE[cardSource]}
+      </span>
       <div className={`${embedded ? "hidden" : "flex"} items-center gap-2 text-ui`}>
         <Icon
           icon={showRaw ? SquareTerminal : approval ? ShieldCheck : MessageCircleQuestion}
@@ -706,6 +785,15 @@ export function HerdrInteractionCard({
       )}
 
       {!approval && hostFooter && <div className="mt-2.5 flex flex-wrap gap-2">{hostFooter}</div>}
+      {transcriptMode && trackScreenStep && (
+        <details className="group mt-2.5" data-herdr-screen-raw>
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-label text-ink-faint hover:text-ink-muted [&::-webkit-details-marker]:hidden">
+            <Icon icon={ChevronRight} size="sm" className="transition-transform group-open:rotate-90" />
+            查看终端原文
+          </summary>
+          <div className="mt-1.5">{rawScreen}</div>
+        </details>
+      )}
       {screenPrompt && (
         <details className="group mt-2.5" data-herdr-screen-raw>
           <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-label text-ink-faint hover:text-ink-muted [&::-webkit-details-marker]:hidden">

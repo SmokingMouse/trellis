@@ -32,6 +32,7 @@ import {
   herdrAttentionKind,
   type HerdrConsolePane,
 } from "@/lib/herdr-console";
+import { herdrPanePrompt } from "@/lib/herdr-ui";
 import { cachedHerdrPeek, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
@@ -206,11 +207,11 @@ function LaneHeader({ icon, label, count, hint }: { icon: React.ReactNode; label
 }
 
 function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode; readOnly: boolean }) {
-  // hook 没给结构化提示时，用卡片读屏认出的类型（提问 / 要执行 Bash）
+  // hook / transcript 都没给结构化提示时，用卡片读屏认出的类型（提问 / 要执行 Bash）
   const [screenPrompt, setScreenPrompt] = useState<HerdrScreenPromptSummary | null>(null);
   const hookKind = herdrAttentionKind(pane);
   const kind = hookKind === "terminal" && screenPrompt ? (screenPrompt.kind === "approval" ? "approval" : "question") : hookKind;
-  const approvalTool = herdrApproval(pane.view?.hook?.interactivePrompt)?.tool ?? screenPrompt?.tool ?? "";
+  const approvalTool = herdrApproval(herdrPanePrompt(pane.view)?.prompt)?.tool ?? screenPrompt?.tool ?? "";
   const waited = ago(pane.activityAt, now);
   const [replyOpen, setReplyOpen] = useState(false);
   const [reply, setReply] = useState("");

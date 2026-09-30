@@ -5,7 +5,9 @@ import {
   diffHerdrAttention,
   findConsolePaneForSession,
   groupHerdrLanes,
+  herdrAttentionKind,
   herdrAttentionText,
+  herdrScreenQuestionStep,
   herdrStatusLabel,
   herdrStripPanes,
   HERDR_ATTENTION_FLICKER_MS,
@@ -16,7 +18,8 @@ import {
   tabLabelOf,
   type HerdrConsolePane,
 } from "./herdr-console";
-import { buildHerdrWorkspaceViews, type HerdrFleetPane, type HerdrFleetResponse, type HerdrHookRecord, type HerdrSessionBinding } from "./herdr-ui";
+import { parseHerdrScreen } from "./herdr-screen-parse";
+import { buildHerdrWorkspaceViews, herdrPanePrompt, type HerdrFleetPane, type HerdrFleetResponse, type HerdrHookRecord, type HerdrSessionBinding } from "./herdr-ui";
 
 const NOW = 1_800_000_000_000;
 
@@ -210,4 +213,91 @@ test("status labels read Chinese like the lanes, never raw idle/blocked/unknown"
   expect(herdrStatusLabel("done")).toBe("空闲");
   expect(herdrStatusLabel("unknown")).toBe("空闲");
   expect(herdrStatusLabel("working", false)).toBe("已离线");
+});
+
+describe("数据源优先级 hook > transcript > 读屏", () => {
+  const ASK = { questions: [{ header: "方向", question: "Harbor 的定位怎么定？", multiSelect: false, options: [{ label: "冻结" }, { label: "继续" }] }], tool_use_id: "toolu_ask" };
+  const transcriptFleet = (status: string, prompt: unknown = ASK): HerdrFleetResponse => ({
+    ...fleet,
+    workspaces: [{ workspace_id: "w9", label: "t", tabs: [{ tab_id: "w9:t1", label: "1", panes: [
+      pane("w9:p1", "claude", status, "✳ 任务", { agent_session: { value: "s-t" }, transcript_prompt: { toolUseId: "toolu_ask", toolName: "AskUserQuestion", interactivePrompt: prompt } }),
+    ] }] }],
+    sessions: [binding("s-t", "w9:p1")],
+  });
+
+  test("hook 缺席 + 窗格 blocked + transcript 有待答 → waiting，卡片拿 transcript 的提问", () => {
+    const view = buildHerdrWorkspaceViews(transcriptFleet("blocked"), [], NOW)[0].panes[0];
+    expect(view.status).toBe("waiting");
+    expect(herdrPanePrompt(view)).toMatchObject({ source: "transcript", toolUseId: "toolu_ask", toolName: "AskUserQuestion" });
+    const consolePane = buildHerdrConsole(transcriptFleet("blocked"), [], NOW)[0];
+    expect(herdrAttentionKind(consolePane)).toBe("question");
+    expect(herdrAttentionText(consolePane)).toBe("提问：Harbor 的定位怎么定？");
+  });
+
+  test("窗格在跑（working）时 transcript 的未完成调用不算待答", () => {
+    const view = buildHerdrWorkspaceViews(transcriptFleet("working"), [], NOW)[0].panes[0];
+    expect(view.status).toBe("working");
+    expect(view.transcript).toBeNull();
+    expect(herdrPanePrompt(view)).toBeNull();
+  });
+
+  test("hook 有卡时压过 transcript", () => {
+    const hook: HerdrHookRecord = { sessionId: "s-t", state: "waiting", toolName: "Bash", interactivePrompt: { approval: { tool: "Bash", summary: "ls" } }, paneKey: null, updatedAt: NOW };
+    const view = buildHerdrWorkspaceViews(transcriptFleet("blocked"), [hook], NOW)[0].panes[0];
+    expect(herdrPanePrompt(view)).toMatchObject({ source: "hook", toolName: "Bash" });
+  });
+
+  test("transcript 权限审批卡", () => {
+    const approval = { approval: { tool: "Bash", summary: "git push" }, tool_use_id: "toolu_ask" };
+    const consolePane = buildHerdrConsole(transcriptFleet("blocked", approval), [], NOW)[0];
+    expect(herdrAttentionKind(consolePane)).toBe("approval");
+    expect(herdrAttentionText(consolePane)).toBe("要执行 Bash：git push");
+  });
+});
+
+describe("herdrScreenQuestionStep", () => {
+  const questions = [
+    { question: "Harbor 的定位怎么定？" },
+    { question: "公司设备的连接怎么处理？" },
+    { question: "本地的 3 个提交 push 吗？" },
+  ];
+  test("harbor 真实屏幕：第 3 题（前两题已在终端答过）", () => {
+    const screen = `──────
+←  ☒ 方向  ☒ 公司设备  ☐ Push  ✔ Submit  →
+
+本地的 3 个提交 push 吗？
+
+❯ 1. push main + 留档分支（推荐）
+     3 个本地提交和 rescue 分支推到 origin 做异地备份。
+  2. 只 push main
+     rescue 分支只留在本地
+  3. 先不 push
+     全部只留在本地。
+  4. Type something.
+──────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+    expect(herdrScreenQuestionStep(parseHerdrScreen(screen), questions)).toBe(2);
+  });
+
+  test("按题目文字认，不被标签行「第一个未答」带偏（用户方向键跳回第 1 题）", () => {
+    expect(herdrScreenQuestionStep({ kind: "question", title: "Harbor 的定位怎么定？", multiQuestion: { total: 3, current: 3, tabs: [] } }, questions)).toBe(0);
+  });
+
+  test("Review 页 → questions.length", () => {
+    expect(herdrScreenQuestionStep({ kind: "question", title: "Review your answers", multiQuestion: { total: 3, current: 4, tabs: [] } }, questions)).toBe(3);
+  });
+
+  test("认不准一律 null：题数对不上 / 标题对不上 / 审批卡 / 没读到", () => {
+    expect(herdrScreenQuestionStep({ kind: "question", title: "本地的 3 个提交 push 吗？", multiQuestion: { total: 2, current: 2, tabs: [] } }, questions)).toBeNull();
+    expect(herdrScreenQuestionStep({ kind: "question", title: "别的问题", multiQuestion: { total: 3, current: 1, tabs: [] } }, questions)).toBeNull();
+    expect(herdrScreenQuestionStep({ kind: "approval", title: "Do you want to proceed?" }, questions)).toBeNull();
+    expect(herdrScreenQuestionStep(null, questions)).toBeNull();
+  });
+
+  test("标题截断拿不到时退回标签行", () => {
+    expect(herdrScreenQuestionStep({ kind: "question", title: null, multiQuestion: { total: 3, current: 2, tabs: [] } }, questions)).toBe(1);
+    expect(herdrScreenQuestionStep({ kind: "question", title: null }, questions)).toBeNull();
+  });
 });
