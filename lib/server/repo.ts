@@ -78,6 +78,8 @@ export type ApiSession = {
   // 被改了老会话跟着变（用户改 agent 的动机就是「上次答得不好，改了再问」），
   // 想知道当时是谁答的看 nodes.agent_id。
   agentId: string | null;
+  // 置顶时刻（= 侧栏置顶区 + 常驻标签）。null = 未置顶。
+  pinnedAt: number | null;
 };
 
 export type ApiNode = {
@@ -185,11 +187,12 @@ type SessionRow = {
   cli_provider: "claude" | "codex" | null;
   require_approval: number;
   agent_id: string | null;
+  pinned_at: number | null;
 };
 
 const SESSION_COLS = `id, title, root_node_id, created_at, updated_at,
        context_mode, workspace_path, workspace_id, system_prompt, archived, model,
-       origin, kind, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type,
+       origin, kind, source_jsonl_path, cli_provider, require_approval, agent_id, binding_type, pinned_at,
        EXISTS(SELECT 1 FROM herdr_sessions h
          JOIN cli_lineages l ON l.cli_session_id = h.session_id
          WHERE l.trellis_session_id = sessions.id AND h.alive = 1
@@ -332,6 +335,7 @@ function rowToSession(r: SessionRow): ApiSession {
     cliProvider: r.cli_provider,
     requireApproval: r.require_approval === 1,
     agentId: r.agent_id,
+    pinnedAt: r.pinned_at ?? null,
   };
 }
 
@@ -446,6 +450,23 @@ export function setSessionArchived(
       "UPDATE sessions SET archived = ?, updated_at = ? WHERE id = ?",
     )
     .run(archived ? 1 : 0, now, sessionId);
+  if (result.changes === 0) return null;
+  return getSession(sessionId);
+}
+
+// 会话置顶：pinned=true 写入置顶时刻（已置顶则保留原时刻，顺序不跳），false 清空。
+// 不动 updated_at —— 置顶不是会话活动，不该让列表重排。
+export function setSessionPinned(
+  sessionId: string,
+  pinned: boolean,
+  now: number,
+): ApiSession | null {
+  const db = getDB();
+  const result = pinned
+    ? db
+        .prepare("UPDATE sessions SET pinned_at = COALESCE(pinned_at, ?) WHERE id = ?")
+        .run(now, sessionId)
+    : db.prepare("UPDATE sessions SET pinned_at = NULL WHERE id = ?").run(sessionId);
   if (result.changes === 0) return null;
   return getSession(sessionId);
 }

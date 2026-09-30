@@ -11,7 +11,8 @@ import type { Session } from "@/lib/types";
 //
 // The tab bar no longer floods every session into a tab. It renders ONLY the
 // open editor tabs, exactly like VSCode:
-//   • pinned tabs (store.pinnedSessionIds, ordered)
+//   • pinned tabs (store.pinnedSessionIds = 服务端置顶集合，按 pinned_at 升序；
+//     与侧栏「置顶」区是同一个概念)
 //   • + the single preview tab (store.previewSessionId), if any and not
 //     already pinned — shown italic / dimmed to read as "temporary".
 //
@@ -19,7 +20,7 @@ import type { Session } from "@/lib/types";
 //   • single-click a tab → loadSession (plain switch; a preview tab stays
 //     preview)
 //   • double-click the preview tab → pinSession (keep it open permanently)
-//   • each tab has a × close → closeTab (removes from pinned / clears
+//   • each tab has a × close → closeTab (pinned → 取消置顶 / clears
 //     preview; if it was active, switches to a neighbor)
 //   • ⌘1–9 jump to the Nth OPEN tab (pinned then preview) — not all sessions
 //   • unread dot (unread hue) when a run finished here while the user was
@@ -55,6 +56,7 @@ export function SessionTabs() {
   const [byId, setById] = useState<Record<string, Session>>({});
   useEffect(() => {
     let cancelled = false;
+    const requestedAt = Date.now();
     fetch("/api/sessions")
       .then((r) => r.json())
       .then((data) => {
@@ -62,12 +64,14 @@ export function SessionTabs() {
         const map: Record<string, Session> = {};
         // S117: taskSessions 也要能 resolve —— 从任务页/侧栏分组深链进来的
         // 任务会话（kind='task'）不在 sessions 里，漏掉它 tab 就渲染不出来。
-        for (const s of [
+        const all = [
           ...(data.sessions ?? []),
           ...(data.taskSessions ?? []),
-        ] as Session[])
-          map[s.id] = s;
+        ] as Session[];
+        for (const s of all) map[s.id] = s;
         setById(map);
+        // 常驻标签 = 服务端置顶集合（sessions.pinned_at）。
+        useSessionStore.getState().syncPinnedFromServer(all, requestedAt);
       })
       .catch(() => {
         /* keep last-known map on transient failure */
@@ -116,7 +120,7 @@ export function SessionTabs() {
       <div className="min-w-0 flex-1 h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
           <div className="self-center pl-1 text-label text-ink-faint">
-            从侧栏或搜索打开会话；单击是预览，双击标签固定
+            从侧栏或搜索打开会话；单击是预览，双击标签置顶
           </div>
         )}
         {openIds.map((id, i) => {
@@ -198,7 +202,7 @@ function Tab({
       aria-selected={active}
       title={
         shortcut <= 9
-          ? `${style.label} · ${session.title}  (⌘${shortcut})${preview ? "\n双击固定" : ""}`
+          ? `${style.label} · ${session.title}  (⌘${shortcut})${preview ? "\n双击置顶" : ""}`
           : `${style.label} · ${session.title}`
       }
       data-session-tab={session.id}

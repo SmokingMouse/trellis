@@ -82,7 +82,9 @@ const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "her
 //  - 桌面常驻（md 以上），宽度可拖拽，收起后由 Header 左上角的侧栏开关展开；
 //    手机端是 Header 汉堡键打开的抽屉，两处共用 renderPanel。
 //  - 工具条：「按项目 / 按时间」SegmentedControl + 来源 Select + 含已归档 Checkbox。
-//  - 行：单击预览（斜体、不占标签位），双击固定；右键 / 行尾「更多」出同一套菜单。
+//  - 行：单击预览（斜体、不占标签位），双击置顶；右键 / 行尾「更多」出同一套菜单。
+//  - 置顶（= 常驻标签，服务端 sessions.pinned_at）：列表顶部「置顶」组，两种排布共用；
+//    置顶的会话从下方分组里去重，不重复出现。
 //    状态只用行首一个槽位（生成中 Dots / 等你回答 / 出错点 / 未读点），行尾是
 //    中性小字 meta；hover 时 meta 让位给「更多」按钮，但**占位不变**，行内容不闪。
 //
@@ -148,6 +150,8 @@ export function SessionSidebar() {
     runningIds.has(id) || (id === activeId && activeRunning);
 
   const [sessions, setSessions] = useState<Session[]>([]);
+  // 任务会话不进侧栏分组，但被置顶时要能在置顶区 resolve 出来。
+  const [taskSessions, setTaskSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 沿用原 collapsed 数组的存储键；与工具条和面板偏好共用安全的 hydration。
   const [collapsedIds, setCollapsedIds] = useSidebarPreference("collapsed", [] as string[], isStringArray);
@@ -203,11 +207,17 @@ export function SessionSidebar() {
   // change or any store mutation that bumps sessionsRevision.
   useEffect(() => {
     let cancelled = false;
+    const requestedAt = Date.now();
     fetch("/api/sessions?includeEmptyWorkspaces=1")
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled) {
           setSessions(data.sessions ?? []);
+          setTaskSessions(data.taskSessions ?? []);
+          useSessionStore.getState().syncPinnedFromServer(
+            [...(data.sessions ?? []), ...(data.taskSessions ?? [])],
+            requestedAt,
+          );
           if (data.pending) useSessionStore.getState().ingestPending(data.pending);
           setArchivedCount(data.archivedCount ?? 0);
           setProjects(data.projects ?? []);
@@ -299,10 +309,22 @@ export function SessionSidebar() {
     [herdrAvailable, herdrStatus],
   );
 
-  const visibleSessions = useMemo(
-    () => selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr),
-    [sessions, archived, source, includeArchived, isOfflineHerdr],
-  );
+  // 置顶区：按置顶顺序（pinned_at 升序）列出，**不受来源筛选与 Herdr 离线隐藏影响**
+  // —— 置顶是显式意图，且它们本来就常驻在标签条上；离线的 Herdr 行照常弱化显示。
+  // 归档则尊重：归档的会话不在活跃列表里，也就不进置顶区（pinned_at 保留，取消归档即回来）。
+  const pinnedSessions = useMemo(() => {
+    const byId = new Map([...taskSessions, ...sessions].map((s) => [s.id, s]));
+    return pinnedIds
+      .map((id) => byId.get(id))
+      .filter((s): s is Session => !!s && !s.archived);
+  }, [pinnedIds, sessions, taskSessions]);
+
+  // 下方分组去重：已在置顶区出现的会话不再重复出现。
+  const visibleSessions = useMemo(() => {
+    const shown = new Set(pinnedSessions.map((s) => s.id));
+    return selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
+      .filter((s) => !shown.has(s.id));
+  }, [sessions, archived, source, includeArchived, isOfflineHerdr, pinnedSessions]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -519,6 +541,29 @@ export function SessionSidebar() {
             }
           }}
         />
+      </div>
+    );
+  };
+
+  // 置顶区：列表最顶部，「按项目 / 按时间」两种排布共用。空时整组不画。
+  const renderPinned = () => {
+    if (pinnedSessions.length === 0) return null;
+    const id = "__pinned";
+    const isCollapsed = collapsed.has(id);
+    return (
+      <div data-sidebar-pinned className="mb-1.5">
+        <GroupRow
+          level={0}
+          icon={Pin}
+          collapsed={isCollapsed}
+          label="置顶"
+          title={`置顶 · ${pinnedSessions.length} 个会话（同时常驻在标签条上）`}
+          badge={String(pinnedSessions.length)}
+          onToggle={() => toggleCollapsed(id)}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>{pinnedSessions.map((s) => renderRow(s, 1))}</IndentGuide>
+        )}
       </div>
     );
   };
@@ -879,8 +924,9 @@ export function SessionSidebar() {
             </p>
           </div>
         )}
+        {renderPinned()}
         {visibleSessions.length === 0 ? (
-          <div className="px-3 py-6 text-center text-label text-ink-faint">
+          pinnedSessions.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
             {source !== "all"
               ? "这个来源还没有会话，切回「全部」看看其它会话"
               : "还没有会话，点上面「新会话」开始"}
@@ -1094,8 +1140,11 @@ function GitBadge({
 // hover 而重排（W4 之前三个按钮挤进来，标题截断点跟着跳，看起来整行在「闪」）。
 // 触屏（pointer-coarse）没有 hover，操作按钮常驻、正常占位。
 const META_FADE = "transition-opacity duration-100 md:group-hover:opacity-0 md:group-focus-within:opacity-0";
+// 菜单展开期间（trigger aria-expanded）也要保持显示：焦点进了 portal、鼠标移向菜单会
+// 同时丢掉 hover / focus-within，trigger 一旦 display:none，菜单就被连带关掉，
+// 点击落到下面那一行上（实测：点「置顶」却切到了下一个会话）。
 const ACTIONS_OVERLAY =
-  "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-surface-hover pl-1 md:group-hover:flex md:group-focus-within:flex";
+  "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-surface-hover pl-1 md:group-hover:flex md:group-focus-within:flex md:has-[[aria-expanded=true]]:flex";
 
 // Project / Workspace 的分组行。两级共用一个组件，靠 level 调缩进与字重 ——
 // 项目行是这棵树的骨架（强），工作区行是它的分支（弱）。外层刻意是 div 而非
@@ -1330,7 +1379,7 @@ function SidebarRow({
   const menu = useContextMenuWithTarget<Session>();
   const menuItems = useMemo<ContextMenuItem[]>(() => [
     {
-      label: isPinned ? "取消固定" : "固定会话",
+      label: isPinned ? "取消置顶" : "置顶",
       onSelect: isPinned ? (onUnpin ?? onPin) : onPin,
     },
     { label: "重命名", onSelect: onStartEdit },
@@ -1449,7 +1498,7 @@ function SidebarRow({
         } ${indicatorStatus === "unread" ? "font-medium" : ""}`}
         onClick={editing ? undefined : onPreview}
         onDoubleClick={editing ? undefined : onPin}
-        title={`${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击固定`}
+        title={`${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击置顶`}
       >
         {/* 当前会话：左缘一条强调色竖线（与 mockup 一致），不再给运行中的行整行染色。 */}
         {active && (
@@ -1481,7 +1530,7 @@ function SidebarRow({
         ) : (
           <span
             className={`min-w-0 flex-1 truncate text-ui ${
-              // 预览（未固定、临时）的会话读作斜体，同 VSCode。
+              // 预览（未置顶、临时）的会话读作斜体，同 VSCode。
               preview ? "italic" : ""
             } ${preview && !active ? "text-ink-muted" : ""}`}
           >
@@ -1556,7 +1605,7 @@ function SessionRowMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem icon={<Icon icon={isPinned ? PinOff : Pin} />} onSelect={isPinned ? onUnpin : onPin}>
-          {isPinned ? "取消固定" : "固定会话"}
+          {isPinned ? "取消置顶" : "置顶"}
         </DropdownMenuItem>
         <DropdownMenuItem icon={<Icon icon={Pencil} />} onSelect={onRename}>
           重命名

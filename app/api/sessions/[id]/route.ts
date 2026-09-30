@@ -4,6 +4,7 @@ import {
   deleteSession,
   renameSession,
   setSessionArchived,
+  setSessionPinned,
   setSessionModel,
   listNotesBySession,
 } from "@/lib/server/repo";
@@ -100,6 +101,21 @@ export async function PATCH(
     // S117: 归档任务的常驻会话 = 「这段历史收起来」，解绑让下次执行重开新会话，
     // 否则归档行会被后台执行悄悄写回新节点、在归档区里一直长。
     if (obj.archived) detachHomeSession(id);
+    return Response.json({ session });
+  }
+
+  // 置顶：{ pinned: boolean }。置顶 = 侧栏置顶区 + 常驻标签，服务端存。
+  if ("pinned" in obj) {
+    if (typeof obj.pinned !== "boolean") {
+      return Response.json(
+        { error: "expected { pinned: boolean }" },
+        { status: 400 },
+      );
+    }
+    const session = setSessionPinned(id, obj.pinned, Date.now());
+    if (!session) {
+      return Response.json({ error: "not found" }, { status: 404 });
+    }
     return Response.json({ session });
   }
 

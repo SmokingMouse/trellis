@@ -49,7 +49,9 @@ export const PREF_KEYS = {
   desktopNotify: "trellis-desktop-notify",
   desktopNotifyOffered: "trellis-desktop-notify-offered",
   // 其它
-  pinnedSessions: "trellis-pinned-sessions",
+  // 已退役：置顶会话改存服务端 sessions.pinned_at。只剩首次加载的一次性迁移读它，
+  // 迁完即删；不进 PREF_ITEMS 镜像清单。
+  legacyPinnedSessions: "trellis-pinned-sessions",
 } as const;
 
 export type PrefKey = (typeof PREF_KEYS)[keyof typeof PREF_KEYS];

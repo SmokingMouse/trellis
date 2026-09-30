@@ -897,6 +897,12 @@ function migrate(db: Database) {
   }
   db.exec("UPDATE sessions SET kind = 'herdr' WHERE origin = 'herdr' AND kind <> 'herdr'");
 
+  // 会话置顶（= 常驻标签）。NULL = 未置顶；非 NULL = 置顶时刻，置顶区按它升序排
+  // （先置顶的在前，与标签从左到右的追加顺序一致）。服务端存，多设备同步。
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'pinned_at'").get()) {
+    db.exec("ALTER TABLE sessions ADD COLUMN pinned_at INTEGER");
+  }
+
   // 飞书是入口，Trellis 的 session/node 树仍是对话真源。bot 只保存连接与执行配置，
   // chat 只保存飞书会话到树链尾的映射，inbox 只承担消息去重；三者不复制回答正文。
   db.exec(`
