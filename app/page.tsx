@@ -45,6 +45,7 @@ import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
 import { HerdrOverview } from "@/components/herdr/HerdrOverview";
+import { useHerdrShortcuts } from "@/hooks/useHerdrShortcuts";
 import { TriangleAlert } from "lucide-react";
 import { Icon, Spinner } from "@/components/ui";
 
@@ -86,6 +87,7 @@ export default function Home() {
   // Wave 4: one app-level /api/runs poll feeds running + unread badges to
   // both the tab strip and the sidebar (no per-component intervals).
   useRunPolling();
+  useHerdrShortcuts();
 
   useEffect(() => {
     // 来源列表放开后，默认最新会话可能由 Herdr 控制。直接自举深链目标，

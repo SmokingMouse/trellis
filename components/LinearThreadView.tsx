@@ -55,6 +55,7 @@ import {
   HerdrSessionBadge,
 } from "./HerdrSessionControls";
 import { HerdrInteractionCard } from "./HerdrInteractionCard";
+import { HerdrPaneStrip } from "./herdr/HerdrPaneStrip";
 import { ButlerChangeCards } from "./ButlerChangeCards";
 import { isButlerSession } from "@/lib/butler";
 
@@ -588,6 +589,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
     >
+      {isHerdr && !isMobile && <HerdrPaneStrip />}
       <div
         data-thread-header
         data-thread-header-hidden={mobileHeaderHidden ? "true" : undefined}

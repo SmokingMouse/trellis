@@ -22,7 +22,7 @@ export function isEditableTarget(t: EventTarget | null): boolean {
 export type Shortcut = {
   keys: string; // 展示用键位（⌘P / J·K / Alt+↑↓←→）
   label: string;
-  scope: "全局" | "线性视图" | "画布" | "地图" | "选中文字时" | "输入框";
+  scope: "全局" | "线性视图" | "画布" | "地图" | "选中文字时" | "输入框" | "Herdr";
 };
 
 export const SHORTCUTS: Shortcut[] = [
@@ -41,6 +41,12 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "↩ / ⌘↩", label: "发送（可在输入框角标切换）", scope: "输入框" },
   { keys: "↑↓ + ↩/Tab", label: "/ 命令下拉导航与选中", scope: "输入框" },
   { keys: "Esc", label: "关闭弹层 / 取消分叉 chip", scope: "全局" },
+  // Herdr 操作台：⌘ 一族已被占（标签 / 树面板 / 分叉），统一用 ⌥。
+  { keys: "⌥J", label: "跳到下一个需要你的 Herdr 窗格", scope: "Herdr" },
+  { keys: "⌥K", label: "跳到窗格：按工作区 / 任务名搜", scope: "Herdr" },
+  { keys: "⌥1-9", label: "Herdr 会话里：切到切换条第 N 个窗格", scope: "Herdr" },
+  { keys: "⌥[ / ⌥]", label: "Herdr 会话里：前 / 后一个窗格", scope: "Herdr" },
+  { keys: "⌥`", label: "Herdr 会话里：开关终端抽屉", scope: "Herdr" },
 ];
 
 // KeyboardHelp 面板的开启走 window 事件（不进 store）：
