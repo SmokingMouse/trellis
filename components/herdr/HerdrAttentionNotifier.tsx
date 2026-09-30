@@ -56,7 +56,7 @@ export function HerdrAttentionNotifier() {
       role="status"
       aria-live="polite"
       data-herdr-notice={notice.paneId}
-      className="fixed bottom-4 z-40 w-[340px] max-w-[calc(100vw-2rem)] rounded-card border border-warn-line bg-surface-raised p-3 shadow-overlay max-md:inset-x-3 max-md:w-auto"
+      className="fixed bottom-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-card border border-warn-line bg-surface-raised p-3 shadow-overlay max-md:inset-x-3 max-md:w-auto"
       style={{ right: "calc(var(--trellis-herdr-dw, 0px) + 1rem)" }}
     >
       <div className="flex items-center gap-2 text-ui">

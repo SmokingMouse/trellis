@@ -257,7 +257,7 @@ function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: 
             {where} · {kind === "approval" ? `${KIND_LABEL.approval} ${herdrApproval(pane.view?.hook?.interactivePrompt)?.tool ?? ""}`.trim() : KIND_LABEL[kind]}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap text-label text-ink-faint">
-            {waited && <span>等了 {waited}</span>}
+            {waited && <span>{waited === "刚刚" ? "刚刚" : `等了 ${waited}`}</span>}
             <span className="inline-flex items-center gap-0.5">
               {pane.sessionId ? "进会话" : "看终端"}
               <Icon icon={ChevronRight} size="sm" />

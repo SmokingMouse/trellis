@@ -46,7 +46,7 @@ export function HerdrPaneStrip() {
       data-herdr-strip
       className="no-scrollbar flex h-9.5 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-surface-canvas px-2.5 max-md:hidden"
     >
-      <span className="inline-flex shrink-0 items-center gap-1.5 pl-0.5 pr-2 text-label text-ink-faint">
+      <span className="sticky left-0 z-10 -ml-2.5 inline-flex shrink-0 items-center gap-1.5 self-stretch bg-surface-canvas pl-3 pr-2 text-label text-ink-faint">
         <Icon icon={Anchor} size="sm" />
         Herdr
       </span>

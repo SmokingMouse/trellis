@@ -85,7 +85,7 @@ export function HerdrInteractionCard({
   const loadScreen = async () => {
     setScreenError(false);
     try {
-      setScreen(await readHerdrPane(pane.paneId, 40));
+      setScreen(await readHerdrPane(pane.paneId, embedded ? 14 : 40));
     } catch {
       setScreenError(true);
     }
@@ -313,19 +313,19 @@ export function HerdrInteractionCard({
           </div>
         </div>
       )}
-      {!approvalPrompt && footer && <div className="mt-2.5 flex flex-wrap gap-2">{footer}</div>}
 
       {codexBlocked && (
         <div className="mt-2">
           <pre
             data-herdr-screen
-            className={`${compact ? "max-h-36" : "max-h-64"} code-surface overflow-auto whitespace-pre-wrap break-words rounded-field p-3 font-mono text-nano`}
+            className={`${embedded ? "max-h-56" : compact ? "max-h-36" : "max-h-64"} code-surface overflow-auto whitespace-pre-wrap break-words rounded-field p-3 font-mono text-nano`}
           >
             {screenError
               ? "读屏暂不可用"
               : screen || "正在读取最近 40 行…"}
           </pre>
-          <div className="mt-2 grid grid-cols-5 gap-1.5 sm:grid-cols-6">
+          {/* 嵌在总览卡里时收成一排小键，读屏只留 36 高，不让一张卡吃掉半屏。 */}
+          <div className={embedded ? "mt-2 flex flex-wrap gap-1.5 [&>button]:min-h-8 [&>button]:min-w-9 [&>button]:px-2.5 max-md:[&>button]:min-h-11" : "mt-2 grid grid-cols-5 gap-1.5 sm:grid-cols-6"}>
             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
               (key) => (
                 <button
@@ -380,6 +380,7 @@ export function HerdrInteractionCard({
         </div>
       )}
 
+      {!approvalPrompt && footer && <div className="mt-2.5 flex flex-wrap gap-2">{footer}</div>}
       {answerState === "error" && (
         <div className="mt-2 text-label text-danger-ink">按键发送失败，请重试</div>
       )}
