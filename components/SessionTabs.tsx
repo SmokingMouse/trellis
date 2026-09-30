@@ -1,11 +1,15 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import { isEditableTarget } from "@/lib/shortcuts";
 import { Plus, X } from "lucide-react";
 import { Dots, Icon, IconButton, StatusDot } from "@/components/ui";
 import type { Session } from "@/lib/types";
+import { useAppMode } from "@/hooks/useAppMode";
+import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { isHerdrSession } from "@/lib/herdr-ui";
+import { HerdrPaneStrip } from "@/components/herdr/HerdrPaneStrip";
 
 // Workbench Wave 4 — VSCode-style editor tab strip (rewrite of Wave 1).
 //
@@ -29,8 +33,13 @@ import type { Session } from "@/lib/types";
 // The full session list lives in the left SessionSidebar (incl. its archived
 // view). The strip only renders pinned + preview tabs plus a "＋" new entry.
 // A redundant "+" sits next to it as a secondary new-session entry.
+//
+// 对话 / Herdr 模式分家（2026-09-30）：对话模式的标签里不出现 Herdr 会话；
+// Herdr 模式整行换成按 workspace 分组的窗格条（HerdrPaneStrip），不再另起一行。
 
 export function SessionTabs() {
+  const mode = useAppMode();
+  const { fleet } = useHerdrFleet();
   const activeId = useSessionStore((s) => s.session?.id ?? null);
   const pinnedIds = useSessionStore((s) => s.pinnedSessionIds);
   const previewId = useSessionStore((s) => s.previewSessionId);
@@ -88,12 +97,17 @@ export function SessionTabs() {
     if (previewId && !pinnedIds.includes(previewId)) ids.push(previewId);
     // Only keep ids we can actually resolve to a session (defends against a
     // just-deleted id lingering for a tick before the store evicts it).
-    return ids.filter((id) => byId[id]);
-  }, [pinnedIds, previewId, byId]);
+    // 对话模式不列 Herdr 会话（它们在 Herdr 模式的分组窗格条里）。
+    return ids.filter((id) => byId[id] && !isHerdrSession(byId[id], fleet));
+  }, [pinnedIds, previewId, byId, fleet]);
+
+  // 窗格条的行标题兜底要用会话标题（终端标题是「Claude Code」这类默认值时）。
+  const sessionTitle = useCallback((id: string) => byId[id]?.title ?? null, [byId]);
 
   // ⌘1–9 (and Ctrl+1–9 off-mac) jump to the Nth open tab. Ignored while
   // typing so digits with a held modifier still reach inputs.
   useEffect(() => {
+    if (mode !== "chat") return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key < "1" || e.key > "9") return;
@@ -105,7 +119,7 @@ export function SessionTabs() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openIds, activeId, loadSession]);
+  }, [openIds, activeId, loadSession, mode]);
 
   // Offset the strip to start right of the sidebar. We read the same
   // --trellis-sb var the content surfaces use (set in page.tsx), which
@@ -115,8 +129,12 @@ export function SessionTabs() {
   return (
     <div
       className="hidden md:flex fixed top-12 right-0 z-30 h-9 bg-surface-canvas border-b border-line"
+      data-tab-row={mode}
       style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
+      {mode === "herdr" ? (
+        <HerdrPaneStrip sessionTitle={sessionTitle} />
+      ) : (
       <div className="min-w-0 flex-1 h-full flex items-stretch overflow-x-auto no-scrollbar px-2 gap-1">
         {openIds.length === 0 && (
           <div className="self-center pl-1 text-label text-ink-faint">
@@ -153,6 +171,7 @@ export function SessionTabs() {
           </IconButton>
         </div>
       </div>
+      )}
       {/* LinearThreadView portals 宽度切换 / 画布 / Herdr 标识 into this slot. */}
       <div
         id="trellis-tab-actions"

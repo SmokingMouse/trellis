@@ -5,9 +5,9 @@ import { herdrUnavailableText, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   buildHerdrConsole,
   findConsolePaneForSession,
-  herdrStripPanes,
   type HerdrConsolePane,
 } from "@/lib/herdr-console";
+import { buildHerdrModeGroups, herdrModeStrip } from "@/lib/herdr-mode";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
@@ -18,11 +18,15 @@ export function useHerdrConsole() {
     () => buildHerdrConsole(snapshot.fleet, snapshot.hooks),
     [snapshot.fleet, snapshot.hooks],
   );
-  const strip = useMemo(() => herdrStripPanes(panes), [panes]);
+  // 窗格条 / ⌥1-9 / ⌥J 的顺序跟 Herdr 模式的分组走（组序 → 组内 tab 序），与侧栏、标签行一致。
+  // 顺序不依赖标题，所以这里不带会话标题；要显示标题的组件自己带标题再算一遍。
+  const groups = useMemo(() => buildHerdrModeGroups(snapshot.fleet, panes), [snapshot.fleet, panes]);
+  const strip = useMemo(() => herdrModeStrip(groups), [groups]);
   const available = Boolean(snapshot.fleet?.available && !snapshot.error);
   return {
     ...snapshot,
     panes,
+    groups,
     strip,
     available,
     readOnly: Boolean(snapshot.fleet?.readOnly),

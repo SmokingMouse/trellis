@@ -54,9 +54,9 @@ export function HerdrAttentionNotifier() {
     if (pane) openHerdrConsolePane(pane);
   };
   return (
-    // 会话区右上角、窗格切换条正下方（切换条上的 chip 同时在闪，空间相邻）。右下角已被
-    // 输入框、会话树浮窗、终端把手占满，不再在底部避让：top = 标签条下沿 + 待办条
-    // + 切换条（--trellis-herdr-strip-h，非 Herdr 会话为 0）+ 8px；右边距只让终端抽屉。
+    // 会话区右上角、标签行正下方（Herdr 模式下标签行就是分组窗格条，chip 同时在闪，空间相邻）。
+    // 右下角已被输入框、会话树浮窗、终端把手占满，不再在底部避让：top = 标签行下沿 + 待办条
+    // + 8px；右边距只让终端抽屉。
     // 从上方滑入（@starting-style）。
     <div
       role="status"
@@ -66,7 +66,7 @@ export function HerdrAttentionNotifier() {
       style={{
         top: isMobile
           ? "calc(var(--trellis-header-h) + 0.5rem)"
-          : "calc(5.25rem + var(--trellis-pending-h, 0px) + var(--trellis-herdr-strip-h, 0px) + 0.5rem)",
+          : "calc(5.25rem + var(--trellis-pending-h, 0px) + 0.5rem)",
         right: isMobile ? undefined : "calc(var(--trellis-rp, 0px) + var(--trellis-herdr-dw, 0px) + 1rem)",
       }}
     >
