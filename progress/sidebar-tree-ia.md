@@ -1,5 +1,7 @@
 # Trellis 侧栏与工作树 · 统一信息架构方案
 
+> **2026-09-30 S185 部分作废**：「Herdr 并进项目树」已改为侧栏 [对话 | Herdr] 两个模式分开（`lib/herdr-mode.ts`），见 sessions/2026-09-30-1740-s185-herdr-console.md。
+
 只读调研，未改仓库任何文件。日期 2026-09-08。
 
 **证据来源**：代码读的是 worktree `chore/ui-audit`（= main 的 6e5e3ce）；真实数据来自生产库只读快照
