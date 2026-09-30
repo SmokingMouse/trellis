@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adoptServerQueue,
   herdrComposerHint,
   insertPathAt,
   quotePath,
@@ -47,5 +48,23 @@ describe("Herdr 输入框纯逻辑", () => {
     expect(restoreDraft("", "旧消息")).toBe("旧消息");
     expect(restoreDraft("新草稿 ", "旧消息")).toBe("新草稿\n旧消息");
     expect(restoreDraft("含旧消息的草稿", "旧消息")).toBe("含旧消息的草稿");
+  });
+
+  test("服务端回执是排队真源：刷新后按窗格并入仍在排队且带原文的条目，按入队时间排序、不重复", () => {
+    const local: HerdrQueuedInput[] = [{ inputId: "b", paneId: "p", text: "本地 b", queuedAt: 20 }];
+    const deliveries = [
+      { inputId: "a", paneId: "p", status: "queued" as const, text: "服务端 a", queuedAt: 10 },
+      { inputId: "b", paneId: "p", status: "queued" as const, text: "服务端 b", queuedAt: 20 },
+      { inputId: "c", paneId: "other", status: "queued" as const, text: "别的窗格", queuedAt: 5 },
+      { inputId: "d", paneId: "p", status: "delivered" as const, queuedAt: 1 },
+      { inputId: "e", paneId: "p", status: "queued" as const },
+    ];
+    expect(adoptServerQueue(local, deliveries, "p")).toEqual([
+      { inputId: "a", paneId: "p", text: "服务端 a", queuedAt: 10 },
+      { inputId: "b", paneId: "p", text: "本地 b", queuedAt: 20 },
+    ]);
+    expect(adoptServerQueue([], deliveries, "p").map(i => i.inputId)).toEqual(["a", "b"]);
+    expect(adoptServerQueue(local, undefined, "p")).toBe(local);
+    expect(adoptServerQueue(local, deliveries, null)).toBe(local);
   });
 });

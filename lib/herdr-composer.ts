@@ -70,6 +70,24 @@ export function reconcileHerdrQueue(
   return { queue: keep, failed, delivered };
 }
 
+/**
+ * 服务端回执是排队列表的真源：把该窗格仍在排队、带原文、本地列表里还没有的条目
+ * 并进来（刷新 / 新标签页 / 另一个标签页发的），按入队时间排序。本地已有的条目原样保留。
+ */
+export function adoptServerQueue(
+  queue: HerdrQueuedInput[],
+  deliveries: HerdrInputDelivery[] | undefined,
+  paneId: string | null,
+): HerdrQueuedInput[] {
+  if (!paneId || !deliveries?.length) return queue;
+  const known = new Set(queue.map((item) => item.inputId));
+  const adopted = deliveries
+    .filter((d) => d.paneId === paneId && d.status === "queued" && typeof d.text === "string" && !known.has(d.inputId))
+    .map((d) => ({ inputId: d.inputId, paneId: d.paneId, text: d.text!, queuedAt: d.queuedAt ?? 0 }));
+  if (adopted.length === 0) return queue;
+  return [...queue, ...adopted].sort((a, b) => a.queuedAt - b.queuedAt);
+}
+
 /** 失败 / 撤回的文本放回输入框：输入框空就直接放，否则另起一行接在后面（不覆盖新草稿）。 */
 export function restoreDraft(current: string, restored: string): string {
   if (!current.trim()) return restored;

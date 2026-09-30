@@ -13,7 +13,10 @@ type Subscriber = {
   onClose: () => void;
 };
 
-const subscribers = new Set<Subscriber>();
+// globalThis 共享：发布方（调度器，instrumentation 那份模块实例）和订阅方（路由）
+// 可能不是同一个模块实例，同 cli-sync-events。
+const shared = globalThis as typeof globalThis & { trellisTaskSubscribers?: Set<Subscriber> };
+const subscribers = shared.trellisTaskSubscribers ??= new Set<Subscriber>();
 
 export function publishTaskEvent(event: TaskEvent): void {
   for (const sub of [...subscribers]) {

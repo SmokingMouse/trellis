@@ -2,11 +2,11 @@
 import { useEffect } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { toast } from "@/components/ui";
-import { bindPageStream } from "@/lib/page-stream";
+import { pageEvents } from "@/lib/page-events";
 
 // S88: 任务执行完成 / 失败的站内提醒。
 //
-// 自带 SSE 订阅 + 自己那点本地状态，**不进 sessionStore** —— 它和会话树、流式
+// 订阅统一事件流的 task 通道 + 自己那点本地状态，**不进 sessionStore** —— 它和会话树、流式
 // 状态零交集，塞进那个 3000 行的 store 只会让它更难读。
 // （S117 起有两处最小交集：run 事件 bump 一下侧栏、点击 toast 直接切会话 ——
 // 都是对既有 store action 的调用，本地状态仍然自持。）
@@ -31,66 +31,27 @@ const AUTO_DISMISS_MS = 8000;
 
 export function TaskToast() {
   useEffect(() => {
-    let ctrl = new AbortController();
     let cancelled = false;
-    let retryTimer = 0;
-
-    // 结构照抄 useCliSyncEvents：手写 SSE 读取 + 断线重连。用 EventSource 会
-    // 少几行，但它不能带 signal、不好在 unmount 时干净收摊。
-    async function run() {
-      const signal = ctrl.signal;
-      try {
-        const res = await fetch("/api/tasks/events", {
-          signal,
-          headers: { Accept: "text/event-stream" },
-        });
-        if (!res.ok || !res.body) return;
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (!cancelled && !signal.aborted) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
-          buffer = frames.pop() ?? "";
-          for (const frame of frames) {
-            const line = frame.split("\n").find((l) => l.startsWith("data: "));
-            if (!line) continue;
-            const ev = JSON.parse(line.slice(6)) as TaskEvent;
-            // S117: 任务会话在侧栏有分组了 —— 首次执行懒建的会话行、执行结束的
-            // 角标都靠重拉 /api/sessions 长出来。getState() 取免得进依赖数组。
-            if (ev.type === "run_started" || ev.type === "run_finished") {
-              useSessionStore.getState().bumpSessionsRevision();
-            }
-            if (ev.type !== "run_finished") continue;
-            // 成功且没人在看任务页时不打扰？—— 不做这个判断：notify_on 已经在
-            // 服务端决定了要不要**外部**推送，站内 toast 是廉价的、看一眼就走。
-            void hydrateItem(ev.taskId, ev.runId, ev.status).then((it) => {
-              if (!it || cancelled) return;
-              showTaskToast(it);
-            });
-          }
-        }
-      } catch {
-        /* transient —— 下面重连 */
-      } finally {
-        if (!cancelled && !signal.aborted) retryTimer = window.setTimeout(run, 2000);
+    // 数据来自页面级统一事件流 /api/events 的 `task` 通道（原 /api/tasks/events 的 data）。
+    const off = pageEvents().on("task", (data) => {
+      const ev = data as TaskEvent;
+      // S117: 任务会话在侧栏有分组了 —— 首次执行懒建的会话行、执行结束的
+      // 角标都靠重拉 /api/sessions 长出来。getState() 取免得进依赖数组。
+      if (ev.type === "run_started" || ev.type === "run_finished") {
+        useSessionStore.getState().bumpSessionsRevision();
       }
-    }
-
-    void run();
-    const stop = () => {
-      cancelled = true;
-      if (retryTimer) window.clearTimeout(retryTimer);
-      ctrl.abort();
-    };
-    return bindPageStream(window, stop, () => {
-      if (!cancelled) return;
-      cancelled = false;
-      ctrl = new AbortController();
-      void run();
+      if (ev.type !== "run_finished") return;
+      // 成功且没人在看任务页时不打扰？—— 不做这个判断：notify_on 已经在
+      // 服务端决定了要不要**外部**推送，站内 toast 是廉价的、看一眼就走。
+      void hydrateItem(ev.taskId, ev.runId, ev.status).then((it) => {
+        if (!it || cancelled) return;
+        showTaskToast(it);
+      });
     });
+    return () => {
+      cancelled = true;
+      off();
+    };
   }, []);
 
   return null;

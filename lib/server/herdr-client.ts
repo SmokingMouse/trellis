@@ -195,6 +195,10 @@ export class HerdrClient {
   }
 
   private publishDelivery(delivery: HerdrInputDelivery): void {
+    if (delivery.status === "delivered" || delivery.status === "cancelled") {
+      delivery = { ...delivery };
+      delete delivery.text;
+    }
     this.deliveries.set(delivery.inputId, delivery);
     this.bump();
     this.emit({ kind: "fleet" });
@@ -322,13 +326,14 @@ export class HerdrClient {
     const acceptedPane = this.requireAgentPane(paneId);
     if (this._readOnly) throw new HerdrUnavailableError("Herdr is read-only");
     // Retain bounded delivery receipts for reconnecting browsers, never evict
-    // an input that is still queued. Text stays only in the worker closure.
+    // an input that is still queued. Queued / failed receipts carry the text so
+    // a reloaded tab can rebuild its queue list; delivered / cancelled drop it.
     for (const [id, delivery] of this.deliveries) {
       if (this.deliveries.size < 128) break;
       if (delivery.status !== "queued") this.deliveries.delete(id);
     }
     if (this.deliveries.size >= 128) throw new HerdrApiError("input queue is full", "queue_full");
-    const receipt: HerdrInputDelivery = { inputId: crypto.randomUUID(), paneId, status: "queued" };
+    const receipt: HerdrInputDelivery = { inputId: crypto.randomUUID(), paneId, status: "queued", text, queuedAt: Date.now() };
     const queued = this.inputTails.has(paneId) || !["idle", "done"].includes(acceptedPane.agent_status);
     const previous = this.inputTails.get(paneId) ?? Promise.resolve();
     const run = previous.then(() => undefined, () => undefined).then(async () => {

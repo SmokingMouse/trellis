@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { readHookToken } from "@/lib/server/agent-hooks/endpoint";
 import { recordClaudeHook } from "@/lib/server/agent-hooks/store";
 import { nudgeCliTranscript } from "@/lib/server/cli-sync-watcher";
+import { notifyConsoleChange } from "@/lib/server/console-events";
 import type { ClaudeHookPayload } from "@/lib/server/agent-hooks/types";
 
 export const runtime = "nodejs";
@@ -60,6 +61,8 @@ export async function POST(req: Request) {
   const paneKey = typeof paneKeyField === "string" ? paneKeyField : null;
 
   const record = recordClaudeHook(payload, { paneKey });
+  // 控制台推送：待答卡的收起 / 弹出靠这一下（合并窗口 100ms，无订阅者时零成本）。
+  if (record) notifyConsoleChange("hook");
   // Hook 驱动同步：每个事件都意味着 transcript 刚追加过（或马上追加），让镜像立刻
   // 重导，而不是等 fs.watch 的 600ms 去抖。只对已镜像的文件生效；失败不影响应答。
   const transcriptPath =

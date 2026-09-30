@@ -420,8 +420,13 @@ describe("HerdrClient", () => {
     expect(client.inputDeliveries.find(input => input.inputId === first.inputId)).toEqual({
       ...first, status: "failed", error: "first wait failed",
     });
+    // 排队 / 失败回执带原文（刷新后恢复排队列表、失败放回输入框）；送达后原文清掉。
+    expect(first.text).toBe("first");
+    expect(typeof first.queuedAt).toBe("number");
+    const secondWithoutText = { ...second };
+    delete secondWithoutText.text;
     expect(client.inputDeliveries.find(input => input.inputId === second.inputId)).toEqual({
-      ...second, status: "delivered",
+      ...secondWithoutText, status: "delivered",
     });
     expect(server.requests.filter(r => r.method === "pane.send_input").map(r => r.params.text)).toEqual(["second"]);
   });

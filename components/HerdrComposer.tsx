@@ -23,6 +23,7 @@ import {
 import {
   herdrComposerHint,
   insertPathAt,
+  adoptServerQueue,
   reconcileHerdrQueue,
   restoreDraft,
   type HerdrQueuedInput,
@@ -113,11 +114,19 @@ export function HerdrComposer({
     onMobileExpandedChange?.(mobileCompact && mobileExpanded);
   }, [mobileCompact, mobileExpanded, onMobileExpandedChange]);
 
-  // 换窗格：排队列表、状态都属于旧窗格。
+  // 排队列表的真源是服务端回执（fleet.inputDeliveries 带排队原文）：挂载 / 换窗格 /
+  // 回执变化时，先把服务端还在排队的条目并进来（刷新、换标签页后恢复显示），再对账。
+  const deliveries = fleet?.inputDeliveries;
+  // 初值为空：首帧若已有回执也要走一次并入。
+  const [seenDeliveries, setSeenDeliveries] = useState<typeof deliveries | null>(null);
+
+  // 换窗格：排队列表、状态都属于旧窗格；清掉 seen 让下一帧按新窗格重新并入。
   const [queuePane, setQueuePane] = useState(paneId);
-  if (queuePane !== paneId) {
+  const switched = queuePane !== paneId;
+  if (switched) {
     setQueuePane(paneId);
     setQueue([]);
+    setSeenDeliveries(null);
     setDelivered(false);
     setNotice(null);
   }
@@ -125,12 +134,11 @@ export function HerdrComposer({
   // 排队列表 × fleet 回执对账：送达 / 撤回移除，失败把文字放回输入框。
   // 回执变了才对一次账（渲染期调整状态，不走 effect）；回执缺失不判过期 —— 刚入队时
   // fleet 可能还没刷新到它。
-  const deliveries = fleet?.inputDeliveries;
-  const [seenDeliveries, setSeenDeliveries] = useState(deliveries);
-  if (seenDeliveries !== deliveries) {
+  if (!switched && seenDeliveries !== deliveries) {
     setSeenDeliveries(deliveries);
-    const result = reconcileHerdrQueue(queue, deliveries, 0, Number.POSITIVE_INFINITY);
-    if (result.queue.length !== queue.length) {
+    const adopted = adoptServerQueue(queue, deliveries, paneId);
+    const result = reconcileHerdrQueue(adopted, deliveries, 0, Number.POSITIVE_INFINITY);
+    if (adopted !== queue || result.queue.length !== adopted.length) {
       setQueue(result.queue);
       if (result.failed.length > 0) {
         setText((current) => result.failed.reduce((acc, item) => restoreDraft(acc, item.text), current));
@@ -156,7 +164,10 @@ export function HerdrComposer({
       const result = await sendHerdrInput(paneId, outgoing);
       setText((current) => (current === text ? "" : current));
       if (result.status === "queued") {
-        setQueue((prev) => [...prev, { inputId: result.inputId, paneId, text: outgoing, queuedAt: Date.now() }]);
+        // 推送可能先于 POST 应答把这条并进列表了：按 inputId 去重。
+        setQueue((prev) => prev.some((q) => q.inputId === result.inputId)
+          ? prev
+          : [...prev, { inputId: result.inputId, paneId, text: outgoing, queuedAt: result.queuedAt ?? Date.now() }]);
       } else {
         setDelivered(true);
         if (deliveredTimer.current) clearTimeout(deliveredTimer.current);

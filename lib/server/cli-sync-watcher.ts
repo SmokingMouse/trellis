@@ -37,6 +37,7 @@ import {
   publishCliSyncFailed,
   type CliSyncFailure,
 } from "./cli-sync-events";
+import { notifyConsoleChange } from "./console-events";
 import {
   CliTranscriptUnreadableError,
   NativeSessionConflictError,
@@ -607,6 +608,9 @@ function watchDir(dir: string, recursive = false): void {
     w = fs.watch(dir, { recursive }, (_event, filename) => {
       if (!filename || !filename.toString().endsWith(".jsonl")) return;
       scheduleReimport(path.join(dir, filename.toString()));
+      // Herdr 待答卡的 transcript 档直接按文件 stat 读，不依赖重导：不等 600ms 去抖，
+      // 让控制台推送（100ms 合并窗口，无订阅者零成本）立刻重算 fleet ETag。
+      notifyConsoleChange("transcript");
     });
   } catch {
     return; // 目录不可 watch

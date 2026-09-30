@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { getDB } from "@/lib/server/sqlite";
 import { applyHookEvent, type NormalizeOptions } from "./normalize";
 import type { AgentHookRecord, ClaudeHookPayload, StashedState } from "./types";
@@ -35,6 +36,12 @@ export function listHookSummaries(): HookSummary[] {
     sessionId: row.session_id, state: row.state as AgentHookRecord["state"], toolName: row.tool_name,
     interactivePrompt: parse<unknown>(row.interactive_prompt, null), paneKey: row.pane_key, updatedAt: row.updated_at,
   }));
+}
+
+/** GET /api/hooks/state 的响应体与 ETag（控制台推送也用同一个 ETag 判断变没变）。 */
+export function hookStateSnapshot(): { body: string; etag: string } {
+  const body = JSON.stringify({ records: listHookSummaries() });
+  return { body, etag: `W/"${createHash("sha256").update(body).digest("hex")}"` };
 }
 
 export function pruneHookRecords(now = Date.now()): number {

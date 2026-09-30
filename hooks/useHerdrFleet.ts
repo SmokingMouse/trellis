@@ -6,6 +6,13 @@ import type {
   HerdrFleetResponse,
   HerdrHookRecord,
 } from "@/lib/herdr-ui";
+import { pageEvents } from "@/lib/page-events";
+import {
+  herdrFetchPlan,
+  herdrPollInterval,
+  type HerdrChangeEvent,
+  type HerdrFetchPlan,
+} from "@/lib/herdr-push";
 
 export type HerdrFleetSnapshot = {
   fleet: HerdrFleetResponse | null;
@@ -21,7 +28,10 @@ export function herdrUnavailableText({ fleet, loading, error }: Pick<HerdrFleetS
   return "Herdr 暂时无法连接";
 }
 
-const POLL_MS = 2_500;
+// 数据来源：服务端一有变化（Herdr 事件 / hook 写入 / transcript 镜像 / 输入投递）就在
+// 统一事件流 /api/events 的 `herdr` 通道推一条 { fleetEtag, hooksEtag }，这里比对 ETag
+// 后只拉变了的那一半（If-None-Match）。轮询只是兜底：流在线 30s，断流时回到 2.5s；
+// 每次（重）连上立刻拉一次全量，补上断线期间错过的变化。
 let snapshot: HerdrFleetSnapshot = {
   fleet: null,
   hooks: [],
@@ -31,9 +41,11 @@ let snapshot: HerdrFleetSnapshot = {
 let etag: string | null = null;
 let hooksEtag: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
+let timerMs = 0;
 let inFlight: Promise<void> | null = null;
-let events: EventSource | null = null;
-let eventVersion = 0;
+let queued: HerdrFetchPlan | null = null;
+let streamConnected = false;
+let detachStream: (() => void) | null = null;
 const listeners = new Set<(next: HerdrFleetSnapshot) => void>();
 
 function publish(next: HerdrFleetSnapshot): void {
@@ -43,88 +55,102 @@ function publish(next: HerdrFleetSnapshot): void {
   }
   snapshot = next;
   for (const listener of listeners) listener(next);
-  // A page already holds task and CLI sync streams. Open the delivery stream
-  // only while inputs are queued, so navigation/hydration keeps HTTP slots.
-  const queued = next.fleet?.inputDeliveries?.some(input => input.status === "queued");
-  if (listeners.size > 0 && queued && !events) {
-    events = new EventSource("/api/herdr/events");
-    events.onmessage = (event) => {
-      try {
-        const fleet = JSON.parse(event.data) as HerdrFleetResponse;
-        eventVersion++;
-        etag = null;
-        publish({ ...snapshot, fleet, loading: false, error: null });
-      } catch { /* polling recovers a malformed or interrupted event */ }
-    };
-  } else if (!queued || listeners.size === 0) {
-    events?.close();
-    events = null;
+}
+
+async function fetchOnce(plan: HerdrFetchPlan): Promise<void> {
+  try {
+    const [fleetResponse, hooksResponse] = await Promise.all([
+      plan.fleet
+        ? fetch("/api/herdr/fleet", { cache: "no-store", headers: etag ? { "If-None-Match": etag } : undefined })
+        : null,
+      plan.hooks
+        ? fetch("/api/hooks/state", { cache: "no-store", headers: hooksEtag ? { "If-None-Match": hooksEtag } : undefined })
+        : null,
+    ]);
+    if (fleetResponse && !fleetResponse.ok && fleetResponse.status !== 304) {
+      throw new Error(`Herdr fleet HTTP ${fleetResponse.status}`);
+    }
+    if (hooksResponse && !hooksResponse.ok && hooksResponse.status !== 304) {
+      throw new Error(`hook state HTTP ${hooksResponse.status}`);
+    }
+    let fleet = snapshot.fleet;
+    if (fleetResponse && fleetResponse.status !== 304) {
+      fleet = (await fleetResponse.json()) as HerdrFleetResponse;
+      etag = fleetResponse.headers.get("etag");
+    }
+    // Refresh the projection on a 304 too: waiting-hook TTLs can expire
+    // even when neither server-side record nor fleet ETag changed.
+    let hooks = [...snapshot.hooks];
+    if (hooksResponse && hooksResponse.status !== 304) {
+      hooks = ((await hooksResponse.json()) as { records?: HerdrHookRecord[] }).records ?? [];
+      hooksEtag = hooksResponse.headers.get("etag");
+    }
+    publish({ fleet, hooks, loading: false, error: null });
+  } catch (error) {
+    publish({
+      ...snapshot,
+      loading: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
-async function poll(): Promise<void> {
-  if (inFlight) return inFlight;
+/** 串行拉取：在途时把新需求并进下一轮（推送密集时最多一个在途 + 一个排队）。 */
+function poll(plan: HerdrFetchPlan = { fleet: true, hooks: true }): Promise<void> {
+  if (inFlight) {
+    queued = { fleet: plan.fleet || Boolean(queued?.fleet), hooks: plan.hooks || Boolean(queued?.hooks) };
+    return inFlight;
+  }
   inFlight = (async () => {
-    const versionAtStart = eventVersion;
-    try {
-      const [fleetResponse, hooksResponse] = await Promise.all([
-        fetch("/api/herdr/fleet", {
-          cache: "no-store",
-          headers: etag ? { "If-None-Match": etag } : undefined,
-        }),
-        fetch("/api/hooks/state", { cache: "no-store", headers: hooksEtag ? { "If-None-Match": hooksEtag } : undefined }),
-      ]);
-      if (!fleetResponse.ok && fleetResponse.status !== 304) {
-        throw new Error(`Herdr fleet HTTP ${fleetResponse.status}`);
-      }
-      if (!hooksResponse.ok && hooksResponse.status !== 304) {
-        throw new Error(`hook state HTTP ${hooksResponse.status}`);
-      }
-      const fleet =
-        fleetResponse.status === 304 || eventVersion !== versionAtStart
-          ? snapshot.fleet
-          : ((await fleetResponse.json()) as HerdrFleetResponse);
-      if (fleetResponse.status !== 304 && eventVersion === versionAtStart) {
-        etag = fleetResponse.headers.get("etag");
-      }
-      // Refresh the projection on a 304 too: waiting-hook TTLs can expire
-      // even when neither server-side record nor fleet ETag changed.
-      const hooks = hooksResponse.status === 304 ? [...snapshot.hooks]
-        : ((await hooksResponse.json()) as { records?: HerdrHookRecord[] }).records ?? [];
-      if (hooksResponse.status !== 304) hooksEtag = hooksResponse.headers.get("etag");
-      publish({
-        fleet: eventVersion === versionAtStart ? fleet : snapshot.fleet,
-        hooks,
-        loading: false,
-        error: null,
-      });
-    } catch (error) {
-      publish({
-        ...snapshot,
-        loading: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      inFlight = null;
+    let next: HerdrFetchPlan | null = plan;
+    while (next) {
+      await fetchOnce(next);
+      next = queued;
+      queued = null;
     }
-  })();
+  })().finally(() => { inFlight = null; });
   return inFlight;
+}
+
+function schedulePolling(): void {
+  const ms = herdrPollInterval(streamConnected);
+  if (timer && timerMs === ms) return;
+  if (timer) clearInterval(timer);
+  timerMs = ms;
+  timer = setInterval(() => void poll(), ms);
+}
+
+function attachStream(): () => void {
+  const stream = pageEvents();
+  const offChange = stream.on("herdr", (data) => {
+    const plan = herdrFetchPlan(data as HerdrChangeEvent, { fleetEtag: etag, hooksEtag });
+    if (plan) void poll(plan);
+  });
+  const offStatus = stream.onStatus(({ connected }) => {
+    streamConnected = connected;
+    schedulePolling();
+    if (connected) void poll();
+  });
+  streamConnected = stream.connected;
+  return () => { offChange(); offStatus(); };
 }
 
 function subscribe(listener: (next: HerdrFleetSnapshot) => void): () => void {
   listeners.add(listener);
   listener(snapshot);
   if (listeners.size === 1) {
+    detachStream = attachStream();
     void poll();
-    timer = setInterval(() => void poll(), POLL_MS);
+    schedulePolling();
   }
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0 && timer) {
-      clearInterval(timer);
+    if (listeners.size === 0) {
+      if (timer) clearInterval(timer);
       timer = null;
-      events?.close();
-      events = null;
+      timerMs = 0;
+      detachStream?.();
+      detachStream = null;
     }
   };
 }
