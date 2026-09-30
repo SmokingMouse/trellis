@@ -267,3 +267,25 @@ export function herdrArrowKeys(from: number, to: number): string[] {
   const step = to > from ? "down" : "up";
   return [...Array.from({ length: Math.abs(to - from) }, () => step), "Enter"];
 }
+
+/**
+ * 自由输入第二步前的核对：发了「Type something」的序号之后重读屏幕，
+ * 必须还是同一道题（标题 + 其余选项不变），且 ❯ 落在自由输入项上，才往里打字。
+ * 自由输入项自己的文字不参与比较——聚焦后 TUI 可能把它渲染成输入框。
+ */
+export function herdrFreeTextReady(
+  before: HerdrScreenPrompt | null,
+  after: HerdrScreenPrompt | null,
+  freeIndex: number,
+): boolean {
+  if (!before || !after || after.multiSelect) return false;
+  const others = (prompt: HerdrScreenPrompt) =>
+    JSON.stringify(prompt.options.filter((option) => option.index !== freeIndex).map((option) => option.label));
+  return (
+    after.kind === before.kind &&
+    after.title === before.title &&
+    (after.multiQuestion?.current ?? 0) === (before.multiQuestion?.current ?? 0) &&
+    others(after) === others(before) &&
+    after.selectedIndex === freeIndex
+  );
+}

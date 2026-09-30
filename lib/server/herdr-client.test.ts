@@ -397,6 +397,9 @@ describe("HerdrClient", () => {
     expect(client.sendKeys("w1:p1", ["Enter"])).rejects.toBeInstanceOf(
       HerdrUnavailableError,
     );
+    expect(client.sendText("w1:p1", "hi")).rejects.toBeInstanceOf(
+      HerdrUnavailableError,
+    );
   });
 
   test("queued inputs have independent receipts when the first wait fails", async () => {

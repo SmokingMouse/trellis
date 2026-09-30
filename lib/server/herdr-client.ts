@@ -381,6 +381,16 @@ export class HerdrClient {
     return this.request("pane.send_keys", { pane_id: paneId, keys });
   }
 
+  /**
+   * 立即把文字打进窗格（不走 enqueueInput 的 agent.wait 排队）：给「窗格正卡在选择卡上、
+   * 要往卡内输入框里打字」用。文字与回车在同一个 pane.send_input 里原子送出——与
+   * splitAndResume / enqueueInput 同一个已验证的请求形状。只读降级由 request() 拒写（503）。
+   */
+  async sendText(paneId: string, text: string, submit = true): Promise<Record<string, unknown>> {
+    this.requireAgentPane(paneId);
+    return this.request("pane.send_input", { pane_id: paneId, text, keys: submit ? ["Enter"] : [] });
+  }
+
   private requireAgentPane(paneId: string): HerdrPane {
     if (!this.enabled || !this._available) throw new HerdrUnavailableError();
     const pane = this.panes.get(paneId);

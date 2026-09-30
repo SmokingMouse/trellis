@@ -22,7 +22,7 @@ import {
   cn,
   toast,
 } from "@/components/ui";
-import { HerdrInteractionCard } from "@/components/HerdrInteractionCard";
+import { HerdrInteractionCard, type HerdrScreenPromptSummary } from "@/components/HerdrInteractionCard";
 import { HerdrPaneMenu } from "./HerdrPaneMenu";
 import { openHerdrConsolePane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
@@ -206,7 +206,11 @@ function LaneHeader({ icon, label, count, hint }: { icon: React.ReactNode; label
 }
 
 function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode; readOnly: boolean }) {
-  const kind = herdrAttentionKind(pane);
+  // hook 没给结构化提示时，用卡片读屏认出的类型（提问 / 要执行 Bash）
+  const [screenPrompt, setScreenPrompt] = useState<HerdrScreenPromptSummary | null>(null);
+  const hookKind = herdrAttentionKind(pane);
+  const kind = hookKind === "terminal" && screenPrompt ? (screenPrompt.kind === "approval" ? "approval" : "question") : hookKind;
+  const approvalTool = herdrApproval(pane.view?.hook?.interactivePrompt)?.tool ?? screenPrompt?.tool ?? "";
   const waited = ago(pane.activityAt, now);
   const [replyOpen, setReplyOpen] = useState(false);
   const [reply, setReply] = useState("");
@@ -254,7 +258,7 @@ function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: 
             {pane.title}
           </span>
           <span className="shrink-0 whitespace-nowrap text-label text-ink-faint max-md:hidden">
-            {where} · {kind === "approval" ? `${KIND_LABEL.approval} ${herdrApproval(pane.view?.hook?.interactivePrompt)?.tool ?? ""}`.trim() : KIND_LABEL[kind]}
+            {where} · {kind === "approval" ? `${KIND_LABEL.approval} ${approvalTool}`.trim() : KIND_LABEL[kind]}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap text-label text-ink-faint">
             {waited && <span>{waited === "刚刚" ? "刚刚" : `等了 ${waited}`}</span>}
@@ -271,6 +275,7 @@ function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: 
           pane={pane.view}
           embedded
           terminalFallback
+          onScreenPrompt={setScreenPrompt}
           footer={
             readOnly ? null : (
               <Button

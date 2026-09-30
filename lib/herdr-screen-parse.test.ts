@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   cleanScreenLines,
   herdrArrowKeys,
+  herdrFreeTextReady,
   herdrOptionKeys,
   herdrScreenSignature,
   parseHerdrScreen,
@@ -261,5 +262,18 @@ describe("按键映射", () => {
     expect(herdrScreenSignature(a)).toBe(herdrScreenSignature(moved));
     expect(herdrScreenSignature(a)).not.toBe(herdrScreenSignature(parseHerdrScreen(APPROVAL)));
     expect(herdrScreenSignature(null)).toBe("");
+  });
+
+  test("自由输入第二步核对：❯ 落到 Type something 且题目没变才打字", () => {
+    const before = parseHerdrScreen(HARBOR)!;
+    const focused = parseHerdrScreen(HARBOR.replace("❯ 1.", "  1.").replace("  4. Type something.", "❯ 4. Type something."));
+    expect(herdrFreeTextReady(before, focused, 4)).toBeTrue();
+    // 聚焦后自由输入项渲染成输入框（文字变了）也算
+    const asInput = parseHerdrScreen(HARBOR.replace("❯ 1.", "  1.").replace("  4. Type something.", "❯ 4. 先 push main"));
+    expect(herdrFreeTextReady(before, asInput, 4)).toBeTrue();
+    // ❯ 没动 / 换了题 / 读屏失败 → 不打字
+    expect(herdrFreeTextReady(before, before, 4)).toBeFalse();
+    expect(herdrFreeTextReady(before, parseHerdrScreen(SINGLE.replace("❯ 1.", "  1.").replace("  4. Type", "❯ 4. Type")), 4)).toBeFalse();
+    expect(herdrFreeTextReady(before, null, 4)).toBeFalse();
   });
 });

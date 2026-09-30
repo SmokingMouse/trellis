@@ -21,13 +21,16 @@ import {
   type HerdrAskOption,
   type HerdrAskQuestion,
 } from "@/lib/herdr-console";
-import { readHerdrPane, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
+import { readHerdrPane, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
 import {
+  herdrFreeTextReady,
   herdrOptionKeys,
   herdrScreenSignature,
   parseHerdrScreen,
   type HerdrScreenPrompt,
 } from "@/lib/herdr-screen-parse";
+
+export type HerdrScreenPromptSummary = { kind: "approval" | "question"; tool: string | null };
 
 const RECOMMENDED = /\s*[（(]\s*(推荐|recommended)\s*[)）]\s*$/i;
 const SCREEN_LINES = 40;
@@ -176,6 +179,7 @@ export function HerdrInteractionCard({
   embedded = false,
   terminalFallback = false,
   footer,
+  onScreenPrompt,
 }: {
   pane: HerdrPaneView;
   compact?: boolean;
@@ -185,6 +189,8 @@ export function HerdrInteractionCard({
   terminalFallback?: boolean;
   /** 动作区尾部的附加内容（总览卡的「回复…」） */
   footer?: ReactNode;
+  /** 读屏认出（或不再认出）选择卡时通知宿主——总览卡标题行据此显示「提问」/「要执行 Bash」 */
+  onScreenPrompt?: (prompt: HerdrScreenPromptSummary | null) => void;
 }) {
   const questions = useMemo(
     () => herdrAskQuestions(pane.hook?.interactivePrompt),
@@ -221,6 +227,15 @@ export function HerdrInteractionCard({
   const signature = herdrScreenSignature(screenPrompt);
   const showRaw = screenMode && !screenPrompt && (rawAllowed || parsed?.multiSelect === true);
   const visible = pane.alive && (waiting || Boolean(screenPrompt) || showRaw);
+  const summaryKind = screenPrompt?.kind ?? null;
+  const summaryTool = screenPrompt?.tool ?? null;
+  const onScreenPromptRef = useRef(onScreenPrompt);
+  useEffect(() => {
+    onScreenPromptRef.current = onScreenPrompt;
+  });
+  useEffect(() => {
+    onScreenPromptRef.current?.(summaryKind ? { kind: summaryKind, tool: summaryTool } : null);
+  }, [summaryKind, summaryTool]);
 
   useEffect(() => {
     setStep(0);
@@ -316,11 +331,17 @@ export function HerdrInteractionCard({
     setTimeout(() => void loadScreen(), 700);
   };
 
-  /** 自由输入：Esc 收起选择卡，文字进 Herdr 输入队列，窗格空闲后作为下一条消息送达。 */
-  const sendFreeText = async () => {
+  /**
+   * 自由输入（选择卡的「Type something」）：
+   *   ① 重读屏幕核对卡没变 → 发该项序号（数字直选，聚焦卡内输入框）
+   *   ② 稍等重读，核对还是同一道题且 ❯ 落在自由输入项上 → 立即打字 + Enter（/text，不排队）
+   * 任一步核对不过就停手；不发 Esc —— 多题时 Esc 会连已答的题一起丢掉。
+   */
+  const sendFreeText = async (freeIndex: number) => {
     const text = freeText.trim();
-    if (!text || sending.current) return;
+    if (!text || sending.current || answerState === "answered") return;
     const expected = signature;
+    const before = screenPrompt;
     const fresh = await loadScreen();
     const current = fresh === null ? null : parseHerdrScreen(fresh);
     if (herdrScreenSignature(current && !current.multiSelect ? current : null) !== expected) {
@@ -331,12 +352,25 @@ export function HerdrInteractionCard({
     sending.current = true;
     setAnswerState("sending");
     try {
-      await sendHerdrKeys(pane.paneId, ["Escape"]);
-      await sendHerdrInput(pane.paneId, text);
+      await sendHerdrKeys(pane.paneId, herdrOptionKeys({ index: freeIndex }));
+      // 读屏接口有 1 秒服务端缓存，TUI 重绘也要一点时间：最多等约 3 秒看 ❯ 落位
+      let ready = false;
+      for (let attempt = 0; attempt < 6 && !ready; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const focused = await loadScreen();
+        ready = herdrFreeTextReady(before, focused === null ? null : parseHerdrScreen(focused), freeIndex);
+      }
+      if (!ready) {
+        setErrorText(`已按 ${freeIndex} 选中「Type something」，但终端没进入预期的输入状态，文字没有发送；请展开终端原文看看`);
+        setAnswerState("error");
+        return;
+      }
+      await sendHerdrText(pane.paneId, text, true);
       answeredSignature.current = expected;
       setAnswerState("answered");
       setFreeText("");
       void refreshHerdrFleet();
+      setTimeout(() => void loadScreen(), 700);
     } catch {
       setErrorText("发送失败，请重试");
       setAnswerState("error");
@@ -395,6 +429,9 @@ export function HerdrInteractionCard({
     : screenApprovalView;
   const screenQuestion = screenPrompt?.kind === "question" ? screenPrompt : null;
   const multi = screenQuestion?.multiQuestion;
+  // 卡内有自由输入框时，宿主的「回复…」就重复了，不再渲染
+  const freeOption = screenQuestion?.options.find((option) => option.isFreeText) ?? null;
+  const hostFooter = freeOption ? null : footer;
   const screenIsReview = Boolean(screenQuestion && /submit your answers|review your answers/i.test(screenQuestion.title ?? ""));
   const kind = showRaw ? "terminal" : approval ? "permission" : "question";
   const pickSend = (keys: string[]) => (screenPrompt ? sendScreenKeys(keys) : sendKeys(keys));
@@ -546,23 +583,22 @@ export function HerdrInteractionCard({
             disabled={busy}
             onPick={(item) => void sendScreenKeys(herdrOptionKeys(item))}
           />
-          {(screenQuestion.options.some((option) => option.isFreeText) ||
-            screenQuestion.options.some((option) => option.isChat)) && (
+          {(freeOption || screenQuestion.options.some((option) => option.isChat)) && (
             <form
               className="mt-2 flex flex-wrap gap-1.5"
               onSubmit={(event) => {
                 event.preventDefault();
-                void sendFreeText();
+                if (freeOption) void sendFreeText(freeOption.index);
               }}
             >
-              {screenQuestion.options.some((option) => option.isFreeText) && (
+              {freeOption && (
                 <>
                   <Input
                     value={freeText}
                     onChange={(event) => setFreeText(event.target.value)}
-                    placeholder={multi ? "都不合适？写你的回答（会收起整张提问卡，作为下一条消息发给它）" : "都不合适？写你的回答（收起选择卡，作为下一条消息发给它）"}
+                    placeholder="都不合适？直接写你的回答"
                     aria-label="自由输入回答"
-                    data-herdr-free-text
+                    data-herdr-free-text={freeOption.index}
                     disabled={busy}
                     className="min-w-0 flex-1 max-md:min-h-11"
                   />
@@ -640,7 +676,7 @@ export function HerdrInteractionCard({
             >
               拒绝
             </Button>
-            {footer}
+            {hostFooter}
           </div>
         </div>
       )}
@@ -669,7 +705,7 @@ export function HerdrInteractionCard({
         </div>
       )}
 
-      {!approval && footer && <div className="mt-2.5 flex flex-wrap gap-2">{footer}</div>}
+      {!approval && hostFooter && <div className="mt-2.5 flex flex-wrap gap-2">{hostFooter}</div>}
       {screenPrompt && (
         <details className="group mt-2.5" data-herdr-screen-raw>
           <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-label text-ink-faint hover:text-ink-muted [&::-webkit-details-marker]:hidden">
