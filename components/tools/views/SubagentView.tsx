@@ -1,7 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import type { ToolNode } from "@/lib/tool-tree";
-import { OutputView, Section } from "../RawView";
+import { OutputView, Section, StderrView } from "../RawView";
 
 // A real sub-agent (task_type: local_agent): the task it was handed, the tool
 // chain it ran, and the report it came back with.
@@ -17,10 +17,13 @@ export function SubagentView({
   children?: ReactNode;
 }) {
   const { meta } = node;
+  // 整块挂在 ToolRow 的委派竖线上：竖线就是「这些归它，不归主链」，所以
+  // 子调用直接铺成行 —— 不再加小标题、不再套边框卡片。description 已经是
+  // 行头摘要，这里只放行头放不下的：完整任务、工具链、报告、错误输出。
   return (
     <>
       {meta.prompt && (
-        <details>
+        <details className="px-3 pt-1 pb-0.5">
           <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
             交给它的任务
           </summary>
@@ -31,25 +34,23 @@ export function SubagentView({
       )}
 
       {node.children.length > 0 ? (
-        // Left rail = "these belong to the sub-agent, not the main chain".
-        <div className="border-l-2 border-line ml-1 pl-2">
-          <div className="text-nano uppercase tracking-wider text-ink-faint mb-0.5">
-            它的工具链 · {node.children.length}
-          </div>
-          <div className="border border-line rounded divide-y divide-line/70 overflow-hidden">
-            {children}
-          </div>
-        </div>
+        <div className="divide-y divide-line-faint">{children}</div>
       ) : (
-        <div className="text-label text-ink-faint italic">
+        <div className="px-3 py-1 text-label text-ink-faint italic">
           {node.running ? "还没开始调工具…" : "没有调用工具"}
         </div>
       )}
 
-      {node.report && (
-        <Section label="它交回的报告">
-          <OutputView text={node.report} />
-        </Section>
+      {(node.report || node.call.stderr) && (
+        <div className="px-3 pt-1 pb-2 space-y-2">
+          {node.report && (
+            <Section label="它交回的报告">
+              <OutputView text={node.report} />
+            </Section>
+          )}
+          {/* 错误永不隐藏：子 Agent 挂掉时的 stderr 以前没有任何渲染路径。 */}
+          {node.call.stderr && <StderrView text={node.call.stderr} />}
+        </div>
       )}
     </>
   );

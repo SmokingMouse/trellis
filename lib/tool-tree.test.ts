@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildToolTree,
+  countToolTree,
+  delegatedStepCount,
+  isFailed,
   MIN_SEGMENT,
   nestedErrorCount,
   runningChain,
@@ -184,5 +187,35 @@ describe("nestedErrorCount", () => {
       call({ id: "k2", name: "Bash", parentToolUseId: "agent" }),
     ]);
     expect(nestedErrorCount(tree[0])).toBe(1);
+  });
+});
+
+describe("失败口径（isFailed）", () => {
+  it("委派任务回报 failed 也算失败 —— 嵌套计数、面板计数同一口径", () => {
+    const tree = buildToolTree([
+      call({ id: "outer", name: "Agent", agent: { taskType: "local_agent" } }),
+      call({
+        id: "inner",
+        name: "Agent",
+        parentToolUseId: "outer",
+        agent: { taskType: "local_agent", status: "failed" },
+      }),
+    ]);
+    expect(isFailed(tree[0].children[0])).toBe(true);
+    expect(nestedErrorCount(tree[0])).toBe(1);
+    expect(countToolTree(tree).errors).toBe(1);
+  });
+});
+
+describe("delegatedStepCount", () => {
+  it("有子调用行就数直接子调用，没有才退回 CLI 自报的 toolUses", () => {
+    const tree = buildToolTree([
+      call({ id: "a", name: "Agent", agent: { taskType: "local_agent", toolUses: 9 } }),
+      call({ id: "k1", name: "Read", parentToolUseId: "a" }),
+      call({ id: "k2", name: "Read", parentToolUseId: "a" }),
+      call({ id: "b", name: "Agent", agent: { taskType: "local_agent", toolUses: 4 } }),
+    ]);
+    expect(delegatedStepCount(tree[0])).toBe(2);
+    expect(delegatedStepCount(tree[1])).toBe(4);
   });
 });

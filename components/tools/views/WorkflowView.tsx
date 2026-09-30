@@ -48,28 +48,23 @@ export function WorkflowView({
 }) {
   const vm = buildWorkflowVM(node, live);
   const script = node.meta.prompt ?? null;
-  const current = currentStep(vm.phases);
   const running = node.running && live;
 
+  // 整块挂在 ToolRow 那道委派竖线上 —— 阶段树不再自带第二道线。
   return (
-    <>
-      {/* 表头下一行安静的等宽小字：跑着时说它在干嘛，跑完说它交回了什么。
+    <div className="px-3 pt-1 pb-2 space-y-2">
+      {/* 跑着时「当前 agent」在表头的摘要位；跑完这里说它交回了什么。
           这里露出 task_notification.summary 是有意的 —— 它对 local_workflow
           只是 'Dynamic workflow "…" completed'（facts #46），当摘要读没问题，
-          当 report 读才是骗人，所以它永远不进「它交回的结果」那一栏。 */}
-      {running && current ? (
-        <p className="flex gap-1.5 min-w-0 m-0 pl-5 pb-1 font-mono text-nano leading-4 text-ink-faint">
-          <b className="flex-none font-normal">当前</b>
-          <span className="min-w-0 truncate">{current}</span>
-        </p>
-      ) : node.meta.summary ? (
-        <p className="flex gap-1.5 min-w-0 m-0 pl-5 pb-1 font-mono text-nano leading-4 text-ink-faint">
+          当 report 读才是骗人，所以它永远不进「返回」那一栏。 */}
+      {!running && node.meta.summary && (
+        <p className="flex gap-1.5 min-w-0 m-0 font-mono text-nano leading-4 text-ink-faint">
           <b className="flex-none font-normal">结果</b>
           <span className="min-w-0 truncate">{node.meta.summary}</span>
         </p>
-      ) : null}
+      )}
 
-      <div className="ml-3 border-l border-line pl-3">
+      <div>
         {vm.phases.map((p) => (
           <PhaseBlock key={p.key} phase={p} />
         ))}
@@ -96,23 +91,8 @@ export function WorkflowView({
           以前只画 output，stderr 唯一的渲染路径是「明细缺失退回 RawView」——
           等于越是画得出漂亮进度树的失败行，越看不到它为什么挂。 */}
       {node.call.stderr && <StderrView text={node.call.stderr} />}
-    </>
+    </div>
   );
-}
-
-// "Review: review:security" —— 最近开始、还没跑完的那个 agent。
-function currentStep(phases: WorkflowPhaseVM[]): string | null {
-  let best: { at: number; text: string } | null = null;
-  for (const p of phases) {
-    for (const a of p.agents) {
-      if (a.state !== "running") continue;
-      const at = a.entry.startedAt ?? a.entry.queuedAt ?? a.entry.index;
-      if (!best || at >= best.at) {
-        best = { at, text: p.title ? `${p.title}: ${a.entry.label}` : a.entry.label };
-      }
-    }
-  }
-  return best?.text ?? null;
 }
 
 // 一个阶段：含未完成 agent 的默认铺开（那是热区），全完成 / 全排队的收成一

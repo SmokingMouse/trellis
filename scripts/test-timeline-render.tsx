@@ -8,9 +8,9 @@
 // Run:  bun scripts/test-timeline-render.tsx
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { buildToolTree, type ToolNode } from "@/lib/tool-tree";
+import { buildToolTree, runningChain, type ToolNode } from "@/lib/tool-tree";
 import type { ToolCall } from "@/lib/types";
-import { ToolTimeline } from "@/components/tools/ToolTimeline";
+import { LiveHeader, ToolTimeline } from "@/components/tools/ToolTimeline";
 import { rowAutoOpen, TimelineList, ToolRow } from "@/components/tools/ToolRow";
 import { WorkflowView } from "@/components/tools/views/WorkflowView";
 
@@ -138,9 +138,23 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
     true,
   );
   check("子 Agent 的报告渲染出来", sub.includes("查完了"));
-  check("子调用嵌在子 Agent 里", sub.includes("它的工具链"));
+  check("子调用挂在委派竖线上（不再套小标题 + 边框卡片）", sub.includes("data-tool-rail") && !sub.includes("它的工具链"));
   check("子调用本身渲染出来", sub.includes("x.ts"));
   check("交给它的任务可见", sub.includes("去查一下"));
+  check("description 只在行头出现一次", (sub.match(/摸清渲染链路/g) ?? []).length === 1);
+
+  const subFailed = renderRow([
+    base({
+      id: "1",
+      name: "Agent",
+      status: "error",
+      input: { subagent_type: "Explore", description: "复现崩溃" },
+      stderr: "SUBAGENT_STDERR_SENTINEL",
+      agent: { taskType: "local_agent" },
+    }),
+    base({ id: "2", name: "Read", parentToolUseId: "1", input: { file_path: "/repo/x.ts" } }),
+  ]);
+  check("失败子 Agent 的 stderr 可见（错误永不隐藏）", subFailed.includes("SUBAGENT_STDERR_SENTINEL"));
 
   const wf = renderRow(
     [
@@ -194,12 +208,13 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
     ],
     true,
   );
-  check("Workflow 表头点名工作流", wf.includes("probe-wf") && wf.includes("Workflow"));
-  check("表头挂运行中胶囊", wf.includes("运行中"));
-  check("表头报 n/m agents", wf.includes("1/3 agents"));
-  check("表头报 token 与次调用", wf.includes("312k") && wf.includes("87"));
+  check("Workflow 表头点名工作流（「Workflow」只在悬停里）", wf.includes("probe-wf") && wf.includes('title="Workflow · probe-wf"'));
+  check("表头挂共用的运行中 Spinner", wf.includes('aria-label="运行中"'));
+  check("表头不再挂彩色状态胶囊", !wf.includes("bg-positive-muted") && !wf.includes("bg-danger-muted"));
+  check("表头报 done/total", wf.includes("1/3"));
+  check("表头 token 进弱色统计，次调用只在悬停", wf.includes("312k") && wf.includes("CLI 计 87 次工具调用") && !wf.includes("次调用<"));
   check("表头带进度轨", wf.includes("data-workflow-rail"));
-  check("运行中露出「当前 阶段: agent」", wf.includes("当前") && wf.includes("Alpha: alpha-2"));
+  check("运行中表头摘要位是「阶段: 当前 agent」", wf.includes("Alpha: alpha-2"));
   check("Workflow 渲染出 phase 树", wf.includes("Alpha") && wf.includes("Beta"));
   check("活跃 phase 铺开 agent 行", wf.includes("alpha-1") && wf.includes("alpha-2"));
   check("phase 头部带完成计数", wf.includes("1/2"));
@@ -237,7 +252,7 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
   ];
   const wfDone = renderRow(doneWorkflowCalls);
   check("跑完的 Workflow 收成一行（阶段树不进 DOM）", !wfDone.includes("Alpha"));
-  check("收起态的表头仍然是完整摘要", wfDone.includes("probe-wf") && wfDone.includes("已完成") && wfDone.includes("1/1 agents"));
+  check("收起态的表头仍然是完整摘要", wfDone.includes("probe-wf") && wfDone.includes("1/1"));
   check("跑完的 Workflow 不再默认展开", !rowAutoOpen(nodeOf(doneWorkflowCalls), false));
 
   // 展开后：结果行露出 task_notification.summary（当摘要读没问题，facts #46）
@@ -283,8 +298,8 @@ console.log("\n── 展开态：每种 body 都渲染得出来");
       },
     }),
   ]);
-  check("失败的 Workflow 表头挂已失败胶囊", wfFailed.includes("已失败"));
-  check("失败数量写进表头", wfFailed.includes("1/2 agents · 1 个已失败"));
+  check("失败的 Workflow 表头挂失败状态", wfFailed.includes("失败") && wfFailed.includes('data-tool-failed=""'));
+  check("失败数量写进表头", wfFailed.includes("1/2") && wfFailed.includes("· 1 失败"));
   check("失败的 Workflow 不收起（铁律：失败永不藏）", wfFailed.includes("data-workflow-phase"));
   check("有失败的阶段默认铺开，失败行可见", wfFailed.includes("alpha-2"));
 
@@ -501,7 +516,7 @@ console.log("\n── 冷热分段：历史折叠，热区常驻");
   );
   check("已完成连跑折成段落 chip", liveHtml.includes("3 步"));
   check("chip 点名工具与次数", liveHtml.includes("Bash ×2") && liveHtml.includes("Read"));
-  check("chip 带有已自动收起提示", liveHtml.includes("已自动收起"));
+  check("chip 不再常驻「已自动收起」字样（只在 title 里）", !liveHtml.includes(">已自动收起<"));
   check("段内明细不进 DOM（冷数据点击才展开）", !liveHtml.includes("cmd-0"));
   check("正在跑的调用不被吞进段里", liveHtml.includes("npm test"));
 
@@ -560,20 +575,40 @@ console.log("\n── 冷热分段：历史折叠，热区常驻");
   check("旧 TodoWrite 收起成一行", !todos.includes("旧的第一版计划条目"));
 
   // header 面包屑：收着的面板也能看到最深运行链（agent › 它正在跑的工具）。
-  const crumb = render(
-    [
-      base({
-        id: "1",
-        name: "Agent",
-        status: "running",
-        input: { subagent_type: "Explore", description: "查渲染链路" },
-        agent: { taskType: "local_agent", lastToolName: "Grep" },
-      }),
-    ],
-    true,
+  // 静态渲染点不了「收起」，所以直接渲染 LiveHeader；面板本体只断言展开时
+  // 表头不再复述（运行态只说一遍）。
+  const crumbCalls = [
+    base({
+      id: "1",
+      name: "Agent",
+      status: "running",
+      input: { subagent_type: "Explore", description: "查渲染链路" },
+      agent: { taskType: "local_agent", lastToolName: "Grep" },
+    }),
+  ];
+  const crumb = renderToStaticMarkup(
+    <LiveHeader chain={runningChain(buildToolTree(crumbCalls))} parallel={0} />,
   );
   check("header 面包屑露出运行链", crumb.includes("Explore") && crumb.includes("Grep"));
   check("面包屑用 › 连接", crumb.includes("›"));
+  check("展开的面板表头不再复述面包屑", !render(crumbCalls, true).includes("data-crumb-kind"));
+
+  const wfCrumb = renderToStaticMarkup(
+    <LiveHeader
+      chain={runningChain(
+        buildToolTree([
+          base({
+            id: "1",
+            name: "Workflow",
+            status: "running",
+            agent: { taskType: "local_workflow", workflowName: "probe-wf" },
+          }),
+        ]),
+      )}
+      parallel={0}
+    />,
+  );
+  check("面包屑不复读与格子同名的 description", (wfCrumb.match(/probe-wf/g) ?? []).length === 1, wfCrumb);
 }
 
 // ── 展开规则 ─────────────────────────────────────────────────────────────

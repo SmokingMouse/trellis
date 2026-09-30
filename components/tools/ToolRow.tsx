@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useElapsed } from "@/hooks/useElapsed";
 import { formatDuration } from "@/lib/format-duration";
-import { formatTokens } from "@/lib/format-tokens";
 import {
   defaultOpen,
   toolIcon,
@@ -11,6 +10,7 @@ import {
   type ToolIconKey,
 } from "@/lib/tool-registry";
 import {
+  isFailed,
   nestedErrorCount,
   segmentTimeline,
   subagentLabel,
@@ -18,9 +18,10 @@ import {
   type ToolNode,
 } from "@/lib/tool-tree";
 import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
-import { Check, ChevronRight } from "lucide-react";
-import { Icon, Pill, Spinner, StatusDot, ToolIcon } from "@/components/ui";
+import { ChevronRight } from "lucide-react";
+import { Icon, ToolIcon } from "@/components/ui";
 import { RawView } from "./RawView";
+import { RowTail, rowStatus, statLine } from "./RowStatus";
 import { resolveToolView } from "./views";
 import { WorkflowHead } from "./views/WorkflowChrome";
 
@@ -121,10 +122,9 @@ function SegmentRow({
         <span className="tabular-nums shrink-0 text-ink-muted">
           {nodes.length} 步
         </span>
+        {/* 「已自动收起 / 已展开」不再常驻：chevron 的朝向已经说了，
+            按钮 title 留给想确认的人。 */}
         <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
-        <span className="shrink-0 text-nano text-ink-faint">
-          {open ? "已展开" : "已自动收起"}
-        </span>
         <span className="flex-1" />
         <span className="font-mono text-nano tabular-nums shrink-0">
           {segmentDuration(nodes)}
@@ -177,23 +177,34 @@ export function ToolRow({
 }) {
   // null = "follow the automatic rule"; once the user clicks, their choice
   // sticks even when the automatic rule would flip (e.g. the sub-agent they
-  // just collapsed starts another tool).
+  // just collapsed starts another tool). 钉住的只是这一行自己：子行的状态
+  // 活在子行里，父行一收起就随 DOM 一起卸掉 —— 再展开时整棵子树回到自动
+  // 规则，不会出现「外层刚展开、里层还钉着上回的开合」。
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? rowAutoOpen(node, live, currentTodo);
 
   const view = resolveToolView(node);
-  const useCustom = view?.canRender(node) ?? false;
-  const Body = useCustom ? view!.Component : RawView;
+  const Body = view && view.canRender(node) ? view.Component : null;
 
   const elapsed = useElapsed(live && node.running ? node.call.startedAt : null);
   const nestedErrors = node.kind === "tool" ? 0 : nestedErrorCount(node);
 
   // 表头自己也读快照（WorkflowHead → buildWorkflowVM），所以只给 body 装
   // canRender 守卫是不够的 —— 畸形快照会从表头这一侧把整行炸掉。同一个守卫，
-  // 不合规就退回普通行头：名称、图标、状态胶囊都还在，只是不画进度轨。
+  // 不合规就退回普通行头：名称、图标、状态都还在，只是不画进度轨。
   const workflow = node.kind === "workflow" && hasValidWorkflowProgress(node);
 
-  const failed = node.call.status === "error" || node.meta.status === "failed";
+  const failed = isFailed(node);
+  // 委派（子 Agent / Workflow / 任何带子调用的行）的正文挂在一道细竖线上：
+  // 竖线就是层级，不再套边框卡片 —— 每深一层只多一道线、缩进一个图标位。
+  const delegation =
+    node.kind === "subagent" ||
+    node.kind === "workflow" ||
+    node.children.length > 0;
+  const nested =
+    node.children.length > 0 ? (
+      <TimelineList nodes={node.children} live={live} depth={depth + 1} />
+    ) : null;
 
   return (
     <div
@@ -208,11 +219,7 @@ export function ToolRow({
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-workflow-head={workflow ? "" : undefined}
-        className={`w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left hover:bg-surface-hover transition-colors ${
-          workflow
-            ? "flex-wrap py-1 pointer-coarse:min-h-[44px]"
-            : ""
-        }`}
+        className="w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left hover:bg-surface-hover transition-colors pointer-coarse:min-h-11"
       >
         {workflow ? (
           <WorkflowHead node={node} live={live} elapsed={elapsed} />
@@ -225,46 +232,54 @@ export function ToolRow({
             <span className="flex-1 min-w-0 truncate font-mono text-label text-ink-muted">
               {rowSummary(node) ?? ""}
             </span>
-            {nestedErrors > 0 && (
-              // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
-              <span className="shrink-0 inline-flex items-center gap-1 text-nano text-danger-ink">
-                <StatusDot tone="danger" />
-                {nestedErrors} 失败
-              </span>
-            )}
-            <span className="shrink-0 font-mono text-nano tabular-nums text-ink-faint">
-              {statLine(node, elapsed)}
-            </span>
-            <StatusPill node={node} live={live} />
+            <RowTail
+              node={node}
+              stat={statLine(node, elapsed)}
+              nestedErrors={nestedErrors}
+              status={rowStatus(node, live)}
+            />
           </>
         )}
       </button>
 
-      {open && (
-        <div
-          className={`pr-3 pb-3 pt-1 space-y-2 ${
-            failed ? "ml-4 pl-4 border-l-2 border-danger-line" : "pl-8"
-          }`}
-        >
-          <Body node={node} live={live}>
-            <TimelineList nodes={node.children} live={live} depth={depth + 1} />
-          </Body>
-          {/* A custom view owns its own body, but children still have to land
-              somewhere — only SubagentView slots them in, so any other kind
-              that somehow spawned children renders them here. */}
-          {!useCustom && node.children.length > 0 && (
-            <div className="border-l-2 border-line ml-1 pl-2">
-              <div className="border border-line rounded divide-y divide-line-faint overflow-hidden">
-                <TimelineList
-                  nodes={node.children}
-                  live={live}
-                  depth={depth + 1}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {open &&
+        (delegation ? (
+          <div
+            data-tool-rail=""
+            className={`ml-[18px] mb-1 border-l ${
+              failed ? "border-danger-line" : "border-line"
+            }`}
+          >
+            {Body ? (
+              <Body node={node} live={live}>
+                {nested}
+              </Body>
+            ) : (
+              // 降级：视图认不出这份数据（畸形 Workflow 快照等）→ 原始视图，
+              // 子调用照样挂在同一道竖线上，不另起一套外框。
+              <>
+                <div className="px-3 pt-1 pb-2 space-y-2">
+                  <RawView node={node} />
+                </div>
+                {nested && (
+                  <div className="divide-y divide-line-faint">{nested}</div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div
+            className={`pr-3 pb-3 pt-1 space-y-2 ${
+              failed ? "ml-4 pl-4 border-l-2 border-danger-line" : "pl-8"
+            }`}
+          >
+            {Body ? (
+              <Body node={node} live={live} />
+            ) : (
+              <RawView node={node} />
+            )}
+          </div>
+        ))}
     </div>
   );
 }
@@ -290,9 +305,8 @@ export function rowAutoOpen(
   live: boolean,
   currentTodo = false,
 ): boolean {
-  // 工具本身报错，或者委派的任务回报 failed（task_updated）—— 两种都是失败，
-  // 只认前一种的话，一个跑挂的 Workflow 会安静地收成一行「已失败」。
-  if (node.call.status === "error" || node.meta.status === "failed") return true;
+  // 失败口径见 isFailed（工具报错 或 委派任务回报 failed）。
+  if (isFailed(node)) return true;
   if (live && node.running && node.kind !== "tool") return true;
   if (currentTodo) return true;
   if (live) return false;
@@ -315,57 +329,16 @@ function rowTitle(node: ToolNode): string {
 function rowSummary(node: ToolNode): string | null {
   // Delegations label themselves through task metadata, which is live-updated
   // and richer than anything sniffable out of the tool input.
-  if (node.kind === "subagent" || node.kind === "workflow") {
-    return node.meta.description ?? toolSummary(node.call);
-  }
-  return toolSummary(node.call);
+  const summary =
+    node.kind === "subagent" || node.kind === "workflow"
+      ? (node.meta.description ?? toolSummary(node.call))
+      : toolSummary(node.call);
+  // Workflow 的 description 缺省回填成 workflowName —— 和标题同一个词，
+  // 再说一遍只是噪音。
+  return summary && summary !== rowTitle(node) ? summary : null;
 }
 
-/**
- * 行尾状态位 —— 安静是默认值。
- *
- * 跑完的普通行只挂一枚淡灰对勾（一屏 40 行绿胶囊等于没有胶囊）；运行中是
- * Spinner；失败是红点 + 「失败」二字（醒目，但不喊）；turn 已结束却仍开着
- * 的调用承认「已中断」。
- */
-export function StatusPill({ node, live }: { node: ToolNode; live: boolean }) {
-  if (node.running) {
-    return live ? (
-      <Spinner size="sm" label="运行中" />
-    ) : (
-      // The turn ended while this call was still open — aborted, or the run
-      // died. Showing "运行中" forever is worse than admitting we lost it.
-      <Pill tone="neutral" className="shrink-0">
-        已中断
-      </Pill>
-    );
-  }
-  if (node.call.status === "error" || node.meta.status === "failed") {
-    return (
-      <span className="shrink-0 inline-flex items-center gap-1 text-nano font-medium text-danger-ink">
-        <StatusDot tone="danger" />
-        失败
-      </span>
-    );
-  }
-  return <Icon icon={Check} size="sm" className="text-ink-faint" />;
-}
-
-// "3 工具 · 12.4k · 8s". Counts come from the CLI's own task_progress usage
-// when present (it counts what the sub-agent actually did, including calls
-// that never surfaced as tool_use blocks); otherwise from the rows we have.
-function statLine(node: ToolNode, elapsed: number | null): string {
-  const parts: string[] = [];
-  if (node.kind !== "tool") {
-    const tools = node.meta.toolUses ?? node.children.length;
-    if (tools > 0) parts.push(`${tools} 工具`);
-    if (node.meta.totalTokens) parts.push(formatTokens(node.meta.totalTokens));
-  }
-  const ms = elapsed ?? node.call.durationMs ?? node.meta.durationMs ?? null;
-  if (ms !== null) parts.push(formatDuration(ms));
-  return parts.join(" · ");
-}
-
-// 秒表搬去了 hooks/useElapsed（Workflow 表头与面板都要用，留在这里会成环）。
-// 这里保留出口，调用点不必改。
+// 秒表搬去了 hooks/useElapsed（Workflow 表头与面板都要用，留在这里会成环）；
+// 状态位搬去了 ./RowStatus（同理）。这里保留出口，调用点不必改。
 export { useElapsed };
+export { StatusPill } from "./RowStatus";

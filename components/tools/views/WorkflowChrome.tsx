@@ -1,40 +1,23 @@
 "use client";
-import { ToolIcon } from "@/components/ui";
-import { formatDuration } from "@/lib/format-duration";
-import { formatTokens } from "@/lib/format-tokens";
+import { Spinner, ToolIcon } from "@/components/ui";
 import type { ToolNode } from "@/lib/tool-tree";
 import {
   AGENT_STATE_LABEL,
   buildWorkflowVM,
-  WORKFLOW_STATUS_LABEL,
   type AgentState,
+  type WorkflowPhaseVM,
   type WorkflowStatus,
 } from "@/lib/workflow-view";
-import { Pill } from "../../ui/Pill";
+import { RowTail, rowStatus, statLine } from "../RowStatus";
 
-// Workflow 卡的「外壳」：表头那一行、状态胶囊、进度轨、状态字形。
+// Workflow 卡的「外壳」：表头那一行、进度轨、agent 状态字形。
 //
 // 单独成文件是为了打断环：表头由 ToolRow 渲染（Workflow 就是动线里那条工具
 // 行，不另起卡片），面板由 views/WorkflowView 渲染，两边都要用这里的零件。
 
 // ── 字形 ──────────────────────────────────────────────────────────────────
-
-export function Spinner({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      className={`animate-spin motion-reduce:animate-none ${className}`}
-      aria-hidden
-    >
-      <circle cx="12" cy="12" r="9" strokeOpacity="0.24" />
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
+//
+// 运行中的转圈用 components/ui 的 Spinner —— 全站一个，不再自画一枚。
 
 const GLYPH: Record<Exclude<AgentState, "running">, string[]> = {
   // ✓ / 时钟 / ✗ / 禁止号，都画在同一个 r=9 的圆里，行首因此永远对齐。
@@ -58,7 +41,7 @@ export function AgentStateIcon({ state }: { state: AgentState }) {
       className={`inline-flex items-center justify-center ${GLYPH_COLOR[state]}`}
     >
       {state === "running" ? (
-        <Spinner className="w-3 h-3" />
+        <Spinner size="sm" label={null} className="w-3 h-3 text-current" />
       ) : (
         <svg
           viewBox="0 0 24 24"
@@ -81,24 +64,6 @@ export function AgentStateIcon({ state }: { state: AgentState }) {
   );
 }
 
-// ── 状态胶囊 ──────────────────────────────────────────────────────────────
-
-const CHIP_TONE = {
-  running: "neutral",
-  completed: "positive",
-  failed: "danger",
-  killed: "neutral",
-} as const;
-
-export function WorkflowChip({ status }: { status: WorkflowStatus }) {
-  return (
-    <Pill tone={CHIP_TONE[status]} className="shrink-0">
-      {status === "running" && <Spinner className="w-2.5 h-2.5" />}
-      {WORKFLOW_STATUS_LABEL[status]}
-    </Pill>
-  );
-}
-
 // ── 进度轨 ────────────────────────────────────────────────────────────────
 
 const RAIL_ACCENT: Record<WorkflowStatus, string> = {
@@ -112,13 +77,15 @@ const RAIL_ACCENT: Record<WorkflowStatus, string> = {
 export function ProgressRail({
   percent,
   status,
+  className = "",
 }: {
   percent: number;
   status: WorkflowStatus;
+  className?: string;
 }) {
   return (
     <span
-      className="relative block shrink-0 w-[72px] max-w-full h-[10px] overflow-hidden rounded-[2px] border border-line bg-surface"
+      className={`relative block shrink-0 w-[72px] max-w-full h-[10px] overflow-hidden rounded-[2px] border border-line bg-surface ${className}`}
       style={{
         backgroundImage:
           "radial-gradient(circle, var(--ink-faint) 1px, transparent 1.35px)",
@@ -144,11 +111,13 @@ export function ProgressRail({
 // ── 表头 ──────────────────────────────────────────────────────────────────
 
 /**
- * 那条 Workflow 工具行的行头内容（折叠箭头之后的部分）。
+ * 那条 Workflow 工具行的行头内容，和普通行同一副骨架：
  *
- * 收起时它**就是**摘要，所以名称 / 状态 / 进度 / n-m agents / 用时 / token /
- * 次调用 全在这一行；窄屏（≤560px）数字整体换到第二行，靠 flex-wrap，不另做
- * 一套结构。
+ *   图标 · 名称 · 一句摘要（跑着时是当前 agent）｜ 进度（轨 + done/total）· 弱色统计 · 状态
+ *
+ * 只有两段要读：名称 + 进度。token / 用时走行尾弱色统计（和普通行同一处），
+ * CLI 自报的调用次数只在悬停里；阶段、脚本、结果展开再看。「Workflow」这个
+ * 词不再写出来 —— 图标已经说了，悬停名称可见。
  */
 export function WorkflowHead({
   node,
@@ -160,47 +129,60 @@ export function WorkflowHead({
   elapsed: number | null;
 }) {
   const vm = buildWorkflowVM(node, live);
-  const ms = elapsed ?? node.call.durationMs ?? node.meta.durationMs ?? null;
+  const name = node.meta.workflowName ?? "Workflow";
+  const current = node.running && live ? currentStep(vm.phases) : null;
   return (
     <>
       <ToolIcon name="workflow" className="text-ink-faint" />
-      <span className="min-w-0 truncate text-ink-muted font-medium">
-        <span className="font-normal text-ink-faint">Workflow</span>{" "}
-        {node.meta.workflowName ?? "Workflow"}
-      </span>
-      <WorkflowChip status={vm.status} />
-      {/* 这一行全是要**读**的数值（进度、用时、token、次调用），浅色下
-          ink-faint（stone-400 on #fff）配 nano 字号偏淡 —— 数值提一档到
-          ink-muted，单位词留在 faint 当注脚。深色不回退：ink-muted 在暗色是
-          stone-400，比 ink-faint 的 stone-500 更亮，对比只增不减。 */}
       <span
-        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 ml-auto font-mono text-nano leading-4 tabular-nums text-ink-muted narrow:ml-0 narrow:w-full narrow:pl-5 narrow:justify-start"
-        data-workflow-meta
+        className="shrink-0 min-w-11 max-w-60 truncate font-medium text-ink"
+        title={`Workflow · ${name}`}
       >
-        {vm.hasDetail && (
-          <>
-            <ProgressRail percent={vm.percent} status={vm.status} />
-            <span>
-              {vm.done}/{vm.total} agents
-              {vm.failed > 0 ? ` · ${vm.failed} 个已失败` : ""}
-            </span>
-          </>
-        )}
-        {ms !== null && <span>{formatDuration(ms)}</span>}
-        {node.meta.totalTokens ? (
-          <span>
-            {formatTokens(node.meta.totalTokens)}{" "}
-            <i className="not-italic text-ink-faint">tokens</i>
-          </span>
-        ) : null}
-        {node.meta.toolUses ? (
-          <span>
-            {node.meta.toolUses}{" "}
-            <i className="not-italic text-ink-faint">次调用</i>
-          </span>
-        ) : null}
-        {!vm.hasDetail && <span className="text-ink-faint">暂无阶段明细</span>}
+        {name}
       </span>
+      <span className="flex-1 min-w-0 truncate font-mono text-label text-ink-muted">
+        {current ?? ""}
+      </span>
+      {vm.hasDetail ? (
+        <span
+          className="shrink-0 inline-flex items-center gap-1.5 font-mono text-nano tabular-nums text-ink-muted"
+          title={`${vm.done}/${vm.total} 个 agent 已完成`}
+          data-workflow-meta
+        >
+          <ProgressRail
+            percent={vm.percent}
+            status={vm.status}
+            className="narrow:hidden"
+          />
+          {vm.done}/{vm.total}
+          {vm.failed > 0 && (
+            <span className="text-danger-ink">· {vm.failed} 失败</span>
+          )}
+        </span>
+      ) : (
+        <span className="shrink-0 text-nano text-ink-faint">暂无阶段明细</span>
+      )}
+      <RowTail
+        node={node}
+        stat={statLine(node, elapsed)}
+        nestedErrors={0}
+        status={rowStatus(node, live)}
+      />
     </>
   );
+}
+
+// "Review: review:security" —— 最近开始、还没跑完的那个 agent。
+export function currentStep(phases: WorkflowPhaseVM[]): string | null {
+  let best: { at: number; text: string } | null = null;
+  for (const p of phases) {
+    for (const a of p.agents) {
+      if (a.state !== "running") continue;
+      const at = a.entry.startedAt ?? a.entry.queuedAt ?? a.entry.index;
+      if (!best || at >= best.at) {
+        best = { at, text: p.title ? `${p.title}: ${a.entry.label}` : a.entry.label };
+      }
+    }
+  }
+  return best?.text ?? null;
 }

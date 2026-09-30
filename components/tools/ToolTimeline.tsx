@@ -25,7 +25,7 @@ import { TimelineList } from "./ToolRow";
 //
 // 结构三层，对应注意力的冷热（见 ToolRow.tsx 的 TimelineList）：
 //   热  header 面包屑 —— 此刻正在跑的最深链路（⚙ wf › 🤖 agent › 工具），
-//       面板收着也一直可见；失败行、运行中的行。
+//       只在面板收着时出现（展开时由运行中的行自己说）；失败行、运行中的行。
 //   温  骨架 —— 委派实体（子 Agent / Workflow / 长跑命令）+ 计划检查点，
 //       一行一个，带聚合统计；这是展开面板后看到的"关系图"。
 //   冷  连续已完成的普通工具压成段落 chip，点击才逐行铺开；行的 body 再
@@ -64,7 +64,10 @@ export function ToolTimeline({
   }, [open, needsLoad, nodeId, loadNodeToolCalls]);
 
   if (!display || display.total === 0) return null;
-  const chain = live ? runningChain(tree) : [];
+  // 运行态只说一遍：面板展开时，正在跑的行自己挂着 Spinner、委派行自己
+  // 铺开着，表头再复述一条面包屑就是第二份；只有收起时表头是唯一可见处，
+  // 这时才由面包屑顶上。
+  const chain = live && !open ? runningChain(tree) : [];
   const span = spanMs(tree);
 
   // 外壳与 AsProjectControls（🔌 引擎块）同一套卡片语言：细描边 + card 圆角 +
@@ -156,12 +159,12 @@ function spanMs(tree: ToolNode[]): number | null {
 }
 
 // The live line — a breadcrumb of the deepest running chain, root → leaf.
-// Always in the header, open or collapsed: this is the one thing the user
-// wants while it streams, and it's also the "who spawned whom" answer without
-// opening anything. The leaf reaches one step deeper than tool_call events
+// Shown while the panel is collapsed: then it's the only running indicator on
+// screen, and the "who spawned whom" answer without opening anything. Once
+// the panel is open the running rows say the same thing, so it steps aside. The leaf reaches one step deeper than tool_call events
 // can see — a sub-agent's current tool / a workflow's running agent — via
 // live task metadata.
-function LiveHeader({
+export function LiveHeader({
   chain,
   parallel,
 }: {
@@ -173,6 +176,10 @@ function LiveHeader({
   const step = leafStep(leaf);
   if (step) crumbs.push({ kind: "step", label: step });
   const doing = leafDoing(leaf);
+  // Workflow 的 description 缺省就是 workflowName —— 和面包屑那一格同词，
+  // 复读一遍只会挤掉右边真有用的东西。
+  const doingText =
+    doing && !crumbs.some((c) => c.label === doing) ? doing : null;
   // 计时和转圈只在每轮底部的 RunLine 出现一次（「流式状态只留一种」，research
   // 根因 #4）：这里再挂一个「本条命令 46s」会和底部「本轮 1m22s」打架。
   const stat = leaf.meta.totalTokens ? formatTokens(leaf.meta.totalTokens) : null;
@@ -205,8 +212,8 @@ function LiveHeader({
           </Fragment>
         ))}
       </span>
-      {doing && (
-        <span className="text-ink-muted truncate min-w-0">{doing}</span>
+      {doingText && (
+        <span className="text-ink-muted truncate min-w-0">{doingText}</span>
       )}
       {stat && (
         <span className="text-ink-faint tabular-nums shrink-0 hidden sm:inline">

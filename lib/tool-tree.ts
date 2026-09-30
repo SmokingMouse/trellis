@@ -199,6 +199,26 @@ function stripUndefined(m: TaskMeta): TaskMeta {
   return out;
 }
 
+/**
+ * 失败口径，全仓一个：工具本身报错（call.status），或者委派的任务回报
+ * failed（task_updated → meta.status）。只认前一种的话，一个跑挂的 Workflow
+ * 会安静地收成一行对勾；只认后一种则漏掉被拒绝 / 抛错的普通调用。
+ * 行头状态、自动展开、嵌套失败计数、段落折叠、面板表头计数都走这里。
+ */
+export function isFailed(node: ToolNode): boolean {
+  return node.call.status === "error" || node.meta.status === "failed";
+}
+
+/**
+ * 委派行的「N 步」—— 一个口径：有子调用行就数展开后真能看到的那一层（直接
+ * 子调用），一行一步，和展开的列表对得上；没有子调用行（Workflow 的 agent
+ * 不产 tool_call、大会话剥离了明细）才退回 CLI 自报的 toolUses。
+ */
+export function delegatedStepCount(node: ToolNode): number {
+  if (node.children.length > 0) return node.children.length;
+  return node.meta.toolUses ?? 0;
+}
+
 /** Label for a sub-agent: "general-purpose" / "Explore" / fallback. */
 export function subagentLabel(meta: TaskMeta): string {
   return meta.subagentType?.trim() || "子 Agent";
@@ -231,7 +251,7 @@ export function countToolTree(nodes: ToolNode[]): ToolTreeCounts {
     subagents: all.filter((n) => n.kind === "subagent").length,
     workflows: all.filter((n) => n.kind === "workflow").length,
     running: all.filter((n) => n.running).length,
-    errors: all.filter((n) => n.call.status === "error").length,
+    errors: all.filter(isFailed).length,
   };
 }
 
@@ -263,7 +283,7 @@ function segmentable(node: ToolNode): boolean {
   return (
     node.kind === "tool" &&
     !node.running &&
-    node.call.status !== "error" &&
+    !isFailed(node) &&
     !CHECKPOINT_TOOL_NAMES.has(node.call.name)
   );
 }
@@ -310,6 +330,5 @@ export function runningChain(tree: ToolNode[]): ToolNode[] {
 /** Failures anywhere under this node (children and deeper, self excluded) —
  * so a collapsed delegation row can still confess its nested failures. */
 export function nestedErrorCount(node: ToolNode): number {
-  return walkToolTree(node.children).filter((n) => n.call.status === "error")
-    .length;
+  return walkToolTree(node.children).filter(isFailed).length;
 }
