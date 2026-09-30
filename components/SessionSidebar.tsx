@@ -68,13 +68,15 @@ import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { sessionSourceChip } from "@/lib/session-source";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
-import { HerdrSidebarEntry } from "@/components/herdr/HerdrSidebarEntry";
+import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
+import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
+import { useAppMode } from "@/hooks/useAppMode";
 import { herdrStatusLabel } from "@/lib/herdr-console";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
 import { isButlerSession } from "@/lib/butler";
-import { herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
+import { belongsToHerdrMode, herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
 const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "herdr", "task", "lark", "external"].includes(v as string);
@@ -90,14 +92,21 @@ const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "her
 //    状态只用行首一个槽位（生成中 Dots / 等你回答 / 出错点 / 未读点），行尾是
 //    中性小字 meta；hover 时 meta 让位给「更多」按钮，但**占位不变**，行内容不闪。
 //
+// 对话 / Herdr 两个模式（2026-09-30，推翻 sidebar-tree-ia.md「Herdr 并进项目树」）：
+// 顶部 [对话 | Herdr] 切换；对话模式的树 / 置顶区不出现 Herdr 会话，Herdr 模式整块
+// 换成 HerdrModeSidebar（workspace → 窗格），置顶区只列 Herdr 会话。
+//
 // W4 删除了方案 A 落地前的 legacy 路径（NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off 时的
 // 「最近」分组、独立 Herdr 分组、底部已归档折叠区）。
 
 export function SessionSidebar() {
   const [layout, setLayout] = useSidebarPreference("layout", "project" as SidebarLayout, isLayout);
-  const [source, setSource] = useSidebarPreference("source-v2", "mine" as SidebarSource, isSource);
+  const [storedSource, setSource] = useSidebarPreference("source-v2", "mine" as SidebarSource, isSource);
+  // Herdr 会话搬去了 Herdr 模式，来源筛选里不再有「Herdr」；旧偏好落回「我的会话」。
+  const source: SidebarSource = storedSource === "herdr" ? "mine" : storedSource;
+  const mode = useAppMode();
   const [includeArchived, setIncludeArchived] = useSidebarPreference("include-archived", false, isBoolean);
-  const { statuses: herdrStatus, available: herdrAvailable, unavailableText } = useHerdrSessionStatuses();
+  const { statuses: herdrStatus, available: herdrAvailable } = useHerdrSessionStatuses();
   const fleetSessionKey = [...herdrStatus.keys()].sort().join(",");
   const activeId = useSessionStore((s) => s.session?.id ?? null);
   const previewId = useSessionStore((s) => s.previewSessionId);
@@ -314,19 +323,24 @@ export function SessionSidebar() {
   // 置顶区：按置顶顺序（pinned_at 升序）列出，**不受来源筛选与 Herdr 离线隐藏影响**
   // —— 置顶是显式意图，且它们本来就常驻在标签条上；离线的 Herdr 行照常弱化显示。
   // 归档则尊重：归档的会话不在活跃列表里，也就不进置顶区（pinned_at 保留，取消归档即回来）。
+  // 两个模式各列各的：对话模式不含 Herdr 会话，Herdr 模式只含 Herdr 会话。
+  const isHerdrOwned = useCallback(
+    (s: Session) => belongsToHerdrMode(s, herdrStatus.get(s.id)?.alive),
+    [herdrStatus],
+  );
   const pinnedSessions = useMemo(() => {
     const byId = new Map([...taskSessions, ...sessions].map((s) => [s.id, s]));
     return pinnedIds
       .map((id) => byId.get(id))
-      .filter((s): s is Session => !!s && !s.archived);
-  }, [pinnedIds, sessions, taskSessions]);
+      .filter((s): s is Session => !!s && !s.archived && isHerdrOwned(s) === (mode === "herdr"));
+  }, [pinnedIds, sessions, taskSessions, isHerdrOwned, mode]);
 
   // 下方分组去重：已在置顶区出现的会话不再重复出现。
   const visibleSessions = useMemo(() => {
     const shown = new Set(pinnedSessions.map((s) => s.id));
     return selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
-      .filter((s) => !shown.has(s.id));
-  }, [sessions, archived, source, includeArchived, isOfflineHerdr, pinnedSessions]);
+      .filter((s) => !shown.has(s.id) && !isHerdrOwned(s));
+  }, [sessions, archived, source, includeArchived, isOfflineHerdr, pinnedSessions, isHerdrOwned]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -559,7 +573,9 @@ export function SessionSidebar() {
           icon={Pin}
           collapsed={isCollapsed}
           label="置顶"
-          title={`置顶 · ${pinnedSessions.length} 个会话（同时常驻在标签条上）`}
+          title={mode === "herdr"
+            ? `置顶 · ${pinnedSessions.length} 个 Herdr 会话`
+            : `置顶 · ${pinnedSessions.length} 个会话（同时常驻在标签条上）`}
           badge={String(pinnedSessions.length)}
           onToggle={() => toggleCollapsed(id)}
         />
@@ -798,6 +814,9 @@ export function SessionSidebar() {
   const renderPanel = (onClose: () => void) => (
     <>
       <div className="shrink-0 space-y-2 px-2 pb-2 pt-2">
+        <div data-app-mode-switch>
+          <AppModeSwitch />
+        </div>
         <div className="flex items-center gap-1.5">
           <Button
             variant="primary"
@@ -875,7 +894,7 @@ export function SessionSidebar() {
           )}
         </div>
 
-        <div data-sidebar-toolbar className="space-y-1.5">
+        {mode === "chat" && <div data-sidebar-toolbar className="space-y-1.5">
           <SegmentedControl<SidebarLayout>
             aria-label="会话排布"
             fullWidth
@@ -907,26 +926,19 @@ export function SessionSidebar() {
               含已归档
             </label>
           </div>
-        </div>
+        </div>}
       </div>
 
       <div
         data-sidebar-list
         data-sidebar-layout={layout}
+        data-sidebar-mode={mode}
         className="flex-1 overflow-y-auto border-t border-line-faint py-1.5"
       >
-        {source === "herdr" && !herdrAvailable && (
-          <div
-            data-herdr-unavailable
-            className="mx-2 mb-2 rounded-md border border-line bg-surface px-3 py-2 text-label text-ink-muted"
-          >
-            {unavailableText}
-            <p className="mt-1 text-nano text-ink-faint">
-              仍可阅读已同步的会话。启动 Herdr 后会自动恢复状态。
-            </p>
-          </div>
-        )}
-        <HerdrSidebarEntry />
+        {mode === "herdr" ? (
+          <HerdrModeSidebar sessions={sessions} pinned={renderPinned()} onNavigate={() => setMobileNavOpen(false)} />
+        ) : (
+        <>
         {renderPinned()}
         {visibleSessions.length === 0 ? (
           pinnedSessions.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
@@ -942,6 +954,8 @@ export function SessionSidebar() {
             {renderGroup("__chat", "速记（无工作区）", chat, MessageSquare)}
             {renderGroup("__foreign", "其它来源", foreign, Anchor)}
           </>
+        )}
+        </>
         )}
       </div>
 
@@ -1285,7 +1299,6 @@ const SOURCE_OPTIONS: { value: SidebarSource; label: string }[] = [
   { value: "mine", label: "我的会话" },
   { value: "all", label: "全部来源" },
   { value: "web", label: "网页" },
-  { value: "herdr", label: "Herdr" },
   { value: "task", label: "定时任务" },
   { value: "lark", label: "飞书" },
   { value: "external", label: "外部" },

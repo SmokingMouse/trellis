@@ -49,6 +49,9 @@ import { useHerdrShortcuts } from "@/hooks/useHerdrShortcuts";
 import { HerdrAttentionNotifier } from "@/components/herdr/HerdrAttentionNotifier";
 import { HerdrTerminalDrawer } from "@/components/herdr/HerdrTerminalDrawer";
 import { HerdrJumpPalette } from "@/components/herdr/HerdrJumpPalette";
+import { useAppMode } from "@/hooks/useAppMode";
+import { parseAppMode } from "@/lib/herdr-mode";
+import { PREF_KEYS, readRaw, writeRaw } from "@/lib/prefs";
 import { TriangleAlert } from "lucide-react";
 import { Icon, Spinner } from "@/components/ui";
 
@@ -159,6 +162,25 @@ export default function Home() {
     const q = new URLSearchParams(window.location.search);
     if (q.get("view") === "herdr" && !q.get("session")) openHerdr();
   }, [hydrated, deepLinkApplied, openHerdr]);
+
+  // 对话 / Herdr 模式是当前视图的投影（hooks/useAppMode）；本地偏好只记「上次在哪个模式」。
+  // 刷新时没有深链（?session / ?view / ?butler）就落回上次的模式：上次在 Herdr → 打开总览。
+  // 深链参数要按首屏 URL 判断 —— 下面的 URL 同步会先把 hydrate 选中的会话写进地址栏。
+  const appMode = useAppMode();
+  const [initialQuery] = useState(() => (typeof window === "undefined" ? "" : window.location.search));
+  const modeRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || !deepLinkApplied || modeRestoredRef.current) return;
+    modeRestoredRef.current = true;
+    const q = new URLSearchParams(initialQuery);
+    if (q.get("session") || q.get("view") || q.get("butler")) return;
+    if (parseAppMode(readRaw(PREF_KEYS.appMode)) !== "herdr") return;
+    const current = useSessionStore.getState().session;
+    if (!isHerdrSession(current, fleet)) openHerdr();
+  }, [hydrated, deepLinkApplied, fleet, openHerdr, initialQuery]);
+  useEffect(() => {
+    if (modeRestoredRef.current) writeRaw(PREF_KEYS.appMode, appMode);
+  }, [appMode, hydrated, deepLinkApplied]);
 
   // 注：--trellis-sb 由 SessionSidebar 发布（宽度可拖拽后归它所有，
   // 这里再按常量发一份就会打架）。
