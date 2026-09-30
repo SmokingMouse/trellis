@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RotateCcw, SquareTerminal, X } from "lucide-react";
-import { Button, Icon, IconButton, toast } from "@/components/ui";
+import { Button, Icon, IconButton, cn, toast } from "@/components/ui";
 import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useGesturesEnabled, usePrefersReducedMotion, useSwipe } from "@/hooks/useSwipe";
 import { readHerdrPane, sendHerdrKeys } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
@@ -46,6 +47,35 @@ export function HerdrTerminalDrawer() {
   const [sending, setSending] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const stickRef = useRef(true);
+  const sheetRef = useRef<HTMLElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+  const gestures = useGesturesEnabled();
+  const reduced = usePrefersReducedMotion();
+
+  // 手机底部 sheet：按住顶栏（把手 + 标题行）下滑关闭，不够阈值回弹。
+  const moveSheet = (offset: number, animate: boolean) => {
+    const el = sheetRef.current;
+    if (!el) return;
+    el.style.transition = animate && !reduced ? "transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)" : "none";
+    el.style.transform = offset > 0 ? `translateY(${offset}px)` : "";
+  };
+  useSwipe(handleRef, {
+    enabled: Boolean(isMobile) && gestures && visible,
+    bindKey: paneId,
+    axis: "y",
+    size: () => sheetRef.current?.clientHeight ?? 600,
+    threshold: { ratio: 0.25, minDistance: 80, velocity: 0.5, minFlingDistance: 32 },
+    onMove: (delta) => moveSheet(Math.max(0, delta), false),
+    onEnd: ({ commit, size }) => {
+      if (commit > 0) {
+        moveSheet(size, true);
+        setTimeout(() => {
+          moveSheet(0, false);
+          close();
+        }, reduced ? 0 : 180);
+      } else moveSheet(0, true);
+    },
+  });
 
   const load = useCallback(async (id: string) => {
     setLoading(true);
@@ -106,13 +136,21 @@ export function HerdrTerminalDrawer() {
   };
 
   return (
+    <>
+    {isMobile && (
+      <div aria-hidden className="fixed inset-0 z-30 bg-scrim/40 ui-enter-fade" onClick={close} data-herdr-drawer-scrim />
+    )}
     <aside
+      ref={sheetRef}
       data-herdr-drawer={target.paneId}
       aria-label="Herdr 终端"
-      className="fixed bottom-0 z-30 flex flex-col border-l border-line bg-surface-canvas max-md:inset-x-0 max-md:border-l-0 max-md:border-t"
+      className={cn(
+        "fixed bottom-0 z-30 flex flex-col border-l border-line bg-surface-canvas max-md:inset-x-0 max-md:rounded-t-card max-md:border-l-0 max-md:border-t max-md:shadow-overlay",
+        isMobile && "ui-enter-slide-up",
+      )}
       style={
         isMobile
-          ? { top: "var(--trellis-header-h)" }
+          ? { top: "calc(var(--trellis-header-h) + 2.5rem)", paddingBottom: "var(--safe-bottom)" }
           : {
               top: "calc(5.25rem + var(--trellis-pending-h, 0px))",
               right: "var(--trellis-rp, 0px)",
@@ -120,7 +158,14 @@ export function HerdrTerminalDrawer() {
             }
       }
     >
-      <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line pl-3 pr-2 text-ui">
+      <div
+        ref={handleRef}
+        data-herdr-drawer-handle
+        className="relative flex h-10 shrink-0 items-center gap-1.5 border-b border-line pl-3 pr-2 text-ui max-md:h-12 max-md:touch-none"
+      >
+        {isMobile && (
+          <span aria-hidden className="absolute left-1/2 top-1 h-1 w-9 -translate-x-1/2 rounded-full bg-line-strong" />
+        )}
         <Icon icon={SquareTerminal} size="sm" className="text-ink-muted" />
         <b className="font-medium text-ink-strong">终端</b>
         <span className="min-w-0 flex-1 truncate text-label text-ink-faint">
@@ -166,5 +211,6 @@ export function HerdrTerminalDrawer() {
         )}
       </div>
     </aside>
+    </>
   );
 }

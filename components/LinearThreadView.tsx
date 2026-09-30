@@ -56,6 +56,7 @@ import {
 } from "./HerdrSessionControls";
 import { HerdrInteractionCard } from "./HerdrInteractionCard";
 import { HerdrDrawerToggle } from "./herdr/HerdrDrawerToggle";
+import { HerdrSessionGestures, HerdrSessionSwipeCard } from "./herdr/HerdrSessionGestures";
 import { ButlerChangeCards } from "./ButlerChangeCards";
 import { isButlerSession } from "@/lib/butler";
 
@@ -139,6 +140,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   }, []);
   const roundRefs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Herdr 会话的手机手势（左右滑切窗格 / 顶部下拉开终端）只位移正文列，不碰滚动容器自身的 transform。
+  const gestureContentRef = useRef<HTMLElement>(null);
   // #6: sticky-to-bottom while the tip streams. True = keep pinning the
   // viewport to the bottom on new content; flips off when the user scrolls
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
@@ -664,6 +667,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         )}
 
       {isMobile && <PendingBar mobile hiddenChrome={mobileHeaderHidden} />}
+      {isHerdr && <HerdrSessionGestures scrollRef={scrollRef} contentRef={gestureContentRef} />}
 
       <div
         ref={scrollRef}
@@ -686,9 +690,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 { paddingRight: treeSafePadding(threadWidth) }
         }
       >
-        <main className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
+        <main ref={gestureContentRef} className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
         {isHerdr && herdrPane && (
-          <HerdrInteractionCard pane={herdrPane} />
+          <HerdrSessionSwipeCard>
+            <HerdrInteractionCard pane={herdrPane} />
+          </HerdrSessionSwipeCard>
         )}
         {isHerdr && session && (
           <HerdrOfflineBanner
