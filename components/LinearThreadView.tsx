@@ -238,11 +238,10 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     return () => cancelAnimationFrame(frame);
   }, [pendingNavigation, threadData.anchorId]);
 
-  // Restore the persisted reading position when landing on a session (tab
-  // switch / reload / canvas→linear). The anchor alone can't do this: it
-  // doesn't move while the user scroll-reads, so anchoring would dump every
-  // return at the root card. Declared BEFORE the anchor-scroll effect so the
-  // skip flag is armed by the time that effect runs for the same commit.
+  // Landing on a session (tab switch / reload / canvas→linear) positions the
+  // viewport itself (see the land-at-bottom effect below), so the anchor-scroll
+  // effect must stand down for that commit. Declared BEFORE the anchor-scroll
+  // effect so the skip flag is armed by the time that effect runs.
   const skipAnchorScrollRef = useRef(false);
   const mapNavigation = useSessionStore(s => s.mapNavigation);
   const [mapHighlight, setMapHighlight] = useState<string | null>(null);
@@ -261,26 +260,42 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     }, 2200);
     return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
   }, [mapNavigation]);
+  // 2026-09-30 用户要求：进入标签（新开 / 切回 / 刷新）一律落到最底部，取代
+  // 「恢复上次阅读位置」。显式跳转（地图点节点、通知 / 待办定位）自己定位，这里让路。
+  // 内容会在首帧之后继续长高（markdown、图片、懒加载），所以短时间内跟着贴底，
+  // 用户一滚动 / 触摸 / 按键就立刻放手。
   useEffect(() => {
     if (!session?.id) return;
-    // A streaming tip owns the viewport (bottom-lock) — let it win.
-    if (tipStreamingId) return;
-    const pos = useSessionStore.getState().readingPosition;
-    if (!pos) return;
-    const card = roundRefs.current.get(pos.nodeId);
+    const { pendingNavigation: pending, mapNavigation: mapNav } = useSessionStore.getState();
+    if (pending || mapNav) return;
     const container = scrollRef.current;
-    if (!card || !container) return; // node left the thread → anchor fallback
+    if (!container) return;
     skipAnchorScrollRef.current = true;
-    const id = requestAnimationFrame(() => {
-      const delta =
-        card.getBoundingClientRect().top -
-        container.getBoundingClientRect().top;
-      container.scrollTop += delta + pos.offset;
+    followRef.current = true;
+    let done = false;
+    const pin = () => {
+      if (!done) container.scrollTop = container.scrollHeight;
+    };
+    const frame = requestAnimationFrame(() => {
+      // 同一提交里的锚点滚动已被跳过；锚点没变时 flag 不会被消费，这里兜底复位。
+      skipAnchorScrollRef.current = false;
+      pin();
     });
-    return () => cancelAnimationFrame(id);
-    // Snapshot semantics: only re-run when the session changes, not on every
-    // node/scroll update within it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const resize = new ResizeObserver(pin);
+    if (container.firstElementChild) resize.observe(container.firstElementChild);
+    const release = () => {
+      done = true;
+      resize.disconnect();
+    };
+    const timer = window.setTimeout(release, 1500);
+    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    for (const type of userEvents) container.addEventListener(type, release, { passive: true, once: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      release();
+      for (const type of userEvents) container.removeEventListener(type, release);
+    };
   }, [session?.id]);
 
   // Anchor navigation → scroll the anchored card into view, top-aligned so
