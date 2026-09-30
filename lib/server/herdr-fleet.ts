@@ -316,6 +316,11 @@ export class HerdrFleetService {
     return this.client.enqueueInput(paneId, text);
   }
 
+  /** 立即打字（不排队），见 HerdrClient.sendText。 */
+  text(paneId: string, text: string, submit = true): Promise<Record<string, unknown>> {
+    return this.client.sendText(paneId, text, submit);
+  }
+
   keys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
     return this.client.sendKeys(paneId, keys);
   }

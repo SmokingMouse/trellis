@@ -24,6 +24,23 @@ test("expired hook records are removed while recent waiting records survive", ()
   expect(store.getHookRecord("recent")?.state).toBe("waiting");
 });
 
+test("waiting records outlive the 24h retention; only the 30-day cap removes them", () => {
+  const now = Date.now();
+  const stale = now - store.HOOK_RETENTION_MS - 60_000;
+  store.recordClaudeHook({ hook_event_name: "PreToolUse", session_id: "stale-ask", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "push?", options: [{ label: "yes" }, { label: "no" }] }] } }, { now: stale });
+  store.recordClaudeHook({ hook_event_name: "PermissionRequest", session_id: "stale-perm", tool_name: "Bash" }, { now: stale });
+  store.recordClaudeHook({ hook_event_name: "PreToolUse", session_id: "stale-working", tool_name: "Read" }, { now: stale });
+  store.recordClaudeHook({ hook_event_name: "PermissionRequest", session_id: "ancient", tool_name: "Bash" }, { now: now - store.HOOK_WAITING_RETENTION_MS - 60_000 });
+  expect(store.getHookRecord("stale-ask")?.state).toBe("waiting");
+  store.pruneHookRecords(now);
+  expect(store.getHookRecord("stale-ask")?.state).toBe("waiting");
+  expect(store.getHookRecord("stale-ask")?.interactivePrompt).toMatchObject({ questions: [{ question: "push?" }] });
+  expect(store.getHookRecord("stale-perm")?.state).toBe("waiting");
+  expect(store.getHookRecord("stale-working")).toBeNull();
+  expect(store.getHookRecord("ancient")).toBeNull();
+  for (const id of ["stale-ask", "stale-perm"]) sqlite.getDB().prepare("DELETE FROM agent_hook_state WHERE session_id = ?").run(id);
+});
+
 test("hook fields are bounded UTF-8 and fleet state projects six fields with ETag", async () => {
   const large = '中"\\'.repeat(40_000);
   store.recordClaudeHook({ hook_event_name: "PreToolUse", session_id: "large", tool_name: "Write", tool_input: { content: large } });

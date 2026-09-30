@@ -35,6 +35,15 @@ export async function sendHerdrInput(paneId: string, text: string): Promise<Herd
   return ((await response.json()) as { result: HerdrInputDelivery }).result;
 }
 
+/** 立即打字进窗格（不排队）；submit 时文字后跟一个 Enter，原子送出。 */
+export async function sendHerdrText(paneId: string, text: string, submit = true): Promise<void> {
+  await ensureOk(await fetch(paneUrl(paneId, "text"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, submit }),
+  }));
+}
+
 export async function focusHerdrPane(paneId: string): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "focus"), { method: "POST" }));
 }

@@ -513,6 +513,34 @@ describe("HerdrFleetService", () => {
     expect(h.requests.filter(r => r.method === "pane.split")).toHaveLength(1);
   });
 
+  test("HTTP text types immediately into a blocked agent pane (no agent.wait), guarded like input", async () => {
+    const h = createHarness();
+    h.basePane.agent_status = "blocked";
+    h.snapshotPanes.push({ ...h.basePane, pane_id: "shell", agent: null, agent_session: null });
+    const globals = globalThis as typeof globalThis & { __trellisHerdrFleet?: InstanceType<typeof HerdrFleetService> };
+    globals.__trellisHerdrFleet = h.service;
+    cleanups.push(() => { delete globals.__trellisHerdrFleet; });
+    const text = await import("../../app/api/herdr/panes/[id]/text/route");
+    const request = (body: unknown) => new Request("http://localhost/api/herdr", { method: "POST", body: JSON.stringify(body) });
+    const params = (id: string) => ({ params: Promise.resolve({ id }) });
+    expect((await text.POST(request({ text: "hi" }), params("shell"))).status).toBe(403);
+    expect((await text.POST(request({ text: "hi" }), params("missing"))).status).toBe(404);
+    for (const body of [{ text: "a\nb" }, { text: "hi\u001b[201~" }, { text: "  " }, { text: "hi", submit: "yes" }]) {
+      expect((await text.POST(request(body), params("w1:p1"))).status).toBe(400);
+    }
+    expect((await text.POST(request({ text: "中".repeat(3_000) }), params("w1:p1"))).status).toBe(413);
+    expect(h.requests.filter(r => r.method === "pane.send_input")).toHaveLength(0);
+    const started = performance.now();
+    expect((await text.POST(request({ text: "先 push main" }), params("w1:p1"))).status).toBe(200);
+    expect(performance.now() - started).toBeLessThan(150);
+    expect((await text.POST(request({ text: "draft", submit: false }), params("w1:p1"))).status).toBe(200);
+    expect(h.requests.filter(r => r.method === "pane.send_input").map(r => r.params)).toEqual([
+      { pane_id: "w1:p1", text: "先 push main", keys: ["Enter"] },
+      { pane_id: "w1:p1", text: "draft", keys: [] },
+    ]);
+    expect(h.requests.filter(r => r.method === "agent.wait")).toHaveLength(0);
+  });
+
   test("HTTP input and keys reject shell panes, controls and oversized text before writing", async () => {
     const h = createHarness();
     h.snapshotPanes.push({ ...h.basePane, pane_id: "shell", agent: null, agent_session: null });

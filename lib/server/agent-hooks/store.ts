@@ -4,6 +4,11 @@ import { applyHookEvent, type NormalizeOptions } from "./normalize";
 import type { AgentHookRecord, ClaudeHookPayload, StashedState } from "./types";
 
 export const HOOK_RETENTION_MS = 24 * 60 * 60_000;
+/**
+ * 「等人」的记录（AskUserQuestion / 权限审批卡）不按 24h 清：人可能隔天才回来答，
+ * 清掉之后总览只能退回读屏。只留一道 30 天的兜底，防进程崩了留下永远 waiting 的孤儿行。
+ */
+export const HOOK_WAITING_RETENTION_MS = 30 * 24 * 60 * 60_000;
 export const HOOK_FIELD_MAX_BYTES = 32 * 1024;
 
 function boundedText(text: string | null, limit = HOOK_FIELD_MAX_BYTES): string | null {
@@ -33,7 +38,10 @@ export function listHookSummaries(): HookSummary[] {
 }
 
 export function pruneHookRecords(now = Date.now()): number {
-  return getDB().prepare("DELETE FROM agent_hook_state WHERE updated_at < ?").run(now - HOOK_RETENTION_MS).changes;
+  return getDB()
+    .prepare(`DELETE FROM agent_hook_state
+      WHERE (state <> 'waiting' AND updated_at < ?) OR updated_at < ?`)
+    .run(now - HOOK_RETENTION_MS, now - HOOK_WAITING_RETENTION_MS).changes;
 }
 
 type Row = {
