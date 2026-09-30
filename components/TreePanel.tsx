@@ -1068,15 +1068,17 @@ export function TreePanel() {
 
   if (isMobile === null || (isMobile && !mobileOpen)) return null;
 
+  // right 让出 Herdr 终端抽屉（--trellis-herdr-dw，未打开为 0 → 等同原来的 right-3）。
   const stackBottom = {
     bottom: "clamp(6rem, calc(var(--trellis-term-stack, 0px) + 0.5rem), 50vh)",
+    right: "calc(var(--trellis-herdr-dw, 0px) + 0.75rem)",
   };
 
   // 桌面收起态：右下角一个小圆点（节点数角标），一键展开。形态沿用
   // 「小浮窗 + 小点」（9/9 两次否决改形态），只是把原来的窄条换成圆点。
   if (!isMobile && collapsed) {
     return (
-      <div className="fixed right-3 z-20 transition-all duration-150" style={stackBottom}>
+      <div className="fixed z-20 transition-all duration-150" style={stackBottom}>
         <IconButton
           label={`展开会话树（${totalNodes} 节点）`}
           tooltipSide="left"
@@ -1119,7 +1121,7 @@ export function TreePanel() {
       className={
         isMobile
           ? "fixed inset-0 z-50 text-label"
-          : "fixed right-3 z-20 text-label transition-all duration-150"
+          : "fixed z-20 text-label transition-all duration-150"
       }
       style={
         isMobile

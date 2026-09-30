@@ -360,8 +360,9 @@ export function TerminalPanel() {
         aria-label="打开终端"
         // bottom 走常量而不是 bottom-[88px]：它和 --trellis-term-stack 是同一个
         // 数，写两处必然漂。
-        style={{ bottom: FLOAT_BOTTOM }}
-        className="hidden md:flex fixed right-4 z-40 items-center gap-1.5 h-7 px-2.5 rounded-full bg-surface/90 backdrop-blur border border-line shadow-raise text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
+        // right 让出 Herdr 终端抽屉（--trellis-herdr-dw，未打开为 0）。
+        style={{ bottom: FLOAT_BOTTOM, right: "calc(var(--trellis-herdr-dw, 0px) + 1rem)" }}
+        className="hidden md:flex fixed z-40 items-center gap-1.5 h-7 px-2.5 rounded-full bg-surface/90 backdrop-blur border border-line shadow-raise text-label text-ink-muted hover:text-ink hover:bg-surface-muted"
       >
         <Icon icon={SquareTerminal} size="sm" />
         <Kbd>⌃`</Kbd>
@@ -385,7 +386,7 @@ export function TerminalPanel() {
           : {
               // 浮层：右下角浮起，留出边距让对话从四周透出来。
               // 宽度封顶 880 且不越过侧栏，窄屏自动收窄。
-              right: 16,
+              right: "calc(var(--trellis-herdr-dw, 0px) + 16px)",
               // 抬到 composer 之上：盖住对话是 Quake 终端的常态（用完即走），
               // 但盖住输入框不行 —— 那是你收起终端后马上要用的东西。
               bottom: FLOAT_BOTTOM,

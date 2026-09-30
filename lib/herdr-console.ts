@@ -52,6 +52,11 @@ export const HERDR_LANE_LABEL: Record<HerdrLane, string> = {
 
 export const HERDR_OFFLINE_LIMIT = 20;
 
+/** 徽标 / 提示里的中文状态，与总览泳道同一套口径：在跑 / 需要你 / 空闲 / 已离线。 */
+export function herdrStatusLabel(status: HerdrUiStatus, alive = true): string {
+  return alive ? HERDR_LANE_LABEL[laneOfStatus(status)] : HERDR_LANE_LABEL.off;
+}
+
 export function laneOfStatus(status: HerdrUiStatus): HerdrLane {
   if (status === "waiting" || status === "blocked") return "need";
   if (status === "working") return "run";

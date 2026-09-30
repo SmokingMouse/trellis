@@ -6,6 +6,7 @@ import {
   findConsolePaneForSession,
   groupHerdrLanes,
   herdrAttentionText,
+  herdrStatusLabel,
   herdrStripPanes,
   HERDR_ATTENTION_FLICKER_MS,
   matchHerdrPanes,
@@ -199,4 +200,14 @@ describe("helpers", () => {
     const trellis = views.find((w) => w.id === "w4")!.panes[0];
     expect(trellis.binding?.sessionId).toBe("s-new");
   });
+});
+
+test("status labels read Chinese like the lanes, never raw idle/blocked/unknown", () => {
+  expect(herdrStatusLabel("working")).toBe("在跑");
+  expect(herdrStatusLabel("blocked")).toBe("需要你");
+  expect(herdrStatusLabel("waiting")).toBe("需要你");
+  expect(herdrStatusLabel("idle")).toBe("空闲");
+  expect(herdrStatusLabel("done")).toBe("空闲");
+  expect(herdrStatusLabel("unknown")).toBe("空闲");
+  expect(herdrStatusLabel("working", false)).toBe("已离线");
 });

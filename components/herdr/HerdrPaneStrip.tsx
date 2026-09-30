@@ -24,10 +24,20 @@ export function HerdrPaneStrip() {
   const flash = useHerdrConsoleStore((s) => s.flash);
   const clearFlash = useHerdrConsoleStore((s) => s.clearFlash);
   const currentRef = useRef<HTMLButtonElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // 当前 chip 滚进可视区（等价 inline:"nearest"），只动 chip 行自己的 scrollLeft：
+  // 标签在滚动容器外，天然不被挡；两侧各留 8px 余量，不贴边。
   useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [current?.key]);
+    const scroller = scrollerRef.current;
+    const chip = currentRef.current;
+    if (!scroller || !chip) return;
+    const pad = 8;
+    const left = chip.offsetLeft - scroller.offsetLeft;
+    const right = left + chip.offsetWidth;
+    if (left - pad < scroller.scrollLeft) scroller.scrollLeft = Math.max(0, left - pad);
+    else if (right + pad > scroller.scrollLeft + scroller.clientWidth) scroller.scrollLeft = right + pad - scroller.clientWidth;
+  }, [current?.key, strip.length]);
 
   // 闪烁只持续几秒；过期后清掉，下次卡住才会再闪。
   useEffect(() => {
@@ -41,46 +51,49 @@ export function HerdrPaneStrip() {
 
   if (strip.length === 0) return null;
   return (
+    // 「Herdr」标签和右侧提示放在滚动容器外，只有 chip 行横向滚动，标签永远不被截。
     <nav
       aria-label="Herdr 窗格"
       data-herdr-strip
-      className="no-scrollbar flex h-9.5 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-surface-canvas px-2.5 max-md:hidden"
+      className="flex h-9.5 shrink-0 items-center border-b border-line bg-surface-canvas max-md:hidden"
     >
-      <span className="sticky left-0 z-10 -ml-2.5 inline-flex shrink-0 items-center gap-1.5 self-stretch bg-surface-canvas pl-3 pr-2 text-label text-ink-faint">
+      <span data-herdr-strip-label className="inline-flex shrink-0 items-center gap-1.5 pl-3 pr-2 text-label text-ink-faint">
         <Icon icon={Anchor} size="sm" />
         Herdr
       </span>
-      {strip.map((pane, i) => {
-        const isCurrent = pane.key === current?.key;
-        const flashing = pane.key in flash;
-        return (
-          <button
-            key={pane.key}
-            ref={isCurrent ? currentRef : undefined}
-            type="button"
-            data-herdr-chip={pane.paneId}
-            data-flash={flashing || undefined}
-            aria-current={isCurrent ? "true" : undefined}
-            title={`${pane.workspaceLabel} · ${pane.tabLabel} · ${pane.title}（${HERDR_LANE_LABEL[pane.lane]}）`}
-            onClick={() => openHerdrConsolePane(pane)}
-            className={cn(
-              "inline-flex h-6.5 max-w-[200px] shrink-0 items-center gap-1.5 rounded-md border px-2 text-label transition-colors",
-              isCurrent
-                ? "border-line-strong bg-surface text-ink-strong"
-                : pane.lane === "need"
-                  ? "border-transparent text-warn-ink hover:bg-surface-hover"
-                  : "border-transparent text-ink-muted hover:bg-surface-hover hover:text-ink",
-              flashing && !isCurrent && "animate-pulse bg-warn-muted motion-reduce:animate-none",
-            )}
-          >
-            <HerdrLaneDot pane={pane} />
-            <span className="shrink-0 text-ink-faint">{pane.workspaceLabel}</span>
-            <span className="min-w-0 truncate">{pane.title}</span>
-            {i < 9 && <Kbd>{i + 1}</Kbd>}
-          </button>
-        );
-      })}
-      <span className="ml-auto inline-flex shrink-0 items-center gap-2.5 pl-3 text-label text-ink-faint">
+      <div ref={scrollerRef} className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+        {strip.map((pane, i) => {
+          const isCurrent = pane.key === current?.key;
+          const flashing = pane.key in flash;
+          return (
+            <button
+              key={pane.key}
+              ref={isCurrent ? currentRef : undefined}
+              type="button"
+              data-herdr-chip={pane.paneId}
+              data-flash={flashing || undefined}
+              aria-current={isCurrent ? "true" : undefined}
+              title={`${pane.workspaceLabel} · ${pane.tabLabel} · ${pane.title}（${HERDR_LANE_LABEL[pane.lane]}）`}
+              onClick={() => openHerdrConsolePane(pane)}
+              className={cn(
+                "inline-flex h-6.5 max-w-[200px] shrink-0 items-center gap-1.5 rounded-md border px-2 text-label transition-colors",
+                isCurrent
+                  ? "border-line-strong bg-surface text-ink-strong"
+                  : pane.lane === "need"
+                    ? "border-transparent text-warn-ink hover:bg-surface-hover"
+                    : "border-transparent text-ink-muted hover:bg-surface-hover hover:text-ink",
+                flashing && !isCurrent && "animate-pulse bg-warn-muted motion-reduce:animate-none",
+              )}
+            >
+              <HerdrLaneDot pane={pane} />
+              <span className="shrink-0 text-ink-faint">{pane.workspaceLabel}</span>
+              <span className="min-w-0 truncate">{pane.title}</span>
+              {i < 9 && <Kbd>{i + 1}</Kbd>}
+            </button>
+          );
+        })}
+      </div>
+      <span className="inline-flex shrink-0 items-center gap-2.5 border-l border-line-faint pl-3 pr-3 text-label text-ink-faint max-lg:hidden">
         <span className="inline-flex items-center gap-1"><Kbd keys={["⌥", "J"]} />下一个需要你</span>
         <span className="inline-flex items-center gap-1"><Kbd keys={["⌥", "["]} /><Kbd keys={["⌥", "]"]} /></span>
       </span>

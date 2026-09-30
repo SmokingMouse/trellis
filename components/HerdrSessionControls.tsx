@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
+import { herdrStatusLabel } from "@/lib/herdr-console";
 import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import type { HerdrInputDelivery } from "@/lib/herdr-input";
 import { Anchor, ArrowUp } from "lucide-react";
@@ -20,7 +21,7 @@ export function HerdrSessionBadge({
       className="flex min-w-0 items-center gap-1.5 text-label text-ink-faint"
       title={
         pane
-          ? `${pane.workspaceLabel} · 窗格 ${pane.paneId} · ${pane.agentKind} · ${pane.alive ? pane.status : "已离线"}`
+          ? `${pane.workspaceLabel} · 窗格 ${pane.paneId} · ${pane.agentKind} · ${herdrStatusLabel(pane.status, pane.alive)}`
           : "Herdr 会话"
       }
     >
@@ -30,7 +31,7 @@ export function HerdrSessionBadge({
       </span>
       {pane ? (
         <span className="min-w-0 truncate">
-          {pane.workspaceLabel} · {pane.paneId} · {pane.agentKind} · {pane.alive ? pane.status : "已离线"}
+          {pane.workspaceLabel} · {pane.paneId} · {pane.agentKind} · {herdrStatusLabel(pane.status, pane.alive)}
         </span>
       ) : (
         <span>{loading ? "正在读取窗格…" : "窗格已离线"}</span>

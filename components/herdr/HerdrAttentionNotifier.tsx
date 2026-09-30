@@ -57,7 +57,10 @@ export function HerdrAttentionNotifier() {
       aria-live="polite"
       data-herdr-notice={notice.paneId}
       className="fixed bottom-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-card border border-warn-line bg-surface-raised p-3 shadow-overlay max-md:inset-x-3 max-md:w-auto"
-      style={{ right: "calc(var(--trellis-herdr-dw, 0px) + 1rem)" }}
+      // 避让右侧浮层，与正文 / composer 同一套安全区：--trellis-tree-safe（会话树浮窗
+      // 展开 19.5rem / 收成圆点 3.5rem，已含右边距与间隙，终端把手也在这一列里）
+      // + --trellis-herdr-dw（终端抽屉）。通知放在树的左侧，不再压住它。
+      style={{ right: "calc(var(--trellis-herdr-dw, 0px) + var(--trellis-tree-safe, 0.25rem) + 0.75rem)" }}
     >
       <div className="flex items-center gap-2 text-ui">
         <Icon icon={Bell} size="sm" className="text-warn" />

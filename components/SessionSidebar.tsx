@@ -69,6 +69,7 @@ import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { sessionSourceChip } from "@/lib/session-source";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { HerdrSidebarEntry } from "@/components/herdr/HerdrSidebarEntry";
+import { herdrStatusLabel } from "@/lib/herdr-console";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
@@ -1433,7 +1434,7 @@ function SidebarRow({
           key="herdr"
           data-herdr-alive={herdr.alive}
           className="inline-flex"
-          title={herdr.alive ? `Herdr 在线 · ${herdr.status}` : "Herdr 离线 · 可阅读历史"}
+          title={herdr.alive ? `Herdr 在线 · ${herdrStatusLabel(herdr.status)}` : "Herdr 离线 · 可阅读历史"}
         >
           <StatusDot
             tone={
