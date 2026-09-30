@@ -4,7 +4,8 @@ import { useMemo, type ReactNode } from "react";
 import { ChevronRight, LayoutGrid, SquareTerminal } from "lucide-react";
 import { Icon, Spinner, StatusDot, cn } from "@/components/ui";
 import { HerdrLaneDot } from "./HerdrPaneStrip";
-import { HerdrPaneMenu } from "./HerdrPaneMenu";
+import { HerdrPaneMenu, useHerdrPaneLongPress } from "./HerdrPaneMenu";
+import { useGesturesEnabled } from "@/hooks/useSwipe";
 import { openHerdrConsolePane, useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { HERDR_LANE_LABEL, herdrLaneCounts } from "@/lib/herdr-console";
@@ -182,11 +183,18 @@ function PaneRow({
   available: boolean;
 }) {
   const { pane } = row;
+  // 手机上行尾 ⋯ 隐藏（max-md:!hidden），长按弹同一份菜单。
+  const gestures = useGesturesEnabled();
+  const longPress = useHerdrPaneLongPress(pane, readOnly, available, gestures, () =>
+    useSessionStore.getState().setMobileNavOpen(false),
+  );
   // tab 名只在组里有多个 tab 时才有区分意义；单 tab 组里每行都挂「t1」是噪音。
   return (
+    <>
     <div
       role="button"
       tabIndex={0}
+      {...longPress.bind}
       data-herdr-sidebar-row={pane.paneId}
       data-herdr-lane={pane.lane}
       aria-current={active ? "true" : undefined}
@@ -224,5 +232,7 @@ function PaneRow({
         <HerdrPaneMenu pane={pane} readOnly={readOnly} available={available} className={active ? "bg-accent-muted" : "bg-surface-hover"} />
       </span>
     </div>
+    {longPress.menu}
+    </>
   );
 }

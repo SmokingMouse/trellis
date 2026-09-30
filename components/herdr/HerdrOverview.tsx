@@ -23,7 +23,9 @@ import {
   toast,
 } from "@/components/ui";
 import { HerdrInteractionCard, type HerdrScreenPromptSummary } from "@/components/HerdrInteractionCard";
-import { HerdrPaneMenu } from "./HerdrPaneMenu";
+import { HerdrPaneMenu, useHerdrPaneLongPress } from "./HerdrPaneMenu";
+import { HerdrSwipeCard } from "./HerdrSwipeCard";
+import { useGesturesEnabled } from "@/hooks/useSwipe";
 import { openHerdrConsolePane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
@@ -61,6 +63,8 @@ export function HerdrOverview({ isMobile }: { isMobile: boolean }) {
   const idleShown = showMore ? lanes.idle : lanes.idle.slice(0, IDLE_VISIBLE);
   const hiddenIdle = Math.max(0, lanes.idle.length - IDLE_VISIBLE);
   const foldable = hiddenIdle + lanes.off.length + lanes.shell.length;
+  const gestures = useGesturesEnabled();
+  const longPress = { readOnly: hc.readOnly, available: hc.available, gestures };
   const menu = (pane: HerdrConsolePane, className?: string) => (
     <HerdrPaneMenu pane={pane} readOnly={hc.readOnly} available={hc.available} className={className} />
   );
@@ -129,7 +133,7 @@ export function HerdrOverview({ isMobile }: { isMobile: boolean }) {
           <section className="mb-6" data-herdr-lane="need">
             <LaneHeader icon={<Icon icon={CircleAlert} size="sm" className="text-warn" />} label="需要你" count={lanes.need.length} />
             {lanes.need.map((pane) => (
-              <NeedCard key={pane.key} pane={pane} now={now} menu={menu(pane)} readOnly={hc.readOnly} />
+              <NeedCard key={pane.key} pane={pane} now={now} menu={menu(pane)} readOnly={hc.readOnly} available={hc.available} />
             ))}
           </section>
         )}
@@ -148,7 +152,7 @@ export function HerdrOverview({ isMobile }: { isMobile: boolean }) {
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2.5">
               {lanes.run.map((pane) => (
-                <RunCard key={pane.key} pane={pane} now={now} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
+                <RunCard key={pane.key} pane={pane} now={now} {...longPress} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
               ))}
             </div>
           )}
@@ -158,15 +162,15 @@ export function HerdrOverview({ isMobile }: { isMobile: boolean }) {
           <LaneHeader icon={<StatusDot tone="idle" />} label="空闲" count={lanes.idle.length} hint="按最近活动" />
           <div className="overflow-hidden rounded-card border border-line bg-surface">
             {idleShown.map((pane) => (
-              <IdleRow key={pane.key} pane={pane} now={now} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
+              <IdleRow key={pane.key} pane={pane} now={now} {...longPress} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
             ))}
             {showMore &&
               lanes.off.map((pane) => (
-                <IdleRow key={pane.key} pane={pane} now={now} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
+                <IdleRow key={pane.key} pane={pane} now={now} {...longPress} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
               ))}
             {showMore &&
               lanes.shell.map((pane) => (
-                <IdleRow key={pane.key} pane={pane} now={now} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
+                <IdleRow key={pane.key} pane={pane} now={now} {...longPress} menu={menu(pane, "opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 max-md:opacity-100")} />
               ))}
             {idleShown.length === 0 && !showMore && (
               <div className="px-3.5 py-2.5 text-label text-ink-faint">没有空闲的窗格</div>
@@ -206,7 +210,7 @@ function LaneHeader({ icon, label, count, hint }: { icon: React.ReactNode; label
   );
 }
 
-function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode; readOnly: boolean }) {
+function NeedCard({ pane, now, menu, readOnly, available }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode; readOnly: boolean; available: boolean }) {
   // hook / transcript 都没给结构化提示时，用卡片读屏认出的类型（提问 / 要执行 Bash）
   const [screenPrompt, setScreenPrompt] = useState<HerdrScreenPromptSummary | null>(null);
   const hookKind = herdrAttentionKind(pane);
@@ -242,10 +246,12 @@ function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: 
     }
   };
 
+  // 外层滑动容器：审批卡右滑允许 / 左滑拒绝（3 秒撤销），长按弹窗格菜单（手机）。
   return (
+    <HerdrSwipeCard pane={pane} readOnly={readOnly} available={available} where={where} className="mb-2.5">
     <article
       data-herdr-need-card={pane.paneId}
-      className="mb-2.5 rounded-card border border-warn-line bg-surface"
+      className="rounded-card border border-warn-line bg-surface"
     >
       <div className="flex items-center gap-2 px-3.5 pb-2 pt-2.5">
         <button
@@ -317,10 +323,14 @@ function NeedCard({ pane, now, menu, readOnly }: { pane: HerdrConsolePane; now: 
         </form>
       )}
     </article>
+    </HerdrSwipeCard>
   );
 }
 
-function RunCard({ pane, now, menu }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode }) {
+type LongPressProps = { readOnly: boolean; available: boolean; gestures: boolean };
+
+function RunCard({ pane, now, menu, readOnly, available, gestures }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode } & LongPressProps) {
+  const longPress = useHerdrPaneLongPress(pane, readOnly, available, gestures);
   const [peek, setPeek] = useState<string | null>(null);
   const [peekOn, setPeekOn] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -343,9 +353,11 @@ function RunCard({ pane, now, menu }: { pane: HerdrConsolePane; now: number; men
     if (timer.current) clearTimeout(timer.current);
   }, []);
   return (
+    <>
     <article
       role="button"
       tabIndex={0}
+      {...longPress.bind}
       data-herdr-run-card={pane.paneId}
       onClick={() => openHerdrConsolePane(pane)}
       onKeyDown={(e) => {
@@ -388,17 +400,22 @@ function RunCard({ pane, now, menu }: { pane: HerdrConsolePane; now: number; men
         {peek ?? "正在读取最后几行…"}
       </pre>
     </article>
+    {longPress.menu}
+    </>
   );
 }
 
-function IdleRow({ pane, now, menu }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode }) {
+function IdleRow({ pane, now, menu, readOnly, available, gestures }: { pane: HerdrConsolePane; now: number; menu: React.ReactNode } & LongPressProps) {
+  const longPress = useHerdrPaneLongPress(pane, readOnly, available, gestures);
   const off = pane.lane === "off";
   const shell = pane.lane === "shell";
   const last = off ? "已离线" : shell ? "shell" : ago(pane.activityAt, now);
   return (
+    <>
     <div
       role="button"
       tabIndex={0}
+      {...longPress.bind}
       data-herdr-idle-row={pane.key}
       onClick={() => openHerdrConsolePane(pane)}
       onKeyDown={(e) => {
@@ -421,5 +438,7 @@ function IdleRow({ pane, now, menu }: { pane: HerdrConsolePane; now: number; men
       {last && <span className="shrink-0 text-label text-ink-faint">{last}</span>}
       {menu}
     </div>
+    {longPress.menu}
+    </>
   );
 }

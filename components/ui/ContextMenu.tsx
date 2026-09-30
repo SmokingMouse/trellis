@@ -260,8 +260,19 @@ function MenuPanel({
   }, [point]);
 
   useEffect(() => {
+    // 触屏：长按松手后浏览器可能补发一个兼容 mousedown（落在触发行上），会把刚弹出的菜单当
+    // 「点外面」立刻关掉。触摸产生的兼容 mousedown 一律忽略，触屏上的「点外面」改由 touchstart 判。
+    let lastTouchEnd = 0;
+    const outside = (target: EventTarget | null) => !ref.current?.contains(target as Node);
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      if (Date.now() - lastTouchEnd < 600) return;
+      if (outside(e.target)) onClose();
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (outside(e.target)) onClose();
+    };
+    const onTouchEnd = () => {
+      lastTouchEnd = Date.now();
     };
     // 键盘导航以 DOM 为准（role=menuitem + data-active），不用再复制一份 items 状态。
     const onKey = (e: KeyboardEvent) => {
@@ -301,11 +312,15 @@ function MenuPanel({
       }
     };
     document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
