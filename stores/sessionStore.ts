@@ -36,7 +36,7 @@ import {
 import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
 import { uuid } from "@/lib/uuid";
 import { BUTLER_AGENT_ID } from "@/lib/butler";
-import { loadStartupView } from "@/lib/prefs";
+import { loadStartupView, PREF_KEYS } from "@/lib/prefs";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
 // union; keep these in sync with app/api/references/route.ts.
@@ -78,16 +78,16 @@ const THREAD_WIDTH_KEY = "trellis-thread-width";
 const TREE_PANEL_VIEW_KEY = "trellis-tree-panel-view";
 const COLLAPSED_KEY = (sid: string) => `trellis-collapsed:${sid}`;
 // Workbench Wave 4 (VSCode-style IDE shell):
-// - pinned tabs (ordered) persist across reloads, like VSCode's permanently
-//   opened editor tabs.
 // - the left explorer sidebar open/closed state persists (desktop default on).
-const PINNED_KEY = "trellis-pinned-sessions";
+// 置顶（= 常驻标签）已服务端化：sessions.pinned_at 是真源，store 只做派生 +
+// 乐观更新。本地老 key 只剩一次性迁移用途（见 syncPinnedFromServer）。
+const LEGACY_PINNED_KEY = PREF_KEYS.legacyPinnedSessions;
 const SIDEBAR_KEY = "trellis-sidebar-open";
 
-function loadPinned(): string[] {
+function loadLegacyPinned(): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(PINNED_KEY);
+    const raw = window.localStorage.getItem(LEGACY_PINNED_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
@@ -96,14 +96,40 @@ function loadPinned(): string[] {
   }
 }
 
-function persistPinned(ids: string[]): void {
+function clearLegacyPinned(): void {
   if (typeof window === "undefined") return;
   try {
-    if (ids.length === 0) window.localStorage.removeItem(PINNED_KEY);
-    else window.localStorage.setItem(PINNED_KEY, JSON.stringify(ids));
+    window.localStorage.removeItem(LEGACY_PINNED_KEY);
   } catch {
-    /* quota / private mode — non-fatal */
+    /* private mode — non-fatal */
   }
+}
+
+// 置顶写入的并发护栏：写入在途时忽略列表同步（否则乐观态会被旧快照闪回），
+// 写入落地后只接受「写入完成之后才发出」的列表请求。
+let pinWritesInFlight = 0;
+let pinSyncFloor = 0;
+let legacyPinMigrationChecked = false;
+
+async function patchPinned(sessionId: string, pinned: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 服务端列表 → 置顶 id 序列：按 pinned_at 升序（先置顶的在左，与标签追加顺序一致）。 */
+export function pinnedIdsFromSessions(list: Session[]): string[] {
+  return list
+    .filter((s) => s.pinnedAt != null && !s.archived)
+    .sort((a, b) => a.pinnedAt! - b.pinnedAt! || a.id.localeCompare(b.id))
+    .map((s) => s.id);
 }
 
 function loadSidebarOpen(): boolean {
@@ -554,8 +580,8 @@ type State = {
   // replaced the moment another preview happens. null = no preview tab.
   // A previewed id never appears in pinnedSessionIds simultaneously.
   previewSessionId: string | null;
-  // Pinned (permanently opened) tabs, in user-visible order. Persisted to
-  // localStorage so the workbench survives reload. Double-click pins.
+  // 置顶会话（= 常驻标签 + 侧栏置顶区），按 pinned_at 升序。由服务端
+  // sessions.pinned_at 派生（syncPinnedFromServer），pin/unpin 乐观更新。
   pinnedSessionIds: string[];
   // Sessions that finished a run while the user was *not* looking at them
   // (computed by the run-poll diff). Cleared the moment loadSession lands
@@ -607,7 +633,11 @@ type Actions = {
   // clear preview if it was previewing this id + load it.
   pinSession: (sessionId: string) => Promise<void>;
   // Remove from pinned tabs without closing or switching the active tab.
-  unpinSession: (sessionId: string) => void;
+  unpinSession: (sessionId: string) => Promise<void>;
+  // 用 GET /api/sessions 的结果（sessions + taskSessions）刷新置顶集合。
+  // requestedAt = 该请求**发出**的时刻，用来丢弃置顶写入之前发出的旧快照。
+  // 首次调用顺带做 localStorage 老置顶 → 服务端的一次性迁移。
+  syncPinnedFromServer: (list: Session[], requestedAt: number) => void;
   // Close a tab (the × on a tab). If pinned → remove from pinned. If it was
   // the preview → clear preview. If we closed the active session, switch to
   // an adjacent still-open tab, else drop to the new-conversation screen.
@@ -948,7 +978,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   treeVisits: {},
   unreadHolds: {},
   previewSessionId: null,
-  pinnedSessionIds: loadPinned(),
+  pinnedSessionIds: [],
   unreadSessionIds: new Set(),
   runningSessionIds: new Set(),
   runningNodeIds: new Set(),
@@ -1114,31 +1144,109 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   pinSession: async (sessionId) => {
-    set((s) => {
-      const pinned = s.pinnedSessionIds.includes(sessionId)
+    const wasPinned = get().pinnedSessionIds.includes(sessionId);
+    const prevPreview = get().previewSessionId;
+    set((s) => ({
+      pinnedSessionIds: wasPinned
         ? s.pinnedSessionIds
-        : [...s.pinnedSessionIds, sessionId];
-      if (pinned !== s.pinnedSessionIds) persistPinned(pinned);
-      return {
-        pinnedSessionIds: pinned,
-        // Pinning consumes the preview slot if it was previewing this id.
-        previewSessionId:
-          s.previewSessionId === sessionId ? null : s.previewSessionId,
-      };
-    });
+        : [...s.pinnedSessionIds, sessionId],
+      // Pinning consumes the preview slot if it was previewing this id.
+      previewSessionId:
+        s.previewSessionId === sessionId ? null : s.previewSessionId,
+    }));
+    if (!wasPinned) {
+      pinWritesInFlight++;
+      void patchPinned(sessionId, true).then((ok) => {
+        pinWritesInFlight--;
+        pinSyncFloor = Date.now();
+        if (!ok) {
+          // 回滚：撤掉乐观加入的 id，preview 位还给它（若没被别人占）。
+          set((s) => ({
+            pinnedSessionIds: s.pinnedSessionIds.filter((id) => id !== sessionId),
+            previewSessionId:
+              prevPreview === sessionId && s.previewSessionId === null
+                ? sessionId
+                : s.previewSessionId,
+          }));
+        }
+        get().bumpSessionsRevision();
+      });
+    }
     // Pinning the already-active (previewed) session must NOT reload — that
     // would reset node positions to (0,0) without changing layoutKey, leaving
     // every node stacked at the origin. Only switch when it's a different one.
     if (get().session?.id !== sessionId) await get().loadSession(sessionId);
   },
 
-  unpinSession: (sessionId) => {
-    const { pinnedSessionIds } = get();
-    const nextPinned = pinnedSessionIds.filter((id) => id !== sessionId);
-    if (nextPinned.length !== pinnedSessionIds.length) {
-      persistPinned(nextPinned);
-      set({ pinnedSessionIds: nextPinned });
+  unpinSession: async (sessionId) => {
+    const prev = get().pinnedSessionIds;
+    if (!prev.includes(sessionId)) return;
+    set({ pinnedSessionIds: prev.filter((id) => id !== sessionId) });
+    pinWritesInFlight++;
+    const ok = await patchPinned(sessionId, false);
+    pinWritesInFlight--;
+    pinSyncFloor = Date.now();
+    if (!ok) {
+      // 回滚：按原顺序补回这一个（期间其它 id 的变动以当前集合为准）。
+      set((s) => {
+        if (s.pinnedSessionIds.includes(sessionId)) return s;
+        const order = new Map(prev.map((id, i) => [id, i]));
+        const next = [...s.pinnedSessionIds, sessionId].sort(
+          (a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity),
+        );
+        return { pinnedSessionIds: next };
+      });
     }
+    get().bumpSessionsRevision();
+  },
+
+  syncPinnedFromServer: (list, requestedAt) => {
+    // 一次性迁移：本地老 key 有值、服务端一个置顶都没有 → 按本地顺序推上去，
+    // 然后删本地 key。服务端已有置顶则以服务端为准，直接删本地 key。
+    if (!legacyPinMigrationChecked) {
+      legacyPinMigrationChecked = true;
+      const legacy = loadLegacyPinned();
+      if (legacy.length > 0) {
+        const serverHasPins = list.some((s) => s.pinnedAt != null);
+        const known = new Set(list.map((s) => s.id));
+        const toPush = serverHasPins ? [] : legacy.filter((id) => known.has(id));
+        if (toPush.length === 0) {
+          clearLegacyPinned();
+        } else {
+          pinWritesInFlight++;
+          set((s) => ({
+            pinnedSessionIds: toPush,
+            previewSessionId:
+              s.previewSessionId && toPush.includes(s.previewSessionId)
+                ? null
+                : s.previewSessionId,
+          }));
+          void (async () => {
+            let allOk = true;
+            // 串行：pinned_at 取服务端 Date.now()，顺序写入才能保住标签顺序。
+            for (const id of toPush) {
+              if (!(await patchPinned(id, true))) allOk = false;
+            }
+            if (allOk) clearLegacyPinned();
+            pinWritesInFlight--;
+            pinSyncFloor = Date.now();
+            get().bumpSessionsRevision();
+          })();
+          return;
+        }
+      }
+    }
+    if (pinWritesInFlight > 0 || requestedAt < pinSyncFloor) return;
+    const next = pinnedIdsFromSessions(list);
+    const cur = get().pinnedSessionIds;
+    if (next.length === cur.length && next.every((id, i) => id === cur[i])) return;
+    set((s) => ({
+      pinnedSessionIds: next,
+      previewSessionId:
+        s.previewSessionId && next.includes(s.previewSessionId)
+          ? null
+          : s.previewSessionId,
+    }));
   },
 
   closeTab: (sessionId) => {
@@ -1155,13 +1263,14 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     ];
     const closingIdx = openOrder.indexOf(sessionId);
 
-    const nextPinned = state.pinnedSessionIds.filter((id) => id !== sessionId);
-    if (nextPinned.length !== state.pinnedSessionIds.length) {
-      persistPinned(nextPinned);
+    // 关掉置顶标签 = 取消置顶（两者是同一个概念），走服务端 + 失败回滚。
+    if (state.pinnedSessionIds.includes(sessionId)) {
+      void get().unpinSession(sessionId);
     }
     const nextPreview =
       state.previewSessionId === sessionId ? null : state.previewSessionId;
-    set({ pinnedSessionIds: nextPinned, previewSessionId: nextPreview });
+    set({ previewSessionId: nextPreview });
+    const nextPinned = get().pinnedSessionIds;
 
     if (!wasActive) return;
     // Closed the active tab → switch to an adjacent still-open tab.
@@ -2865,8 +2974,9 @@ function evictSessionFromTabs(
   sessionId: string,
 ): void {
   const s = get();
+  // 只在本地移出：删除 → 行没了；归档 → 服务端 pinned_at 保留，取消归档后
+  // 自动回到置顶区（列表同步只按未归档行派生）。
   const nextPinned = s.pinnedSessionIds.filter((id) => id !== sessionId);
-  if (nextPinned.length !== s.pinnedSessionIds.length) persistPinned(nextPinned);
   let unread = s.unreadSessionIds;
   if (unread.has(sessionId)) {
     unread = new Set(unread);

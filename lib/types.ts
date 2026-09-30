@@ -386,7 +386,8 @@ export type Session = {
   requireApproval?: boolean;
   // S88 会话人设（agents.id）。null/缺省 = 默认 Agent（老路，行为一字不变）。
   // 创建时锁定；**live 引用** —— agent 定义改了老会话跟着变。
-  agentId?: string | null;
+  agentId?: string | null;  // 置顶时刻（服务端存，多设备同步）。非 null = 侧栏置顶区 + 常驻标签。
+  pinnedAt?: number | null;
 };
 
 // S117：侧栏「定时任务」分组的骨架行（GET /api/sessions 的 tasks 字段）。
