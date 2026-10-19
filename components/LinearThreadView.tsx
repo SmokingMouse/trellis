@@ -706,11 +706,6 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         }
       >
         <main ref={gestureContentRef} className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
-        {isHerdr && herdrPane && (
-          <HerdrSessionSwipeCard>
-            <HerdrInteractionCard pane={herdrPane} />
-          </HerdrSessionSwipeCard>
-        )}
         {isHerdr && session && (
           <HerdrOfflineBanner
             sessionId={session.id}
@@ -826,6 +821,13 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             </Fragment>
           );
         })
+        )}
+        {isHerdr && herdrPane && (
+          <div className="mt-4">
+            <HerdrSessionSwipeCard>
+              <HerdrInteractionCard pane={herdrPane} />
+            </HerdrSessionSwipeCard>
+          </div>
         )}
         </main>
       </div>

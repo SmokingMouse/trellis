@@ -157,6 +157,12 @@ export type HerdrPanePrompt = {
 function isCardPrompt(prompt: unknown): boolean {
   if (!prompt || typeof prompt !== "object") return false;
   const record = prompt as Record<string, unknown>;
+  const isAsk =
+    record.tool_name === "AskUserQuestion" ||
+    (record.approval as { tool?: string } | undefined)?.tool === "AskUserQuestion";
+  if (isAsk) {
+    return Array.isArray(record.questions) && record.questions.length > 0;
+  }
   return (Array.isArray(record.questions) && record.questions.length > 0) ||
     Boolean(record.approval && typeof record.approval === "object");
 }

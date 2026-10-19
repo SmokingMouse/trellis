@@ -247,6 +247,20 @@ describe("数据源优先级 hook > transcript > 读屏", () => {
     expect(herdrPanePrompt(view)).toMatchObject({ source: "hook", toolName: "Bash" });
   });
 
+  test("hook 若残存无 questions 的 AskUserQuestion approval，被拒绝并自动 fallback 到 transcript", () => {
+    const corruptedHook: HerdrHookRecord = {
+      sessionId: "s-t",
+      state: "waiting",
+      toolName: "AskUserQuestion",
+      interactivePrompt: { approval: { tool: "AskUserQuestion", summary: "AskUserQuestion" }, tool_name: "AskUserQuestion" },
+      paneKey: null,
+      updatedAt: NOW,
+    };
+    const view = buildHerdrWorkspaceViews(transcriptFleet("blocked"), [corruptedHook], NOW)[0].panes[0];
+    // 畸形 hook 不算合法的 card prompt，因此让位给 transcript 提取真实提问选项
+    expect(herdrPanePrompt(view)).toMatchObject({ source: "transcript", toolName: "AskUserQuestion" });
+  });
+
   test("transcript 权限审批卡", () => {
     const approval = { approval: { tool: "Bash", summary: "git push" }, tool_use_id: "toolu_ask" };
     const consolePane = buildHerdrConsole(transcriptFleet("blocked", approval), [], NOW)[0];

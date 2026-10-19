@@ -108,6 +108,24 @@ describe("卡片形状", () => {
     expect(rec.interactivePrompt).toEqual({ ...toolInput, tool_name: "AskUserQuestion" });
   });
 
+  test("AskUserQuestion 紧接着收到 PermissionRequest 不会被降级成 approval 卡", () => {
+    const toolInput = {
+      questions: [
+        { question: "选哪个方案？", header: "方案", options: [{ label: "A" }, { label: "B" }] },
+      ],
+    };
+    const rec = feed([
+      ev("SessionStart"),
+      ev("PreToolUse", { tool_name: "AskUserQuestion", tool_input: toolInput }),
+      // Claude Code 可能会在 PreToolUse 之后补发 PermissionRequest（不带 tool_input 或只带 tool_name）
+      ev("PermissionRequest", { tool_name: "AskUserQuestion" }),
+    ]);
+    expect(rec.state).toBe("waiting");
+    expect(rec.toolName).toBe("AskUserQuestion");
+    // 依然保留 questions，不被冲成 approval
+    expect(rec.interactivePrompt).toEqual({ ...toolInput, tool_name: "AskUserQuestion" });
+  });
+
   test("PermissionRequest → waiting，interactivePrompt 是 approval 卡", () => {
     const rec = feed([
       ev("SessionStart"),

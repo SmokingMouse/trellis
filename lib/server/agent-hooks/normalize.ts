@@ -187,7 +187,25 @@ export function applyHookEvent(
       next.toolName = str(payload.tool_name) ?? next.toolName;
       next.toolInput = payload.tool_input ?? next.toolInput;
       stashIfSubagent();
-      next.interactivePrompt = promptWithOwner(toApproval(payload), payload);
+      if (next.toolName === ASK_USER_QUESTION) {
+        // AskUserQuestion 是人机提问交互，绝不能被降级成普通 approval 审批卡（会导致丢失选项）。
+        // 优先保留 PreToolUse 已收到的 questions 结构；若完全无 questions 则置 null 让 transcript 兜底。
+        const input =
+          payload.tool_input ??
+          next.toolInput ??
+          (prev?.interactivePrompt && typeof prev.interactivePrompt === "object" && "questions" in prev.interactivePrompt
+            ? prev.interactivePrompt
+            : null);
+        if (input && typeof input === "object" && "questions" in input) {
+          next.interactivePrompt = promptWithOwner(input, payload);
+        } else if (prev?.interactivePrompt && typeof prev.interactivePrompt === "object" && "questions" in prev.interactivePrompt) {
+          next.interactivePrompt = promptWithOwner(prev.interactivePrompt, payload);
+        } else {
+          next.interactivePrompt = null;
+        }
+      } else {
+        next.interactivePrompt = promptWithOwner(toApproval(payload), payload);
+      }
       setState("waiting");
       break;
     }
