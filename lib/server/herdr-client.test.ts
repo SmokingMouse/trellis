@@ -387,8 +387,8 @@ describe("HerdrClient", () => {
 
   test("protocol mismatch keeps reads but rejects writes", async () => {
     const server = new FakeHerdr();
-    server.protocol = 20;
-    server.snapshot = snapshot(5, 20);
+    server.protocol = 99;
+    server.snapshot = snapshot(5, 99);
     servers.push(server);
     const client = clientFor(server);
     await client.start();
@@ -400,6 +400,18 @@ describe("HerdrClient", () => {
     expect(client.sendText("w1:p1", "hi")).rejects.toBeInstanceOf(
       HerdrUnavailableError,
     );
+  });
+
+  test("protocol 22 is supported for reads and writes", async () => {
+    const server = new FakeHerdr();
+    server.protocol = 22;
+    server.snapshot = snapshot(5, 22);
+    servers.push(server);
+    const client = clientFor(server);
+    await client.start();
+    expect(client.state.readOnly).toBeFalse();
+    await client.request("pane.read", { pane_id: "w1:p1", source: "recent" });
+    await expect(client.sendKeys("w1:p1", ["Enter"])).resolves.toBeDefined();
   });
 
   test("queued inputs have independent receipts when the first wait fails", async () => {

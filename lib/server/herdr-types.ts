@@ -1,4 +1,9 @@
-export const HERDR_PROTOCOL = 19;
+export const MIN_HERDR_PROTOCOL = 19;
+export const HERDR_PROTOCOL = 22;
+
+export function isHerdrProtocolSupported(protocol: number | null | undefined): boolean {
+  return typeof protocol === "number" && protocol >= MIN_HERDR_PROTOCOL && protocol <= HERDR_PROTOCOL;
+}
 
 export type HerdrAgentStatus =
   | "idle"

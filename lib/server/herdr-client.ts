@@ -5,6 +5,8 @@ import fs from "node:fs";
 import type { HerdrInputDelivery } from "../herdr-input";
 import {
   HERDR_PROTOCOL,
+  MIN_HERDR_PROTOCOL,
+  isHerdrProtocolSupported,
   type HerdrAgent,
   type HerdrClientChange,
   type HerdrClientState,
@@ -304,7 +306,7 @@ export class HerdrClient {
     if (!this.enabled) throw new HerdrUnavailableError("Herdr is disabled");
     if (this._readOnly && !READ_METHODS.has(method)) {
       throw new HerdrUnavailableError(
-        `Herdr protocol ${this._protocol} is read-only (expected ${HERDR_PROTOCOL})`,
+        `Herdr protocol ${this._protocol} is read-only (expected ${MIN_HERDR_PROTOCOL}..${HERDR_PROTOCOL})`,
       );
     }
     if (!this._available && method !== "ping") {
@@ -474,9 +476,9 @@ export class HerdrClient {
     this.fatalTransport = false;
     this._version = pong.version;
     this._protocol = pong.protocol;
-    this._readOnly = pong.protocol !== HERDR_PROTOCOL;
+    this._readOnly = !isHerdrProtocolSupported(pong.protocol);
     this._lastError = this._readOnly
-      ? `protocol mismatch: expected ${HERDR_PROTOCOL}, got ${pong.protocol}`
+      ? `protocol mismatch: expected ${MIN_HERDR_PROTOCOL}..${HERDR_PROTOCOL}, got ${pong.protocol}`
       : null;
     if (this._readOnly) console.warn(`[trellis] Herdr ${this._lastError}; writes disabled`);
   }
@@ -956,7 +958,7 @@ export class HerdrClient {
     for (const agent of snapshot.agents) if (!closed.has(agent.pane_id)) this.agents.set(agent.pane_id, agent);
     this._protocol = snapshot.protocol;
     this._version = snapshot.version;
-    this._readOnly = snapshot.protocol !== HERDR_PROTOCOL;
+    this._readOnly = !isHerdrProtocolSupported(snapshot.protocol);
     this._available = true;
     this.lastSnapshotAt = Date.now();
     this.bump();
