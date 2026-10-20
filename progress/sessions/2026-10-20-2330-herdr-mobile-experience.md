@@ -4,6 +4,9 @@
 - 新增 POST /api/herdr/tabs 服务端接口，支持从移动端新建 Tab（指定 workspace / cwd / label 并自动聚焦）
 - 移动端 Header 增加 Herdr 态势胶囊与快速建 Tab 按钮，点击呼出 FleetPickerSheet，冷热分流展示（🔥 活跃并行 vs ❄️ 闲置）
 - 升级 HerdrTerminalDrawer 终端抽屉：支持半屏/全屏伸缩切换，增加常用命令快捷芯片（llm claude 等）与 Tab 补全键；停用横向误触滑切；原子上线 2f63220
+- 解决终端抽屉入口缺失：移动端 Header 新增常驻终端图标按钮，态势面板每行增设直达终端入口
+- 开放任意命令输入与模型自动填入：终端抽屉新增自定义命令行输入框与选模型填入芯片（从 providerCatalog 读取）
+- 修复新建 Shell 无法执行命令的问题：新增 POST /api/herdr/panes/[id]/command 解除纯 shell 窗格限制；挂起窗格严格按 activityAt 倒序排列；更新上线 81cece4
 
 ## 决定
 - [decision] 移动端以 Trellis 原生 LinearThreadView 阅读体验为主体，终端以伴侣抽屉形式按需呼出；拒绝纯 CLI 化带来的字符矩阵与缩放拖拽硬伤
