@@ -9,6 +9,7 @@ import { useGesturesEnabled, usePrefersReducedMotion, useSwipe } from "@/hooks/u
 import { readHerdrPane, sendHerdrCommand } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { useSessionStore } from "@/stores/sessionStore";
+import { HerdrTerminalReflow } from "./HerdrTerminalReflow";
 
 export const HERDR_DRAWER_WIDTH = 380;
 const POLL_MS = 3_000;
@@ -49,7 +50,8 @@ export function HerdrTerminalDrawer() {
   const [screen, setScreen] = useState<{ paneId: string; text: string; error: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
-  const preRef = useRef<HTMLPreElement>(null);
+  const [rawMode, setRawMode] = useState(false);
+  const preRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const sheetRef = useRef<HTMLElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -204,6 +206,14 @@ export function HerdrTerminalDrawer() {
             <Icon icon={mobileExpanded ? Minimize2 : Maximize2} size="sm" />
           </IconButton>
         )}
+        <button
+          type="button"
+          onClick={() => setRawMode(!rawMode)}
+          className="rounded-field border border-line bg-surface-raised px-1.5 py-0.5 font-mono text-nano text-ink-muted hover:border-line-strong hover:text-ink active:bg-surface-muted"
+          title="切换重排优化与原始字符"
+        >
+          {rawMode ? "原始" : "重排"}
+        </button>
         <IconButton label="重新读屏" size="sm" onClick={() => void load(target.paneId)} disabled={loading}>
           <Icon icon={RotateCcw} size="sm" className={loading ? "animate-spin motion-reduce:animate-none" : undefined} />
         </IconButton>
@@ -211,17 +221,23 @@ export function HerdrTerminalDrawer() {
           <Icon icon={X} size="sm" />
         </IconButton>
       </div>
-      <pre
+      <div
         ref={preRef}
         data-herdr-drawer-screen
         onScroll={(e) => {
           const el = e.currentTarget;
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
-        className="code-surface m-0 min-h-0 flex-1 overflow-auto whitespace-pre p-3 font-mono text-nano leading-relaxed"
+        className="code-surface m-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 font-mono text-nano leading-relaxed select-text"
       >
-        {own?.error ? `读屏暂不可用：${own.error}` : own?.text || "正在读取…"}
-      </pre>
+        {own?.error ? (
+          <div className="text-danger font-medium">读屏暂不可用：{own.error}</div>
+        ) : own?.text ? (
+          <HerdrTerminalReflow text={own.text} raw={rawMode} />
+        ) : (
+          <div className="text-ink-faint">正在读取…</div>
+        )}
+      </div>
 
       {/* 命令行输入条：支持用户自主敲入任何命令 */}
       <form
