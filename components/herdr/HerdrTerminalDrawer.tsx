@@ -13,7 +13,7 @@ import { HerdrTerminalReflow } from "./HerdrTerminalReflow";
 
 export const HERDR_DRAWER_WIDTH = 380;
 const POLL_MS = 3_000;
-const LINES = 200;
+const LINES = 1000;
 
 // 底部一排按键：herdr send_keys 的键名（esc / ctrl+c 为 herdr 规范名）。
 const KEYS: { label: string; key: string; title: string }[] = [
@@ -51,6 +51,7 @@ export function HerdrTerminalDrawer() {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
   const preRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const sheetRef = useRef<HTMLElement>(null);
@@ -168,7 +169,7 @@ export function HerdrTerminalDrawer() {
       data-herdr-drawer={target.paneId}
       aria-label="Herdr 终端"
       className={cn(
-        "fixed bottom-0 z-30 flex flex-col border-l border-line bg-surface-canvas max-md:inset-x-0 max-md:rounded-t-card max-md:border-l-0 max-md:border-t max-md:shadow-overlay",
+        "fixed bottom-0 z-30 flex flex-col border-l border-line bg-[#07080a] max-md:inset-x-0 max-md:rounded-t-card max-md:border-l-0 max-md:border-t-2 max-md:border-accent max-md:shadow-[0_-16px_48px_rgba(0,0,0,0.95)]",
         isMobile && "ui-enter-slide-up",
       )}
       style={
@@ -187,13 +188,13 @@ export function HerdrTerminalDrawer() {
       <div
         ref={handleRef}
         data-herdr-drawer-handle
-        className="relative flex h-10 shrink-0 items-center gap-1.5 border-b border-line pl-3 pr-2 text-ui max-md:h-12 max-md:touch-none"
+        className="relative flex h-10 shrink-0 items-center gap-1.5 border-b border-line-strong bg-[#12141a] pl-3 pr-2 text-ui max-md:h-12 max-md:touch-none"
       >
         {isMobile && (
           <span aria-hidden className="absolute left-1/2 top-1 h-1 w-9 -translate-x-1/2 rounded-full bg-line-strong" />
         )}
-        <Icon icon={SquareTerminal} size="sm" className="text-ink-muted" />
-        <b className="font-medium text-ink-strong">终端</b>
+        <Icon icon={SquareTerminal} size="sm" className="text-accent" />
+        <b className="font-semibold text-ink-strong">终端</b>
         <span className="min-w-0 flex-1 truncate text-label text-ink-faint">
           {target.workspaceLabel} · {target.tabLabel} · {shell ? target.title : `最近 ${LINES} 行`}
         </span>
@@ -221,21 +222,44 @@ export function HerdrTerminalDrawer() {
           <Icon icon={X} size="sm" />
         </IconButton>
       </div>
-      <div
-        ref={preRef}
-        data-herdr-drawer-screen
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-        }}
-        className="code-surface m-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 font-mono text-nano leading-relaxed select-text"
-      >
-        {own?.error ? (
-          <div className="text-danger font-medium">读屏暂不可用：{own.error}</div>
-        ) : own?.text ? (
-          <HerdrTerminalReflow text={own.text} raw={rawMode} />
-        ) : (
-          <div className="text-ink-faint">正在读取…</div>
+      <div className="relative m-0 min-h-0 flex-1 flex flex-col bg-[#020203]">
+        <div
+          ref={preRef}
+          data-herdr-drawer-screen
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+            const atBottom = dist < 32;
+            stickRef.current = atBottom;
+            setIsScrolledUp(!atBottom);
+          }}
+          className="m-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 font-mono text-nano leading-relaxed select-text"
+        >
+          {own?.error ? (
+            <div className="text-danger font-medium">读屏暂不可用：{own.error}</div>
+          ) : own?.text ? (
+            <HerdrTerminalReflow text={own.text} raw={rawMode} />
+          ) : (
+            <div className="text-ink-faint">正在读取…</div>
+          )}
+        </div>
+
+        {/* 往上翻时提示回到底部 */}
+        {isScrolledUp && (
+          <button
+            type="button"
+            onClick={() => {
+              const el = preRef.current;
+              if (el) {
+                el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                stickRef.current = true;
+                setIsScrolledUp(false);
+              }
+            }}
+            className="absolute bottom-3 right-3 z-20 flex items-center gap-1 rounded-full border border-line-strong bg-surface-raised/95 px-3 py-1 font-mono text-label font-medium text-ink shadow-lg backdrop-blur-sm active:bg-surface-muted"
+          >
+            <span>↓ 回到底部</span>
+          </button>
         )}
       </div>
 
@@ -245,14 +269,14 @@ export function HerdrTerminalDrawer() {
           e.preventDefault();
           void executeCmd(customCmd);
         }}
-        className="flex shrink-0 items-center gap-1.5 border-t border-line bg-surface-canvas px-2.5 py-1.5"
+        className="flex shrink-0 items-center gap-1.5 border-t border-line-strong bg-[#0c0d12] px-2.5 py-1.5"
       >
         <input
           type="text"
           value={customCmd}
           onChange={(e) => setCustomCmd(e.target.value)}
           placeholder="输入命令，如 llm claude-opus..."
-          className="min-w-0 flex-1 rounded-field border border-line bg-surface px-2.5 py-1 font-mono text-ui text-ink outline-none focus:border-accent"
+          className="min-w-0 flex-1 rounded-field border border-line bg-surface-canvas px-2.5 py-1 font-mono text-ui text-ink outline-none focus:border-accent"
         />
         <Button
           type="submit"
@@ -265,7 +289,7 @@ export function HerdrTerminalDrawer() {
       </form>
 
       {/* 快捷模型选择条：点击模型自动组装并填入 llm <model> */}
-      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-surface px-2.5 py-1 text-nano">
+      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-[#0c0d12] px-2.5 py-1 text-nano">
         <span className="shrink-0 text-ink-faint">选模型:</span>
         {providerCatalog.map((p) => {
           const modelName = p.shortLabel || p.id.split(":").pop() || p.id;
@@ -297,7 +321,7 @@ export function HerdrTerminalDrawer() {
         </button>
       </div>
 
-      <div className="shrink-0 border-t border-line px-2.5 py-2">
+      <div className="shrink-0 border-t border-line bg-[#08090d] px-2.5 py-2">
         <div className="flex flex-wrap gap-1">
           {KEYS.map(({ label, key, title }) => (
             <Button

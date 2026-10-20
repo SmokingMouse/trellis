@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CACHE_MS = 1_000;
-const MAX_LINES = 200;
+const MAX_LINES = 1000;
 const cache = new Map<string, { at: number; text: string }>();
 const pending = new Map<string, Promise<string>>();
 
@@ -16,9 +16,9 @@ function lastLines(text: string, count: number): string {
   return text.replace(/\r/g, "").split("\n").slice(-count).join("\n");
 }
 
-// 缓存整屏（最多 200 行），按请求切尾：会话卡读 40 行、悬停预览读几行、终端抽屉读 200 行
+// 缓存整屏（最多 1000 行），按请求切尾：会话卡读 40 行、悬停预览读几行、终端抽屉读 1000 行
 // 共用同一份，1 秒内的并发读只打一次 socket。
-async function cachedRead(paneId: string): Promise<string> {
+async function cachedRead(paneId: string, fetchLines = 200): Promise<string> {
   const cached = cache.get(paneId);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.text;
   const running = pending.get(paneId);
@@ -26,7 +26,7 @@ async function cachedRead(paneId: string): Promise<string> {
   const request = (async () => {
     const service = getHerdrFleetService();
     await service.ensureStarted();
-    const result = await service.read(paneId);
+    const result = await service.read(paneId, fetchLines);
     if (typeof result.read?.text !== "string") {
       throw new HerdrApiError("pane.read returned no read.text", "bad_response");
     }
@@ -49,9 +49,10 @@ export async function GET(
   const { id } = await context.params;
   const requested = Number(new URL(req.url).searchParams.get("lines") ?? 40);
   const lines = Number.isFinite(requested) ? Math.min(MAX_LINES, Math.max(1, Math.floor(requested))) : 40;
+  const fetchLines = lines > 200 ? lines : 200;
   try {
     return Response.json(
-      { ok: true, text: lastLines(await cachedRead(id), lines) },
+      { ok: true, text: lastLines(await cachedRead(id, fetchLines), lines) },
       { headers: { "Cache-Control": "private, max-age=1" } },
     );
   } catch (error) {

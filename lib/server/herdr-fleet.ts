@@ -438,11 +438,11 @@ export class HerdrFleetService {
     };
   }
 
-  read(paneId: string): Promise<{ type: "pane_read"; read: { text: string } }> {
+  read(paneId: string, lines = 200): Promise<{ type: "pane_read"; read: { text: string } }> {
     return this.client.request("pane.read", {
       pane_id: paneId,
       source: "recent",
-      lines: 200,
+      lines,
     });
   }
 
