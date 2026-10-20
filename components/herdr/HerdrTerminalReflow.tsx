@@ -16,12 +16,12 @@ function renderSemanticLine(line: string, index: number) {
 
   // 1. 空行
   if (!trimmed) {
-    return <div key={index} className="h-2.5" />;
+    return <div key={index} className="h-2" />;
   }
 
-  // 2. 超长分隔线（折叠为 1px 精细分界线）
+  // 2. 超长分隔线（折叠为 1px 精细分界线，绝不横向撑开或折成多截）
   if (DIVIDER_RE.test(trimmed)) {
-    return <div key={index} className="my-2 h-px w-full bg-line-strong" />;
+    return <div key={index} className="my-1.5 h-px w-full bg-line-strong" />;
   }
 
   // 3. 摘要提示条 (※ recap: ...)
@@ -29,9 +29,9 @@ function renderSemanticLine(line: string, index: number) {
     return (
       <div
         key={index}
-        className="my-1.5 rounded-field border border-accent-line bg-accent-muted/20 px-2.5 py-1.5 text-label leading-relaxed text-accent-ink"
+        className="my-1 w-full max-w-full min-w-0 rounded-field border border-accent-line bg-accent-muted/20 px-2 py-1 text-label leading-relaxed text-accent-ink whitespace-pre-wrap break-all [overflow-wrap:anywhere]"
       >
-        <span className="font-semibold">※ </span>
+        <span className="font-semibold text-accent">※ </span>
         {trimmed.replace(/^※\s*/, "")}
       </div>
     );
@@ -41,11 +41,14 @@ function renderSemanticLine(line: string, index: number) {
   const promptMatch = trimmed.match(PROMPT_RE);
   if (promptMatch) {
     return (
-      <div key={index} className="my-1 flex items-start gap-1.5 font-medium">
+      <div
+        key={index}
+        className="my-0.5 flex w-full max-w-full min-w-0 items-start gap-1 font-medium"
+      >
         <span className="shrink-0 select-none font-bold text-accent">
           {promptMatch[1]}
         </span>
-        <span className="min-w-0 flex-1 break-words text-ink-strong">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-ink-strong">
           {promptMatch[2]}
         </span>
       </div>
@@ -56,9 +59,12 @@ function renderSemanticLine(line: string, index: number) {
   const actionMatch = trimmed.match(ACTION_RE);
   if (actionMatch) {
     return (
-      <div key={index} className="my-0.5 flex items-start gap-1.5 text-ui font-medium">
+      <div
+        key={index}
+        className="my-0.5 flex w-full max-w-full min-w-0 items-start gap-1 text-label font-medium"
+      >
         <span className="shrink-0 text-accent font-bold">⏺</span>
-        <span className="min-w-0 flex-1 break-words text-ink-strong">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-ink-strong">
           {actionMatch[2]}
         </span>
       </div>
@@ -71,10 +77,10 @@ function renderSemanticLine(line: string, index: number) {
     return (
       <div
         key={index}
-        className="my-0.5 ml-3 flex items-start gap-1 rounded bg-surface-muted/60 px-2 py-0.5 font-mono text-label text-ink-muted"
+        className="my-0.5 ml-2 flex w-[calc(100%-0.5rem)] max-w-[calc(100%-0.5rem)] min-w-0 items-start gap-1 rounded bg-surface-muted/60 px-1.5 py-0.5 font-mono text-label text-ink-muted"
       >
         <span className="shrink-0 select-none text-ink-faint">⎿</span>
-        <span className="min-w-0 flex-1 break-words font-semibold text-ink">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-semibold text-ink">
           {toolMatch[2]}
         </span>
       </div>
@@ -85,9 +91,14 @@ function renderSemanticLine(line: string, index: number) {
   const thinkMatch = trimmed.match(THINK_RE);
   if (thinkMatch) {
     return (
-      <div key={index} className="my-1 flex items-center gap-1.5 text-label text-warn">
+      <div
+        key={index}
+        className="my-0.5 flex w-full max-w-full min-w-0 items-center gap-1.5 text-label text-warn"
+      >
         <span className="shrink-0 animate-spin motion-reduce:animate-none">✽</span>
-        <span className="break-words font-medium">{thinkMatch[2]}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-medium">
+          {thinkMatch[2]}
+        </span>
       </div>
     );
   }
@@ -99,7 +110,10 @@ function renderSemanticLine(line: string, index: number) {
 
   if (isPass) {
     return (
-      <div key={index} className="my-0.5 break-words font-medium text-positive">
+      <div
+        key={index}
+        className="my-0.5 w-full max-w-full min-w-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-medium text-positive"
+      >
         {line}
       </div>
     );
@@ -107,7 +121,10 @@ function renderSemanticLine(line: string, index: number) {
 
   if (isFail) {
     return (
-      <div key={index} className="my-0.5 break-words font-medium text-danger">
+      <div
+        key={index}
+        className="my-0.5 w-full max-w-full min-w-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-medium text-danger"
+      >
         {line}
       </div>
     );
@@ -117,16 +134,19 @@ function renderSemanticLine(line: string, index: number) {
     return (
       <div
         key={index}
-        className="my-1 rounded-field border border-line-faint bg-surface-raised px-2 py-1 text-nano text-ink-faint"
+        className="my-1 w-full max-w-full min-w-0 rounded-field border border-line-faint bg-surface-raised px-2 py-0.5 text-nano text-ink-faint whitespace-pre-wrap break-all [overflow-wrap:anywhere]"
       >
         {line}
       </div>
     );
   }
 
-  // 默认文本行：支持自动折行与等宽排版
+  // 默认文本行：强制保留空格与折行，且任何超长字符串均必须折行（break-all）
   return (
-    <div key={index} className="min-w-0 break-words leading-relaxed text-ink-muted">
+    <div
+      key={index}
+      className="w-full max-w-full min-w-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] leading-relaxed text-ink-muted"
+    >
       {line}
     </div>
   );
@@ -150,7 +170,7 @@ export const HerdrTerminalReflow = memo(function HerdrTerminalReflow({
     return (
       <pre
         className={cn(
-          "code-surface m-0 min-h-0 whitespace-pre font-mono text-nano leading-relaxed",
+          "w-full max-w-full min-w-0 m-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-ink-muted bg-transparent p-0",
           className,
         )}
       >
@@ -162,7 +182,7 @@ export const HerdrTerminalReflow = memo(function HerdrTerminalReflow({
   return (
     <div
       className={cn(
-        "min-h-0 flex-1 font-mono text-nano leading-relaxed select-text",
+        "w-full max-w-full min-w-0 min-h-0 flex-1 font-mono text-[11.5px] leading-relaxed select-text [tab-size:2]",
         className,
       )}
     >
