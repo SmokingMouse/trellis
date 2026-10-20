@@ -568,7 +568,7 @@ function QuestionBlock({
   return (
     <div
       data-turn-question=""
-      className="group/q relative rounded-card bg-surface-muted pl-4.5 pr-10 py-2.5"
+      className="group/q relative w-full max-w-full min-w-0 rounded-card bg-surface-muted pl-4.5 pr-10 py-2.5"
     >
       {/* 提问的主色竖条：和助手正文一眼分开（强调色点缀，2026-09-29）。 */}
       <span aria-hidden className="absolute left-1.5 top-2.5 bottom-2.5 w-0.75 rounded-full bg-accent" />
@@ -587,7 +587,7 @@ function QuestionBlock({
         )}
         {unread && <StatusDot tone="unread" label="未读" />}
       </span>
-      <div className="text-reading text-ink-strong leading-relaxed whitespace-pre-wrap break-words min-w-0">
+      <div className="text-reading text-ink-strong leading-relaxed whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] min-w-0">
         {question}
       </div>
       {attachments.length > 0 && (
@@ -770,7 +770,7 @@ function ResponseBody({
       ref={bodyRef}
       data-chat-node-id={node.id}
       onClick={onMarkClick}
-      className="md-body mt-3 text-reading text-ink leading-relaxed"
+      className="md-body mt-3 text-reading text-ink leading-relaxed w-full max-w-full min-w-0"
     >
       {/* S88 @提及：这一轮是外援答的，标出来 —— 否则读者会以为主线人格变了。
           会话级人设（agentScope==='session'）刻意不挂 chip：每张卡都挂一枚是
@@ -1014,7 +1014,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
         ref={bodyRef}
         data-chat-node-id={node.id}
         onClick={onMarkClick}
-        className="md-body text-reading text-ink leading-relaxed"
+        className="md-body text-reading text-ink leading-relaxed w-full max-w-full min-w-0"
       >
         {ref.contentMd ? (
           near ? (

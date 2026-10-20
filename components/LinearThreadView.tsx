@@ -72,6 +72,69 @@ function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
+/**
+ * 线性 Thread 沿树下行时的子节点择优：
+ * 优先走「有输出、非空」的分支，且优先走「子树更深/更活跃」的主干；
+ * 避免因为用户中途取消重输产生空壳 sibling: 0 而把主线带入死胡同。
+ */
+function preferredChild(
+  children: ChatNode[] | undefined,
+  byParent: Map<string, ChatNode[]>,
+): ChatNode | undefined {
+  if (!children || children.length === 0) return undefined;
+  if (children.length === 1) return children[0];
+
+  const subtreeDepth = (id: string, depth = 0): number => {
+    if (depth > 50) return depth;
+    const kids = byParent.get(id);
+    if (!kids || kids.length === 0) return depth;
+    let maxSub = depth;
+    for (const k of kids) {
+      const d = subtreeDepth(k.id, depth + 1);
+      if (d > maxSub) maxSub = d;
+    }
+    return maxSub;
+  };
+
+  const isUsable = (n: ChatNode) =>
+    Boolean(n.response?.trim()) ||
+    n.toolCalls.length > 0 ||
+    (n.toolCallStats?.total ?? 0) > 0 ||
+    n.status === "streaming";
+
+  let best = children[0];
+  let bestUsable = isUsable(best);
+  let bestDepth = subtreeDepth(best.id);
+
+  for (let i = 1; i < children.length; i++) {
+    const candidate = children[i];
+    const candidateUsable = isUsable(candidate);
+    const candidateDepth = subtreeDepth(candidate.id);
+
+    // 1. 有内容优先于空壳
+    if (candidateUsable && !bestUsable) {
+      best = candidate;
+      bestUsable = true;
+      bestDepth = candidateDepth;
+      continue;
+    }
+    if (!candidateUsable && bestUsable) continue;
+
+    // 2. 深度更深（更有后续）优先
+    if (candidateDepth > bestDepth) {
+      best = candidate;
+      bestUsable = candidateUsable;
+      bestDepth = candidateDepth;
+      continue;
+    }
+    if (candidateDepth < bestDepth) continue;
+
+    // 3. 深度相同时，遵从 nodeSort 默认顺序（siblingIndex / createdAt）
+  }
+
+  return best;
+}
+
 function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) {
   if (rootNodeId && nodes[rootNodeId]) return nodes[rootNodeId];
   return Object.values(nodes)
@@ -181,7 +244,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     const down: ChatNode[] = [];
     let cur: ChatNode | undefined = anchor;
     while (cur) {
-      const child: ChatNode | undefined = byParent.get(cur.id)?.[0];
+      const child: ChatNode | undefined = preferredChild(byParent.get(cur.id), byParent);
       if (!child) break;
       down.push(child);
       cur = child;
@@ -689,7 +752,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         onScroll={onScroll}
         onClick={revealFromHiddenTitleArea}
         data-thread-scroll
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto overflow-x-hidden"
         style={
           mobileHeaderHidden
             ? {
@@ -705,7 +768,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 { paddingRight: treeSafePadding(threadWidth) }
         }
       >
-        <main ref={gestureContentRef} className={`${widthClass} mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
+        <main ref={gestureContentRef} className={`${widthClass} w-full max-w-full min-w-0 mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
         {isHerdr && session && (
           <HerdrOfflineBanner
             sessionId={session.id}
@@ -759,7 +822,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   data-thread-active={isActive || undefined}
                   // Faint rule between turns so where one answer ends is
                   // visible without bringing card frames back.
-                  className={`group/turn scroll-mt-3 py-4 outline-none${idx > 0 && !isCompacted ? " border-t border-line" : ""}`}
+                  className={`group/turn scroll-mt-3 py-4 outline-none min-w-0 max-w-full${idx > 0 && !isCompacted ? " border-t border-line" : ""}`}
                 >
                   <TurnCard
                     node={node}

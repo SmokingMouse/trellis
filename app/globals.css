@@ -702,9 +702,13 @@ html, body {
 }
 
 /* Markdown body inside chat nodes */
-.md-body p { margin: 0.55em 0; line-height: 1.7; }
-.md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; }
-.md-body li { margin: 0.25em 0; }
+.md-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.md-body p { margin: 0.55em 0; line-height: 1.7; overflow-wrap: anywhere; }
+.md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; overflow-wrap: anywhere; }
+.md-body li { margin: 0.25em 0; overflow-wrap: anywhere; }
 .md-body strong { color: var(--ink-strong); font-weight: 600; }
 /* Tailwind preflight strips link styling — restore it, else links read as
    plain text. Local-file links add decoration-dotted on top (preview hint). */
@@ -713,6 +717,8 @@ html, body {
   text-decoration: underline;
   text-decoration-color: var(--accent-line);
   text-underline-offset: 2px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .md-body a:hover { text-decoration-color: currentColor; }
 .md-body code:not(pre code) {
@@ -723,6 +729,9 @@ html, body {
   border-radius: 4px;
   font-size: 0.88em;
   font-family: var(--font-mono);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: break-spaces;
 }
 .md-body pre {
   background: var(--code-bg) !important;
