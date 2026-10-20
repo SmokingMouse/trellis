@@ -18,6 +18,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -340,28 +341,39 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             )}
           </div>
           {hc.available && (
-            <IconButton
-              label="新建终端 Tab"
-              onClick={async () => {
-                try {
-                  const res = await createHerdrTab({
-                    workspaceId: currentHerdrPane?.workspaceId,
-                    cwd: currentHerdrPane?.cwd ?? undefined,
-                  });
-                  toast.success("已创建新终端 Tab");
-                  refreshHerdrFleet();
-                  if (res.paneId) {
-                    useHerdrConsoleStore.getState().openDrawer(res.paneId);
+            <>
+              <IconButton
+                label="终端抽屉"
+                data-mobile-target="header-terminal-toggle"
+                onClick={() => useHerdrConsoleStore.getState().toggleDrawer()}
+                className="h-11 w-11 p-0"
+                tooltip={false}
+              >
+                <Icon icon={SquareTerminal} size="md" />
+              </IconButton>
+              <IconButton
+                label="新建终端 Tab"
+                onClick={async () => {
+                  try {
+                    const res = await createHerdrTab({
+                      workspaceId: currentHerdrPane?.workspaceId,
+                      cwd: currentHerdrPane?.cwd ?? undefined,
+                    });
+                    toast.success("已创建新终端 Tab");
+                    refreshHerdrFleet();
+                    if (res.paneId) {
+                      useHerdrConsoleStore.getState().openDrawer(res.paneId);
+                    }
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "创建失败");
                   }
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "创建失败");
-                }
-              }}
-              className="h-11 w-11 p-0"
-              tooltip={false}
-            >
-              <Icon icon={Plus} size="md" />
-            </IconButton>
+                }}
+                className="h-11 w-11 p-0"
+                tooltip={false}
+              >
+                <Icon icon={Plus} size="md" />
+              </IconButton>
+            </>
           )}
           <IconButton
             label="更多功能"

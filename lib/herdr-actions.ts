@@ -85,6 +85,21 @@ export async function createHerdrTab(options?: {
   return data.result;
 }
 
+/** 向任意窗格（包含纯 shell 窗格）执行命令或按键（终端抽屉使用）。 */
+export async function sendHerdrCommand(
+  paneId: string,
+  command: string,
+  keys: string[] = ["Enter"],
+): Promise<void> {
+  await ensureOk(
+    await fetch(paneUrl(paneId, "command"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, keys }),
+    }),
+  );
+}
+
 // 悬停预览的客户端缓存：同一窗格 5 秒内只读一次、并发悬停共用一个请求，
 // 不让鼠标在卡片网格上扫一遍就打出一串 socket 读。
 const PEEK_TTL_MS = 5_000;

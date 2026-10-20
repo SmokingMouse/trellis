@@ -6,8 +6,9 @@ import { Button, Icon, IconButton, cn, toast } from "@/components/ui";
 import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useGesturesEnabled, usePrefersReducedMotion, useSwipe } from "@/hooks/useSwipe";
-import { readHerdrPane, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
+import { readHerdrPane, sendHerdrCommand } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
+import { useSessionStore } from "@/stores/sessionStore";
 
 export const HERDR_DRAWER_WIDTH = 380;
 const POLL_MS = 3_000;
@@ -25,15 +26,6 @@ const KEYS: { label: string; key: string; title: string }[] = [
   { label: "2", key: "2", title: "发按键 2" },
 ];
 
-// 快捷命令芯片：免去在手机小键盘打长命令的痛点
-const QUICK_COMMANDS: { label: string; cmd: string }[] = [
-  { label: "llm claude", cmd: "llm claude" },
-  { label: "llm codex", cmd: "llm codex" },
-  { label: "git status", cmd: "git status" },
-  { label: "bun test", cmd: "bun test" },
-  { label: "clear", cmd: "clear" },
-];
-
 // 终端抽屉：读屏最近 200 行（打开时每 3 秒轮询、页面隐藏时暂停，另有手动刷新）+ 发按键。
 // 目标 = 显式指定的窗格（总览里的纯 shell / 「看原始输出」）或当前 Herdr 会话的窗格。
 // 镜像跟不上、或者想看 TUI 原貌时用它；Trellis 仍只转发按键，不接管进程。
@@ -45,6 +37,8 @@ export function HerdrTerminalDrawer() {
   const close = useHerdrConsoleStore((s) => s.closeDrawer);
   const isMobile = useIsMobile();
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const providerCatalog = useSessionStore((s) => s.providerCatalog);
+  const [customCmd, setCustomCmd] = useState("");
   const target = explicit
     ? hc.panes.find((p) => p.paneId === explicit && p.lane !== "off") ?? null
     : current;
@@ -132,14 +126,31 @@ export function HerdrTerminalDrawer() {
   if (!visible || !target) return null;
   const own = screen?.paneId === target.paneId ? screen : null;
   const shell = target.lane === "shell";
-  const keysDisabled = shell || hc.readOnly || !hc.available;
+  const keysDisabled = hc.readOnly || !hc.available;
+
   const press = async (key: string, label: string) => {
     setSending(key);
     try {
-      await sendHerdrKeys(target.paneId, [key]);
+      await sendHerdrCommand(target.paneId, "", [key]);
       setTimeout(() => void load(target.paneId), 300);
     } catch (err) {
       toast.error(`按键 ${label} 没发出去`, { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSending(null);
+    }
+  };
+
+  const executeCmd = async (cmd: string) => {
+    if (!cmd.trim()) return;
+    setSending("cmd");
+    try {
+      await sendHerdrCommand(target.paneId, cmd.trim(), ["Enter"]);
+      setCustomCmd("");
+      setTimeout(() => void load(target.paneId), 300);
+    } catch (err) {
+      toast.error(`发送命令失败: ${cmd}`, {
+        description: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setSending(null);
     }
@@ -212,31 +223,63 @@ export function HerdrTerminalDrawer() {
         {own?.error ? `读屏暂不可用：${own.error}` : own?.text || "正在读取…"}
       </pre>
 
-      {/* 手机端快捷命令芯片 */}
-      {isMobile && (
-        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-surface px-2.5 py-1.5 text-nano">
-          <span className="shrink-0 text-ink-faint">快捷:</span>
-          {QUICK_COMMANDS.map(({ label, cmd }) => (
+      {/* 命令行输入条：支持用户自主敲入任何命令 */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void executeCmd(customCmd);
+        }}
+        className="flex shrink-0 items-center gap-1.5 border-t border-line bg-surface-canvas px-2.5 py-1.5"
+      >
+        <input
+          type="text"
+          value={customCmd}
+          onChange={(e) => setCustomCmd(e.target.value)}
+          placeholder="输入命令，如 llm claude-opus..."
+          className="min-w-0 flex-1 rounded-field border border-line bg-surface px-2.5 py-1 font-mono text-ui text-ink outline-none focus:border-accent"
+        />
+        <Button
+          type="submit"
+          variant="secondary"
+          size="sm"
+          disabled={!customCmd.trim() || sending !== null}
+        >
+          发送
+        </Button>
+      </form>
+
+      {/* 快捷模型选择条：点击模型自动组装并填入 llm <model> */}
+      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-surface px-2.5 py-1 text-nano">
+        <span className="shrink-0 text-ink-faint">选模型:</span>
+        {providerCatalog.map((p) => {
+          const modelName = p.shortLabel || p.id.split(":").pop() || p.id;
+          return (
             <button
-              key={cmd}
+              key={p.id}
               type="button"
-              onClick={async () => {
-                try {
-                  await sendHerdrText(target.paneId, cmd, true);
-                  setTimeout(() => void load(target.paneId), 300);
-                } catch (err) {
-                  toast.error(`发送命令失败: ${cmd}`, {
-                    description: err instanceof Error ? err.message : String(err),
-                  });
-                }
-              }}
-              className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink transition-colors active:border-accent active:bg-accent-muted"
+              title={`填入: llm ${modelName}`}
+              onClick={() => setCustomCmd(`llm ${modelName}`)}
+              className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted transition-colors hover:border-accent hover:text-ink active:bg-accent-muted"
             >
-              {label}
+              llm {modelName}
             </button>
-          ))}
-        </div>
-      )}
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => void executeCmd("git status")}
+          className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted hover:border-accent hover:text-ink"
+        >
+          git status
+        </button>
+        <button
+          type="button"
+          onClick={() => void executeCmd("clear")}
+          className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted hover:border-accent hover:text-ink"
+        >
+          clear
+        </button>
+      </div>
 
       <div className="shrink-0 border-t border-line px-2.5 py-2">
         <div className="flex flex-wrap gap-1">
@@ -255,9 +298,6 @@ export function HerdrTerminalDrawer() {
             </Button>
           ))}
         </div>
-        {shell && (
-          <p className="mt-1.5 text-label text-ink-faint">纯 shell 窗格只读：Trellis 只向 agent 窗格发按键。</p>
-        )}
       </div>
     </aside>
     </>

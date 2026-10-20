@@ -397,6 +397,15 @@ export class HerdrFleetService {
     return this.client.sendText(paneId, text, submit);
   }
 
+  /** 向任意窗格（包含纯 shell）发送命令或按键（终端抽屉使用）。 */
+  command(
+    paneId: string,
+    command: string,
+    keys: string[] = ["Enter"],
+  ): Promise<Record<string, unknown>> {
+    return this.client.executeCommand(paneId, command, keys);
+  }
+
   keys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
     return this.client.sendKeys(paneId, keys);
   }

@@ -28,6 +28,7 @@ import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 import { createHerdrTab } from "@/lib/herdr-actions";
 import { HERDR_LANE_LABEL, type HerdrConsolePane } from "@/lib/herdr-console";
 import { herdrGroupName } from "@/lib/herdr-mode";
+import { formatRelativeTimeShort } from "@/lib/relative-time";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
 export function HerdrFleetPickerSheet() {
@@ -58,8 +59,12 @@ export function HerdrFleetPickerSheet() {
       if (b.lane === "need" && a.lane !== "need") return 1;
       if (a.lane === "run" && b.lane !== "run") return -1;
       if (b.lane === "run" && a.lane !== "run") return 1;
-      return 0;
+      return (b.activityAt ?? 0) - (a.activityAt ?? 0);
     });
+
+    // 挂起/冷窗格：严格按最近活跃时间倒序排
+    cold.sort((a, b) => (b.activityAt ?? 0) - (a.activityAt ?? 0));
+
     return { hotPanes: hot, coldPanes: cold };
   }, [hc.panes, current?.key]);
 
@@ -68,6 +73,12 @@ export function HerdrFleetPickerSheet() {
   const handleSelect = (pane: HerdrConsolePane) => {
     close();
     openHerdrConsolePane(pane);
+  };
+
+  const handleOpenTerminal = (e: React.MouseEvent, paneId: string) => {
+    e.stopPropagation();
+    close();
+    useHerdrConsoleStore.getState().openDrawer(paneId);
   };
 
   const handleCreate = async () => {
@@ -172,6 +183,14 @@ export function HerdrFleetPickerSheet() {
                       <span>{pane.workspaceLabel}</span>
                       <span>·</span>
                       <span>{pane.tabLabel}</span>
+                      {pane.activityAt && (
+                        <>
+                          <span>·</span>
+                          <span className="font-mono text-nano text-ink-faint">
+                            {formatRelativeTimeShort(pane.activityAt)}
+                          </span>
+                        </>
+                      )}
                       {isNeed && (
                         <>
                           <span>·</span>
@@ -187,8 +206,17 @@ export function HerdrFleetPickerSheet() {
                     </div>
                   </div>
 
-                  <div className="shrink-0 text-label text-ink-faint">
-                    {HERDR_LANE_LABEL[pane.lane]}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span className="text-label text-ink-faint">
+                      {HERDR_LANE_LABEL[pane.lane]}
+                    </span>
+                    <IconButton
+                      label="打开此窗格终端"
+                      size="sm"
+                      onClick={(e) => handleOpenTerminal(e, pane.paneId)}
+                    >
+                      <Icon icon={SquareTerminal} size="sm" />
+                    </IconButton>
                   </div>
                 </button>
               );
@@ -205,7 +233,7 @@ export function HerdrFleetPickerSheet() {
               >
                 <div className="flex items-center gap-1.5">
                   <Icon icon={Snowflake} size="sm" className="text-ink-muted" />
-                  <span>闲置与挂起窗格 ({coldPanes.length})</span>
+                  <span>按活跃时间排序的挂起窗格 ({coldPanes.length})</span>
                 </div>
                 <Icon
                   icon={showCold ? ChevronDown : ChevronRight}
@@ -217,16 +245,27 @@ export function HerdrFleetPickerSheet() {
               {showCold && (
                 <div className="mt-1 flex flex-col gap-1">
                   {coldPanes.map((pane) => (
-                    <button
+                    <div
                       key={pane.key}
-                      type="button"
                       onClick={() => handleSelect(pane)}
-                      className="flex w-full items-center gap-2.5 rounded-field px-3 py-2 text-left text-label text-ink-muted transition-colors hover:bg-surface-hover"
+                      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-field px-3 py-2 text-left text-label text-ink-muted transition-colors hover:bg-surface-hover"
                     >
                       <Icon icon={SquareTerminal} size="sm" className="shrink-0 text-ink-faint" />
-                      <span className="min-w-0 flex-1 truncate font-mono">{pane.title}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-ink">{pane.title}</span>
                       <span className="text-nano text-ink-faint">{pane.workspaceLabel}</span>
-                    </button>
+                      {pane.activityAt && (
+                        <span className="font-mono text-nano text-ink-faint">
+                          {formatRelativeTimeShort(pane.activityAt)}
+                        </span>
+                      )}
+                      <IconButton
+                        label="打开此窗格终端"
+                        size="sm"
+                        onClick={(e) => handleOpenTerminal(e, pane.paneId)}
+                      >
+                        <Icon icon={SquareTerminal} size="sm" />
+                      </IconButton>
+                    </div>
                   ))}
                 </div>
               )}

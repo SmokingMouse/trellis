@@ -417,10 +417,25 @@ export class HerdrClient {
     return this.request("pane.send_input", { pane_id: paneId, text, keys: submit ? ["Enter"] : [] });
   }
 
-  private requireAgentPane(paneId: string): HerdrPane {
+  /** 向任意窗格（包含纯 shell 窗格）直接执行命令或按键，给终端抽屉用户输入使用。 */
+  async executeCommand(
+    paneId: string,
+    text: string,
+    keys: string[] = ["Enter"],
+  ): Promise<Record<string, unknown>> {
+    this.requirePane(paneId);
+    return this.request("pane.send_input", { pane_id: paneId, text, keys });
+  }
+
+  private requirePane(paneId: string): HerdrPane {
     if (!this.enabled || !this._available) throw new HerdrUnavailableError();
     const pane = this.panes.get(paneId);
     if (!pane) throw new HerdrApiError("pane not found", "pane_not_found");
+    return pane;
+  }
+
+  private requireAgentPane(paneId: string): HerdrPane {
+    const pane = this.requirePane(paneId);
     if (!pane.agent) throw new HerdrApiError("target must be an agent pane", "not_agent_pane");
     return pane;
   }
