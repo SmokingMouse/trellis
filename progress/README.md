@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Herdr 操作台（/herdr 总览 + 窗格切换 + 就地放行）与会话置顶已上线；观察真实使用，余偏好迁服务端与设置页入口。
+Herdr 移动端体验优化（冷热会话选择器 + 新建终端 Tab + 伴侣抽屉）已上线；余观察手机端真实交互反馈。
 
 ## Goals
 
