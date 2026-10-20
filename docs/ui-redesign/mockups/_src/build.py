@@ -1,7 +1,7 @@
 import re, sys, pathlib
 
 SRC = pathlib.Path("/tmp/mockup-src")
-OUT = pathlib.Path("/Users/smokingmouse/python/learning/trellis/docs/ui-redesign/mockups")
+OUT = pathlib.Path("/Users/smokingmouse/code/agent/trellis/docs/ui-redesign/mockups")
 LUCIDE = pathlib.Path.home() / ".bun/install/cache/lucide-react@1.33.0@@registry.npmmirror.com@@@1/dist/esm/icons"
 
 tokens = (OUT / "tokens.css").read_text()

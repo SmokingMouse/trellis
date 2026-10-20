@@ -293,6 +293,10 @@
 - [fj-fix-e-3591] 根因 D：herdr 首次 attach 仍同步全量 parse（attachSession→importCliLine | accepted | reworks=0 | 2026-09-18T17:48:33+08:00 | 5c97ffbddc39
 - [fj-review-cde-4573] 异源 review C+D+E 集成分支：符号链接收口、首次 attach 异步化、git 角标节流，三者互不架空且零回 | accepted | reworks=0 | 2026-09-18T18:06:59+08:00 | cb4d6be706f5
 - [fj-fix-g-d5e9] 返工 review-cde 的 F1（canonical 回退让越界 symlink 通过包含判断，安全闸 fail-o | accepted | reworks=0 | 2026-09-18T18:20:20+08:00 | be816b4cf2a9
+- [fj-fix-startup-4c19] 启动补齐 2min 不可用窗口：给 lineage 持久化文件水位，没变过的会话零读取跳过 + 补齐限速 | accepted | reworks=0 | 2026-09-24T12:36:09+08:00 | 8f896889890d
+- [fj-review-startup-e537] 异源 review 启动补齐水位跳过 + FTS 全表扫描修复：数据层正确性、O(N²) 是否真消、零读取跳过与失效边界 | aborted | reworks=0 | 2026-09-24T12:42:38+08:00
+- [fj-review-startup-52ea] 异源 review 启动补齐水位跳过 + FTS 全表扫描修复：数据层正确性、O(N²) 是否真消、零读取跳过与失效边界 | aborted | reworks=0 | 2026-09-24T12:59:13+08:00
+- [fj-review-startup-2304] 异源 review 启动补齐水位跳过 + FTS 全表扫描修复：数据层正确性、O(N²) 是否真消、零读取跳过与失效边界 | accepted | reworks=0 | 2026-09-24T13:09:02+08:00 | beb371aba6ac
 - [fj-access-5ade] bot 对话审批：按 bot 的发送人白名单 + 管理员私聊卡片审批（文字命令兜底）+ 挂起消息放行后重放 + 设置页名 | aborted | reworks=0 | 2026-09-24T15:58:29+08:00
 - [fj-watch-a948] sub2api 巡检脚本 alert_watch.py：可行动告警规则 + 去重状态 + 号主 @ 映射 + [SILE | aborted | reworks=0 | 2026-09-24T15:58:29+08:00
 - [fj-access-3e1f] bot 对话审批：按 bot 的发送人白名单 + 管理员私聊卡片审批（文字命令兜底）+ 挂起消息放行后重放 + 设置页名 | aborted | reworks=0 | 2026-09-24T16:09:00+08:00

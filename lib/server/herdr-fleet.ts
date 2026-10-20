@@ -406,6 +406,29 @@ export class HerdrFleetService {
     return this.client.request("pane.focus", { pane_id: paneId });
   }
 
+  /** 创建一个新 Tab（可指定工作区、工作目录与标签名，默认聚焦该 Tab）。 */
+  async createTab(params: { workspaceId?: string; cwd?: string; label?: string } = {}): Promise<{
+    tabId: string;
+    paneId: string;
+    workspaceId: string;
+    label: string;
+  }> {
+    const payload: Record<string, unknown> = { focus: true };
+    if (params.workspaceId) payload.workspace_id = params.workspaceId;
+    if (params.cwd) payload.cwd = params.cwd;
+    if (params.label) payload.label = params.label;
+    const res = await this.client.request<{
+      tab: { tab_id: string; workspace_id: string; label: string };
+      root_pane?: { pane_id: string; tab_id: string; workspace_id: string };
+    }>("tab.create", payload);
+    return {
+      tabId: res.tab.tab_id,
+      paneId: res.root_pane?.pane_id ?? "",
+      workspaceId: res.tab.workspace_id,
+      label: res.tab.label,
+    };
+  }
+
   read(paneId: string): Promise<{ type: "pane_read"; read: { text: string } }> {
     return this.client.request("pane.read", {
       pane_id: paneId,

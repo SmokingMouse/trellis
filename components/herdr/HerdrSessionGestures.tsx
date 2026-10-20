@@ -85,9 +85,9 @@ export function HerdrSessionGestures({
     lingerTimer.current = setTimeout(() => setIndicator(null), INDICATOR_LINGER_MS);
   };
 
-  // ① 左右滑切窗格
+  // ① 左右滑切窗格：移动端滑切容易与代码块横滑及系统边缘误触冲突，默认停用，由顶部态势胶囊显式手动选择
   useSwipe(scrollRef, {
-    enabled,
+    enabled: false,
     bindKey,
     axis: "x",
     canStart: (e, el) => {

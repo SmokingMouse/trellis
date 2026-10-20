@@ -22,6 +22,8 @@ type State = {
   flash: Record<string, number>;
   notice: HerdrNotice | null;
   paletteOpen: boolean;
+  /** 移动端 Fleet 态势切换抽屉是否打开 */
+  fleetPickerOpen: boolean;
 };
 
 type Actions = {
@@ -32,6 +34,8 @@ type Actions = {
   dismissNotice: () => void;
   clearFlash: (key: string) => void;
   setPaletteOpen: (open: boolean) => void;
+  setFleetPickerOpen: (open: boolean) => void;
+  toggleFleetPicker: () => void;
 };
 
 export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
@@ -40,6 +44,7 @@ export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
   flash: {},
   notice: null,
   paletteOpen: false,
+  fleetPickerOpen: false,
   openDrawer: (paneId = null) => set({ drawerOpen: true, drawerPaneId: paneId }),
   closeDrawer: () => set({ drawerOpen: false, drawerPaneId: null }),
   toggleDrawer: () => (get().drawerOpen ? get().closeDrawer() : get().openDrawer(null)),
@@ -53,4 +58,6 @@ export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
       return { flash };
     }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setFleetPickerOpen: (fleetPickerOpen) => set({ fleetPickerOpen }),
+  toggleFleetPicker: () => set((s) => ({ fleetPickerOpen: !s.fleetPickerOpen })),
 }));

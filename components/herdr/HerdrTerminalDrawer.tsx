@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { RotateCcw, SquareTerminal, X } from "lucide-react";
+import { Maximize2, Minimize2, RotateCcw, SquareTerminal, X } from "lucide-react";
 import { Button, Icon, IconButton, cn, toast } from "@/components/ui";
 import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useGesturesEnabled, usePrefersReducedMotion, useSwipe } from "@/hooks/useSwipe";
-import { readHerdrPane, sendHerdrKeys } from "@/lib/herdr-actions";
+import { readHerdrPane, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 
 export const HERDR_DRAWER_WIDTH = 380;
@@ -15,14 +15,23 @@ const LINES = 200;
 
 // 底部一排按键：herdr send_keys 的键名（esc / ctrl+c 为 herdr 规范名）。
 const KEYS: { label: string; key: string; title: string }[] = [
-  { label: "1", key: "1", title: "发按键 1" },
-  { label: "2", key: "2", title: "发按键 2" },
-  { label: "3", key: "3", title: "发按键 3" },
+  { label: "Tab", key: "Tab", title: "Tab 自动补全" },
   { label: "Enter", key: "Enter", title: "回车" },
   { label: "Esc", key: "Escape", title: "Esc：取消 / 打断" },
+  { label: "Ctrl-C", key: "ctrl+c", title: "Ctrl-C：中断" },
   { label: "↑", key: "up", title: "方向键上" },
   { label: "↓", key: "down", title: "方向键下" },
-  { label: "Ctrl-C", key: "ctrl+c", title: "Ctrl-C：中断" },
+  { label: "1", key: "1", title: "发按键 1" },
+  { label: "2", key: "2", title: "发按键 2" },
+];
+
+// 快捷命令芯片：免去在手机小键盘打长命令的痛点
+const QUICK_COMMANDS: { label: string; cmd: string }[] = [
+  { label: "llm claude", cmd: "llm claude" },
+  { label: "llm codex", cmd: "llm codex" },
+  { label: "git status", cmd: "git status" },
+  { label: "bun test", cmd: "bun test" },
+  { label: "clear", cmd: "clear" },
 ];
 
 // 终端抽屉：读屏最近 200 行（打开时每 3 秒轮询、页面隐藏时暂停，另有手动刷新）+ 发按键。
@@ -35,6 +44,7 @@ export function HerdrTerminalDrawer() {
   const explicit = useHerdrConsoleStore((s) => s.drawerPaneId);
   const close = useHerdrConsoleStore((s) => s.closeDrawer);
   const isMobile = useIsMobile();
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const target = explicit
     ? hc.panes.find((p) => p.paneId === explicit && p.lane !== "off") ?? null
     : current;
@@ -150,7 +160,10 @@ export function HerdrTerminalDrawer() {
       )}
       style={
         isMobile
-          ? { top: "calc(var(--trellis-header-h) + 2.5rem)", paddingBottom: "var(--safe-bottom)" }
+          ? {
+              top: mobileExpanded ? "calc(var(--trellis-header-h) + 0.5rem)" : "48vh",
+              paddingBottom: "var(--safe-bottom)",
+            }
           : {
               top: "calc(5.25rem + var(--trellis-pending-h, 0px))",
               right: "var(--trellis-rp, 0px)",
@@ -171,6 +184,15 @@ export function HerdrTerminalDrawer() {
         <span className="min-w-0 flex-1 truncate text-label text-ink-faint">
           {target.workspaceLabel} · {target.tabLabel} · {shell ? target.title : `最近 ${LINES} 行`}
         </span>
+        {isMobile && (
+          <IconButton
+            label={mobileExpanded ? "半屏展示" : "全屏展示"}
+            size="sm"
+            onClick={() => setMobileExpanded(!mobileExpanded)}
+          >
+            <Icon icon={mobileExpanded ? Minimize2 : Maximize2} size="sm" />
+          </IconButton>
+        )}
         <IconButton label="重新读屏" size="sm" onClick={() => void load(target.paneId)} disabled={loading}>
           <Icon icon={RotateCcw} size="sm" className={loading ? "animate-spin motion-reduce:animate-none" : undefined} />
         </IconButton>
@@ -189,6 +211,33 @@ export function HerdrTerminalDrawer() {
       >
         {own?.error ? `读屏暂不可用：${own.error}` : own?.text || "正在读取…"}
       </pre>
+
+      {/* 手机端快捷命令芯片 */}
+      {isMobile && (
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-surface px-2.5 py-1.5 text-nano">
+          <span className="shrink-0 text-ink-faint">快捷:</span>
+          {QUICK_COMMANDS.map(({ label, cmd }) => (
+            <button
+              key={cmd}
+              type="button"
+              onClick={async () => {
+                try {
+                  await sendHerdrText(target.paneId, cmd, true);
+                  setTimeout(() => void load(target.paneId), 300);
+                } catch (err) {
+                  toast.error(`发送命令失败: ${cmd}`, {
+                    description: err instanceof Error ? err.message : String(err),
+                  });
+                }
+              }}
+              className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink transition-colors active:border-accent active:bg-accent-muted"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="shrink-0 border-t border-line px-2.5 py-2">
         <div className="flex flex-wrap gap-1">
           {KEYS.map(({ label, key, title }) => (

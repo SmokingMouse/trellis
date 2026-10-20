@@ -111,6 +111,12 @@ function createHarness(waitDelayMs = 0, options: {
             type: "pane_info",
             pane: { ...basePane, pane_id: "w1:p2", terminal_id: "term-2", revision: 0 },
           };
+        } else if (request.method === "tab.create") {
+          result = {
+            type: "tab_created",
+            tab: { tab_id: "w1:t2", workspace_id: "w1", label: String(request.params.label || "new-tab") },
+            root_pane: { ...basePane, pane_id: "w1:p3", tab_id: "w1:t2" },
+          };
         } else if (request.method === "pane.read") {
           // Wire shape captured by review rv_read_shape.ts / rv_readtext.ts.
           result = {
@@ -677,6 +683,25 @@ describe("HerdrFleetService", () => {
     );
     expect(focused.status).toBe(200);
     expect(harness.requests.find((request) => request.method === "pane.focus")?.params).toEqual({ pane_id: "w1:p1" });
+
+    const tabsRoute = await import("../../app/api/herdr/tabs/route");
+    const createdTab = await tabsRoute.POST(
+      new Request("http://trellis/api/herdr/tabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: "w1", label: "my-tab" }),
+      }),
+    );
+    expect(createdTab.status).toBe(200);
+    const tabJson = (await createdTab.json()) as { ok: boolean; result: { tabId: string; paneId: string } };
+    expect(tabJson.ok).toBeTrue();
+    expect(tabJson.result.tabId).toBe("w1:t2");
+    expect(tabJson.result.paneId).toBe("w1:p3");
+    expect(harness.requests.find((request) => request.method === "tab.create")?.params).toMatchObject({
+      workspace_id: "w1",
+      label: "my-tab",
+      focus: true,
+    });
 
     const reopened = await reopenRoute.POST(
       new Request(`http://trellis/api/herdr/sessions/${harness.sessionId}/reopen`, {

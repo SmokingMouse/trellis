@@ -28,6 +28,11 @@ seats:
     runner: codex-tui
     model: opus
     permission: full
+  reviewer-oss:                 # 2026-09-24：cpa codex 号池冷却到 09-26，用 gpt-oss-120b-medium 顶异源位
+    kind: claude
+    runner: native
+    permission: full
+    env_file: ~/.config/herdr-leader/presets/gpt-oss.env
   reviewer-codex:               # 网关 codex 恢复后可切回
     kind: codex
     runner: codex-tui

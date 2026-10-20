@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bookmark,
   CalendarClock,
+  ChevronDown,
   ChevronRight,
   LayoutGrid,
   Download,
@@ -12,6 +13,7 @@ import {
   Menu,
   NotebookPen,
   PanelLeftOpen,
+  Plus,
   Search,
   Settings,
   ShieldCheck,
@@ -34,7 +36,10 @@ import {
   Kbd,
   Modal,
   Popover,
+  Spinner,
+  StatusDot,
   Tooltip,
+  toast,
 } from "@/components/ui";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
 import {
@@ -42,6 +47,10 @@ import {
   useIsNarrowViewport,
 } from "@/hooks/useIsMobile";
 import { useScrollHideState } from "@/hooks/useScrollHide";
+import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
+import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
+import { createHerdrTab } from "@/lib/herdr-actions";
+import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { formatTokens } from "@/lib/format-tokens";
 import { contextWindowFor } from "@/lib/llm";
 import { ctxTokensOf, findLineageCtxTurn } from "@/lib/context-usage";
@@ -201,6 +210,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setWorkspaceFilesOpen = useSessionStore((s) => s.setWorkspaceFilesOpen);
   const provider = useSessionStore((s) => s.provider);
+  const hc = useHerdrConsole();
+  const currentHerdrPane = useCurrentHerdrPane(hc.panes);
+  const toggleFleetPicker = useHerdrConsoleStore((s) => s.toggleFleetPicker);
   const nodeCount = Object.keys(nodes).length;
   const contextWindow = contextWindowFor(provider);
   // 四个桶各自累加。放 useMemo 而不是 Zustand selector：selector 每次返回新对象
@@ -292,14 +304,65 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           >
             <Icon icon={Menu} size="lg" />
           </IconButton>
-          <div className="min-w-0 flex-1 px-1 text-center">
-            <span
-              className="block truncate text-sm font-medium text-ink-strong"
-              title={title}
-            >
-              {title}
-            </span>
+          <div className="flex min-w-0 flex-1 items-center justify-center px-1">
+            {hc.available && (herdrOpen || currentHerdrPane) ? (
+              <button
+                type="button"
+                data-mobile-target="herdr-fleet-picker-btn"
+                onClick={toggleFleetPicker}
+                className="flex max-w-[210px] items-center gap-1.5 rounded-full border border-line-strong bg-surface-raised px-2.5 py-1 text-label font-medium text-ink-strong active:bg-surface-muted"
+              >
+                {currentHerdrPane ? (
+                  currentHerdrPane.lane === "need" ? (
+                    <StatusDot tone="warn" className="ring-2 ring-warn-muted" />
+                  ) : currentHerdrPane.lane === "run" ? (
+                    <Spinner size="sm" label={null} />
+                  ) : (
+                    <StatusDot tone="idle" />
+                  )
+                ) : (
+                  <StatusDot tone="neutral" />
+                )}
+                <span className="truncate">
+                  {currentHerdrPane
+                    ? `${currentHerdrPane.tabLabel} · ${currentHerdrPane.title}`
+                    : "Herdr 总览"}
+                </span>
+                <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
+              </button>
+            ) : (
+              <span
+                className="block truncate text-sm font-medium text-ink-strong"
+                title={title}
+              >
+                {title}
+              </span>
+            )}
           </div>
+          {hc.available && (
+            <IconButton
+              label="新建终端 Tab"
+              onClick={async () => {
+                try {
+                  const res = await createHerdrTab({
+                    workspaceId: currentHerdrPane?.workspaceId,
+                    cwd: currentHerdrPane?.cwd ?? undefined,
+                  });
+                  toast.success("已创建新终端 Tab");
+                  refreshHerdrFleet();
+                  if (res.paneId) {
+                    useHerdrConsoleStore.getState().openDrawer(res.paneId);
+                  }
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "创建失败");
+                }
+              }}
+              className="h-11 w-11 p-0"
+              tooltip={false}
+            >
+              <Icon icon={Plus} size="md" />
+            </IconButton>
+          )}
           <IconButton
             label="更多功能"
             data-mobile-target="header-overflow"

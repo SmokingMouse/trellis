@@ -48,3 +48,5 @@ id 只用 [a-z0-9-]；after 写依赖项的 id（都验收通过才可起）；k
 - [ ] fix-startup: 启动补齐 2min 不可用窗口：给 lineage 持久化文件水位，没变过的会话零读取跳过 + 补齐限速 | seat: worker
   cid: fj-fix-startup-4c19
   devbox e80951a94 实测：重启后约 2min 事件循环占满、curl 整批超时；稳态正常。补齐已异步，问题是总 CPU 体量。
+- [ ] review-startup: 异源 review 启动补齐水位跳过 + FTS 全表扫描修复：数据层正确性、O(N²) 是否真消、零读取跳过与失效边界 | after: fix-startup | mode: readonly | seat: reviewer-codex | keep-seat
+  cid: fj-review-startup-2304

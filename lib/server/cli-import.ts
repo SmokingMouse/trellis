@@ -332,18 +332,41 @@ export function* reduceCliEntries(
     });
   }
 
-  // 剪掉不承载任何东西的兜底 turn。兜底起点只是"内容的临时挂靠点"，不是用户
-  // 真提过的问题；既没回复也没工具时它纯粹是树里的空壳。子 turn 提升到被剪者的
-  // parent（直接删会留下断链的 parentId —— 实测会造出 9 个孤儿）。严格 turn 不
-  // 参与剪枝：那是真用户提问，还没答上也得显示（正在跑的末轮就长这样）。
+  // 剪掉不承载任何东西的 turn：
+  // 1. 兜底起点只是"内容的临时挂靠点"，不是用户真提过的问题；既没回复也没工具时它纯粹是树里的空壳。
+  //    子 turn 提升到被剪者的 parent（直接删会留下断链的 parentId —— 实测会造出 9 个孤儿）。
+  // 2. 被用户取消/重新发送废弃的空 user turn：无回复、无工具调用、无子 turn，
+  //    且同 parent 下存在更晚的兄弟 turn（或整个会话后续已有其它进展），证明已被后续输入取代。
+  //    若不剪掉，它们会作为 siblingIndex: 0 抢占主线性 thread，把真正带回复的后续分支挤到折叠里。
+  //    注意：严格 turn 若是整个会话的最末轮（正在跑的末轮）绝不剪，那是真提问还没答上。
+  const childCountByParent = new Map<string, number>();
+  const latestSiblingTimeByParent = new Map<string, number>();
+  for (const t of turns) {
+    if (t.parentId) {
+      childCountByParent.set(t.parentId, (childCountByParent.get(t.parentId) ?? 0) + 1);
+      const prevMax = latestSiblingTimeByParent.get(t.parentId) ?? -Infinity;
+      if (t.createdAt > prevMax) latestSiblingTimeByParent.set(t.parentId, t.createdAt);
+    }
+  }
+
+  const lastTurn = turns[turns.length - 1];
   const prunable = new Set(
     turns
-      .filter(
-        (t) =>
-          fallbackStartIds.has(t.id) &&
-          !t.response.trim() &&
-          t.toolCalls.length === 0,
-      )
+      .filter((t) => {
+        const isEmpty = !t.response.trim() && t.toolCalls.length === 0;
+        if (!isEmpty) return false;
+        // 兜底 turn 只要空就剪
+        if (fallbackStartIds.has(t.id)) return true;
+        // 严格 user turn：必须无子节点，且不是会话最末轮，且同一 parent 下有更新的兄弟（被取代）
+        const hasChildren = (childCountByParent.get(t.id) ?? 0) > 0;
+        if (hasChildren) return false;
+        if (t.id === lastTurn?.id) return false;
+        if (t.parentId) {
+          const latestSibling = latestSiblingTimeByParent.get(t.parentId) ?? t.createdAt;
+          if (latestSibling > t.createdAt) return true;
+        }
+        return false;
+      })
       .map((t) => t.id),
   );
   let kept = turns;

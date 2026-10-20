@@ -66,6 +66,25 @@ export async function readHerdrPane(paneId: string, lines = 40): Promise<string>
   return ((await response.json()) as { text?: string }).text ?? "";
 }
 
+export async function createHerdrTab(options?: {
+  workspaceId?: string;
+  cwd?: string;
+  label?: string;
+}): Promise<{ tabId: string; paneId: string; workspaceId: string; label: string }> {
+  const response = await ensureOk(
+    await fetch("/api/herdr/tabs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options ?? {}),
+    }),
+  );
+  const data = (await response.json()) as {
+    ok: boolean;
+    result: { tabId: string; paneId: string; workspaceId: string; label: string };
+  };
+  return data.result;
+}
+
 // 悬停预览的客户端缓存：同一窗格 5 秒内只读一次、并发悬停共用一个请求，
 // 不让鼠标在卡片网格上扫一遍就打出一串 socket 读。
 const PEEK_TTL_MS = 5_000;
