@@ -1,16 +1,13 @@
 # 2026-10-20 Herdr 移动端体验优化上线
 
 ## 做了什么
-- 新增 POST /api/herdr/tabs 服务端接口，支持从移动端新建 Tab（指定 workspace / cwd / label 并自动聚焦）
-- 移动端 Header 增加 Herdr 态势胶囊与快速建 Tab 按钮，点击呼出 FleetPickerSheet，冷热分流展示（🔥 活跃并行 vs ❄️ 闲置）
-- 升级 HerdrTerminalDrawer 终端抽屉：支持半屏/全屏伸缩切换，增加常用命令快捷芯片（llm claude 等）与 Tab 补全键；停用横向误触滑切；原子上线 2f63220
-- 解决终端抽屉入口缺失：移动端 Header 新增常驻终端图标按钮，态势面板每行增设直达终端入口
-- 开放任意命令输入与模型自动填入：终端抽屉新增自定义命令行输入框与选模型填入芯片（从 providerCatalog 读取）
-- 修复新建 Shell 无法执行命令的问题：新增 POST /api/herdr/panes/[id]/command 解除纯 shell 窗格限制；挂起窗格严格按 activityAt 倒序排列；更新上线 81cece4
+- 新增 Tab 创建 API 与 command 通信接口，解除 shell 窗格输入限制；移动端 Header 增加态势胶囊与快速建 Tab
+- 新增 FleetPickerSheet 区分活跃与冷窗格，挂起按活跃时间倒排；抽屉支持自定义命令与选模型自动填入
+- 终端智能重排：自研 HerdrTerminalReflow，超长分割线折叠为 1px 细线，自动折行消灭横滚，语义化高亮状态；上线 38a1c04
 
 ## 决定
-- [decision] 移动端以 Trellis 原生 LinearThreadView 阅读体验为主体，终端以伴侣抽屉形式按需呼出；拒绝纯 CLI 化带来的字符矩阵与缩放拖拽硬伤
-- [decision] 窗格切换收敛为显式态势胶囊手动选择；停用屏幕横向滑动手势，彻底消除与代码块横滑及 iOS 边缘返回的冲突
+- [decision] 移动端以 Trellis 结构化阅读为主体，终端以伴侣抽屉形式按需呼出；拒绝纯 CLI 字符矩阵
+- [decision] 终端输出默认语义重排并提供原始切换，彻底解决移动端横向溢出与阅读割裂
 
 ## Next
-在手机端真实使用一周，观察新 Tab 创建频率与终端抽屉使用粘性，按需增加一键派发模板。
+在手机端实测重排视图与模型快捷启动，按需优化自定义命令历史记录。
