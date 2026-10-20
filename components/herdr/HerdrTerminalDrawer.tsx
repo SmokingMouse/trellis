@@ -126,7 +126,7 @@ export function HerdrTerminalDrawer() {
     };
   }, [visible, isMobile]);
 
-  if (!visible || !target) return null;
+  if (!visible || !target || isMobile) return null;
   const own = screen?.paneId === target.paneId ? screen : null;
   const shell = target.lane === "shell";
   const keysDisabled = hc.readOnly || !hc.available;

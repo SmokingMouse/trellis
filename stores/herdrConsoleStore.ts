@@ -24,6 +24,8 @@ type State = {
   paletteOpen: boolean;
   /** 移动端 Fleet 态势切换抽屉是否打开 */
   fleetPickerOpen: boolean;
+  /** 移动端打平全屏终端工作台是否激活 */
+  mobileTerminalView: boolean;
 };
 
 type Actions = {
@@ -36,6 +38,8 @@ type Actions = {
   setPaletteOpen: (open: boolean) => void;
   setFleetPickerOpen: (open: boolean) => void;
   toggleFleetPicker: () => void;
+  setMobileTerminalView: (open: boolean) => void;
+  toggleMobileTerminalView: () => void;
 };
 
 export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
@@ -45,9 +49,15 @@ export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
   notice: null,
   paletteOpen: false,
   fleetPickerOpen: false,
-  openDrawer: (paneId = null) => set({ drawerOpen: true, drawerPaneId: paneId }),
-  closeDrawer: () => set({ drawerOpen: false, drawerPaneId: null }),
-  toggleDrawer: () => (get().drawerOpen ? get().closeDrawer() : get().openDrawer(null)),
+  mobileTerminalView: false,
+  openDrawer: (paneId = null) =>
+    set({ drawerOpen: true, drawerPaneId: paneId, mobileTerminalView: true }),
+  closeDrawer: () =>
+    set({ drawerOpen: false, drawerPaneId: null, mobileTerminalView: false }),
+  toggleDrawer: () =>
+    get().drawerOpen || get().mobileTerminalView
+      ? get().closeDrawer()
+      : get().openDrawer(null),
   raise: (notice) => set((s) => ({ notice, flash: { ...s.flash, [notice.key]: notice.at } })),
   dismissNotice: () => set({ notice: null }),
   clearFlash: (key) =>
@@ -60,4 +70,7 @@ export const useHerdrConsoleStore = create<State & Actions>((set, get) => ({
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setFleetPickerOpen: (fleetPickerOpen) => set({ fleetPickerOpen }),
   toggleFleetPicker: () => set((s) => ({ fleetPickerOpen: !s.fleetPickerOpen })),
+  setMobileTerminalView: (mobileTerminalView) => set({ mobileTerminalView }),
+  toggleMobileTerminalView: () =>
+    set((s) => ({ mobileTerminalView: !s.mobileTerminalView })),
 }));

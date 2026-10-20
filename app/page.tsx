@@ -49,6 +49,7 @@ import { useHerdrShortcuts } from "@/hooks/useHerdrShortcuts";
 import { HerdrAttentionNotifier } from "@/components/herdr/HerdrAttentionNotifier";
 import { HerdrTerminalDrawer } from "@/components/herdr/HerdrTerminalDrawer";
 import { HerdrFleetPickerSheet } from "@/components/herdr/HerdrFleetPickerSheet";
+import { HerdrMobileWorkbench } from "@/components/herdr/HerdrMobileWorkbench";
 import { MobileEdgeSwipe } from "@/components/MobileEdgeSwipe";
 import { HerdrJumpPalette } from "@/components/herdr/HerdrJumpPalette";
 import { useAppMode } from "@/hooks/useAppMode";
@@ -289,6 +290,7 @@ export default function Home() {
       <HerdrAttentionNotifier />
       <HerdrTerminalDrawer />
       <HerdrFleetPickerSheet />
+      <HerdrMobileWorkbench />
       <MobileEdgeSwipe />
       {/* S1 P1：工作区终端。自己判断有没有 workspace（chat 会话直接返回 null），
           所以不在这里加条件 —— 它还要负责在没打开时渲染右下角那个「▲ 终端」把手。 */}

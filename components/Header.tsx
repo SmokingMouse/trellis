@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Keyboard,
   Menu,
+  MessagesSquare,
   NotebookPen,
   PanelLeftOpen,
   Plus,
@@ -40,6 +41,7 @@ import {
   Spinner,
   StatusDot,
   Tooltip,
+  cn,
   toast,
 } from "@/components/ui";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
@@ -214,6 +216,8 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const hc = useHerdrConsole();
   const currentHerdrPane = useCurrentHerdrPane(hc.panes);
   const toggleFleetPicker = useHerdrConsoleStore((s) => s.toggleFleetPicker);
+  const mobileTerminalView = useHerdrConsoleStore((s) => s.mobileTerminalView);
+  const toggleMobileTerminalView = useHerdrConsoleStore((s) => s.toggleMobileTerminalView);
   const nodeCount = Object.keys(nodes).length;
   const contextWindow = contextWindowFor(provider);
   // 四个桶各自累加。放 useMemo 而不是 Zustand selector：selector 每次返回新对象
@@ -343,13 +347,13 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           {hc.available && (
             <>
               <IconButton
-                label="终端抽屉"
+                label={mobileTerminalView ? "切换到对话" : "切换到终端工作台"}
                 data-mobile-target="header-terminal-toggle"
-                onClick={() => useHerdrConsoleStore.getState().toggleDrawer()}
-                className="h-11 w-11 p-0"
+                onClick={toggleMobileTerminalView}
+                className={cn("h-11 w-11 p-0", mobileTerminalView && "text-accent")}
                 tooltip={false}
               >
-                <Icon icon={SquareTerminal} size="md" />
+                <Icon icon={mobileTerminalView ? MessagesSquare : SquareTerminal} size="md" />
               </IconButton>
               <IconButton
                 label="新建终端 Tab"
