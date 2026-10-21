@@ -134,6 +134,21 @@ describe("ordering", () => {
     expect(lanes.idle.map((p) => p.key)).toEqual(["d", "c"]);
   });
 
+  test("cold pane ordering prefers activityAt when hook is missing", () => {
+    const coldPanes: HerdrConsolePane[] = [
+      { ...byKey("w5:p1"), key: "c1", paneId: "w5:p1", activityAt: NOW - 50_000 },
+      { ...byKey("w5:p2"), key: "c2", paneId: "w5:p2", activityAt: NOW - 10_000 },
+      { ...byKey("w5:p1"), key: "c3", paneId: "w5:p3", activityAt: null },
+    ];
+    coldPanes.sort((a, b) => {
+      const atA = a.activityAt ?? 0;
+      const atB = b.activityAt ?? 0;
+      if (atA !== atB) return atB - atA;
+      return a.paneId.localeCompare(b.paneId);
+    });
+    expect(coldPanes.map((p) => p.key)).toEqual(["c2", "c1", "c3"]);
+  });
+
   test("next need wraps after current and skips it; step does not wrap", () => {
     const strip = herdrStripPanes(panes);
     expect(nextNeedPane(strip, "w4:p1")?.key).toBe("w3:p2");

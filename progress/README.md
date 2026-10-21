@@ -1,7 +1,7 @@
 # Trellis Progress
 
 ## Current Focus
-Herdr 移动端体验优化（冷热会话选择器 + 新建终端 Tab + 伴侣抽屉）已上线；余观察手机端真实交互反馈。
+主页 Herdr 挂起回复归位至「等你处理」（行内回复+终端抽屉）与冷 Tab 活跃时间排序修复已落地。
 
 ## Goals
 

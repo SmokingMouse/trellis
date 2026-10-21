@@ -61,6 +61,7 @@ export type HerdrSessionBinding = {
   agentStatus: string;
   revision: number;
   alive: boolean;
+  firstSeenAt?: number;
   lastSeenAt?: number;
 };
 

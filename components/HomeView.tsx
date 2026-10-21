@@ -12,6 +12,7 @@ import {
   Plug,
   Scale,
   Sprout,
+  Terminal,
 } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { QuestionInput, type QuestionInputHandle } from "@/components/QuestionInput";
@@ -25,14 +26,24 @@ import {
   DropdownMenuTrigger,
   Dots,
   Icon,
+  Input,
   Skeleton,
   StatusDot,
   Tooltip,
   cn,
+  toast,
   type StatusTone,
 } from "@/components/ui";
 import { usePendingActions } from "@/hooks/usePendingActions";
-import { useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { useHerdrFleet, refreshHerdrFleet } from "@/hooks/useHerdrFleet";
+import { openHerdrConsolePane, useHerdrConsole } from "@/hooks/useHerdrConsole";
+import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
+import {
+  herdrAttentionKind,
+  herdrAttentionText,
+  type HerdrConsolePane,
+} from "@/lib/herdr-console";
+import { sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
 import { buildHerdrWorkspaceViews, type HerdrUiStatus } from "@/lib/herdr-ui";
 import { pendingKey } from "@/lib/pending";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
@@ -160,25 +171,32 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
     () => [...runningIds].map((id) => byId.get(id)).filter((s): s is Session => Boolean(s)),
     [runningIds, byId],
   );
-  // 在线坐席：只逐行列「在干活 / 等你」的，空闲的收成一行计数（常驻坐席动辄十几个，
-  // 全列出来会把真正在跑的淹掉）。已经作为「生成中会话」列出的不重复列。
-  const { herdrPanes, idlePaneCount } = useMemo(() => {
-    const alive = buildHerdrWorkspaceViews(fleet, hooks)
-      .flatMap((w) => w.panes)
-      .filter((p) => {
-        const sid = p.binding?.trellisSessionId ?? p.binding?.sessionId;
-        return p.alive && !(sid && runningIds.has(sid));
-      });
-    const busy = alive.filter((p) => p.status === "working" || p.status === "waiting" || p.status === "blocked");
-    return { herdrPanes: busy, idlePaneCount: alive.length - busy.length };
-  }, [fleet, hooks, runningIds]);
+
+  const hc = useHerdrConsole();
+  const waitingHerdrPanes = useMemo(() => {
+    if (!hc.available) return [];
+    return hc.panes.filter((p) => p.lane === "need");
+  }, [hc.available, hc.panes]);
+
+  const runningHerdrPanes = useMemo(() => {
+    if (!hc.available) return [];
+    return hc.panes.filter((p) => p.lane === "run" && !(p.sessionId && runningIds.has(p.sessionId)));
+  }, [hc.available, hc.panes, runningIds]);
+
+  const idlePaneCount = useMemo(() => {
+    if (!hc.available) return 0;
+    return hc.panes.filter((p) => p.lane === "idle").length;
+  }, [hc.available, hc.panes]);
 
   const upcoming = useMemo(() => upcomingTasks(tasks ?? [], now), [tasks, now]);
   const problem = useMemo(() => latestProblemRun(tasks ?? []), [tasks]);
 
+  const totalPending = pending.length + waitingHerdrPanes.length;
+  const totalRunning = runningSessions.length + runningHerdrPanes.length;
+
   const loaded = data !== null && tasks !== null;
   const isEmpty =
-    loaded && data.sessions.length === 0 && tasks.length === 0 && pending.length === 0;
+    loaded && data.sessions.length === 0 && tasks.length === 0 && totalPending === 0;
 
   const open = (id: string) => void previewSession(id);
   const showAll = () => {
@@ -294,15 +312,15 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
           <Welcome onPick={(text) => inputRef.current?.fill(text)} />
         ) : (
           <>
-            {pending.length > 0 && (
-              <HomeSection id="pending" title="等你处理" count={pending.length} tone="warn">
+            {totalPending > 0 && (
+              <HomeSection id="pending" title="等你处理" count={totalPending} tone="warn">
                 {pending.map((item) => (
                   <li
                     key={pendingKey(item)}
                     data-home-pending={pendingKey(item)}
                     className="flex min-h-9 items-center gap-2.5 rounded-md px-2 py-1 max-md:flex-wrap max-md:py-2"
                   >
-                    <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano text-warn-ink">
+                    <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano text-warn-ink font-medium">
                       {item.kind === "approval" ? "审批" : "提问"}
                     </span>
                     <span className="max-w-48 shrink-0 truncate text-ui font-medium text-ink" title={item.sessionTitle}>
@@ -325,15 +343,18 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                     </span>
                   </li>
                 ))}
+                {waitingHerdrPanes.map((pane) => (
+                  <HomeHerdrPendingItem key={pane.key} pane={pane} now={now.getTime()} />
+                ))}
                 {pendingError && <li role="alert" className="px-2 py-1.5 text-ui text-danger-ink">{pendingError}</li>}
               </HomeSection>
             )}
 
-            {(runningSessions.length > 0 || herdrPanes.length > 0) && (
+            {totalRunning > 0 && (
               <HomeSection
                 id="running"
                 title="正在运行"
-                count={runningSessions.length + herdrPanes.length}
+                count={totalRunning}
                 action={idlePaneCount > 0 ? <Meta className="px-2">另有 {idlePaneCount} 个 Herdr 坐席在线空闲</Meta> : undefined}
               >
                 {runningSessions.map((s) => (
@@ -344,25 +365,22 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                     <Meta className="w-14 text-right">生成中</Meta>
                   </RowButton>
                 ))}
-                {herdrPanes.map((pane) => {
-                  const sid = pane.binding?.trellisSessionId ?? pane.binding?.sessionId;
-                  const target = sid && byId.has(sid) ? sid : null;
+                {runningHerdrPanes.map((pane) => {
+                  const target = pane.sessionId && byId.has(pane.sessionId) ? pane.sessionId : null;
                   const body = (
                     <>
                       <span className="grid w-4 shrink-0 place-items-center">
-                        <StatusDot tone={herdrTone(pane.status)} label={HERDR_STATUS_TEXT[pane.status]} />
+                        <StatusDot tone="live" label="工作中" />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{target ? byId.get(target)!.title : pane.label}</span>
-                      <Meta className="max-md:hidden">Herdr · {pane.workspaceLabel}</Meta>
-                      <Meta className={cn("w-14 text-right", (pane.status === "waiting" || pane.status === "blocked") && "text-warn-ink")}>
-                        {HERDR_STATUS_TEXT[pane.status]}
-                      </Meta>
+                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{target ? byId.get(target)!.title : pane.title}</span>
+                      <Meta className="max-md:hidden">Herdr · {pane.workspaceLabel} · {pane.tabLabel}</Meta>
+                      <Meta className="w-14 text-right">工作中</Meta>
                     </>
                   );
-                  return target ? (
-                    <RowButton key={pane.paneId} data-home-herdr={pane.paneId} onClick={() => open(target)}>{body}</RowButton>
-                  ) : (
-                    <li key={pane.paneId} data-home-herdr={pane.paneId} className={ROW_CLASS} title="这个坐席还没有对应的 Trellis 会话">{body}</li>
+                  return (
+                    <RowButton key={pane.key} data-home-herdr={pane.paneId} onClick={() => openHerdrConsolePane(pane)}>
+                      {body}
+                    </RowButton>
                   );
                 })}
               </HomeSection>
@@ -573,4 +591,115 @@ function herdrTone(status: HerdrUiStatus): StatusTone {
   if (status === "waiting" || status === "blocked") return "warn";
   if (status === "done") return "positive";
   return "neutral";
+}
+
+function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: number }) {
+  const kind = herdrAttentionKind(pane);
+  const text = herdrAttentionText(pane);
+  const [replying, setReplying] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (replying) inputRef.current?.focus();
+  }, [replying]);
+
+  const send = async () => {
+    const val = replyText.trim();
+    if (!val || sending) return;
+    setSending(true);
+    try {
+      await sendHerdrKeys(pane.paneId, ["Escape"]);
+      const result = await sendHerdrInput(pane.paneId, val);
+      toast.success(result.status === "queued" ? `已排队，空闲后发送至 ${pane.workspaceLabel}` : `已发送至 ${pane.workspaceLabel}`);
+      setReplyText("");
+      setReplying(false);
+      void refreshHerdrFleet();
+    } catch (err) {
+      toast.error("发送失败", { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleOpenTerminal = () => {
+    useHerdrConsoleStore.getState().openDrawer(pane.paneId);
+  };
+
+  return (
+    <li
+      data-home-herdr-pending={pane.paneId}
+      className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-surface-hover/40 max-md:py-2.5"
+    >
+      <div className="flex min-h-7 items-center gap-2.5 max-md:flex-wrap">
+        <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano font-medium text-warn-ink">
+          {kind === "approval" ? "审批" : "提问"}
+        </span>
+        <button
+          type="button"
+          onClick={() => openHerdrConsolePane(pane)}
+          className="max-w-48 shrink-0 truncate text-left text-ui font-medium text-ink hover:underline"
+          title={`${pane.title} (${pane.workspaceLabel} · ${pane.tabLabel})`}
+        >
+          {pane.title}
+        </button>
+        <span className="min-w-0 flex-1 truncate text-ui text-ink-muted max-md:basis-full" title={text}>
+          {text}
+        </span>
+        {pane.activityAt && (
+          <span className="shrink-0 text-label tabular-nums text-warn-ink/80">
+            {formatRelativeTimeShort(pane.activityAt, now)}
+          </span>
+        )}
+        <span className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setReplying((v) => !v)}
+            title="行内回复"
+          >
+            {replying ? "收起" : "回复"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleOpenTerminal}
+            title="在终端抽屉中打开"
+          >
+            <Icon icon={Terminal} size="sm" className="mr-1 text-ink-faint" />
+            终端
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => openHerdrConsolePane(pane)}
+          >
+            {pane.sessionId ? "去处理" : "直达"}
+          </Button>
+        </span>
+      </div>
+      {replying && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+          className="flex items-center gap-2 pb-1 pl-7 pr-1 pt-0.5"
+        >
+          <input
+            ref={inputRef}
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            placeholder={`回复 ${pane.workspaceLabel} · ${pane.tabLabel}，回车直接发送...`}
+            className="flex-1 rounded-md border border-line bg-surface px-2.5 py-1 text-ui text-ink outline-none transition-colors focus:border-accent"
+            disabled={sending}
+          />
+          <Button size="sm" variant="primary" type="submit" disabled={!replyText.trim() || sending}>
+            {sending ? "发送中..." : "发送"}
+          </Button>
+        </form>
+      )}
+    </li>
+  );
 }

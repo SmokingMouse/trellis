@@ -1,3 +1,4 @@
+// ui-guard-allow-file(hex): terminal high contrast theme
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";

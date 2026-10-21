@@ -63,7 +63,12 @@ export function HerdrFleetPickerSheet() {
     });
 
     // 挂起/冷窗格：严格按最近活跃时间倒序排
-    cold.sort((a, b) => (b.activityAt ?? 0) - (a.activityAt ?? 0));
+    cold.sort((a, b) => {
+      const atA = a.activityAt ?? 0;
+      const atB = b.activityAt ?? 0;
+      if (atA !== atB) return atB - atA;
+      return a.paneId.localeCompare(b.paneId);
+    });
 
     return { hotPanes: hot, coldPanes: cold };
   }, [hc.panes, current?.key]);

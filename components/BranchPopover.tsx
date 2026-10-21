@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { SelectionInfo } from "@/hooks/useSelectionWithin";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -10,6 +11,7 @@ import {
 import { useIsMobile, useIsNarrowViewport } from "@/hooks/useIsMobile";
 import { Ellipsis, GitBranch, Paperclip, Pin } from "lucide-react";
 import { Button, Icon, IconButton } from "@/components/ui";
+import { computeBranchPopoverPosition } from "@/lib/branch-popover-layout";
 
 type Props = {
   selection: SelectionInfo;
@@ -113,6 +115,11 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     return () => cssApi.highlights?.delete("branch-source");
   }, [expanded, selection.range]);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const { doneAttachments, hasUploading } = att;
 
   const submit = async () => {
@@ -130,25 +137,60 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     streamBranch(selection.nodeId, text, anchor, opts);
   };
 
-  // Expanded popover height grows with pending attachment previews so it
-  // doesn't clip behind the textarea / clobber screen-edge math.
-  const pendingHeight = att.pending.length > 0 ? 96 : 0;
-  const popoverHeight = expanded ? 130 + pendingHeight : 38;
-  const top = Math.max(8, selection.rect.top - popoverHeight - 8);
-  const left = selection.rect.left + selection.rect.width / 2;
-  const positionStyle = isNarrowViewport
-    ? {
-        right: 8,
-        bottom: "calc(var(--safe-bottom) + 8px)",
-        left: 8,
-      }
-    : { top, left, transform: "translateX(-50%)" };
+  const sidebarWidth =
+    typeof window !== "undefined"
+      ? Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--trellis-sb",
+          ),
+        ) || 0
+      : 0;
+  const rightPanelsWidth =
+    typeof window !== "undefined"
+      ? (Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--trellis-rp",
+          ),
+        ) || 0) +
+        (Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--trellis-herdr-dw",
+          ),
+        ) || 0)
+      : 0;
+  const topFence =
+    typeof window !== "undefined"
+      ? Math.max(
+          (Number.parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue(
+              "--trellis-header-h",
+            ),
+          ) || 48) + 38,
+          92,
+        )
+      : 92;
 
-  return (
+  const positionStyle = computeBranchPopoverPosition({
+    selectionRect: selection.rect,
+    expanded,
+    viewport: {
+      width: typeof window !== "undefined" ? window.innerWidth : 1200,
+      height: typeof window !== "undefined" ? window.innerHeight : 800,
+    },
+    sidebarWidth,
+    rightPanelsWidth,
+    topFence,
+    isNarrowViewport,
+    pendingAttachmentsCount: att.pending.length,
+  });
+
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       data-branch-popover
       className="fixed z-50"
-      style={{ ...positionStyle, maxWidth: "calc(100vw - 16px)" }}
+      style={positionStyle}
       // Collapsed: swallow mousedown so clicking the ⌘K / note buttons keeps
       // the document text selection alive (the buttons act on it). Expanded:
       // the selection is already snapshotted into `selection.text`, and this
@@ -159,11 +201,11 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
     >
       {expanded ? (
         <div
-          className="bg-surface-raised border border-line rounded-overlay shadow-pop overflow-hidden"
-          style={{ width: "min(420px, calc(100vw - 16px))" }}
+          className="bg-surface-raised border border-line rounded-overlay shadow-pop overflow-hidden flex flex-col"
+          style={{ width: "100%" }}
         >
-          <div className="px-3 py-1.5 bg-fork-muted border-b border-fork-line text-label text-fork-ink flex items-center gap-1.5 min-w-0">
-            <Icon icon={GitBranch} size="sm" className="text-fork" />
+          <div className="px-3 py-1.5 bg-fork-muted border-b border-fork-line text-label text-fork-ink flex items-center gap-1.5 min-w-0 shrink-0">
+            <Icon icon={GitBranch} size="sm" className="text-fork shrink-0" />
             <span className="truncate">
               针对「
               <span className="font-medium">
@@ -175,7 +217,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
             </span>
           </div>
           {att.pending.length > 0 && (
-            <div className="px-3 pt-2">
+            <div className="px-3 pt-2 shrink-0">
               <AttachmentPreview
                 pending={att.pending}
                 onRemove={att.remove}
@@ -323,6 +365,7 @@ export function BranchPopover({ selection, expanded, onExpand, onClose }: Props)
           )}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

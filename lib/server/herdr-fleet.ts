@@ -333,6 +333,18 @@ export class HerdrFleetService {
   } {
     const state = this.client.state;
     const sessions = listHerdrBindings(this.options.db);
+    for (const binding of sessions) {
+      if (binding.transcriptPath) {
+        try {
+          const stat = statSync(binding.transcriptPath);
+          if (stat && stat.mtimeMs > (binding.lastSeenAt || 0)) {
+            binding.lastSeenAt = Math.round(stat.mtimeMs);
+          }
+        } catch {
+          // ignore transient filesystem misses
+        }
+      }
+    }
     const prompts = this.transcriptPromptsByPane(sessions);
     const models = this.transcriptModelsByPane(sessions);
     const workspaces = state.workspaces.map((workspace) => ({

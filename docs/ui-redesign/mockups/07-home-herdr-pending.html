@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trellis 主页 Herdr 待回复 UI 重设计 & 冷 Tab 排序优化方案</title>
+  <style>
+    :root {
+      --surface-canvas: #0b0b0c;
+      --surface: #121215;
+      --surface-raised: #18181c;
+      --surface-muted: #202026;
+      --surface-hover: rgba(255, 255, 255, 0.05);
+      --line: rgba(255, 255, 255, 0.1);
+      --line-strong: rgba(255, 255, 255, 0.18);
+      --line-faint: rgba(255, 255, 255, 0.05);
+      --ink: #e4e4e7;
+      --ink-strong: #fafafa;
+      --ink-muted: #a1a1aa;
+      --ink-faint: #71717a;
+      --accent: oklch(62% 0.16 277);
+      --accent-muted: oklch(25% 0.04 277);
+      --accent-line: oklch(45% 0.08 277);
+      --warn: oklch(78% 0.15 75);
+      --warn-muted: oklch(26% 0.04 70);
+      --warn-line: oklch(46% 0.09 70);
+      --warn-ink: #fef08a;
+      --positive: oklch(72% 0.14 155);
+      --positive-muted: oklch(24% 0.03 155);
+      --danger: oklch(66% 0.18 25);
+      --danger-muted: oklch(24% 0.04 25);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--surface-canvas);
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 32px 24px 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-w: 960px;
+      max-width: 960px;
+    }
+
+    /* 顶部导航与说明 */
+    .header-banner {
+      margin-bottom: 24px;
+      padding: 16px 20px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header-banner h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--ink-strong);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tag-badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 500;
+      background: var(--accent-muted);
+      color: var(--accent);
+      border: 1px solid var(--accent-line);
+    }
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+      border: 1px solid transparent;
+      outline: none;
+    }
+    .btn-secondary {
+      background: var(--surface-raised);
+      border-color: var(--line);
+      color: var(--ink);
+    }
+    .btn-secondary:hover {
+      background: var(--surface-muted);
+      border-color: var(--line-strong);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      opacity: 0.9;
+    }
+    .btn-warn {
+      background: var(--warn-muted);
+      border-color: var(--warn-line);
+      color: var(--warn-ink);
+    }
+    .btn-warn:hover {
+      background: rgba(234, 179, 8, 0.2);
+    }
+
+    /* 对比视图分栏 */
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 860px) {
+      .comparison-grid { grid-template-columns: 1fr; }
+    }
+
+    .preview-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-raised);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .preview-title {
+      font-weight: 600;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .preview-body {
+      padding: 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Section 标题 */
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-strong);
+      margin-bottom: 8px;
+    }
+    .section-counter {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      background: var(--surface-muted);
+      padding: 1px 6px;
+      border-radius: 10px;
+      color: var(--ink-muted);
+    }
+    .counter-warn {
+      background: var(--warn-muted);
+      color: var(--warn-ink);
+      border: 1px solid var(--warn-line);
+    }
+
+    /* 现状 (Before) 样式 */
+    .before-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--line-faint);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .before-tag {
+      font-size: 11px;
+      color: var(--warn-ink);
+      margin-left: auto;
+    }
+    .problem-callout {
+      background: rgba(239, 68, 68, 0.08);
+      border-left: 3px solid var(--danger);
+      padding: 8px 12px;
+      border-radius: 0 6px 6px 0;
+      font-size: 11px;
+      color: #fca5a5;
+    }
+
+    /* 新设计 (After) 样式 */
+    .herdr-pending-card {
+      background: var(--surface-raised);
+      border: 1px solid var(--warn-line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    .herdr-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card-meta-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .pane-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--warn-muted);
+      color: var(--warn-ink);
+      border: 1px solid var(--warn-line);
+      white-space: nowrap;
+    }
+    .pane-title {
+      font-weight: 600;
+      color: var(--ink-strong);
+      truncate: true;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pane-context {
+      font-size: 11px;
+      color: var(--ink-faint);
+      white-space: nowrap;
+    }
+    .waited-time {
+      font-size: 11px;
+      color: var(--warn-ink);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .prompt-box {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+    }
+    .prompt-code {
+      font-family: var(--font-mono);
+      background: rgba(0, 0, 0, 0.3);
+      padding: 6px 10px;
+      border-radius: 4px;
+      margin-top: 5px;
+      font-size: 11px;
+      color: #93c5fd;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .action-group-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .reply-input-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      margin-top: 2px;
+    }
+    .quick-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 5px 10px;
+      color: var(--ink-strong);
+      font-size: 12px;
+      outline: none;
+    }
+    .quick-input:focus {
+      border-color: var(--accent);
+    }
+
+    /* 状态圆点 */
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .dot-warn { background: #eab308; box-shadow: 0 0 6px rgba(234, 179, 8, 0.6); }
+    .dot-run { background: #3b82f6; box-shadow: 0 0 6px rgba(59, 130, 246, 0.6); }
+    .dot-idle { background: #71717a; }
+
+    /* 冷 Tab 排序对比表 */
+    .sort-analysis-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .sort-analysis-card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--ink-strong);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin: 12px 0;
+    }
+    table.data-table th, table.data-table td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--line-faint);
+    }
+    table.data-table th {
+      background: var(--surface-raised);
+      color: var(--ink-muted);
+      font-weight: 500;
+    }
+    table.data-table tr:hover td {
+      background: var(--surface-hover);
+    }
+    .pill {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+    }
+    .pill-bad { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .pill-good { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+
+    /* 架构图与解法流程 */
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 16px 0;
+    }
+    @media (max-width: 768px) {
+      .flow-steps { grid-template-columns: 1fr; }
+    }
+    .step-box {
+      background: var(--surface-raised);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .step-num {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 4px;
+      font-family: var(--font-mono);
+    }
+    .step-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-strong);
+      margin-bottom: 4px;
+    }
+    .step-desc {
+      font-size: 11px;
+      color: var(--ink-muted);
+      line-height: 1.4;
+    }
+
+    /* 复制闭环按钮 */
+    .copy-success {
+      color: var(--positive) !important;
+      border-color: var(--positive) !important;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header-banner">
+      <div>
+        <h1>
+          <span>主页 Herdr 等待回复交互优化 & 冷 Tab 排序方案</span>
+          <span class="tag-badge">RFC / UI Mockup</span>
+        </h1>
+        <p style="font-size: 12px; color: var(--ink-muted); margin-top: 4px;">
+          针对「首页 Herdr 挂起回复展示怪异」与「冷 Tab 按创建时间而非活跃时间排序」两大体验问题
+        </p>
+      </div>
+      <div class="action-buttons">
+        <button class="btn btn-secondary" onclick="copyPrompt(this)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          复制实现 Prompt
+        </button>
+        <button class="btn btn-primary" onclick="copyDiffPlan(this)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          复制执行计划 Diff
+        </button>
+      </div>
+    </div>
+
+    <!-- UI 对比区域 (Before vs After) -->
+    <div class="comparison-grid">
+      <!-- 现状 (Before) -->
+      <div class="preview-card">
+        <div class="preview-header">
+          <div class="preview-title" style="color: #f87171;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+            现状 (Before): 错位与黑盒
+          </div>
+          <span class="pill pill-bad">体验断层</span>
+        </div>
+        <div class="preview-body">
+          <div class="problem-callout">
+            ⚠️ <b>问题 1</b>: 待回复/待审批的 Herdr 坐席被错误塞进「正在运行」列表！<br>
+            ⚠️ <b>问题 2</b>: 单行灰色文本，看不到任何提问或审批细节，甚至不能点击交互。
+          </div>
+
+          <div>
+            <div class="section-title">
+              <span>等你处理</span>
+              <span class="section-counter counter-warn">1</span>
+            </div>
+            <div class="before-row" style="border-left: 2px solid var(--warn);">
+              <span class="pane-badge">审批</span>
+              <span style="font-weight: 500;">优化搜索后端</span>
+              <span style="color: var(--ink-faint); margin-left: 4px;">rm -rf .cache</span>
+              <span class="before-tag">2m 前</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="section-title">
+              <span>正在运行 (混杂了等待回复！)</span>
+              <span class="section-counter">2</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <!-- 正常的运行中 -->
+              <div class="before-row">
+                <span class="status-dot dot-run"></span>
+                <span>重构数据索引</span>
+                <span style="color: var(--ink-faint); margin-left: 8px;">trellis</span>
+                <span style="margin-left: auto; color: var(--ink-faint);">生成中</span>
+              </div>
+              <!-- 错位的 Herdr 等待回复 -->
+              <div class="before-row" style="background: rgba(234, 179, 8, 0.04); border-color: rgba(234, 179, 8, 0.2);">
+                <span class="status-dot dot-warn"></span>
+                <span>claude-leader</span>
+                <span style="color: var(--ink-faint); margin-left: 8px;">Herdr · trellis/feat-db</span>
+                <span class="before-tag">等你回复</span>
+              </div>
+            </div>
+            <div style="font-size: 11px; color: var(--ink-faint); margin-top: 6px; font-style: italic;">
+              用户疑问：既然是“等你回复”，为什么在“正在运行”里？在等我回复什么？点开后又去哪了？
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 优化后 (After) -->
+      <div class="preview-card" style="border-color: var(--accent-line);">
+        <div class="preview-header">
+          <div class="preview-title" style="color: #4ade80;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            优化后 (After): 归位与就地交互卡片
+          </div>
+          <span class="pill pill-good">首屏闭环</span>
+        </div>
+        <div class="preview-body">
+          <div class="section-title">
+            <span>等你处理 (包含 Herdr 挂起卡片)</span>
+            <span class="section-counter counter-warn">2</span>
+          </div>
+
+          <!-- 普通审批项 -->
+          <div class="before-row" style="border-left: 2px solid var(--warn);">
+            <span class="pane-badge">审批</span>
+            <span style="font-weight: 500;">优化搜索后端</span>
+            <span style="color: var(--ink-faint); margin-left: 4px;">rm -rf .cache</span>
+            <div style="margin-left: auto; display: flex; gap: 6px;">
+              <button class="btn btn-warn" style="padding: 2px 8px; font-size: 11px;">允许</button>
+            </div>
+          </div>
+
+          <!-- Herdr 等待回复的交互卡片 (新型态) -->
+          <div class="herdr-pending-card">
+            <div class="herdr-card-top">
+              <div class="card-meta-left">
+                <span class="status-dot dot-warn"></span>
+                <span class="pane-badge">Herdr 提问</span>
+                <span class="pane-title">claude-leader</span>
+                <span class="pane-context">trellis · feat-ui-tabs</span>
+              </div>
+              <div class="waited-time">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                等了 45s
+              </div>
+            </div>
+
+            <div class="prompt-box">
+              <div style="font-weight: 500; color: var(--ink-strong); margin-bottom: 2px;">
+                AskUserQuestion: 是否需要将冷 tab 排序持久化到 sqlite 数据库？
+              </div>
+              <div style="font-size: 11px; color: var(--ink-muted);">
+                选项 A: 纯前端根据 mtime 与 hook 实时算 (推荐) &nbsp;·&nbsp; 选项 B: 写入 herdr_sessions 绑定表
+              </div>
+            </div>
+
+            <!-- 行内快捷回复操作 -->
+            <div class="reply-input-row">
+              <input type="text" class="quick-input" placeholder="输入回复内容，回车直接发送到终端..." value="选 A，纯实时计算更轻量，不污染 DB">
+              <button class="btn btn-primary" style="padding: 4px 10px; font-size: 11px;">发送</button>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;" title="在右侧呼出终端抽屉查看完整上下文">
+                终端 (⌥O)
+              </button>
+            </div>
+          </div>
+
+          <div class="section-title" style="margin-top: 10px;">
+            <span>正在运行</span>
+            <span class="section-counter">1</span>
+          </div>
+          <div class="before-row">
+            <span class="status-dot dot-run"></span>
+            <span>重构数据索引</span>
+            <span style="color: var(--ink-faint); margin-left: 8px;">trellis</span>
+            <span style="margin-left: auto; color: var(--ink-faint);">生成中</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 冷 Tab 排序根因与修复方案 -->
+    <div class="sort-analysis-card">
+      <h2>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"></line><line x1="10" y1="12" x2="21" y2="12"></line><line x1="10" y1="18" x2="21" y2="18"></line><polyline points="3 6 4 7 2 9"></polyline><polyline points="3 12 4 13 2 15"></polyline><polyline points="3 18 4 19 2 21"></polyline></svg>
+        冷 Tab 排序根因剖析：为什么看起来像「创建时间」而非「活跃时间」？
+      </h2>
+
+      <p style="color: var(--ink-muted); font-size: 12px; margin-bottom: 12px;">
+        深入排查 <code>lib/herdr-console.ts</code>、<code>HerdrFleetPickerSheet.tsx</code> 与底层绑定：
+      </p>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>链路环节</th>
+            <th>现状表现 (Bug 根因)</th>
+            <th>为何退化为创建时间</th>
+            <th>修复方案</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>1. 时间戳来源</b></td>
+            <td>只取 <code>view.hook?.updatedAt</code>。无 hook 或纯 shell 的 pane 其 <code>activityAt === null</code></td>
+            <td>当 <code>activityAt</code> 为 null 时，比较结果为 0，保持原有数组排序</td>
+            <td><b>四级级联回退</b>：Hook 时间 → Transcript mtime (终端输出) → 会话更新时间 → 首次/最后发现时间</td>
+          </tr>
+          <tr>
+            <td><b>2. 初始遍历顺序</b></td>
+            <td><code>buildHerdrConsole</code> 循环遍历 <code>workspace.tabs</code></td>
+            <td>Herdr 后端按 tab_id (t1, t2, t3...) 返回，正是 Tab 的创建顺序</td>
+            <td>在视图派生层最后对冷 Tab 数组显式执行 <code>stableSort(byActivityDesc)</code></td>
+          </tr>
+          <tr>
+            <td><b>3. 空闲窗口比较</b></td>
+            <td><code>cold.sort((a,b) => (b.activityAt ?? 0) - (a.activityAt ?? 0))</code></td>
+            <td>若都为 0，V8 稳定排序直接维持原创建序</td>
+            <td>保证每个 Tab 均有有效时间戳兜底，绝对不出现 0 - 0 退化</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 实施三大支柱 -->
+      <div class="flow-steps">
+        <div class="step-box">
+          <div class="step-num">STEP 1</div>
+          <div class="step-title">主页数据模型归位</div>
+          <div class="step-desc">
+            在 <code>HomeView.tsx</code> 中，将 <code>herdrPanes</code> 细分为 <code>waitingHerdrPanes</code> 和 <code>runningHerdrPanes</code>。将 waiting / blocked 提升至「等你处理」区块，与 Trellis 原生待办并列。
+          </div>
+        </div>
+        <div class="step-box">
+          <div class="step-num">STEP 2</div>
+          <div class="step-title">提炼待答与快捷操作</div>
+          <div class="step-desc">
+            复用 <code>HerdrOverview</code> 的卡片能力（识别 <code>AskUserQuestion</code> / <code>Bash 权限审批</code>），支持在主页直接回车回复或一键打开 <code>HerdrTerminalDrawer</code>。
+          </div>
+        </div>
+        <div class="step-box">
+          <div class="step-num">STEP 3</div>
+          <div class="step-title">修复冷 Tab 活跃时间链</div>
+          <div class="step-desc">
+            在 <code>lib/herdr-console.ts</code> 的 <code>buildHerdrConsole</code> 中，若 <code>hook.updatedAt</code> 不存在，顺位读取 <code>binding.lastSeenAt</code> 和 transcript 文件的修改时间，彻底解决排序假死。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function copyPrompt(btn) {
+      const prompt = `优化 Trellis 主页 Herdr 挂起回复展示与冷 Tab 排序：
+1. HomeView.tsx：将 Herdr waiting/blocked 窗格移入「等你处理」(pending) 区块，展示提问摘要，提供行内回复与呼出终端抽屉。
+2. lib/herdr-console.ts：修复冷 Tab activityAt 为 null 导致退化为创建时间排序的问题，加入 transcript.mtime / binding.lastSeenAt 级联兜底。`;
+      navigator.clipboard.writeText(prompt);
+      btn.classList.add('copy-success');
+      btn.innerText = '已复制 Prompt';
+      setTimeout(() => {
+        btn.classList.remove('copy-success');
+        btn.innerText = '复制实现 Prompt';
+      }, 2000);
+    }
+
+    function copyDiffPlan(btn) {
+      const plan = `diff --git a/components/HomeView.tsx b/components/HomeView.tsx
+- 把 herdrPanes 里的 waiting / blocked 从 "正在运行" 移入 "等你处理"
+- 增加 HerdrPendingCard 组件，支持行内快速回复和打开终端抽屉
+diff --git a/lib/herdr-console.ts b/lib/herdr-console.ts
+- 修复 activityAt 获取逻辑：hook.updatedAt ?? binding.lastSeenAt ?? transcriptMtime
+- 修正 coldPanes 排序兜底`;
+      navigator.clipboard.writeText(plan);
+      btn.classList.add('copy-success');
+      btn.innerText = '已复制 Plan';
+      setTimeout(() => {
+        btn.classList.remove('copy-success');
+        btn.innerText = '复制执行计划 Diff';
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

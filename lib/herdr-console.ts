@@ -151,6 +151,11 @@ export function buildHerdrConsole(
         const sessionId = view.binding?.alive === false ? null : bindingSessionId(view.binding);
         if (sessionId) liveSessions.add(sessionId);
         if (view.binding) liveSessions.add(view.binding.sessionId);
+        const activityAt =
+          view.hook?.updatedAt ??
+          view.binding?.lastSeenAt ??
+          view.binding?.firstSeenAt ??
+          null;
         out.push({
           ...base,
           title: cleanTerminalTitle(pane.terminal_title) || view.label || workspaceLabel,
@@ -160,7 +165,7 @@ export function buildHerdrConsole(
           sessionId,
           view,
           lastTool: view.hook?.toolName ?? null,
-          activityAt: view.hook?.updatedAt ?? null,
+          activityAt,
         });
       }
     }
