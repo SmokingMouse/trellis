@@ -164,8 +164,9 @@ export function HerdrMobileWorkbench() {
   return (
     <div
       data-herdr-mobile-workbench
-      className="fixed inset-0 z-50 flex flex-col bg-[#0a0b10] text-ink ui-enter-fade"
+      className="dark fixed inset-0 z-50 flex flex-col bg-[#0a0b10] text-[#e4e6ee] ui-enter-fade"
       style={{
+        colorScheme: "dark",
         paddingTop: "var(--safe-top, 0px)",
         paddingBottom: "max(var(--safe-bottom, 0px), 8px)",
       }}

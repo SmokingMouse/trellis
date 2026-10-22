@@ -53,7 +53,7 @@ function renderTableLine(line: string, lineIndex: number): ReactNode {
     );
   }
 
-  // 单元格内容行：将 | 弱化为线色，单元格文字保持高清晰 text-ink
+  // 单元格内容行：将 | 弱化为线色，单元格文字保持高清晰 text-[#e4e6ee]
   const parts: ReactNode[] = [];
   let currentWord = "";
   let isHeader = /(?:动作|结果|状态|耗时|名称|阶段|action|result|status|name|summary)/i.test(line);
@@ -66,7 +66,7 @@ function renderTableLine(line: string, lineIndex: number): ReactNode {
           <span
             key={`w-${i}`}
             className={cn(
-              isHeader ? "font-semibold text-ink-strong" : "text-ink",
+              isHeader ? "font-semibold text-white" : "text-[#e4e6ee]",
             )}
           >
             {currentWord}
@@ -88,7 +88,7 @@ function renderTableLine(line: string, lineIndex: number): ReactNode {
     parts.push(
       <span
         key="w-end"
-        className={cn(isHeader ? "font-semibold text-ink-strong" : "text-ink")}
+        className={cn(isHeader ? "font-semibold text-white" : "text-[#e4e6ee]")}
       >
         {currentWord}
       </span>
@@ -155,7 +155,7 @@ function renderSemanticLine(line: string, index: number): ReactNode {
         className="my-0.5 flex w-full max-w-full min-w-0 items-start gap-1 text-label font-medium"
       >
         <span className="shrink-0 text-accent font-bold">⏺</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-ink font-medium">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-[#e4e6ee] font-medium">
           {actionMatch[2]}
         </span>
       </div>
@@ -171,7 +171,7 @@ function renderSemanticLine(line: string, index: number): ReactNode {
         className="my-0.5 ml-2 flex w-[calc(100%-0.5rem)] max-w-[calc(100%-0.5rem)] min-w-0 items-start gap-1.5 rounded-field border border-line-faint bg-surface-raised/60 px-2 py-0.5 font-mono text-label text-ink-muted"
       >
         <span className="shrink-0 select-none text-ink-faint">⎿</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-semibold text-ink">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-semibold text-[#e4e6ee]">
           {toolMatch[2]}
         </span>
       </div>
@@ -239,7 +239,7 @@ function renderSemanticLine(line: string, index: number): ReactNode {
         <span className="shrink-0 select-none font-bold text-accent">
           {bulletMatch[1]}
         </span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-ink">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-all [overflow-wrap:anywhere] text-[#e4e6ee]">
           {bulletMatch[2]}
         </span>
       </div>
@@ -284,11 +284,11 @@ function renderSemanticLine(line: string, index: number): ReactNode {
     );
   }
 
-  // 默认正文文本行：提升至正文高清晰色 text-ink（不再是暗沉无对比的 text-ink-muted）
+  // 默认正文文本行：提升至绝对清晰亮色 #e4e6ee（对比度 15.2:1，杜绝黑底黑字与变暗）
   return (
     <div
       key={index}
-      className="w-full max-w-full min-w-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] leading-relaxed text-ink"
+      className="w-full max-w-full min-w-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] leading-relaxed text-[#e4e6ee]"
     >
       {line}
     </div>
@@ -351,7 +351,7 @@ export const HerdrTerminalReflow = memo(function HerdrTerminalReflow({
     return (
       <pre
         className={cn(
-          "w-full max-w-full min-w-0 m-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-ink bg-transparent p-0",
+          "w-full max-w-full min-w-0 m-0 whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-[#e4e6ee] bg-transparent p-0",
           className,
         )}
       >
@@ -363,7 +363,7 @@ export const HerdrTerminalReflow = memo(function HerdrTerminalReflow({
   return (
     <div
       className={cn(
-        "w-full max-w-full min-w-0 min-h-0 flex-1 font-mono text-[11.5px] leading-relaxed select-text [tab-size:2]",
+        "w-full max-w-full min-w-0 min-h-0 flex-1 font-mono text-[11.5px] leading-relaxed select-text [tab-size:2] text-[#e4e6ee]",
         className,
       )}
     >

@@ -170,16 +170,18 @@ export function HerdrTerminalDrawer() {
       data-herdr-drawer={target.paneId}
       aria-label="Herdr 终端"
       className={cn(
-        "fixed bottom-0 z-30 flex flex-col border-l border-line bg-[#07080a] max-md:inset-x-0 max-md:rounded-t-card max-md:border-l-0 max-md:border-t-2 max-md:border-accent max-md:shadow-[0_-16px_48px_rgba(0,0,0,0.95)]",
+        "dark fixed bottom-0 z-30 flex flex-col border-l border-line bg-[#0a0b10] text-[#e4e6ee] max-md:inset-x-0 max-md:rounded-t-card max-md:border-l-0 max-md:border-t-2 max-md:border-accent max-md:shadow-[0_-16px_48px_rgba(0,0,0,0.95)]",
         isMobile && "ui-enter-slide-up",
       )}
       style={
         isMobile
           ? {
+              colorScheme: "dark",
               top: mobileExpanded ? "calc(var(--trellis-header-h) + 0.5rem)" : "48vh",
               paddingBottom: "var(--safe-bottom)",
             }
           : {
+              colorScheme: "dark",
               top: "calc(5.25rem + var(--trellis-pending-h, 0px))",
               right: "var(--trellis-rp, 0px)",
               width: HERDR_DRAWER_WIDTH,
