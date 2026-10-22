@@ -223,7 +223,7 @@ export function HerdrTerminalDrawer() {
           <Icon icon={X} size="sm" />
         </IconButton>
       </div>
-      <div className="relative m-0 min-h-0 flex-1 flex flex-col bg-[#020203]">
+      <div className="relative m-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10]">
         <div
           ref={preRef}
           data-herdr-drawer-screen

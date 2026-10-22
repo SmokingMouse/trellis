@@ -164,19 +164,19 @@ export function HerdrMobileWorkbench() {
   return (
     <div
       data-herdr-mobile-workbench
-      className="fixed inset-0 z-50 flex flex-col bg-black text-ink ui-enter-fade"
+      className="fixed inset-0 z-50 flex flex-col bg-[#0a0b10] text-ink ui-enter-fade"
       style={{
         paddingTop: "var(--safe-top, 0px)",
         paddingBottom: "max(var(--safe-bottom, 0px), 8px)",
       }}
     >
       {/* 1. 极简薄顶栏 (Mobile Topbar) */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-line-strong bg-[#0f1118] px-2.5 text-ui">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#1e2232] bg-[#0e1017] px-2.5 text-ui">
         {/* 会话切换胶囊：点击直接呼出 Fleet Switcher */}
         <button
           type="button"
           onClick={toggleFleetPicker}
-          className="flex max-w-[190px] items-center gap-1.5 rounded-full border border-line-strong bg-surface-raised px-2.5 py-1 text-xs font-medium text-ink-strong active:bg-surface-muted"
+          className="flex max-w-[190px] items-center gap-1.5 rounded-full border border-[#24283b] bg-[#141622] px-2.5 py-1 text-xs font-medium text-ink-strong active:bg-[#1a1e2e]"
         >
           {target.lane === "need" ? (
             <StatusDot tone="warn" className="ring-2 ring-warn-muted" />
@@ -197,7 +197,7 @@ export function HerdrMobileWorkbench() {
             <button
               type="button"
               onClick={close}
-              className="flex items-center gap-1 rounded-full border border-accent-line bg-accent-muted/40 px-2 py-0.5 text-nano font-medium text-accent-ink"
+              className="flex items-center gap-1 rounded-full border border-accent-line/60 bg-accent-muted/30 px-2 py-0.5 text-nano font-medium text-accent-ink"
               title="切换到结构化对话阅读流"
             >
               <Icon icon={MessagesSquare} size="sm" />
@@ -208,7 +208,7 @@ export function HerdrMobileWorkbench() {
           <button
             type="button"
             onClick={() => setRawMode(!rawMode)}
-            className="rounded-field border border-line bg-surface-raised px-1.5 py-0.5 font-mono text-nano text-ink-muted active:bg-surface-muted"
+            className="rounded-field border border-[#25293d] bg-[#141624] px-1.5 py-0.5 font-mono text-nano text-[#8e96ac] hover:text-ink active:bg-[#1a1e2e]"
           >
             {rawMode ? "原始" : "重排"}
           </button>
@@ -223,8 +223,8 @@ export function HerdrMobileWorkbench() {
         </div>
       </header>
 
-      {/* 2. 满屏打平纯黑终端视口 (Flat Full-Bleed Terminal Screen) */}
-      <div className="relative w-full max-w-full min-w-0 min-h-0 flex-1 flex flex-col bg-black overflow-hidden">
+      {/* 2. 满屏打平终端视口 (Flat Full-Bleed Terminal Screen) */}
+      <div className="relative w-full max-w-full min-w-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10] overflow-hidden">
         <div
           ref={scrollRef}
           onScroll={(e) => {
@@ -272,14 +272,14 @@ export function HerdrMobileWorkbench() {
           e.preventDefault();
           void executeCmd(customCmd);
         }}
-        className="flex w-full shrink-0 items-center gap-1.5 border-t border-line-strong bg-[#0d0f15] px-2.5 py-1.5"
+        className="flex w-full shrink-0 items-center gap-1.5 border-t border-[#1e2232] bg-[#0e1017] px-2.5 py-1.5"
       >
         <input
           type="text"
           value={customCmd}
           onChange={(e) => setCustomCmd(e.target.value)}
           placeholder="输入命令或选择下方模型..."
-          className="min-w-0 flex-1 rounded-field border border-line-strong bg-[#141620] px-2.5 py-1 font-mono text-ui text-ink outline-none focus:border-accent"
+          className="min-w-0 flex-1 rounded-field border border-[#24283c] bg-[#141624] px-2.5 py-1 font-mono text-ui text-ink outline-none focus:border-accent"
         />
         <Button
           type="submit"
@@ -292,7 +292,7 @@ export function HerdrMobileWorkbench() {
       </form>
 
       {/* 4. 模型快捷芯片行 */}
-      <div className="flex w-full shrink-0 items-center gap-1.5 overflow-x-auto border-t border-line bg-[#0d0f15] px-2.5 py-1 text-nano">
+      <div className="flex w-full shrink-0 items-center gap-1.5 overflow-x-auto border-t border-[#1a1d2b] bg-[#0c0e14] px-2.5 py-1 text-nano">
         <span className="shrink-0 text-ink-faint">选模型:</span>
         {providerCatalog.map((p) => {
           const modelName = p.shortLabel || p.id.split(":").pop() || p.id;
@@ -302,7 +302,7 @@ export function HerdrMobileWorkbench() {
               type="button"
               title={`填入: llm ${modelName}`}
               onClick={() => setCustomCmd(`llm ${modelName}`)}
-              className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted transition-colors hover:border-accent hover:text-ink active:bg-accent-muted"
+              className="shrink-0 rounded-field border border-[#222638] bg-[#141624] px-2 py-0.5 font-mono text-[11px] text-[#8e96ac] transition-colors hover:border-accent hover:text-ink active:bg-accent-muted"
             >
               llm {modelName}
             </button>
@@ -311,21 +311,21 @@ export function HerdrMobileWorkbench() {
         <button
           type="button"
           onClick={() => void executeCmd("git status")}
-          className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted hover:border-accent"
+          className="shrink-0 rounded-field border border-[#222638] bg-[#141624] px-2 py-0.5 font-mono text-[11px] text-[#8e96ac] hover:border-accent hover:text-ink"
         >
           git status
         </button>
         <button
           type="button"
           onClick={() => void executeCmd("clear")}
-          className="shrink-0 rounded-field border border-line bg-surface-raised px-2 py-0.5 font-mono text-ink-muted hover:border-accent"
+          className="shrink-0 rounded-field border border-[#222638] bg-[#141624] px-2 py-0.5 font-mono text-[11px] text-[#8e96ac] hover:border-accent hover:text-ink"
         >
           clear
         </button>
       </div>
 
       {/* 5. 常驻物理级辅助按键条 (Keybar) */}
-      <div className="w-full shrink-0 border-t border-line bg-[#08090d] px-2 py-1.5">
+      <div className="w-full shrink-0 border-t border-[#1a1d2b] bg-[#08090d] px-2 py-1.5">
         <div className="flex flex-wrap gap-1">
           {KEYS.map(({ label, key, title }) => (
             <Button
@@ -335,7 +335,7 @@ export function HerdrMobileWorkbench() {
               title={title}
               disabled={sending !== null}
               onClick={() => void pressKey(key, label)}
-              className="font-mono text-nano"
+              className="font-mono text-nano border-[#24283c] bg-[#141624] text-[#a0a8be] hover:bg-[#1c2032] hover:text-ink"
             >
               {label}
             </Button>
