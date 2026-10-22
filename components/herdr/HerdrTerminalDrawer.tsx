@@ -11,6 +11,7 @@ import { readHerdrPane, sendHerdrCommand } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { HerdrTerminalReflow } from "./HerdrTerminalReflow";
+import { HerdrXterm } from "./HerdrXterm";
 
 export const HERDR_DRAWER_WIDTH = 380;
 const POLL_MS = 3_000;
@@ -51,7 +52,7 @@ export function HerdrTerminalDrawer() {
   const [screen, setScreen] = useState<{ paneId: string; text: string; error: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
-  const [rawMode, setRawMode] = useState(false);
+  const [viewMode, setViewMode] = useState<"terminal" | "reflow" | "raw">("terminal");
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const preRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -85,17 +86,18 @@ export function HerdrTerminalDrawer() {
     },
   });
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, mode = viewMode) => {
     setLoading(true);
     try {
-      const next = await readHerdrPane(id, LINES);
+      const format = mode === "terminal" ? "ansi" : "text";
+      const next = await readHerdrPane(id, LINES, format);
       setScreen({ paneId: id, text: next, error: null });
     } catch (err) {
       setScreen((prev) => ({ paneId: id, text: prev?.paneId === id ? prev.text : "", error: err instanceof Error ? err.message : String(err) }));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     if (!paneId) return;
@@ -212,11 +214,15 @@ export function HerdrTerminalDrawer() {
         )}
         <button
           type="button"
-          onClick={() => setRawMode(!rawMode)}
+          onClick={() => {
+            const nextMode = viewMode === "terminal" ? "reflow" : viewMode === "reflow" ? "raw" : "terminal";
+            setViewMode(nextMode);
+            if (target) void load(target.paneId, nextMode);
+          }}
           className="rounded-field border border-line bg-surface-raised px-1.5 py-0.5 font-mono text-nano text-ink-muted hover:border-line-strong hover:text-ink active:bg-surface-muted"
-          title="切换重排优化与原始字符"
+          title="切换真实终端(xterm)、重排优化与原始字符"
         >
-          {rawMode ? "原始" : "重排"}
+          {viewMode === "terminal" ? "终端" : viewMode === "reflow" ? "重排" : "原始"}
         </button>
         <IconButton label="重新读屏" size="sm" onClick={() => void load(target.paneId)} disabled={loading}>
           <Icon icon={RotateCcw} size="sm" className={loading ? "animate-spin motion-reduce:animate-none" : undefined} />
@@ -225,30 +231,32 @@ export function HerdrTerminalDrawer() {
           <Icon icon={X} size="sm" />
         </IconButton>
       </div>
-      <div className="relative m-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10]">
-        <div
-          ref={preRef}
-          data-herdr-drawer-screen
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-            const atBottom = dist < 32;
-            stickRef.current = atBottom;
-            setIsScrolledUp(!atBottom);
-          }}
-          className="m-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 font-mono text-nano leading-relaxed select-text"
-        >
-          {own?.error ? (
-            <div className="text-danger font-medium">读屏暂不可用：{own.error}</div>
-          ) : own?.text ? (
-            <HerdrTerminalReflow text={own.text} raw={rawMode} />
-          ) : (
-            <div className="text-ink-faint">正在读取…</div>
-          )}
-        </div>
+      <div className="relative m-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10] overflow-hidden">
+        {own?.error ? (
+          <div className="p-3 text-danger font-medium">读屏暂不可用：{own.error}</div>
+        ) : !own?.text ? (
+          <div className="p-3 text-ink-faint">正在读取…</div>
+        ) : viewMode === "terminal" ? (
+          <HerdrXterm ansiText={own.text} />
+        ) : (
+          <div
+            ref={preRef}
+            data-herdr-drawer-screen
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+              const atBottom = dist < 32;
+              stickRef.current = atBottom;
+              setIsScrolledUp(!atBottom);
+            }}
+            className="m-0 min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 font-mono text-nano leading-relaxed select-text"
+          >
+            <HerdrTerminalReflow text={own.text} raw={viewMode === "raw"} />
+          </div>
+        )}
 
-        {/* 往上翻时提示回到底部 */}
-        {isScrolledUp && (
+        {/* 往上翻时提示回到底部 (非 xterm 模式下) */}
+        {viewMode !== "terminal" && isScrolledUp && (
           <button
             type="button"
             onClick={() => {

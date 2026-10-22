@@ -450,11 +450,16 @@ export class HerdrFleetService {
     };
   }
 
-  read(paneId: string, lines = 200): Promise<{ type: "pane_read"; read: { text: string } }> {
+  read(
+    paneId: string,
+    lines = 200,
+    format: "text" | "ansi" = "text",
+  ): Promise<{ type: "pane_read"; read: { text: string } }> {
     return this.client.request("pane.read", {
       pane_id: paneId,
       source: "recent",
       lines,
+      format,
     });
   }
 

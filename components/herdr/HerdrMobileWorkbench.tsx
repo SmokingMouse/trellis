@@ -33,6 +33,7 @@ import {
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { HerdrTerminalReflow } from "./HerdrTerminalReflow";
+import { HerdrXterm } from "./HerdrXterm";
 
 const LINES = 1000;
 const POLL_MS = 2500;
@@ -64,7 +65,7 @@ export function HerdrMobileWorkbench() {
   const [screen, setScreen] = useState<{ paneId: string; text: string; error: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
-  const [rawMode, setRawMode] = useState(false);
+  const [viewMode, setViewMode] = useState<"terminal" | "reflow" | "raw">("terminal");
   const [customCmd, setCustomCmd] = useState("");
   const [isScrolledUp, setIsScrolledUp] = useState(false);
 
@@ -73,10 +74,11 @@ export function HerdrMobileWorkbench() {
 
   const paneId = target?.paneId ?? null;
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, mode = viewMode) => {
     setLoading(true);
     try {
-      const next = await readHerdrPane(id, LINES);
+      const format = mode === "terminal" ? "ansi" : "text";
+      const next = await readHerdrPane(id, LINES, format);
       setScreen({ paneId: id, text: next, error: null });
     } catch (err) {
       setScreen((prev) => ({
@@ -87,7 +89,7 @@ export function HerdrMobileWorkbench() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     if (!paneId || !active) return;
@@ -208,10 +210,15 @@ export function HerdrMobileWorkbench() {
 
           <button
             type="button"
-            onClick={() => setRawMode(!rawMode)}
-            className="rounded-field border border-[#25293d] bg-[#141624] px-1.5 py-0.5 font-mono text-nano text-[#8e96ac] hover:text-ink active:bg-[#1a1e2e]"
+            title="切换真实终端(xterm)、重排卡片与原始字符"
+            onClick={() => {
+              const nextMode = viewMode === "terminal" ? "reflow" : viewMode === "reflow" ? "raw" : "terminal";
+              setViewMode(nextMode);
+              if (target) void load(target.paneId, nextMode);
+            }}
+            className="rounded-field border border-[#25293d] bg-[#141624] px-2 py-0.5 font-mono text-nano text-[#8e96ac] hover:text-ink active:bg-[#1a1e2e]"
           >
-            {rawMode ? "原始" : "重排"}
+            {viewMode === "terminal" ? "终端" : viewMode === "reflow" ? "重排" : "原始"}
           </button>
 
           <IconButton label="刷新" size="sm" onClick={() => void load(target.paneId)} disabled={loading}>
@@ -226,30 +233,32 @@ export function HerdrMobileWorkbench() {
 
       {/* 2. 满屏打平终端视口 (Flat Full-Bleed Terminal Screen) */}
       <div className="relative w-full max-w-full min-w-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10] overflow-hidden">
-        <div
-          ref={scrollRef}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-            const atBottom = dist < 36;
-            stickRef.current = atBottom;
-            setIsScrolledUp(!atBottom);
-          }}
-          className="w-full max-w-full min-w-0 m-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5 font-mono text-[11.5px] leading-relaxed select-text"
-        >
-          {own?.error ? (
-            <div className="text-danger font-medium">读屏不可用：{own.error}</div>
-          ) : own?.text ? (
-            <HerdrTerminalReflow text={own.text} raw={rawMode} />
-          ) : (
-            <div className="flex h-32 items-center justify-center gap-2 text-ink-faint">
-              <Spinner size="sm" label="正在连接终端流..." />
-            </div>
-          )}
-        </div>
+        {own?.error ? (
+          <div className="p-3 text-danger font-medium">读屏不可用：{own.error}</div>
+        ) : !own?.text ? (
+          <div className="flex h-32 items-center justify-center gap-2 text-ink-faint">
+            <Spinner size="sm" label="正在连接终端流..." />
+          </div>
+        ) : viewMode === "terminal" ? (
+          <HerdrXterm ansiText={own.text} />
+        ) : (
+          <div
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+              const atBottom = dist < 36;
+              stickRef.current = atBottom;
+              setIsScrolledUp(!atBottom);
+            }}
+            className="w-full max-w-full min-w-0 m-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5 font-mono text-[11.5px] leading-relaxed select-text"
+          >
+            <HerdrTerminalReflow text={own.text} raw={viewMode === "raw"} />
+          </div>
+        )}
 
-        {/* 往上翻时提示回到底部 */}
-        {isScrolledUp && (
+        {/* 往上翻时提示回到底部 (非 xterm 模式下) */}
+        {viewMode !== "terminal" && isScrolledUp && (
           <button
             type="button"
             onClick={() => {

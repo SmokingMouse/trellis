@@ -61,8 +61,14 @@ export async function focusHerdrPane(paneId: string): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "focus"), { method: "POST" }));
 }
 
-export async function readHerdrPane(paneId: string, lines = 40): Promise<string> {
-  const response = await ensureOk(await fetch(`${paneUrl(paneId, "read")}?lines=${lines}`, { cache: "no-store" }));
+export async function readHerdrPane(
+  paneId: string,
+  lines = 40,
+  format: "text" | "ansi" = "text",
+): Promise<string> {
+  const response = await ensureOk(
+    await fetch(`${paneUrl(paneId, "read")}?lines=${lines}&format=${format}`, { cache: "no-store" }),
+  );
   return ((await response.json()) as { text?: string }).text ?? "";
 }
 
