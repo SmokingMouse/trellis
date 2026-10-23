@@ -307,7 +307,8 @@ function CardPreviewDialog({
               {title}
             </h3>
           </div>
-          <div className="md-body text-ink [&_.md-codeblock-copy]:hidden [&_.md-codeblock-bar_button]:hidden">
+          {/* 导出图里图表永远展开全图：去掉折叠高度上限、缩放角标与「展开 / 收起」按钮 */}
+          <div className="md-body text-ink [&_.md-codeblock-copy]:hidden [&_.md-codeblock-bar_button]:hidden [&_[data-diagram-frame]]:max-h-none! [&_[data-diagram-chrome]]:hidden">
             <ReactMarkdown
               remarkPlugins={MARKDOWN_REMARK_PLUGINS}
               rehypePlugins={MARKDOWN_REHYPE_PLUGINS}

@@ -32,7 +32,7 @@
 | `Checkbox` | 表单 / 批量选择 | `checked`（可 `"indeterminate"`）；外层 `<label>` 包文字 | 原生 checkbox（新代码） |
 | `Tabs` | 同一位置切换不同面板 | `Tabs` + `TabsList` + `TabsTrigger` + `TabsContent` | 一排手写按钮 + `useState` 切面板 |
 | `SegmentedControl` | 同一份数据换视图 / 排序（侧栏「按项目 / 按时间」） | `value`、`onValueChange`、`options`（可带 `icon`）、`aria-label`（必填） | 手写 pill 组 |
-| `Modal` | 居中弹窗 | `onClose`、`size` md / lg、`closeOnEsc`、`panelClassName`、`title`（读屏名） | 手写 `fixed inset-0 bg-scrim/50` 外壳；`z-[60]` 之类 |
+| `Modal` | 居中弹窗 | `onClose`、`size` md / lg / full（铺满视口的查看器，如图表全屏）、`closeOnEsc`、`panelClassName`、`title`（读屏名） | 手写 `fixed inset-0 bg-scrim/50` 外壳；`z-[60]` 之类 |
 | `Drawer` | 右侧面板 / 手机底部 sheet | `open`、`onClose`、`widthClassName`、`title` | 手写滑入面板 |
 | `Popover` | trigger 旁的自由内容面板（搜索、表单、说明） | `trigger`、`open`、`onClose`、`align`、`panelClassName` | 手写 `absolute right-0 mt-1 …` 下拉；面板里的字号颜色依赖继承（已 portal，不再继承） |
 | `DropdownMenu` | 点按钮弹出动作 / 单选 / 多选列表 | `DropdownMenuTrigger asChild` + `Content` + `Item`（`icon`、`shortcut`、`danger`）/ `CheckboxItem` / `RadioItem` | 用 Popover 手搓菜单项和方向键 |

@@ -136,3 +136,47 @@ export function downloadSvgFile(svgText: string, filename = "diagram.svg") {
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * SVG 文本 → data: URL。比 blob: URL 省掉 revoke 生命周期（组件卸载 / 缓存复用时
+ * 不会出现图被提前回收成裂图），卡片图导出也不用再转一道。
+ */
+export function svgToDataUrl(svgText: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+}
+
+/** 读 SVG 根节点的固有尺寸：优先数字 width/height，其次 viewBox；都没有返回 null。 */
+export function readSvgSize(svgText: string): { width: number; height: number } | null {
+  const open = /<svg\b[^>]*>/i.exec(svgText);
+  if (!open) return null;
+  const tag = open[0];
+  const num = (attr: string) => {
+    const m = new RegExp(`\\s${attr}\\s*=\\s*["']\\s*([\\d.]+)(?:px)?\\s*["']`, "i").exec(tag);
+    return m ? Number(m[1]) : NaN;
+  };
+  const w = num("width");
+  const h = num("height");
+  if (w > 0 && h > 0) return { width: w, height: h };
+  const vb = /\sviewBox\s*=\s*["']\s*[-\d.eE]+[\s,]+[-\d.eE]+[\s,]+([\d.eE]+)[\s,]+([\d.eE]+)\s*["']/i.exec(tag);
+  if (vb && Number(vb[1]) > 0 && Number(vb[2]) > 0) {
+    const vw = Number(vb[1]);
+    const vh = Number(vb[2]);
+    // 只给了一边（如 width="800"）时按 viewBox 比例补另一边
+    if (w > 0) return { width: w, height: (w * vh) / vw };
+    if (h > 0) return { width: (h * vw) / vh, height: h };
+    return { width: vw, height: vh };
+  }
+  return null;
+}
+
+/**
+ * 宽进严出：按 HTML 宽松解析、再按 XML 严格序列化。
+ * <img> / data: URL 里的 SVG 必须是良构 XML，而 HTML 序列化的产物（mermaid strict
+ * 模式过 DOMPurify 后的 innerHTML）里 `<br>` 不闭合、模型手写的 SVG 常带裸 `&`、
+ * `&nbsp;`——任何一处都会让整张图裂掉。仅浏览器端生效，服务端原样返回。
+ */
+export function toWellFormedSvg(svg: string): string {
+  if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") return svg;
+  const el = new DOMParser().parseFromString(svg, "text/html").querySelector("svg");
+  return el ? new XMLSerializer().serializeToString(el) : svg;
+}

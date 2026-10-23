@@ -184,7 +184,7 @@ export function waitForRenderComplete(container: HTMLElement, timeoutMs = 5000):
     }
 
     function check() {
-      const loadingPulse = container.querySelectorAll(".animate-pulse");
+      const loadingPulse = container.querySelectorAll(".animate-pulse, [data-diagram-pending]");
       const textLoading = Array.from(container.querySelectorAll("div")).some((el) =>
         el.textContent?.includes("图表渲染中…"),
       );

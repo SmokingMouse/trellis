@@ -30,6 +30,7 @@ import { copyText } from "@/lib/clipboard";
 import { formatDuration } from "@/lib/format-duration";
 import { toolTitle } from "@/lib/tool-registry";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
+import { MarkdownStreamingContext } from "@/lib/markdown-streaming";
 import {
   MARKDOWN_REMARK_PLUGINS,
   MARKDOWN_STREAMING_REHYPE_PLUGINS,
@@ -787,14 +788,17 @@ function ResponseBody({
       )}
       {isStreaming ? (
         liveText ? (
-          <ReactMarkdown
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_STREAMING_REHYPE_PLUGINS}
-            components={MD_COMPONENTS}
-            urlTransform={MD_URL_TRANSFORM}
-          >
-            {liveText}
-          </ReactMarkdown>
+          // 告诉代码块「还在写」：Mermaid 等源码静止再渲染、半截不报错
+          <MarkdownStreamingContext.Provider value>
+            <ReactMarkdown
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_STREAMING_REHYPE_PLUGINS}
+              components={MD_COMPONENTS}
+              urlTransform={MD_URL_TRANSFORM}
+            >
+              {liveText}
+            </ReactMarkdown>
+          </MarkdownStreamingContext.Provider>
         ) : null
       ) : node.response ? (
         near ? (

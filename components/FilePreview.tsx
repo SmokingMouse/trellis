@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import { MD_COMPONENTS, MD_URL_TRANSFORM } from "@/lib/md-components";
@@ -10,8 +10,16 @@ import {
 import { useSessionStore } from "@/stores/sessionStore";
 import { filePreviewUrl, previewKind } from "@/lib/generated-files";
 import { copyText } from "@/lib/clipboard";
-import { createSvgBlobUrl, downloadSvgFile } from "@/lib/svg";
-import { renderMermaidToSvg } from "@/lib/mermaid";
+import {
+  downloadSvgFile,
+  normalizeSvg,
+  readSvgSize,
+  svgToDataUrl,
+  toWellFormedSvg,
+} from "@/lib/svg";
+import { renderMermaidForExport } from "@/lib/mermaid";
+import { useMermaidSvg } from "@/hooks/useMermaidSvg";
+import { DiagramCanvas, type DiagramBackground } from "@/components/diagram/DiagramCanvas";
 import {
   Code,
   Download,
@@ -19,9 +27,7 @@ import {
   Eye,
   FileText,
   Image as ImageIcon,
-  Minus,
   Palette,
-  Plus,
   Workflow,
   X,
 } from "lucide-react";
@@ -50,10 +56,12 @@ export function FilePreview() {
   useEffect(() => {
     if (!target) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      // 叠在预览上的弹窗（图表全屏查看）与画布查找框自己处理 Esc，别把整个预览关掉
+      const t = e.target as Element | null;
+      if (t?.closest?.("[data-focus-panel], [data-esc-local]")) return;
+      e.stopPropagation();
+      onClose();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -151,24 +159,24 @@ function PreviewBody({
   return <TextPreview url={url} markdown={kind === "markdown"} />;
 }
 
-type BgMode = "checkered" | "white" | "dark";
-
-// 透明图的衬底：刻意用固定的黑 / 白 / 棋盘格（看图用的「画布」，不随皮肤走）。
-const BG_CLASSES: Record<BgMode, string> = {
-  checkered:
-    "[background:repeating-conic-gradient(var(--surface-muted)_0%_25%,white_0%_50%)_50%/20px_20px] dark:[background:repeating-conic-gradient(rgba(255,255,255,0.06)_0%_25%,rgba(0,0,0,0.3)_0%_50%)_50%/20px_20px]",
-  white: "bg-white",
-  dark: "bg-[#141414]", // ui-guard-allow(hex): 看图用的固定深色画布，不随皮肤
+const BG_LABEL: Record<DiagramBackground, string> = {
+  grid: "点阵底",
+  checkered: "棋盘格底",
+  white: "白底",
+  dark: "深色底",
 };
-const BG_LABEL: Record<BgMode, string> = { checkered: "棋盘格底", white: "白底", dark: "深色底" };
-const NEXT_BG: Record<BgMode, BgMode> = { checkered: "white", white: "dark", dark: "checkered" };
+const NEXT_BG: Record<DiagramBackground, DiagramBackground> = {
+  grid: "checkered",
+  checkered: "white",
+  white: "dark",
+  dark: "checkered",
+};
 
-// SVG / Mermaid 共用的查看器工具条：预览 / 源码切换、缩放、衬底、复制源码、下载。
+// SVG / Mermaid 共用的查看器工具条：预览 / 源码切换、衬底（仅透明 SVG）、复制源码、下载。
+// 缩放 / 平移 / 查找在画布自己的浮动控件里（components/diagram/DiagramCanvas）。
 function ViewerToolbar({
   mode,
   onMode,
-  scale,
-  onScale,
   bg,
   onBg,
   source,
@@ -177,10 +185,8 @@ function ViewerToolbar({
 }: {
   mode: "preview" | "code";
   onMode: (m: "preview" | "code") => void;
-  scale: number;
-  onScale: (fn: (s: number) => number) => void;
-  bg: BgMode;
-  onBg: (b: BgMode) => void;
+  bg?: DiagramBackground;
+  onBg?: (b: DiagramBackground) => void;
   source: string | null;
   onDownload: () => void;
   downloadLabel: string;
@@ -207,28 +213,11 @@ function ViewerToolbar({
         ]}
       />
       <div className="flex items-center gap-1.5">
-        {mode === "preview" && (
-          <>
-            <IconButton label="缩小" size="sm" onClick={() => onScale((s) => Math.max(0.2, s - 0.2))}>
-              <Icon icon={Minus} size="sm" />
-            </IconButton>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onScale(() => 1)}
-              title="重置缩放"
-              className="font-mono tabular-nums"
-            >
-              {Math.round(scale * 100)}%
-            </Button>
-            <IconButton label="放大" size="sm" onClick={() => onScale((s) => Math.min(4, s + 0.2))}>
-              <Icon icon={Plus} size="sm" />
-            </IconButton>
-            <Button size="sm" variant="ghost" onClick={() => onBg(NEXT_BG[bg])} title="切换衬底">
-              <Icon icon={Palette} size="sm" />
-              {BG_LABEL[bg]}
-            </Button>
-          </>
+        {mode === "preview" && bg && onBg && (
+          <Button size="sm" variant="ghost" onClick={() => onBg(NEXT_BG[bg])} title="切换透明图的衬底">
+            <Icon icon={Palette} size="sm" />
+            {BG_LABEL[bg]}
+          </Button>
         )}
         {source && (
           <>
@@ -246,14 +235,9 @@ function ViewerToolbar({
   );
 }
 
-function MermaidFilePreview({ url, name }: { url: string; name: string }) {
-  const [mode, setMode] = useState<"preview" | "code">("preview");
-  const [scale, setScale] = useState(1);
-  const [bg, setBg] = useState<BgMode>("checkered");
-  const [codeText, setCodeText] = useState<string | null>(null);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+function useFileText(url: string) {
+  const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
   useEffect(() => {
     let alive = true;
     fetch(url)
@@ -262,97 +246,83 @@ function MermaidFilePreview({ url, name }: { url: string; name: string }) {
         return r.text();
       })
       .then((t) => {
-        if (!alive) return;
-        setCodeText(t);
-        const isDark =
-          typeof document !== "undefined" &&
-          document.documentElement.classList.contains("dark");
-        return renderMermaidToSvg(t, isDark);
-      })
-      .then((res) => {
-        if (!alive || !res) return;
-        if (res.error || !res.svg) {
-          setError(res.error || "Mermaid 图表解析失败");
-        } else {
-          const bUrl = createSvgBlobUrl(res.svg);
-          setBlobUrl(bUrl);
-          setError(null);
-        }
+        if (alive) setText(t);
       })
       .catch((e) => {
         if (alive) setError(String(e));
       });
     return () => {
       alive = false;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [url]);
+  return { text, error };
+}
 
-  const handleDownload = () => {
-    if (blobUrl) {
-      fetch(blobUrl)
-        .then((r) => r.text())
-        .then((svg) => downloadSvgFile(svg, `${name}.svg`))
-        .catch(() => downloadSvgFile(codeText || "", `${name}.txt`));
-    }
+function SourceView({ text }: { text: string | null }) {
+  if (text === null)
+    return (
+      <div className="p-6">
+        <Spinner />
+      </div>
+    );
+  return (
+    <pre className="h-full overflow-auto m-0 p-4 text-ui leading-relaxed text-ink font-mono whitespace-pre bg-surface">
+      {text}
+    </pre>
+  );
+}
+
+function MermaidFilePreview({ url, name }: { url: string; name: string }) {
+  const [mode, setMode] = useState<"preview" | "code">("preview");
+  const { text: codeText, error: loadError } = useFileText(url);
+  const { result } = useMermaidSvg(codeText);
+
+  const handleDownload = async () => {
+    if (!codeText) return;
+    const svg = await renderMermaidForExport(codeText);
+    if (svg) downloadSvgFile(svg, `${name}.svg`);
+    else toast.error("下载失败", { description: "图表没有渲染成功，切到源码看看。" });
   };
+
+  if (loadError) return <ReadError error={loadError} />;
 
   return (
     <div className="flex flex-col h-full">
       <ViewerToolbar
         mode={mode}
         onMode={setMode}
-        scale={scale}
-        onScale={setScale}
-        bg={bg}
-        onBg={setBg}
         source={codeText}
-        onDownload={handleDownload}
+        onDownload={() => void handleDownload()}
         downloadLabel="下载 SVG"
       />
-
-      {/* Body Viewport */}
-      <div className="flex-1 min-h-0 overflow-auto">
-        {mode === "preview" ? (
-          <div
-            className={`w-full h-full min-h-75 overflow-auto flex items-center justify-center p-8 transition-colors ${BG_CLASSES[bg]}`}
-          >
-            {error ? (
-              <ErrorCallout
-                className="max-w-md"
-                error={error}
-                title="图表渲染失败"
-                hint="Mermaid 语法可能有误，切到源码看看。"
-                action={
-                  <Button size="sm" onClick={() => setMode("code")}>
-                    查看源码
-                  </Button>
-                }
-              />
-            ) : blobUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={blobUrl}
-                alt={name}
-                style={{
-                  transform: `scale(${scale})`,
-                  transformOrigin: "center center",
-                  transition: "transform 120ms ease-out",
-                }}
-                className="max-w-full max-h-full object-contain"
-              />
-            ) : (
-              <Spinner label="正在渲染图表" />
-            )}
-          </div>
-        ) : codeText === null ? (
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {mode === "code" ? (
+          <SourceView text={codeText} />
+        ) : result?.ok ? (
+          <DiagramCanvas
+            source={{ kind: "inline", svg: result.svg, width: result.width, height: result.height }}
+            label={name}
+            autoFocus
+            className="h-full w-full"
+          />
+        ) : result ? (
           <div className="p-6">
-            <Spinner />
+            <ErrorCallout
+              className="max-w-xl"
+              error={result.detail ?? result.error}
+              title={result.error}
+              hint="Mermaid 语法可能有误，切到源码看看。"
+              action={
+                <Button size="sm" onClick={() => setMode("code")}>
+                  查看源码
+                </Button>
+              }
+            />
           </div>
         ) : (
-          <pre className="h-full overflow-auto m-0 p-4 text-ui leading-relaxed text-ink font-mono whitespace-pre bg-surface">
-            {codeText}
-          </pre>
+          <div className="flex h-full items-center justify-center">
+            <Spinner label="正在渲染图表" />
+          </div>
         )}
       </div>
     </div>
@@ -361,28 +331,15 @@ function MermaidFilePreview({ url, name }: { url: string; name: string }) {
 
 function SvgFilePreview({ url, name }: { url: string; name: string }) {
   const [mode, setMode] = useState<"preview" | "code">("preview");
-  const [scale, setScale] = useState(1);
-  const [bg, setBg] = useState<BgMode>("checkered");
-  const [svgText, setSvgText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((t) => {
-        if (alive) setSvgText(t);
-      })
-      .catch((e) => {
-        if (alive) setError(String(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [url]);
+  const [bg, setBg] = useState<DiagramBackground>("checkered");
+  const { text: svgText, error } = useFileText(url);
+  // 走规范化后的 data: URL：模型写的 SVG 常漏 xmlns、带裸 & / &nbsp;，直接当 <img src> 会裂图
+  const image = useMemo(() => {
+    if (svgText === null) return null;
+    const svg = toWellFormedSvg(normalizeSvg(svgText));
+    const size = readSvgSize(svg);
+    return { src: svgToDataUrl(svg), width: size?.width || 800, height: size?.height || 600 };
+  }, [svgText]);
 
   if (error) return <ReadError error={error} />;
 
@@ -391,41 +348,27 @@ function SvgFilePreview({ url, name }: { url: string; name: string }) {
       <ViewerToolbar
         mode={mode}
         onMode={setMode}
-        scale={scale}
-        onScale={setScale}
         bg={bg}
         onBg={setBg}
         source={svgText}
         onDownload={() => svgText && downloadSvgFile(svgText, name)}
         downloadLabel="下载"
       />
-
-      {/* Body Viewport */}
-      <div className="flex-1 min-h-0 overflow-auto">
-        {mode === "preview" ? (
-          <div
-            className={`w-full h-full min-h-75 overflow-auto flex items-center justify-center p-8 transition-colors ${BG_CLASSES[bg]}`}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt={name}
-              style={{
-                transform: `scale(${scale})`,
-                transformOrigin: "center center",
-                transition: "transform 120ms ease-out",
-              }}
-              className="max-w-full max-h-full object-contain"
-            />
-          </div>
-        ) : svgText === null ? (
-          <div className="p-6">
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {mode === "code" ? (
+          <SourceView text={svgText} />
+        ) : image ? (
+          <DiagramCanvas
+            source={{ kind: "image", ...image }}
+            background={bg}
+            label={name}
+            autoFocus
+            className="h-full w-full"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
             <Spinner />
           </div>
-        ) : (
-          <pre className="h-full overflow-auto m-0 p-4 text-ui leading-relaxed text-ink font-mono whitespace-pre bg-surface">
-            {svgText}
-          </pre>
         )}
       </div>
     </div>

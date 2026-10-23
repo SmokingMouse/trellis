@@ -831,6 +831,32 @@ html, body {
 .diagram-bg-checkered {
   background: repeating-conic-gradient(var(--surface-muted) 0% 25%, var(--surface) 0% 50%) 50% / 16px 16px;
 }
+/* 图表查看画布（components/diagram/DiagramCanvas）：点阵底随平移移动，提示「可拖」 */
+.diagram-bg-grid {
+  background-color: var(--surface-canvas);
+  background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.25px);
+  background-size: 22px 22px;
+}
+/* 查找命中框：画在被缩放的图层里，描边宽度按 1/scale 反向补偿，任何缩放下都是固定像素 */
+.diagram-hit {
+  position: absolute;
+  pointer-events: none;
+  border-radius: calc(4px * var(--diagram-inv-scale, 1));
+  outline: calc(2px * var(--diagram-inv-scale, 1)) solid var(--accent-line);
+  outline-offset: calc(3px * var(--diagram-inv-scale, 1));
+}
+.diagram-hit-current {
+  outline-color: var(--accent-vivid);
+  outline-width: calc(3px * var(--diagram-inv-scale, 1));
+  background: color-mix(in srgb, var(--accent-vivid) 14%, transparent);
+}
+.diagram-minimap-viewport {
+  position: absolute;
+  pointer-events: none;
+  border: 1.5px solid var(--accent-vivid);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent-vivid) 10%, transparent);
+}
 /* 恒暗代码面（Herdr 终端读屏等非 markdown 场景复用） */
 .code-surface {
   background: var(--code-bg);

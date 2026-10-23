@@ -1,6 +1,7 @@
 "use client";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FocusEvent,
@@ -21,8 +22,8 @@ import {
   remoteImageHref,
   type PreviewKind,
 } from "@/lib/generated-files";
-import { createSvgBlobUrl } from "@/lib/svg";
-import { renderMermaidToSvg } from "@/lib/mermaid";
+import { svgToDataUrl } from "@/lib/svg";
+import { useMermaidSvg } from "@/hooks/useMermaidSvg";
 import { ImageOff } from "lucide-react";
 import { Icon } from "@/components/ui";
 
@@ -138,7 +139,7 @@ function HoverBody({ target }: { target: HoverTarget }) {
 }
 
 function MermaidHoverBody({ url, name }: { url: string; name: string }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -149,34 +150,22 @@ function MermaidHoverBody({ url, name }: { url: string; name: string }) {
         return r.text();
       })
       .then((t) => {
-        if (!alive) return;
-        const isDark =
-          typeof document !== "undefined" &&
-          document.documentElement.classList.contains("dark");
-        return renderMermaidToSvg(t, isDark);
-      })
-      .then((res) => {
-        if (!alive || !res) return;
-        if (res.error || !res.svg) {
-          setFailed(true);
-        } else {
-          const bUrl = createSvgBlobUrl(res.svg);
-          setBlobUrl(bUrl);
-        }
+        if (alive) setText(t);
       })
       .catch(() => alive && setFailed(true));
-
     return () => {
       alive = false;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [url]);
 
-  if (failed) {
+  const { result } = useMermaidSvg(text);
+  const src = useMemo(() => (result?.ok ? svgToDataUrl(result.svg) : null), [result]);
+
+  if (failed || (result && !result.ok)) {
     return <TextBody url={url} markdown={false} />;
   }
 
-  if (!blobUrl) {
+  if (!src) {
     return <div className="px-3 py-2.5 text-label text-ink-faint">渲染图表中…</div>;
   }
 
@@ -184,7 +173,7 @@ function MermaidHoverBody({ url, name }: { url: string; name: string }) {
     <div className="p-2 flex items-center justify-center min-h-25 bg-surface-muted">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={blobUrl}
+        src={src}
         alt={name}
         className="max-w-full max-h-63 object-contain"
       />

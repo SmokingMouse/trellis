@@ -102,6 +102,44 @@ type Fiber = {
 
 工作循环用类似 \`requestIdleCallback\` 的机制让出主线程，让高优先级的输入事件能打断低优先级渲染，避免 jank。`,
   },
+  {
+    // 流式输出里的 Mermaid：验证图表等源码写完再出图、半截不闪错误卡
+    keywords: ["mermaid", "流程图", "架构图"],
+    text: `一个请求从浏览器到落库，大致经过四层。先看全景，再逐层说。
+
+\`\`\`mermaid
+flowchart LR
+  subgraph 客户端 (Browser)
+    UI[页面 (React)] --> Store[状态仓库 (zustand)]
+  end
+  subgraph 服务端
+    API[Route Handler] --> Bus{运行总线}
+    Bus -->|流式事件 (SSE)| UI
+    Bus --> DB[(SQLite 主库)]
+  end
+  Store -->|fetch /api/chat| API
+  style DB fill:honeydew,stroke:seagreen
+\`\`\`
+
+关键点：
+
+1. **页面只订阅不轮询**——运行总线把增量事件推回来，断线重连从游标续上
+2. **落库在总线侧**——客户端刷新不丢正在生成的内容
+3. 时序上，一次提问是这样走的：
+
+\`\`\`mermaid
+sequenceDiagram
+  participant U as 用户
+  participant A as API
+  participant L as 模型
+  U->>A： 提交问题
+  A->>L: 开始流式生成; 带上历史
+  L-->>A: 增量文本
+  A-->>U: SSE 推送
+\`\`\`
+
+上面两张图的源码里故意留了模型常见的写法（标签里裸括号、全角冒号、消息里的分号），渲染层会先归一化再出图。`,
+  },
 ];
 
 export function pickResponse(
@@ -130,6 +168,7 @@ export function pickResponse(
 - **drop / flag / 析构** — 讲 drop flags 和 NLL
 - **async / pin / 状态机** — 讲 Pin 与 self-reference
 - **React / fiber** — 讲 React reconciliation
+- **mermaid / 流程图** — 带 Mermaid 图的回答（流式出图）
 
 \`\`\`typescript
 // 选中代码块也能测试分叉

@@ -27,7 +27,8 @@ export function Modal({
   children,
 }: {
   onClose: () => void;
-  size?: "md" | "lg";
+  /** full = 铺满视口（留出外壳边距），给图表 / 大图这类查看器 */
+  size?: "md" | "lg" | "full";
   closeOnEsc?: "outside-inputs" | "always" | false;
   panelClassName?: string;
   /** 读屏用的对话框名；不传则为「对话框」（面板里自己的标题仍照常显示） */
@@ -93,7 +94,7 @@ export function Modal({
               onKeyDown={trapTabKey}
               className={cn(
                 "w-full overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay outline-none ui-enter-layer",
-                size === "lg" ? "max-w-2xl" : "max-w-xl",
+                size === "full" ? "h-[calc(100%-2rem)]" : size === "lg" ? "max-w-2xl" : "max-w-xl",
                 panelClassName,
               )}
             >
