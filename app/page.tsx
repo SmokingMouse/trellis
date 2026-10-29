@@ -60,7 +60,8 @@ import { useAppMode } from "@/hooks/useAppMode";
 import { parseAppMode } from "@/lib/herdr-mode";
 import { PREF_KEYS, readRaw, writeRaw } from "@/lib/prefs";
 import { TriangleAlert } from "lucide-react";
-import { Icon, Spinner } from "@/components/ui";
+import { Icon, Skeleton } from "@/components/ui";
+import { installNavViewTransitions } from "@/lib/nav-view-transition";
 
 export default function Home() {
   const hydrate = useSessionStore((s) => s.hydrate);
@@ -233,13 +234,14 @@ export default function Home() {
     }
   }, [isMobile, herdrControlled, butler, sessionId, setViewMode]);
 
-  if (!hydrated || isMobile === null) {
-    return (
-      <div className="min-h-dvh flex items-center justify-center">
-        <Spinner size="lg" label="正在载入工作台" />
-      </div>
-    );
-  }
+  // 手机端切会话 / 回首页 / 进总览走 View Transition（lib/nav-view-transition：包住 store 的导航动作，
+  // 回调里 flushSync 提交）。桌面不装，原样直接替换。
+  useEffect(() => {
+    if (!isMobile) return;
+    return installNavViewTransitions();
+  }, [isMobile]);
+
+  if (!hydrated || isMobile === null) return <BootSkeleton />;
 
   return (
     <ScrollHideProvider>
@@ -313,6 +315,46 @@ export default function Home() {
       <BookmarksDrawer />
       <KeyboardHelp />
     </ScrollHideProvider>
+  );
+}
+
+// 首屏骨架：hydrate 完成前（以及 useIsMobile 还没判出断点时）先铺出顶栏 + 几条消息的轮廓，
+// 替代原先居中的一个 Spinner —— 主屏 PWA 冷启动时启动图之后紧接着就是这一屏，形状对得上。
+// 只用 Tailwind 断点，不依赖 isMobile（它此时可能还是 null）。
+function BootSkeleton() {
+  return (
+    <div role="status" aria-label="正在载入工作台" data-boot-skeleton className="fixed inset-0 flex flex-col bg-surface-canvas">
+      <div
+        className="flex shrink-0 items-center gap-3 px-3"
+        style={{ height: "var(--trellis-header-h)", paddingTop: "var(--safe-top)" }}
+      >
+        <Skeleton className="size-7 rounded-md" />
+        <div className="flex min-w-0 flex-1 flex-col items-center gap-1.5 md:items-start">
+          <Skeleton className="h-3.5 w-40" />
+          <Skeleton className="h-2.5 w-20 md:hidden" />
+        </div>
+        <Skeleton className="size-7 rounded-md" />
+      </div>
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 overflow-hidden px-4 pt-6 md:px-8">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex flex-col gap-3">
+            {/* 提问：靠右的短气泡；回答：左侧多行正文 */}
+            <div className="flex justify-end">
+              <Skeleton className={i % 2 ? "h-9 w-1/2 rounded-card" : "h-9 w-2/3 rounded-card"} />
+            </div>
+            {/* 不用 SkeletonText：它自带 role=status，嵌在外层 status 里会被读屏重复播报 */}
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-full" />
+              {i !== 3 && <Skeleton className="h-3.5 w-3/5" />}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="shrink-0 px-4 pb-[calc(var(--safe-bottom,0px)+1rem)] pt-2">
+        <Skeleton className="mx-auto h-12 w-full max-w-3xl rounded-card" />
+      </div>
+    </div>
   );
 }
 

@@ -1377,3 +1377,37 @@ html, body {
     font-size: 16px;
   }
 }
+
+/* ── 手机导航外壳（2026-10-30 去塑料感：mp-shell）──────────────────────── */
+
+/* 侧栏抽屉跟手（components/MobileNavDrawer）：横向交给 hooks/useSwipe，纵向仍由浏览器滚列表。
+   touch-action 只算到最近的滚动容器，所以列表本身也要声明一次。 */
+[data-mobile-nav-drawer],
+[data-mobile-nav-drawer] [data-sidebar-list] {
+  touch-action: pan-y pinch-zoom;
+}
+
+/* 会话切换转场（lib/nav-view-transition.ts 用 document.startViewTransition 包住切换，
+   在 <html data-nav-vt> 上标方向）。只在手机断点生效；桌面与 reduced-motion 根本不发起转场。
+   进入会话 = 新页从右 24px 淡入滑入、旧页略向左淡出；回首页 = 反向。 */
+@keyframes trellis-vt-in-from-right { from { opacity: 0; transform: translateX(24px); } }
+@keyframes trellis-vt-in-from-left { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes trellis-vt-out-to-left { to { opacity: 0; transform: translateX(-12px); } }
+@keyframes trellis-vt-out-to-right { to { opacity: 0; transform: translateX(12px); } }
+@media (max-width: 767.98px) {
+  :root[data-nav-vt]::view-transition-old(root),
+  :root[data-nav-vt]::view-transition-new(root) {
+    animation-duration: var(--dur-heavy);
+    animation-timing-function: var(--ease-out);
+    animation-fill-mode: both;
+  }
+  :root[data-nav-vt="forward"]::view-transition-new(root) { animation-name: trellis-vt-in-from-right; }
+  :root[data-nav-vt="forward"]::view-transition-old(root) { animation-name: trellis-vt-out-to-left; }
+  :root[data-nav-vt="back"]::view-transition-new(root) { animation-name: trellis-vt-in-from-left; }
+  :root[data-nav-vt="back"]::view-transition-old(root) { animation-name: trellis-vt-out-to-right; }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}

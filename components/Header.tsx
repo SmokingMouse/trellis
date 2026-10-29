@@ -53,7 +53,9 @@ import {
 } from "@/hooks/useIsMobile";
 import { useScrollHideState } from "@/hooks/useScrollHide";
 import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
-import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
+import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
+import { isHerdrSession } from "@/lib/herdr-ui";
+import { modeStyle } from "@/lib/mode-style";
 import { createHerdrTab } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { formatTokens } from "@/lib/format-tokens";
@@ -186,6 +188,29 @@ function ContextMeter({ percent }: { percent: number }) {
   );
 }
 
+// 手机顶栏的发丝线：正文在顶部时不画（顶栏与画布连成一片），一滚动才出现。
+// 页面的主滚动容器有好几种（线性 thread、首页、Herdr 总览…），不逐个接线：在 document 上
+// capture 所有 scroll 事件，只认「占了大半屏高」的滚动盒 —— 抽屉 / sheet 里的列表、代码块横滚、
+// 输入框都不算。不按「顶边贴着顶栏」判：顶栏下面可能还夹着待办横幅。
+function useMainScrolled(enabled: boolean, resetKey: string): boolean {
+  // 记下是哪个视图量出来的：换会话 / 回首页后旧值作废（新视图从顶部开始），不用在 effect 里清零
+  const [scrolled, setScrolled] = useState<{ key: string; on: boolean }>({ key: resetKey, on: false });
+  useEffect(() => {
+    if (!enabled) return;
+    const onScroll = (e: Event) => {
+      const el = e.target;
+      if (!(el instanceof HTMLElement)) return;
+      if (el.closest('[data-mobile-header], [role="dialog"], [data-mobile-nav-drawer]')) return;
+      if (el.clientHeight < window.innerHeight * 0.5) return;
+      const on = el.scrollTop > 2;
+      setScrolled((prev) => (prev.key === resetKey && prev.on === on ? prev : { key: resetKey, on }));
+    };
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => document.removeEventListener("scroll", onScroll, { capture: true });
+  }, [enabled, resetKey]);
+  return enabled && scrolled.key === resetKey && scrolled.on;
+}
+
 function basename(p: string): string {
   const stripped = p.replace(/\/+$/, "");
   const idx = stripped.lastIndexOf("/");
@@ -221,6 +246,12 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const toggleFleetPicker = useHerdrConsoleStore((s) => s.toggleFleetPicker);
   const mobileTerminalView = useHerdrConsoleStore((s) => s.mobileTerminalView);
   const toggleMobileTerminalView = useHerdrConsoleStore((s) => s.toggleMobileTerminalView);
+  const viewMode = useSessionStore((s) => s.viewMode);
+  const { fleet: herdrFleet } = useHerdrFleet();
+  const mainScrolled = useMainScrolled(
+    isMobile,
+    session?.id ?? (herdrOpen ? "herdr" : homeOpen ? "home" : "compose"),
+  );
   const nodeCount = Object.keys(nodes).length;
   const contextWindow = contextWindowFor(provider);
   // 四个桶各自累加。放 useMemo 而不是 Zustand selector：selector 每次返回新对象
@@ -286,6 +317,16 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   if (isMobile) {
     const title = session?.title.trim() || (herdrOpen ? "Herdr 总览" : homeOpen ? "首页" : "新会话");
     const headerHidden = scrollHidden;
+    // 原线性 thread 头（56px，「模式 · 线性」+ 标题）并进这里：标题下一行小字副标题。
+    // Herdr 会话的窗格信息由下面的 fleet pill 承担；fleet 不可用时退成「Herdr 会话」小字。
+    const subtitle = !session
+      ? null
+      : isHerdrSession(session, herdrFleet)
+        ? { tone: "neutral" as const, text: "Herdr 会话" }
+        : {
+            tone: session.mode === "project" ? ("project" as const) : ("chat" as const),
+            text: `${modeStyle(session.mode).label} · ${viewMode === "canvas" ? "画布" : "线性"}`,
+          };
     return (
       <>
         <header
@@ -294,7 +335,8 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           data-header-hidden={headerHidden ? "true" : undefined}
           aria-hidden={headerHidden ? true : undefined}
           inert={headerHidden ? true : undefined}
-          className={`fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-1 z-40 gap-1 transition-transform duration-200 motion-reduce:transition-none ${
+          data-header-scrolled={mainScrolled ? "true" : undefined}
+          className={`fixed top-0 inset-x-0 h-12 bg-surface-canvas/80 backdrop-blur-xl backdrop-saturate-150 flex items-center px-1 z-40 gap-1 transition-transform duration-200 motion-reduce:transition-none ${
             headerHidden ? "pointer-events-none" : ""
           }`}
           style={{
@@ -339,12 +381,20 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
               </button>
             ) : (
-              <span
-                className="block truncate text-sm font-medium text-ink-strong"
-                title={title}
-              >
-                {title}
-              </span>
+              <div className="flex min-w-0 flex-col items-center leading-tight" title={title}>
+                <span className="block max-w-full truncate text-ui font-semibold text-ink-strong">
+                  {title}
+                </span>
+                {subtitle && (
+                  <span
+                    data-mobile-header-subtitle
+                    className="mt-0.5 flex max-w-full items-center gap-1 truncate text-nano text-ink-faint"
+                  >
+                    <StatusDot tone={subtitle.tone} />
+                    {subtitle.text}
+                  </span>
+                )}
+              </div>
             )}
           </div>
           {hc.available && (
@@ -392,6 +442,14 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           >
             <Icon icon={Ellipsis} size="lg" />
           </IconButton>
+          {/* 0.5px 发丝线：只在主内容滚离顶部时出现 */}
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 h-px origin-bottom scale-y-50 bg-line transition-opacity duration-150 motion-reduce:transition-none",
+              mainScrolled ? "opacity-100" : "opacity-0",
+            )}
+          />
         </header>
         {headerHidden && (
           <button

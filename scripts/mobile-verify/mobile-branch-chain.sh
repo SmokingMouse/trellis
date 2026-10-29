@@ -104,7 +104,7 @@ print_page_diagnostics() {
     saved,
     composer: document.querySelector('[data-mobile-composer]')?.dataset.composerState,
     header: Boolean(document.querySelector('[data-mobile-header]')),
-    threadHeader: Boolean(document.querySelector('[data-thread-header]')),
+    threadScroll: Boolean(document.querySelector('[data-thread-scroll]')),
     canvas: Boolean(document.querySelector('[data-canvas-surface]')),
     nodeIds: [...document.querySelectorAll('[data-thread-node-id]')].map((element) => element.getAttribute('data-thread-node-id')),
   };
@@ -162,7 +162,7 @@ assert_mobile_landing() {
       && saved?.viewMode === 'linear'
       && node === '$expected'
       && Boolean(document.querySelector('[data-mobile-header]'))
-      && Boolean(document.querySelector('[data-thread-header]'))
+      && Boolean(document.querySelector('[data-thread-scroll]'))
       && Boolean(document.querySelector('[data-thread-node-id=\"$expected\"]'))
       && document.querySelector('[data-mobile-composer]')?.dataset.composerState === 'compact'
       && !document.querySelector('[data-canvas-surface]');
@@ -431,7 +431,7 @@ wait_for_js "new-tree cancel returns to linear with TreePanel closed" "(() => {
   return !document.querySelector('[data-mobile-target=new-tree-start]')
     && !document.querySelector('[data-mobile-tree-sheet]')
     && saved?.viewMode === 'linear'
-    && Boolean(document.querySelector('[data-thread-header]'))
+    && Boolean(document.querySelector('[data-thread-scroll]'))
     && !document.querySelector('[data-canvas-surface]');
 })()"
 assert_mobile_landing "$EDIT_ID" "new-tree cancel preserves the active linear chain"
@@ -489,11 +489,11 @@ wait_for_js "overflow opens from hidden header" "document.querySelector('[data-m
 ab click '[data-mobile-target="overflow-canvas"]'
 wait_for_js "map clears hidden header state" "Boolean(document.querySelector('[data-canvas-map]')) && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 ab click '[aria-label="关闭地图"]'
-wait_for_js "linear remount chrome visible" "Boolean(document.querySelector('[data-thread-header]')) && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false' && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
+wait_for_js "linear remount chrome visible" "Boolean(document.querySelector('[data-thread-scroll]')) && document.querySelector('[data-safe-area="linear-composer"]')?.dataset.composerHidden === 'false' && !document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden')"
 
 echo "== 7a. desktop anchored edit focuses the re-asked sibling =="
 ab set viewport 1280 800
-wait_for_js "desktop linear fixture" "innerWidth === 1280 && !document.querySelector('[data-mobile-header]') && Boolean(document.querySelector('[data-thread-header]'))"
+wait_for_js "desktop linear fixture" "innerWidth === 1280 && !document.querySelector('[data-mobile-header]') && Boolean(document.querySelector('[data-thread-scroll]'))"
 if ! ab eval "Boolean([...document.querySelectorAll('aside')].find((element) => getComputedStyle(element).display !== 'none' && element.getBoundingClientRect().width > 0))" | grep -q '^true$'; then
   ab click 'button[aria-label="展开侧栏"]'
 fi

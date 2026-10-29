@@ -16,7 +16,6 @@ import { isContextCompacted } from "@/lib/context-usage";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, nodeSort } from "@/lib/tree-panel";
 import { subscribeStream } from "@/lib/stream-bus";
-import { modeStyle } from "@/lib/mode-style";
 import {
   THREAD_WIDTH_CLASS,
   THREAD_WIDTH_OPTIONS,
@@ -655,7 +654,6 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   };
 
   if (!session) return null;
-  const mode = modeStyle(session.mode);
   // Header/cards/composer share one width class so they stay column-aligned.
   const widthClass = THREAD_WIDTH_CLASS[threadWidth];
   const composerIsHidden =
@@ -676,11 +674,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           "--safe-top",
         ),
       ) || 0;
-    const titleHeight =
-      document
-        .querySelector<HTMLElement>("[data-thread-header]")
-        ?.getBoundingClientRect().height ?? 56;
-    if (event.clientY <= safeTop + titleHeight) revealScrollChrome();
+    // 收起后顶栏原先占的那条（48px）仍可点回
+    if (event.clientY <= safeTop + 48) revealScrollChrome();
   };
 
   return (
@@ -709,37 +704,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
     >
-      <div
-        data-thread-header
-        data-thread-header-hidden={mobileHeaderHidden ? "true" : undefined}
-        aria-hidden={mobileHeaderHidden ? true : undefined}
-        inert={mobileHeaderHidden ? true : undefined}
-        className="shrink-0 z-30 max-md:h-14 md:hidden border-b border-line/80 bg-surface-canvas/90 backdrop-blur transition-transform duration-200 motion-reduce:transition-none"
-        style={{
-          transform: mobileHeaderHidden
-            ? "translateY(calc(-100% - var(--trellis-header-h)))"
-            : undefined,
-        }}
-      >
-        <div className={`${widthClass} mx-auto px-4 py-2 max-md:h-full flex items-center gap-3`}>
-          <div className="min-w-0 flex-1">
-            {isHerdr ? (
-              <HerdrSessionBadge
-                pane={herdrPane}
-                loading={herdrSnapshot.loading}
-              />
-            ) : (
-              <div className="text-label text-ink-faint flex items-center gap-1.5">
-                <StatusDot tone={session.mode === "project" ? "project" : "chat"} />
-                {mode.label} · 线性
-              </div>
-            )}
-            <h1 className="truncate text-ui font-semibold text-ink-strong">
-              {session.title}
-            </h1>
-          </div>
-        </div>
-      </div>
+      {/* 手机线程头（原 56px「模式 · 线性」+ 标题）已并进全局 Header（components/Header.tsx
+          手机分支的标题 + 副标题），这里不再渲染第二层顶栏。桌面端本来就不显示它。 */}
 
       {/* 桌面端：标题已在面包屑和标签里，不再单独占一行；Herdr 标识、宽度切换、
           画布入口收进标签条右端（照 mockups/01-workbench.html），和正文列不再错位。 */}
@@ -796,9 +762,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           mobileHeaderHidden
             ? {
                 marginBottom:
-                  "calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem)",
+                  "calc(var(--safe-top) - var(--trellis-header-h))",
                 transform:
-                  "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))",
+                  "translateY(calc(var(--safe-top) - var(--trellis-header-h)))",
               }
             : isMobile
               ? undefined

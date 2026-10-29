@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { PREF_KEYS } from "@/lib/prefs";
 import { AppProviders } from "@/components/ui/AppProviders";
+import { splashStartupImages } from "@/lib/pwa-splash";
 
 export const metadata: Metadata = {
   title: "Trellis",
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "Trellis",
+    // iOS 主屏启动图：按机型尺寸 × 亮 / 暗各一张（lib/pwa-splash.ts，scripts/gen-pwa-splash.ts 生成）。
+    // 没有它，主屏图标点开到首屏骨架之间是一块白屏。
+    startupImage: splashStartupImages(),
   },
 };
 
