@@ -77,6 +77,7 @@ import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { useAppMode } from "@/hooks/useAppMode";
 import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
+import { readCachedSessionList, writeCachedSessionList } from "@/lib/offline-cache";
 import { herdrStatusLabel } from "@/lib/herdr-console";
 import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
@@ -106,6 +107,14 @@ const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "her
 //
 // W4 删除了方案 A 落地前的 legacy 路径（NEXT_PUBLIC_TRELLIS_SIDEBAR_V2=off 时的
 // 「最近」分组、独立 Herdr 分组、底部已归档折叠区）。
+
+/** 侧栏列表的本地缓存形状。stores/sessionStore 冷启动也读它的 sessions[0] 挑启动会话。 */
+type CachedSidebarList = {
+  sessions: Session[];
+  taskSessions: Session[];
+  archivedCount: number;
+  projects: ProjectSummary[];
+};
 
 export function SessionSidebar() {
   const [layout, setLayout] = useSidebarPreference("layout", "project" as SidebarLayout, isLayout);
@@ -229,13 +238,41 @@ export function SessionSidebar() {
 
   // Same watch contract as SessionPicker / SessionTabs: refetch on active
   // change or any store mutation that bumps sessionsRevision.
+  //
+  // 冷启动先铺本地缓存（lib/offline-cache，离线 / 慢网也有列表可看），网络回来再覆盖并回写。
+  // 缓存里不带 pending（待处理以服务端快照为准，旧的会让角标 / 待办条报假数），也不拿来
+  // 同步置顶（置顶写入有并发护栏，只认服务端列表）。
+  const listCacheSeeded = useRef(false);
+  const listFromNetwork = useRef(false);
+  useEffect(() => {
+    if (listCacheSeeded.current) return;
+    listCacheSeeded.current = true;
+    void readCachedSessionList<CachedSidebarList>().then((data) => {
+      if (!data || listFromNetwork.current) return;
+      setSessions(data.sessions ?? []);
+      setTaskSessions(data.taskSessions ?? []);
+      useSessionTitlesStore.getState().ingest([...(data.sessions ?? []), ...(data.taskSessions ?? [])]);
+      setArchivedCount(data.archivedCount ?? 0);
+      setProjects(data.projects ?? []);
+    });
+  }, []);
   useEffect(() => {
     let cancelled = false;
     const requestedAt = Date.now();
     fetch("/api/sessions?includeEmptyWorkspaces=1")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         if (!cancelled) {
+          listFromNetwork.current = true;
+          void writeCachedSessionList<CachedSidebarList>({
+            sessions: data.sessions ?? [],
+            taskSessions: data.taskSessions ?? [],
+            archivedCount: data.archivedCount ?? 0,
+            projects: data.projects ?? [],
+          });
           setSessions(data.sessions ?? []);
           setTaskSessions(data.taskSessions ?? []);
           useSessionTitlesStore.getState().ingest([...(data.sessions ?? []), ...(data.taskSessions ?? [])]);

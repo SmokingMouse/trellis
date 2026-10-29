@@ -42,7 +42,16 @@ export type PushPayload = {
   url: string;
   sessionId: string | null;
   nodeId: string | null;
+  /** 发送时「等你回答」的会话总数（主屏图标角标，public/sw.js 用 Badging API 设）。
+   *  缺省 = 不动角标（例如测试推送）。 */
+  badge?: number;
 };
+
+/** 角标数：待处理快照里涉及的会话数（同一会话多项只算一个，与页面 lib/attention 同口径）。
+ *  服务端看不到 Herdr 窗格状态与页面里「提交中」的项，那两处由页面打开时校正。 */
+export function waitingBadgeCount(items: readonly Pick<PendingItem, "sessionId">[]): number {
+  return new Set(items.map((i) => i.sessionId)).size;
+}
 
 const BODY_MAX = 140;
 const TITLE_MAX = 60;

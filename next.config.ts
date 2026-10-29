@@ -20,10 +20,16 @@ const projectRoot = process.cwd().startsWith(os.homedir() + "/") ? os.homedir() 
 const devOrigin = process.env.TRELLIS_DEV_ORIGIN;
 const distDir = process.env.TRELLIS_DIST_DIR;
 const verifyBuild = process.env.NEXT_PUBLIC_TRELLIS_VERIFY === "1" ? "1" : "0";
+// Service worker 缓存版本（public/sw.js）：页面以 /sw.js?v=<这个值> 注册，换值 = 换 SW
+// 脚本 URL = 浏览器装新 SW，activate 时清掉旧版本的 app shell / 静态资源缓存。
+// 每次 next build 取一个新值；写回 process.env 是为了同一次构建里 config 被多次加载
+// （主进程 / worker 继承环境变量）时拿到同一个值。dev 固定 "dev"，SW 见到它就不接管请求
+// （dev 的 chunk 没有内容 hash，cache-first 会把 HMR 卡死）。
+const swVersion = isDev ? "dev" : (process.env.TRELLIS_SW_VERSION ||= Date.now().toString(36));
 
 const nextConfig: NextConfig = {
   ...(distDir ? { distDir } : {}),
-  env: { NEXT_PUBLIC_TRELLIS_VERIFY: verifyBuild },
+  env: { NEXT_PUBLIC_TRELLIS_VERIFY: verifyBuild, NEXT_PUBLIC_TRELLIS_SW_VERSION: swVersion },
   // 127.0.0.1 必须显式进白名单：Next 16 dev 的跨源防护只认启动 hostname（localhost）。
   // 用 http://127.0.0.1:<port> 打开 dev 页时，HMR WebSocket 握手带 Origin: http://127.0.0.1
   // 会被 dev server **静默掐断**（不回 HTTP 响应、不打日志），而 dev 的 RSC/hydration

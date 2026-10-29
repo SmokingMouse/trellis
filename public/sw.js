@@ -1,18 +1,175 @@
-// Trellis service worker —— 只做 Web Push，不做离线缓存。
+// Trellis service worker —— Web Push + 主屏角标 + app shell 离线兜底。
 //
-// 刻意没有 fetch 处理器：trellis 是一台机器上的实时应用，缓存页面 / 接口只会制造
-// 「看到的是旧版本」这类问题；没有 fetch 处理器时浏览器照常走网络，SW 不在请求路径上。
+// fetch 处理只管两类请求，其余（/api/*、/term、RSC 请求、跨域……）一律不 respondWith，
+// 照常走网络、绝不进缓存（接口带鉴权数据，缓存既有泄漏面又会陈旧）：
+//   ① 页面导航（app 自己的几条路由）：network-first，3s 没回来、断网或 5xx（隧道断了）→
+//      回退到上一次成功的同路径 HTML（app shell）。shell 本身不含会话数据（主界面是 client
+//      page，数据走 /api），最近会话的「秒开」在页面里用 IndexedDB 做（lib/offline-cache.ts）。
+//   ② /_next/static/*：文件名带内容 hash、不可变 → cache-first。
 //
-// 推送 payload 由 lib/push.ts buildPushPayload 构造：
-//   { kind, title, body, tag, url, sessionId, nodeId }
+// 鉴权：未登录时导航会被 proxy.ts 重定向到 /login —— 重定向（opaqueredirect / redirected）
+// 和 /login 本身都不进缓存。登出 / 落到登录页时页面会清掉全部 trellis-* 缓存
+// （lib/offline-cache.ts clearOfflineData，app/login/page.tsx 调）。
+//
+// 版本：页面以 /sw.js?v=<构建版本> 注册（lib/push-client.ts swUrl，值来自 next.config）。
+// 部署后脚本 URL 变 → 浏览器装新 SW → activate 删掉不属于本版本的缓存，再预热新 shell。
+// v=dev（next dev）时不接管任何请求：dev 的 chunk 没有 hash，cache-first 会卡住 HMR。
+//
+// 推送 payload 由 lib/push.ts buildPushPayload 构造（badge 由 lib/server/push.ts 发送时补）：
+//   { kind, title, body, tag, url, sessionId, nodeId, badge? }
+
+const VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
+const OFFLINE_ENABLED = VERSION !== "dev";
+const SHELL_CACHE = `trellis-shell-${VERSION}`;
+const STATIC_CACHE = `trellis-static-${VERSION}`;
+const NAV_TIMEOUT_MS = 3000;
+
+/** 能当 app shell 缓存 / 回退的导航路径。/login、/term、/api 等都不在内。 */
+function isShellPath(pathname) {
+  return (
+    pathname === "/" ||
+    pathname === "/herdr" ||
+    pathname === "/butler" ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname.startsWith("/settings/")
+  );
+}
+
+/** 只缓存「真拿到了这一页」的响应：同源 200、没被重定向（未登录会被导去 /login）、是 HTML。 */
+function cacheableShell(res) {
+  if (!res || res.status !== 200 || res.type !== "basic" || res.redirected) return false;
+  if (new URL(res.url).pathname === "/login") return false;
+  return (res.headers.get("content-type") || "").includes("text/html");
+}
+
+/** shell 按路径缓存，去掉 ?session= 等查询串。 */
+function shellKey(url) {
+  return new URL(url.pathname, self.location.origin).href;
+}
+
+const STATIC_RE = /\/_next\/static\/[^"'\s()\\<>]+/g;
+
+/** 把 shell HTML 里引用到的 /_next/static 资源补进缓存（已有的跳过）。 */
+async function warmAssets(html) {
+  const urls = new Set((html.match(STATIC_RE) || []).map((p) => new URL(p, self.location.origin).href));
+  if (urls.size === 0) return;
+  const cache = await caches.open(STATIC_CACHE);
+  await Promise.all(
+    [...urls].map(async (u) => {
+      try {
+        if (await cache.match(u)) return;
+        const res = await fetch(u);
+        if (res.ok) await cache.put(u, res);
+      } catch {
+        /* 预热失败无妨：真用到时 fetch 处理器还会再取 */
+      }
+    }),
+  );
+}
+
+async function storeShell(key, res) {
+  const html = await res.clone().text();
+  const cache = await caches.open(SHELL_CACHE);
+  await cache.put(key, res);
+  await warmAssets(html);
+}
+
+/** 预热主界面 shell：SW 刚装上时页面是在它之前加载的，那次导航没经过 fetch 处理器。 */
+async function warmShell() {
+  try {
+    const res = await fetch("/", { credentials: "same-origin", cache: "no-store" });
+    if (cacheableShell(res)) await storeShell(shellKey(new URL("/", self.location.origin)), res);
+  } catch {
+    /* 离线 / 未登录：等下一次成功导航再缓存 */
+  }
+}
 
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      const keep = new Set([SHELL_CACHE, STATIC_CACHE]);
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k.startsWith("trellis-") && !keep.has(k)).map((k) => caches.delete(k)));
+      await self.clients.claim();
+      if (OFFLINE_ENABLED) await warmShell();
+    })(),
+  );
 });
+
+function offlinePage() {
+  const html =
+    '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>Trellis · 离线</title><body style="font-family:system-ui;padding:2rem;line-height:1.6">' +
+    '<h1 style="font-size:1.1rem">连不上 Trellis</h1><p>当前离线，这台设备上也还没有可用的页面缓存。</p>' +
+    '<p><a href="">重试</a></p></body></html>';
+  return new Response(html, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+async function handleNavigation(event, url) {
+  const key = shellKey(url);
+  const network = fetch(event.request);
+  // 网络回来就更新 shell（不阻塞响应）。注意先注册这个 then：clone 必须发生在浏览器读 body 之前。
+  const updated = network
+    .then(async (res) => {
+      if (cacheableShell(res)) await storeShell(key, res.clone());
+      return res;
+    })
+    .catch(() => null);
+  event.waitUntil(updated);
+
+  const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), NAV_TIMEOUT_MS));
+  const first = await Promise.race([network.then((res) => res, () => "error"), timeout]);
+  // 正常回来（含 307 去登录页、4xx）原样给浏览器；只有超时 / 断网 / 5xx 才考虑缓存。
+  if (first instanceof Response && first.status < 500) return first;
+  const hit = await caches.open(SHELL_CACHE).then((c) => c.match(key));
+  if (hit) return hit;
+  if (first instanceof Response) return first;
+  // 没缓存：超时就继续等网络，彻底失败给一张离线说明页。
+  if (first === "timeout") {
+    const res = await updated;
+    if (res) return res;
+  }
+  return offlinePage();
+}
+
+async function handleStatic(request) {
+  const cache = await caches.open(STATIC_CACHE);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const res = await fetch(request);
+  if (res.ok && res.type === "basic") await cache.put(request, res.clone());
+  return res;
+}
+
+self.addEventListener("fetch", (event) => {
+  if (!OFFLINE_ENABLED) return;
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (req.mode === "navigate") {
+    if (isShellPath(url.pathname)) event.respondWith(handleNavigation(event, url));
+    return;
+  }
+  if (url.pathname.startsWith("/_next/static/")) event.respondWith(handleStatic(req));
+  // 其余（含全部 /api/*）不接管：不缓存、不改写。
+});
+
+/** 主屏角标（Badging API）。payload 没带 badge 时不动；不支持 / 没权限时静默。 */
+async function applyBadge(n) {
+  if (typeof n !== "number" || !("setAppBadge" in self.navigator)) return;
+  try {
+    if (n > 0) await self.navigator.setAppBadge(n);
+    else await self.navigator.clearAppBadge();
+  } catch {
+    /* 没通知权限等 */
+  }
+}
 
 self.addEventListener("push", (event) => {
   let data = {};
@@ -37,6 +194,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
       await self.registration.showNotification(title, options);
+      await applyBadge(data.badge);
       // 告诉打开着的页面（验收 / 调试用；页面不处理也无妨）。
       const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const c of all) c.postMessage({ type: "trellis-push", payload: data });

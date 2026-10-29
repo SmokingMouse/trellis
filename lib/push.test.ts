@@ -11,6 +11,7 @@ import {
   pushKindAllowed,
   recordPresence,
   takeDedupeSlot,
+  waitingBadgeCount,
   PENDING_FRESH_MS,
   PENDING_STALE_MS,
   PRESENCE_TTL_MS,
@@ -164,5 +165,12 @@ describe("parseSubscription", () => {
     expect(isGoneStatus(410)).toBe(true);
     expect(isGoneStatus(429)).toBe(false);
     expect(isGoneStatus(undefined)).toBe(false);
+  });
+});
+
+describe("waitingBadgeCount", () => {
+  test("按会话去重计数", () => {
+    expect(waitingBadgeCount([])).toBe(0);
+    expect(waitingBadgeCount([{ sessionId: "a" }, { sessionId: "a" }, { sessionId: "b" }])).toBe(2);
   });
 });

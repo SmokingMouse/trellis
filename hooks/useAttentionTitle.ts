@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo } from "react";
 import { attentionTitle, waitingSessionIds } from "@/lib/attention";
+import { syncAppBadge } from "@/lib/app-badge";
 import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
 import { useSessionStore } from "@/stores/sessionStore";
 
@@ -21,6 +22,17 @@ export function useWaitingSessionIds(): Set<string> {
  */
 export function useAttentionTitle(): void {
   const count = useWaitingSessionIds().size;
+  // 主屏图标角标与标题前缀同一个数。回到前台时重设一次：后台期间 SW 可能按服务端
+  // 计数改过角标（服务端看不到 Herdr 状态，口径略窄）。卸载时不清 —— 离开主界面 /
+  // 关掉 App 后角标仍应留着，之后由 SW 收推送时更新。
+  useEffect(() => {
+    syncAppBadge(count);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") syncAppBadge(count);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [count]);
   useEffect(() => {
     const apply = () => {
       const next = attentionTitle(document.title, count);

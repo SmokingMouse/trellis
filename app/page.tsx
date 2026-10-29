@@ -54,6 +54,7 @@ import { HerdrFleetPickerSheet } from "@/components/herdr/HerdrFleetPickerSheet"
 import { HerdrMobileWorkbench } from "@/components/herdr/HerdrMobileWorkbench";
 import { MobileEdgeSwipe } from "@/components/MobileEdgeSwipe";
 import { DiffReviewHost } from "@/components/DiffReviewHost";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { HerdrJumpPalette } from "@/components/herdr/HerdrJumpPalette";
 import { useAppMode } from "@/hooks/useAppMode";
 import { parseAppMode } from "@/lib/herdr-mode";
@@ -260,6 +261,7 @@ export default function Home() {
           </span>
         </div>
       )}
+      <OfflineBanner />
       {showHome && (butlerDraft ? <ButlerHome isMobile={isMobile} /> : <HomeView isMobile={isMobile} />)}
       {showHerdr && <HerdrOverview isMobile={isMobile} />}
       {!session && !showHome && !showHerdr && <QuestionInput isMobile={isMobile} />}

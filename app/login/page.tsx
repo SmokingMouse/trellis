@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ErrorCallout, Input } from "@/components/ui";
+import { clearOfflineData } from "@/lib/offline-cache";
 
 type LoginError = { title: string; hint: string; raw: unknown };
 
@@ -17,6 +18,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<LoginError | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 落到登录页 = 登出 / cookie 失效 / 换了 token：清掉本机的会话缓存（IndexedDB）与
+  // SW 的 app shell 缓存，下一个登录的人看不到上一个人的会话内容。
+  useEffect(() => {
+    void clearOfflineData();
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

@@ -30,11 +30,17 @@ export function detectPushEnv(): PushEnv {
   };
 }
 
+export function swUrl(): string {
+  return `/sw.js?v=${encodeURIComponent(process.env.NEXT_PUBLIC_TRELLIS_SW_VERSION || "dev")}`;
+}
+
 export async function registerPushWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator) || !window.isSecureContext) return null;
   try {
     // updateViaCache: none —— SW 脚本本身永远走网络取，改了推送逻辑下次打开就生效。
-    return await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" });
+    // ?v= 是构建版本（next.config swVersion）：部署后脚本 URL 变了，浏览器装新 SW 并在
+    // activate 时清掉旧版本的离线缓存（public/sw.js）。
+    return await navigator.serviceWorker.register(swUrl(), { scope: "/", updateViaCache: "none" });
   } catch (err) {
     console.warn("[push] service worker 注册失败：", err);
     return null;
