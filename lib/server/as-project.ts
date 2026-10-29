@@ -435,6 +435,23 @@ export async function interruptProject(nodeId: string) {
   if (active && !active.terminal) return active.client.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId });
   return withNodeThread(nodeId, (client, threadId) => client.request("turn/interrupt", { threadId, turnId: getAsTurn(nodeId)?.turn_id ?? undefined }));
 }
+/** 插话不可用（这一轮不在 Agent 服务上跑 / 已结束 / daemon 不支持）——调用方改为排队。 */
+export class SteerUnavailable extends Error {}
+/**
+ * 插话：把一条用户消息注入正在跑的那一轮（AS turn/steer）。
+ * 只认本进程持有的活跃 run：它有 turnId、有自己的 wire；legacy run-bus 的
+ * CLI 子进程没有中途写入的入口（@smokingmouse/agent Backend 只有 run(prompt)）。
+ * 注入的消息由 turn-queue 记成该 turn 的 userMessage item，projectResponse 把它
+ * 投影成正文里的「插话」引用块，所以刷新后也看得见。
+ */
+export async function steerProject(nodeId: string, text: string) {
+  if (!isAgentServerEnabled()) throw new SteerUnavailable("Agent 服务已关闭");
+  const run = runs.get(nodeId);
+  if (!run || run.terminal || !run.turnId) throw new SteerUnavailable("这一轮不在 Agent 服务上运行，不能插话");
+  if (run.client.initializeResult?.capabilities.steer !== true) throw new SteerUnavailable("Agent 服务不支持插话");
+  await run.client.request("turn/steer", { threadId: run.threadId, expectedTurnId: run.turnId, input: [{ type: "text", text }],
+    clientTurnId: `trellis-steer-${nodeId}-${randomUUID()}` });
+}
 export async function permissionProject(nodeId: string, permission: NonNullable<StartThreadParams["permission"]>) {
   if (["full", "bypassPermissions"].includes(permission)) throw new Error("bypass 只能在创建线程时选择");
   return withNodeThread(nodeId, (client, threadId) => setProjectPermission(client, threadId, permission));

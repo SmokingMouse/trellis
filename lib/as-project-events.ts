@@ -30,10 +30,30 @@ export function itemToolCall(item: Item): ToolCall | null {
     startedAt: item.startedAtMs, endedAt: item.completedAtMs ?? null,
     durationMs: item.completedAtMs == null ? null : Math.max(0, item.completedAtMs - item.startedAtMs) };
 }
+/** 插话（turn/steer 注入的用户消息）在正文里的呈现：引用块 + 标签。 */
+export function steerBlock(text: string) {
+  return text.trim().split("\n").map((line, i) => `> ${i === 0 ? "**插话**　" : ""}${line}`).join("\n");
+}
+const userText = (item: Extract<Item, {type:"userMessage"}>) =>
+  item.payload.content.map(p => p.type === "text" ? p.text : "").filter(Boolean).join("\n");
 export function projectResponse(items: Item[]) {
-  const messages = items.filter((i): i is Extract<Item, {type:"agentMessage"}> => i.type === "agentMessage").sort((a,b) => a.seq-b.seq);
-  const response = messages.map(i => i.payload.text).join("\n\n");
-  return { response, finalStart: messages.length > 1 ? response.length - messages.at(-1)!.payload.text.length : 0 };
+  // 一轮里第一条 userMessage 是本轮的提问本身（节点 question），其后的都是中途
+  // 插话：按 seq 穿插进正文，否则用户在回复里看不到自己插了什么。
+  const ordered = items.filter(i => i.type === "agentMessage" || i.type === "userMessage").sort((a,b) => a.seq-b.seq);
+  const firstUser = ordered.find(i => i.type === "userMessage");
+  const parts: { text: string; agent: boolean }[] = [];
+  for (const i of ordered) {
+    if (i.type === "agentMessage") parts.push({ text: i.payload.text, agent: true });
+    else if (i !== firstUser && i.type === "userMessage") {
+      const text = userText(i);
+      if (text.trim()) parts.push({ text: steerBlock(text), agent: false });
+    }
+  }
+  const response = parts.map(p => p.text).join("\n\n");
+  // finalStart = 最后一段 agent 正文的起点；只有一段（或最后一段 agent 就是第一段）时整段即答复。
+  const lastAgent = parts.map(p => p.agent).lastIndexOf(true);
+  const finalStart = lastAgent > 0 ? parts.slice(0, lastAgent).reduce((n, p) => n + p.text.length + 2, 0) : 0;
+  return { response, finalStart };
 }
 export function projectInteraction(request: PendingServerRequest): PendingInteraction {
   const { method, params } = request;

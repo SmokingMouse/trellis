@@ -8,6 +8,16 @@ test("message boundaries determine finalStart and preserve order", () => {
   expect(projectResponse([item("b",3,"answer"),item("a",1,"preface")])).toEqual({response:"preface\n\nanswer",finalStart:9});
   expect(projectResponse([item("a",1,"partial")])).toEqual({response:"partial",finalStart:0});
 });
+test("steered user messages are interleaved as quotes; the turn's own prompt is not", () => {
+  const user = (id:string, seq:number, text:string): Item => ({id, seq, turnId:"turn", startedAtMs:10, type:"userMessage", payload:{content:[{type:"text",text}]}});
+  const items = [user("q",0,"original question"), item("a",1,"working"), user("s",2,"also check B\nplease"), item("b",3,"done")];
+  const { response, finalStart } = projectResponse(items);
+  expect(response).toBe("working\n\n> **插话**　also check B\n> please\n\ndone");
+  expect(response.slice(finalStart)).toBe("done");
+  // 插话是最后一项（还没回复）：finalStart 仍指向最后一段 agent 正文。
+  const trailing = projectResponse([user("q",0,"q"), item("a",1,"only"), user("s",2,"late")]);
+  expect(trailing).toEqual({ response: "only\n\n> **插话**　late", finalStart: 0 });
+});
 test("command completion preserves failure, output and timestamps", () => {
   expect(itemToolCall({id:"tool",seq:2,turnId:"turn",startedAtMs:10,completedAtMs:45,type:"commandExecution",status:"completed",
     payload:{command:"exit 1",cwd:"/tmp",aggregatedOutput:"failure",exitCode:1}})).toMatchObject({id:"tool",name:"Bash",status:"error",output:"failure",durationMs:35});

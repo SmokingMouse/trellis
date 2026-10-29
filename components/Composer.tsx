@@ -1,7 +1,24 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, GitBranch, Paperclip, PenLine, Square } from "lucide-react";
+import { ArrowUp, CornerDownRight, GitBranch, ListPlus, Paperclip, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useComposerQueueStore, useSessionQueue } from "@/stores/composerQueueStore";
+import {
+  editQueued,
+  enqueue,
+  newQueuedMessage,
+  observeQueue,
+  queueStatus,
+  removeQueued,
+  requeueFailed,
+  resumeQueue,
+  type BusySendMode,
+  type ComposerQueue,
+  type QueueAction,
+  type QueuedMessage,
+  type QueueTarget,
+} from "@/lib/composer-queue";
+import type { ComposerQueueItem } from "./ComposerShell";
 import { sessionScopedKey } from "@/lib/prefs";
 import { sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
@@ -26,8 +43,13 @@ import type { ChatNode } from "@/lib/types";
 // W3：单一卡片式输入（描边卡 + 聚焦描边环）。卡内：可选横幅（分叉目标）→
 // 附件 → 输入框 → 底栏（模式 chip · 模型 · 附件 / 手绘 ghost 图标 ·「发送到」·
 // 主按钮）；卡外一行弱化提示（状态 + 快捷键）。主按钮三态合一：空闲 = 发送、
-// 流式 = 停止、连接中 / 上传中 = 加载。流式时输入框不再被停止按钮替换 ——
-// 可以先写好下一条，回合结束再发（没有排队后端，所以流式中不发送）。
+// 流式 = 停止、连接中 / 上传中 = 加载。流式时输入框不再被停止按钮替换。
+// 回复进行中继续发送（参考 Codex 手机端 Queue vs Steer，lib/composer-queue.ts）：
+//   - 排队：进入本会话的排队列表（卡片上方，可编辑 / 取消），本轮成功结束后
+//     自动按序发出；出错 / 被停止则暂停，等「继续发送」。
+//   - 插话：注入正在跑的这一轮（/api/nodes/[id]/as/steer），只有 Agent 服务上的
+//     thread 会话支持；其它会话不显示这个入口，服务端拒绝时自动改为排队。
+//   默认用哪个是偏好（busySendMode），另一个是主按钮旁的次级入口；停止按钮始终在最右。
 // 草稿按会话存 localStorage：切会话 / 刷新都不丢；发送没落地（服务端没回
 // `created`）时把原文放回输入框。
 
@@ -229,7 +251,130 @@ export function Composer({
     onMobileExpandedChange?.(mobileCompact && mobileExpanded);
   }, [mobileCompact, mobileExpanded, onMobileExpandedChange]);
 
-  const submit = () => {
+  // ── 回复进行中：排队 / 插话 ───────────────────────────────────────────────
+  const sessionId = session?.id ?? null;
+  const queue = useSessionQueue(sessionId);
+  const updateQueue = useComposerQueueStore((s) => s.update);
+  const busySendMode = useSessionStore((s) => s.busySendMode);
+  const [steering, setSteering] = useState(false);
+  const targetId = targetNode?.id ?? null;
+  const targetParentId = targetNode?.parentId ?? null;
+  const targetStatus = targetNode?.status ?? null;
+  const queueTarget: QueueTarget | null =
+    targetId && targetStatus
+      ? { id: targetId, parentId: targetParentId, status: targetStatus, optimistic: isPending }
+      : null;
+  // 事件回调（异步插话回退、取消、继续发送）要看见最新的目标。
+  const queueTargetRef = useRef<QueueTarget | null>(queueTarget);
+  useEffect(() => {
+    queueTargetRef.current = queueTarget;
+  });
+
+  // 出队发送：总是接在刚结束的那个节点后面（非分叉），@slug 照常剥出。
+  const dispatchQueued = (action: QueueAction) => {
+    const sid = sessionId;
+    const { item, targetId: parent } = action;
+    const [mentionAgentSlug, question] = splitMention(item.text.trim());
+    const sent = streamBranch(parent, question, null, {
+      attachments: item.attachments.length > 0 ? item.attachments : undefined,
+      mentionAgentSlug,
+    });
+    // 没落地：放回队首并暂停，不丢字。
+    void sent.then((ok) => {
+      if (!ok && sid) updateQueue(sid, (q) => requeueFailed(q, item, parent));
+    });
+  };
+  const dispatchRef = useRef(dispatchQueued);
+  useEffect(() => {
+    dispatchRef.current = dispatchQueued;
+  });
+
+  /** 推进队列一步，并用当前目标立刻 observe 一次（入队时目标可能已经结束）。 */
+  const commitQueue = (next: (q: ComposerQueue) => ComposerQueue) => {
+    if (!sessionId) return;
+    let action: QueueAction | null = null;
+    updateQueue(sessionId, (q) => {
+      const step = observeQueue(next(q), queueTargetRef.current);
+      action = step.action;
+      return step.queue;
+    });
+    if (action) dispatchRef.current(action);
+  };
+
+  // 目标的 id / 状态 / 乐观态一变就 observe：当前轮成功结束 → 发队首；出错 → 暂停。
+  // 首次进会话顺带从 localStorage 载入（update 对未加载的会话会先 load）。
+  useEffect(() => {
+    if (!sessionId) return;
+    const target: QueueTarget | null =
+      targetId && targetStatus
+        ? { id: targetId, parentId: targetParentId, status: targetStatus, optimistic: isPending }
+        : null;
+    let action: QueueAction | null = null;
+    updateQueue(sessionId, (q) => {
+      const step = observeQueue(q, target);
+      action = step.action;
+      return step.queue;
+    });
+    if (action) dispatchRef.current(action);
+  }, [sessionId, targetId, targetParentId, targetStatus, isPending, updateQueue]);
+
+  const steerAvailable =
+    Boolean(isStreaming && targetNode) &&
+    !isPending &&
+    session?.bindingType === "thread" &&
+    session.origin !== "external";
+
+  const resetAfterSend = () => {
+    setText("");
+    att.clear();
+    onSubmitted?.();
+    if (mobileCompact) setMobileExpanded(false);
+  };
+
+  const enqueueMessage = (message: string, attachments: QueuedMessage["attachments"]) => {
+    const target = queueTargetRef.current;
+    if (!target) return;
+    const item = newQueuedMessage(message, attachments);
+    commitQueue((q) => enqueue(q, item, target));
+  };
+
+  const steer = async (message: string, nodeId: string) => {
+    const key = loadedKey;
+    // 输入框还是这条会话、且用户没开始写新的，才把文字放回去。
+    const refill = () => {
+      if (loadedKeyRef.current === key) setText((cur) => (cur.trim() ? cur : message));
+    };
+    resetAfterSend();
+    setSteering(true);
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}/as/steer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message }),
+      });
+      if (res.ok) {
+        setCmdNotice("已插话：会在当前步骤结束后送达这一轮");
+        return;
+      }
+      const data = (await res.json().catch(() => ({}))) as { error?: string; steerable?: boolean };
+      if (res.status === 409 && data.steerable === false) {
+        if (loadedKeyRef.current === key) {
+          enqueueMessage(message, []);
+          setCmdNotice(`${data.error ?? "这一轮不能插话"}：已改为排队`);
+        } else refill();
+        return;
+      }
+      refill();
+      setCmdNotice(`插话失败：${data.error ?? res.status}`);
+    } catch (error) {
+      refill();
+      setCmdNotice(`插话失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSteering(false);
+    }
+  };
+
+  const submit = (busyMode?: BusySendMode) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     // C1: intercept bare Trellis commands BEFORE any send-to-LLM path — they
@@ -240,9 +385,20 @@ export function Composer({
       runCommand(parsed.command, parsed.args);
       return;
     }
-    if ((!targetNode && !emptyExternal) || isStreaming || att.hasUploading || externalEnded) return;
+    if ((!targetNode && !emptyExternal) || att.hasUploading || externalEnded) return;
     const attachments =
       att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
+    if (isStreaming && targetNode) {
+      const mode = busyMode ?? (steerAvailable ? busySendMode : "queue");
+      // 插话只带文字、不带 @提及（提及是单独一轮的定向委派）。
+      if (mode === "steer" && steerAvailable && !attachments && !splitMention(trimmed)[0]) {
+        void steer(trimmed, targetNode.id);
+      } else {
+        enqueueMessage(trimmed, attachments ?? []);
+        resetAfterSend();
+      }
+      return;
+    }
     setText("");
     // This composer stays mounted after submit — clear so the next turn
     // starts fresh.
@@ -263,23 +419,112 @@ export function Composer({
     if (mobileCompact) setMobileExpanded(false);
   };
 
+  const cancelQueued = (id: string) => {
+    if (!sessionId) return;
+    let removed: QueuedMessage | null = null;
+    updateQueue(sessionId, (q) => {
+      const r = removeQueued(q, id);
+      removed = r.removed;
+      return r.queue;
+    });
+    const back = removed as QueuedMessage | null;
+    if (!back) return;
+    // 退回输入框：输入框里已有文字就接在后面，别覆盖用户正在写的。
+    setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${back.text}` : back.text));
+    if (back.attachments.length > 0) att.restore(back.attachments);
+    if (mobileCompact) setMobileExpanded(true);
+    window.requestAnimationFrame(() => ref.current?.focus());
+  };
+
+  const resumeQueued = () => {
+    if (!sessionId) return;
+    let action: QueueAction | null = null;
+    updateQueue(sessionId, (q) => {
+      const step = resumeQueue(q, queueTargetRef.current);
+      action = step.action;
+      return step.queue;
+    });
+    if (action) dispatchRef.current(action);
+  };
+
   const compact = mobileCompact && !mobileExpanded;
   const noTarget = !targetNode && !emptyExternal;
   const streaming = Boolean(isStreaming && targetNode);
+  const hasDraft = !!text.trim();
   const canSend =
-    !streaming && !!text.trim() && !noTarget && !att.hasUploading && !externalEnded;
+    hasDraft && !noTarget && !att.hasUploading && !externalEnded && !steering;
   const targetLabel = targetNode
     ? (targetNode.topicLabel ?? targetNode.question).replace(/\s+/g, " ").trim()
     : null;
+  // 运行中主按钮代表的方式：插话不可用时一律排队。
+  const busyPrimary: BusySendMode = steerAvailable ? busySendMode : "queue";
+  const busySecondary: BusySendMode | null = steerAvailable
+    ? busyPrimary === "queue"
+      ? "steer"
+      : "queue"
+    : null;
   const hint = streaming
     ? isPending
-      ? "正在建立连接…"
-      : "回复进行中：可以先写下一条，结束后再发送 · Esc 停止"
+      ? "正在建立连接…可以先写，发送会排队"
+      : busyPrimary === "steer"
+        ? "回复进行中：发送会插话进这一轮（可改为排队）· Esc 停止"
+        : `回复进行中：发送会排队，本轮结束后自动发出${steerAvailable ? "（可改为插话）" : ""} · Esc 停止`
     : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · 可粘贴 / 拖入图片与文件");
 
+  const status = queueStatus(queue, queueTarget);
+  const queueItems: ComposerQueueItem[] = queue.items.map((item, i) => ({
+    id: item.id,
+    text: item.text,
+    label: i === 0 && status === "paused" ? "已暂停" : "排队中",
+    meta: item.attachments.length > 0 ? `+${item.attachments.length} 附件` : undefined,
+    onEdit: (next) => commitQueue((q) => editQueued(q, item.id, next)),
+    actions: [{ label: "取消", tone: "danger" as const, onClick: () => cancelQueued(item.id) }],
+  }));
+  const queueHeader =
+    status === "paused" || status === "waiting" ? (
+      <div
+        data-composer-queue-status={status}
+        role="status"
+        className="flex min-h-8 items-center gap-2 border-b border-line-faint pl-2 pr-0.5 pb-1 mb-1 text-label text-warn-ink max-md:min-h-11"
+      >
+        <span className="min-w-0 flex-1">
+          {status === "paused"
+            ? "已暂停：上一轮出错或被停止，排队消息没有自动发出"
+            : "排队消息在等待：当前目标不是它们排在后面的那一轮"}
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          data-composer-queue-resume=""
+          onClick={resumeQueued}
+          disabled={!queueTarget || queueTarget.optimistic}
+          className="shrink-0"
+        >
+          {queueTarget?.status === "streaming" ? "本轮结束后发送" : "继续发送"}
+        </Button>
+      </div>
+    ) : status === "auto" ? (
+      <div
+        data-composer-queue-status="auto"
+        className="px-2 pb-0.5 text-label text-ink-faint max-md:hidden"
+      >
+        当前轮结束后自动依次发出 · {queue.items.length} 条
+      </div>
+    ) : undefined;
+
+  const busyMeta = {
+    queue: { label: "排队", aria: "排队发送", tip: "排队：本轮结束后自动发出", icon: ListPlus },
+    steer: { label: "插话", aria: "插话发送", tip: "插话：注入正在进行的这一轮", icon: CornerDownRight },
+  } as const;
+  const steerBlocked = (mode: BusySendMode) =>
+    mode === "steer" && (att.doneAttachments.length > 0 || att.pending.length > 0)
+      ? "插话暂不支持附件，可以排队"
+      : null;
+
   // 主按钮三态合一：发送 / 停止 / 加载。停止态 aria-label 固定「停止生成」
-  // （mobile-followup-approval.sh 依赖），手机 ≥44px。
-  const primary = streaming ? (
+  // （mobile-followup-approval.sh 依赖），手机 ≥44px。运行中有文字时，
+  // 「排队 / 插话」主按钮 + 另一种方式的次级入口排在停止按钮左边。
+  const stopButton = (
     <Tooltip content={isPending ? "正在建立连接…" : "停止生成"} shortcut={isPending ? undefined : "Esc"} side="top">
       <Button
         variant="secondary"
@@ -297,6 +542,53 @@ export function Composer({
         )}
       </Button>
     </Tooltip>
+  );
+  const busyPrimaryButton = (
+    <Tooltip
+      content={att.hasUploading ? "等待附件上传…" : steerBlocked(busyPrimary) ?? busyMeta[busyPrimary].tip}
+      shortcut={sendKey === "enter" ? "↩" : ["⌘", "↩"]}
+      side="top"
+    >
+      <Button
+        variant="primary"
+        size="icon"
+        aria-label={busyMeta[busyPrimary].aria}
+        data-composer-busy-send={busyPrimary}
+        onClick={() => submit(busyPrimary)}
+        disabled={!canSend}
+        className="shrink-0"
+      >
+        {att.hasUploading || steering ? (
+          <Spinner size="sm" label={null} className="text-current" />
+        ) : (
+          <Icon icon={busyMeta[busyPrimary].icon} size="md" selected />
+        )}
+      </Button>
+    </Tooltip>
+  );
+  const busySecondaryButton = busySecondary && (
+    <Tooltip content={steerBlocked(busySecondary) ?? busyMeta[busySecondary].tip} side="top">
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label={busyMeta[busySecondary].aria}
+        data-composer-busy-send={busySecondary}
+        onClick={() => submit(busySecondary)}
+        disabled={!canSend || !!steerBlocked(busySecondary)}
+        className="shrink-0"
+      >
+        <Icon icon={busyMeta[busySecondary].icon} size="sm" />
+        {/* 手机收起的单行里只留图标（44px 热区由 Button 的 max-md 基线保证） */}
+        {!compact && busyMeta[busySecondary].label}
+      </Button>
+    </Tooltip>
+  );
+  const primary = streaming ? (
+    <>
+      {hasDraft && busySecondaryButton}
+      {hasDraft && busyPrimaryButton}
+      {stopButton}
+    </>
   ) : (
     <Tooltip
       content={att.hasUploading ? "等待附件上传…" : "发送"}
@@ -308,7 +600,7 @@ export function Composer({
         size="icon"
         aria-label="发送"
         data-composer-primary={att.hasUploading ? "loading" : "send"}
-        onClick={submit}
+        onClick={() => submit()}
         disabled={!canSend}
         className="shrink-0"
       >
@@ -426,6 +718,8 @@ export function Composer({
       }
       primary={primary}
       state={streaming ? "stopping" : compact ? "compact" : "expanded"}
+      queue={queueItems}
+      queueHeader={queueHeader}
       notice={cmdNotice ?? att.notice}
       hintLeft={streaming ? hint : ""}
       hintRight={streaming ? "" : hint}
