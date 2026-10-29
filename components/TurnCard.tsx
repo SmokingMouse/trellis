@@ -43,6 +43,7 @@ import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import { useNearViewport } from "@/hooks/useNearViewport";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
 import {
+  ActionSheet,
   Button,
   ErrorCallout,
   Icon,
@@ -381,16 +382,20 @@ function RegenerateVariantButton({
   nodeId,
   question,
   menu = false,
+  onDone,
 }: {
   nodeId: string;
   question: string;
   menu?: boolean;
+  /** 菜单形态：点完收起所在的 action sheet */
+  onDone?: () => void;
 }) {
   const editNode = useSessionStore((s) => s.editNode);
   const label = "用相同问题再答一版（新建兄弟节点，可在分支列表对比）";
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     editNode(nodeId, question);
+    onDone?.();
   };
   if (menu) {
     return (
@@ -429,27 +434,11 @@ function MobileResponseActions({
   readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
+  // 手机「更多」走贴底 action sheet（点 scrim / 取消 / Esc 关）。sheet 在 z-50：
+  // 卡片图预览的 Modal（z-60）从这里打开时盖在上面，关掉回到 sheet。
   return (
     <div
-      ref={menuRef}
       data-mobile-response-actions
       className="relative flex items-center gap-1 md:hidden"
     >
@@ -463,15 +452,16 @@ function MobileResponseActions({
         data-mobile-target="response-more"
         aria-label="更多回答操作"
         aria-expanded={open}
+        aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
         className="flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-muted hover:bg-surface-hover"
       >
         <Icon icon={Ellipsis} />
       </button>
-      {open && (
+      <ActionSheet open={open} onClose={() => setOpen(false)} label="回答操作">
         <div
           data-mobile-response-menu
-          className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-overlay border border-line bg-surface-raised p-2 shadow-pop"
+          className="flex flex-col gap-2 p-3 [&>button]:min-h-12 [&>button]:w-full [&>button]:justify-start"
         >
           <BookmarkButton
             node={node}
@@ -480,14 +470,19 @@ function MobileResponseActions({
           />
           {!readOnly && <CliResumeButton nodeId={node.id} />}
           {!readOnly && (
-            <RegenerateVariantButton nodeId={node.id} question={node.question} menu />
+            <RegenerateVariantButton
+              nodeId={node.id}
+              question={node.question}
+              menu
+              onDone={() => setOpen(false)}
+            />
           )}
           <CardImageButton
             title={node.topicLabel ?? node.question}
             content={finalResponseText(node)}
           />
         </div>
-      )}
+      </ActionSheet>
     </div>
   );
 }
