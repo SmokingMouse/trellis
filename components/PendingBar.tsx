@@ -34,7 +34,7 @@ export function PendingBar({ mobile = false, hiddenChrome = false }: { mobile?: 
   if (!items.length) return null;
   return <div ref={rail} data-pending-bar={mobile ? "mobile" : "desktop"}
     className={mobile ? "relative z-20 shrink-0 bg-warn-muted transition-transform duration-200 motion-reduce:transition-none" : "fixed right-0 z-40 border-b border-warn-line bg-surface"}
-    style={mobile ? { transform: hiddenChrome ? "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))" : undefined } : { top: "var(--trellis-header-h)", left: "var(--trellis-sb, 0px)" }}>
+    style={mobile ? { transform: hiddenChrome ? "translateY(calc(var(--safe-top) - var(--trellis-header-h)))" : undefined } : { top: "var(--trellis-header-h)", left: "var(--trellis-sb, 0px)" }}>
     {(mobile || items.length > 1) && <button ref={trigger} type="button" data-mobile-waiting-banner={mobile ? "" : undefined}
       data-pending-toggle aria-expanded={expanded} aria-controls={mobile ? "pending-mobile-list" : "pending-desktop-list"}
       onClick={() => setExpanded(value => !value)} className={`flex min-h-11 w-full items-center justify-between gap-2 bg-warn-muted px-4 text-ui font-medium text-warn-ink ${mobile ? "border-b border-warn-line" : ""}`}>

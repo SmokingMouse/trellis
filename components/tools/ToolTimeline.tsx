@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleCheck, TriangleAlert } from "lucide-react";
 import { Icon, Spinner, StatusDot, ToolIcon } from "@/components/ui";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
@@ -19,6 +19,7 @@ import {
   hasValidWorkflowProgress,
 } from "@/lib/workflow-view";
 import { useSessionStore } from "@/stores/sessionStore";
+import { Collapse } from "@/components/ui/Collapse";
 import { TimelineList } from "./ToolRow";
 
 // The turn's whole tool timeline, in chronological order.
@@ -72,9 +73,13 @@ export function ToolTimeline({
 
   // 外壳与 AsProjectControls（🔌 引擎块）同一套卡片语言：细描边 + card 圆角 +
   // 一行表头（chevron · 摘要 · 右侧数值）+ 展开后的分隔线列表（decisions 9/15）。
+  // 手机（2026-10-30，参考 Cindy ToolGroupCard）：去掉描边卡套分隔线的重框，
+  // 改为淡底圆角卡、行间靠间距；表头说「N 个步骤」+ 一枚微型状态图标。桌面不变。
+  const headStatus: "running" | "error" | "done" =
+    live && counts.running > 0 ? "running" : display.errors > 0 ? "error" : "done";
   return (
     <div
-      className="mb-3 border border-line rounded-card overflow-hidden bg-surface-muted/60"
+      className="mb-3 rounded-card overflow-hidden md:border md:border-line md:bg-surface-muted/60 max-md:bg-surface-muted"
       data-tool-timeline={nodeId}
     >
       <button
@@ -87,7 +92,7 @@ export function ToolTimeline({
         <Icon
           icon={ChevronRight}
           size="sm"
-          className={`text-ink-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          className={`ui-collapse-chevron text-ink-faint ${open ? "rotate-90" : ""}`}
         />
         {chain.length > 0 ? (
           <LiveHeader
@@ -96,8 +101,10 @@ export function ToolTimeline({
           />
         ) : (
           <>
-            <span className="shrink-0 tabular-nums">
-              <b className="font-medium text-ink">{display.total} 步</b>
+            <span className="shrink-0 tabular-nums inline-flex items-center gap-1.5">
+              <b className="font-medium text-ink max-md:hidden">{display.total} 步</b>
+              <b className="font-medium text-ink md:hidden">{display.total} 个步骤</b>
+              <MicroStatus status={headStatus} />
             </span>
             <span className="text-ink-muted truncate min-w-0">
               {summaryLine(tree, display.subagents, display.workflows, stats?.tools)}
@@ -120,15 +127,15 @@ export function ToolTimeline({
         )}
       </button>
 
-      {open &&
-        (tree.length > 0 ? (
-          <div className="border-t border-line divide-y divide-line-faint py-0.5">
+      <Collapse open={open}>
+        {tree.length > 0 ? (
+          <div className="md:border-t md:border-line md:divide-y md:divide-line-faint py-0.5 max-md:pb-1.5 max-md:space-y-0.5">
             <TimelineList nodes={tree} live={live} />
           </div>
         ) : (
           // toolCalls 还在按需拉取（或拉取失败静默降级）——给一行占位，
           // 别让展开的面板空着。
-          <div className="border-t border-line px-3 py-2 text-ui text-ink-faint flex items-center gap-2">
+          <div className="md:border-t md:border-line px-3 py-2 text-ui text-ink-faint flex items-center gap-2">
             {loading ? (
               <>
                 <Spinner size="sm" label={null} />
@@ -138,8 +145,22 @@ export function ToolTimeline({
               <span>工具调用暂无数据</span>
             )}
           </div>
-        ))}
+        )}
+      </Collapse>
     </div>
+  );
+}
+
+// 手机表头的微型状态图标：在跑 = 转圈，有失败 = 警示，全部完成 = 勾。
+// 只在手机出现（桌面表头保持原样）；装饰性，旁边的文字已说清楚。
+export function MicroStatus({ status }: { status: "running" | "error" | "done" }) {
+  if (status === "running") return <Spinner size="sm" label={null} className="md:hidden" />;
+  return (
+    <Icon
+      icon={status === "error" ? TriangleAlert : CircleCheck}
+      size="sm"
+      className={`md:hidden ${status === "error" ? "text-danger-ink" : "text-positive-ink"}`}
+    />
   );
 }
 

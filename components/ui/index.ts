@@ -35,6 +35,7 @@ export { Tabs, TabsList, TabsTrigger, TabsContent, SegmentedControl, type Segmen
 // 弹层族
 export { Modal } from "./Modal";
 export { Drawer } from "./Drawer";
+export { ActionSheet, actionSheetItemClass } from "./ActionSheet";
 export { Popover } from "./Popover";
 export {
   DropdownMenu,

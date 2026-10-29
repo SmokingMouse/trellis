@@ -43,6 +43,7 @@ import { useMarkdownBodyMarks } from "@/hooks/useMarkdownBodyMarks";
 import { useNearViewport } from "@/hooks/useNearViewport";
 import type { ChatNode, NodeAttachment } from "@/lib/types";
 import {
+  ActionSheet,
   Button,
   ErrorCallout,
   Icon,
@@ -52,6 +53,7 @@ import {
   StatusDot,
   StopButton,
 } from "@/components/ui";
+import { Collapse } from "@/components/ui/Collapse";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { CardImageButton } from "./CardImageButton";
 import { CliResumeButton } from "./CliResumeButton";
@@ -219,11 +221,20 @@ export const TurnCard = memo(function TurnCard({
 
 // 流式状态全页只有一种写法：每轮底部一行「圆点 + 状态文案 + 计时」。
 // 不再三点跳动 + 闪烁光标 + 脉冲点并存（research 根因 #4）。
+// 2026-10-30 手机质感（参考 Cindy WorkingStatusText / Codex）：
+//   - 文案节流：每条至少停留 RUNLINE_MIN_MS，连跑十个小工具不再闪成一片；
+//   - 换文案：旧字向下 3px 淡出、新字从下方 3px 升起（globals.css .status-text-*）；
+//   - 「在干活」的文案挂文字微光（.shimmer-text），取代这里圆点的 animate-pulse；
+//     等你回答 / 批准不是「在干活」，不挂微光。reduced-motion 全部降级为静态。
+const RUNLINE_MIN_MS = 1000;
+const RUNLINE_SWAP_MS = 150;
+
 function RunLine({ node, label: override }: { node: ChatNode; label?: string }) {
   const elapsed = useElapsed(node.createdAt ?? null, true);
   const runningTool = [...node.toolCalls]
     .reverse()
     .find((c) => c.status === "running");
+  const waiting = !override && Boolean(node.pendingInteraction);
   const label = override ?? (node.pendingInteraction
     ? node.pendingInteraction.toolName === "AskUserQuestion"
       ? "等待你回答"
@@ -231,14 +242,38 @@ function RunLine({ node, label: override }: { node: ChatNode; label?: string }) 
     : runningTool
       ? `正在运行 ${toolTitle(runningTool)}`
       : "正在生成");
+  const shown = useThrottledStatus(label, RUNLINE_MIN_MS);
   return (
     <div
       data-turn-runline=""
       role="status"
       className="mt-3 flex items-center gap-2 text-ui text-ink-muted"
     >
-      <StatusDot tone="live" />
-      <span className="min-w-0 truncate">{label}</span>
+      <StatusDot tone={waiting ? "warn" : "accent"} />
+      {/* 新旧两条叠在同一格里交接；读屏只读当前那条 */}
+      <span className="grid min-w-0">
+        {shown.prev !== null && (
+          <span
+            key={`out-${shown.n}`}
+            aria-hidden
+            className="status-text-out col-start-1 row-start-1 min-w-0 truncate"
+          >
+            {shown.prev}
+          </span>
+        )}
+        {/* 入场动画和微光都是 animation，分挂两层，免得互相覆盖 */}
+        <span
+          key={`in-${shown.n}`}
+          className={`col-start-1 row-start-1 flex min-w-0 ${shown.n > 0 ? "status-text-in" : ""}`}
+        >
+          <span
+            data-turn-runline-label=""
+            className={`min-w-0 truncate ${waiting ? "" : "shimmer-text"}`}
+          >
+            {shown.text}
+          </span>
+        </span>
+      </span>
       {elapsed !== null && (
         <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
           {formatDuration(elapsed)}
@@ -246,6 +281,39 @@ function RunLine({ node, label: override }: { node: ChatNode; label?: string }) 
       )}
     </div>
   );
+}
+
+// 状态文案节流：上一条显示满 minMs 才换；期间来了好几条只换成最新那条。
+// n = 第几次切换（0 = 首帧，不播入场）；prev = 正在淡出的旧文案，交接完清掉。
+function useThrottledStatus(label: string, minMs: number) {
+  const [state, setState] = useState(() => ({
+    text: label,
+    prev: null as string | null,
+    n: 0,
+    at: Date.now(),
+  }));
+  const { text, at, n } = state;
+  useEffect(() => {
+    if (label === text) return;
+    const wait = Math.max(0, minMs - (Date.now() - at));
+    const t = window.setTimeout(() => {
+      setState((s) => ({ text: label, prev: s.text, n: s.n + 1, at: Date.now() }));
+    }, wait);
+    return () => window.clearTimeout(t);
+  }, [label, text, at, minMs]);
+  useEffect(() => {
+    if (n === 0) return;
+    const t = window.setTimeout(() => setState((s) => ({ ...s, prev: null })), RUNLINE_SWAP_MS);
+    return () => window.clearTimeout(t);
+  }, [n]);
+  return state;
+}
+
+// 思考读秒：进行中整秒跳（「思考中 12s」），结束后一位小数（「已思考 3.2s」）。
+function formatThinkSeconds(ms: number, done: boolean): string {
+  const s = ms / 1000;
+  if (s >= 60) return formatDuration(ms).replace(/\s/g, "");
+  return done ? `${s.toFixed(1)}s` : `${Math.floor(s)}s`;
 }
 
 // 每轮底部的轻工具栏：桌面 hover / 聚焦才浮出（触屏常显），meta 一行弱化，
@@ -381,16 +449,20 @@ function RegenerateVariantButton({
   nodeId,
   question,
   menu = false,
+  onDone,
 }: {
   nodeId: string;
   question: string;
   menu?: boolean;
+  /** 菜单形态：点完收起所在的 action sheet */
+  onDone?: () => void;
 }) {
   const editNode = useSessionStore((s) => s.editNode);
   const label = "用相同问题再答一版（新建兄弟节点，可在分支列表对比）";
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     editNode(nodeId, question);
+    onDone?.();
   };
   if (menu) {
     return (
@@ -429,27 +501,11 @@ function MobileResponseActions({
   readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
+  // 手机「更多」走贴底 action sheet（点 scrim / 取消 / Esc 关）。sheet 在 z-50：
+  // 卡片图预览的 Modal（z-60）从这里打开时盖在上面，关掉回到 sheet。
   return (
     <div
-      ref={menuRef}
       data-mobile-response-actions
       className="relative flex items-center gap-1 md:hidden"
     >
@@ -463,15 +519,16 @@ function MobileResponseActions({
         data-mobile-target="response-more"
         aria-label="更多回答操作"
         aria-expanded={open}
+        aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
         className="flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-muted hover:bg-surface-hover"
       >
         <Icon icon={Ellipsis} />
       </button>
-      {open && (
+      <ActionSheet open={open} onClose={() => setOpen(false)} label="回答操作">
         <div
           data-mobile-response-menu
-          className="absolute bottom-full right-0 z-30 mb-2 flex min-w-48 flex-col gap-1 rounded-overlay border border-line bg-surface-raised p-2 shadow-pop"
+          className="flex flex-col gap-2 p-3 [&>button]:min-h-12 [&>button]:w-full [&>button]:justify-start"
         >
           <BookmarkButton
             node={node}
@@ -480,14 +537,19 @@ function MobileResponseActions({
           />
           {!readOnly && <CliResumeButton nodeId={node.id} />}
           {!readOnly && (
-            <RegenerateVariantButton nodeId={node.id} question={node.question} menu />
+            <RegenerateVariantButton
+              nodeId={node.id}
+              question={node.question}
+              menu
+              onDone={() => setOpen(false)}
+            />
           )}
           <CardImageButton
             title={node.topicLabel ?? node.question}
             content={finalResponseText(node)}
           />
         </div>
-      )}
+      </ActionSheet>
     </div>
   );
 }
@@ -640,30 +702,51 @@ function ThinkingScroll({ text }: { text: string }) {
 
 // 思考块：还没有正文时展开（看它在想什么），正文一开始就自动折叠；用户点过
 // 就尊重用户（userOpen 钉住）。回合结束整块消失（思考流不落库）。
+//
+// 读秒（参考 Codex / Cindy）：思考进行中「思考中 12s」实时跳，想完（开始作答 /
+// 去跑工具）定格为「已思考 3.2s」。起点 = 第一段思考流到达（本组件挂载），
+// 终点 = answering 翻真的那一帧；又回头想（answering 翻回假）就接着从起点数。
 function ThinkingBlock({ text, answering }: { text: string; answering: boolean }) {
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? !answering;
+  const [startedAt] = useState(() => Date.now());
+  const [endedAt, setEndedAt] = useState<number | null>(null);
+  useEffect(() => {
+    // 回调里 setState（不在 effect 体内同步写）；差一帧对读秒无感。
+    const id = requestAnimationFrame(() => setEndedAt(answering ? Date.now() : null));
+    return () => cancelAnimationFrame(id);
+  }, [answering]);
+  const live = useElapsed(startedAt, !answering);
+  const done = answering && endedAt !== null;
+  const ms = done ? endedAt - startedAt : (live ?? 0);
   return (
     <div className="mb-3" data-turn-thinking="">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setUserOpen(!open)}
-        className="-ml-1 inline-flex items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors"
+        title={`思考过程 ${text.length} 字`}
+        className="-ml-1 inline-flex items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors max-md:min-h-11"
       >
         <Icon
           icon={ChevronRight}
           size="sm"
-          className={`transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          className={`ui-collapse-chevron ${open ? "rotate-90" : ""}`}
         />
         <Icon icon={Brain} size="sm" />
-        {answering ? `思考过程（${text.length} 字）` : "思考中…"}
+        <span className={answering ? undefined : "shimmer-text"}>
+          {answering ? "已思考" : "思考中"}
+        </span>
+        <span data-turn-thinking-time="" className="font-mono text-label tabular-nums">
+          {formatThinkSeconds(ms, done)}
+        </span>
       </button>
-      {open && (
-        <div className="mt-1.5 ml-2 pl-3.5 border-l border-line-strong">
+      <Collapse open={open} className="ml-2">
+        {/* 外边距放在被裁切的内层里，收起时一起压到 0 */}
+        <div className="mt-1.5 pl-3.5 border-l border-line-strong">
           <ThinkingScroll text={text} />
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

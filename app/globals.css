@@ -629,11 +629,27 @@
   --radius-field: 6px;
   --radius-card: 8px;
   --radius-overlay: 10px;
+  /* 手机 sheet 顶部圆角（Drawer / Modal / ActionSheet / ConfirmDialog 贴底形态）与胶囊（grabber 等） */
+  --radius-sheet: 16px;
+  --radius-pill: 9999px;
 
   /* 阴影阶梯：raise=卡片，pop=dropdown/popover，overlay=modal/drawer/toast */
   --shadow-raise: 0 0 0 0 transparent; /* 克制工具风：卡片不投影，靠 1px 描边 */
   --shadow-pop: 0 4px 14px -6px rgb(0 0 0 / 0.14);
   --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.22);
+
+  /* 动效阶梯（2026-10-30 手机质感改版，参数取自 Cindy mobile theme/tokens.ts）：
+     out = 进场（快起慢收），in = 退场，move = 位移。桌面弹层仍走下方 100ms；
+     触屏（pointer: coarse）的 sheet / 侧栏 / 按压走这套。 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  /* 轻微过冲的弹簧（damping≈30 / stiffness≈260 的近似），给 sheet 落位、按压回弹 */
+  --ease-spring: linear(0, 0.18 7%, 0.56 17%, 0.86 28%, 1.01 40%, 1.04 50%, 1.02 62%, 1 78%, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-heavy: 280ms;
 
   /* 等宽字体归一：globals 声明与组件 font-mono 从此同源（原 CSS 声明
      JetBrains Mono 但从未加载、实际回退 Menlo；组件 font-mono 又是
@@ -653,6 +669,43 @@ html, body {
   color: var(--ink);
   /* Prevent iOS rubber-banding on body */
   overscroll-behavior: none;
+  /* iOS 点按默认的灰色方块闪光是「网页感」的头号来源；按压反馈由 .press / active 底色接管 */
+  -webkit-tap-highlight-color: transparent;
+}
+* { -webkit-tap-highlight-color: transparent; }
+
+/* 手机字号档：桌面 13/14/15/17 的高密度阶梯在 375pt 屏上偏扁偏小，
+   触屏放大一档并拉开层级（参考 Cindy：UI 15、会话正文 17、标题 20）。 */
+@media (max-width: 767.98px) {
+  :root {
+    --text-ui: 14px;
+    --text-body: 15px;
+    --text-reading: 16px;
+    --text-reading--line-height: 1.65;
+    --text-title: 18px;
+  }
+}
+
+/* 触屏按压反馈：原语（Button / IconButton / 列表行）挂 .press。
+   只在 coarse pointer 生效——桌面「克制工具风只用颜色反馈」的裁决不变。
+   按下 80ms 缩到 0.97，松手走弹簧回弹。 */
+@media (pointer: coarse) {
+  .press {
+    transition-property: transform, background-color, color, opacity;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease-spring);
+  }
+  .press:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: var(--dur-instant);
+    transition-timing-function: var(--ease-out);
+  }
+  /* 整行 / 大块元素缩放太晃，只压暗底色 */
+  .press-row { transition: background-color var(--dur-fast) var(--ease-out); }
+  .press-row:active { background-color: var(--surface-hover); transition-duration: 0ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .press, .press:active { transform: none !important; }
 }
 
 /* React Flow tweaks: lighter grid + softer edges.
@@ -1174,6 +1227,66 @@ html, body {
   .ui-drawer[data-state="closed"] { animation-name: ui-drawer-left-out; }
 }
 
+/* ── 手机 sheet 体系（2026-10-30，只在触屏 / 窄屏形态挂这些类；桌面弹层仍走上面 100ms）──
+   .ui-sheet          vaul 的 Drawer.Content（Drawer <sm、Modal <md）。vaul 把 0.5s 的 transition
+                      写成内联样式、把 0.5s 动画写在它注入的样式表里：时长 / 曲线只能 !important 盖。
+                      拖拽中 vaul 写 transition: none（property 为 none），这里的时长不会复活它。
+   .ui-sheet-scrim    贴底 sheet 的 scrim（data-state 驱动进 / 退场）。
+   .ui-sheet-shell    Modal 手机形态的外壳：退场时挂一段「空」动画，让 Radix Presence 等里面的
+                      面板 / scrim 播完再卸载。
+   .ui-action-sheet   ConfirmDialog / ContextMenu / 回答「更多」的贴底 action sheet。 */
+.ui-sheet[data-vaul-drawer] {
+  transition-duration: var(--dur-heavy) !important;
+  transition-timing-function: var(--ease-spring) !important;
+}
+.ui-sheet[data-vaul-drawer][data-state="open"] {
+  animation-duration: var(--dur-heavy);
+  animation-timing-function: var(--ease-spring);
+}
+.ui-sheet[data-vaul-drawer][data-state="closed"] {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-in);
+}
+.ui-sheet-scrim-fade {
+  transition-duration: var(--dur-heavy);
+  transition-timing-function: var(--ease-out);
+}
+.ui-sheet-scrim[data-state="open"] { animation: ui-fade-in var(--dur-heavy) var(--ease-out); }
+/* 退场不写 from：从拖拽时写进内联的透明度接着淡，不先跳回不透明 */
+@keyframes ui-sheet-scrim-out { to { opacity: 0; } }
+.ui-sheet-scrim[data-state="closed"] { animation: ui-sheet-scrim-out var(--dur-base) var(--ease-in) forwards; }
+/* 退场中的 scrim / 外壳 / 面板不再吃点击：关掉后紧跟着点下面的东西不会被这层挡住 */
+.ui-sheet-scrim[data-state="closed"],
+.ui-sheet-shell[data-state="closed"],
+.ui-action-sheet[data-state="closed"] { pointer-events: none; }
+@keyframes ui-sheet-hold { from { opacity: 1; } to { opacity: 1; } }
+.ui-sheet-shell[data-state="closed"] { animation: ui-sheet-hold calc(var(--dur-base) + 20ms) linear forwards; }
+@keyframes ui-action-sheet-in { from { transform: translateY(calc(100% + 24px)); } to { transform: none; } }
+@keyframes ui-action-sheet-out { from { transform: none; } to { transform: translateY(calc(100% + 24px)); } }
+.ui-action-sheet[data-state="open"] { animation: ui-action-sheet-in var(--dur-heavy) var(--ease-spring); }
+.ui-action-sheet[data-state="closed"] { animation: ui-action-sheet-out var(--dur-base) var(--ease-in) forwards; }
+
+/* 长按预示：500ms 计时期间被按元素缓缩到 0.98（ContextMenu 的 bindTrigger 打标）。
+   用独立的 scale 属性，不和元素自己的 transform（行滑动等）打架。 */
+[data-long-pressing="true"] {
+  scale: 0.98;
+  transition: scale 500ms var(--ease-move);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-sheet[data-vaul-drawer] {
+    transition-duration: 0ms !important;
+    animation: none !important;
+  }
+  .ui-sheet-scrim-fade { transition-duration: 0ms; }
+  .ui-sheet-scrim[data-state],
+  .ui-sheet-shell[data-state],
+  .ui-action-sheet[data-state] {
+    animation: none;
+  }
+  [data-long-pressing="true"] { scale: none; }
+}
+
 /* Skeleton：中性灰扫光，全站唯一的占位写法 */
 @keyframes ui-skeleton-sweep { to { background-position: -200% 0; } }
 .ui-skeleton {
@@ -1262,5 +1375,128 @@ html, body {
   textarea,
   select {
     font-size: 16px;
+  }
+}
+
+/* ── 手机导航外壳（2026-10-30 去塑料感：mp-shell）──────────────────────── */
+
+/* 侧栏抽屉跟手（components/MobileNavDrawer）：横向交给 hooks/useSwipe，纵向仍由浏览器滚列表。
+   touch-action 只算到最近的滚动容器，所以列表本身也要声明一次。 */
+[data-mobile-nav-drawer],
+[data-mobile-nav-drawer] [data-sidebar-list] {
+  touch-action: pan-y pinch-zoom;
+}
+
+/* 会话切换转场（lib/nav-view-transition.ts 用 document.startViewTransition 包住切换，
+   在 <html data-nav-vt> 上标方向）。只在手机断点生效；桌面与 reduced-motion 根本不发起转场。
+   进入会话 = 新页从右 24px 淡入滑入、旧页略向左淡出；回首页 = 反向。 */
+@keyframes trellis-vt-in-from-right { from { opacity: 0; transform: translateX(24px); } }
+@keyframes trellis-vt-in-from-left { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes trellis-vt-out-to-left { to { opacity: 0; transform: translateX(-12px); } }
+@keyframes trellis-vt-out-to-right { to { opacity: 0; transform: translateX(12px); } }
+@media (max-width: 767.98px) {
+  :root[data-nav-vt]::view-transition-old(root),
+  :root[data-nav-vt]::view-transition-new(root) {
+    animation-duration: var(--dur-heavy);
+    animation-timing-function: var(--ease-out);
+    animation-fill-mode: both;
+  }
+  :root[data-nav-vt="forward"]::view-transition-new(root) { animation-name: trellis-vt-in-from-right; }
+  :root[data-nav-vt="forward"]::view-transition-old(root) { animation-name: trellis-vt-out-to-left; }
+  :root[data-nav-vt="back"]::view-transition-new(root) { animation-name: trellis-vt-in-from-left; }
+  :root[data-nav-vt="back"]::view-transition-old(root) { animation-name: trellis-vt-out-to-right; }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}
+||||||| 548de5c
+
+/* ── 手机质感改版 · 内容层（2026-10-30）────────────────────────────────
+   1) .ui-collapse：展开 / 折叠的高度过渡（components/ui/Collapse.tsx）。
+      grid-template-rows 0fr → 1fr 让浏览器自己量高度，不用 JS 测 scrollHeight；
+      子元素 min-height:0 + 过渡期 overflow:hidden 才能被压到 0。落定后
+      （data-settled）放开 overflow，免得裁掉焦点环 / 阴影。 */
+.ui-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-base) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.ui-collapse[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.ui-collapse > * { min-height: 0; overflow: hidden; }
+.ui-collapse[data-settled] > * { overflow: visible; }
+/* 与之同步的箭头：rotate 走同一档时长与曲线 */
+.ui-collapse-chevron {
+  /* Tailwind v4 的 rotate-90 写的是独立 rotate 属性，不是 transform */
+  transition: rotate var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+
+/* 2) 运行状态文字（TurnCard RunLine，参考 Cindy WorkingStatusText）：
+      换文案时旧字向下 3px 淡出、新字从下方 3px 升起。 */
+@keyframes status-text-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes status-text-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(3px); }
+}
+.status-text-in { animation: status-text-in var(--dur-fast) var(--ease-out); }
+.status-text-out { animation: status-text-out var(--dur-fast) var(--ease-in) forwards; }
+
+/* 3) Codex 式「文字微光」：一道亮带从左扫到右，1.6s 一圈。
+      底色 = 弱化墨色，亮带 = 强墨色，随明暗 / 皮肤变量走。 */
+@keyframes shimmer-text {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+.shimmer-text {
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--ink-muted) 0%,
+    var(--ink-muted) 40%,
+    var(--ink-strong) 50%,
+    var(--ink-muted) 60%,
+    var(--ink-muted) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer-text 1.6s linear infinite;
+}
+
+/* 4) 主按钮图标同位交叉淡变（Composer 发送 ↔ 停止 ↔ 排队）：
+      所有候选图标叠在同一格，只有 data-active 的那枚显形。 */
+.morph-icon { display: inline-grid; place-items: center; }
+.morph-icon > * {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.morph-icon > [data-active] { opacity: 1; transform: none; }
+
+/* 5) 新轮次入场（上浮 6px 淡入）在 LinearThreadView 里用 WAAPI 播：乐观占位换成
+      真节点时要从同一进度接着播，CSS 类做不到。 */
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-collapse,
+  .ui-collapse-chevron,
+  .morph-icon > * { transition: none; }
+  .status-text-in,
+  .status-text-out { animation: none; }
+  .status-text-out { opacity: 0; }
+  /* 微光降级为静态弱化墨色 */
+  .shimmer-text {
+    animation: none;
+    background: none;
+    color: var(--ink-muted);
   }
 }

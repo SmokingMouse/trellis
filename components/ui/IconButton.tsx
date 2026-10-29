@@ -21,8 +21,8 @@ const SIZE: Record<Size, string> = {
 
 const TONE: Record<Tone, string> = {
   neutral:
-    "text-ink-muted hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink",
-  danger: "text-ink-faint hover:bg-danger-muted hover:text-danger-ink",
+    "text-ink-muted hover:bg-surface-hover hover:text-ink active:bg-surface-hover active:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink",
+  danger: "text-ink-faint hover:bg-danger-muted hover:text-danger-ink active:bg-danger-muted active:text-danger-ink",
 };
 
 export function IconButton({
@@ -52,7 +52,7 @@ export function IconButton({
       aria-label={label}
       title={tooltip ? undefined : (title ?? label)}
       className={cn(
-        "shrink-0 inline-flex items-center justify-center rounded-field transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
+        "press shrink-0 inline-flex items-center justify-center rounded-field transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
         SIZE[size],
         TONE[tone],
         className,

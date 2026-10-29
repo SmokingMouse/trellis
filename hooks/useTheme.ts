@@ -47,9 +47,35 @@ export function resolveDark(mode: ThemeMode): boolean {
     : false;
 }
 
+/**
+ * 把 <meta name="theme-color"> 对齐到当前画布色（明暗 + 皮肤）。
+ * iOS 主屏 PWA 的状态栏、Android 的地址栏都取它；layout.tsx 里静态写的
+ * 两条只是首帧兜底，按系统明暗分 media——用户在 App 内切暗色或换皮肤后
+ * 会对不上，所以这里去掉 media、统一改写成计算值。
+ * layout.tsx 的 pre-hydration 脚本内联了同样的逻辑（首帧就对）。
+ */
+export function syncThemeColorMeta() {
+  if (typeof document === "undefined") return;
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--surface-canvas").trim();
+  if (!color) return;
+  const metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
+  if (metas.length === 0) {
+    const m = document.createElement("meta");
+    m.name = "theme-color";
+    m.content = color;
+    document.head.appendChild(m);
+    return;
+  }
+  metas.forEach((m) => {
+    m.removeAttribute("media");
+    m.content = color;
+  });
+}
+
 export function setThemeMode(mode: ThemeMode) {
   if (typeof document === "undefined") return;
   document.documentElement.classList.toggle("dark", resolveDark(mode));
+  syncThemeColorMeta();
   try {
     window.localStorage.setItem(MODE_KEY, mode);
   } catch {
@@ -65,6 +91,7 @@ export function setThemePalette(palette: string) {
   } else {
     document.documentElement.dataset.theme = palette;
   }
+  syncThemeColorMeta();
   try {
     window.localStorage.setItem(PALETTE_KEY, palette);
   } catch {
@@ -93,6 +120,8 @@ export function useTheme(): {
       setResolvedDark(document.documentElement.classList.contains("dark"));
     };
     sync();
+    // Next 的 head 管理可能在 hydrate 时重写 viewport meta，挂载后再对齐一次
+    syncThemeColorMeta();
     listeners.add(sync);
 
     // OS-level scheme changes only matter while following the system.
@@ -100,6 +129,7 @@ export function useTheme(): {
     const onChange = () => {
       if (getThemeMode() !== "system") return;
       document.documentElement.classList.toggle("dark", mq.matches);
+      syncThemeColorMeta();
       sync();
     };
     mq.addEventListener("change", onChange);

@@ -267,7 +267,15 @@ ab eval --stdin <<'JS'
     return rect.width >= 44 && rect.height >= 44;
   }), 'mobile header targets below 44px');
   assert(header.textContent.includes('手机精简壳验收会话标题'), `missing current title: ${header.textContent}`);
-  return { width: header.clientWidth, scrollWidth: header.scrollWidth, buttons: labels };
+  // mp-shell：线性 thread 头并进 Header —— 只剩一条 48px 顶栏，模式在标题下的小字副标题里
+  assert(!document.querySelector('[data-thread-header]'), 'thread header still rendered as a second bar');
+  const subtitle = header.querySelector('[data-mobile-header-subtitle]');
+  assert(subtitle?.textContent?.includes('Project · 线性'), `header subtitle=${subtitle?.textContent}`);
+  const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
+  assert(Math.abs(header.getBoundingClientRect().height - 48 - safe) <= 0.8, `header height=${header.getBoundingClientRect().height}`);
+  const scroll = document.querySelector('[data-thread-scroll]');
+  assert(Math.abs(scroll.getBoundingClientRect().top - header.getBoundingClientRect().bottom) <= 0.8 || document.querySelector('[data-mobile-waiting-banner]'), `scroll top=${scroll.getBoundingClientRect().top} header bottom=${header.getBoundingClientRect().bottom}`);
+  return { width: header.clientWidth, scrollWidth: header.scrollWidth, buttons: labels, subtitle: subtitle.textContent };
 })()
 JS
 
@@ -280,14 +288,14 @@ sleep 1
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scroll reset"'
 mv_wait_idle soft
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; window.__mvScrollBeforeHide = 300; "scrolled down"'
-wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); if (h?.dataset.headerHidden !== 'true') { const sc=document.querySelector('[data-thread-scroll]'); if (sc) { sc.scrollTop=Math.min(sc.scrollTop + 24, sc.scrollHeight - sc.clientHeight); window.__mvScrollBeforeHide = sc.scrollTop; sc.dispatchEvent(new Event('scroll')); } return false; } const t=document.querySelector('[data-thread-header]'); const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && t?.dataset.threadHeaderHidden==='true' && t.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
+wait_for_js "header, title, and Composer hidden" "(() => { const h=document.querySelector('[data-mobile-header]'); if (h?.dataset.headerHidden !== 'true') { const sc=document.querySelector('[data-thread-scroll]'); if (sc) { sc.scrollTop=Math.min(sc.scrollTop + 24, sc.scrollHeight - sc.clientHeight); window.__mvScrollBeforeHide = sc.scrollTop; sc.dispatchEvent(new Event('scroll')); } return false; } const s=document.querySelector('[data-thread-scroll]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); const sr=s?.getBoundingClientRect(); const safe=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0; const pending=document.querySelector('[data-mobile-waiting-banner]'); const pendingHeight=pending?.getBoundingClientRect().height ?? 0; return h?.dataset.headerHidden==='true' && h.getBoundingClientRect().bottom<=0.8 && sr && Math.abs(sr.top-safe-pendingHeight)<=0.8 && Math.abs(sr.bottom-innerHeight)<=0.8 && c?.dataset.composerHidden==='true'; })()"
 ab eval --stdin <<'JS'
 (() => {
   const scroll = document.querySelector('[data-thread-scroll]');
   const header = document.querySelector('[data-mobile-header]');
-  const title = document.querySelector('[data-thread-header]');
   const safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0;
-  const shift = header.getBoundingClientRect().height + title.getBoundingClientRect().height - safe;
+  // 线程头已并进 Header：收起时的位移只剩 Header 一条
+  const shift = header.getBoundingClientRect().height - safe;
   // 收起那一刻的 scrollTop：通常是 300，就绪前被推过几次则更大（见上方等待条件）。
   const expected = (window.__mvScrollBeforeHide ?? 300) - shift;
   if (Math.abs(scroll.scrollTop - expected) > 2) {
@@ -297,11 +305,16 @@ ab eval --stdin <<'JS'
 })()
 JS
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop -= 100; "scrolled up"'
-wait_for_js "header, title, and Composer restored after upward scroll" "(() => { const h=document.querySelector('[data-mobile-header]'); const t=document.querySelector('[data-thread-header]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); return !h?.hasAttribute('data-header-hidden') && h.getBoundingClientRect().top>=-0.8 && !t?.hasAttribute('data-thread-header-hidden') && t.getBoundingClientRect().top>=-0.8 && c?.dataset.composerHidden==='false'; })()"
+wait_for_js "header, title, and Composer restored after upward scroll" "(() => { const h=document.querySelector('[data-mobile-header]'); const c=document.querySelector('[data-safe-area=\"linear-composer\"]'); return !h?.hasAttribute('data-header-hidden') && h.getBoundingClientRect().top>=-0.8 && c?.dataset.composerHidden==='false'; })()"
+wait_for_js "hairline shown while scrolled" "document.querySelector('[data-mobile-header]')?.dataset.headerScrolled === 'true'"
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop += 100; "scrolled down again"'
 wait_for_js "chrome hidden before top reset" "document.querySelector('[data-mobile-header]')?.dataset.headerHidden === 'true'"
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 0; "scrolled to top"'
 wait_for_js "chrome restored at scroll top" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-hidden') && document.querySelector('[data-safe-area=\"linear-composer\"]')?.dataset.composerHidden === 'false'"
+# 顶栏收回时 useScrollHide 会把 scrollTop 补偿 +Header 高度（保持阅读锚点），此刻并不在真顶部；
+# 再归零一次才是「正文在顶部」，发丝线应消失。
+ab eval 'const sc = document.querySelector("[data-thread-scroll]"); sc.scrollTop = 0; sc.dispatchEvent(new Event("scroll")); "back to real top"'
+wait_for_js "no hairline at scroll top" "!document.querySelector('[data-mobile-header]')?.hasAttribute('data-header-scrolled')"
 ab eval 'document.querySelector("[data-thread-scroll]").scrollTop = 300; "scrolled down for edge reveal"'
 wait_for_js "top-edge reveal target" "Boolean(document.querySelector('[data-header-reveal]'))"
 ab eval --stdin <<'JS'

@@ -18,18 +18,19 @@ import { Spinner } from "./Spinner";
 //
 // 高度用 min-h 而不是 h：调用方加 py / h-11 放大时不会被夹住。
 // 手机端（max-md）统一 ≥44px 热区，mobile-verify 依赖它。
-// 不再有 active:scale 按压缩放——克制工具风只用颜色反馈。
+// 桌面不做按压缩放（克制工具风只用颜色反馈）；触屏由 .press（globals.css，
+// pointer: coarse）给 0.97 按压 + 弹簧回弹，外加 active 底色。
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-field font-medium select-none transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
+  "press inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-field font-medium select-none transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-fg hover:bg-accent-strong",
-        secondary: "border border-line-strong bg-surface text-ink hover:bg-surface-hover",
-        ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink",
-        danger: "border border-danger-line text-danger-ink hover:bg-danger-muted",
-        "danger-solid": "bg-danger text-accent-fg hover:bg-danger-strong",
+        primary: "bg-accent text-accent-fg hover:bg-accent-strong active:bg-accent-strong",
+        secondary: "border border-line-strong bg-surface text-ink hover:bg-surface-hover active:bg-surface-hover",
+        ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink active:bg-surface-hover active:text-ink",
+        danger: "border border-danger-line text-danger-ink hover:bg-danger-muted active:bg-danger-muted",
+        "danger-solid": "bg-danger text-accent-fg hover:bg-danger-strong active:bg-danger-strong",
         link: "text-accent-ink underline-offset-2 hover:underline",
       },
       size: {

@@ -361,7 +361,8 @@ ab eval --stdin <<'JS'
   }), null, 2);
 })()
 JS
-ab click '[data-thread-node-id="mv-touch-done"] [data-mobile-target="response-more"]'
+# 「更多」改成贴底 action sheet 后，scrim 盖住了触发按钮：用 sheet 自己的「取消」收起
+ab click '[data-action-sheet-cancel]'
 wait_for_js "mobile response overflow closed" "!document.querySelector('[data-mobile-response-menu]')"
 ab screenshot "$OUT/mobile-permission.png" >/dev/null
 

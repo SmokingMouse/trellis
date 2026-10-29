@@ -9,8 +9,12 @@ import {
   type MouseEvent as ReactMouseEvent,
   type TouchEvent as ReactTouchEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { ActionSheet, actionSheetItemClass } from "./ActionSheet";
+import { cn } from "./cn";
+import { SHEET_MODAL_QUERY, useMediaQuery } from "./sheet";
 
 // 右键菜单原语：任何行 / 节点都能挂。与 Popover 的区别有两点 —— Popover 锚在
 // trigger 元素上（下拉），这里锚在指针坐标上（右键 / 长按）；Popover 用相对
@@ -31,6 +35,10 @@ import { createPortal } from "react-dom";
 //   ]} />
 //
 // 手机长按等非右键入口用 menu.openAt({ x, y })。
+//
+// 手机（<md）不再按坐标浮出小菜单，改走贴底 action sheet（ActionSheet，菜单项
+// ≥48px）；DOM 仍是 [data-testid="context-menu"][role="menu"] > [role="menuitem"]。
+// 长按计时的 500ms 里，被按元素挂 data-long-pressing（globals.css 缓缩到 0.98）预示。
 
 export type ContextMenuAction = {
   label: string;
@@ -89,12 +97,20 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPosRef = useRef<ContextMenuPoint | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
+  // 正在长按的元素：计时期间挂 data-long-pressing="true"，计时结束 / 取消时摘掉
+  const pressedRef = useRef<Element | null>(null);
+
+  const releasePressed = useCallback(() => {
+    pressedRef.current?.removeAttribute("data-long-pressing");
+    pressedRef.current = null;
+  }, []);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      releasePressed();
     };
-  }, []);
+  }, [releasePressed]);
 
   const menuClose = menu.close;
   const menuOpenAt = menu.openAt;
@@ -119,7 +135,11 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
         if (!touch) return;
         startPosRef.current = { x: touch.clientX, y: touch.clientY };
         if (timerRef.current) clearTimeout(timerRef.current);
+        releasePressed();
+        pressedRef.current = e.currentTarget;
+        e.currentTarget.setAttribute("data-long-pressing", "true");
         timerRef.current = setTimeout(() => {
+          releasePressed();
           if (!startPosRef.current) return;
           setTarget(item);
           menuOpenAt(startPosRef.current);
@@ -135,6 +155,7 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
         if (dx > 10 || dy > 10) {
           clearTimeout(timerRef.current);
           timerRef.current = null;
+          releasePressed();
         }
       },
       onTouchEnd: (e: ReactTouchEvent<TargetElement>) => {
@@ -142,6 +163,7 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
           clearTimeout(timerRef.current);
           timerRef.current = null;
         }
+        releasePressed();
         if (Date.now() < suppressClickUntilRef.current) {
           e.preventDefault();
           e.stopPropagation();
@@ -153,6 +175,7 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
           clearTimeout(timerRef.current);
           timerRef.current = null;
         }
+        releasePressed();
         startPosRef.current = null;
       },
       onClickCapture: (e: ReactMouseEvent<TargetElement>) => {
@@ -162,7 +185,7 @@ export function useContextMenuWithTarget<T, E extends HTMLElement = HTMLElement>
         }
       },
     }),
-    [menuOpenAt],
+    [menuOpenAt, releasePressed],
   );
 
   const props = useMemo(
@@ -214,6 +237,10 @@ export function ContextMenu({
   /** aria-label；同一页面多个菜单时用来区分 */
   label?: string;
 }) {
+  const sheet = useMediaQuery(SHEET_MODAL_QUERY);
+  if (sheet) {
+    return <SheetMenu open={point !== null} onClose={onClose} items={items} label={label} />;
+  }
   if (point === null) return null;
   // key 随坐标变：换个位置再次右键时，面板整体重建，高亮项自然归零。
   return createPortal(
@@ -259,6 +286,8 @@ function MenuPanel({
     el.style.visibility = "visible";
   }, [point]);
 
+  useMenuKeyboard(ref, onClose, setActive);
+
   useEffect(() => {
     // 触屏：长按松手后浏览器可能补发一个兼容 mousedown（落在触发行上），会把刚弹出的菜单当
     // 「点外面」立刻关掉。触摸产生的兼容 mousedown 一律忽略，触屏上的「点外面」改由 touchstart 判。
@@ -274,54 +303,15 @@ function MenuPanel({
     const onTouchEnd = () => {
       lastTouchEnd = Date.now();
     };
-    // 键盘导航以 DOM 为准（role=menuitem + data-active），不用再复制一份 items 状态。
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      const el = ref.current;
-      if (!el) return;
-      const buttons = Array.from(
-        el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
-      );
-      if (buttons.length === 0) return;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        e.stopPropagation();
-        const cur = buttons.findIndex((b) => b.dataset.active === "true");
-        const step = e.key === "ArrowDown" ? 1 : -1;
-        const next =
-          cur < 0
-            ? step > 0
-              ? 0
-              : buttons.length - 1
-            : (cur + step + buttons.length) % buttons.length;
-        setActive(Number(buttons[next].dataset.index));
-        return;
-      }
-      if (e.key === "Enter" || e.key === " ") {
-        const cur = buttons.find((b) => b.dataset.active === "true");
-        if (cur) {
-          e.preventDefault();
-          e.stopPropagation();
-          cur.click();
-        }
-      }
-    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onTouchStart, { passive: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
-    document.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onClose, true);
     window.addEventListener("resize", onClose);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchend", onTouchEnd);
-      document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("scroll", onClose, true);
       window.removeEventListener("resize", onClose);
     };
@@ -374,4 +364,135 @@ function MenuPanel({
       )}
     </div>
   );
+}
+
+// 键盘导航以 DOM 为准（role=menuitem + data-active），不用再复制一份 items 状态。
+function useMenuKeyboard(
+  ref: RefObject<HTMLDivElement | null>,
+  onClose: () => void,
+  setActive: (i: number) => void,
+) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      const el = ref.current;
+      if (!el) return;
+      const buttons = Array.from(
+        el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'),
+      );
+      if (buttons.length === 0) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        const cur = buttons.findIndex((b) => b.dataset.active === "true");
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        const next =
+          cur < 0
+            ? step > 0
+              ? 0
+              : buttons.length - 1
+            : (cur + step + buttons.length) % buttons.length;
+        setActive(Number(buttons[next].dataset.index));
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        const cur = buttons.find((b) => b.dataset.active === "true");
+        if (cur) {
+          e.preventDefault();
+          e.stopPropagation();
+          cur.click();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [ref, onClose, setActive]);
+}
+
+// 手机形态：贴底 action sheet。关闭时 point 先变 null、消费方的 items 往往跟着
+// target 清空——退场动画期间继续画最后一次打开时的那组菜单项。
+function SheetMenu({
+  open,
+  onClose,
+  items,
+  label,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: ContextMenuItem[];
+  label?: string;
+}) {
+  const [shown, setShown] = useState(items);
+  if (open && shown !== items) setShown(items);
+  const list = open ? items : shown;
+  const ref = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(-1);
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) setActive(-1);
+  }
+
+  return (
+    <ActionSheet open={open} onClose={onClose} label={label ?? "菜单"} zClassName="z-[80]">
+      {open ? <MenuKeyboard menuRef={ref} onClose={onClose} setActive={setActive} /> : null}
+      <div
+        ref={ref}
+        role="menu"
+        aria-label={label}
+        data-testid={open ? "context-menu" : undefined}
+        className="flex flex-col"
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {list.map((it, i) =>
+          isAction(it) ? (
+            <button
+              key={`${it.label}-${i}`}
+              type="button"
+              role="menuitem"
+              disabled={it.disabled}
+              data-index={i}
+              data-active={active === i ? "true" : undefined}
+              onClick={() => {
+                if (it.disabled || !open) return;
+                onClose();
+                it.onSelect();
+              }}
+              className={cn(
+                actionSheetItemClass,
+                "border-b border-line-faint last:border-b-0",
+                it.danger && "text-danger",
+                active === i && "bg-surface-muted",
+              )}
+            >
+              {it.icon && <span className="shrink-0 text-ink-muted">{it.icon}</span>}
+              <span className="flex-1 truncate">{it.label}</span>
+              {it.hint && <span className="shrink-0 text-label text-ink-faint">{it.hint}</span>}
+            </button>
+          ) : (
+            <div key={`sep-${i}`} role="separator" className="h-2 shrink-0 bg-surface-muted" />
+          ),
+        )}
+      </div>
+    </ActionSheet>
+  );
+}
+
+/** 只在打开期间挂键盘监听（退场动画期间不再响应方向键 / Esc） */
+function MenuKeyboard({
+  menuRef,
+  onClose,
+  setActive,
+}: {
+  menuRef: RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  setActive: (i: number) => void;
+}) {
+  useMenuKeyboard(menuRef, onClose, setActive);
+  return null;
 }
