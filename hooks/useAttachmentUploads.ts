@@ -11,6 +11,7 @@ import {
   newPendingId,
   type PendingAttachment,
 } from "@/components/AttachmentPreview";
+import { compressImageForUpload } from "@/lib/image-compress";
 import type { NodeAttachment } from "@/lib/types";
 
 export const MAX_ATTACHMENTS = 6;
@@ -62,15 +63,29 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
       ...prev,
       { localId, status: "uploading", previewUrl, filename, mime },
     ]);
-    uploadAttachment(file, filename, (attempt, total) =>
-      setPending((prev) =>
-        prev.map((p) =>
-          p.localId === localId
-            ? { ...p, retryLabel: `重试 ${attempt}/${total}` }
-            : p,
-        ),
-      ),
-    )
+    // 大图先在本地压缩（长边 2048、q0.85、按 EXIF 摆正，见 lib/image-compress.ts）；
+    // 压不了 / 不需要压就原样上传。预览仍用原图的 object URL。
+    compressImageForUpload(file, filename)
+      .then((prepared) => {
+        if (prepared.compressed) {
+          setPending((prev) =>
+            prev.map((p) =>
+              p.localId === localId
+                ? { ...p, filename: prepared.filename, mime: prepared.blob.type }
+                : p,
+            ),
+          );
+        }
+        return uploadAttachment(prepared.blob, prepared.filename, (attempt, total) =>
+          setPending((prev) =>
+            prev.map((p) =>
+              p.localId === localId
+                ? { ...p, retryLabel: `重试 ${attempt}/${total}` }
+                : p,
+            ),
+          ),
+        );
+      })
       .then((att) =>
         setPending((prev) =>
           prev.map((p) =>

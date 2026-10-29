@@ -82,7 +82,7 @@ const TASK_ID_PREFIX: Record<string, TaskKind> = {
  * contract) that covers older SDKs and lets this work before that release
  * lands. Keep both — the prefix is cheap and only consulted as a fallback.
  */
-function taskKindOf(meta: TaskMeta | undefined): TaskKind | undefined {
+export function taskKindOf(meta: TaskMeta | undefined): TaskKind | undefined {
   if (!meta) return undefined;
   if (meta.taskType) return meta.taskType;
   const first = meta.taskId?.[0];

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, CornerDownRight, GitBranch, ListPlus, Paperclip, PenLine, Square } from "lucide-react";
+import { ArrowUp, CornerDownRight, GitBranch, ListPlus, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useComposerQueueStore, useSessionQueue } from "@/stores/composerQueueStore";
 import {
@@ -39,6 +39,11 @@ import { isOptimisticNodeId } from "@/stores/sessionStore";
 import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
 import { ModeBadge } from "./ModeBadge";
 import { ModelPicker } from "./ModelPicker";
+import { ComposerAttachButton, useAttachPicker } from "./ComposerAttachButton";
+import { ComposerStatusBar } from "./ComposerStatusBar";
+import { composerStatusPills, runningBackgroundTasks } from "@/lib/composer-status";
+import { contextUsageFor } from "@/lib/context-usage";
+import { contextWindowFor } from "@/lib/llm";
 import type { ChatNode } from "@/lib/types";
 
 // #3/#7: the shared always-docked composer. Used by the linear thread's
@@ -152,7 +157,6 @@ export function Composer({
   const chatEnhanced = useSessionStore((s) => s.chatEnhanced);
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isStreaming = targetNode?.status === "streaming";
   // Before the server's `created` event lands, the streaming card is a local
   // optimistic placeholder — there's no run to abort yet.
@@ -181,6 +185,15 @@ export function Composer({
     family !== "mock",
   );
   const att = useAttachmentUploads(toolCapable ? "all" : "chat-safe");
+  // 选完文件 / 拍完照：手机收起态展开，让附件预览露出来（和拖入一致）。
+  const picker = useAttachPicker({
+    accept: att.accept,
+    onPicked: (e) => {
+      att.handlePicked(e);
+      if (mobileCompact) setMobileExpanded(true);
+    },
+  });
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   // C1: Trellis commands in the docked composer — first-class in every mode
   // (skills stay gated on toolCapable). A bare /command runs locally against
   // the store and never streams; same registry + interception contract as the
@@ -590,6 +603,22 @@ export function Composer({
       </div>
     ) : undefined;
 
+  // ── 输入框上方状态条：排队 · 上下文用量（Project 模式，与 Header 同口径）· 本轮后台任务 ──
+  const [queueOpenPref, setQueueOpen] = useState(false);
+  const queueOpen = queueOpenPref && queue.items.length > 0;
+  const contextWindow = contextWindowFor(provider);
+  // 选 token 数（原始值）而不是对象，selector 结果才可比较、不会每次都触发重渲染。
+  const ctxTokens = useSessionStore((s) =>
+    s.session?.mode === "project" ? (contextUsageFor(targetId, s.nodes, contextWindow)?.tokens ?? 0) : 0,
+  );
+  const context =
+    ctxTokens > 0 ? { tokens: ctxTokens, percent: Math.min(100, (ctxTokens / contextWindow) * 100), contextWindow } : null;
+  const statusPills = composerStatusPills({
+    queue: { count: queue.items.length, status },
+    context,
+    background: runningBackgroundTasks(isStreaming ? targetNode?.toolCalls : undefined),
+  });
+
   const busyMeta = {
     queue: { label: "排队", aria: "排队发送", tip: "排队：本轮结束后自动发出", icon: ListPlus },
     steer: { label: "插话", aria: "插话发送", tip: "插话：注入正在进行的这一轮", icon: CornerDownRight },
@@ -694,15 +723,13 @@ export function Composer({
   );
 
   const attachButton = (
-    <IconButton
-      label="添加附件"
-      title={att.atLimit ? "已到附件上限" : "添加图片 / 文件"}
-      onClick={() => fileInputRef.current?.click()}
+    <ComposerAttachButton
+      openFiles={picker.openFiles}
+      openCamera={picker.openCamera}
       disabled={noTarget || att.atLimit}
-      data-composer-attach=""
-    >
-      <Icon icon={Paperclip} />
-    </IconButton>
+      atLimit={att.atLimit}
+      onMenuOpenChange={setAttachMenuOpen}
+    />
   );
 
   return (
@@ -752,7 +779,8 @@ export function Composer({
           att.doneAttachments.length > 0 ||
           att.notice ||
           cmdNotice ||
-          sketchOpen,
+          sketchOpen ||
+          attachMenuOpen,
       )}
       focusToken={focusToken}
       banner={banner}
@@ -810,19 +838,26 @@ export function Composer({
       state={streaming ? "stopping" : compact ? "compact" : "expanded"}
       queue={queueItems}
       queueHeader={queueHeader}
+      queueOpen={queueOpen}
+      statusBar={
+        statusPills.length > 0 && (
+          <ComposerStatusBar
+            pills={statusPills}
+            queueOpen={queueOpen}
+            onToggleQueue={() => setQueueOpen(!queueOpen)}
+            context={context}
+            onStartFresh={() => setComposeRootOpen(true)}
+          />
+        )
+      }
+      fullscreen={{
+        submitLabel: streaming ? busyMeta[busyPrimary].label : "发送",
+        submitDisabled: !canSend,
+      }}
       notice={cmdNotice ?? att.notice}
       hintLeft={streaming ? hint : ""}
       hintRight={streaming ? "" : hint}
-      beforeCard={
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={att.accept}
-          multiple
-          onChange={att.handlePicked}
-          className="hidden"
-        />
-      }
+      beforeCard={picker.inputs}
       afterCard={
         sketchOpen && (
           <SketchModal

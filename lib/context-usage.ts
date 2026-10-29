@@ -71,3 +71,21 @@ export function isContextCompacted(
 
   return false;
 }
+
+export type ContextUsage = { tokens: number; percent: number; contextWindow: number };
+
+/**
+ * 某节点所在谱系的上下文占用（与 Header 的上下文条同一口径：沿父链找最近一个
+ * 上报过 token 的轮次，除以模型窗口）。没有可用数据或窗口无效 → null。
+ */
+export function contextUsageFor(
+  nodeId: string | null | undefined,
+  nodes: Record<string, ContextNode>,
+  contextWindow: number,
+): ContextUsage | null {
+  if (!nodeId || !(contextWindow > 0)) return null;
+  const turn = findLineageCtxTurn(nodeId, nodes);
+  if (!turn) return null;
+  const tokens = ctxTokensOf(turn);
+  return { tokens, percent: Math.min(100, (tokens / contextWindow) * 100), contextWindow };
+}
