@@ -648,6 +648,26 @@ function migrate(db: Database) {
     );
   `);
 
+  // Passkey（WebAuthn）登录凭证（lib/server/passkeys.ts）。一行 = 一把已注册的 passkey。
+  // id = credential ID（base64url），public_key = COSE 公钥原样字节；counter 每次登录回写
+  // （iCloud 钥匙串的 passkey 恒为 0，硬件钥匙会递增，回退即拒）。rp_id 记注册时的
+  // RP（prod 域名 / localhost），登录时必须与本次 challenge 的 rpId 一致。
+  // 删除一行 = 该 passkey 立即不能再登录（不影响已签发的 cookie）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      id TEXT PRIMARY KEY,
+      public_key BLOB NOT NULL,
+      counter INTEGER NOT NULL DEFAULT 0,
+      transports TEXT,
+      name TEXT NOT NULL,
+      rp_id TEXT NOT NULL,
+      device_type TEXT,
+      backed_up INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
+  `);
+
   // 工具审批规则（三档作用域里的「本会话」「所有会话」；「仅本次」不落库）。
   // 规则粒度 = 工具名（tool_key，见 lib/approval-rules.ts）。会话规则随会话删除级联清掉；
   // 全局规则只能在 /settings/approvals 撤销。服务端在发起审批前先匹配这张表。
