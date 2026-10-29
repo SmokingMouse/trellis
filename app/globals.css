@@ -1314,3 +1314,13 @@ html, body {
     font-size: 16px;
   }
 }
+
+/* ── 手机导航外壳（2026-10-30 去塑料感：mp-shell）──────────────────────── */
+
+/* 侧栏抽屉跟手（components/MobileNavDrawer）：横向交给 hooks/useSwipe，纵向仍由浏览器滚列表。
+   touch-action 只算到最近的滚动容器，所以列表本身也要声明一次。 */
+[data-mobile-nav-drawer],
+[data-mobile-nav-drawer] [data-sidebar-list] {
+  touch-action: pan-y pinch-zoom;
+}
+
