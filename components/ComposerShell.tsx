@@ -26,12 +26,28 @@ import type { SendKey } from "@/lib/send-key";
 //   - 手机端 mobileCompact：收成一行（输入框 + compactTools + primary），聚焦 / 拖入展开，
 //     失焦且没有未完成内容（keepExpanded=false）时收回；
 //   - 卡外：提示 / 通知行、状态条（statusBar）、排队列表、补全面板（suggestions，浮在卡片上方）；
-//   - 全屏长文编辑（fullscreen 给了才有）：手机收起态 / 展开态工具区、桌面工具区各一个「展开」，
+//   - 全屏长文编辑（fullscreen 给了才有）：桌面工具区常驻一个「展开」；手机收起态不放
+//     （收起态只留「输入框 + 附件 + 主按钮」），展开态里输入框聚焦或写到 ≥3 行才出现。
 //     打开 ComposerFullscreen，同一份 value 双向同步，发送走同一个 onSubmit。
 // 调用方负责：文字状态、发送 / 停止语义、补全数据、附件上传。
 //
 // 手机展开态是受控的（mobileExpanded + onMobileExpandedChange）：发送后收回、拖入后展开
 // 这类决定属于调用方的提交流程。
+
+const FULLSCREEN_MIN_LINES = 3;
+
+/** 输入框按当前宽度折行后的行数（先撑回 auto 再量，autosize effect 随后会重设高度）。 */
+function countLines(el: HTMLTextAreaElement): number {
+  const style = getComputedStyle(el);
+  const lineHeight = Number.parseFloat(style.lineHeight);
+  if (!Number.isFinite(lineHeight) || lineHeight <= 0) return 1;
+  const prev = el.style.height;
+  el.style.height = "auto";
+  const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+  const lines = Math.round((el.scrollHeight - (Number.isFinite(padding) ? padding : 0)) / lineHeight);
+  el.style.height = prev;
+  return Math.max(1, lines);
+}
 
 export type ComposerQueueItem = {
   id: string;
@@ -150,6 +166,9 @@ export function ComposerShell({
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  // 手机展开态「全屏」入口的显隐依据：输入框聚焦中，或内容 ≥ FULLSCREEN_MIN_LINES 行。
+  const [inputFocused, setInputFocused] = useState(false);
+  const [measuredLines, setMeasuredLines] = useState(1);
   const compositionEndAt = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const compact = mobileCompact && !mobileExpanded;
@@ -189,9 +208,15 @@ export function ComposerShell({
     });
   };
 
-  const expandButton = fullscreen && (
+  const multiline =
+    measuredLines >= FULLSCREEN_MIN_LINES || value.split("\n").length >= FULLSCREEN_MIN_LINES;
+  const showExpand = !mobileCompact || (!compact && (inputFocused || multiline));
+  const expandButton = fullscreen && showExpand && (
     <IconButton
       label="全屏编辑"
+      // 不抢输入框焦点：触屏点按时 mousedown 会先让 textarea 失焦，按钮随之
+      // 被「聚焦才显示」藏掉，click 就落空了。
+      onMouseDown={(e) => e.preventDefault()}
       onClick={() => setFullscreenOpen(true)}
       disabled={disabled}
       data-composer-fullscreen-open=""
@@ -283,13 +308,24 @@ export function ComposerShell({
             // 手机键盘回车键标签：Enter 发送时显示「发送」，⌘↩ 模式保持换行语义。
             enterKeyHint={sendKey === "enter" ? "send" : "enter"}
             value={value}
-            onChange={(e) => onValueChange(e.target.value)}
+            onChange={(e) => {
+              setMeasuredLines(countLines(e.target));
+              onValueChange(e.target.value);
+            }}
             onCompositionEnd={() => {
               compositionEndAt.current = Date.now();
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            onFocus={expandMobile}
+            onFocus={() => {
+              setInputFocused(true);
+              expandMobile();
+            }}
+            onBlur={(e) => {
+              const el = e.currentTarget;
+              // 焦点可能只是在卡内按钮间短暂切换：下一帧还不在输入框才算失焦。
+              window.requestAnimationFrame(() => setInputFocused(document.activeElement === el));
+            }}
             rows={1}
             // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 不在
             // layer 里、utility 压不住，只能内联去掉输入框自己的那一圈。
@@ -304,7 +340,6 @@ export function ComposerShell({
           />
           {compact && (
             <>
-              {expandButton}
               {compactTools}
               {primary}
             </>
