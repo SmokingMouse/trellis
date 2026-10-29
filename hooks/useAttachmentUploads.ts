@@ -168,6 +168,27 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
     setNotice(null);
   };
 
+  // 把已上传过的附件（排队消息取消时退回输入框）放回 pending：直接是 done 态，
+  // 预览走服务端 blob URL（revokeObjectURL 对非 blob: URL 是 no-op）。
+  const restore = (attachments: NodeAttachment[]) => {
+    const room = Math.max(0, MAX_ATTACHMENTS - count.current);
+    const take = attachments.slice(0, room);
+    if (take.length < attachments.length) setNotice(`最多 ${MAX_ATTACHMENTS} 个附件，多出的没有放回`);
+    if (take.length === 0) return;
+    count.current += take.length;
+    setPending((prev) => [
+      ...prev,
+      ...take.map((a) => ({
+        localId: newPendingId(),
+        status: "done" as const,
+        previewUrl: `/api/uploads/${a.hash}`,
+        filename: a.filename,
+        mime: a.mime,
+        attachment: a,
+      })),
+    ]);
+  };
+
   const doneAttachments: NodeAttachment[] = pending
     .filter(
       (p): p is PendingAttachment & { attachment: NodeAttachment } =>
@@ -184,6 +205,7 @@ export function useAttachmentUploads(policy: AttachmentPolicy) {
     handlePicked,
     remove,
     clear,
+    restore,
     doneAttachments,
     hasUploading: pending.some((p) => p.status === "uploading"),
     atLimit: pending.length >= MAX_ATTACHMENTS,

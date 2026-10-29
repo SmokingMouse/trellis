@@ -240,6 +240,32 @@ try {
       release(); pause = undefined;
       await done(a);
     } finally { AgentClient.prototype.connect = originalConnect; }
+  } else if (process.argv[2] === "steer injects into active turn") {
+    const { POST } = await import("../../app/api/nodes/[id]/as/steer/route");
+    const steer = (id: string, text: unknown) => POST(new Request("http://localhost/steer", {method:"POST",body:JSON.stringify({text})}), {params:Promise.resolve({id})});
+    assert.equal((await steer(second, "after the fact")).status, 409, "finished turns cannot be steered");
+    assert.equal((await steer("missing-node", "x")).status, 404);
+    let release!: () => void;
+    pause = new Promise<void>(resolve => { release = resolve; });
+    const pending = branch(second, "steerable question");
+    const run = await as.startProjectRun({nodeId:pending,prompt:"steerable question",attachments:[]});
+    assert.equal((await steer(pending, "   ")).status, 400);
+    const ok = await steer(pending, "also cover edge cases");
+    assert.equal(ok.status, 200, await ok.clone().text());
+    const engine = engines.find(e => e.sent.some(s => s.turnId === run.turnId))!;
+    assert.deepEqual(engine.steered, [{turnId:run.turnId,input:[{type:"text",text:"also cover edge cases"}]}]);
+    release(); pause = undefined;
+    await done(run);
+    const node = repo.getNode(pending)!;
+    assert.equal(node.status, "done");
+    assert.equal(node.response, `answer ${run.turnId}\n\n> **插话**　also cover edge cases`);
+    assert.equal(node.finalStart ?? 0, 0, "the answer stays the final segment");
+    // Legacy (non-AS) nodes are reported as not steerable so the client queues instead.
+    const legacy = branch(pending, "legacy streaming");
+    getDB().prepare("UPDATE nodes SET status='streaming' WHERE id=?").run(legacy);
+    const refused = await steer(legacy, "x");
+    assert.equal(refused.status, 409);
+    assert.equal((await refused.json()).steerable, false);
   } else if (process.argv[2] === "P2-3 interrupt bypasses peer lease") {
     const pending = branch(second, "interrupt under lease");
     let release!: () => void;

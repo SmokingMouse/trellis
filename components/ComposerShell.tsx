@@ -33,8 +33,14 @@ import type { SendKey } from "@/lib/send-key";
 export type ComposerQueueItem = {
   id: string;
   text: string;
+  /** 行首状态字，默认「排队中」 */
+  label?: string;
+  /** 文本后的弱化补充（如「+2 附件」） */
+  meta?: string;
   /** 行尾动作（撤回 / 打断后立即发送…），按顺序渲染成 ghost 小按钮 */
   actions: { label: string; onClick: () => void; disabled?: boolean; tone?: "neutral" | "danger" }[];
+  /** 可就地编辑：给了就在动作前多一个「编辑」，保存时回调新文本 */
+  onEdit?: (text: string) => void;
 };
 
 type DataAttributes = { [key: `data-${string}`]: string | undefined };
@@ -71,6 +77,7 @@ export function ComposerShell({
   hintLeft,
   hintRight,
   queue,
+  queueHeader,
   beforeCard,
   afterCard,
   rootProps,
@@ -122,6 +129,8 @@ export function ComposerShell({
   hintLeft?: ReactNode;
   hintRight?: ReactNode;
   queue?: ComposerQueueItem[];
+  /** 排队列表顶部的状态行（已暂停 · 继续发送…） */
+  queueHeader?: ReactNode;
   beforeCard?: ReactNode;
   afterCard?: ReactNode;
   rootProps?: DataAttributes;
@@ -203,7 +212,7 @@ export function ComposerShell({
     >
       {suggestions}
       {beforeCard}
-      {queue && queue.length > 0 && <ComposerQueueList items={queue} />}
+      {queue && queue.length > 0 && <ComposerQueueList items={queue} header={queueHeader} />}
       <div
         data-composer-card=""
         className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
@@ -295,39 +304,132 @@ export function ComposerShell({
   );
 }
 
-/** 排队列表：卡片正上方一组弱化行，每行 = 时钟 · 文本（截断）· 行尾动作。 */
-function ComposerQueueList({ items }: { items: ComposerQueueItem[] }) {
+/** 排队列表：卡片正上方一组弱化行，每行 = 时钟 · 文本（截断）· 行尾动作；可选顶部状态行与就地编辑。 */
+function ComposerQueueList({ items, header }: { items: ComposerQueueItem[]; header?: ReactNode }) {
+  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
+  // 正在编辑的那条已经被发出 / 取消：编辑态随之失效（渲染时判定，不用 effect 清）。
+  const active = editing && items.some((i) => i.id === editing.id) ? editing : null;
   return (
-    <ul
+    <div
       data-composer-queue=""
-      aria-label="排队中的消息"
-      className="mb-1.5 space-y-0.5 rounded-card border border-line bg-surface p-1"
+      className="mb-1.5 rounded-card border border-line bg-surface p-1"
     >
-      {items.map((item) => (
-        <li
-          key={item.id}
-          data-composer-queue-item={item.id}
-          className="flex min-h-8 items-center gap-2 rounded-field pl-2 pr-0.5 text-ui max-md:min-h-11"
-        >
-          <Icon icon={Clock3} size="sm" className="shrink-0 text-ink-faint" />
-          <span className="shrink-0 text-label text-ink-faint">排队中</span>
-          <span className="min-w-0 flex-1 truncate text-ink" title={item.text}>
-            {item.text.replace(/\s+/g, " ").trim()}
-          </span>
-          {item.actions.map((action) => (
-            <Button
-              key={action.label}
-              variant="ghost"
-              size="sm"
-              onClick={action.onClick}
-              disabled={action.disabled}
-              className={`shrink-0 ${action.tone === "danger" ? "hover:text-danger-ink" : ""}`}
+      {header}
+      <ul aria-label="排队中的消息" className="space-y-0.5">
+        {items.map((item) =>
+          active?.id === item.id && item.onEdit ? (
+            <li key={item.id} data-composer-queue-item={item.id} data-composer-queue-editing="" className="rounded-field p-1">
+              <QueueItemEditor
+                value={active.draft}
+                onChange={(draft) => setEditing({ id: item.id, draft })}
+                onCancel={() => setEditing(null)}
+                onSave={() => {
+                  if (!active.draft.trim()) return;
+                  item.onEdit?.(active.draft);
+                  setEditing(null);
+                }}
+              />
+            </li>
+          ) : (
+            <li
+              key={item.id}
+              data-composer-queue-item={item.id}
+              className="flex min-h-8 items-center gap-2 rounded-field pl-2 pr-0.5 text-ui max-md:min-h-11"
             >
-              {action.label}
-            </Button>
-          ))}
-        </li>
-      ))}
-    </ul>
+              <Icon icon={Clock3} size="sm" className="shrink-0 text-ink-faint" />
+              <span className="shrink-0 text-label text-ink-faint">{item.label ?? "排队中"}</span>
+              <span className="min-w-0 flex-1 truncate text-ink" title={item.text}>
+                {item.text.replace(/\s+/g, " ").trim()}
+                {item.meta && <span className="ml-1.5 text-label text-ink-faint">{item.meta}</span>}
+              </span>
+              {item.onEdit && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-composer-queue-edit=""
+                  aria-label={`编辑排队消息：${item.text.slice(0, 20)}`}
+                  onClick={() => setEditing({ id: item.id, draft: item.text })}
+                  className="shrink-0"
+                >
+                  编辑
+                </Button>
+              )}
+              {item.actions.map((action) => (
+                <Button
+                  key={action.label}
+                  variant="ghost"
+                  size="sm"
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                  className={`shrink-0 ${action.tone === "danger" ? "hover:text-danger-ink" : ""}`}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </li>
+          ),
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function QueueItemEditor({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }
+  }, [value]);
+  return (
+    <div className="flex flex-col gap-1">
+      <textarea
+        ref={ref}
+        data-composer-queue-editor=""
+        aria-label="编辑排队消息"
+        value={value}
+        rows={1}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onSave();
+          }
+        }}
+        style={{ outline: "none" }}
+        className="block w-full min-w-0 resize-none rounded-field border border-line-strong bg-surface px-2.5 py-1.5 text-ui text-ink-strong focus:border-accent-line max-h-40"
+      />
+      <div className="flex justify-end gap-1">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          取消
+        </Button>
+        <Button variant="primary" size="sm" onClick={onSave} disabled={!value.trim()} data-composer-queue-save="">
+          保存
+        </Button>
+      </div>
+    </div>
   );
 }

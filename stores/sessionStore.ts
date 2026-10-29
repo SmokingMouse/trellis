@@ -28,6 +28,7 @@ import {
 } from "@/lib/stream-bus";
 import { ancestorsOf, subtreeIds } from "@/lib/collapsed";
 import { type SendKey, SEND_KEY_DEFAULT, isSendKey } from "@/lib/send-key";
+import { type BusySendMode, BUSY_SEND_MODE_DEFAULT, isBusySendMode } from "@/lib/composer-queue";
 import {
   type ThreadWidth,
   THREAD_WIDTH_DEFAULT,
@@ -337,6 +338,16 @@ function loadSendKey(): SendKey {
   return isSendKey(stored) ? stored : SEND_KEY_DEFAULT;
 }
 
+function loadBusySendMode(): BusySendMode {
+  if (typeof window === "undefined") return BUSY_SEND_MODE_DEFAULT;
+  try {
+    const stored = window.localStorage.getItem(PREF_KEYS.busySendMode);
+    return isBusySendMode(stored) ? stored : BUSY_SEND_MODE_DEFAULT;
+  } catch {
+    return BUSY_SEND_MODE_DEFAULT;
+  }
+}
+
 function clampDepth(n: number): number {
   return Number.isFinite(n) && n >= 0 && n <= 12 ? Math.round(n) : DEFAULT_HISTORY_DEPTH;
 }
@@ -431,6 +442,8 @@ type State = {
   setDraftAgentId: (id: string | null) => void;
   // A4: send-key preference, applied live to every chat input.
   sendKey: SendKey;
+  // 回复进行中发送的默认方式（排队 / 插话），lib/composer-queue.ts。
+  busySendMode: BusySendMode;
   // 线性视图内容列宽度偏好（窄/宽/超宽）。
   threadWidth: ThreadWidth;
   // 树面板当前树节点区的展示形态（列表/图形）。
@@ -677,6 +690,7 @@ type Actions = {
   setDraftWorkspacePath: (path: string | null) => void;
   setDraftSystemPrompt: (prompt: string | null) => void;
   setSendKey: (key: SendKey) => void;
+  setBusySendMode: (mode: BusySendMode) => void;
   setThreadWidth: (width: ThreadWidth) => void;
   setTreePanelView: (view: TreePanelView) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -918,6 +932,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   draftSystemPrompt: null,
   draftAgentId: null,
   sendKey: SEND_KEY_DEFAULT,
+  busySendMode: BUSY_SEND_MODE_DEFAULT,
   threadWidth: THREAD_WIDTH_DEFAULT,
   treePanelView: "list",
   historyDepth: DEFAULT_HISTORY_DEPTH,
@@ -1013,6 +1028,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftSystemPrompt: loadDraftSystemPrompt(),
       draftAgentId: loadDraftAgentId(),
       sendKey: loadSendKey(),
+      busySendMode: loadBusySendMode(),
       threadWidth: loadThreadWidth(),
       treePanelView: loadTreePanelView(),
       historyDepth: loadHistoryDepth(),
@@ -1571,6 +1587,17 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set({ sendKey: key });
     if (typeof window !== "undefined") {
       window.localStorage.setItem(SEND_KEY_KEY, key);
+    }
+  },
+
+  setBusySendMode: (mode) => {
+    set({ busySendMode: mode });
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(PREF_KEYS.busySendMode, mode);
+      } catch {
+        /* 偏好写不进去不影响本次会话 */
+      }
     }
   },
 

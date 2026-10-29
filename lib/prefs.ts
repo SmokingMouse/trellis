@@ -24,6 +24,8 @@ export const PREF_KEYS = {
   palette: "trellis-palette",
   // 输入
   sendKey: "trellis-send-key",
+  /** 回复进行中发送的默认方式：排队到下一轮 / 插话进当前轮 */
+  busySendMode: "trellis-busy-send-mode",
   historyDepth: "trellis-history-depth",
   historyDepthMigrated: "trellis-history-depth-migrated",
   chatEnhanced: "trellis-chat-enhanced",
@@ -64,6 +66,8 @@ export const sessionScopedKey = {
   treeVisits: (sid: string) => `trellis-tree-visits:${sid}`,
   view: (sid: string) => `trellis-view:${sid}`,
   draft: (sid: string) => `trellis-draft:${sid}`,
+  /** 运行中追加的排队消息（lib/composer-queue.ts） */
+  queue: (sid: string) => `trellis-queue:${sid}`,
 };
 
 // ── 启动视图 ─────────────────────────────────────────────────────────────────
@@ -152,6 +156,18 @@ export const PREF_ITEMS: PrefItem[] = [
     options: [
       { value: "mod-enter", label: "⌘Enter 发送 / Enter 换行" },
       { value: "enter", label: "Enter 发送 / ⌘Enter 换行" },
+    ],
+  },
+  {
+    key: PREF_KEYS.busySendMode,
+    label: "回复进行中发送",
+    where: "回复进行中输入框右下的「排队 / 插话」（插话仅 Agent 服务上的 project 会话可用）",
+    group: "输入",
+    kind: "enum",
+    fallback: "queue",
+    options: [
+      { value: "queue", label: "排队：本轮结束后自动发出" },
+      { value: "steer", label: "插话：注入当前这一轮" },
     ],
   },
   {
