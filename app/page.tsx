@@ -40,6 +40,7 @@ import { useUnreadNavigation } from "@/hooks/useUnreadNavigation";
 import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
+import { useAttentionTitle } from "@/hooks/useAttentionTitle";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
 import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
@@ -96,6 +97,8 @@ export default function Home() {
   // Wave 4: one app-level /api/runs poll feeds running + unread badges to
   // both the tab strip and the sidebar (no per-component intervals).
   useRunPolling();
+  // 标签页标题「(N) 」= 等你回答的会话数，与侧栏「等你处理」同一来源（lib/attention）。
+  useAttentionTitle();
   useHerdrShortcuts();
 
   useEffect(() => {

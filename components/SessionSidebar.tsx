@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import {
   Anchor,
   Archive,
+  BellDot,
   ArchiveRestore,
   Bookmark,
   CalendarClock,
@@ -56,6 +57,7 @@ import {
 import { useIsDesktopViewport } from "@/hooks/useIsMobile";
 import { ContextMenu, useContextMenuWithTarget, type ContextMenuItem } from "@/components/ui/ContextMenu";
 import { type RecentChainStatus } from "@/lib/recent";
+import { isHerdrWaiting, prioritySessions, waitingSessionIds } from "@/lib/attention";
 import {
   HOME_CLUSTER_KEY,
   SCRATCH_CLUSTER_KEY,
@@ -88,6 +90,8 @@ const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "her
 //    手机端是 Header 汉堡键打开的抽屉，两处共用 renderPanel。
 //  - 工具条：「按项目 / 按时间」SegmentedControl + 来源 Select + 含已归档 Checkbox。
 //  - 行：单击预览（斜体、不占标签位），双击置顶；右键 / 行尾「更多」出同一套菜单。
+//  - 等你处理（自动分组，仿 Codex 手机端 Priority）：置顶组之上，收录等你回答 + 完成·未读，
+//    判定与行首状态槽同源（lib/attention）。它是最顶层，下方置顶组 / 树都对它去重。
 //  - 置顶（= 常驻标签，服务端 sessions.pinned_at）：列表顶部「置顶」组，两种排布共用；
 //    置顶的会话从下方分组里去重，不重复出现。
 //    状态只用行首一个槽位（生成中 Dots / 等你回答 / 出错点 / 未读点），行尾是
@@ -131,6 +135,8 @@ export function SessionSidebar() {
   const sessionsRevision = useSessionStore((s) => s.sessionsRevision);
   const runningIds = useSessionStore((s) => s.runningSessionIds);
   const unreadIds = useSessionStore((s) => s.unreadSessionIds);
+  const pendingItems = useSessionStore((s) => s.pending.items);
+  const pendingSubmissions = useSessionStore((s) => s.pendingSubmissions);
   const unarchiveSession = useSessionStore((s) => s.unarchiveSession);
   const bumpSessionsRevision = useSessionStore((s) => s.bumpSessionsRevision);
   const liveSessionIds = useSessionStore((s) => s.liveSessionIds);
@@ -330,19 +336,43 @@ export function SessionSidebar() {
     (s: Session) => belongsToHerdrMode(s, herdrStatus.get(s.id)?.alive),
     [herdrStatus],
   );
+  // 等你回答：与行首状态槽、标签页标题前缀同一来源（lib/attention）——
+  // pending 快照（审批 / 提问）∪ 在线 Herdr 窗格 waiting / blocked。
+  const waitingIds = useMemo(
+    () => waitingSessionIds(pendingItems, pendingSubmissions, herdrStatus),
+    [pendingItems, pendingSubmissions, herdrStatus],
+  );
+
+  // 「等你处理」区（仿 Codex 手机端 Priority）：等你回答在前、完成·未读在后，组内最近活跃在前。
+  // 与置顶区同口径：不受来源筛选影响（要处理的事不该被筛掉）、尊重归档、两个模式各列各的。
+  //
+  // 去重取舍：它是列表最顶层，Codex 的 Priority 也是「去重的置顶视图」—— 会话在这里出现时，
+  // 下方的置顶组和树都不再重复列它；处理完（答完 / 读过）自动回到原位置。
+  // 这样一屏里每个会话只出现一次，手机上最先看到的就是要你动手的那几条。
+  const attentionRows = useMemo(() => {
+    const candidates = [...new Map([...taskSessions, ...sessions].map((s) => [s.id, s])).values()]
+      .filter((s) => !s.archived && isHerdrOwned(s) === (mode === "herdr"))
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+    return prioritySessions(candidates, waitingIds, unreadIds);
+  }, [sessions, taskSessions, isHerdrOwned, mode, waitingIds, unreadIds]);
+  const attentionIds = useMemo(
+    () => new Set(attentionRows.map((r) => r.session.id)),
+    [attentionRows],
+  );
+
   const pinnedSessions = useMemo(() => {
     const byId = new Map([...taskSessions, ...sessions].map((s) => [s.id, s]));
     return pinnedIds
       .map((id) => byId.get(id))
-      .filter((s): s is Session => !!s && !s.archived && isHerdrOwned(s) === (mode === "herdr"));
-  }, [pinnedIds, sessions, taskSessions, isHerdrOwned, mode]);
+      .filter((s): s is Session => !!s && !s.archived && isHerdrOwned(s) === (mode === "herdr") && !attentionIds.has(s.id));
+  }, [pinnedIds, sessions, taskSessions, isHerdrOwned, mode, attentionIds]);
 
-  // 下方分组去重：已在置顶区出现的会话不再重复出现。
+  // 下方分组去重：已在「等你处理」/ 置顶区出现的会话不再重复出现。
   const visibleSessions = useMemo(() => {
-    const shown = new Set(pinnedSessions.map((s) => s.id));
+    const shown = new Set([...attentionIds, ...pinnedSessions.map((s) => s.id)]);
     return selectSidebarSessions(sessions, archived, source, includeArchived, isOfflineHerdr)
       .filter((s) => !shown.has(s.id) && !isHerdrOwned(s));
-  }, [sessions, archived, source, includeArchived, isOfflineHerdr, pinnedSessions, isHerdrOwned]);
+  }, [sessions, archived, source, includeArchived, isOfflineHerdr, pinnedSessions, attentionIds, isHerdrOwned]);
 
   // Mobile drawer auto-closes once a session is chosen (activeId changes). The
   // drawer is an overlay, so leaving it open over the loaded session would hide
@@ -516,6 +546,7 @@ export function SessionSidebar() {
           active={s.id === activeId}
           preview={s.id === previewId}
           running={isRunning(s.id)}
+          waiting={waitingIds.has(s.id)}
           unread={unreadIds.has(s.id)}
           isPinned={pinnedIds.includes(s.id)}
           workspaceTag={workspaceTag}
@@ -583,6 +614,34 @@ export function SessionSidebar() {
         />
         {!isCollapsed && (
           <IndentGuide level={0}>{pinnedSessions.map((s) => renderRow(s, 1))}</IndentGuide>
+        )}
+      </div>
+    );
+  };
+
+  // 「等你处理」区：置顶组之上，空时整组不画。折叠状态与其它分组共用 collapsed 集合。
+  const renderAttention = () => {
+    if (attentionRows.length === 0) return null;
+    const id = "__attention";
+    const isCollapsed = collapsed.has(id);
+    const waitingCount = attentionRows.filter((r) => r.reason === "waiting").length;
+    const unreadCount = attentionRows.length - waitingCount;
+    return (
+      <div data-sidebar-attention className="mb-1.5">
+        <GroupRow
+          level={0}
+          icon={BellDot}
+          collapsed={isCollapsed}
+          label="等你处理"
+          title={`等你处理 · ${[
+            waitingCount ? `${waitingCount} 个等你回答` : "",
+            unreadCount ? `${unreadCount} 个完成·未读` : "",
+          ].filter(Boolean).join(" · ")}（处理后回到原位置）`}
+          badge={String(attentionRows.length)}
+          onToggle={() => toggleCollapsed(id)}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>{attentionRows.map((r) => renderRow(r.session, 1))}</IndentGuide>
         )}
       </div>
     );
@@ -938,12 +997,13 @@ export function SessionSidebar() {
         className="flex-1 overflow-y-auto border-t border-line-faint py-1.5"
       >
         {mode === "herdr" ? (
-          <HerdrModeSidebar pinned={renderPinned()} onNavigate={() => setMobileNavOpen(false)} />
+          <HerdrModeSidebar pinned={<>{renderAttention()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
         <>
+        {renderAttention()}
         {renderPinned()}
         {visibleSessions.length === 0 ? (
-          pinnedSessions.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
+          pinnedSessions.length > 0 || attentionRows.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
             {source !== "all"
               ? "这个来源还没有会话，切回「全部」看看其它会话"
               : "还没有会话，点上面「新会话」开始"}
@@ -1023,7 +1083,8 @@ export function SessionSidebar() {
             aria-hidden
           />
           <aside
-            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] bg-surface-canvas border-r border-line shadow-overlay ui-enter-slide-left"
+            // 刘海 / 状态栏：抽屉贴顶，顶部留出 --safe-top（app/globals.css），否则工具条被压在状态栏下。
+            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] pt-(--safe-top) bg-surface-canvas border-r border-line shadow-overlay ui-enter-slide-left"
           >
             {renderPanel(() => setMobileNavOpen(false))}
           </aside>
@@ -1330,6 +1391,7 @@ function SidebarRow({
   active,
   preview,
   running,
+  waiting = false,
   unread,
   isPinned,
   workspaceTag,
@@ -1353,6 +1415,8 @@ function SidebarRow({
   active: boolean;
   preview: boolean;
   running: boolean;
+  /** 等你回答（lib/attention：pending 审批 / 提问 ∪ 在线 Herdr waiting / blocked） */
+  waiting?: boolean;
   unread: boolean;
   isPinned?: boolean;
   /** 所在工作区（分支 / worktree 名）。项目只有一个工作区时不传 —— 标签不带信息。 */
@@ -1378,7 +1442,7 @@ function SidebarRow({
   const sourceChip = sessionSourceChip(session);
   const SourceIcon = SOURCE_ICON[source];
   const indicatorStatus: RecentChainStatus | "done" =
-    herdr?.alive && (herdr.status === "waiting" || herdr.status === "blocked")
+    waiting || isHerdrWaiting(herdr)
       ? "waiting"
       : running || (herdr?.alive && herdr.status === "working")
         ? "streaming"
@@ -1579,6 +1643,27 @@ function SidebarRow({
               onDelete={onDelete}
             />
           </div>
+        )}
+        {/* 手机没有 hover，「更多」整块藏着、只能长按 —— 行尾常显一个 ⋯，点开的是长按同一个
+            ContextMenu（同一份 menuItems），44px 热区。不设 aria-expanded：桌面上它虽 hidden，
+            但会被上面 ACTIONS_OVERLAY 的 has-[[aria-expanded=true]] 选中，右键菜单时误显 overlay。 */}
+        {!editing && (
+          <button
+            type="button"
+            aria-label="会话操作"
+            aria-haspopup="menu"
+            data-session-row-more-mobile
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              menu.setTarget(session);
+              menu.openAt({ x: r.right, y: r.bottom });
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="-mr-1.5 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-muted active:bg-surface-muted md:hidden"
+          >
+            <Icon icon={Ellipsis} size="sm" />
+          </button>
         )}
       </div>
       {!editing && (

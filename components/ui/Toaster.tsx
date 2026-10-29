@@ -15,6 +15,9 @@ export { toast };
 
 const GAP = 8;
 const BASE = 16;
+// 手机底部是 composer（ComposerShell 手机端：输入区 min-h-18 + 工具条 min-h-11 + 内边距 ≈ 8.5rem），
+// 离底 16px 会正好压在输入框上；抬到它上方，再加 Home Indicator 的安全区。
+const MOBILE_BOTTOM = "calc(var(--safe-bottom) + 9rem)";
 
 function useHtmlDark(): boolean {
   const [dark, setDark] = useState(false);
@@ -36,7 +39,10 @@ export function Toaster() {
       theme={dark ? "dark" : "light"}
       position="bottom-right"
       offset={{ bottom: BASE, right: BASE }}
-      mobileOffset={{ bottom: BASE, left: 12, right: 12 }}
+      mobileOffset={{ bottom: MOBILE_BOTTOM, left: 12, right: 12 }}
+      // sonner 的 mobileOffset 只在 ≤600px 生效，600–767px（仍是 max-md 的单栏布局）走的是
+      // offset；用 !important 的类覆盖它写在行内 style 上的 --offset-bottom，与站内 md 断点对齐。
+      className="max-md:[--offset-bottom:calc(var(--safe-bottom)+9rem)]!"
       gap={GAP}
       visibleToasts={4}
       closeButton
@@ -64,7 +70,7 @@ export function Toaster() {
           cancelButton:
             "ml-2 shrink-0 self-center rounded-field border border-line-strong px-2 min-h-6.5 text-label text-ink hover:bg-surface-hover",
           closeButton:
-            "absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-surface-raised text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink",
+            "absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-surface-raised text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink max-md:opacity-100 [@media(hover:none)]:opacity-100 before:absolute before:-inset-3 before:content-['']",
           error: "border-danger-line",
           warning: "border-warn-line",
         },

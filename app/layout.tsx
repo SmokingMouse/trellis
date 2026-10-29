@@ -20,6 +20,9 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
+  // Android Chrome 弹键盘时缩 layout viewport，底部输入框自然留在键盘上方；
+  // iOS 忽略此项，由 hooks/useKeyboardInset 读 visualViewport 兜住。
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fafaf9" }, // ui-guard-allow(hex): viewport themeColor 是 <meta>，读不到 CSS 变量
     { media: "(prefers-color-scheme: dark)", color: "#0f1115" }, // ui-guard-allow(hex): 同上

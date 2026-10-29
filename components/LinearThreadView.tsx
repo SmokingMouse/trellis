@@ -29,6 +29,7 @@ import {
 } from "@/hooks/useSelectionWithin";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import { useScrollHide } from "@/hooks/useScrollHide";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useVerifyStreamingStub } from "@/hooks/useVerifyStreamingStub";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
@@ -38,7 +39,7 @@ import {
   isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
-import { ChevronRight, GitBranch, Layers, Workflow, X } from "lucide-react";
+import { ArrowDown, ChevronRight, GitBranch, Layers, Workflow, X } from "lucide-react";
 import {
   Button,
   Icon,
@@ -145,6 +146,8 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
 // How close to the bottom (px) still counts as "following" — scrolling
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;
+// 离底超过这么远才出「回到底部」浮钮：刚好在跟随阈值外一点点时不打扰。
+const JUMP_TO_BOTTOM_PX = 480;
 
 export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const session = useSessionStore((s) => s.session);
@@ -210,6 +213,22 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // 参考 Codex 手机端：读旧内容时右下角一个「回到底部」浮钮，生成中顺带提示。
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const keyboard = useKeyboardInset(isMobile);
+  // 输入框实测高度：正文底部留白和浮钮位置都跟着它走，而不是写死 pb-28——
+  // 展开态（分叉横幅 + 附件 + 160px 输入区 + 工具栏）会超过固定值盖住最后一段。
+  const composerRef = useRef<HTMLDivElement>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      setComposerHeight(Math.round(el.getBoundingClientRect().height));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const {
     isHidden: scrollHidden,
     reveal: revealScrollChrome,
@@ -443,8 +462,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    followRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    followRef.current = distance < FOLLOW_SLACK_PX;
+    setAwayFromBottom(distance > JUMP_TO_BOTTOM_PX);
 
     updateFromScroll(el.scrollTop, followRef.current);
 
@@ -476,6 +496,20 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       }
       if (picked) setReadingPosition(sid, picked);
     }, 200);
+  };
+
+  const jumpToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 先放出顶栏 / 输入框：reveal 会改写 scrollTop，放在滚动之后会打断平滑滚动。
+    revealScrollChrome();
+    followRef.current = true;
+    setAwayFromBottom(false);
+    // 直接跳，不用 smooth：下滑会触发 useScrollHide 收起顶栏并回写 scrollTop，
+    // 把进行中的平滑滚动打断在半路（实测停在离底 1000+px）；隔几十屏平滑也只是晃。
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
   };
 
   const onComposerExpandedChange = useCallback((expanded: boolean) => {
@@ -666,7 +700,12 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         left: "var(--trellis-sb, 0px)",
         // 管家右栏（ButlerPanel 发布 --trellis-rp）；其余会话恒为 0。
         right: "calc(var(--trellis-rp, 0px) + var(--trellis-herdr-dw, 0px))",
-        bottom: "var(--trellis-term-h, 0px)",
+        // 软键盘弹起：整列钉在键盘之上的可见区域（useKeyboardInset）。
+        top: keyboard.open ? keyboard.top : undefined,
+        bottom: keyboard.open
+          ? `max(var(--trellis-term-h, 0px), ${keyboard.bottom}px)`
+          : "var(--trellis-term-h, 0px)",
+        ["--trellis-composer-h" as string]: composerHeight ? `${composerHeight}px` : undefined,
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
     >
@@ -768,7 +807,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 { paddingRight: treeSafePadding(threadWidth) }
         }
       >
-        <main ref={gestureContentRef} className={`${widthClass} w-full max-w-full min-w-0 mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-28`}>
+        <main ref={gestureContentRef} className={`${widthClass} w-full max-w-full min-w-0 mx-auto px-4 md:px-8 py-4 pb-6 max-md:pb-[calc(var(--trellis-composer-h,6rem)+1rem)]`}>
         {isHerdr && session && (
           <HerdrOfflineBanner
             sessionId={session.id}
@@ -895,14 +934,36 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         </main>
       </div>
 
+      {awayFromBottom && (
+        <button
+          type="button"
+          data-jump-to-bottom
+          onClick={jumpToBottom}
+          aria-label={tipStreamingId ? "回到底部，正在生成" : "回到底部"}
+          className="absolute right-4 md:right-8 z-30 flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface-raised/95 px-3 text-ui text-ink shadow-md backdrop-blur transition-[bottom,background-color] duration-200 motion-reduce:transition-none hover:bg-surface-hover max-md:h-11 max-md:px-3.5"
+          // 输入框随下滑收起时浮钮落到底边，不跟着消失。
+          style={{
+            bottom: composerIsHidden
+              ? "calc(var(--safe-bottom) + 0.75rem)"
+              : "calc(var(--trellis-composer-h, 6rem) + 0.75rem)",
+          }}
+        >
+          {tipStreamingId && <StatusDot tone="live" className="animate-pulse motion-reduce:animate-none" />}
+          <Icon icon={ArrowDown} size="sm" />
+          <span>{tipStreamingId ? "生成中" : "回到底部"}</span>
+        </button>
+      )}
+
       <div
+        ref={composerRef}
         data-safe-area="linear-composer"
         data-composer-hidden={composerIsHidden ? "true" : "false"}
         className={`shrink-0 z-20 bg-surface-canvas/95 transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:border-t max-md:border-line max-md:backdrop-blur ${
           composerIsHidden ? "max-md:translate-y-full max-md:pointer-events-none" : "translate-y-0"
         }`}
         style={{
-          paddingBottom: "var(--safe-bottom)",
+          // 键盘弹起时底部是键盘不是 Home 条，再留安全区就是一截空白。
+          paddingBottom: keyboard.open ? 0 : "var(--safe-bottom)",
           paddingRight: isMobile ? undefined : treeSafePadding(threadWidth),
         }}
       >

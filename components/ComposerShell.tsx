@@ -233,6 +233,8 @@ export function ComposerShell({
             data-composer-input
             {...textareaProps}
             ref={textareaRef}
+            // 手机键盘回车键标签：Enter 发送时显示「发送」，⌘↩ 模式保持换行语义。
+            enterKeyHint={sendKey === "enter" ? "send" : "enter"}
             value={value}
             onChange={(e) => onValueChange(e.target.value)}
             onCompositionEnd={() => {
