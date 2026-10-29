@@ -1,5 +1,6 @@
 "use client";
-import { Check } from "lucide-react";
+import { Check, ShieldCheck } from "lucide-react";
+import { describeToolKey, scopeLabel } from "@/lib/approval-rules";
 import { Icon, Pill, Spinner, StatusDot } from "@/components/ui";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
@@ -27,8 +28,21 @@ export function RowTail({
   nestedErrors: number;
   status: RowStatus;
 }) {
+  const approval = node.call.approval;
   return (
     <>
+      {approval && (
+        // 审批三档作用域：按已授权规则自动放行的调用要留痕，不能和人手点的混在一起。
+        <Pill
+          tone="neutral"
+          data-tool-approval={approval.scope}
+          className="shrink-0"
+          title={`没有弹卡：命中「${scopeLabel(approval.scope)}」规则 · ${describeToolKey(approval.toolKey)}（可在 设置 › 已授权规则 撤销）`}
+        >
+          <Icon icon={ShieldCheck} size="sm" />
+          按规则允许
+        </Pill>
+      )}
       {nestedErrors > 0 && (
         // 收着的委派行也得把肚子里的失败招出来 —— 折叠不是藏错的理由。
         <span className="shrink-0 inline-flex items-center gap-1 text-nano text-danger-ink">

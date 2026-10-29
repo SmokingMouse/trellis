@@ -648,6 +648,24 @@ function migrate(db: Database) {
     );
   `);
 
+  // 工具审批规则（三档作用域里的「本会话」「所有会话」；「仅本次」不落库）。
+  // 规则粒度 = 工具名（tool_key，见 lib/approval-rules.ts）。会话规则随会话删除级联清掉；
+  // 全局规则只能在 /settings/approvals 撤销。服务端在发起审批前先匹配这张表。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS approval_rules (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL CHECK (scope IN ('session', 'global')),
+      session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+      tool_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      use_count INTEGER NOT NULL DEFAULT 0,
+      CHECK ((scope = 'session') = (session_id IS NOT NULL))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS approval_rules_unique
+      ON approval_rules(scope, IFNULL(session_id, ''), tool_key);
+  `);
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

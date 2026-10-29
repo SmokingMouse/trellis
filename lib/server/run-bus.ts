@@ -11,7 +11,10 @@ import {
   setNodeResumeId,
   resetNodeForRetry,
   getNode,
+  patchToolCallApproval,
 } from "./repo";
+import { findApprovalRule, grantApprovalRule } from "./approval-rules";
+import type { ApprovalScope, ToolCallApproval } from "@/lib/approval-rules";
 import {
   persistPendingInteraction,
   clearPendingInteraction,
@@ -131,6 +134,8 @@ export type RunEvent =
     }
   // Stage 22: sub-agent progress/report patch for the Task/Agent call `id`.
   | { type: "tool_call_update"; id: string; agent: TaskMeta }
+  // 审批三档作用域：这次调用按已授权规则自动放行了，客户端把痕迹挂到该调用上。
+  | { type: "tool_call_approval"; id: string; approval: ToolCallApproval }
   // A路②: a run paused on an interactive tool, broadcast so the UI renders the
   // waiting form; interaction_resolved when the user's answer continues it.
   | {
@@ -237,9 +242,9 @@ type RunState = {
   // the abort path call interactionResolver to unpark the promise.
   pendingInteraction: PendingInteraction | null;
   interactionResolver?: (answer: InteractionDecision) => void;
-  // 权限确认:本轮内用户点过「总是允许」的工具名。仅存活于这一次 spawn(每轮
-  // 新进程,权限记忆随 RunState 丢弃);下一轮同工具会重新弹卡。
-  approvedTools: Set<string>;
+  // 审批三档作用域：按规则自动放行、但对应 tool_call_start 还没到的调用痕迹，
+  // 等调用落库时补上（toolUseId → 痕迹）。规则本身在 approval_rules 表，不在这里。
+  approvalMarks: Map<string, ToolCallApproval>;
   subscribers: Set<Subscriber>;
   // Drop the RunState 30s after terminal so memory doesn't accrete. New
   // subscribers after that window go through /api/nodes/[id]/stream
@@ -325,8 +330,8 @@ export function startRun(args: {
   // the claude family — codex/mock have no stdio permission control. When
   // false, ctx.onCanUseTool is undefined and the provider never opens it.
   interactive?: boolean;
-  // 权限确认:true = 本 run 的 can_use_tool 一律暂停弹权限卡(除本轮已「总是
-  // 允许」的工具),false/缺省 = 现状(非交互工具 auto-allow,YOLO)。来自
+  // 权限确认:true = 本 run 的 can_use_tool 一律暂停弹权限卡(除命中已授权规则
+  // 的工具,见 approval_rules),false/缺省 = 现状(非交互工具 auto-allow,YOLO)。来自
   // session.require_approval,只对 interactive(claude 系)run 有意义。
   requireApproval?: boolean;
   // Optional post-done topic generator. Called with the aggregated
@@ -379,7 +384,7 @@ export function startRun(args: {
     finalStart: 0,
     pendingBreak: false,
     pendingInteraction: null,
-    approvedTools: new Set(),
+    approvalMarks: new Map(),
     subscribers: new Set(),
   };
   RUNS.set(args.nodeId, state);
@@ -458,14 +463,26 @@ async function runLoop(
         //   project keep their bypass — no UI, no wait, zero stall.
         //   权限确认(requireApproval) → 不放行,落到下面的暂停路径弹权限卡;
         //   例外:只读/编排类免审名单(READONLY_AUTO_ALLOW,ask="all" 后全部
-        //   工具都进回调,免审判断在这层做)与本轮内点过「总是允许」的工具名。
+        //   工具都进回调,免审判断在这层做)与命中已授权规则(本会话/所有会话)
+        //   的工具——后者在调用上留「按规则允许」痕迹,不静默。
         if (
           !INTERACTIVE_TOOLS.has(req.toolName) &&
-          (!args.requireApproval ||
-            READONLY_AUTO_ALLOW.has(req.toolName) ||
-            state.approvedTools.has(req.toolName))
+          (!args.requireApproval || READONLY_AUTO_ALLOW.has(req.toolName))
         ) {
           return { behavior: "allow", updatedInput: req.input };
+        }
+        if (!INTERACTIVE_TOOLS.has(req.toolName)) {
+          const sessionId = getNode(args.nodeId)?.sessionId;
+          let hit: ReturnType<typeof findApprovalRule> = null;
+          try {
+            hit = sessionId ? findApprovalRule(sessionId, req) : null;
+          } catch {
+            hit = null; // 规则表读不了就退回弹卡，宁可多问一次
+          }
+          if (hit) {
+            markApproval(state, args.nodeId, req.toolUseId, hit.approval);
+            return { behavior: "allow", updatedInput: req.input };
+          }
         }
         // Interactive tool / 待审批工具 → pause. Record + persist + broadcast, then park
         // on a promise the user (POST respond) or abort will resolve.
@@ -632,6 +649,8 @@ async function runLoop(
           if (early) {
             tc.agent = mergeAgentMeta(undefined, early);
           }
+          const approvalMark = state.approvalMarks.get(tc.id);
+          if (approvalMark) tc.approval = approvalMark;
           try {
             appendToolCallStart({ nodeId: args.nodeId, call: tc });
           } catch (err) {
@@ -641,6 +660,7 @@ async function runLoop(
           }
           if (fail.err) break;
           if (early) state.pendingAgentPatches.delete(tc.id);
+          if (approvalMark) state.approvalMarks.delete(tc.id);
           state.committedToolCalls.push(tc);
           broadcast(state, {
             type: "tool_call_start",
@@ -654,6 +674,9 @@ async function runLoop(
           });
           if (early) {
             broadcast(state, { type: "tool_call_update", id: tc.id, agent: tc.agent! });
+          }
+          if (approvalMark) {
+            broadcast(state, { type: "tool_call_approval", id: tc.id, approval: approvalMark });
           }
         }
       } else if (event.type === "tool_call_done") {
@@ -1069,6 +1092,29 @@ export function abortRun(nodeId: string): boolean {
   return true;
 }
 
+// 审批三档作用域：给按规则自动放行的调用挂痕迹。调用已在 committedToolCalls 里
+// （claude 通常先吐 tool_use 再发 can_use_tool）就 persist → commit → broadcast；
+// 还没到就暂存，tool_call_start 落库时一并带上。
+function markApproval(
+  state: RunState,
+  nodeId: string,
+  toolUseId: string,
+  approval: ToolCallApproval,
+) {
+  const idx = state.committedToolCalls.findIndex((c) => c.id === toolUseId);
+  if (idx === -1) {
+    state.approvalMarks.set(toolUseId, approval);
+    return;
+  }
+  try {
+    patchToolCallApproval({ nodeId, toolCallId: toolUseId, approval });
+  } catch {
+    return; // 痕迹写不进不终止本轮；但没落库的痕迹也不进快照
+  }
+  state.committedToolCalls[idx] = { ...state.committedToolCalls[idx], approval };
+  broadcast(state, { type: "tool_call_approval", id: toolUseId, approval });
+}
+
 // A路②: deliver a user's answer to a paused interactive tool. Looks up the
 // live run, validates the pending toolUseId matches, and resolves the parked
 // onCanUseTool promise so the model continues. Returns:
@@ -1081,9 +1127,9 @@ export function resolveInteraction(
   toolUseId: string,
   answer: InteractionDecision,
   opts?: {
-    // 权限确认:allow 时同时把该工具名记进本轮「总是允许」,后续同名工具不再
-    // 弹卡(只影响这一次 spawn,下一轮重置)。
-    alwaysAllowTool?: boolean;
+    // 审批三档作用域:allow + session/global 时先落一条规则(approval_rules),
+    // 之后同键工具在发起审批前就被放行;once 不落库。
+    scope?: ApprovalScope;
   },
 ): "ok" | "no_run" | "no_pending" | "mismatch" {
   const state = RUNS.get(nodeId);
@@ -1092,8 +1138,16 @@ export function resolveInteraction(
     return "no_pending";
   }
   if (state.pendingInteraction.toolUseId !== toolUseId) return "mismatch";
-  if (opts?.alwaysAllowTool && answer.behavior === "allow") {
-    state.approvedTools.add(state.pendingInteraction.toolName);
+  if (opts?.scope && opts.scope !== "once" && answer.behavior === "allow") {
+    const sessionId = getNode(nodeId)?.sessionId;
+    if (sessionId) {
+      try {
+        grantApprovalRule({ scope: opts.scope, sessionId, interaction: state.pendingInteraction });
+      } catch (err) {
+        // 规则没落下不该吞掉这次「允许」——本次照常放行，只是下次还会再问。
+        console.warn(`[run-bus] ${nodeId} 审批规则落库失败:`, err);
+      }
+    }
   }
   state.interactionResolver(answer);
   return "ok";

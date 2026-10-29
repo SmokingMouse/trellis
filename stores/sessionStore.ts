@@ -785,8 +785,8 @@ type Actions = {
       behavior: "allow" | "deny";
       updatedInput?: unknown;
       message?: string;
-      // 权限确认：allow 时同名工具本轮内不再弹卡。
-      alwaysAllowTool?: boolean;
+      // 审批三档作用域：allow + session/global 时服务端落一条规则（缺省 once）。
+      scope?: import("@/lib/approval-rules").ApprovalScope;
     },
   ) => Promise<{ ok: true } | { ok: false; reason: "stale" | "error" }>;
   // Combined "go to parent + scroll its response to the mark for this
@@ -2786,7 +2786,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
           behavior: decision.behavior,
           updatedInput: decision.updatedInput,
           message: decision.message,
-          ...(decision.alwaysAllowTool ? { alwaysAllowTool: true } : {}),
+          ...(decision.scope && decision.scope !== "once" ? { scope: decision.scope } : {}),
         }),
       });
       const payload = await res.json().catch(() => null);
@@ -3292,6 +3292,12 @@ type StreamEvent =
       id: string;
       agent: import("@/lib/types").TaskMeta;
     }
+  // 审批三档作用域：该调用是按已授权规则自动放行的（痕迹挂在调用行尾）。
+  | {
+      type: "tool_call_approval";
+      id: string;
+      approval: import("@/lib/approval-rules").ToolCallApproval;
+    }
   // A路②: the run paused on an interactive tool (AskUserQuestion /
   // ExitPlanMode). interaction_required carries the prompt for the UI to
   // render a form; interaction_resolved fires once the user answered and the
@@ -3643,6 +3649,15 @@ function handleStreamEvent(
         const cur = n.toolCalls[idx];
         const next = n.toolCalls.slice();
         next[idx] = { ...cur, agent: { ...cur.agent, ...event.agent } };
+        return { ...n, toolCalls: next };
+      });
+    } else if (event.type === "tool_call_approval" && currentNodeId) {
+      const id = currentNodeId;
+      scheduleNodePatch(id, (n) => {
+        const idx = n.toolCalls.findIndex((c) => c.id === event.id);
+        if (idx === -1) return n;
+        const next = n.toolCalls.slice();
+        next[idx] = { ...next[idx], approval: event.approval };
         return { ...n, toolCalls: next };
       });
     } else if (event.type === "interaction_required" && currentNodeId) {

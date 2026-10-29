@@ -7,6 +7,9 @@ import { NotificationSchemas, type NotificationMethod, type ServerNotification, 
 import { createProjectClient, withProjectLease, setProjectPermission, supportsMidThreadFork } from "./as-client";
 import { daemonIdentity, getAsTurn, bindAsThread, bindAsTurn, updateAsTurn, resolveSessionBinding, removeAsTurn, pruneAsThreads, claimAsThread } from "./session-binding";
 import { getDB } from "./sqlite";
+import { findApprovalRule, grantApprovalRule } from "./approval-rules";
+import type { ApprovalScope, ToolCallApproval } from "../approval-rules";
+import { patchToolCallApproval } from "./repo";
 import { getNode, getSession, appendNodeResponse, appendToolCallStart, markToolCallDone, finalizeNode, persistPendingInteraction, clearPendingInteraction, patchToolCallAgent, buildHistoryForNode, getSessionTitleContext, applyAutoTitle, setNodeTopicLabel, resetNodeForRetry } from "./repo";
 import { providerFamily } from "../llm/providers";
 import { emptyThreadLog, applyThreadEvent } from "../as-thread-log";
@@ -33,6 +36,10 @@ export class ProjectRun {
   private lastCatchup?: string;
   private starting?: Promise<void>;
   private retryResolutions: string[] = [];
+  // 审批三档作用域：正在按规则自动放行的 requestId（别把它们投影成待审批卡），以及
+  // 放行了、但对应 ToolCall 还没投影出来的痕迹（itemId → 痕迹）。
+  private autoResolving = new Set<string>();
+  private approvalMarks = new Map<string, ToolCallApproval>();
   constructor(readonly nodeId: string, readonly threadId: string, readonly params: StartTurnParams, private replacing = false, private observeOnly = false) {
     this.turnId = replacing ? undefined : getAsTurn(nodeId)?.turn_id ?? undefined;
     this.client.onSnapshot(snapshot => this.snapshot(snapshot));
@@ -51,12 +58,40 @@ export class ProjectRun {
       this.client.onServerRequest(method, request => {
         if (request.params.threadId !== threadId || (this.turnId && request.params.turnId !== this.turnId)) return;
         const interaction = projectInteraction(request);
+        if (method !== "item/tool/requestUserInput" && !this.observeOnly && this.autoApprove(interaction, request.params.itemId)) return;
         if (JSON.stringify(getNode(nodeId)?.pendingInteraction) !== JSON.stringify(interaction)) {
           appendPendingInteraction(nodeId, interaction);
           this.emit({ type: "interaction_required", ...interaction });
         }
       });
     }
+  }
+  // 发起审批前先匹配已授权规则；命中就由 trellis 代答 accept 并在调用上留痕迹。
+  // 返回 true = 已接管（不弹卡）。代答失败退回弹卡，让人来决定。
+  private autoApprove(interaction: ReturnType<typeof projectInteraction>, itemId: string): boolean {
+    if (this.autoResolving.has(interaction.toolUseId)) return true;
+    const sessionId = getNode(this.nodeId)?.sessionId;
+    let hit: ReturnType<typeof findApprovalRule> = null;
+    try { hit = sessionId ? findApprovalRule(sessionId, interaction) : null; } catch { hit = null; }
+    if (!hit) return false;
+    const approval = hit.approval;
+    this.autoResolving.add(interaction.toolUseId);
+    void respondProject(this.nodeId, { toolUseId: interaction.toolUseId, behavior: "allow", scope: "once" })
+      .then(() => this.markApproval(itemId, approval))
+      .catch(error => {
+        console.warn(`[trellis/as] ${this.nodeId}: 按规则自动允许失败，改为弹卡: ${error}`);
+        if (getNode(this.nodeId)?.status !== "streaming") return;
+        appendPendingInteraction(this.nodeId, interaction);
+        this.emit({ type: "interaction_required", ...interaction });
+      })
+      .finally(() => this.autoResolving.delete(interaction.toolUseId));
+    return true;
+  }
+  private markApproval(itemId: string, approval: ToolCallApproval) {
+    let patched = false;
+    try { patched = patchToolCallApproval({ nodeId: this.nodeId, toolCallId: itemId, approval }); } catch { return; }
+    if (!patched) { this.approvalMarks.set(itemId, approval); return; }
+    this.emit({ type: "tool_call_approval", id: itemId, approval });
   }
   private emit(event: RunEvent | CatchupEvent) {
     if (event.type === "catchup") {
@@ -86,8 +121,10 @@ export class ProjectRun {
       const call = itemToolCall(item);
       if (call) {
         if (!this.toolVersions.has(call.id)) {
-          appendToolCallStart({ nodeId: this.nodeId, call });
+          const mark = this.approvalMarks.get(call.id);
+          appendToolCallStart({ nodeId: this.nodeId, call: mark ? { ...call, approval: mark } : call });
           this.emit({ type: "tool_call_start", id: call.id, name: call.name, input: call.input, startedAt: call.startedAt });
+          if (mark) { this.approvalMarks.delete(call.id); this.emit({ type: "tool_call_approval", id: call.id, approval: mark }); }
         }
         const version = JSON.stringify(call);
         if (call.endedAt !== null && version !== this.toolVersions.get(call.id)) {
@@ -117,7 +154,7 @@ export class ProjectRun {
       this.turnId = user?.turnId;
     }
     this.project();
-    persistPendingInteractions(this.nodeId, snapshot.pendingRequests.filter(r => r.params.turnId === this.turnId).map(projectInteraction));
+    persistPendingInteractions(this.nodeId, snapshot.pendingRequests.filter(r => r.params.turnId === this.turnId && !this.autoResolving.has(r.params.requestId)).map(projectInteraction));
     this.emit(this.catchup());
     if (this.observeOnly) {
       const turn = adoptionTurns(snapshot).find(g => g.turn.id === this.turnId)?.turn;
@@ -397,7 +434,7 @@ export async function withNodeThread<T>(nodeId: string, action: (client: AgentCl
     return await action(client, binding.thread_id);
   } finally { client.close(); }
 }
-export async function respondProject(nodeId: string, body: { toolUseId: string; behavior: "allow" | "deny"; updatedInput?: unknown; alwaysAllowTool?: unknown }) {
+export async function respondProject(nodeId: string, body: { toolUseId: string; behavior: "allow" | "deny"; updatedInput?: unknown; scope?: ApprovalScope }) {
   return withNodeThread(nodeId, (client, threadId) => withProjectLease(client, threadId, async () => {
     // Re-read under lease: another client may have won between attach and acquire.
     await client.request("thread/attach", { threadId, sinceSeq: 0 });
@@ -412,11 +449,14 @@ export async function respondProject(nodeId: string, body: { toolUseId: string; 
       function done(error?: Error) { clearTimeout(timer); offResolved(); offError(); if (error) reject(error); else resolve(); }
     });
     const allow = body.behavior === "allow";
+    // 「本会话 / 所有会话」由 trellis 的 approval_rules 统一承担（发起审批前匹配、代答），
+    // 引擎侧只回单次 accept：daemon 的 acceptForSession 是进程内缓存、撤销不到，
+    // 会让设置页里「撤销」成为假动作。
     switch (request.method) {
       case "item/commandExecution/requestApproval": case "item/fileChange/requestApproval":
-        request.respond({ decision: allow ? body.alwaysAllowTool === true ? "acceptForSession" : "accept" : "reject" }); break;
+        request.respond({ decision: allow ? "accept" : "reject" }); break;
       case "item/permissions/requestApproval":
-        request.respond({ permissions: allow ? request.params.permissions : {}, scope: body.alwaysAllowTool === true ? "session" : "turn" }); break;
+        request.respond({ permissions: allow ? request.params.permissions : {}, scope: "turn" }); break;
       case "item/tool/requestUserInput": {
         const input = body.updatedInput as {answers?: Record<string,unknown>} | undefined;
         const answers: Record<string, {answers:string[]}> = {};
@@ -430,6 +470,11 @@ export async function respondProject(nodeId: string, body: { toolUseId: string; 
     }
     await completion;
     clearPendingInteraction(nodeId, body.toolUseId);
+    const sessionId = getNode(nodeId)?.sessionId;
+    if (allow && body.scope && body.scope !== "once" && sessionId && request.method !== "item/tool/requestUserInput") {
+      try { grantApprovalRule({ scope: body.scope, sessionId, interaction: projectInteraction(request) }); }
+      catch (error) { console.warn(`[trellis/as] ${nodeId}: 审批规则落库失败: ${error}`); }
+    }
     return { ok: true };
   }));
 }

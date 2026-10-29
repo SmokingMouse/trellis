@@ -1423,6 +1423,38 @@ export function patchToolCallAgent(args: {
   );
 }
 
+// 审批三档作用域：把「已按规则自动允许」的痕迹挂到对应 ToolCall 上。返回 false =
+// 这条调用还没落进 tool_calls_json（审批先于 tool_call_start 到达），调用方暂存，
+// 等调用出现时再补。
+export function patchToolCallApproval(args: {
+  nodeId: string;
+  toolCallId: string;
+  approval: import("@/lib/approval-rules").ToolCallApproval;
+}): boolean {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT tool_calls_json FROM nodes WHERE id = ?")
+    .get(args.nodeId) as { tool_calls_json: string | null } | undefined;
+  if (!row?.tool_calls_json) return false;
+  let list: ToolCall[];
+  try {
+    const parsed = JSON.parse(row.tool_calls_json);
+    if (!Array.isArray(parsed)) return false;
+    list = parsed as ToolCall[];
+  } catch {
+    return false;
+  }
+  const idx = list.findIndex((c) => c.id === args.toolCallId);
+  if (idx === -1) return false;
+  list[idx] = { ...list[idx], approval: args.approval };
+  dbWrite("patchToolCallApproval", () =>
+    db
+      .prepare("UPDATE nodes SET tool_calls_json = ? WHERE id = ?")
+      .run(JSON.stringify(list), args.nodeId),
+  );
+  return true;
+}
+
 // Shared by repo + run-bus: additive shallow merge with undefined stripped.
 export function mergeAgentMeta(
   cur: TaskMeta | undefined,

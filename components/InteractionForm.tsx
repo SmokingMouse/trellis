@@ -8,8 +8,9 @@ import {
   MARKDOWN_REMARK_PLUGINS,
 } from "@/lib/markdown-plugins";
 import { Check, CircleAlert, ListChecks, MessageCircleQuestion, ShieldCheck, type LucideIcon } from "lucide-react";
-import { Button, Icon, Textarea, Tooltip } from "@/components/ui";
+import { Button, Icon, SegmentedControl, Textarea, cn, type SegmentOption } from "@/components/ui";
 import type { PendingInteraction } from "@/lib/types";
+import { allowLabel, approvalToolKey, describeToolKey, type ApprovalScope } from "@/lib/approval-rules";
 
 // A路③ (third / final knife, pure frontend): render a paused interactive-tool
 // prompt as a form so the user can answer inside Trellis and the model
@@ -326,9 +327,17 @@ function AskUserQuestionForm({
 }
 
 // ── 权限卡（requireApproval 会话的通用工具审批）─────────────────────────
-// Bash 显示 command（等宽块），其余工具显示入参 JSON。三个动作：
-// 允许（放行这一次）/ 本轮总是允许（同名工具此后自动放行，只影响这一次
-// spawn，下一轮重置）/ 拒绝（可附理由，作为 tool_result 回给模型）。
+// Bash 显示 command（等宽块），其余工具显示入参 JSON。动作分三档作用域
+// （参考 Codex 手机端）：仅本次 / 本会话始终允许 / 所有会话始终允许，外加拒绝
+// （可附理由，作为 tool_result 回给模型）。作用域是次级选择（分段控件），主按钮
+// 永远是「允许」本身、文案跟着作用域走；选了 session/global 时显示将要落下的
+// 规则文本，点之前就知道放行范围。
+const SCOPE_OPTIONS: SegmentOption<ApprovalScope>[] = [
+  { value: "once", label: "仅本次" },
+  { value: "session", label: "本会话" },
+  { value: "global", label: "所有会话" },
+];
+
 function PermissionForm({
   nodeId,
   interaction,
@@ -341,10 +350,12 @@ function PermissionForm({
 
   const [showDeny, setShowDeny] = useState(false);
   const [reason, setReason] = useState("");
-  const [submitting, setSubmitting] = useState<
-    "allow" | "always" | "deny" | null
-  >(null);
+  const [scope, setScope] = useState<ApprovalScope>("once");
+  const [submitting, setSubmitting] = useState<"allow" | "deny" | null>(null);
   const [stale, setStale] = useState(false);
+  // null = 这类交互不能建规则（只能逐次答），不渲染作用域选择。
+  const toolKey = approvalToolKey(interaction);
+  const effectiveScope: ApprovalScope = toolKey ? scope : "once";
 
   const command =
     interaction.toolName === "Bash" && typeof input?.command === "string"
@@ -359,9 +370,7 @@ function PermissionForm({
     }
   }, [command, input]);
 
-  const decide = async (
-    kind: "allow" | "always" | "deny",
-  ) => {
+  const decide = async (kind: "allow" | "deny") => {
     if (submitting) return;
     setSubmitting(kind);
     const res =
@@ -374,7 +383,7 @@ function PermissionForm({
             behavior: "allow",
             // 与 run-bus auto-allow 同纪律：原样回显入参。
             updatedInput: interaction.input,
-            ...(kind === "always" ? { alwaysAllowTool: true } : {}),
+            scope: effectiveScope,
           });
     if (!res.ok && res.reason === "stale") {
       setStale(true);
@@ -412,19 +421,46 @@ function PermissionForm({
               className="resize-y"
             />
           )}
-          {/* 权重铁律：允许一次 = 主按钮（最宽）；拒绝 = 描边，点后出理由框再
-              确认；总是允许 = 靠右的低权重文字按钮。手机端纵向堆叠，顺序不变。 */}
+          {toolKey && (
+            <div data-mobile-target="permission-scope" className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch">
+                <span className="text-label text-ink-muted">放行范围</span>
+                <SegmentedControl
+                  aria-label="放行范围"
+                  value={scope}
+                  onValueChange={setScope}
+                  options={SCOPE_OPTIONS}
+                  // 手机整宽三等分（每档 44px 高），桌面按内容宽度紧凑排在标签右侧。
+                  className="max-md:flex max-md:w-full max-md:[&>button]:flex-1 [&>button]:whitespace-nowrap"
+                />
+              </div>
+              {scope !== "once" && (
+                <p
+                  data-approval-rule-preview
+                  className={cn("text-label", scope === "global" ? "text-warn-ink" : "text-ink-muted")}
+                >
+                  将放行 {describeToolKey(toolKey)}
+                  {scope === "session"
+                    ? "（仅本会话，会话删除即失效）"
+                    : "（所有需审批的会话，可在 设置 › 已授权规则 撤销）"}
+                </p>
+              )}
+            </div>
+          )}
+          {/* 权重铁律：允许 = 主按钮（最宽，文案随作用域）；拒绝 = 描边，点后出理由
+              框再确认。手机端纵向堆叠，主按钮整宽、加高在最上。 */}
           <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch max-md:gap-3">
             <Button
               type="button"
               variant="primary"
               data-mobile-target="permission-allow"
+              data-scope={effectiveScope}
               onClick={() => decide("allow")}
               disabled={submitting !== null}
               loading={submitting === "allow"}
-              className="min-w-36 max-md:w-full"
+              className="min-w-36 max-md:w-full max-md:min-h-12"
             >
-              允许一次
+              {allowLabel(effectiveScope)}
             </Button>
             {showDeny ? (
               <Button
@@ -450,23 +486,6 @@ function PermissionForm({
                 拒绝
               </Button>
             )}
-            <Tooltip
-              content={`本轮回答内 ${interaction.toolName} 不再逐个确认（下一轮重置）`}
-              side="top"
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                data-mobile-target="permission-always"
-                onClick={() => decide("always")}
-                disabled={submitting !== null}
-                loading={submitting === "always"}
-                className="ml-auto font-normal max-md:ml-0 max-md:self-start"
-              >
-                本轮总是允许
-              </Button>
-            </Tooltip>
           </div>
         </>
       )}

@@ -323,7 +323,7 @@ ab eval --stdin <<'JS'
 (() => {
   const specs = [
     ['permission allow', '[data-mobile-target="permission-allow"]'],
-    ['permission always', '[data-mobile-target="permission-always"]'],
+    ['permission scope (session)', '[data-mobile-target="permission-scope"] [role=radio][data-value="session"]'],
     ['permission deny', '[data-mobile-target="permission-deny"]'],
     ['code copy', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="code-copy"]'],
     ['mark read toggle', '[data-thread-node-id="mv-touch-done"] [data-mobile-target="node-read-toggle"]'],
@@ -548,9 +548,9 @@ ab eval --stdin <<'JS'
     return { name, selector, width: +r.width.toFixed(2), height: +r.height.toFixed(2) };
   };
   const allow = document.querySelector('[data-mobile-target="permission-allow"]');
-  const always = document.querySelector('[data-mobile-target="permission-always"]');
-  if (!allow || !always || always.getBoundingClientRect().width >= allow.getBoundingClientRect().width || always.classList.contains('bg-accent')) {
-    throw new Error('always allow must remain a narrower tertiary action');
+  const scopeSeg = document.querySelector('[data-mobile-target="permission-scope"] [role=radio][data-value="session"]');
+  if (!allow || !scopeSeg || scopeSeg.getBoundingClientRect().width >= allow.getBoundingClientRect().width || scopeSeg.classList.contains('bg-accent')) {
+    throw new Error('scope selector must remain a secondary control next to the primary allow');
   }
   const results = [
     ['drawer new session', '[data-mobile-target="drawer-new-session"]'],
