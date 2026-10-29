@@ -76,6 +76,7 @@ import { refreshHerdrFleet, useHerdrSessionStatuses } from "@/hooks/useHerdrFlee
 import { MobileNavDrawer } from "@/components/MobileNavDrawer";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
+import { NodeSwitcher } from "./NodeSwitcher";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { useAppMode } from "@/hooks/useAppMode";
 import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
@@ -979,6 +980,8 @@ export function SessionSidebar() {
   const renderPanel = (onClose: () => void, mobile = false) => (
     <>
       <div className="shrink-0 space-y-2 px-2 pb-2 pt-2">
+        {/* 经 hub 访问且有远端机器时才出现，否则不渲染任何东西。 */}
+        <NodeSwitcher />
         <div data-app-mode-switch>
           <AppModeSwitch />
         </div>
