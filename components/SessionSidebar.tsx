@@ -55,6 +55,9 @@ import {
   persistSidebarWidth,
 } from "@/lib/workbench-layout";
 import { useIsDesktopViewport } from "@/hooks/useIsMobile";
+import { useGesturesEnabled } from "@/hooks/useSwipe";
+import { SwipeableRow, type SwipeRowAction } from "@/components/SwipeableRow";
+import type { RowSwipeSide } from "@/lib/row-swipe";
 import { ContextMenu, useContextMenuWithTarget, type ContextMenuItem } from "@/components/ui/ContextMenu";
 import { type RecentChainStatus } from "@/lib/recent";
 import { isHerdrWaiting, prioritySessions, waitingSessionIds } from "@/lib/attention";
@@ -177,6 +180,9 @@ export function SessionSidebar() {
   const [width, setWidth] = useState<number>(loadSidebarWidth);
   const [resizing, setResizing] = useState(false);
   const isDesktopViewport = useIsDesktopViewport();
+  // 会话行左右滑：只在手机断点 / 触屏启用；同时只允许一行展开，由这里持有。
+  const swipeGestures = useGesturesEnabled();
+  const [swipeOpen, setSwipeOpen] = useState<{ id: string; side: RowSwipeSide } | null>(null);
 
   // 侧栏自己拥有宽度，就由它来发布 --trellis-sb（原先在 page.tsx 里按常量发，
   // 宽度一旦可拖拽，两处就会打架）。所有消费者读的仍是同一个变量，不用改。
@@ -537,6 +543,38 @@ export function SessionSidebar() {
   // 会话行。侧栏固定两层（分组 → 会话，S184）：树 / 链不再在侧栏展开，
   // 行尾只回显话题数 / 分叉数，进会话后在思维树面板切换；工作区降为行尾分支标签。
   const renderRow = (s: Session, indent = 0, workspaceTag?: string | null) => {
+    const title = s.title || "未命名";
+    // 与长按 / 右键菜单同一套 handler；滑动版多一个可撤销 toast。
+    const toggleArchive = () => (s.archived ? unarchiveSession(s.id) : archiveSession(s.id));
+    const swipeArchive = () => {
+      const wasArchived = !!s.archived;
+      void toggleArchive().then(
+        () =>
+          toast(wasArchived ? `已恢复「${title}」` : `已归档「${title}」`, {
+            action: {
+              label: "撤销",
+              onClick: () => void (wasArchived ? archiveSession(s.id) : unarchiveSession(s.id)),
+            },
+          }),
+        (err: unknown) =>
+          toast.error(wasArchived ? "恢复失败" : "归档失败", {
+            description: err instanceof Error ? err.message : String(err),
+          }),
+      );
+    };
+    // 置顶不顺带打开会话（菜单里的「置顶」会切过去并收起抽屉）：滑动是在列表里整理，
+    // 一划就跳走、抽屉关掉，连着置顶几条就做不到了。
+    const swipeTogglePin = () => {
+      const wasPinned = pinnedIds.includes(s.id);
+      if (wasPinned) void unpinSession(s.id);
+      else void pinSession(s.id, { load: false });
+      toast(wasPinned ? `已取消置顶「${title}」` : `已置顶「${title}」`, {
+        action: {
+          label: "撤销",
+          onClick: () => void (wasPinned ? pinSession(s.id, { load: false }) : unpinSession(s.id)),
+        },
+      });
+    };
 
     return (
       <div key={s.id} data-sidebar-session-item={s.id}>
@@ -566,7 +604,20 @@ export function SessionSidebar() {
               await renameSession(s.id, next);
             }
           }}
-          onArchive={() => s.archived ? unarchiveSession(s.id) : archiveSession(s.id)}
+          onArchive={toggleArchive}
+          swipe={
+            swipeGestures
+              ? {
+                  open: swipeOpen?.id === s.id ? swipeOpen.side : null,
+                  onOpenChange: (side) =>
+                    setSwipeOpen((cur) =>
+                      side ? { id: s.id, side } : cur?.id === s.id ? null : cur,
+                    ),
+                  onTogglePin: swipeTogglePin,
+                  onArchive: swipeArchive,
+                }
+              : undefined
+          }
           onDelete={async () => {
             if (
               await confirm({
@@ -1408,6 +1459,7 @@ function SidebarRow({
   onCommit,
   onArchive,
   onDelete,
+  swipe,
 }: {
   session: Session;
   /** 缩进层级：1 = 挂在速记 / 暂存区下，2 = 挂在 Project → Workspace 下 */
@@ -1435,6 +1487,15 @@ function SidebarRow({
   onCommit: (title: string) => void | Promise<void>;
   onArchive: () => void;
   onDelete: () => void;
+  /** 手机 / 触屏的左右滑动操作；不传 = 不启用（桌面） */
+  swipe?: {
+    open: RowSwipeSide | null;
+    onOpenChange: (side: RowSwipeSide | null) => void;
+    /** 右滑：置顶 / 取消置顶（带撤销 toast） */
+    onTogglePin: () => void;
+    /** 左滑划到底 / 点按钮：归档 / 恢复（带撤销 toast） */
+    onArchive: () => void;
+  };
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(session.title);
@@ -1479,6 +1540,31 @@ function SidebarRow({
       return () => window.clearTimeout(t);
     }
   }, [editing, session.title]);
+
+  // 手机左右滑（SwipeableRow）：右滑「置顶 / 取消置顶」；左滑「删除」+「归档」，归档贴边、划到底直接执行。
+  // 删除不进划到底（误触代价太大），只能点露出的按钮，且仍走 onDelete 的二次确认。
+  // 只放菜单里真有的动作（没有「标为已读 / 未读」，不造）。
+  const swipeLeading: SwipeRowAction[] = swipe
+    ? [{
+        key: "pin",
+        label: isPinned ? "取消置顶" : "置顶",
+        icon: isPinned ? PinOff : Pin,
+        tone: "warn",
+        onSelect: swipe.onTogglePin,
+      }]
+    : [];
+  const swipeTrailing: SwipeRowAction[] = swipe
+    ? [
+        { key: "delete", label: "删除", icon: Trash2, tone: "danger", onSelect: onDelete },
+        {
+          key: "archive",
+          label: session.archived ? "恢复" : "归档",
+          icon: session.archived ? ArchiveRestore : Archive,
+          tone: "accent",
+          onSelect: swipe.onArchive,
+        },
+      ]
+    : [];
 
   // 行尾 meta：全是中性小字。优先级从左到右 = 来源 · 话题数 · 状态文字。
   const meta: React.ReactNode[] = [];
@@ -1562,6 +1648,15 @@ function SidebarRow({
 
   return (
     <>
+      <SwipeableRow
+        enabled={Boolean(swipe) && !editing}
+        open={swipe?.open ?? null}
+        onOpenChange={swipe?.onOpenChange ?? noop}
+        leading={swipeLeading}
+        trailing={swipeTrailing}
+        trailingFull
+        className="mx-1"
+      >
       <div
         style={{ paddingLeft: PAD(indent) }}
         data-mobile-target="session-row"
@@ -1573,7 +1668,7 @@ function SidebarRow({
         data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
         aria-current={active ? "true" : undefined}
         {...(editing ? {} : menu.bindTrigger(session))}
-        className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative mx-1 flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-md pr-1.5 transition-colors ${
+        className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-md pr-1.5 transition-colors ${
           active
             ? "bg-accent-muted text-ink-strong"
             : "text-ink hover:bg-surface-hover"
@@ -1666,12 +1761,15 @@ function SidebarRow({
           </button>
         )}
       </div>
+      </SwipeableRow>
       {!editing && (
         <ContextMenu {...menu.props} items={menuItems} label={`${session.title} 菜单`} />
       )}
     </>
   );
 }
+
+const noop = () => {};
 
 // 会话行尾的「更多」：与右键菜单同一套动作。hover 时才出现，占 meta 的位置。
 function SessionRowMenu({
