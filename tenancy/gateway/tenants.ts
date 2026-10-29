@@ -6,7 +6,7 @@ export type Tenant = {
   name: string;
   hostPort: number;
   authToken: string;
-  kind: "container" | "host";
+  kind: "container" | "host" | "remote";
 };
 const cache = new Map<string, { mtimeMs: number; size: number; tenant: Tenant }>();
 

@@ -17,7 +17,7 @@ function error(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-function requestOrigin(req: Request): string {
+export function requestOrigin(req: Request): string {
   const url = new URL(req.url);
   const proto = (req.headers.get("x-forwarded-proto") || url.protocol.replace(":", "")).split(",")[0].trim();
   const host = (req.headers.get("x-forwarded-host") || req.headers.get("host") || url.host).split(",")[0].trim();
