@@ -65,6 +65,22 @@ function migrate(db: Database): void {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (share_id,user_id)
     );
+    CREATE TABLE IF NOT EXISTS nodes (
+      name TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_seen_at INTEGER,
+      revoked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS pairings (
+      ticket_hash TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER
+    );
   `);
 
   // Migrations stay additive: old gateway DBs gain fields without losing data.

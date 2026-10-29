@@ -64,6 +64,22 @@ bun tenancy/tenantctl.ts creds-share alice --revoke # 撤销共享
 - tmux scrollback 不跨容器重建(upgrade 会丢终端历史,数据不丢)。
 - 网关登录限速 5 次/分钟(内存计数);cookie sameSite=strict 是 `/term` 隔站驱动攻击的主防御,不许降级为 lax。
 
+## 多机 node(hub 隧道,原型)
+
+外面连不进来、但能出站的机器(公司 devbox)把自己的 trellis 挂到网关上。连接永远由 node 发起:node 的 `server.ts` 主动连 `/__gw/tunnel`(WS),网关给它开一个 127.0.0.1 虚拟端口,对该端口的 TCP 连接逐条复用进隧道——于是现有 HTTP/SSE/WS 反代对远端 node 原样可用。协议见 `lib/hub-tunnel.ts`,hub 侧见 `gateway/tunnel.ts`。
+
+日常用法(设置 →「机器互联」):
+
+1. 经 hub 打开 trellis →「添加机器」→ 起名 → 得到连接串 `trellis://v1/…`(hub 地址 + 名称 + 一次性票据;10 分钟、只能用一次,库里存哈希)。hub 地址取 `TRELLIS_GW_PUBLIC_URL`,没设就取请求的 x-forwarded-host,**经 127.0.0.1 打开时生成的连接串只能本机用**。
+2. 新机器上二选一:打开它自己的 trellis →「本机接入 hub」粘贴;或 `make node-connect CONN='…'`。node 用票据向 `POST /__gw/pair` 换长期 token,写进 `~/.trellis/hub-node.json`(0600)。`server.ts` 每 3s 看一次这个文件,变了就重连,不用重启服务。
+3. 撤销:hub 侧列表点「撤销」(隧道立刻断、token 失效);node 侧「断开」或 `make node-disconnect`。对同名 node 再配对 = 轮换 token。
+
+也可以不走文件,把 `TRELLIS_HUB_URL` / `TRELLIS_NODE_NAME` / `TRELLIS_NODE_TOKEN` 写进服务定义(三个齐全时优先于文件,设置页只读)。CLI 兜底:`bun tenancy/gateway/gateway.ts node add <name> --owner <user> | node ls | node revoke <name>`。
+
+用户侧:`trellis_node` cookie 选 node(只认属于自己的 node,网关自有、不转发给实例);`GET /__gw/go/<node>/<path>` 切换并跳转;`/__gw/api/nodes` 列表 / 生成连接串 / 撤销。选中的 node 离线 → 503 离线页,带回本机的出口。远端请求带 `x-trellis-hub-node` 头,实例据此提示「断开会把当前页面也断掉」。
+
+未做:侧栏常驻的 node 切换器、跨机「等你处理」汇总与推送、隧道级流控(大下载会在内存里排队)、node 侧识别「已被撤销」(现在会按 30s 封顶一直重试)。
+
 ## 公网接入(待接)
 
 caddy 加站点块 → `127.0.0.1:3200`;验证 x-forwarded-proto 让 gw cookie 带 secure;全链 WS/SSE 过一遍真浏览器。域名与是否挂公网由房主拍板。

@@ -8,6 +8,7 @@ import {
   Cpu,
   KeyRound,
   MessagesSquare,
+  Network,
   Server,
   Share2,
   ShieldCheck,
@@ -36,6 +37,7 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   "shield-check": ShieldCheck,
   "key-round": KeyRound,
   "circle-arrow-up": CircleArrowUp,
+  network: Network,
 };
 
 // S89: 管理台的 tab 导航。

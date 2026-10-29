@@ -3,6 +3,8 @@ import type {
   GwInvite,
   GwInviteCreateResponse,
   GwMe,
+  GwNode,
+  GwNodeCreateResponse,
   GwShareCreateBody,
   GwSharesResponse,
   GwSubscribeResponse,
@@ -137,4 +139,19 @@ export async function unsubscribeShare(id: string): Promise<GwSubscribeResponse>
       method: "DELETE",
     },
   );
+}
+
+export async function fetchNodes(): Promise<GwNode[]> {
+  return request<GwNode[]>("/__gw/api/nodes");
+}
+
+export async function createNodePairing(name: string): Promise<GwNodeCreateResponse> {
+  return request<GwNodeCreateResponse>("/__gw/api/nodes", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function revokeNode(name: string): Promise<void> {
+  return request<void>(`/__gw/api/nodes/${encodeURIComponent(name)}`, { method: "DELETE" });
 }

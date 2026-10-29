@@ -21,7 +21,8 @@ export type SettingsTabIconKey =
   | "sliders"
   | "shield-check"
   | "key-round"
-  | "circle-arrow-up";
+  | "circle-arrow-up"
+  | "network";
 
 /** 导航分组。顺序即渲染顺序。 */
 export const SETTINGS_TAB_GROUPS = [
@@ -80,6 +81,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
     group: "connect",
     icon: "share",
     title: "模型与 Token 共享池：发布与订阅 Claude Token 或大模型 API 端点",
+  },
+  {
+    segment: "nodes",
+    label: "机器互联",
+    group: "connect",
+    icon: "network",
+    title: "经 hub 用一套界面访问多台机器：添加 / 撤销机器、切换，以及本机接入 hub",
   },
   {
     segment: "workspaces",
