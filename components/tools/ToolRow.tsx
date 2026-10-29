@@ -18,8 +18,9 @@ import {
   type ToolNode,
 } from "@/lib/tool-tree";
 import { hasValidWorkflowProgress, workflowStatusOf } from "@/lib/workflow-view";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, CircleCheck } from "lucide-react";
 import { Icon, ToolIcon } from "@/components/ui";
+import { Collapse } from "@/components/ui/Collapse";
 import { RawView } from "./RawView";
 import { RowTail, rowStatus, statLine } from "./RowStatus";
 import { resolveToolView } from "./views";
@@ -117,10 +118,13 @@ function SegmentRow({
         <Icon
           icon={ChevronRight}
           size="sm"
-          className={`transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          className={`ui-collapse-chevron ${open ? "rotate-90" : ""}`}
         />
-        <span className="tabular-nums shrink-0 text-ink-muted">
-          {nodes.length} 步
+        <span className="tabular-nums shrink-0 text-ink-muted inline-flex items-center gap-1.5">
+          <span className="max-md:hidden">{nodes.length} 步</span>
+          {/* 手机：「N 个步骤」+ 微型状态图标（段落里都是已完成的普通调用） */}
+          <span className="md:hidden">{nodes.length} 个步骤</span>
+          <Icon icon={CircleCheck} size="sm" className="md:hidden text-positive-ink" />
         </span>
         {/* 「已自动收起 / 已展开」不再常驻：chevron 的朝向已经说了，
             按钮 title 留给想确认的人。 */}
@@ -130,13 +134,13 @@ function SegmentRow({
           {segmentDuration(nodes)}
         </span>
       </button>
-      {open && (
-        <div className="border-t border-line-faint divide-y divide-line-faint">
+      <Collapse open={open}>
+        <div className="md:border-t md:border-line-faint md:divide-y md:divide-line-faint max-md:space-y-0.5">
           {nodes.map((n) => (
             <ToolRow key={n.call.id} node={n} live={live} depth={depth} />
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

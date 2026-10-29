@@ -10,13 +10,13 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { useSessionStore } from "@/stores/sessionStore";
+import { isOptimisticNodeId, useSessionStore } from "@/stores/sessionStore";
+import { useComposerInsertStore } from "@/stores/composerInsertStore";
 import { ancestorsOf } from "@/lib/collapsed";
 import { isContextCompacted } from "@/lib/context-usage";
 import { buildNodeIndex } from "@/lib/node-index";
 import { childrenIndex, nodeSort } from "@/lib/tree-panel";
 import { subscribeStream } from "@/lib/stream-bus";
-import { modeStyle } from "@/lib/mode-style";
 import {
   THREAD_WIDTH_CLASS,
   THREAD_WIDTH_OPTIONS,
@@ -39,7 +39,7 @@ import {
   isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
-import { ArrowDown, ChevronRight, GitBranch, Layers, Workflow, X } from "lucide-react";
+import { ArrowDown, ChevronRight, GitBranch, Layers, MessageSquareDashed, Workflow, X } from "lucide-react";
 import {
   Button,
   Icon,
@@ -47,6 +47,8 @@ import {
   SegmentedControl,
   StatusDot,
 } from "@/components/ui";
+import { Collapse } from "@/components/ui/Collapse";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { BranchPopover } from "./BranchPopover";
 import { Composer } from "./Composer";
 import { TurnCard } from "./TurnCard";
@@ -149,6 +151,62 @@ const FOLLOW_SLACK_PX = 120;
 // 离底超过这么远才出「回到底部」浮钮：刚好在跟随阈值外一点点时不打扰。
 const JUMP_TO_BOTTOM_PX = 480;
 
+// 用户发送后滚到底的平滑滚动时长（锁住期间流式跟随不直接写 scrollTop）。
+const SEND_SMOOTH_MS = 450;
+
+// 空会话（已收编、还没有轮次的外部线程）的起手句：点了填进输入框，不替用户发。
+const STARTER_PROMPTS = [
+  "总结一下这个线程目前的进展",
+  "列出接下来还要做的事",
+  "检查工作区有没有未提交的改动",
+];
+
+// 新轮次入场（上浮 6px 淡入，--dur-base / --ease-out）只给「挂载后新出现」的轮次：
+//   - 切进会话那一刻已有的节点全是历史，记为不播；
+//   - 一次冒出多个新节点（缓存 → 网络补齐、外部同步一批）也按历史处理；
+//   - 乐观占位换成服务端真节点（同 parent 刚有过 optimistic-*）：section 的 key 变了
+//     会重挂，真节点接着占位那段动画的进度播完（continue），不从头再闪一次。
+// 判定在渲染期一次定下并记住（同 Composer 草稿的渲染期 setState 写法）；动画本身在
+// section 的 ref 回调里用 WAAPI 起（要拿到「占位已经播了多久」接着播）。
+type TurnEnterKind = "enter" | "continue";
+type TurnEnterInfo = { kind: TurnEnterKind; parentId: string | null };
+const TURN_ENTER_MS = 200;
+
+function useEnteringTurns(
+  sessionId: string | null,
+  nodes: Record<string, ChatNode>,
+  thread: ChatNode[],
+): ReadonlyMap<string, TurnEnterInfo> {
+  const [track, setTrack] = useState<{
+    sid: string | null;
+    seen: Map<string, string | null>;
+    entering: Map<string, TurnEnterInfo>;
+  }>(() => ({ sid: null, seen: new Map(), entering: new Map() }));
+  if (track.sid !== sessionId) {
+    const seen = new Map<string, string | null>();
+    for (const n of Object.values(nodes)) seen.set(n.id, n.parentId);
+    setTrack({ sid: sessionId, seen, entering: new Map() });
+  } else {
+    const fresh = thread.filter((n) => !track.seen.has(n.id));
+    if (fresh.length > 0) {
+      const seen = new Map(track.seen);
+      const entering = new Map(track.entering);
+      for (const n of fresh) {
+        seen.set(n.id, n.parentId);
+        if (fresh.length !== 1) continue;
+        const replacesOptimistic =
+          !isOptimisticNodeId(n.id) &&
+          [...track.entering].some(
+            ([id, v]) => isOptimisticNodeId(id) && v.parentId === n.parentId,
+          );
+        entering.set(n.id, { kind: replacesOptimistic ? "continue" : "enter", parentId: n.parentId });
+      }
+      setTrack({ sid: sessionId, seen, entering });
+    }
+  }
+  return track.entering;
+}
+
 export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const session = useSessionStore((s) => s.session);
   const nodes = useSessionStore((s) => s.nodes);
@@ -212,6 +270,14 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // viewport to the bottom on new content; flips off when the user scrolls
   // up past FOLLOW_SLACK_PX, back on when they return to the bottom.
   const followRef = useRef(true);
+  // 用户自己发送后的那一下平滑滚到底：锁到这个时间点（performance.now()）为止。
+  // 锁住期间流式跟随不直接写 scrollTop（会把平滑滚动打断在半路），onScroll 也
+  // 强制顶栏可见——useScrollHide 收起顶栏时回写 scrollTop 同样会打断它（见 jumpToBottom）。
+  const smoothUntilRef = useRef(0);
+  // 锁到期的那次补贴底。不随流式 effect 清理：乐观占位换成真节点时 effect 会重跑，
+  // 这一下仍然要落地（否则平滑途中长出来的内容会留在视口下面）。
+  const smoothSettleRef = useRef(0);
+  useEffect(() => () => window.clearTimeout(smoothSettleRef.current), []);
   const [composerExpanded, setComposerExpanded] = useState(false);
   // 参考 Codex 手机端：读旧内容时右下角一个「回到底部」浮钮，生成中顺带提示。
   const [awayFromBottom, setAwayFromBottom] = useState(false);
@@ -281,6 +347,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     }
     return { anchorId: anchor.id, thread, branchesByNode };
   }, [activeNodeId, nodes, session?.rootNodeId]);
+
+  const entering = useEnteringTurns(session?.id ?? null, nodes, threadData.thread);
 
   const waitingNodes = useMemo(
     () => Object.values(nodes).filter((node) => node.pendingInteraction).sort(nodeSort),
@@ -413,22 +481,61 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     // 新 tip 开始流式时不无条件抢滚动：只有 tip 就是当前锚点（用户自己发起
     // 的追问会把焦点落在新节点上）、或视口本来就贴底（正在跟读）才开启跟随。
     // 正在上方读旧卡片时，后台启动的运行（CLI 同步轮次等）不把人拽到底部。
+    // 发送后的平滑滚动还在途（乐观占位换真节点时会重跑到这里）：跟随不能被半路的
+    // 距离判定关掉。
     followRef.current =
+      performance.now() < smoothUntilRef.current ||
       threadData.anchorId === tipStreamingId ||
       el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
     let raf = 0;
     const pin = () => {
       raf = 0;
+      if (performance.now() < smoothUntilRef.current) {
+        // 平滑途中内容又长了：重新瞄准底部（浏览器会把进行中的平滑滚动平滑改道），
+        // 不直接写 scrollTop 打断它。
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+        return;
+      }
       if (followRef.current && scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     };
-    pin();
+    // 用户刚发出的这一轮（锚点就是乐观占位）且离底部还有一段：平滑滚过去，
+    // 之后的流式跟随照旧直接写 scrollTop（逐帧平滑会抖）。
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const ownSend = threadData.anchorId === tipStreamingId && isOptimisticNodeId(tipStreamingId);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const releaseSmooth = () => {
+      smoothUntilRef.current = 0;
+    };
+    if (ownSend && distance > 1 && !reduced) {
+      // 隔着好几屏时先瞬移到离底一屏半，平滑只走最后一段。
+      if (distance > el.clientHeight * 3) el.scrollTop = el.scrollHeight - el.clientHeight * 2.5;
+      smoothUntilRef.current = performance.now() + SEND_SMOOTH_MS;
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      // 锁到期补一次贴底：平滑途中内容可能又长高了。
+      window.clearTimeout(smoothSettleRef.current);
+      smoothSettleRef.current = window.setTimeout(() => {
+        // 用户中途动过手（releaseSmooth 已清零）就不再强拉。
+        if (smoothUntilRef.current === 0) return;
+        smoothUntilRef.current = 0;
+        followRef.current = true;
+        const box = scrollRef.current;
+        if (box) box.scrollTop = box.scrollHeight;
+      }, SEND_SMOOTH_MS + 20);
+      // 用户中途自己动手：立刻放锁，交还给 onScroll 的跟随判定。
+      el.addEventListener("wheel", releaseSmooth, { passive: true, once: true });
+      el.addEventListener("touchstart", releaseSmooth, { passive: true, once: true });
+    } else {
+      pin();
+    }
     const unsub = subscribeStream(tipStreamingId, () => {
       if (!raf) raf = requestAnimationFrame(pin);
     });
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      el.removeEventListener("wheel", releaseSmooth);
+      el.removeEventListener("touchstart", releaseSmooth);
       unsub();
     };
     // anchorId is a snapshot at tip-change time: anchor moves mid-stream are
@@ -440,6 +547,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // forms) doesn't emit stream deltas — re-pin after those renders too.
   useEffect(() => {
     if (!tipStreamingId || !followRef.current) return;
+    if (performance.now() < smoothUntilRef.current) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   });
@@ -462,6 +570,13 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    if (performance.now() < smoothUntilRef.current) {
+      // 发送后的平滑滚动途中：保持跟随、顶栏不收（见 smoothUntilRef）。
+      followRef.current = true;
+      setAwayFromBottom(false);
+      updateFromScroll(el.scrollTop, true);
+      return;
+    }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     followRef.current = distance < FOLLOW_SLACK_PX;
     setAwayFromBottom(distance > JUMP_TO_BOTTOM_PX);
@@ -632,10 +747,40 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     });
   }, [liveSelection]);
 
+  // 入场动画：每个 section 元素只播一次（ref 回调每次渲染都会重绑）。乐观占位起播的
+  // Animation 按 parent 记下，换成真节点时读它的 currentTime，从同一进度接着播。
+  const animatedEls = useRef(new WeakSet<HTMLElement>());
+  const optimisticEnter = useRef(new Map<string, Animation>());
+  const playTurnEnter = (id: string, el: HTMLElement) => {
+    if (animatedEls.current.has(el)) return;
+    animatedEls.current.add(el);
+    const info = entering.get(id);
+    if (!info || typeof el.animate !== "function") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const parentKey = info.parentId ?? "";
+    let elapsed = 0;
+    if (info.kind === "continue") {
+      const prev = optimisticEnter.current.get(parentKey);
+      optimisticEnter.current.delete(parentKey);
+      elapsed = Number(prev?.currentTime ?? TURN_ENTER_MS);
+      if (!(elapsed < TURN_ENTER_MS)) return;
+    }
+    const anim = el.animate(
+      [
+        { opacity: 0, transform: "translateY(6px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: TURN_ENTER_MS, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "backwards" },
+    );
+    anim.currentTime = elapsed;
+    if (info.kind === "enter" && isOptimisticNodeId(id)) optimisticEnter.current.set(parentKey, anim);
+  };
+
   const setRoundRef = (id: string) => (el: HTMLDivElement | null) => {
     if (el) {
       roundRefs.current.set(id, el);
       observerRef.current?.observe(el);
+      playTurnEnter(id, el);
     } else {
       const prev = roundRefs.current.get(id);
       if (prev) observerRef.current?.unobserve(prev);
@@ -655,7 +800,6 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   };
 
   if (!session) return null;
-  const mode = modeStyle(session.mode);
   // Header/cards/composer share one width class so they stay column-aligned.
   const widthClass = THREAD_WIDTH_CLASS[threadWidth];
   const composerIsHidden =
@@ -676,11 +820,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           "--safe-top",
         ),
       ) || 0;
-    const titleHeight =
-      document
-        .querySelector<HTMLElement>("[data-thread-header]")
-        ?.getBoundingClientRect().height ?? 56;
-    if (event.clientY <= safeTop + titleHeight) revealScrollChrome();
+    // 收起后顶栏原先占的那条（48px）仍可点回
+    if (event.clientY <= safeTop + 48) revealScrollChrome();
   };
 
   return (
@@ -709,37 +850,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         paddingTop: isMobile ? undefined : "calc(5.25rem + var(--trellis-pending-h, 0px))",
       }}
     >
-      <div
-        data-thread-header
-        data-thread-header-hidden={mobileHeaderHidden ? "true" : undefined}
-        aria-hidden={mobileHeaderHidden ? true : undefined}
-        inert={mobileHeaderHidden ? true : undefined}
-        className="shrink-0 z-30 max-md:h-14 md:hidden border-b border-line/80 bg-surface-canvas/90 backdrop-blur transition-transform duration-200 motion-reduce:transition-none"
-        style={{
-          transform: mobileHeaderHidden
-            ? "translateY(calc(-100% - var(--trellis-header-h)))"
-            : undefined,
-        }}
-      >
-        <div className={`${widthClass} mx-auto px-4 py-2 max-md:h-full flex items-center gap-3`}>
-          <div className="min-w-0 flex-1">
-            {isHerdr ? (
-              <HerdrSessionBadge
-                pane={herdrPane}
-                loading={herdrSnapshot.loading}
-              />
-            ) : (
-              <div className="text-label text-ink-faint flex items-center gap-1.5">
-                <StatusDot tone={session.mode === "project" ? "project" : "chat"} />
-                {mode.label} · 线性
-              </div>
-            )}
-            <h1 className="truncate text-ui font-semibold text-ink-strong">
-              {session.title}
-            </h1>
-          </div>
-        </div>
-      </div>
+      {/* 手机线程头（原 56px「模式 · 线性」+ 标题）已并进全局 Header（components/Header.tsx
+          手机分支的标题 + 副标题），这里不再渲染第二层顶栏。桌面端本来就不显示它。 */}
 
       {/* 桌面端：标题已在面包屑和标签里，不再单独占一行；Herdr 标识、宽度切换、
           画布入口收进标签条右端（照 mockups/01-workbench.html），和正文列不再错位。 */}
@@ -796,9 +908,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           mobileHeaderHidden
             ? {
                 marginBottom:
-                  "calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem)",
+                  "calc(var(--safe-top) - var(--trellis-header-h))",
                 transform:
-                  "translateY(calc(var(--safe-top) - var(--trellis-header-h) - 3.5rem))",
+                  "translateY(calc(var(--safe-top) - var(--trellis-header-h)))",
               }
             : isMobile
               ? undefined
@@ -816,9 +928,39 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           />
         )}
         {threadData.thread.length === 0 ? (
-          <div className="rounded-card border border-dashed border-line-strong px-4 py-8 text-center text-ui text-ink-muted">
-            {session.origin === "external" ? session.externalStatus === "closed" ? "外部线程已结束" : "外部线程已收编，可在下方提问" : "暂无节点"}
-          </div>
+          <EmptyState
+            icon={MessageSquareDashed}
+            title={
+              session.origin === "external"
+                ? session.externalStatus === "closed"
+                  ? "外部线程已结束"
+                  : "外部线程已收编"
+                : "还没有对话"
+            }
+            description={
+              session.origin === "external" && session.externalStatus !== "closed"
+                ? "可以在下方直接提问，或从下面挑一句开始"
+                : undefined
+            }
+            action={
+              // 只有输入框可用（已收编、未结束的外部线程）时才给起手句：普通会话没有
+              // 节点时输入框是禁用的，填进去也发不出。
+              session.origin === "external" && session.externalStatus !== "closed" ? (
+                <div data-empty-starters="" className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+                  {STARTER_PROMPTS.map((prompt) => (
+                    <Button
+                      key={prompt}
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => useComposerInsertStore.getState().queueComposerInsert(session.id, prompt)}
+                    >
+                      {prompt}
+                    </Button>
+                  ))}
+                </div>
+              ) : undefined
+            }
+          />
         ) : (
           threadData.thread.map((node, idx) => {
             const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
@@ -860,8 +1002,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   style={mapHighlight === node.id ? { outline: "3px solid var(--color-accent-ink)", outlineOffset: 3 } : undefined}
                   data-thread-active={isActive || undefined}
                   // Faint rule between turns so where one answer ends is
-                  // visible without bringing card frames back.
-                  className={`group/turn scroll-mt-3 py-4 outline-none min-w-0 max-w-full${idx > 0 && !isCompacted ? " border-t border-line" : ""}`}
+                  // visible without bringing card frames back. 手机上减线：
+                  // 轮次之间只靠间距分开（用户消息自带浅灰块，足够当分隔）。
+                  className={`group/turn scroll-mt-3 py-4 max-md:py-5 outline-none min-w-0 max-w-full${idx > 0 && !isCompacted ? " md:border-t md:border-line" : ""}`}
                 >
                   <TurnCard
                     node={node}
@@ -890,13 +1033,13 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                         <Icon
                           icon={ChevronRight}
                           size="sm"
-                          className={`text-ink-faint transition-transform motion-reduce:transition-none ${
+                          className={`ui-collapse-chevron text-ink-faint ${
                             openBranches.has(node.id) ? "rotate-90" : ""
                           }`}
                         />
                       </button>
-                      {openBranches.has(node.id) && (
-                        <div className="mt-1.5 ml-2 pl-3 border-l border-fork-line space-y-0.5">
+                      <Collapse open={openBranches.has(node.id)} className="ml-2">
+                        <div className="mt-1.5 pl-3 border-l border-fork-line space-y-0.5">
                           {branches.map((branch) => (
                             <button
                               key={branch.id}
@@ -916,7 +1059,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                             </button>
                           ))}
                         </div>
-                      )}
+                      </Collapse>
                     </div>
                   )}
               </section>

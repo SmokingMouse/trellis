@@ -97,12 +97,14 @@ fi
 grep -qF 'viewportFit: "cover"' app/layout.tsx || fail "缺少 viewportFit: cover"
 grep -qF 'maximumScale: 5' app/layout.tsx || fail "maximum-scale 未放宽到 5"
 grep -qF 'userScalable: true' app/layout.tsx || fail "系统缩放未开放"
-grep -qF '{ media: "(prefers-color-scheme: light)", color: "#fafaf9" }' app/layout.tsx || fail "缺少浅色 theme-color"
-grep -qF '{ media: "(prefers-color-scheme: dark)", color: "#0f1115" }' app/layout.tsx || fail "缺少深色 theme-color"
+# 静态 theme-color 只是首帧兜底，取值与默认皮肤画布色对齐；运行时由 syncThemeColorMeta 改写成当前画布色
+grep -qF '{ media: "(prefers-color-scheme: light)", color: "#fafafa" }' app/layout.tsx || fail "缺少浅色 theme-color"
+grep -qF '{ media: "(prefers-color-scheme: dark)", color: "#0b0b0c" }' app/layout.tsx || fail "缺少深色 theme-color"
+grep -qF 'syncThemeColorMeta' hooks/useTheme.ts || fail "缺少 theme-color 运行时同步"
 grep -qF 'touchAction: "none"' components/Canvas.tsx || fail "画布表面未局部接管触摸手势"
 
 MANIFEST_THEME="$(bun -e 'console.log(JSON.parse(await Bun.file("public/manifest.json").text()).theme_color)')"
-[[ "$MANIFEST_THEME" == "#fafaf9" ]] || fail "manifest theme_color 未与 layout 浅色值对齐"
+[[ "$MANIFEST_THEME" == "#fafafa" ]] || fail "manifest theme_color 未与 layout 浅色值对齐"
 
 SAFE_ENV_FILES="$(find app components -type f \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' \) -exec grep -lF 'env(safe-area-inset-' {} + 2>/dev/null || true)"
 [[ "$SAFE_ENV_FILES" == "app/globals.css" ]] || fail "safe-area env() 必须只定义在 app/globals.css"
@@ -203,8 +205,9 @@ agent-browser --session "$SESSION" eval --stdin <<'MOBILE_EOF'
   assert(viewport.includes('viewport-fit=cover'), `viewport meta: ${viewport}`);
   assert(viewport.includes('maximum-scale=5'), `viewport maximum-scale: ${viewport}`);
   assert(viewport.includes('user-scalable=yes'), `viewport user-scalable: ${viewport}`);
-  assert(themeColors.some((meta) => meta.media === '(prefers-color-scheme: light)' && meta.content === '#fafaf9'), `light theme-color=${themeColors.map((meta) => `${meta.media}:${meta.content}`).join(',')}`);
-  assert(themeColors.some((meta) => meta.media === '(prefers-color-scheme: dark)' && meta.content === '#0f1115'), `dark theme-color=${themeColors.map((meta) => `${meta.media}:${meta.content}`).join(',')}`);
+  // theme-color 跟随当前画布色（明暗 + 皮肤）：每条 meta 都已去掉 media、内容等于 --surface-canvas
+  const canvas = getComputedStyle(root).getPropertyValue('--surface-canvas').trim();
+  assert(themeColors.length > 0 && themeColors.every((meta) => !meta.media && meta.content === canvas), `theme-color=${themeColors.map((meta) => `${meta.media}:${meta.content}`).join(',')} canvas=${canvas}`);
   const initialSafeBottom = getComputedStyle(root).getPropertyValue('--safe-bottom').trim();
   assert(initialSafeBottom !== '', `--safe-bottom=${JSON.stringify(initialSafeBottom)}`);
 

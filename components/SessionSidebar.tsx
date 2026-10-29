@@ -72,7 +72,9 @@ import {
 import { WorkspaceDiffModal } from "@/components/WorkspaceDiffModal";
 import { BatchCleanModal } from "@/components/BatchCleanModal";
 import { sessionSourceChip } from "@/lib/session-source";
-import { useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
+import { refreshHerdrFleet, useHerdrSessionStatuses } from "@/hooks/useHerdrFleet";
+import { MobileNavDrawer } from "@/components/MobileNavDrawer";
+import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { useAppMode } from "@/hooks/useAppMode";
@@ -244,6 +246,14 @@ export function SessionSidebar() {
   // 同步置顶（置顶写入有并发护栏，只认服务端列表）。
   const listCacheSeeded = useRef(false);
   const listFromNetwork = useRef(false);
+  // 手机下拉刷新：bump sessionsRevision 触发下面的重拉，等这一轮拉完（成功或失败）再收起指示器。
+  const listRefreshWaiters = useRef<(() => void)[]>([]);
+  const refreshList = useCallback(() => {
+    const done = new Promise<void>((resolve) => listRefreshWaiters.current.push(resolve));
+    bumpSessionsRevision();
+    // Herdr 模式的列表投影自 fleet 快照，两路都等
+    return mode === "herdr" ? Promise.all([done, refreshHerdrFleet()]) : done;
+  }, [mode, bumpSessionsRevision]);
   useEffect(() => {
     if (listCacheSeeded.current) return;
     listCacheSeeded.current = true;
@@ -287,6 +297,12 @@ export function SessionSidebar() {
       })
       .catch(() => {
         /* keep last-known list on transient failure */
+      })
+      .finally(() => {
+        // 被更新的一轮取代（cancelled）时不结算：等接手的那一轮拉完
+        if (cancelled) return;
+        const waiters = listRefreshWaiters.current.splice(0);
+        waiters.forEach((resolve) => resolve());
       });
     return () => {
       cancelled = true;
@@ -960,7 +976,7 @@ export function SessionSidebar() {
 
   // 面板主体（新会话 + 工具条 + 树 + 底栏）桌面常驻栏与手机抽屉共用。
   // `onClose` 接到当前容器的收起动作（收起常驻栏 / 关抽屉）。
-  const renderPanel = (onClose: () => void) => (
+  const renderPanel = (onClose: () => void, mobile = false) => (
     <>
       <div className="shrink-0 space-y-2 px-2 pb-2 pt-2">
         <div data-app-mode-switch>
@@ -1078,11 +1094,13 @@ export function SessionSidebar() {
         </div>}
       </div>
 
-      <div
+      <PullToRefresh
+        enabled={mobile}
+        onRefresh={refreshList}
         data-sidebar-list
         data-sidebar-layout={layout}
         data-sidebar-mode={mode}
-        className="flex-1 overflow-y-auto border-t border-line-faint py-1.5"
+        className="overflow-y-auto border-t border-line-faint py-1.5"
       >
         {mode === "herdr" ? (
           <HerdrModeSidebar pinned={<>{renderAttention()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
@@ -1107,7 +1125,7 @@ export function SessionSidebar() {
         )}
         </>
         )}
-      </div>
+      </PullToRefresh>
 
       <div className="flex shrink-0 items-center gap-1 border-t border-line-faint px-2 py-1.5 max-md:hidden">
         <Button
@@ -1163,21 +1181,14 @@ export function SessionSidebar() {
       {/* ── Mobile drawer ── overlay (md:hidden), opened by Header hamburger.
           The sidebar is otherwise invisible on phones, leaving no way to see
           or switch between sessions — this is that entry point. ── */}
-      {mobileNavOpen && (
-        <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
-          <div
-            className="absolute inset-0 bg-scrim/50 ui-enter-fade"
-            onClick={() => setMobileNavOpen(false)}
-            aria-hidden
-          />
-          <aside
-            // 刘海 / 状态栏：抽屉贴顶，顶部留出 --safe-top（app/globals.css），否则工具条被压在状态栏下。
-            className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] pt-(--safe-top) bg-surface-canvas border-r border-line shadow-overlay ui-enter-slide-left"
-          >
-            {renderPanel(() => setMobileNavOpen(false))}
-          </aside>
-        </div>
-      )}
+      {/* 跟手拖拽 / 弹簧落位都在 MobileNavDrawer 里；左缘右滑由 MobileEdgeSwipe 识别后经总线驱动它。 */}
+      <MobileNavDrawer
+        open={mobileNavOpen}
+        onOpen={() => setMobileNavOpen(true)}
+        onClose={() => setMobileNavOpen(false)}
+      >
+        {renderPanel(() => setMobileNavOpen(false), true)}
+      </MobileNavDrawer>
 
       {/* 工作区代码改动检视抽屉/弹窗 */}
       {diffTarget && (

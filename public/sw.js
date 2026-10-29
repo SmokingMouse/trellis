@@ -50,6 +50,12 @@ function shellKey(url) {
 
 const STATIC_RE = /\/_next\/static\/[^"'\s()\\<>]+/g;
 
+/** 静态资源只缓存真正的资源响应。上游挂掉时网关会用一张 HTML 维护页顶替 CSS/JS
+ * （曾经还是 200），cache-first 收下它就会让页面长期无样式，直到下一次部署换缓存。 */
+function cacheableStatic(res) {
+  return res.ok && res.type === "basic" && !(res.headers.get("content-type") || "").includes("text/html");
+}
+
 /** 把 shell HTML 里引用到的 /_next/static 资源补进缓存（已有的跳过）。 */
 async function warmAssets(html) {
   const urls = new Set((html.match(STATIC_RE) || []).map((p) => new URL(p, self.location.origin).href));
@@ -60,7 +66,7 @@ async function warmAssets(html) {
       try {
         if (await cache.match(u)) return;
         const res = await fetch(u);
-        if (res.ok) await cache.put(u, res);
+        if (cacheableStatic(res)) await cache.put(u, res);
       } catch {
         /* 预热失败无妨：真用到时 fetch 处理器还会再取 */
       }
@@ -142,7 +148,7 @@ async function handleStatic(request) {
   const hit = await cache.match(request);
   if (hit) return hit;
   const res = await fetch(request);
-  if (res.ok && res.type === "basic") await cache.put(request, res.clone());
+  if (cacheableStatic(res)) await cache.put(request, res.clone());
   return res;
 }
 

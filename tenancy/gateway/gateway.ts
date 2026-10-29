@@ -158,8 +158,11 @@ function unauthenticated(req: Request, url: URL): Response {
 }
 
 async function proxyHTTP(req: Request, url: URL, tenant: Tenant): Promise<Response> {
-  // 远端 node 的首字节要穿过公网隧道，2s 太紧；本机实例保持原来的快速失败。
-  const connectTimeoutMs = tenant.kind === "remote" ? 30_000 : 2000;
+  // 这是「等到响应头」的超时，不只是建连：fetch 要等上游吐出响应头才 resolve。
+  // 原来的 2s 会把冷启动 / 并发高峰下的 Next SSR 和静态资源一起掐掉，浏览器拿到
+  // 维护页当 CSS/JS（2026-10-30 经 hub.home 实测：整页维护页 + 无样式页面）。
+  // 上游真挂了时 ECONNREFUSED 是立刻失败的，用不着靠短超时来快速失败。
+  const connectTimeoutMs = 30_000;
   const authority = `127.0.0.1:${tenant.hostPort}`;
   const controller = new AbortController();
   const abort = () => controller.abort(req.signal.reason);
