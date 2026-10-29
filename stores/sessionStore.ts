@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { NavigationOwner, fetchWithRetry, type NavigationTicket } from "@/lib/client-navigation";
 import { reconcilePending, type PendingSnapshot } from "@/lib/pending";
+import {
+  deleteCachedSession,
+  isConnectivityFailure,
+  readCachedSession,
+  readCachedSessionList,
+  writeCachedSession,
+} from "@/lib/offline-cache";
 import { CANVAS_MAP, normalizeViewMode } from "@/lib/canvas-map";
 import type { Mode, ProviderId, ProviderInfo } from "@/lib/llm";
 import { DEFAULT_PROVIDER, isProviderId, PROVIDERS } from "@/lib/llm";
@@ -421,6 +428,9 @@ type State = {
   activeNodeId: string | null;
   hydrated: boolean;
   hydrateError: string | null;
+  /** 刷新失败、正在显示本地缓存（lib/offline-cache）的内容。OfflineBanner 据此提示「离线 · 重试」，
+   *  已显示的内容不清。下一次网络加载成功即复位。 */
+  offline: boolean;
   provider: ProviderId;
   // Live model catalog from GET /api/providers (sourced from
   // endpoints.yaml, optional). Seeded with the static PROVIDERS
@@ -632,6 +642,8 @@ type State = {
 type Actions = {
   hydrate: (sessionId?: string) => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
+  /** 离线条的「重试」/ 网络恢复时自动调：只走网络重拉当前会话与侧栏列表。 */
+  retryOffline: () => Promise<void>;
   newConversation: () => void;
   // 「新会话」按钮：不沿用上次的模式和目录 —— 落 Project 模式 + 未选工作区，
   // 发送时自动建空白沙箱（QuestionInput）。显式挑目录走 WorkspacePicker /
@@ -925,6 +937,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   activeNodeId: null,
   hydrated: false,
   hydrateError: null,
+  offline: false,
   provider: DEFAULT_PROVIDER,
   providerCatalog: PROVIDERS,
   draftMode: "chat",
@@ -1046,18 +1059,15 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
         set({ hydrated: true, homeOpen: true });
         return;
       }
-      if (!targetId) {
-        const res = await fetchWithRetry("/api/sessions", 5000, navigation.signal);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const { sessions } = (await res.json()) as { sessions: Session[] };
-        targetId = sessions[0]?.id;
-      }
+      if (!targetId) targetId = await startupSessionId(navigation);
       if (!targetId) {
         if (!navigation.current()) return;
         set({ hydrated: true });
         return;
       }
-      if (!await loadSessionInternal(targetId, set, navigation)) return;
+      // 冷启动先渲染本地缓存（有的话）再等网络：手机上打开就有内容，刷新失败也不清屏。
+      const loaded = await loadSessionInternal(targetId, set, navigation, { cacheFirst: true });
+      if (!loaded) return;
       // Wave 4: surface the auto-loaded session as a tab. If the user had
       // it pinned across reloads, it's already an open tab; otherwise show
       // it as the (transient) preview tab so the strip isn't empty while a
@@ -1073,7 +1083,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // Stage 17: any rows still status='streaming' after hydrate must
       // be a stream that was alive when we last saw the page. Attach
       // reconnect SSE to each so live deltas / terminal events resume.
-      get().reconnectStreamingNodes();
+      // 只显示了缓存（离线）时不连：等 retryOffline 拿到真数据再说。
+      if (loaded === "network") get().reconnectStreamingNodes();
     } catch (err) {
       if (!navigation.current()) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -1086,7 +1097,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
 
   loadSession: async (sessionId) => {
     set(s => ({ navigationVersion: s.navigationVersion + 1 }));
-    if (!await loadSessionInternal(sessionId, set)) return;
+    const loaded = await loadSessionInternal(sessionId, set);
+    if (!loaded) return;
     if (get().butlerDraft) set({ butlerDraft: false });
     // Wave 4: landing on a session clears its "finished while away" badge.
     set((s) => {
@@ -1095,7 +1107,28 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       next.delete(sessionId);
       return { unreadSessionIds: next };
     });
-    get().reconnectStreamingNodes();
+    if (loaded === "network") get().reconnectStreamingNodes();
+  },
+
+  retryOffline: async () => {
+    if (retryOfflineInFlight || hydrateInFlight) return;
+    retryOfflineInFlight = true;
+    try {
+      // 侧栏 / 标签按 sessionsRevision 各自重拉列表。
+      get().bumpSessionsRevision();
+      const id = get().session?.id;
+      if (id) {
+        const loaded = await loadSessionInternal(id, set, sessionNavigation.begin(), { fallbackToCache: false });
+        if (loaded === "network") get().reconnectStreamingNodes();
+      } else {
+        const res = await fetch("/api/sessions", { cache: "no-store" });
+        if (res.ok) set({ offline: false });
+      }
+    } catch {
+      /* 还是连不上：保持离线条，等下一次重试 */
+    } finally {
+      retryOfflineInFlight = false;
+    }
   },
 
   newConversation: () => {
@@ -3038,19 +3071,89 @@ const sessionNavigation = new NavigationOwner();
 
 // S117: hydrate 防重入（hydrated 变 true 之前的并发双跑，见 hydrate 注释）。
 let hydrateInFlight = false;
+let retryOfflineInFlight = false;
 
-async function loadSessionInternal(sessionId: string, set: Setter, navigation: NavigationTicket = sessionNavigation.begin()): Promise<boolean> {
-  let res: Response;
-  try { res = await fetchWithRetry(`/api/sessions/${sessionId}`, 5000, navigation.signal); }
-  catch (error) { if (!navigation.current()) return false; throw error; }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const { session, nodes, notes } = (await res.json()) as {
-    session: Session;
-    nodes: ApiNode[];
-    notes?: Note[];
+type SessionPayload = { session: Session; nodes: ApiNode[]; notes?: Note[] };
+/** false = 被更新的导航取代；"network" = 拿到服务端真数据；"cache" = 网络不通、显示的是本地缓存。 */
+type SessionLoadResult = false | "network" | "cache";
+
+class HttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+  }
+}
+
+/** 侧栏缓存的列表形状（components/SessionSidebar 写）。这里只用第一项挑启动会话。 */
+type CachedSessionList = { sessions: Session[] };
+
+// 冷启动没带会话参数时落「最近一个会话」。有本地列表缓存时网络只等这么久，超时就按缓存
+// 先开（列表本身由侧栏随后刷新）；没缓存就照旧等网络。
+const STARTUP_LIST_WAIT_MS = 800;
+
+async function startupSessionId(navigation: NavigationTicket): Promise<string | undefined> {
+  const network = (async () => {
+    const res = await fetchWithRetry("/api/sessions", 5000, navigation.signal);
+    if (!res.ok) throw new HttpStatusError(res.status);
+    const { sessions } = (await res.json()) as { sessions: Session[] };
+    return sessions[0]?.id;
+  })();
+  const cachedId = (await readCachedSessionList<CachedSessionList>())?.sessions?.[0]?.id;
+  if (!cachedId) return network;
+  const timer = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), STARTUP_LIST_WAIT_MS));
+  const first = await Promise.race([
+    network.then((id) => ({ id }), (error: unknown) => ({ error })),
+    timer,
+  ]);
+  if (first === "timeout") return cachedId;
+  if ("id" in first) return first.id;
+  if (isConnectivityFailure(first.error)) return cachedId;
+  throw first.error;
+}
+
+// 会话载入：网络为准，本地缓存（lib/offline-cache）只做两件事 ——
+//   cacheFirst：先把缓存渲染出来再等网络（冷启动秒开）；
+//   fallbackToCache（默认开）：网络不通（断网 / 超时 / 5xx）时退到缓存，并亮离线条。
+// 4xx 是服务端的明确回答（会话被删 / 未登录），照旧抛错，不拿旧数据糊过去。
+async function loadSessionInternal(
+  sessionId: string,
+  set: Setter,
+  navigation: NavigationTicket = sessionNavigation.begin(),
+  opts: { cacheFirst?: boolean; fallbackToCache?: boolean } = {},
+): Promise<SessionLoadResult> {
+  const { cacheFirst = false, fallbackToCache = true } = opts;
+  const showCached = async (): Promise<boolean> => {
+    const cached = await readCachedSession<SessionPayload>(sessionId);
+    if (!cached?.session || !Array.isArray(cached.nodes) || !navigation.current()) return false;
+    applySessionPayload(cached, set);
+    return true;
   };
+  let shownFromCache = cacheFirst ? await showCached() : false;
+  let payload: SessionPayload;
+  try {
+    const res = await fetchWithRetry(`/api/sessions/${sessionId}`, 5000, navigation.signal);
+    if (!res.ok) throw new HttpStatusError(res.status);
+    payload = (await res.json()) as SessionPayload;
+  } catch (error) {
+    if (!navigation.current()) return false;
+    if (error instanceof HttpStatusError && error.status === 404) void deleteCachedSession(sessionId);
+    if (isConnectivityFailure(error)) {
+      if (!shownFromCache && fallbackToCache) shownFromCache = await showCached();
+      if (shownFromCache) {
+        set({ offline: true });
+        return "cache";
+      }
+    }
+    throw error;
+  }
   // A newer load superseded this one while we were fetching — drop it.
   if (!navigation.current()) return false;
+  void writeCachedSession(sessionId, payload);
+  applySessionPayload(payload, set);
+  set({ offline: false });
+  return "network";
+}
+
+function applySessionPayload({ session, nodes, notes }: SessionPayload, set: Setter): void {
   const map: Record<string, ChatNode> = {};
   for (const n of nodes) map[n.id] = apiNodeToChatNode(n);
   // Streaming nodes with a live LOCAL subscription need their response
@@ -3167,7 +3270,6 @@ async function loadSessionInternal(sessionId: string, set: Setter, navigation: N
     treeVisits,
     ...(sessionProvider ? { provider: sessionProvider } : {}),
   });
-  return true;
 }
 
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {

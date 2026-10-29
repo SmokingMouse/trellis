@@ -20,7 +20,9 @@ import {
   type PushSettings,
   type PushSubscriptionInput,
   type WaitingGroup,
+  waitingBadgeCount,
 } from "../push";
+import type { PendingSnapshot } from "../pending";
 
 // Web Push 出口：VAPID 密钥、订阅表、发送、触发点调用的两个入口
 // （pushTurnDone / pushWaitingGroups）。
@@ -36,6 +38,8 @@ type Shared = typeof globalThis & {
   trellisPushDedupe?: Map<string, number>;
   trellisPushPresence?: Map<string, PresenceEntry>;
   trellisPushSender?: Sender;
+  // lib/server/pending.ts 写的待处理快照。这里只读、不 import pending.ts（会成环，见上）。
+  trellisPendingSnapshot?: PendingSnapshot;
 };
 const shared = globalThis as Shared;
 const dedupe = (shared.trellisPushDedupe ??= new Map());
@@ -258,8 +262,14 @@ function gate(kind: PushKind, sessionId: string): boolean {
   return takeDedupeSlot(dedupe, dedupeKey(kind, sessionId), now);
 }
 
+/** 当前「等你回答」的会话数，随每条推送带给 SW 设主屏角标。快照在 pushWaitingGroups
+ *  被调之前已经换成新版（pending.ts），所以这里读到的就是含本次新项的总数。 */
+function currentBadge(): number {
+  return waitingBadgeCount(shared.trellisPendingSnapshot?.items ?? []);
+}
+
 function fire(payload: PushPayload): void {
-  void sendPush(payload).catch((err) => console.warn("[push] 发送异常：", err));
+  void sendPush({ ...payload, badge: currentBadge() }).catch((err) => console.warn("[push] 发送异常：", err));
 }
 
 /** 一轮回答正常结束（run-bus / AS 两条执行路径的终态处各调一次）。 */
