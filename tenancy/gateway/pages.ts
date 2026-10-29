@@ -40,8 +40,10 @@ export function registerPendingPage(): Response {
   );
 }
 
+// 503 而不是 200：这个页面也会顶替 CSS/JS 等子资源返回，200 会让浏览器（和 Service
+// Worker 缓存）把一段 HTML 当成样式表 / 脚本收下。
 export function maintenancePage(): Response {
-  return shell("trellis · 维护中", `<h1>你的实例正在启动或维护</h1><p class="hint">网关运行正常，实例恢复后本页会自动刷新。</p>`, true);
+  return shell("trellis · 维护中", `<h1>你的实例正在启动或维护</h1><p class="hint">网关运行正常，实例恢复后本页会自动刷新。</p>`, true, 503);
 }
 
 /** 选中的远端 node 不在线。给一个回本机的出口（借 herdrx 的「返回主机」）。 */

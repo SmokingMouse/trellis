@@ -356,7 +356,7 @@ if (command === "add") {
     await test(11, "unavailable tenant gets maintenance page", async () => {
       maintCookie = await claim("maint", "maint", "maint-pass");
       const response = await fetch(`${base}/`, { headers: { cookie: maintCookie, accept: "text/html" } });
-      assert(response.status === 200 && (await response.text()).includes("维护"), "maintenance page missing");
+      assert(response.status === 503 && (await response.text()).includes("维护"), "maintenance page missing");
     });
 
     await test(12, "disabled user sessions stop immediately", async () => {
