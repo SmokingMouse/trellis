@@ -82,3 +82,21 @@ export type GwShareCreateBody = {
 export type GwSubscribeResponse = {
   willRestart: boolean;
 };
+
+/** GET /__gw/api/nodes 的一项：hub 上属于当前用户的机器（第一项永远是本机实例）。 */
+export type GwNode = {
+  name: string;
+  kind: "home" | "remote";
+  online: boolean;
+  current: boolean;
+  version: string | null;
+  lastSeenAt: number | null;
+  connectedAt: number | null;
+};
+
+export type GwNodeCreateResponse = {
+  name: string;
+  hub: string;
+  expiresAt: number;
+  connectionString: string;
+};

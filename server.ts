@@ -20,6 +20,8 @@ import { spawn, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
 import { hasTtyd, ttydHostDependencyNote } from "./lib/ttyd-dependency";
 import { diskHealthField } from "./lib/disk-space";
+import { startHubTunnel, type HubTunnelHandle } from "./lib/hub-tunnel";
+import { resolveHubNodeConfig } from "./lib/hub-node-config";
 import {
   deployPaths,
   isDeployStateFresh,
@@ -76,6 +78,9 @@ function upstreamHeaders(h: Headers, upstreamHost: string): Headers {
 const PASS = process.env.TRELLIS_AUTH_PASS;
 const TOKEN = process.env.TRELLIS_AUTH_TOKEN;
 const gateOn = Boolean(PASS && TOKEN);
+
+// hub 隧道的当前配置摘要（不含 token），/__gate/health 认证段对外报告。
+let hubState: { source: "env" | "file"; hubURL: string; nodeName: string } | null = null;
 
 function authed(req: Request): boolean {
   if (!gateOn) return true;
@@ -393,6 +398,8 @@ Bun.serve<TermSocket>({
         body.deploy = st ? { phase: st.phase, sha: st.sha } : null;
         body.release = readReleaseInfo(deployPaths().current);
         body.lastExitCode = lastExitCode;
+        // hub 隧道状态（设置页「本机接入 hub」读这里；不含 token）。
+        body.hub = hubState ? { ...hubState, connected: hubTunnel?.connected() ?? false } : null;
       }
       return Response.json(body, {
         headers: { "cache-control": "no-store" },
@@ -514,3 +521,36 @@ Bun.serve<TermSocket>({
 console.log(
   `[trellis] gate listening on :${PORT}  (auth ${gateOn ? "ON" : "OFF"}, next→${NEXT_PORT})`,
 );
+
+// ── hub 隧道（可选）─────────────────────────────────────────────────────────
+// 这台机器外面连不进来（公司 devbox）时，由它主动连出到 hub，hub 再把用户请求
+// 经这条隧道转回本大门。配置来自环境变量（三个齐全）或 ~/.trellis/hub-node.json
+// （设置页粘贴连接串 / `make node-connect` 写入）。文件每 3s 看一次，变了就重连，
+// 不需要重启服务。都没配 = 行为与以前完全一致。
+let hubTunnel: HubTunnelHandle | null = null;
+let hubConfigKey = "";
+
+function syncHubTunnel(): void {
+  const cfg = resolveHubNodeConfig();
+  const key = cfg ? `${cfg.hubURL}\0${cfg.nodeName}\0${cfg.nodeToken}` : "";
+  if (key === hubConfigKey) return;
+  hubConfigKey = key;
+  hubTunnel?.stop();
+  hubTunnel = null;
+  hubState = cfg ? { source: cfg.source, hubURL: cfg.hubURL, nodeName: cfg.nodeName } : null;
+  if (!cfg) {
+    console.log("[trellis] hub tunnel: not configured");
+    return;
+  }
+  hubTunnel = startHubTunnel({
+    hubURL: cfg.hubURL,
+    nodeName: cfg.nodeName,
+    nodeToken: cfg.nodeToken,
+    localPort: PORT,
+    gateToken: gateOn ? TOKEN! : "",
+    version: readReleaseInfo(deployPaths().current)?.sha ?? "",
+  });
+}
+
+syncHubTunnel();
+setInterval(syncHubTunnel, 3000);

@@ -82,15 +82,15 @@ function recordFailure(key: string): void {
   attempts.set(key, [...(attempts.get(key) || []), Date.now()]);
 }
 
-export function rateLimited(scope: "login" | "register", ip: string, name: string): boolean {
+export function rateLimited(scope: "login" | "register" | "pair", ip: string, name: string): boolean {
   return isLimited(failureKey(scope, ip, name));
 }
 
-export function recordRateFailure(scope: "login" | "register", ip: string, name: string): void {
+export function recordRateFailure(scope: "login" | "register" | "pair", ip: string, name: string): void {
   recordFailure(failureKey(scope, ip, name));
 }
 
-export function clearRateFailures(scope: "login" | "register", ip: string, name: string): void {
+export function clearRateFailures(scope: "login" | "register" | "pair", ip: string, name: string): void {
   attempts.delete(failureKey(scope, ip, name));
 }
 

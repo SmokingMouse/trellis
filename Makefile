@@ -16,7 +16,8 @@
 SDK_HOME ?= $(HOME)/sdk
 
 .PHONY: setup check dev build start clean link-sdk unlink-sdk help \
-        deploy rollback deploy-status releases install-service install-launchd
+        deploy rollback deploy-status releases install-service install-launchd \
+        node-connect node-status node-disconnect
 
 REF ?= HEAD
 
@@ -38,6 +39,10 @@ help:
 	@echo "make deploy-status    — current/previous、长驻服务与上次部署状态"
 	@echo "make releases         — 列出保留的 release"
 	@echo "make install-service  — 一次性：把常驻服务（launchd / systemd user unit）的工作目录指向 ~/.trellis/current"
+	@echo ""
+	@echo "── 多机互联（scripts/node-connect.ts）──"
+	@echo "make node-connect CONN='trellis://v1/…' — 用 hub 生成的连接串把本机接入 hub"
+	@echo "make node-status / node-disconnect      — 查看 / 断开"
 
 setup:
 	bun install
@@ -109,3 +114,13 @@ install-service:
 
 # 旧名字（那时只有 macOS 一台）。留着当别名。
 install-launchd: install-service
+
+node-connect:
+	@test -n "$(CONN)" || { echo "用法：make node-connect CONN='trellis://v1/…'"; exit 1; }
+	bun scripts/node-connect.ts '$(CONN)'
+
+node-status:
+	@bun scripts/node-connect.ts status
+
+node-disconnect:
+	bun scripts/node-connect.ts disconnect

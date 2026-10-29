@@ -17,10 +17,25 @@ import {
 } from "./auth";
 import { handleGatewayAPI } from "./api";
 import { getGatewayDB } from "./db";
-import { invitePage, loginPage, maintenancePage, registerPage, registerPendingPage } from "./pages";
+import { invitePage, loginPage, maintenancePage, nodeOfflinePage, registerPage, registerPendingPage } from "./pages";
 import { provisionTenant } from "./orchestrator";
-import { responseHeaders, translatedCookie, upstreamHeaders } from "./proxy-util";
+import { NODE_COOKIE, readCookie, responseHeaders, translatedCookie, upstreamHeaders } from "./proxy-util";
 import { getTenant, type Tenant } from "./tenants";
+import { TUNNEL_PATH } from "../../lib/hub-tunnel";
+import {
+  addNode,
+  authenticateNode,
+  listNodes,
+  liveNode,
+  revokeNode,
+  startTunnelReaper,
+  tunnelClose,
+  tunnelMessage,
+  tunnelOpen,
+  type TunnelSocketData,
+} from "./tunnel";
+import type { SessionUser } from "./auth";
+import { handleNodesAPI, handlePair, ownsNode } from "./nodes-api";
 
 const PORT = Number(process.env.TRELLIS_GW_PORT) || 3200;
 const argv = process.argv.slice(2);
@@ -57,6 +72,53 @@ async function userCLI(args: string[]): Promise<void> {
   } else {
     throw new Error(`unknown user command: ${command}`);
   }
+}
+
+async function nodeCLI(args: string[]): Promise<void> {
+  const [command, name] = args;
+  const db = getGatewayDB();
+  if (command === "ls") {
+    console.table(listNodes(db).map((row) => ({
+      name: row.name, revoked: row.revoked, lastSeenAt: row.last_seen_at, online: Boolean(liveNode(row.name)),
+    })));
+    return;
+  }
+  if (!name) throw new Error("usage: node add <name> --owner <user> | node revoke <name> | node ls");
+  if (command === "add") {
+    const index = args.indexOf("--owner");
+    const owner = index >= 0 ? args[index + 1] : undefined;
+    const row = owner ? db.prepare("SELECT id FROM users WHERE name=?").get(owner) as { id: string } | null : null;
+    if (!row) throw new Error("node add requires --owner <existing user>");
+    const token = addNode(db, name, row.id);
+    // 明文 token 只在这里出现一次；node 侧写进 TRELLIS_NODE_TOKEN。
+    console.log(`TRELLIS_NODE_NAME=${name}\nTRELLIS_NODE_TOKEN=${token}`);
+  } else if (command === "revoke") {
+    if (!revokeNode(db, name)) throw new Error(`unknown node: ${name}`);
+    console.log(`revoked ${name}`);
+  } else {
+    throw new Error(`unknown node command: ${command}`);
+  }
+}
+
+// ── 多机路由 ────────────────────────────────────────────────────────────────
+// 用户自己的 tenant 是默认 node；trellis_node cookie 选中一个**属于他的**远端
+// node 时改路由过去。前端零改动：它看到的永远是同源 /api。
+type Target = { tenant: Tenant } | { offline: string } | null;
+
+function resolveTarget(req: Request, user: SessionUser): Target {
+  const selected = readCookie(req.headers.get("cookie"), NODE_COOKIE);
+  if (selected && selected !== user.tenant && ownsNode(getGatewayDB(), user, selected)) {
+    const n = liveNode(selected);
+    if (!n) return { offline: selected };
+    return { tenant: { name: selected, hostPort: n.port, authToken: n.gateToken, kind: "remote" } };
+  }
+  const tenant = getTenant(user.tenant);
+  return tenant ? { tenant } : null;
+}
+
+function nodeCookie(name: string | null, isSecure: boolean): string {
+  const attrs = `Path=/; HttpOnly; SameSite=Strict${isSecure ? "; Secure" : ""}`;
+  return name ? `${NODE_COOKIE}=${name}; ${attrs}; Max-Age=31536000` : `${NODE_COOKIE}=; ${attrs}; Max-Age=0`;
 }
 
 async function fields(req: Request): Promise<Record<string, string>> {
@@ -96,16 +158,24 @@ function unauthenticated(req: Request, url: URL): Response {
 }
 
 async function proxyHTTP(req: Request, url: URL, tenant: Tenant): Promise<Response> {
+  // 远端 node 的首字节要穿过公网隧道，2s 太紧；本机实例保持原来的快速失败。
+  const connectTimeoutMs = tenant.kind === "remote" ? 30_000 : 2000;
   const authority = `127.0.0.1:${tenant.hostPort}`;
   const controller = new AbortController();
   const abort = () => controller.abort(req.signal.reason);
   if (req.signal.aborted) abort();
   else req.signal.addEventListener("abort", abort, { once: true });
-  const timer = setTimeout(() => controller.abort("upstream connect timeout"), 2000);
+  const timer = setTimeout(() => controller.abort("upstream connect timeout"), connectTimeoutMs);
   try {
     const upstream = await fetch(`http://${authority}${url.pathname}${url.search}`, {
       method: req.method,
-      headers: upstreamHeaders(req.headers, authority, tenant.authToken),
+      headers: (() => {
+        const headers = upstreamHeaders(req.headers, authority, tenant.authToken);
+        // 让远端实例知道「这次请求是经 hub 隧道来的」（设置页断开前据此确认）。
+        if (tenant.kind === "remote") headers.set("x-trellis-hub-node", tenant.name);
+        else headers.delete("x-trellis-hub-node");
+        return headers;
+      })(),
       body: req.body,
       redirect: "manual",
       signal: controller.signal,
@@ -124,7 +194,8 @@ async function proxyHTTP(req: Request, url: URL, tenant: Tenant): Promise<Respon
   }
 }
 
-type SocketData = {
+type ProxySocketData = {
+  kind: "proxy";
   target: string;
   cookie: string;
   protocols: string[];
@@ -132,18 +203,32 @@ type SocketData = {
   queue: (string | Uint8Array)[];
 };
 
-function closeClient(ws: ServerWebSocket<SocketData>, code = 1011, reason = "upstream closed") {
+type SocketData = ProxySocketData | TunnelSocketData;
+
+function closeClient(ws: ServerWebSocket<ProxySocketData>, code = 1011, reason = "upstream closed") {
   try { ws.close(code, reason); } catch { /* already closed */ }
 }
 
 function startGateway(): void {
   const db = getGatewayDB();
+  startTunnelReaper();
   Bun.serve<SocketData>({
     hostname: "127.0.0.1",
     port: PORT,
     idleTimeout: 0,
     async fetch(req, server) {
       const url = new URL(req.url);
+      // 远端 node 的隧道入口。不走用户 session：node 用自己的 Bearer token 认证。
+      if (url.pathname === TUNNEL_PATH) {
+        if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+          return new Response("Upgrade Required", { status: 426 });
+        }
+        const node = authenticateNode(db, req);
+        if (!node) return new Response("Unauthorized", { status: 401 });
+        if (server.upgrade(req, { data: { kind: "tunnel", node } })) return undefined;
+        return new Response("upgrade failed", { status: 400 });
+      }
+      if (url.pathname === "/__gw/pair") return handlePair(req, db, clientIP(req));
       if (url.pathname === "/__gw/login") {
         if (req.method === "GET") return loginPage();
         if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
@@ -216,6 +301,27 @@ function startGateway(): void {
       if (url.pathname === "/__gw/register/pending" && req.method === "GET") {
         return registerPendingPage();
       }
+      if (url.pathname === "/__gw/api/nodes" || url.pathname.startsWith("/__gw/api/nodes/")) {
+        return handleNodesAPI(req, url, user, db);
+      }
+      // 切 node：/__gw/go/<node>/<path> → 设 cookie，跳到该 node 上的 <path>。
+      // 跨机汇总列表里的条目都指向这里，点一下就落到对的机器、对的会话。
+      const go = url.pathname.match(/^\/__gw\/go\/([a-z0-9-]{1,64})(\/.*)?$/);
+      if (go && req.method === "GET") {
+        const [, name, rest] = go;
+        const known = name === user.tenant || ownsNode(db, user, name);
+        if (!known) return new Response("Unknown node", { status: 404 });
+        // 只允许站内相对路径，防开放重定向（//evil.com）。
+        const path = rest && !rest.startsWith("//") ? rest : "/";
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: `${path}${url.search}`,
+            "cache-control": "no-store",
+            "set-cookie": nodeCookie(name === user.tenant ? null : name, secure(req)),
+          },
+        });
+      }
       if (url.pathname.startsWith("/__gw/api/")) {
         return handleGatewayAPI(req, url, user, db);
       }
@@ -224,14 +330,16 @@ function startGateway(): void {
         return new Response("Not Found", { status: 404 });
       }
 
-      const tenant = getTenant(user.tenant);
-      if (!tenant) return maintenancePage();
+      const target = resolveTarget(req, user);
+      if (!target) return maintenancePage();
+      if ("offline" in target) return nodeOfflinePage(target.offline, user.tenant);
+      const { tenant } = target;
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const protocols = (req.headers.get("sec-websocket-protocol") || "")
           .split(",").map((value) => value.trim()).filter(Boolean);
         const target = `ws://127.0.0.1:${tenant.hostPort}${url.pathname}${url.search}`;
         const cookie = translatedCookie(req.headers.get("cookie"), tenant.authToken);
-        if (server.upgrade(req, { data: { target, cookie, protocols, queue: [] } })) return undefined;
+        if (server.upgrade(req, { data: { kind: "proxy", target, cookie, protocols, queue: [] } })) return undefined;
         return new Response("upgrade failed", { status: 400 });
       }
       return proxyHTTP(req, url, tenant);
@@ -239,7 +347,12 @@ function startGateway(): void {
     websocket: {
       idleTimeout: 0,
       open(ws) {
+        if (ws.data.kind === "tunnel") {
+          tunnelOpen(db, ws as ServerWebSocket<TunnelSocketData>);
+          return;
+        }
         const data = ws.data;
+        const client = ws as ServerWebSocket<ProxySocketData>;
         // Bun 的 WebSocket 客户端支持握手自定义 headers/protocols(bun-types WebSocketOptionsHeaders);
         // next build 的 tsc 走 DOM lib 看不到这个扩展签名,局部断言之。
         type BunWebSocketCtor = new (
@@ -258,16 +371,24 @@ function startGateway(): void {
           if (event.data instanceof ArrayBuffer) ws.send(new Uint8Array(event.data));
           else ws.send(event.data);
         };
-        upstream.onclose = (event) => closeClient(ws, event.code || 1000, event.reason);
-        upstream.onerror = () => closeClient(ws);
+        upstream.onclose = (event) => closeClient(client, event.code || 1000, event.reason);
+        upstream.onerror = () => closeClient(client);
       },
       message(ws, message) {
+        if (ws.data.kind === "tunnel") {
+          tunnelMessage(db, ws as ServerWebSocket<TunnelSocketData>, message);
+          return;
+        }
         const data = ws.data;
         const frame = typeof message === "string" ? message : new Uint8Array(message);
         if (data.upstream?.readyState === WebSocket.OPEN) data.upstream.send(frame);
         else data.queue.push(frame);
       },
       close(ws, code, reason) {
+        if (ws.data.kind === "tunnel") {
+          tunnelClose(ws as ServerWebSocket<TunnelSocketData>);
+          return;
+        }
         try { ws.data.upstream?.close(code, reason); } catch { /* already closed */ }
       },
     },
@@ -277,6 +398,7 @@ function startGateway(): void {
 
 try {
   if (argv[0] === "user") await userCLI(argv.slice(1));
+  else if (argv[0] === "node") await nodeCLI(argv.slice(1));
   else startGateway();
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

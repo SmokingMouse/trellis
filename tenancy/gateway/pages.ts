@@ -43,3 +43,13 @@ export function registerPendingPage(): Response {
 export function maintenancePage(): Response {
   return shell("trellis · 维护中", `<h1>你的实例正在启动或维护</h1><p class="hint">网关运行正常，实例恢复后本页会自动刷新。</p>`, true);
 }
+
+/** 选中的远端 node 不在线。给一个回本机的出口（借 herdrx 的「返回主机」）。 */
+export function nodeOfflinePage(node: string, home: string): Response {
+  return shell(
+    "trellis · 节点离线",
+    `<h1>${esc(node)} 当前离线</h1><p class="hint">这台机器的隧道没有连上 hub。它重新连上后本页会自动刷新。</p><p><a href="/__gw/go/${esc(home)}/" style="color:#e7e9ed">回到 ${esc(home)}</a></p>`,
+    true,
+    503,
+  );
+}
