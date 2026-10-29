@@ -635,6 +635,19 @@
   --shadow-pop: 0 4px 14px -6px rgb(0 0 0 / 0.14);
   --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.22);
 
+  /* 动效阶梯（2026-10-30 手机质感改版，参数取自 Cindy mobile theme/tokens.ts）：
+     out = 进场（快起慢收），in = 退场，move = 位移。桌面弹层仍走下方 100ms；
+     触屏（pointer: coarse）的 sheet / 侧栏 / 按压走这套。 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  /* 轻微过冲的弹簧（damping≈30 / stiffness≈260 的近似），给 sheet 落位、按压回弹 */
+  --ease-spring: linear(0, 0.18 7%, 0.56 17%, 0.86 28%, 1.01 40%, 1.04 50%, 1.02 62%, 1 78%, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-heavy: 280ms;
+
   /* 等宽字体归一：globals 声明与组件 font-mono 从此同源（原 CSS 声明
      JetBrains Mono 但从未加载、实际回退 Menlo；组件 font-mono 又是
      ui-monospace——双源不一致就此终结） */
@@ -653,6 +666,43 @@ html, body {
   color: var(--ink);
   /* Prevent iOS rubber-banding on body */
   overscroll-behavior: none;
+  /* iOS 点按默认的灰色方块闪光是「网页感」的头号来源；按压反馈由 .press / active 底色接管 */
+  -webkit-tap-highlight-color: transparent;
+}
+* { -webkit-tap-highlight-color: transparent; }
+
+/* 手机字号档：桌面 13/14/15/17 的高密度阶梯在 375pt 屏上偏扁偏小，
+   触屏放大一档并拉开层级（参考 Cindy：UI 15、会话正文 17、标题 20）。 */
+@media (max-width: 767.98px) {
+  :root {
+    --text-ui: 14px;
+    --text-body: 15px;
+    --text-reading: 16px;
+    --text-reading--line-height: 1.65;
+    --text-title: 18px;
+  }
+}
+
+/* 触屏按压反馈：原语（Button / IconButton / 列表行）挂 .press。
+   只在 coarse pointer 生效——桌面「克制工具风只用颜色反馈」的裁决不变。
+   按下 80ms 缩到 0.97，松手走弹簧回弹。 */
+@media (pointer: coarse) {
+  .press {
+    transition-property: transform, background-color, color, opacity;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease-spring);
+  }
+  .press:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: var(--dur-instant);
+    transition-timing-function: var(--ease-out);
+  }
+  /* 整行 / 大块元素缩放太晃，只压暗底色 */
+  .press-row { transition: background-color var(--dur-fast) var(--ease-out); }
+  .press-row:active { background-color: var(--surface-hover); transition-duration: 0ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .press, .press:active { transform: none !important; }
 }
 
 /* React Flow tweaks: lighter grid + softer edges.

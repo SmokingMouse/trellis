@@ -24,8 +24,8 @@ export const viewport: Viewport = {
   // iOS 忽略此项，由 hooks/useKeyboardInset 读 visualViewport 兜住。
   interactiveWidget: "resizes-content",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafaf9" }, // ui-guard-allow(hex): viewport themeColor 是 <meta>，读不到 CSS 变量
-    { media: "(prefers-color-scheme: dark)", color: "#0f1115" }, // ui-guard-allow(hex): 同上
+    { media: "(prefers-color-scheme: light)", color: "#fafafa" }, // ui-guard-allow(hex): viewport themeColor 是 <meta>，读不到 CSS 变量
+    { media: "(prefers-color-scheme: dark)", color: "#0b0b0c" }, // ui-guard-allow(hex): 同上
   ],
   // Keep document zoom accessible; the React Flow surface owns gestures
   // locally via touch-action instead of disabling zoom for the whole app.
@@ -49,6 +49,16 @@ const themeScript = `
     if (dark) document.documentElement.classList.add('dark');
     var p = localStorage.getItem('${PREF_KEYS.palette}');
     if (p && p !== 'default') document.documentElement.setAttribute('data-theme', p);
+    // theme-color 对齐画布色（同 hooks/useTheme.ts syncThemeColorMeta）。脚本在 <head>
+    // 里跑时 meta 可能还没解析到，DOMContentLoaded 再补一次。
+    var syncMeta = function() {
+      var c = getComputedStyle(document.documentElement).getPropertyValue('--surface-canvas').trim();
+      if (!c) return;
+      var ms = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; i < ms.length; i++) { ms[i].removeAttribute('media'); ms[i].setAttribute('content', c); }
+    };
+    syncMeta();
+    document.addEventListener('DOMContentLoaded', syncMeta);
   } catch (_) {}
 })();
 `;
