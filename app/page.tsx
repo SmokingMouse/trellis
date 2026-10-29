@@ -52,6 +52,7 @@ import { HerdrTerminalDrawer } from "@/components/herdr/HerdrTerminalDrawer";
 import { HerdrFleetPickerSheet } from "@/components/herdr/HerdrFleetPickerSheet";
 import { HerdrMobileWorkbench } from "@/components/herdr/HerdrMobileWorkbench";
 import { MobileEdgeSwipe } from "@/components/MobileEdgeSwipe";
+import { DiffReviewHost } from "@/components/DiffReviewHost";
 import { HerdrJumpPalette } from "@/components/herdr/HerdrJumpPalette";
 import { useAppMode } from "@/hooks/useAppMode";
 import { parseAppMode } from "@/lib/herdr-mode";
@@ -302,6 +303,7 @@ export default function Home() {
       <WorkspaceFilesDrawer />
       <SearchModal />
       <HerdrJumpPalette />
+      <DiffReviewHost />
       <FilePreview />
       <BookmarksDrawer />
       <KeyboardHelp />

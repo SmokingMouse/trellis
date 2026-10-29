@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useDiffReviewStore } from "@/stores/diffReviewStore";
 import {
   Bookmark,
   CalendarClock,
@@ -9,6 +10,7 @@ import {
   ChevronRight,
   Cpu,
   Download,
+  FileDiff,
   FolderOpen,
   Gauge,
   GitFork,
@@ -231,6 +233,15 @@ export function MobileOverflowMenu({
                   onClick={() => act(() => setWorkspaceFilesOpen(true))}
                 >
                   工作区文件
+                </MenuButton>
+              )}
+              {session.workspacePath && (
+                <MenuButton
+                  target="overflow-diff-review"
+                  icon={FileDiff}
+                  onClick={() => act(() => useDiffReviewStore.getState().openReview({ sessionId: session.id }))}
+                >
+                  审阅改动
                 </MenuButton>
               )}
               <MenuButton

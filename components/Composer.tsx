@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, GitBranch, Paperclip, PenLine, Square } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { appendToDraft, useComposerInsertStore } from "@/stores/composerInsertStore";
 import { sessionScopedKey } from "@/lib/prefs";
 import { sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
@@ -160,6 +161,18 @@ export function Composer({
   useEffect(() => {
     loadedKeyRef.current = loadedKey;
   }, [loadedKey]);
+  // 外部投递到本会话的文本（diff 审阅「发送给 agent」）：追加进草稿、聚焦，不自动发送。
+  const pendingInsert = useComposerInsertStore((s) => s.pending);
+  const [appliedInsertId, setAppliedInsertId] = useState<number | null>(null);
+  if (pendingInsert && pendingInsert.sessionId === session?.id && loadedKey === draftKey && appliedInsertId !== pendingInsert.id) {
+    setAppliedInsertId(pendingInsert.id);
+    setText((cur) => appendToDraft(cur, pendingInsert.text));
+  }
+  useEffect(() => {
+    if (appliedInsertId === null) return;
+    useComposerInsertStore.getState().consumeComposerInsert(appliedInsertId);
+    ref.current?.focus();
+  }, [appliedInsertId]);
 
   const commandStore: CommandStore = {
     session,

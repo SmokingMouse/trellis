@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   Download,
   Ellipsis,
+  FileDiff,
   FolderOpen,
   Keyboard,
   Menu,
@@ -23,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useDiffReviewStore } from "@/stores/diffReviewStore";
 import { ModelPicker } from "./ModelPicker";
 import { ModeBadge } from "./ModeBadge";
 import { ThemeMenu } from "./ThemeMenu";
@@ -212,6 +214,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const setChatEnhanced = useSessionStore((s) => s.setChatEnhanced);
   const setComposeRootOpen = useSessionStore((s) => s.setComposeRootOpen);
   const setWorkspaceFilesOpen = useSessionStore((s) => s.setWorkspaceFilesOpen);
+  const openReview = useDiffReviewStore((s) => s.openReview);
   const provider = useSessionStore((s) => s.provider);
   const hc = useHerdrConsole();
   const currentHerdrPane = useCurrentHerdrPane(hc.panes);
@@ -686,6 +689,14 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 onSelect={() => setWorkspaceFilesOpen(true)}
               >
                 工作区文件
+              </DropdownMenuItem>
+            )}
+            {session?.workspacePath && (
+              <DropdownMenuItem
+                icon={<Icon icon={FileDiff} />}
+                onSelect={() => openReview({ sessionId: session.id })}
+              >
+                审阅改动
               </DropdownMenuItem>
             )}
             {session && (
