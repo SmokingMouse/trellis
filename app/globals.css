@@ -629,6 +629,9 @@
   --radius-field: 6px;
   --radius-card: 8px;
   --radius-overlay: 10px;
+  /* 手机 sheet 顶部圆角（Drawer / Modal / ActionSheet / ConfirmDialog 贴底形态）与胶囊（grabber 等） */
+  --radius-sheet: 16px;
+  --radius-pill: 9999px;
 
   /* 阴影阶梯：raise=卡片，pop=dropdown/popover，overlay=modal/drawer/toast */
   --shadow-raise: 0 0 0 0 transparent; /* 克制工具风：卡片不投影，靠 1px 描边 */
@@ -1222,6 +1225,66 @@ html, body {
 @media (min-width: 640px) {
   .ui-drawer[data-state="open"] { animation-name: ui-drawer-left-in; }
   .ui-drawer[data-state="closed"] { animation-name: ui-drawer-left-out; }
+}
+
+/* ── 手机 sheet 体系（2026-10-30，只在触屏 / 窄屏形态挂这些类；桌面弹层仍走上面 100ms）──
+   .ui-sheet          vaul 的 Drawer.Content（Drawer <sm、Modal <md）。vaul 把 0.5s 的 transition
+                      写成内联样式、把 0.5s 动画写在它注入的样式表里：时长 / 曲线只能 !important 盖。
+                      拖拽中 vaul 写 transition: none（property 为 none），这里的时长不会复活它。
+   .ui-sheet-scrim    贴底 sheet 的 scrim（data-state 驱动进 / 退场）。
+   .ui-sheet-shell    Modal 手机形态的外壳：退场时挂一段「空」动画，让 Radix Presence 等里面的
+                      面板 / scrim 播完再卸载。
+   .ui-action-sheet   ConfirmDialog / ContextMenu / 回答「更多」的贴底 action sheet。 */
+.ui-sheet[data-vaul-drawer] {
+  transition-duration: var(--dur-heavy) !important;
+  transition-timing-function: var(--ease-spring) !important;
+}
+.ui-sheet[data-vaul-drawer][data-state="open"] {
+  animation-duration: var(--dur-heavy);
+  animation-timing-function: var(--ease-spring);
+}
+.ui-sheet[data-vaul-drawer][data-state="closed"] {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease-in);
+}
+.ui-sheet-scrim-fade {
+  transition-duration: var(--dur-heavy);
+  transition-timing-function: var(--ease-out);
+}
+.ui-sheet-scrim[data-state="open"] { animation: ui-fade-in var(--dur-heavy) var(--ease-out); }
+/* 退场不写 from：从拖拽时写进内联的透明度接着淡，不先跳回不透明 */
+@keyframes ui-sheet-scrim-out { to { opacity: 0; } }
+.ui-sheet-scrim[data-state="closed"] { animation: ui-sheet-scrim-out var(--dur-base) var(--ease-in) forwards; }
+/* 退场中的 scrim / 外壳 / 面板不再吃点击：关掉后紧跟着点下面的东西不会被这层挡住 */
+.ui-sheet-scrim[data-state="closed"],
+.ui-sheet-shell[data-state="closed"],
+.ui-action-sheet[data-state="closed"] { pointer-events: none; }
+@keyframes ui-sheet-hold { from { opacity: 1; } to { opacity: 1; } }
+.ui-sheet-shell[data-state="closed"] { animation: ui-sheet-hold calc(var(--dur-base) + 20ms) linear forwards; }
+@keyframes ui-action-sheet-in { from { transform: translateY(calc(100% + 24px)); } to { transform: none; } }
+@keyframes ui-action-sheet-out { from { transform: none; } to { transform: translateY(calc(100% + 24px)); } }
+.ui-action-sheet[data-state="open"] { animation: ui-action-sheet-in var(--dur-heavy) var(--ease-spring); }
+.ui-action-sheet[data-state="closed"] { animation: ui-action-sheet-out var(--dur-base) var(--ease-in) forwards; }
+
+/* 长按预示：500ms 计时期间被按元素缓缩到 0.98（ContextMenu 的 bindTrigger 打标）。
+   用独立的 scale 属性，不和元素自己的 transform（行滑动等）打架。 */
+[data-long-pressing="true"] {
+  scale: 0.98;
+  transition: scale 500ms var(--ease-move);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-sheet[data-vaul-drawer] {
+    transition-duration: 0ms !important;
+    animation: none !important;
+  }
+  .ui-sheet-scrim-fade { transition-duration: 0ms; }
+  .ui-sheet-scrim[data-state],
+  .ui-sheet-shell[data-state],
+  .ui-action-sheet[data-state] {
+    animation: none;
+  }
+  [data-long-pressing="true"] { scale: none; }
 }
 
 /* Skeleton：中性灰扫光，全站唯一的占位写法 */

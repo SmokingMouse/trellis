@@ -3,6 +3,7 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { buttonVariants } from "./Button";
 import { cn } from "./cn";
+import { SHEET_MODAL_QUERY, useMediaQuery } from "./sheet";
 
 // 确认框（Radix AlertDialog）——用来替换 window.confirm（W4 迁移调用点）。
 //
@@ -16,6 +17,9 @@ import { cn } from "./cn";
 //              if (!(await confirm({ title, description, danger: true }))) return;
 // Promise 式依赖根布局挂的 <ConfirmHost/>（AppProviders 里）；万一没挂，退回
 // window.confirm，不会静默吞掉确认。
+//
+// 形态：桌面（≥md）居中小卡；手机（<md）iOS 风 action sheet——贴底，标题 / 说明 +
+// 全宽 48px 主按钮（danger 时实心红）一块，「取消」单独一块。
 
 export type ConfirmOptions = {
   /** 问句：「删除这棵树？」 */
@@ -41,6 +45,66 @@ export function ConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const sheet = useMediaQuery(SHEET_MODAL_QUERY);
+  const titleEl = (
+    <AlertDialogPrimitive.Title
+      className={sheet ? "text-ui font-semibold text-ink-strong" : "text-body font-semibold text-ink-strong"}
+    >
+      {title}
+    </AlertDialogPrimitive.Title>
+  );
+  const descriptionEl = description ? (
+    <AlertDialogPrimitive.Description
+      className={sheet ? "mt-1 text-label text-ink-muted" : "mt-1.5 text-ui text-ink-muted"}
+    >
+      {description}
+    </AlertDialogPrimitive.Description>
+  ) : (
+    <AlertDialogPrimitive.Description className="sr-only">{title}</AlertDialogPrimitive.Description>
+  );
+
+  if (sheet) {
+    return (
+      <AlertDialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+        <AlertDialogPrimitive.Portal>
+          <AlertDialogPrimitive.Overlay className="ui-sheet-scrim fixed inset-0 z-60 bg-scrim/50" />
+          <AlertDialogPrimitive.Content
+            data-confirm-dialog
+            data-confirm-sheet
+            className="ui-action-sheet fixed inset-x-0 bottom-0 z-60 mx-auto flex w-full max-w-md flex-col gap-2 outline-none"
+            style={{
+              paddingBottom: "calc(0.5rem + var(--safe-bottom))",
+              paddingLeft: "calc(0.5rem + var(--safe-left))",
+              paddingRight: "calc(0.5rem + var(--safe-right))",
+            }}
+          >
+            <div className="overflow-hidden rounded-sheet border border-line bg-surface-raised shadow-overlay">
+              <div className="px-4 pb-3 pt-4 text-center">
+                {titleEl}
+                {descriptionEl}
+              </div>
+              <div className="px-3 pb-3">
+                <AlertDialogPrimitive.Action
+                  // 不复用 buttonVariants：它的 max-md:min-h-11 / rounded-field 会和这里的 48px / 圆角打架（cn 不做 merge）
+                  className={cn(
+                    "press flex min-h-12 w-full select-none items-center justify-center rounded-card px-4 text-body font-semibold text-accent-fg",
+                    danger ? "bg-danger active:bg-danger-strong" : "bg-accent active:bg-accent-strong",
+                  )}
+                  onClick={onConfirm}
+                >
+                  {confirmLabel}
+                </AlertDialogPrimitive.Action>
+              </div>
+            </div>
+            <AlertDialogPrimitive.Cancel className="press min-h-12 shrink-0 rounded-sheet border border-line bg-surface-raised text-body font-semibold text-ink shadow-overlay active:bg-surface-hover">
+              {cancelLabel}
+            </AlertDialogPrimitive.Cancel>
+          </AlertDialogPrimitive.Content>
+        </AlertDialogPrimitive.Portal>
+      </AlertDialogPrimitive.Root>
+    );
+  }
+
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialogPrimitive.Portal>
@@ -58,17 +122,9 @@ export function ConfirmDialog({
             data-confirm-dialog
             className="ui-layer pointer-events-auto w-full max-w-sm rounded-overlay border border-line bg-surface p-5 shadow-overlay outline-none"
           >
-            <AlertDialogPrimitive.Title className="text-body font-semibold text-ink-strong">
-              {title}
-            </AlertDialogPrimitive.Title>
-            {description ? (
-              <AlertDialogPrimitive.Description className="mt-1.5 text-ui text-ink-muted">
-                {description}
-              </AlertDialogPrimitive.Description>
-            ) : (
-              <AlertDialogPrimitive.Description className="sr-only">{title}</AlertDialogPrimitive.Description>
-            )}
-            <div className="mt-5 flex justify-end gap-2 max-md:flex-col-reverse">
+            {titleEl}
+            {descriptionEl}
+            <div className="mt-5 flex justify-end gap-2">
               <AlertDialogPrimitive.Cancel className={buttonVariants({ variant: "secondary" })}>
                 {cancelLabel}
               </AlertDialogPrimitive.Cancel>
