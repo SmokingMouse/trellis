@@ -10,8 +10,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { Clock3 } from "lucide-react";
-import { Button, Icon } from "@/components/ui";
+import { Clock3, Maximize2 } from "lucide-react";
+import { Button, Icon, IconButton } from "@/components/ui";
+import { ComposerFullscreen } from "./ComposerFullscreen";
 import { resolveComposerKey } from "@/lib/composer-keys";
 import type { SendKey } from "@/lib/send-key";
 
@@ -24,7 +25,9 @@ import type { SendKey } from "@/lib/send-key";
 //   - 底栏布局：左 chip 行（chips，手机收起时隐藏）→ 工具图标（tools）→ 右侧「发送到」（sendTo）→ 主按钮（primary）；
 //   - 手机端 mobileCompact：收成一行（输入框 + compactTools + primary），聚焦 / 拖入展开，
 //     失焦且没有未完成内容（keepExpanded=false）时收回；
-//   - 卡外：提示 / 通知行、排队列表、补全面板（suggestions，浮在卡片上方）。
+//   - 卡外：提示 / 通知行、状态条（statusBar）、排队列表、补全面板（suggestions，浮在卡片上方）；
+//   - 全屏长文编辑（fullscreen 给了才有）：手机收起态 / 展开态工具区、桌面工具区各一个「展开」，
+//     打开 ComposerFullscreen，同一份 value 双向同步，发送走同一个 onSubmit。
 // 调用方负责：文字状态、发送 / 停止语义、补全数据、附件上传。
 //
 // 手机展开态是受控的（mobileExpanded + onMobileExpandedChange）：发送后收回、拖入后展开
@@ -78,6 +81,9 @@ export function ComposerShell({
   hintRight,
   queue,
   queueHeader,
+  queueOpen,
+  statusBar,
+  fullscreen,
   beforeCard,
   afterCard,
   rootProps,
@@ -131,12 +137,19 @@ export function ComposerShell({
   queue?: ComposerQueueItem[];
   /** 排队列表顶部的状态行（已暂停 · 继续发送…） */
   queueHeader?: ReactNode;
+  /** 排队列表是否展开；不传 = 有排队就一直显示（Herdr 输入框的老行为） */
+  queueOpen?: boolean;
+  /** 卡片上方的紧凑状态条（ComposerStatusBar）；没内容时调用方传空，不占高度 */
+  statusBar?: ReactNode;
+  /** 全屏长文编辑：给了才出现「展开」按钮；label / disabled 描述面板里的发送按钮 */
+  fullscreen?: { submitLabel: string; submitDisabled: boolean };
   beforeCard?: ReactNode;
   afterCard?: ReactNode;
   rootProps?: DataAttributes;
   textareaProps?: DataAttributes & Pick<HTMLAttributes<HTMLTextAreaElement>, "aria-label">;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const compositionEndAt = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const compact = mobileCompact && !mobileExpanded;
@@ -176,6 +189,30 @@ export function ComposerShell({
     });
   };
 
+  const expandButton = fullscreen && (
+    <IconButton
+      label="全屏编辑"
+      onClick={() => setFullscreenOpen(true)}
+      disabled={disabled}
+      data-composer-fullscreen-open=""
+    >
+      <Icon icon={Maximize2} />
+    </IconButton>
+  );
+
+  const closeFullscreen = (refocus: boolean) => {
+    setFullscreenOpen(false);
+    if (!refocus) return;
+    // 回到卡片输入框（手机端顺带展开），光标放末尾。
+    window.requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      if (mobileCompact) setExpandedRef.current(true);
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const action = resolveComposerKey(
       {
@@ -212,7 +249,8 @@ export function ComposerShell({
     >
       {suggestions}
       {beforeCard}
-      {queue && queue.length > 0 && <ComposerQueueList items={queue} header={queueHeader} />}
+      {statusBar}
+      {queue && queue.length > 0 && queueOpen !== false && <ComposerQueueList items={queue} header={queueHeader} />}
       <div
         data-composer-card=""
         className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
@@ -266,6 +304,7 @@ export function ComposerShell({
           />
           {compact && (
             <>
+              {expandButton}
               {compactTools}
               {primary}
             </>
@@ -279,6 +318,7 @@ export function ComposerShell({
               </div>
             )}
             {tools}
+            {expandButton}
             <span className="flex-1" />
             {sendTo}
             {primary}
@@ -286,6 +326,19 @@ export function ComposerShell({
         )}
       </div>
       {afterCard}
+      {fullscreen && fullscreenOpen && (
+        <ComposerFullscreen
+          value={value}
+          onValueChange={onValueChange}
+          onSubmit={onSubmit}
+          onClose={closeFullscreen}
+          sendKey={sendKey}
+          onPaste={onPaste}
+          submitLabel={fullscreen.submitLabel}
+          submitDisabled={fullscreen.submitDisabled || disabled}
+          placeholder={placeholder}
+        />
+      )}
       {notice && (
         <div className="mt-1.5 px-1 text-label text-warn-ink" role="status">
           {notice}
