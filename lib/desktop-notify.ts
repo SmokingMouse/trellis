@@ -55,6 +55,9 @@ export function showDesktopNotification(opts: {
   onClick: () => void;
 }): void {
   if (!desktopNotifyReady()) return;
+  // 本浏览器已订阅 Web Push：同一件事服务端会推一条（tag 按会话去重、点开直达），
+  // 这里再弹就是两条。
+  if (readRaw(PREF_KEYS.pushSubscribed) === "1") return;
   try {
     const n = new Notification(opts.title, {
       body: opts.body,

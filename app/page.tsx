@@ -41,6 +41,7 @@ import { useNodeKeyboardNav } from "@/hooks/useNodeKeyboardNav";
 import { useReconnectStreams } from "@/hooks/useReconnectStreams";
 import { useRunPolling } from "@/hooks/useRunPolling";
 import { useAttentionTitle } from "@/hooks/useAttentionTitle";
+import { usePushBridge } from "@/hooks/usePushBridge";
 import { useCliSyncEvents } from "@/hooks/useCliSyncEvents";
 import { useAsAdoption } from "@/hooks/useAsAdoption";
 import { useHerdrFleet } from "@/hooks/useHerdrFleet";
@@ -99,6 +100,8 @@ export default function Home() {
   useRunPolling();
   // 标签页标题「(N) 」= 等你回答的会话数，与侧栏「等你处理」同一来源（lib/attention）。
   useAttentionTitle();
+  // Web Push：点通知直达会话 + 前台心跳（正看着的会话不推手机）。
+  usePushBridge();
   useHerdrShortcuts();
 
   useEffect(() => {

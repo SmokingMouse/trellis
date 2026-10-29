@@ -887,6 +887,7 @@ export async function POST(req: Request) {
     resumeFamily: family,
     interactive,
     requireApproval: resolvedRequireApproval,
+    pushOnDone: true,
     factory: (signal, ctx) =>
       llm.stream({
         history,

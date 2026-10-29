@@ -18,6 +18,7 @@ import {
   markNodeInterrupted,
 } from "./repo";
 import { DbWriteError } from "./db-error";
+import { pushTurnDone } from "./push";
 import type { ToolCall, TaskMeta, PendingInteraction } from "@/lib/types";
 import type { ProviderFamily, InteractionDecision } from "@/lib/llm";
 
@@ -347,6 +348,10 @@ export function startRun(args: {
   //
   // ⚠️ 进程被 SIGKILL 时这个回调一次都不跑 —— 所以 sqlite.ts 的 migrate() 里有一条
   // 对称的 boot reap 把残留的 running/pending task_run 收成 error。**两者必须成对**。
+  // Web Push「完成」推送（lib/server/push.ts）。只有用户在网页里亲手发起的一轮
+  // （app/api/chat）打开：自动化任务有自己的 notify 出口，飞书 bot 的回答回到飞书群，
+  // 这两类再推一遍手机就是噪音。
+  pushOnDone?: boolean;
   onSettled?: (r: {
     status: "done" | "error";
     errorMessage?: string | null;
@@ -816,6 +821,7 @@ async function runLoop(
     }
 
     state.status = stoppedWith;
+    if (stoppedWith === "done" && args.pushOnDone) pushTurnDone(args.nodeId);
     if (stoppedWith === "done") {
       state.finalEvent = { type: "done", usage, finalStart: state.finalStart, durationMs };
       broadcast(state, { type: "done", usage, finalStart: state.finalStart, durationMs });

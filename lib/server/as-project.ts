@@ -1,5 +1,6 @@
 import "server-only";
 import { persistPendingInteractions, appendPendingInteraction } from "./repo";
+import { pushTurnDone } from "./push";
 import { randomUUID } from "node:crypto";
 import type { AgentClient } from "@smokingmouse/agent-server/client";
 import { NotificationSchemas, type NotificationMethod, type ServerNotification, type AttachResult, type Turn, type StartTurnParams, type StartThreadParams } from "@smokingmouse/agent-server/protocol";
@@ -189,6 +190,8 @@ export class ProjectRun {
       tokenContext: u?.contextTokens, finalStart, durationMs: turn.durationMs, now: Date.now() });
     this.terminal = event;
     this.emit(event);
+    // Web Push「完成」：只推本页面发起的 turn（observeOnly = 收养来的外部 CLI 线程，不推）。
+    if (!this.observeOnly && turn.status === "completed") pushTurnDone(this.nodeId);
     void this.settled(turn, response).finally(() => {
       for (const sub of this.subscribers) sub.onClose();
       this.subscribers.clear();

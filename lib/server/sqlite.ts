@@ -634,6 +634,20 @@ function migrate(db: Database) {
     );
   `);
 
+  // Web Push 订阅（lib/server/push.ts）：一行 = 一个浏览器 / 主屏 PWA 的推送端点。
+  // endpoint 是推送服务给的唯一 URL，重复订阅按它 upsert；推送服务回 404/410
+  // （订阅已失效）时整行删掉。last_ok_at = 最近一次成功投递，排查「为啥没收到」用。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      ua TEXT,
+      created_at INTEGER NOT NULL,
+      last_ok_at INTEGER
+    );
+  `);
+
   // Notebook: per-session free-form excerpts the user collects while
   // reading. Each row points back to its source node so the UI can offer
   // a "jump to source + scroll to mark" return path.

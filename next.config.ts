@@ -53,6 +53,9 @@ const nextConfig: NextConfig = {
     "@smokingmouse/llm",
     "@larksuiteoapi/node-sdk",
     "ws",
+    // web-push（lib/server/push.ts）：纯 Node CJS 包（带 https-proxy-agent），按名字从
+    // node_modules 加载，不让 bundler 内联。
+    "web-push",
   ],
   // S89: 管理台改成 tab 壳之后的两条路由兼容。放在 next.config 而不是留一张 redirect 页 ——
   // 这里在文件系统路由之前生效，不用为了转发而渲染一个 React 树，也就不会有「先闪一下空页
@@ -73,39 +76,47 @@ const nextConfig: NextConfig = {
       { source: "/tasks", destination: "/settings/tasks", permanent: false },
     ];
   },
-  // Tunneled dev (Cloudflare CDN, etc.): some CDNs rewrite Next dev's
-  // `Cache-Control: no-cache` into `max-age=14400`, so edits to globals.css
-  // don't reach the browser for hours. `no-store` is one of the few
-  // directives CDNs typically won't override — they treat it as
-  // bypass-cache. Only apply in dev; production builds use hashed
-  // filenames so caching is actually useful there.
-  ...(isDev
-    ? {
-        async headers() {
-          return [
-            {
-              source: "/_next/:path*",
-              headers: [
-                {
-                  key: "Cache-Control",
-                  value:
-                    "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
-                },
-              ],
-            },
-            {
-              source: "/",
-              headers: [
-                {
-                  key: "Cache-Control",
-                  value: "no-store, no-cache, must-revalidate, max-age=0",
-                },
-              ],
-            },
-          ];
-        },
-      }
-    : {}),
+  async headers() {
+    // Service worker（public/sw.js，PWA 推送）：照 Next 官方 PWA 指南 —— 不许缓存
+    // （否则 Cloudflare / 浏览器拿着旧 SW，改了推送逻辑迟迟不生效），CSP 只放同源脚本。
+    const sw = {
+      source: "/sw.js",
+      headers: [
+        { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" },
+      ],
+    };
+    if (!isDev) return [sw];
+    // Tunneled dev (Cloudflare CDN, etc.): some CDNs rewrite Next dev's
+    // `Cache-Control: no-cache` into `max-age=14400`, so edits to globals.css
+    // don't reach the browser for hours. `no-store` is one of the few
+    // directives CDNs typically won't override — they treat it as
+    // bypass-cache. Only apply in dev; production builds use hashed
+    // filenames so caching is actually useful there.
+    return [
+      sw,
+      {
+        source: "/_next/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value:
+              "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          },
+        ],
+      },
+      {
+        source: "/",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, max-age=0",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
