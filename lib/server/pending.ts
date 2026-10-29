@@ -1,6 +1,8 @@
 import "server-only";
 import { getDB } from "./sqlite";
-import { pendingSummary, type PendingItem, type PendingSnapshot } from "../pending";
+import { pendingKey, pendingSummary, type PendingItem, type PendingSnapshot } from "../pending";
+import { newWaitingGroups } from "../push";
+import { pushWaitingGroups } from "./push";
 import type { PendingInteraction } from "../types";
 
 const shared = globalThis as typeof globalThis & { trellisPendingSnapshot?: PendingSnapshot; trellisPendingRefresh?: boolean };
@@ -39,5 +41,15 @@ export function refreshPendingSnapshot(): PendingSnapshot {
         summary: pendingSummary(single), createdAt: single.createdAt ?? row.created_at, interaction: single });
     }
   }
-  return shared.trellisPendingSnapshot = { revision: Math.max(Date.now(), (shared.trellisPendingSnapshot?.revision ?? 0) + 1), items };
+  const previous = shared.trellisPendingSnapshot;
+  const next = shared.trellisPendingSnapshot = { revision: Math.max(Date.now(), (previous?.revision ?? 0) + 1), items };
+  // 「等你回答」推送的触发点：快照是所有来源（run-bus 暂停、AS 投影、CLI 同步）待处理项
+  // 的唯一汇合处，在这里和上一版比出新冒出来的项。推送内部同步判门槛、异步发送，
+  // 不会拖慢这条读路径；任何异常都不能影响快照本身。
+  try {
+    pushWaitingGroups(newWaitingGroups(previous ? new Set(previous.items.map(pendingKey)) : null, items, Date.now()));
+  } catch (error) {
+    console.warn("[pending push]", error);
+  }
+  return next;
 }

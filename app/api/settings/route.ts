@@ -6,7 +6,14 @@ export const dynamic = "force-dynamic";
 // 服务端 app 级偏好 kv（app_settings 表）的读写口。与 /settings/prefs 那批
 // localStorage 偏好的分界：**spawn 路径要读的**才进这里（服务端读不到
 // localStorage）。key 白名单制 —— 新偏好先在这里登记。
-const ALLOWED_KEYS = new Set(["label_model_claude", "label_model_codex"]);
+// push_*：手机推送开关（lib/push.ts PUSH_SETTING_KEYS），服务端发推送前要读。
+const ALLOWED_KEYS = new Set([
+  "label_model_claude",
+  "label_model_codex",
+  "push_enabled",
+  "push_done",
+  "push_waiting",
+]);
 
 // GET /api/settings → { settings: { <key>: string | null } }（全白名单键）
 export async function GET() {

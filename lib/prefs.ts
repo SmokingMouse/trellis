@@ -52,6 +52,8 @@ export const PREF_KEYS = {
   // 提醒
   desktopNotify: "trellis-desktop-notify",
   desktopNotifyOffered: "trellis-desktop-notify-offered",
+  /** 本浏览器已订阅手机推送（lib/push-client.ts）。页内系统通知看到它就让位，不重复弹。 */
+  pushSubscribed: "trellis-push-subscribed",
   // 其它
   // 已退役：置顶会话改存服务端 sessions.pinned_at。只剩首次加载的一次性迁移读它，
   // 迁完即删；不进 PREF_ITEMS 镜像清单。

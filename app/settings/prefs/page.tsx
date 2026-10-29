@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { PREF_ITEMS, PREF_KEYS, readRaw, writeRaw, type PrefItem } from "@/lib/prefs";
 import { enableDesktopNotify } from "@/lib/desktop-notify";
 import { PageHeader, Select, Skeleton, Switch } from "@/components/ui";
+import { PushSettings } from "@/components/PushSettings";
 
 // S89: 偏好的「可穷举清单」。
 //
@@ -49,8 +50,12 @@ export default function PrefsSettingsPage() {
       {GROUPS.map((g) => {
         const items = PREF_ITEMS.filter((i) => i.group === g);
         if (!items.length) return null;
+        // 手机推送紧跟「提醒」：同一类事（跑完 / 等你回答时叫你），但开关存服务端、
+        // 对所有已订阅设备生效，所以单独成区而不进 PREF_ITEMS 的本地清单。
+        const after = g === "提醒" ? <PushSettings /> : null;
         return (
-          <section key={g}>
+          <Fragment key={g}>
+          <section>
             <h2 className="text-ui font-semibold text-ink-strong mb-2">{g}</h2>
             <div className="flex flex-col divide-y divide-line-faint rounded-card border border-line bg-surface px-4">
               {items.map((it) => (
@@ -64,6 +69,8 @@ export default function PrefsSettingsPage() {
               ))}
             </div>
           </section>
+          {after}
+          </Fragment>
         );
       })}
     </div>

@@ -35,7 +35,13 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||
     pathname === "/apple-icon" ||
-    pathname === "/manifest.json"
+    pathname === "/manifest.json" ||
+    // PWA / Web Push：service worker 脚本与 public/icons/ 下的静态 PNG。都是公开
+    // 静态文件、不含任何数据；放开是因为浏览器在后台做 SW 更新检查、iOS 读主屏图标
+    // 时未必带得上登录 cookie —— 401 会让 SW 更新失败 / 图标退化。订阅、发送等
+    // /api/push/* 仍在下面的 cookie 闸后，不受影响。
+    pathname === "/sw.js" ||
+    /^\/icons\/[\w-]+\.png$/.test(pathname)
   );
 }
 
