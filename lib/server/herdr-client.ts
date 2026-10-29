@@ -2,7 +2,8 @@ import "server-only";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import type { HerdrInputDelivery } from "../herdr-input";
+import type { HerdrInputDelivery, HerdrSendRefusal } from "../herdr-input";
+import { HERDR_CLEAR_DRAFT_KEYS, checkHerdrSend, herdrSendRefusalMessage } from "../herdr-send-guard";
 import {
   HERDR_PROTOCOL,
   MIN_HERDR_PROTOCOL,
@@ -106,6 +107,23 @@ export class HerdrApiError extends Error {
     super(message);
     this.name = "HerdrApiError";
   }
+}
+
+/** 发前读屏不过关：什么都没打，原文可安全重发。code 是 HerdrSendRefusalCode。 */
+export class HerdrSendRefusedError extends HerdrApiError {
+  constructor(readonly refusal: HerdrSendRefusal) {
+    super(herdrSendRefusalMessage(refusal.code, refusal.draft), refusal.code);
+    this.name = "HerdrSendRefusedError";
+  }
+}
+
+/**
+ * 路由里别用 instanceof 认拒发：fleet 是 globalThis 单例，可能由另一个路由 bundle 里的
+ * HerdrClient 抛出，类身份对不上（2026-10-29 实测 409 掉成 502）。按 name + refusal 认。
+ */
+export function isHerdrSendRefused(error: unknown): error is HerdrSendRefusedError {
+  return error instanceof Error && error.name === "HerdrSendRefusedError" &&
+    typeof (error as { refusal?: unknown }).refusal === "object";
 }
 
 export class HerdrUnavailableError extends Error {
@@ -324,6 +342,8 @@ export class HerdrClient {
     paneId: string,
     text: string,
     timeoutMs = 300_000,
+    /** 用户看过拒发提示、同意清掉的那段单行草稿：送达前输入框里还是它才清，见 guardSend。 */
+    clearDraft?: string,
   ): Promise<HerdrInputDelivery> {
     const acceptedPane = this.requireAgentPane(paneId);
     if (this._readOnly) throw new HerdrUnavailableError("Herdr is read-only");
@@ -355,6 +375,7 @@ export class HerdrClient {
           JSON.stringify(target.agent_session) !== JSON.stringify(acceptedPane.agent_session)) {
         throw new HerdrApiError("queued input target changed or stopped", "pane_changed");
       }
+      await this.guardSend(target, clearDraft);
       await this.request<Record<string, unknown>>("pane.send_input", {
         pane_id: paneId,
         text,
@@ -368,7 +389,9 @@ export class HerdrClient {
     void run.catch((error) => {
       // 撤回时已经发布过 cancelled 回执，别再被 failed 覆盖。
       if (this.cancelledInputs.delete(receipt.inputId)) return;
-      this.publishDelivery({ ...receipt, status: "failed", error: error instanceof Error ? error.message : String(error) });
+      const failed: HerdrInputDelivery = { ...receipt, status: "failed", error: error instanceof Error ? error.message : String(error) };
+      if (isHerdrSendRefused(error)) failed.refusal = error.refusal;
+      this.publishDelivery(failed);
     });
     // Both idle waits belong to the background worker. A busy pane (or an
     // existing queue) acknowledges acceptance immediately, without waiting.
@@ -400,6 +423,38 @@ export class HerdrClient {
     this.cancelledInputs.add(inputId);
     this.publishDelivery({ ...delivery, status: "cancelled" });
     return true;
+  }
+
+  /**
+   * 发消息前的读屏核对（lib/herdr-send-guard.ts）：读一次带颜色的可见屏，对话框开着 /
+   * 输入框里有草稿 / 认不出输入框 → 抛 HerdrSendRefusedError，什么都不打。
+   * clearDraft 与此刻的单行草稿完全一致时先清掉（ctrl+k ctrl+u）再读一次确认空了。
+   * 读屏本身失败也拒发：看不见屏幕就不往里打字。
+   */
+  private async guardSend(pane: HerdrPane, clearDraft?: string): Promise<void> {
+    const read = async () => {
+      const result = await this.request<{ read?: { text?: unknown } }>("pane.read", {
+        pane_id: pane.pane_id,
+        source: "visible",
+        lines: 60,
+        format: "ansi",
+      }).catch(() => null);
+      const text = result?.read?.text;
+      if (typeof text !== "string") throw new HerdrSendRefusedError({ code: "screen_unknown" });
+      return checkHerdrSend(pane.agent, text);
+    };
+    let check = await read();
+    if (!check.ok && check.code === "input_draft" && clearDraft && check.clearable === clearDraft) {
+      await this.request("pane.send_keys", { pane_id: pane.pane_id, keys: HERDR_CLEAR_DRAFT_KEYS });
+      await Bun.sleep(150);
+      check = await read();
+    }
+    if (!check.ok) {
+      const refusal: HerdrSendRefusal = { code: check.code };
+      if (check.draft !== undefined) refusal.draft = check.draft;
+      if (check.clearable !== undefined) refusal.clearable = check.clearable;
+      throw new HerdrSendRefusedError(refusal);
+    }
   }
 
   async sendKeys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
@@ -608,6 +663,8 @@ export class HerdrClient {
     const id = String(++this.requestId);
     return new Promise<T>((resolve, reject) => {
       let buffer = "";
+      // 分块到达的 UTF-8 可能在多字节字符中间被切开（─、中文），逐块 toString 会变成 U+FFFD。
+      const decoder = new TextDecoder();
       let settled = false;
       let socket: Bun.Socket<undefined> | null = null;
       const finish = (error?: unknown, value?: T) => {
@@ -636,7 +693,7 @@ export class HerdrClient {
             opened.write(`${JSON.stringify({ id, method, params })}\n`);
           },
           data(_socket, chunk) {
-            buffer += chunk.toString();
+            buffer += decoder.decode(chunk, { stream: true });
             const newline = buffer.indexOf("\n");
             if (newline < 0) return;
             try {
@@ -694,6 +751,8 @@ export class HerdrClient {
     const id = `sub-${++this.requestId}`;
     return new Promise<void>((resolve, reject) => {
       let buffer = "";
+      // 分块到达的 UTF-8 可能在多字节字符中间被切开（─、中文），逐块 toString 会变成 U+FFFD。
+      const decoder = new TextDecoder();
       let acknowledged = false;
       let socket: Bun.Socket<undefined> | null = null;
       let settled = false;
@@ -729,7 +788,7 @@ export class HerdrClient {
             );
           },
           data: (_socket, chunk) => {
-            buffer += chunk.toString();
+            buffer += decoder.decode(chunk, { stream: true });
             while (true) {
               const newline = buffer.indexOf("\n");
               if (newline < 0) break;

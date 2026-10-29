@@ -1,5 +1,6 @@
 import {
   HerdrApiError,
+  isHerdrSendRefused,
   HerdrUnavailableError,
 } from "@/lib/server/herdr-client";
 import { getHerdrFleetService } from "@/lib/server/herdr-fleet";
@@ -11,7 +12,7 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  let body: { text?: unknown };
+  let body: { text?: unknown; clearDraft?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -26,13 +27,24 @@ export async function POST(
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(body.text)) {
     return Response.json({ error: "text contains terminal control characters" }, { status: 400 });
   }
+  // 用户看过「电脑上有草稿」的拒发提示后选了「清空并发送」：带回服务端给的那段 clearable。
+  if (body.clearDraft !== undefined && (typeof body.clearDraft !== "string" || !body.clearDraft || Buffer.byteLength(body.clearDraft, "utf8") > 8 * 1024)) {
+    return Response.json({ error: "clearDraft must be a non-empty string" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const service = getHerdrFleetService();
     await service.ensureStarted();
-    const result = await service.input(id, body.text);
+    const result = await service.input(id, body.text, body.clearDraft as string | undefined);
     return Response.json({ ok: true, status: result.status, result }, { status: result.status === "queued" ? 202 : 200 });
   } catch (error) {
+    // 发前读屏拒发：什么都没打（delivered: none），带上原因和电脑端草稿，前端据此提示 / 清空重发。
+    if (isHerdrSendRefused(error)) {
+      return Response.json(
+        { error: error.message, delivered: "none", ...error.refusal },
+        { status: 409 },
+      );
+    }
     const status =
       error instanceof HerdrUnavailableError
         ? 503

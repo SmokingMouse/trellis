@@ -11,7 +11,7 @@ import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { useHerdrReopen } from "@/hooks/useHerdrReopen";
-import { cancelHerdrInput, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
+import { HerdrActionError, cancelHerdrInput, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
 import { herdrSendTarget } from "@/lib/herdr-mode";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
 import {
@@ -85,6 +85,8 @@ export function HerdrComposer({
   const [interrupting, setInterrupting] = useState(false);
   const [delivered, setDelivered] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 拒发提示附带的电脑端单行草稿：有它时提示里给「清空并发送」，跟 notice 同生同灭。
+  const [clearableDraft, setClearableDraft] = useState<string | null>(null);
   const [queue, setQueue] = useState<HerdrQueuedInput[]>([]);
   const [uploading, setUploading] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -129,6 +131,7 @@ export function HerdrComposer({
     setSeenDeliveries(null);
     setDelivered(false);
     setNotice(null);
+    setClearableDraft(null);
   }
 
   // 排队列表 × fleet 回执对账：送达 / 撤回移除，失败把文字放回输入框。
@@ -142,7 +145,12 @@ export function HerdrComposer({
       setQueue(result.queue);
       if (result.failed.length > 0) {
         setText((current) => result.failed.reduce((acc, item) => restoreDraft(acc, item.text), current));
-        setNotice("排队的消息没能送达，已放回输入框");
+        // 发前读屏拒发的（对话框 / 电脑上有草稿）说清原因；其余失败照旧笼统提示。
+        const refused = result.failed
+          .map((item) => deliveries?.find((d) => d.inputId === item.inputId))
+          .find((d) => d?.refusal);
+        setNotice(refused?.error ? `${refused.error}；已放回输入框` : "排队的消息没能送达，已放回输入框");
+        setClearableDraft(refused?.refusal?.clearable ?? null);
       }
     }
   }
@@ -154,14 +162,16 @@ export function HerdrComposer({
     [],
   );
 
-  const submit = async () => {
+  /** clearDraft：用户在拒发提示里点了「清空并发送」，带回服务端给的那段单行草稿。 */
+  const submit = async (clearDraft?: string) => {
     const outgoing = text.trim();
     if (!outgoing || !paneId || !online || sending || uploading > 0) return;
     setSending(true);
     setNotice(null);
+    setClearableDraft(null);
     setDelivered(false);
     try {
-      const result = await sendHerdrInput(paneId, outgoing);
+      const result = await sendHerdrInput(paneId, outgoing, clearDraft);
       setText((current) => (current === text ? "" : current));
       if (result.status === "queued") {
         // 推送可能先于 POST 应答把这条并进列表了：按 inputId 去重。
@@ -176,7 +186,13 @@ export function HerdrComposer({
       if (mobileCompact) setMobileExpanded(false);
       void refreshHerdrFleet();
     } catch (error) {
-      setNotice(`发送失败：${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof HerdrActionError && error.refusal) {
+        // 什么都没打，文字还在输入框里：直接说原因，单行草稿给一键清空重发。
+        setNotice(error.message);
+        setClearableDraft(error.refusal.clearable ?? null);
+      } else {
+        setNotice(`发送失败：${error instanceof Error ? error.message : String(error)}`);
+      }
     } finally {
       setSending(false);
     }
@@ -388,6 +404,7 @@ export function HerdrComposer({
       onValueChange={(value) => {
         setText(value);
         if (notice) setNotice(null);
+        if (clearableDraft) setClearableDraft(null);
       }}
       onSubmit={() => void submit()}
       sendKey={sendKey}
@@ -455,7 +472,20 @@ export function HerdrComposer({
       }
       primary={primary}
       state={working ? "stopping" : compact ? "compact" : "expanded"}
-      notice={offlineNotice ?? notice}
+      notice={offlineNotice ?? (notice && clearableDraft ? (
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1" data-herdr-send-refused="">
+          <span>{notice}</span>
+          <Button
+            variant="link"
+            size="sm"
+            data-herdr-clear-draft=""
+            onClick={() => void submit(clearableDraft)}
+            disabled={sending}
+          >
+            清空电脑上的草稿并发送
+          </Button>
+        </span>
+      ) : notice)}
       hintLeft={
         <span data-herdr-delivery={delivered ? "delivered" : queue.length ? "queued" : "idle"} aria-live="polite">
           {statusHint}

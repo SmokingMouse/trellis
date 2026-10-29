@@ -1,19 +1,31 @@
 // 浏览器侧的 Herdr 窗格动作：发按键 / 发文本 / 读屏 / 切焦点。
 // 会话内审批卡、/herdr 总览泳道卡、终端抽屉共用这一份，不各写一遍 fetch。
-import type { HerdrInputDelivery } from "./herdr-input";
+import type { HerdrInputDelivery, HerdrSendRefusal } from "./herdr-input";
 
 function paneUrl(paneId: string, action: string): string {
   return `/api/herdr/panes/${encodeURIComponent(paneId)}/${action}`;
 }
 
+/** 窗格动作失败；发前读屏拒发（409，什么都没打）时带 refusal。 */
+export class HerdrActionError extends Error {
+  constructor(message: string, readonly refusal?: HerdrSendRefusal) {
+    super(message);
+    this.name = "HerdrActionError";
+  }
+}
+
 async function ensureOk(response: Response): Promise<Response> {
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
+    let refusal: HerdrSendRefusal | undefined;
     try {
-      const body = (await response.json()) as { error?: string };
+      const body = (await response.json()) as { error?: string; delivered?: string } & Partial<HerdrSendRefusal>;
       if (body.error) message = body.error;
+      if (response.status === 409 && body.delivered === "none" && body.code) {
+        refusal = { code: body.code, draft: body.draft, clearable: body.clearable };
+      }
     } catch { /* keep status text */ }
-    throw new Error(message);
+    throw new HerdrActionError(message, refusal);
   }
   return response;
 }
@@ -26,11 +38,12 @@ export async function sendHerdrKeys(paneId: string, keys: string[]): Promise<voi
   }));
 }
 
-export async function sendHerdrInput(paneId: string, text: string): Promise<HerdrInputDelivery> {
+/** clearDraft：拒发提示里的单行草稿，用户同意清掉它再发（服务端核对输入框里还是它才清）。 */
+export async function sendHerdrInput(paneId: string, text: string, clearDraft?: string): Promise<HerdrInputDelivery> {
   const response = await ensureOk(await fetch(paneUrl(paneId, "input"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(clearDraft ? { text, clearDraft } : { text }),
   }));
   return ((await response.json()) as { result: HerdrInputDelivery }).result;
 }

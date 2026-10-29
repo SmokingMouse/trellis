@@ -395,8 +395,9 @@ export class HerdrFleetService {
     return `W/"herdr-${this.client.state.generation}-${this.bindingVersion}${prompts ? `-${prompts}` : ""}"`;
   }
 
-  input(paneId: string, text: string): Promise<HerdrInputDelivery> {
-    return this.client.enqueueInput(paneId, text);
+  /** 排队送达（发前读屏核对见 HerdrClient.guardSend）；clearDraft 是用户同意清掉的电脑端单行草稿。 */
+  input(paneId: string, text: string, clearDraft?: string): Promise<HerdrInputDelivery> {
+    return this.client.enqueueInput(paneId, text, undefined, clearDraft);
   }
 
   /** 撤回排队中的输入，见 HerdrClient.cancelInput。 */

@@ -1,0 +1,57 @@
+
+[0m[38;2;215;119;87m ▐[0m[38;2;215;119;87m[48;2;0;0;0m▛███▛█   [0m[1mClaude Code [0m[38;2;153;153;153mv2.1.280[0m
+[0m[38;2;215;119;87m▝▜[0m[38;2;215;119;87m[48;2;0;0;0m█████[0m[38;2;215;119;87m█▀  [0m[38;2;153;153;153mSonnet 5 with high effort · API Usage Billing[0m
+[0m[38;2;215;119;87m  ▝▝ ▝▝    [0m[38;2;153;153;153m/private/tmp/project[0m
+
+
+[0m[38;2;80;80;80m[48;2;55;55;55m❯ [0m[38;2;255;255;255m[48;2;55;55;55mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[0m[48;2;55;55;55m                                                                                           [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55myyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy/mod[0m[48;2;55;55;55m [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mel[0m[48;2;55;55;55m                                                                                                                                                                                                                 [0m
+
+[0m[38;2;255;193;7m⏺ Login expired · Please run /login[0m
+
+[0m[38;2;153;153;153m✻ Cogitated for 0s · done 10:50 PM[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[0m[38;2;177;185;249m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔[0m
+   [0m[1m[38;2;177;185;249mSelect model[0m
+   [0m[38;2;153;153;153mSwitch between Claude models. Your pick becomes the default for new sessions. For other/previous model names, specify with --model.[0m
+
+     [0m[38;2;153;153;153m1. [0mDefault (recommended)  [0m[38;2;153;153;153mUse the default model (currently [0m[38;2;215;119;87mOpus 5.5[0m[38;2;153;153;153m (1M context)) · $4/$20 per Mtok[0m
+     [0m[38;2;153;153;153m2. [0mOpus (1M context)      [0m[38;2;215;119;87mOpus 5.5[0m[38;2;153;153;153m with 1M context · Best for everyday, complex tasks · $4/$20 per Mtok[0m
+     [0m[38;2;153;153;153m3. [0mFable                  [0m[38;2;153;153;153mFable 5.1 · Most capable for your hardest and longest-running tasks · $10/$50 per Mtok[0m
+   [0m[38;2;177;185;249m❯[0m [0m[38;2;153;153;153m4. [0m[38;2;78;186;101mSonnet[0m [0m[38;2;78;186;101m✔[0m               [0m[38;2;153;153;153mSonnet 5 · Efficient for routine tasks · $2/$10 per Mtok[0m
+     [0m[38;2;153;153;153m5. [0mHaiku                  [0m[38;2;153;153;153mHaiku 4.5 · Fastest for quick answers · $1/$5 per Mtok[0m
+
+   [0m[38;2;215;119;87m●[0m[38;2;153;153;153m High effort (default)[0m[38;2;80;80;80m ←/→ to adjust[0m
+  
+   [0m[38;2;153;153;153mEnter to set as default · s to use this session only · Esc to cancel[0m

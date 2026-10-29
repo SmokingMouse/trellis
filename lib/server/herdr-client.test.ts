@@ -41,6 +41,12 @@ const snapshot = (revision = 5, protocol = 19): HerdrSnapshot => ({
   agents: [{ pane_id: "w1:p1", name: "worker", state_change_seq: 1 }],
 });
 
+const RULE = "─".repeat(40);
+const claudeScreen = (box: string) => ["⏺ done", "", RULE, box, RULE, "  ⏵⏵ bypass permissions on"].join("\n");
+const EMPTY_CLAUDE_SCREEN = claudeScreen("❯\u00a0\x1b[0m\x1b[7m \x1b[0m");
+const DRAFT_CLAUDE_SCREEN = claudeScreen("❯\u00a0half typed\x1b[0m\x1b[7m \x1b[0m");
+const TRUST_DIALOG_SCREEN = " Quick safety check: trust this folder?\n\n   No, exit\n ❯ Yes, I trust this folder\n\n Enter to confirm · Esc to cancel";
+
 class FakeHerdr {
   readonly dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-"));
   readonly socketPath = path.join(this.dir, "herdr.sock");
@@ -52,6 +58,8 @@ class FakeHerdr {
   waitDelayMs = 0;
   waitFailures = 0;
   snapshotDelayMs = 0;
+  /** pane.read 依次返回的屏幕；只剩一张时一直返回它。默认是 Claude 的空输入框（发前读屏放行）。 */
+  screens: (string | null)[] = [EMPTY_CLAUDE_SCREEN];
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private subscribers = new Set<Bun.Socket<{ buffer: string }>>();
   private listener: Bun.UnixSocketListener<{ buffer: string }>;
@@ -101,6 +109,13 @@ class FakeHerdr {
               };
             } else if (request.method === "session.snapshot") {
               result = { type: "session_snapshot", snapshot: capturedSnapshot };
+            } else if (request.method === "pane.read") {
+              const text = this.screens.length > 1 ? this.screens.shift()! : this.screens[0];
+              if (text === null) {
+                socket.end(`${JSON.stringify({ id: request.id, error: { code: "read_failed", message: "read failed" } })}\n`);
+                return;
+              }
+              result = { type: "pane_read", read: { text } };
             } else if (request.method === "pane.split") {
               result = { type: "pane_info", pane: pane(0) };
             } else {
@@ -543,6 +558,148 @@ describe("HerdrClient", () => {
       expect(server.requests.filter(r => r.method === "pane.send_input")).toHaveLength(0);
     });
   }
+
+  describe("发前读屏核对", () => {
+    const sent = (server: FakeHerdr) => server.requests.filter(r => r.method === "pane.send_input");
+    const keys = (server: FakeHerdr) => server.requests.filter(r => r.method === "pane.send_keys").map(r => r.params.keys);
+
+    test("空输入框：读一次带颜色的可见屏再发", async () => {
+      const server = new FakeHerdr();
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      expect((await client.enqueueInput("w1:p1", "hi", 500)).status).toBe("delivered");
+      const read = server.requests.find(r => r.method === "pane.read");
+      expect(read?.params).toMatchObject({ pane_id: "w1:p1", source: "visible", format: "ansi" });
+      expect(server.requests.findIndex(r => r.method === "pane.read"))
+        .toBeLessThan(server.requests.findIndex(r => r.method === "pane.send_input"));
+    });
+
+    for (const [name, screenText, code] of [
+      ["信任目录对话框（herdr 报 idle）", TRUST_DIALOG_SCREEN, "dialog_open"],
+      ["电脑上有草稿", DRAFT_CLAUDE_SCREEN, "input_draft"],
+      ["读屏失败", null, "screen_unknown"],
+    ] as const) {
+      test(`${name} → 拒发，什么都没打`, async () => {
+        const server = new FakeHerdr();
+        server.screens = [screenText];
+        servers.push(server);
+        const client = clientFor(server);
+        await client.start();
+        await expect(client.enqueueInput("w1:p1", "hi", 500)).rejects.toMatchObject({ name: "HerdrSendRefusedError", code });
+        expect(sent(server)).toHaveLength(0);
+        expect(keys(server)).toHaveLength(0);
+        const receipt = client.inputDeliveries.find(d => d.text === "hi");
+        expect(receipt).toMatchObject({ status: "failed", refusal: { code } });
+      });
+    }
+
+    test("草稿拒发带上原文和可清空的那段", async () => {
+      const server = new FakeHerdr();
+      server.screens = [DRAFT_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.enqueueInput("w1:p1", "hi", 500)).rejects.toMatchObject({
+        refusal: { code: "input_draft", draft: "half typed", clearable: "half typed" },
+      });
+    });
+
+    test("clearDraft 与此刻草稿一致 → 清空、复核为空后再发", async () => {
+      const server = new FakeHerdr();
+      server.screens = [DRAFT_CLAUDE_SCREEN, EMPTY_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      expect((await client.enqueueInput("w1:p1", "hi", 500, "half typed")).status).toBe("delivered");
+      expect(keys(server)).toEqual([["ctrl+k", "ctrl+u"]]);
+      expect(sent(server).map(r => r.params.text)).toEqual(["hi"]);
+    });
+
+    test("clearDraft 与此刻草稿不一致（电脑上又改了）→ 不清不发", async () => {
+      const server = new FakeHerdr();
+      server.screens = [DRAFT_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.enqueueInput("w1:p1", "hi", 500, "something else")).rejects.toMatchObject({ code: "input_draft" });
+      expect(keys(server)).toHaveLength(0);
+      expect(sent(server)).toHaveLength(0);
+    });
+
+    test("清空后复核仍有字 → 拒发", async () => {
+      const server = new FakeHerdr();
+      server.screens = [DRAFT_CLAUDE_SCREEN, DRAFT_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.enqueueInput("w1:p1", "hi", 500, "half typed")).rejects.toMatchObject({ code: "input_draft" });
+      expect(keys(server)).toHaveLength(1);
+      expect(sent(server)).toHaveLength(0);
+    });
+
+    test("排队的消息在送达那一刻才核对：等待期间电脑上开始打字 → 失败回执带 refusal", async () => {
+      const server = new FakeHerdr();
+      server.snapshot.panes = [pane(5, "working")];
+      server.waitDelayMs = 30;
+      server.screens = [DRAFT_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      const receipt = await client.enqueueInput("w1:p1", "queued hi", 500);
+      expect(receipt.status).toBe("queued");
+      const deadline = Date.now() + 1000;
+      while (client.inputDeliveries.some(d => d.status === "queued") && Date.now() < deadline) await Bun.sleep(10);
+      expect(client.inputDeliveries.find(d => d.inputId === receipt.inputId)).toMatchObject({
+        status: "failed", text: "queued hi", refusal: { code: "input_draft", draft: "half typed" },
+      });
+      expect(sent(server)).toHaveLength(0);
+    });
+
+    test("Codex 窗格只查对话框", async () => {
+      const server = new FakeHerdr();
+      server.snapshot.panes = [{ ...pane(5), agent: "codex" }];
+      server.screens = ["› some codex text without a claude box"];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      expect((await client.enqueueInput("w1:p1", "hi", 500)).status).toBe("delivered");
+    });
+  });
+
+  test("多字节字符被 socket 分块切开时不变成 U+FFFD", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-herdr-utf8-"));
+    const socketPath = path.join(dir, "herdr.sock");
+    const text = "─".repeat(50) + "你好";
+    const listener = Bun.listen({
+      unix: socketPath,
+      socket: {
+        data(socket, chunk) {
+          const request = JSON.parse(chunk.toString().split("\n")[0]) as RequestEnvelope;
+          const bytes = Buffer.from(`${JSON.stringify({ id: request.id, result: request.method === "ping"
+            ? { type: "pong", version: "0.8.0", protocol: 19, capabilities: {} }
+            : { type: "pane_read", read: { text } } })}\n`);
+          // 在第一个「─」（3 字节）中间切开分两次写
+          const cut = bytes.indexOf(Buffer.from("─")) + 1;
+          socket.write(bytes.subarray(0, cut));
+          setTimeout(() => socket.end(bytes.subarray(cut)), 5);
+        },
+      },
+    });
+    try {
+      const client = new HerdrClient({ socketPath, requestTimeoutMs: 500 });
+      clients.push(client);
+      const result = await client.request<{ read: { text: string } }>("ping");
+      expect(result).toMatchObject({ type: "pong" });
+      // 绕开 available 门槛：直接测 ping 以外的读也走同一条解码路径
+      const read = await (client as unknown as { requestWithRetry: (m: string, p: object, r: number, t: number) => Promise<{ read: { text: string } }> })
+        .requestWithRetry("pane.read", {}, 0, 500);
+      expect(read.read.text).toBe(text);
+    } finally {
+      listener.stop(true);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   test("an RPC deadline preserves fleet availability and the event connection", async () => {
     const server = new FakeHerdr();

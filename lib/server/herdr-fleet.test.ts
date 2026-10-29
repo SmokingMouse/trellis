@@ -117,6 +117,10 @@ function createHarness(waitDelayMs = 0, options: {
             tab: { tab_id: "w1:t2", workspace_id: "w1", label: String(request.params.label || "new-tab") },
             root_pane: { ...basePane, pane_id: "w1:p3", tab_id: "w1:t2" },
           };
+        } else if (request.method === "pane.read" && request.params.source === "visible") {
+          // 发消息前的读屏核对（HerdrClient.guardSend）：Claude 的空输入框，放行。
+          const rule = "─".repeat(40);
+          result = { type: "pane_read", read: { text: ["⏺ done", rule, "❯\u00a0\x1b[7m \x1b[0m", rule, "  status"].join("\n") } };
         } else if (request.method === "pane.read") {
           // Wire shape captured by review rv_read_shape.ts / rv_readtext.ts.
           result = {
@@ -661,8 +665,8 @@ describe("HerdrFleetService", () => {
     expect(screen.text.split("\n")).toHaveLength(40);
     expect(screen.text.startsWith("line-6\n")).toBeTrue();
     expect(
-      harness.requests.find((request) => request.method === "pane.read")?.params,
-    ).toEqual({ pane_id: "w1:p1", source: "recent", lines: 200 });
+      harness.requests.find((request) => request.method === "pane.read" && request.params.source === "recent")?.params,
+    ).toEqual({ pane_id: "w1:p1", source: "recent", lines: 200, format: "text" });
     // 终端抽屉读 200 行、悬停预览读几行：同一份缓存按请求切尾，越界夹紧。
     const drawer = await readRoute.GET(
       new Request("http://trellis/api/herdr/panes/w1:p1/read?lines=500"),
@@ -674,7 +678,7 @@ describe("HerdrFleetService", () => {
       { params: Promise.resolve({ id: "w1:p1" }) },
     );
     expect(((await peek.json()) as { text: string }).text.split("\n")).toHaveLength(6);
-    expect(harness.requests.filter((request) => request.method === "pane.read")).toHaveLength(1);
+    expect(harness.requests.filter((request) => request.method === "pane.read" && request.params.source === "recent")).toHaveLength(1);
 
     const focusRoute = await import("../../app/api/herdr/panes/[id]/focus/route");
     const focused = await focusRoute.POST(
