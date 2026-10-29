@@ -58,7 +58,8 @@ import type { ChatNode } from "@/lib/types";
 //     自动按序发出；出错 / 被停止则暂停，等「继续发送」。
 //   - 插话：注入正在跑的这一轮（/api/nodes/[id]/as/steer），只有 Agent 服务上的
 //     thread 会话支持；其它会话不显示这个入口，服务端拒绝时自动改为排队。
-//   默认用哪个是偏好（busySendMode），另一个是主按钮旁的次级入口；停止按钮始终在最右。
+//   默认用哪个是偏好（busySendMode），另一个是展开态里主按钮旁的次级入口；没草稿时
+//   主按钮原地变成停止，有草稿时停止退到主按钮左侧小槽（桌面仍在最右）。
 // 草稿按会话存 localStorage：切会话 / 刷新都不丢；发送没落地（服务端没回
 // `created`）时把原文放回输入框。
 
@@ -630,48 +631,86 @@ export function Composer({
         ? "插话暂不支持 @ 引用，可以排队"
         : null;
 
-  // 主按钮三态合一：发送 / 停止 / 加载。停止态 aria-label 固定「停止生成」
-  // （mobile-followup-approval.sh 依赖），手机 ≥44px。运行中有文字时，
-  // 「排队 / 插话」主按钮 + 另一种方式的次级入口排在停止按钮左边。
-  const stopButton = (
+  // 主按钮同位互换（参考 Cindy mobile）：同一颗按钮、同一个位置，按状态换语义——
+  //   空闲            = 发送；
+  //   运行中、没草稿  = 停止（方形图标）；
+  //   运行中、有草稿  = 发送（排队 / 插话按 busySendMode，语义同前），停止退到主按钮
+  //                     左侧一个小槽（手机 36px 视觉 / 44px 热区）；另一种方式（通常是
+  //                     插话）是展开态里主按钮左边的次要入口——手机收起态不放。
+  //   连接中 / 上传中 = 加载。
+  // 图标在同一格里交叉淡变 + 缩放（globals.css .morph-icon，150ms）。停止态
+  // aria-label 固定「停止生成」（mobile-followup-approval.sh 依赖），手机 ≥44px。
+  // 桌面布局不变：有草稿时停止仍排在最右（md:order-last）。
+  const stopNow = streaming && !hasDraft;
+  const mainIcon: "send" | "stop" | "queue" | "steer" | "loading" =
+    (stopNow && isPending) || (!stopNow && (att.hasUploading || steering))
+      ? "loading"
+      : stopNow
+        ? "stop"
+        : streaming
+          ? busyPrimary
+          : "send";
+  const mainTip = stopNow
+    ? isPending
+      ? "正在建立连接…"
+      : "停止生成"
+    : att.hasUploading
+      ? "等待附件上传…"
+      : streaming
+        ? (steerBlocked(busyPrimary) ?? busyMeta[busyPrimary].tip)
+        : "发送";
+  const mainButton = (
+    <Tooltip
+      content={mainTip}
+      shortcut={stopNow ? (isPending ? undefined : "Esc") : sendKey === "enter" ? "↩" : ["⌘", "↩"]}
+      side="top"
+    >
+      <Button
+        variant={stopNow ? "secondary" : "primary"}
+        size="icon"
+        aria-label={stopNow ? "停止生成" : streaming ? busyMeta[busyPrimary].aria : "发送"}
+        data-composer-primary={
+          stopNow ? (isPending ? "loading" : "stop") : streaming ? undefined : att.hasUploading ? "loading" : "send"
+        }
+        data-composer-busy-send={streaming && !stopNow ? busyPrimary : undefined}
+        onClick={() => (stopNow ? abortStream(targetNode!.id) : submit(streaming ? busyPrimary : undefined))}
+        disabled={stopNow ? isPending : !canSend}
+        className="shrink-0"
+      >
+        <span className="morph-icon" aria-hidden>
+          <Icon icon={ArrowUp} size="md" selected data-active={mainIcon === "send" ? "" : undefined} />
+          <Square size={11} strokeWidth={0} fill="currentColor" data-active={mainIcon === "stop" ? "" : undefined} />
+          <Icon icon={ListPlus} size="md" selected data-active={mainIcon === "queue" ? "" : undefined} />
+          <Icon icon={CornerDownRight} size="md" selected data-active={mainIcon === "steer" ? "" : undefined} />
+          {/* 转圈只在加载态挂（常驻会一直跑 animate-spin） */}
+          <span className="inline-grid" data-active={mainIcon === "loading" ? "" : undefined}>
+            {mainIcon === "loading" && <Spinner size="sm" label={null} className="text-current" />}
+          </span>
+        </span>
+      </Button>
+    </Tooltip>
+  );
+  // 有草稿时退到主按钮左侧的小停止槽。手机：44px 透明热区里一枚 36px 圆形；
+  // 桌面：和原来一样的描边图标按钮，排在最右。
+  const stopSlot = streaming && hasDraft && (
     <Tooltip content={isPending ? "正在建立连接…" : "停止生成"} shortcut={isPending ? undefined : "Esc"} side="top">
       <Button
         variant="secondary"
         size="icon"
         aria-label="停止生成"
         data-composer-primary={isPending ? "loading" : "stop"}
+        data-composer-stop-slot=""
         onClick={() => abortStream(targetNode!.id)}
         disabled={isPending}
-        className="shrink-0"
+        className="shrink-0 md:order-last max-md:border-0 max-md:bg-transparent max-md:active:bg-transparent"
       >
-        {isPending ? (
-          <Spinner size="sm" label={null} />
-        ) : (
-          <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden />
-        )}
-      </Button>
-    </Tooltip>
-  );
-  const busyPrimaryButton = (
-    <Tooltip
-      content={att.hasUploading ? "等待附件上传…" : steerBlocked(busyPrimary) ?? busyMeta[busyPrimary].tip}
-      shortcut={sendKey === "enter" ? "↩" : ["⌘", "↩"]}
-      side="top"
-    >
-      <Button
-        variant="primary"
-        size="icon"
-        aria-label={busyMeta[busyPrimary].aria}
-        data-composer-busy-send={busyPrimary}
-        onClick={() => submit(busyPrimary)}
-        disabled={!canSend}
-        className="shrink-0"
-      >
-        {att.hasUploading || steering ? (
-          <Spinner size="sm" label={null} className="text-current" />
-        ) : (
-          <Icon icon={busyMeta[busyPrimary].icon} size="md" selected />
-        )}
+        <span className="md:contents max-md:grid max-md:size-9 max-md:place-items-center max-md:rounded-full max-md:border max-md:border-line-strong max-md:bg-surface">
+          {isPending ? (
+            <Spinner size="sm" label={null} />
+          ) : (
+            <Square size={10} strokeWidth={0} fill="currentColor" aria-hidden />
+          )}
+        </span>
       </Button>
     </Tooltip>
   );
@@ -687,39 +726,17 @@ export function Composer({
         className="shrink-0"
       >
         <Icon icon={busyMeta[busySecondary].icon} size="sm" />
-        {/* 手机收起的单行里只留图标（44px 热区由 Button 的 max-md 基线保证） */}
-        {!compact && busyMeta[busySecondary].label}
+        {busyMeta[busySecondary].label}
       </Button>
     </Tooltip>
   );
-  const primary = streaming ? (
+  // 槽位固定（false 占位），主按钮在各状态间是同一个 fiber，图标才能原地过渡。
+  const primary = (
     <>
-      {hasDraft && busySecondaryButton}
-      {hasDraft && busyPrimaryButton}
-      {stopButton}
+      {streaming && hasDraft && !compact && busySecondaryButton}
+      {stopSlot}
+      {mainButton}
     </>
-  ) : (
-    <Tooltip
-      content={att.hasUploading ? "等待附件上传…" : "发送"}
-      shortcut={sendKey === "enter" ? "↩" : ["⌘", "↩"]}
-      side="top"
-    >
-      <Button
-        variant="primary"
-        size="icon"
-        aria-label="发送"
-        data-composer-primary={att.hasUploading ? "loading" : "send"}
-        onClick={() => submit()}
-        disabled={!canSend}
-        className="shrink-0"
-      >
-        {att.hasUploading ? (
-          <Spinner size="sm" label={null} className="text-current" />
-        ) : (
-          <Icon icon={ArrowUp} size="md" selected />
-        )}
-      </Button>
-    </Tooltip>
   );
 
   const attachButton = (

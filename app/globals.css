@@ -1411,3 +1411,92 @@ html, body {
   ::view-transition-old(*),
   ::view-transition-new(*) { animation: none !important; }
 }
+||||||| 548de5c
+
+/* ── 手机质感改版 · 内容层（2026-10-30）────────────────────────────────
+   1) .ui-collapse：展开 / 折叠的高度过渡（components/ui/Collapse.tsx）。
+      grid-template-rows 0fr → 1fr 让浏览器自己量高度，不用 JS 测 scrollHeight；
+      子元素 min-height:0 + 过渡期 overflow:hidden 才能被压到 0。落定后
+      （data-settled）放开 overflow，免得裁掉焦点环 / 阴影。 */
+.ui-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-base) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.ui-collapse[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.ui-collapse > * { min-height: 0; overflow: hidden; }
+.ui-collapse[data-settled] > * { overflow: visible; }
+/* 与之同步的箭头：rotate 走同一档时长与曲线 */
+.ui-collapse-chevron {
+  /* Tailwind v4 的 rotate-90 写的是独立 rotate 属性，不是 transform */
+  transition: rotate var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+
+/* 2) 运行状态文字（TurnCard RunLine，参考 Cindy WorkingStatusText）：
+      换文案时旧字向下 3px 淡出、新字从下方 3px 升起。 */
+@keyframes status-text-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes status-text-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(3px); }
+}
+.status-text-in { animation: status-text-in var(--dur-fast) var(--ease-out); }
+.status-text-out { animation: status-text-out var(--dur-fast) var(--ease-in) forwards; }
+
+/* 3) Codex 式「文字微光」：一道亮带从左扫到右，1.6s 一圈。
+      底色 = 弱化墨色，亮带 = 强墨色，随明暗 / 皮肤变量走。 */
+@keyframes shimmer-text {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+.shimmer-text {
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--ink-muted) 0%,
+    var(--ink-muted) 40%,
+    var(--ink-strong) 50%,
+    var(--ink-muted) 60%,
+    var(--ink-muted) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer-text 1.6s linear infinite;
+}
+
+/* 4) 主按钮图标同位交叉淡变（Composer 发送 ↔ 停止 ↔ 排队）：
+      所有候选图标叠在同一格，只有 data-active 的那枚显形。 */
+.morph-icon { display: inline-grid; place-items: center; }
+.morph-icon > * {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.morph-icon > [data-active] { opacity: 1; transform: none; }
+
+/* 5) 新轮次入场（上浮 6px 淡入）在 LinearThreadView 里用 WAAPI 播：乐观占位换成
+      真节点时要从同一进度接着播，CSS 类做不到。 */
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-collapse,
+  .ui-collapse-chevron,
+  .morph-icon > * { transition: none; }
+  .status-text-in,
+  .status-text-out { animation: none; }
+  .status-text-out { opacity: 0; }
+  /* 微光降级为静态弱化墨色 */
+  .shimmer-text {
+    animation: none;
+    background: none;
+    color: var(--ink-muted);
+  }
+}
