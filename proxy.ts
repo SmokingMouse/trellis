@@ -30,6 +30,10 @@ function isPublicPath(pathname: string): boolean {
   return (
     pathname === "/login" ||
     pathname === "/api/login" ||
+    // Passkey 登录的两步（发 challenge / 验签名）本身就是登录入口，必须在闸前。
+    // 只开这两条精确路径；注册、列表、删除（/api/passkeys/*）全在闸后。
+    pathname === "/api/login/passkey/options" ||
+    pathname === "/api/login/passkey/verify" ||
     pathname === "/api/hooks/claude" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||

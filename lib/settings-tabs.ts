@@ -20,6 +20,7 @@ export type SettingsTabIconKey =
   | "server"
   | "sliders"
   | "shield-check"
+  | "key-round"
   | "circle-arrow-up";
 
 /** 导航分组。顺序即渲染顺序。 */
@@ -100,6 +101,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
     group: "system",
     icon: "shield-check",
     title: "工具审批的「本会话 / 所有会话始终允许」规则：查看与撤销",
+  },
+  {
+    segment: "security",
+    label: "登录与 Passkey",
+    group: "system",
+    icon: "key-round",
+    title: "用 Face ID / 指纹登录：添加、查看、删除 Passkey（口令登录始终可用作兜底）",
   },
   {
     segment: "prefs",

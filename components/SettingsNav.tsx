@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CircleArrowUp,
   Cpu,
+  KeyRound,
   MessagesSquare,
   Server,
   Share2,
@@ -33,6 +34,7 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   server: Server,
   sliders: SlidersHorizontal,
   "shield-check": ShieldCheck,
+  "key-round": KeyRound,
   "circle-arrow-up": CircleArrowUp,
 };
 
