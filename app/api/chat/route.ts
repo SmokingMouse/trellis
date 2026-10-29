@@ -58,6 +58,8 @@ import {
 import { isKnownAttachmentMime, isTextMime } from "@/lib/attachments";
 import { sessionCwd } from "@/lib/paths";
 import type { NodeAttachment } from "@/lib/types";
+import { buildNodeRefContext } from "@/lib/server/node-refs";
+import { parseNodeRefs, readableNodeRefs } from "@/lib/node-refs";
 
 const VALID_MODES: Mode[] = ["chat", "project"];
 function isMode(s: unknown): s is Mode {
@@ -396,7 +398,8 @@ export async function POST(req: Request) {
         const { session, node } = createSessionWithRoot({
           sessionId: trellisSessionId,
           nodeId,
-          title: body.question.slice(0, 60),
+          // `@` 引用标记不进标题：取去掉标记的正文；只有引用没写字时用可读的 `[@标题 #N]`。
+          title: (parseNodeRefs(body.question).text || readableNodeRefs(body.question)).slice(0, 60),
           question: body.question,
           now,
           mode: resolvedMode,
@@ -519,12 +522,23 @@ export async function POST(req: Request) {
   // for topic labeling so an inlined 100KB CSV doesn't pollute the label
   // prompt. Injected only into THIS turn (matches images: not re-sent in
   // folded history; project/B-fork resume keeps it in the CLI session).
+  //
+  // `@` 引用其他会话 / 节点（lib/node-refs.ts）：落库的 question 里带着
+  // `[@标题 #N](trellis://node/<sid>/<nid>)` 标记 —— 这里按 id 现取被引用节点
+  // （不信客户端正文；不存在 / 已删 / 不可见的引用只留一句「已忽略」），模型看到的
+  // 问题里标记换成可读的 `[@标题 #N]`，内容块追加在附件说明之后。root / branch /
+  // retry 都经过这里（retry 从 DB 读回同一 question，引用随之重新解析），而
+  // questionForLLM 同时喂 Agent 服务（startProjectRun）和 legacy CLI（llm.stream），
+  // 所以两条路径注入的是同一份上下文。
+  const nodeRefCtx = buildNodeRefContext(questionForLLM, nodeId);
+  questionForLLM = nodeRefCtx.readable;
   const questionForTopic = questionForLLM;
   questionForLLM += buildFileAttachmentSuffix(
     nodeId,
     fileAttachments,
     mode !== "chat" || chatEnhanced,
   );
+  questionForLLM += nodeRefCtx.suffix;
   let asFallback = false;
   const binding = resolveSessionBinding(trellisSessionId);
   if (binding.type === "pane") return Response.json({ error: "pane binding requires herdr-bridge" }, { status: 409 });

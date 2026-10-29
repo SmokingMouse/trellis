@@ -1,4 +1,6 @@
 "use client";
+import { parseNodeRefs } from "@/lib/node-refs";
+import { NodeRefCards } from "./NodeRefChips";
 import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
@@ -566,6 +568,7 @@ function QuestionBlock({
     );
   }
 
+  const questionText = parseNodeRefs(question).text;
   return (
     <div
       data-turn-question=""
@@ -589,8 +592,10 @@ function QuestionBlock({
         {unread && <StatusDot tone="unread" label="未读" />}
       </span>
       <div className="text-reading text-ink-strong leading-relaxed whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] min-w-0">
-        {question}
+        {questionText}
       </div>
+      {/* `@` 引用其他会话 / 节点：正文里的标记剥掉，渲染成可点击的引用卡 */}
+      <NodeRefCards question={question} />
       {attachments.length > 0 && (
         <div className="mt-2">
           <AttachmentPreview attachments={attachments} readOnly />

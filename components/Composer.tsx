@@ -25,6 +25,9 @@ import { sendHint } from "@/lib/send-key";
 import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import { useAgentMentions, splitMention } from "@/hooks/useAgentMentions";
+import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
+import { appendNodeRefs, MAX_NODE_REFS, removeMentionQuery, type NodeRef } from "@/lib/node-refs";
+import { NodeRefChips } from "./NodeRefChips";
 import { providerFamily } from "@/lib/llm";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
@@ -73,6 +76,34 @@ function writeDraft(key: string | null, value: string): void {
   }
 }
 
+// `@` 引用的 chip 跟草稿一起按会话存（同一 key 加 `:refs` 后缀），切会话 / 刷新不丢。
+function readDraftRefs(key: string | null): NodeRef[] {
+  if (!key) return [];
+  try {
+    const raw = localStorage.getItem(`${key}:refs`);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (r): r is NodeRef =>
+          !!r && typeof r === "object" && typeof r.sessionId === "string" && typeof r.nodeId === "string" && typeof r.title === "string",
+      )
+      .slice(0, MAX_NODE_REFS);
+  } catch {
+    return [];
+  }
+}
+
+function writeDraftRefs(key: string | null, refs: NodeRef[]): void {
+  if (!key) return;
+  try {
+    if (refs.length > 0) localStorage.setItem(`${key}:refs`, JSON.stringify(refs));
+    else localStorage.removeItem(`${key}:refs`);
+  } catch {
+    /* best-effort，同草稿 */
+  }
+}
+
 export function Composer({
   targetNode,
   placeholder,
@@ -108,6 +139,8 @@ export function Composer({
   banner?: ReactNode;
 }) {
   const [text, setText] = useState("");
+  // `@` 引用的其他会话 / 节点（lib/node-refs.ts），发送时序列化成标记追加到问题末尾。
+  const [refs, setRefs] = useState<NodeRef[]>([]);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const streamBranch = useSessionStore((s) => s.streamBranch);
@@ -164,6 +197,12 @@ export function Composer({
   // its usage. Cleared on the next keystroke.
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
   const matchedCommands = matchCommands(text);
+  // `@` 引用会话 / 节点：与 `/` 补全互斥（有命令 / 技能命中时不出）；与 @agent 同屏。
+  const nodeRefs = useNodeRefMentions(
+    text,
+    matchedCommands.length === 0 && matchedSkills.length === 0 && refs.length < MAX_NODE_REFS,
+  );
+  const refItems = nodeRefs.items;
 
   // Drafts: `loadedKey` is the session the current text belongs to. Swapping
   // it during render (not in an effect) means text and key always change in
@@ -174,10 +213,14 @@ export function Composer({
   if (loadedKey !== draftKey) {
     setLoadedKey(draftKey);
     setText(readDraft(draftKey));
+    setRefs(readDraftRefs(draftKey));
   }
   useEffect(() => {
     writeDraft(loadedKey, text);
   }, [text, loadedKey]);
+  useEffect(() => {
+    writeDraftRefs(loadedKey, refs);
+  }, [refs, loadedKey]);
   // For async callbacks (send-failure refill) to see the live session.
   const loadedKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -247,13 +290,27 @@ export function Composer({
     setText(`@${slug} `);
     ref.current?.focus();
   };
+  const pickRef = (item: RefPickItem) => {
+    const picked = refFromItem(item);
+    // 会话还没有已完成节点：展开看看（列表为空即不可引用）。
+    if (!picked) return nodeRefs.toggleExpand(item.session.sessionId);
+    setRefs((cur) =>
+      cur.some((r) => r.nodeId === picked.nodeId) ? cur : [...cur, picked].slice(0, MAX_NODE_REFS),
+    );
+    setText((cur) => removeMentionQuery(cur));
+    nodeRefs.collapse();
+    ref.current?.focus();
+  };
+  const removeRef = (nodeId: string) => setRefs((cur) => cur.filter((r) => r.nodeId !== nodeId));
   // agents 与 commands/skills 互斥出现（`@` vs `/`），所以三者共用一个平坦的
-  // 索引空间不会串味：有 agent 时另两个必为空，反之亦然。
+  // 索引空间不会串味：有 agent 时另两个必为空，反之亦然。`@` 引用的会话行排在
+  // agents 之后（同样只在没有命令 / 技能命中时出现）。
   const slashNav = useSlashNav(
-    matchedCommands.length + matchedSkills.length + matchedAgents.length,
+    matchedCommands.length + matchedSkills.length + matchedAgents.length + refItems.length,
     text,
     (i) => {
-      if (matchedAgents.length) return pickAgent(matchedAgents[i].slug);
+      if (i < matchedAgents.length) return pickAgent(matchedAgents[i].slug);
+      if (matchedAgents.length || refItems.length) return pickRef(refItems[i - matchedAgents.length]);
       return i < matchedCommands.length
         ? pickCommand(matchedCommands[i])
         : pickSkill(matchedSkills[i - matchedCommands.length].name);
@@ -339,6 +396,7 @@ export function Composer({
 
   const resetAfterSend = () => {
     setText("");
+    setRefs([]);
     att.clear();
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
@@ -389,11 +447,12 @@ export function Composer({
 
   const submit = (busyMode?: BusySendMode) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // 只有引用、没写字也能发（「看看这个」式的引用本身就是问题）。
+    if (!trimmed && refs.length === 0) return;
     // C1: intercept bare Trellis commands BEFORE any send-to-LLM path — they
     // don't need a target node (/new, /switch work even mid-stream). Skill
     // commands aren't in the registry → parseCommand null → fall through.
-    const parsed = parseCommand(trimmed);
+    const parsed = refs.length === 0 ? parseCommand(trimmed) : null;
     if (parsed) {
       runCommand(parsed.command, parsed.args);
       return;
@@ -403,30 +462,36 @@ export function Composer({
       att.doneAttachments.length > 0 ? att.doneAttachments : undefined;
     if (isStreaming && targetNode) {
       const mode = busyMode ?? (steerAvailable ? busySendMode : "queue");
-      // 插话只带文字、不带 @提及（提及是单独一轮的定向委派）。
-      if (mode === "steer" && steerAvailable && !attachments && !splitMention(trimmed)[0]) {
+      // 插话只带文字、不带 @提及（提及是单独一轮的定向委派）；带 `@` 引用的也改排队
+      // （插话直接注入 Agent 服务，不经 chat 路由的引用注入）。
+      if (mode === "steer" && steerAvailable && !attachments && !splitMention(trimmed)[0] && refs.length === 0) {
         void steer(trimmed, targetNode.id);
       } else {
-        enqueueMessage(trimmed, attachments ?? []);
+        // 排队消息带着引用标记，出队时照常经 chat 路由解析注入。
+        enqueueMessage(appendNodeRefs(trimmed, refs), attachments ?? []);
         resetAfterSend();
       }
       return;
     }
+    const sentRefs = refs;
     setText("");
+    setRefs([]);
     // This composer stays mounted after submit — clear so the next turn
     // starts fresh.
     att.clear();
     // S88: 剥出开头的 `@slug` —— slug 走 body 字段，剩下的才是问题本身。
+    // `@` 引用：标记追加在问题末尾（lib/node-refs.ts），服务端按 id 现取内容注入。
     const [mentionAgentSlug, question] = splitMention(trimmed);
     const sent = targetNode
-      ? streamBranch(targetNode.id, question, null, { attachments, mentionAgentSlug, fork })
-      : streamRoot(trimmed, { attachToCurrentSession: true, attachments });
+      ? streamBranch(targetNode.id, appendNodeRefs(question, sentRefs), null, { attachments, mentionAgentSlug, fork })
+      : streamRoot(appendNodeRefs(trimmed, sentRefs), { attachToCurrentSession: true, attachments });
     // Never acknowledged → hand the text back, unless the user has already
     // started something new or moved to another session meanwhile.
     const key = loadedKey;
     void sent.then((ok) => {
       if (ok || loadedKeyRef.current !== key) return;
       setText((cur) => (cur.trim() ? cur : text));
+      setRefs((cur) => (cur.length > 0 ? cur : sentRefs));
     });
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
@@ -463,7 +528,7 @@ export function Composer({
   const compact = mobileCompact && !mobileExpanded;
   const noTarget = !targetNode && !emptyExternal;
   const streaming = Boolean(isStreaming && targetNode);
-  const hasDraft = !!text.trim();
+  const hasDraft = !!text.trim() || refs.length > 0;
   const canSend =
     hasDraft && !noTarget && !att.hasUploading && !externalEnded && !steering;
   const targetLabel = targetNode
@@ -482,7 +547,7 @@ export function Composer({
       : busyPrimary === "steer"
         ? "回复进行中：发送会插话进这一轮（可改为排队）· Esc 停止"
         : `回复进行中：发送会排队，本轮结束后自动发出${steerAvailable ? "（可改为插话）" : ""} · Esc 停止`
-    : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · 可粘贴 / 拖入图片与文件");
+    : sendHint(sendKey) + (compact ? "" : " · 输入 / 调出命令 · @ 引用会话 · 可粘贴 / 拖入图片与文件");
 
   const status = queueStatus(queue, queueTarget);
   const queueItems: ComposerQueueItem[] = queue.items.map((item, i) => ({
@@ -532,7 +597,9 @@ export function Composer({
   const steerBlocked = (mode: BusySendMode) =>
     mode === "steer" && (att.doneAttachments.length > 0 || att.pending.length > 0)
       ? "插话暂不支持附件，可以排队"
-      : null;
+      : mode === "steer" && refs.length > 0
+        ? "插话暂不支持 @ 引用，可以排队"
+        : null;
 
   // 主按钮三态合一：发送 / 停止 / 加载。停止态 aria-label 固定「停止生成」
   // （mobile-followup-approval.sh 依赖），手机 ≥44px。运行中有文字时，
@@ -653,7 +720,8 @@ export function Composer({
       suggestions={
         (matchedCommands.length > 0 ||
           matchedSkills.length > 0 ||
-          matchedAgents.length > 0) && (
+          matchedAgents.length > 0 ||
+          refItems.length > 0) && (
           <SkillPickerList
             skills={matchedSkills}
             onPick={pickSkill}
@@ -661,6 +729,11 @@ export function Composer({
             onPickCommand={pickCommand}
             agents={matchedAgents}
             onPickAgent={pickAgent}
+            refItems={refItems}
+            onPickRef={pickRef}
+            refExpandedId={nodeRefs.expandedId}
+            refExpandedLoading={nodeRefs.expandedLoading}
+            onToggleRefExpand={nodeRefs.toggleExpand}
             activeIndex={slashNav.active}
             skillPrefix={skillPrefix}
           />
@@ -674,6 +747,7 @@ export function Composer({
       onMobileExpandedChange={setMobileExpanded}
       keepExpanded={Boolean(
         text.trim() ||
+          refs.length > 0 ||
           att.pending.length > 0 ||
           att.doneAttachments.length > 0 ||
           att.notice ||
@@ -683,9 +757,12 @@ export function Composer({
       focusToken={focusToken}
       banner={banner}
       attachments={
-        att.pending.length > 0 && (
-          <div className="px-3 pt-2.5">
-            <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+        (refs.length > 0 || att.pending.length > 0) && (
+          <div className="px-3 pt-2.5 flex flex-col gap-2">
+            <NodeRefChips refs={refs} onRemove={removeRef} />
+            {att.pending.length > 0 && (
+              <AttachmentPreview pending={att.pending} onRemove={att.remove} />
+            )}
           </div>
         )
       }

@@ -1,7 +1,7 @@
 import type { Session } from "./types";
 
 /** 所有会话导航查询共用的来源范围；列名只允许查询内部的固定标识符。 */
-const sidebarSessionKinds = ["user", "lark", "herdr", "task"] as const;
+export const sidebarSessionKinds = ["user", "lark", "herdr", "task"] as const;
 export function sessionSourcePredicate(column: "kind" | "s.kind" = "kind"): string {
   return `${column} IN (${sidebarSessionKinds.map(kind => `'${kind}'`).join(", ")})`;
 }

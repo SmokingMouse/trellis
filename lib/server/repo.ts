@@ -11,6 +11,7 @@ import { codexRolloutExists, deleteCodexRollout } from "./codex-fork";
 import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
+import { readableNodeRefs } from "@/lib/node-refs";
 import type { RecentChainRow } from "@/lib/recent";
 import {
   BOOKMARK_QUESTION_LIMIT,
@@ -1713,7 +1714,8 @@ export function buildHistoryForNode(
       response = `[此处仅保留新节点关注的原文片段]\n\n${self.parent_anchor_text}`;
     }
     if (response) buffer.push({ role: "assistant", content: response });
-    buffer.push({ role: "user", content: cur.question });
+    // `@` 引用标记的 trellis:// 链接对模型是噪音，折叠历史里换成可读的 `[@标题 #N]`。
+    buffer.push({ role: "user", content: readableNodeRefs(cur.question) });
 
     curId = cur.parent_id;
     isImmediateParent = false;

@@ -1,5 +1,6 @@
 import type { LLMProvider, StreamEvent, StreamRequest } from "./types";
 import { pickResponse } from "./mock-responses";
+import { NODE_REF_LEAD } from "@/lib/node-refs";
 
 const CHUNK_MIN = 4;
 const CHUNK_MAX = 10;
@@ -12,7 +13,16 @@ export const mockProvider: LLMProvider = {
     parentAnchor,
     signal,
   }: StreamRequest): AsyncGenerator<StreamEvent> {
-    const response = pickResponse(question, history, parentAnchor);
+    // `@` 引用的上下文块（lib/node-refs.ts）不参与关键词匹配，免得被引用内容
+    // 触发预设回答；回答末尾回显收到了哪些引用，供隔离实例 / e2e 验证注入链路。
+    const refAt = question.indexOf(NODE_REF_LEAD);
+    const ownQuestion = refAt >= 0 ? question.slice(0, refAt) : question;
+    const refTitles = [...question.matchAll(/<referenced_node [^>]*title="([^"]*)"/g)].map((m) => m[1]);
+    const response =
+      pickResponse(ownQuestion, history, parentAnchor) +
+      (refTitles.length > 0
+        ? `\n\n（mock：本轮收到 ${refTitles.length} 个引用节点上下文：${refTitles.join("、")}）`
+        : "");
     let outputChars = 0;
 
     for (const chunk of chunkText(response, CHUNK_MIN, CHUNK_MAX)) {
