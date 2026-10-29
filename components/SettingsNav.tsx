@@ -9,6 +9,7 @@ import {
   MessagesSquare,
   Server,
   Share2,
+  ShieldCheck,
   SlidersHorizontal,
   SquareTerminal,
   type LucideIcon,
@@ -31,6 +32,7 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   "square-terminal": SquareTerminal,
   server: Server,
   sliders: SlidersHorizontal,
+  "shield-check": ShieldCheck,
   "circle-arrow-up": CircleArrowUp,
 };
 

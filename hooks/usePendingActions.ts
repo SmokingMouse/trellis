@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import type { PendingItem } from "@/lib/pending";
+import type { ApprovalScope } from "@/lib/approval-rules";
 import { openPendingItem } from "@/lib/pending-navigation";
 
 // 「等你处理」的数据源与两个动作（去处理 / 允许·拒绝），PendingBar 与首页共用。
@@ -27,10 +28,11 @@ export function usePendingActions() {
       setError(error instanceof Error ? error.message : "跳转失败，请重试。");
     }
   };
-  const decide = async (item: PendingItem, allow: boolean) => {
+  // scope：审批三档作用域（缺省仅本次）；session/global 由服务端落规则。
+  const decide = async (item: PendingItem, allow: boolean, scope: ApprovalScope = "once") => {
     setError("");
     const result = await useSessionStore.getState().respondToInteraction(item.nodeId, item.interaction.toolUseId,
-      allow ? { behavior: "allow", updatedInput: item.interaction.input } : { behavior: "deny", message: "用户拒绝了本次工具执行" });
+      allow ? { behavior: "allow", updatedInput: item.interaction.input, scope } : { behavior: "deny", message: "用户拒绝了本次工具执行" });
     if (!result.ok && result.reason !== "stale") setError("处理失败，请重试。");
   };
   return { items, error, jump, decide };

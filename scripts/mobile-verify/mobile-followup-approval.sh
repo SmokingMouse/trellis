@@ -493,17 +493,20 @@ wait_for_js "second approval card in viewport" "(() => { const r=document.queryS
 ab eval --stdin <<'JS'
 (() => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
-  const names = ['permission-allow', 'permission-deny', 'permission-always'];
+  const names = ['permission-scope', 'permission-allow', 'permission-deny'];
   const rects = names.map((name) => {
-    const button = document.querySelector(`[data-mobile-target="${name}"]`);
-    const rect = button?.getBoundingClientRect();
+    const el = document.querySelector(`[data-mobile-target="${name}"]`);
+    const rect = el?.getBoundingClientRect();
     assert(rect && rect.width >= 44 && rect.height >= 44, `${name} below 44px`);
     return { name, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
   });
-  assert(rects[1].top > rects[0].bottom, 'deny follows primary action');
-  assert(rects[2].top > rects[1].bottom, 'always is last');
-  assert(rects[2].width < rects[0].width, 'always is narrower than primary');
-  assert(!document.querySelector('[data-mobile-target=permission-always]').className.includes('bg-accent'), 'always has no accent background');
+  assert(rects[1].top > rects[0].bottom, 'primary follows scope selector');
+  assert(rects[2].top > rects[1].bottom, 'deny follows primary action');
+  for (const seg of document.querySelectorAll('[data-mobile-target=permission-scope] [role=radio]')) {
+    const r = seg.getBoundingClientRect();
+    assert(r.height >= 44, `scope segment ${seg.textContent} below 44px`);
+    assert(!seg.className.includes('bg-accent'), 'scope segment has no accent background');
+  }
   const rail = document.querySelector('[data-safe-area="linear-composer"]');
   assert(rail?.dataset.composerHidden === 'false', `waiting Composer hidden=${rail?.dataset.composerHidden}`);
   return rects;
@@ -621,10 +624,10 @@ ab eval --stdin <<'JS'
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   assert(!document.querySelector('[data-mobile-waiting-banner]'), 'waiting banner leaked onto desktop');
   const primary = document.querySelector('[data-mobile-target=permission-allow]');
-  const always = document.querySelector('[data-mobile-target=permission-always]');
+  const deny = document.querySelector('[data-mobile-target=permission-deny]');
   assert(primary.textContent.trim() === '允许一次', 'primary copy');
-  assert(primary.getBoundingClientRect().width > always.getBoundingClientRect().width, 'primary is wider');
-  assert(primary.className.includes('bg-accent ') && !always.className.includes('bg-accent'), 'action hierarchy');
+  assert(primary.getBoundingClientRect().width > deny.getBoundingClientRect().width, 'primary is wider');
+  assert(primary.className.includes('bg-accent ') && !deny.className.includes('bg-accent'), 'action hierarchy');
   assert(document.querySelector('[data-pending-bar=desktop]'), 'desktop pending bar missing');
   return true;
 })()

@@ -160,6 +160,9 @@ export type ToolCall = {
   // name is a historical misnomer kept to avoid a data migration (it is
   // serialized into nodes.tool_calls_json).
   agent?: TaskMeta;
+  // 审批三档作用域：这次调用没弹卡、是按已授权规则（本会话 / 所有会话）自动
+  // 放行的。UI 在行尾挂「按规则允许」，不让自动放行静默发生。
+  approval?: import("./approval-rules").ToolCallApproval;
 };
 
 // 预计算的工具调用统计——GET /api/sessions/[id] 用它替代完整 toolCalls 数组

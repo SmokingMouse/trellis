@@ -19,6 +19,7 @@ export type SettingsTabIconKey =
   | "square-terminal"
   | "server"
   | "sliders"
+  | "shield-check"
   | "circle-arrow-up";
 
 /** 导航分组。顺序即渲染顺序。 */
@@ -92,6 +93,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
     group: "system",
     icon: "server",
     title: "Trellis 服务所在机器的 CPU、内存与工作目录磁盘状态",
+  },
+  {
+    segment: "approvals",
+    label: "已授权规则",
+    group: "system",
+    icon: "shield-check",
+    title: "工具审批的「本会话 / 所有会话始终允许」规则：查看与撤销",
   },
   {
     segment: "prefs",

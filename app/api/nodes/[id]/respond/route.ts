@@ -1,6 +1,7 @@
 import { resolveInteraction } from "@/lib/server/run-bus";
 import { isThreadNode, respondProject } from "@/lib/server/as-project";
 import { pendingSnapshot } from "@/lib/server/pending";
+import { parseApprovalScope } from "@/lib/approval-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,10 @@ export async function POST(
     behavior?: unknown;
     updatedInput?: unknown;
     message?: unknown;
-    // 权限确认:true + allow = 本轮内同名工具不再弹卡。
+    // 审批三档作用域:"once"(缺省) | "session" | "global"。session/global + allow
+    // = 落一条规则,之后同键工具在发起审批前自动放行(见 lib/server/approval-rules.ts)。
+    scope?: unknown;
+    // 旧客户端字段:true 等价 scope="session"(部署窗口内的旧页面)。
     alwaysAllowTool?: unknown;
   };
   try {
@@ -48,9 +52,11 @@ export async function POST(
     );
   }
 
+  const scope = parseApprovalScope(body);
+
   if (isThreadNode(id)) {
     try {
-      const result = await respondProject(id, { ...body, toolUseId: body.toolUseId, behavior: body.behavior });
+      const result = await respondProject(id, { toolUseId: body.toolUseId, behavior: body.behavior, updatedInput: body.updatedInput, scope });
       return Response.json({ ...result, pending: pendingSnapshot() });
     }
     catch (error) { return Response.json({ error: String(error), pending: pendingSnapshot() }, { status: 409 }); }
@@ -63,7 +69,7 @@ export async function POST(
       updatedInput: body.updatedInput,
       message: typeof body.message === "string" ? body.message : undefined,
     },
-    { alwaysAllowTool: body.alwaysAllowTool === true },
+    { scope },
   );
 
   switch (result) {
