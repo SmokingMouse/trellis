@@ -1,8 +1,9 @@
 "use client";
-import { File, FileText, FileType, Globe, Image, type LucideIcon } from "lucide-react";
+import { File, FileDiff, FileText, FileType, Globe, Image, type LucideIcon } from "lucide-react";
 import { Icon } from "@/components/ui";
 import type { ChatNode } from "@/lib/types";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useDiffReviewStore } from "@/stores/diffReviewStore";
 import { generatedFilesFromNode, previewKind } from "@/lib/generated-files";
 
 const KIND_ICON: Record<string, LucideIcon> = {
@@ -22,6 +23,9 @@ const KIND_ICON: Record<string, LucideIcon> = {
 // generatedFiles；toolCalls 在手里时（流式 / 按需拉过后）就地算。
 export function GeneratedFilesBar({ node }: { node: ChatNode }) {
   const openFilePreview = useSessionStore((s) => s.openFilePreview);
+  // 绑定了工作区的会话：可直接审阅这一轮改过的文件的 diff
+  const reviewable = useSessionStore((s) => Boolean(s.session?.workspacePath));
+  const openReview = useDiffReviewStore((s) => s.openReview);
   const files =
     node.toolCalls.length > 0
       ? generatedFilesFromNode(node)
@@ -43,6 +47,17 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
           <span className="truncate max-w-48 font-mono">{file.name}</span>
         </button>
       ))}
+      {reviewable && (
+        <button
+          type="button"
+          onClick={() => openReview({ sessionId: node.sessionId, scope: "turn", turnNodeId: node.id })}
+          title="审阅这一轮改过的文件的 diff，可逐行评论"
+          className="nodrag inline-flex items-center gap-1.5 min-h-6.5 px-2 rounded-field text-label text-accent-ink hover:bg-surface-hover transition-colors max-md:min-h-11"
+        >
+          <Icon icon={FileDiff} size="sm" />
+          审阅 {files.length} 个文件改动
+        </button>
+      )}
     </div>
   );
 }

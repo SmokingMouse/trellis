@@ -127,6 +127,14 @@
   --code-bar-bg: #1f1f23;
   --code-bar-line: #09090b;
   --code-inline-ink: var(--ink);
+  /* diff 审阅（同在恒暗代码底上，取 github-dark 的增删配色）：行底 / 行号栏底 / 前缀符号 / 行号 */
+  --code-add-bg: rgb(46 160 67 / 0.18);
+  --code-add-gutter: rgb(46 160 67 / 0.28);
+  --code-add-ink: #3fb950;
+  --code-del-bg: rgb(248 81 73 / 0.18);
+  --code-del-gutter: rgb(248 81 73 / 0.28);
+  --code-del-ink: #f85149;
+  --code-muted: #6e7681;
 
   /* 文内 mark：fork=分叉锚点(兰紫)，note=笔记/搜索(绿) —— 淡底 + 下划线 */
   --mark-fork-bg: oklch(58% 0.11 330 / 0.12);
