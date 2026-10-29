@@ -14,6 +14,9 @@ import { AttachmentPreview } from "./AttachmentPreview";
 import { RelatedHints } from "./RelatedHints";
 import { SketchModal } from "./SketchModal";
 import { SkillPickerList } from "./SkillPickerList";
+import { NodeRefChips } from "./NodeRefChips";
+import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
+import { appendNodeRefs, MAX_NODE_REFS, removeMentionQuery, type NodeRef } from "@/lib/node-refs";
 import { ModelPicker } from "./ModelPicker";
 import {
   ArrowLeftRight,
@@ -77,6 +80,8 @@ export function QuestionInput({
 }) {
   const embedded = variant === "home";
   const [q, setQ] = useState("");
+  // `@` 引用其他会话 / 节点作为上下文（lib/node-refs.ts）：新会话首问就能带上别处的结论。
+  const [refs, setRefs] = useState<NodeRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [zoneOpen, setZoneOpen] = useState(false);
@@ -202,6 +207,21 @@ export function QuestionInput({
   // above skills in the shared "/" dropdown. matchCommands gates on the same
   // "/name" (no space) shape as skills, so the two lists co-exist cleanly.
   const matchedCommands = matchCommands(q);
+  const nodeRefs = useNodeRefMentions(
+    q,
+    matchedCommands.length === 0 && matchedSkills.length === 0 && refs.length < MAX_NODE_REFS,
+  );
+  const refItems = nodeRefs.items;
+  const pickRef = (item: RefPickItem) => {
+    const picked = refFromItem(item);
+    if (!picked) return nodeRefs.toggleExpand(item.session.sessionId);
+    setRefs((cur) =>
+      cur.some((r) => r.nodeId === picked.nodeId) ? cur : [...cur, picked].slice(0, MAX_NODE_REFS),
+    );
+    setQ((cur) => removeMentionQuery(cur));
+    nodeRefs.collapse();
+    ref.current?.focus();
+  };
 
   // Dropdown pick actions, shared by mouse click and keyboard (Enter/Tab).
   // /model takes an argument → fill "/model " for typing; other commands run
@@ -231,23 +251,26 @@ export function QuestionInput({
     setQ(`${skillPrefix}${name} `);
     ref.current?.focus();
   };
+  // `@` 引用的会话行与 `/` 命令 / 技能互斥（见上方 nodeRefs 的 enabled），索引从 0 起。
   const slashNav = useSlashNav(
-    matchedCommands.length + matchedSkills.length,
+    matchedCommands.length + matchedSkills.length + refItems.length,
     q,
     (i) =>
-      i < matchedCommands.length
-        ? pickCommand(matchedCommands[i])
-        : pickSkill(matchedSkills[i - matchedCommands.length].name),
+      refItems.length > 0
+        ? pickRef(refItems[i])
+        : i < matchedCommands.length
+          ? pickCommand(matchedCommands[i])
+          : pickSkill(matchedSkills[i - matchedCommands.length].name),
   );
 
   const submit = async () => {
     const trimmed = q.trim();
-    if (!trimmed) return;
+    if (!trimmed && refs.length === 0) return;
     // C1: intercept bare Trellis commands BEFORE any send-to-LLM path. A bare
     // /command runs locally against the store and never streams. Skill
     // commands (/skill-name) aren't in the command registry, so parseCommand
     // returns null and they fall through to streamRoot → claude CLI as before.
-    const parsed = parseCommand(trimmed);
+    const parsed = refs.length === 0 ? parseCommand(trimmed) : null;
     if (parsed) {
       const note = parsed.command.run(commandStore, parsed.args);
       if (note) {
@@ -279,7 +302,7 @@ export function QuestionInput({
     // invisible; on failure (server unreachable / non-2xx — surfaced via the
     // global StreamAlertToast) it un-bricks the composer so the user can
     // retry instead of being stuck on a disabled "提交中…" forever.
-    streamRoot(trimmed, {
+    streamRoot(appendNodeRefs(trimmed, refs), {
       attachments: doneAttachments.length > 0 ? doneAttachments : undefined,
     }).finally(() => setBusy(false));
   };
@@ -297,7 +320,7 @@ export function QuestionInput({
   };
 
   const submitDisabled =
-    !q.trim() || busy || needsWorkspace || hasUploading;
+    (!q.trim() && refs.length === 0) || busy || needsWorkspace || hasUploading;
   const submitLabel = busy
     ? "提交中…"
     : needsWorkspace
@@ -402,6 +425,11 @@ export function QuestionInput({
             att.handleDrop(e);
           }}
         >
+          {refs.length > 0 && (
+            <div className="px-4 pt-3">
+              <NodeRefChips refs={refs} onRemove={(id) => setRefs((cur) => cur.filter((r) => r.nodeId !== id))} />
+            </div>
+          )}
           {att.pending.length > 0 && (
             <div className="px-4 pt-3">
               <AttachmentPreview
@@ -584,6 +612,11 @@ export function QuestionInput({
           onPick={pickSkill}
           commands={matchedCommands}
           onPickCommand={pickCommand}
+          refItems={refItems}
+          onPickRef={pickRef}
+          refExpandedId={nodeRefs.expandedId}
+          refExpandedLoading={nodeRefs.expandedLoading}
+          onToggleRefExpand={nodeRefs.toggleExpand}
           activeIndex={slashNav.active}
           skillPrefix={skillPrefix}
         />

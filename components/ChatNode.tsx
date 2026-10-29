@@ -1,4 +1,5 @@
 "use client";
+import { readableNodeRefs } from "@/lib/node-refs";
 import { memo, useRef, useState, useEffect } from "react";
 import {
   Handle,
@@ -388,7 +389,7 @@ function ChatNodeImpl({ data }: NodeProps<ChatFlowNode>) {
               )}
             </span>
           )}
-          {n.question}
+          {readableNodeRefs(n.question)}
           {n.attachments.length > 0 && (
             <div className="mt-2 font-normal">
               <AttachmentPreview attachments={n.attachments} readOnly />

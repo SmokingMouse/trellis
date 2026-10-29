@@ -1,8 +1,9 @@
 "use client";
-import { AtSign, Sparkles, SquareSlash, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { AtSign, ChevronDown, ChevronRight, CornerDownRight, MessagesSquare, Sparkles, SquareSlash, type LucideIcon } from "lucide-react";
+import { Fragment, type ReactNode } from "react";
 import { Icon } from "@/components/ui";
 import type { Command } from "@/lib/commands";
+import type { RefPickItem } from "@/hooks/useNodeRefMentions";
 
 // C4/C1: shared "/" suggestion dropdown for input boxes — Trellis commands
 // (first-class, all modes) render above skills (tool-capable modes only).
@@ -27,6 +28,11 @@ export function SkillPickerList({
   placement = "above",
   slashItems = [],
   onPickSlashItem,
+  refItems = [],
+  onPickRef,
+  refExpandedId = null,
+  refExpandedLoading = false,
+  onToggleRefExpand,
 }: {
   skills: { name: string; description: string }[];
   onPick: (name: string) => void;
@@ -44,8 +50,16 @@ export function SkillPickerList({
   // 排在 commands + skills 之后（Herdr 里那两组为空，索引即从 0 起）。
   slashItems?: { name: string; description: string; kindLabel: string; kind: "command" | "skill" }[];
   onPickSlashItem?: (index: number) => void;
+  // `@` 引用其他会话 / 节点（hooks/useNodeRefMentions）。只和 agents 同屏（都绑 `@`），
+  // 排在 agents 之后，索引从 agents.length 起算。会话行 = 引用该会话最新已完成节点，
+  // 行尾展开钮列出具体节点改选（展开的节点行紧跟在会话行之后，同属这个索引空间）。
+  refItems?: RefPickItem[];
+  onPickRef?: (item: RefPickItem) => void;
+  refExpandedId?: string | null;
+  refExpandedLoading?: boolean;
+  onToggleRefExpand?: (sessionId: string) => void;
 }) {
-  if (!skills.length && !commands.length && !agents.length && !slashItems.length) return null;
+  if (!skills.length && !commands.length && !agents.length && !slashItems.length && !refItems.length) return null;
   // Keep the keyboard highlight visible inside the scrollable list. Ref
   // callbacks re-run per render, but scrollIntoView(nearest) on an already
   // visible element is a no-op.
@@ -78,7 +92,7 @@ export function SkillPickerList({
       ref={active ? activeRef : undefined}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors ${
+      className={`w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors max-md:min-h-11 ${
         active ? "bg-surface-hover" : "hover:bg-surface-hover"
       }`}
     >
@@ -101,7 +115,7 @@ export function SkillPickerList({
       aria-label="命令与技能"
       className={`${
         placement === "above" ? "absolute bottom-full inset-x-0 mb-1 z-10" : "mt-2"
-      } border border-line rounded-card bg-surface shadow-pop p-1 max-h-64 overflow-y-auto`}
+      } border border-line rounded-card bg-surface shadow-pop p-1 max-h-64 max-md:max-h-[min(18rem,40svh)] overflow-y-auto overscroll-contain`}
     >
       {commands.map((c, i) =>
         row({
@@ -127,6 +141,88 @@ export function SkillPickerList({
           description: a.description,
         }),
       )}
+      {refItems.length > 0 && agents.length > 0 && (
+        <div role="presentation" className="px-2.5 pt-1.5 pb-0.5 text-nano text-ink-faint">
+          引用会话作为上下文
+        </div>
+      )}
+      {refItems.map((item, i) => {
+        const active = agents.length + i === activeIndex;
+        if (item.kind === "node") {
+          const n = item.node;
+          return (
+            <button
+              key={`ref-node-${n.nodeId}`}
+              type="button"
+              role="option"
+              aria-selected={active}
+              ref={active ? activeRef : undefined}
+              data-node-ref-option={n.nodeId}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onPickRef?.(item)}
+              className={`w-full text-left pl-8 pr-2.5 py-1.5 rounded-field flex items-start gap-2 transition-colors max-md:min-h-11 ${
+                active ? "bg-surface-hover" : "hover:bg-surface-hover"
+              }`}
+            >
+              <Icon icon={CornerDownRight} size="sm" className="mt-0.5 text-ink-faint" />
+              <span className="min-w-0 flex-1 text-ui text-ink">
+                <span className="font-mono text-ink-faint tabular-nums mr-1.5">#{n.index}</span>
+                <span className="truncate">{n.topicLabel ?? n.question.replace(/\s+/g, " ")}</span>
+              </span>
+            </button>
+          );
+        }
+        const s = item.session;
+        const expanded = refExpandedId === s.sessionId;
+        const latest = s.latest;
+        return (
+          <Fragment key={`ref-session-${s.sessionId}`}>
+          <div
+            className={`flex items-stretch rounded-field transition-colors ${active ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
+          >
+            <button
+              type="button"
+              role="option"
+              aria-selected={active}
+              aria-disabled={!latest}
+              ref={active ? activeRef : undefined}
+              data-node-ref-session={s.sessionId}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => (latest ? onPickRef?.(item) : onToggleRefExpand?.(s.sessionId))}
+              className="min-w-0 flex-1 text-left px-2.5 py-1.5 flex items-start gap-2.5 max-md:min-h-11"
+            >
+              <Icon icon={MessagesSquare} size="sm" className="mt-0.5 text-ink-faint" />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-1.5 text-ui text-ink">
+                  <span className="min-w-0 truncate">{s.title || "未命名会话"}</span>
+                  {latest && <span className="shrink-0 font-mono text-ink-faint tabular-nums">#{latest.index}</span>}
+                  <span className="ml-auto shrink-0 text-label text-ink-faint">会话</span>
+                </span>
+                <span className="block text-label text-ink-muted truncate">
+                  {latest ? (latest.topicLabel ?? latest.question.replace(/\s+/g, " ")) : "还没有已完成的回答"}
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-label={expanded ? `收起「${s.title}」的节点` : `展开「${s.title}」，改选具体节点`}
+              aria-expanded={expanded}
+              title={expanded ? "收起" : "改选具体节点"}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onToggleRefExpand?.(s.sessionId)}
+              className="shrink-0 inline-flex w-8 items-center justify-center rounded-field text-ink-faint hover:text-ink max-md:w-11"
+            >
+              <Icon icon={expanded ? ChevronDown : ChevronRight} size="sm" />
+            </button>
+          </div>
+          {expanded && refExpandedLoading && (
+            <div role="presentation" className="pl-8 py-1.5 text-label text-ink-faint">
+              载入节点…
+            </div>
+          )}
+          </Fragment>
+        );
+      })}
       {skills.map((s, i) =>
         row({
           key: `skill-${s.name}`,

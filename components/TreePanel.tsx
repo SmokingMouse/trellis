@@ -1,4 +1,5 @@
 "use client";
+import { readableNodeRefs } from "@/lib/node-refs";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isBoolean, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -97,7 +98,7 @@ function WaitingGlyph({ title, label }: { title: string; label: string }) {
 
 function nodeRowLabel(n: ChatNode, max = 30): string {
   if (n.topicLabel) return n.topicLabel;
-  const q = n.question.trim();
+  const q = readableNodeRefs(n.question).trim();
   if (!q && n.kind === "reference") return "参考材料";
   return q.length > max ? `${q.slice(0, max - 1)}…` : q || "（空）";
 }
