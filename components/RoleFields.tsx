@@ -13,8 +13,11 @@ export function RoleField({
   error,
   children,
   className,
+  inline = false,
 }: {
   label: string;
+  /** 桌面上标签放左列（新建弹窗，照原型）；默认上下堆叠（设置页） */
+  inline?: boolean;
   hint?: ReactNode;
   /** 有就替换 hint、红字显示，并挂到控件的 aria-describedby */
   error?: string | null;
@@ -25,13 +28,25 @@ export function RoleField({
   const hintId = `${id}-hint`;
   const note = error || hint;
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <label htmlFor={id} className="text-ui font-medium text-ink">
+    <div
+      className={cn(
+        "flex flex-col gap-1",
+        inline && "md:grid md:grid-cols-[96px_minmax(0,1fr)] md:items-start md:gap-x-4",
+        className,
+      )}
+    >
+      <label
+        htmlFor={id}
+        className={cn("text-ui font-medium text-ink", inline && "md:pt-1.5 md:text-ink-muted")}
+      >
         {label}
       </label>
-      <div>{children({ id, describedBy: note ? hintId : undefined })}</div>
+      <div className="min-w-0">{children({ id, describedBy: note ? hintId : undefined })}</div>
       {note && (
-        <div id={hintId} className={cn("text-label", error ? "text-danger-ink" : "text-ink-muted")}>
+        <div
+          id={hintId}
+          className={cn("text-label", inline && "md:col-start-2", error ? "text-danger-ink" : "text-ink-muted")}
+        >
           {note}
         </div>
       )}

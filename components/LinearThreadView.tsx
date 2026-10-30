@@ -970,7 +970,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 title: `内容宽度：${opt.label}`,
               }))}
             />
-            {!isHerdr && (
+            {/* 角色会话强制线性（多个话题串成一条时间线），画布入口不给 */}
+            {!isHerdr && !isRole && (
               <Button
                 variant="ghost"
                 size="sm"

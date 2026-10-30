@@ -189,13 +189,14 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          <div className="flex flex-col gap-1">
-            <span className="text-ui font-medium text-ink">头像</span>
+          <div className="flex flex-col gap-1 md:grid md:grid-cols-[96px_minmax(0,1fr)] md:items-center md:gap-x-4">
+            <span className="text-ui font-medium text-ink md:text-ink-muted">头像</span>
             <RoleHuePicker hue={hue} name={name} glyph="" onChange={setHue} />
-            <span className="text-label text-ink-muted">头像上的字取名字的第一个字</span>
+            <span className="text-label text-ink-muted md:col-start-2">头像上的字取名字的第一个字</span>
           </div>
 
           <RoleField
+            inline
             label="名字"
             hint="名字不能和已有角色重复"
             error={nameTaken ? "已经有叫这个名字的角色了" : null}
@@ -215,7 +216,7 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
             )}
           </RoleField>
 
-          <RoleField label="一句话介绍">
+          <RoleField inline label="一句话介绍">
             {({ id }) => (
               <Input
                 id={id}
@@ -226,7 +227,7 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
             )}
           </RoleField>
 
-          <RoleField label="性格与说话方式">
+          <RoleField inline label="性格与说话方式">
             {({ id }) => (
               <Textarea
                 id={id}
@@ -239,8 +240,8 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
             )}
           </RoleField>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
-            <RoleField label="默认目录" hint="不填就用角色自己的目录">
+          <div className="flex flex-col gap-4">
+            <RoleField inline label="默认目录" hint="不填就用角色自己的目录">
               {({ id, describedBy }) => (
                 <Input
                   id={id}
@@ -254,12 +255,12 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
                 />
               )}
             </RoleField>
-            <RoleField label="模型">
+            <RoleField inline label="模型">
               {({ id }) => <RoleModelSelect id={id} value={model} onChange={setModel} />}
             </RoleField>
           </div>
 
-          <label className="flex cursor-pointer items-center gap-2.5 self-start">
+          <label className="flex cursor-pointer items-center gap-2.5 self-start md:ml-[112px]">
             <Switch checked={memoryEnabled} onCheckedChange={setMemoryEnabled} />
             <span className="text-ui text-ink">
               使用记忆
@@ -276,6 +277,9 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-5 py-3">
+          <span className="mr-auto hidden text-label text-ink-muted md:inline">
+            创建后发一句话就能开始聊
+          </span>
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>

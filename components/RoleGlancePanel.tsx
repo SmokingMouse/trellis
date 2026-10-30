@@ -70,12 +70,12 @@ export function RoleGlanceContent({ role }: { role: Role }) {
               key={m.file}
               href={roleSettingsHref(role.id, "memory")}
               title={m.description || m.name}
-              className="flex items-center gap-2 px-3 py-2 text-ui text-ink transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
+              className="flex items-start gap-2 px-3 py-2 text-ui text-ink transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
             >
-              <Pill tone={TYPE_TONE[m.type] ?? "neutral"} className="shrink-0">
+              <Pill tone={TYPE_TONE[m.type] ?? "neutral"} className="mt-px shrink-0">
                 {MEMORY_TYPE_LABEL[m.type] ?? m.type}
               </Pill>
-              <span className="min-w-0 flex-1 truncate">{m.name}</span>
+              <span className="line-clamp-2 min-w-0 flex-1 leading-snug">{m.name}</span>
             </a>
           ))
         )}
