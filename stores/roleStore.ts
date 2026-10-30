@@ -15,6 +15,9 @@ type RoleState = {
   error: string | null;
   /** 角色 id → 记忆列表缓存（一览面板、设置页共用） */
   memories: Record<string, RoleMemoryList>;
+  /** 角色 id → 上面那份缓存是什么时候拉回来的（ms）。「记下了…」行据此判断
+   * 「列表里没有这个文件」是真被删了，还是列表比这一轮还旧。 */
+  memoriesLoadedAt: Record<string, number>;
   /** 一览右栏是否展开（桌面） */
   glanceOpen: boolean;
   /** 新建弹窗是否打开（侧栏 ＋、设置页、手机首页共用一个） */
@@ -54,6 +57,7 @@ export const useRoleStore = create<RoleState>((set, get) => ({
   loaded: false,
   error: null,
   memories: {},
+  memoriesLoadedAt: {},
   glanceOpen: true,
   newRoleOpen: false,
 
@@ -102,9 +106,13 @@ export const useRoleStore = create<RoleState>((set, get) => ({
   },
 
   loadMemories: async (id) => {
+    const startedAt = Date.now();
     const r = await call<RoleMemoryList>(`/api/roles/${encodeURIComponent(id)}/memories`);
     if (typeof r === "string") return null;
-    set((s) => ({ memories: { ...s.memories, [id]: r } }));
+    set((s) => ({
+      memories: { ...s.memories, [id]: r },
+      memoriesLoadedAt: { ...s.memoriesLoadedAt, [id]: startedAt },
+    }));
     return r;
   },
 
