@@ -17,6 +17,8 @@
 //
 // 推送 payload 由 lib/push.ts buildPushPayload 构造（badge 由 lib/server/push.ts 发送时补）：
 //   { kind, title, body, tag, url, sessionId, nodeId, badge? }
+// 经 hub 中继时网关会改写（tenancy/gateway/push.ts）：url → /__gw/go/<机器>/...，tag 前缀机器名，
+// badge 为各机器之和。
 
 const VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
 const OFFLINE_ENABLED = VERSION !== "dev";
@@ -225,7 +227,10 @@ self.addEventListener("notificationclick", (event) => {
         } catch {
           /* 有的平台不给聚焦，照样继续导航 */
         }
-        if (home && data.sessionId) {
+        // 经 hub 中继来的通知（url = /__gw/go/<机器>/...）必须整页导航：网关要换机器 cookie，
+        // 站内切会话会在「当前那台」上找这个 sessionId，切错机器。
+        const viaHub = target.pathname.startsWith("/__gw/go/");
+        if (home && data.sessionId && !viaHub) {
           home.postMessage({ type: "trellis-open-session", sessionId: data.sessionId, nodeId: data.nodeId });
           return;
         }
