@@ -14,6 +14,9 @@ export type HerdrStreamClientMessage =
   | { t: "paste"; data: string }
   | { t: "key"; key: string }
   | { t: "scroll"; offset: number }
+  // 滚轮手势：交给 herdr 自己决定是翻它的历史，还是编码成鼠标滚轮转给应用（见 herdr-stream.ts）。
+  // col / row 是指针所在单元格（0 起），全屏应用（Claude Code 等）可能按位置决定滚哪块。
+  | { t: "wheel"; dir: "up" | "down"; lines: number; col: number; row: number }
   | { t: "resize"; cols: number; rows: number }
   | { t: "ping" };
 
@@ -52,6 +55,8 @@ export const PASTE_LIMIT_BYTES = 256 * 1024;
 /** 客户端消息体积上限：粘贴上限 + JSON 转义余量。 */
 export const CLIENT_MESSAGE_MAX_BYTES = PASTE_LIMIT_BYTES * 2 + 1024;
 export const SCROLL_MAX = 100_000;
+/** 单条滚轮消息最多几行（herdr 的滚轮手势上限是 100）。 */
+export const WHEEL_LINES_MAX = 100;
 export const MAX_STREAMS = 32;
 
 // 窗格 id 形如 w4:p2K。它会作为 argv 元素传给 herdr CLI（不过 shell），但仍然
@@ -123,6 +128,15 @@ export function parseClientMessage(raw: string): HerdrStreamClientMessage | { er
     case "scroll": {
       const offset = intInRange(msg.offset, 0, SCROLL_MAX);
       return offset === null ? { error: "invalid scroll offset" } : { t: "scroll", offset };
+    }
+    case "wheel": {
+      const lines = intInRange(msg.lines, 1, WHEEL_LINES_MAX);
+      const col = intInRange(msg.col, 0, COLS_MAX - 1);
+      const row = intInRange(msg.row, 0, ROWS_MAX - 1);
+      if ((msg.dir !== "up" && msg.dir !== "down") || lines === null || col === null || row === null) {
+        return { error: "invalid wheel" };
+      }
+      return { t: "wheel", dir: msg.dir, lines, col, row };
     }
     case "resize": {
       const cols = intInRange(msg.cols, COLS_MIN, COLS_MAX);
