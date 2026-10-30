@@ -11,6 +11,8 @@ import {
 import { HerdrClient } from "./herdr-client";
 import type { HerdrPane } from "./herdr-types";
 import type { HerdrInputDelivery } from "../herdr-input";
+import type { HerdrScreenPrompt } from "../herdr-screen-parse";
+import { IdempotencyCache } from "./idempotency";
 import {
   isDeterministicAttachFailure,
   type CliAttachOutcome,
@@ -26,6 +28,7 @@ import {
   type TranscriptPrompt,
 } from "./agent-hooks/transcript-pending";
 import { TranscriptModelCache } from "./agent-hooks/transcript-model";
+import { claudeBlockingArgs } from "./agent-hooks/blocking-settings";
 
 // 路径规范化只此一家（./canonical-path）：fleet 这边 realpath、discover 那边
 // os.homedir() 原样，正是根因 C 的形状。差别只在 fallback —— herdr 报上来的路径
@@ -79,6 +82,8 @@ export class HerdrFleetService {
   private readonly transcriptPrompts = new TranscriptPromptCache();
   // claude 窗格当前模型（jsonl 最近一条 assistant 的 message.model），给 Herdr 输入框的只读 chip。
   private readonly transcriptModels = new TranscriptModelCache();
+  // 窗格输入按 client_msg_id 去重（Outbox 重发 / 响应丢了重试不重复打字），见 ./idempotency.ts
+  private readonly inputSends = new IdempotencyCache<HerdrInputDelivery>();
 
   constructor(
     readonly client = new HerdrClient(),
@@ -396,8 +401,23 @@ export class HerdrFleetService {
   }
 
   /** 排队送达（发前读屏核对见 HerdrClient.guardSend）；clearDraft 是用户同意清掉的电脑端单行草稿。 */
-  input(paneId: string, text: string, clearDraft?: string): Promise<HerdrInputDelivery> {
-    return this.client.enqueueInput(paneId, text, undefined, clearDraft);
+  input(paneId: string, text: string, clearDraft?: string, clientMsgId?: string): Promise<HerdrInputDelivery> {
+    if (!clientMsgId) return this.client.enqueueInput(paneId, text, undefined, clearDraft);
+    const key = `${paneId}\n${clientMsgId}`;
+    const first = this.inputSends.peek(key);
+    // 重复请求：回第一次的回执，换成它此刻的状态（第一次回的 queued 可能已经 delivered）。
+    // 排队后送达前被读屏拒发（什么都没打）或被撤回的，忘掉旧记录、这次真的重新排队。
+    if (first) {
+      return first.then((receipt) => {
+        const latest = this.client.inputDeliveries.find((d) => d.inputId === receipt.inputId) ?? receipt;
+        if ((latest.status === "failed" && latest.refusal) || latest.status === "cancelled") {
+          this.inputSends.delete(key);
+          return this.input(paneId, text, clearDraft, clientMsgId);
+        }
+        return latest;
+      });
+    }
+    return this.inputSends.run(key, () => this.client.enqueueInput(paneId, text, undefined, clearDraft), herdrInputNothingSent);
   }
 
   /** 撤回排队中的输入，见 HerdrClient.cancelInput。 */
@@ -406,8 +426,13 @@ export class HerdrFleetService {
   }
 
   /** 立即打字（不排队），见 HerdrClient.sendText。 */
-  text(paneId: string, text: string, submit = true): Promise<Record<string, unknown>> {
-    return this.client.sendText(paneId, text, submit);
+  text(paneId: string, text: string, submit = true, expectedRev?: string): Promise<Record<string, unknown>> {
+    return this.client.sendText(paneId, text, submit, expectedRev);
+  }
+
+  /** 读屏认出此刻的对话框 + rev（pending 接口），见 HerdrClient.readPrompt。 */
+  readPrompt(paneId: string): Promise<{ prompt: HerdrScreenPrompt | null; rev: string }> {
+    return this.client.readPrompt(paneId);
   }
 
   /** 向任意窗格（包含纯 shell）发送命令或按键（终端抽屉使用）。 */
@@ -419,8 +444,9 @@ export class HerdrFleetService {
     return this.client.executeCommand(paneId, command, keys);
   }
 
-  keys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
-    return this.client.sendKeys(paneId, keys);
+  /** expectedRev：卡片的 rev，发键前重读屏幕核对，对不上抛 HerdrPromptChangedError。 */
+  keys(paneId: string, keys: string[], expectedRev?: string): Promise<Record<string, unknown>> {
+    return this.client.sendKeys(paneId, keys, expectedRev);
   }
 
   /** 在 Herdr 终端里把焦点切到该窗格（次要操作；只读降级时 request 会拒绝写方法）。 */
@@ -429,7 +455,7 @@ export class HerdrFleetService {
   }
 
   /** 创建一个新 Tab（可指定工作区、工作目录与标签名，默认聚焦该 Tab）。 */
-  async createTab(params: { workspaceId?: string; cwd?: string; label?: string } = {}): Promise<{
+  async createTab(params: { workspaceId?: string; cwd?: string; label?: string; agent?: "claude" } = {}): Promise<{
     tabId: string;
     paneId: string;
     workspaceId: string;
@@ -443,6 +469,15 @@ export class HerdrFleetService {
       tab: { tab_id: string; workspace_id: string; label: string };
       root_pane?: { pane_id: string; tab_id: string; workspace_id: string };
     }>("tab.create", payload);
+    // agent: "claude" = 新 Tab 里直接起一个 trellis 拉起的 claude（带阻塞 hook 的 --settings）；
+    // 不传就是普通 shell Tab，用户自己在里面敲 claude 的会话行为不变。
+    if (params.agent === "claude" && res.root_pane?.pane_id) {
+      await this.client.request("pane.send_input", {
+        pane_id: res.root_pane.pane_id,
+        text: `claude${claudeBlockingArgs()}`,
+        keys: ["Enter"],
+      });
+    }
     return {
       tabId: res.tab.tab_id,
       paneId: res.root_pane?.pane_id ?? "",
@@ -478,8 +513,21 @@ export class HerdrFleetService {
       binding.sessionId,
       binding.agentKind,
       binding.cwd ?? target.cwd ?? null,
+      // trellis 拉起的 claude 才开阻塞 hook（结构化作答）；见 agent-hooks/blocking-settings.ts
+      claudeBlockingArgs(),
     );
   }
+}
+
+/**
+ * 这次输入失败时确定什么都没打（读屏拒发 / Herdr 不可用 / 排队满 / 窗格不对）：忘掉 client_msg_id，
+ * 让带同一个 id 的重发真的再试。按 name / code 认 —— 错误可能来自另一个路由 bundle 里的类。
+ */
+function herdrInputNothingSent(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "HerdrSendRefusedError" || error.name === "HerdrUnavailableError") return true;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && ["queue_full", "pane_not_found", "not_agent_pane", "pane_changed", "input_cancelled"].includes(code);
 }
 
 const globalFleet = globalThis as typeof globalThis & {

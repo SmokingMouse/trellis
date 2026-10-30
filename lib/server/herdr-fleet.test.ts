@@ -509,9 +509,18 @@ describe("HerdrFleetService", () => {
   });
 
   test("reopens in the original workspace using split then atomic resume input", async () => {
+    // 没有 blocking-settings.json（别读到本机真实的 ~/.trellis/hooks）→ 命令不带 --settings
+    const saved = process.env.TRELLIS_HOOK_DIR;
+    process.env.TRELLIS_HOOK_DIR = path.join(os.tmpdir(), `trellis-no-hooks-${process.pid}`);
     const harness = createHarness();
     await harness.service.ensureStarted();
-    const paneId = await harness.service.reopen(harness.sessionId);
+    let paneId: string;
+    try {
+      paneId = await harness.service.reopen(harness.sessionId);
+    } finally {
+      if (saved === undefined) delete process.env.TRELLIS_HOOK_DIR;
+      else process.env.TRELLIS_HOOK_DIR = saved;
+    }
     expect(paneId).toBe("w1:p2");
     const split = harness.requests.find((request) => request.method === "pane.split")!;
     expect(split.params).toMatchObject({
@@ -529,6 +538,35 @@ describe("HerdrFleetService", () => {
       text: `claude --resume ${harness.sessionId}`,
       keys: ["Enter"],
     });
+  });
+
+  test("blocking-settings.json 在时，reopen / 新建 claude Tab 带上阻塞 hook 的 --settings", async () => {
+    const saved = process.env.TRELLIS_HOOK_DIR;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trellis-fleet-blocking-"));
+    process.env.TRELLIS_HOOK_DIR = dir;
+    try {
+      const { writeBlockingSettings } = await import("./agent-hooks/blocking-settings");
+      const file = writeBlockingSettings();
+      const harness = createHarness();
+      await harness.service.ensureStarted();
+      const paneId = await harness.service.reopen(harness.sessionId);
+      const input = harness.requests.find((r) => r.method === "pane.send_input" && r.params.pane_id === paneId)!;
+      expect(input.params.text).toBe(`claude --resume ${harness.sessionId} --settings '${file}'`);
+      // 新建 Tab：默认还是普通 shell（不发命令）；agent: "claude" 才起 claude
+      await harness.service.createTab({ cwd: "/tmp" });
+      expect(harness.requests.filter((r) => r.method === "pane.send_input" && r.params.pane_id === "w1:p3")).toHaveLength(0);
+      await harness.service.createTab({ cwd: "/tmp", agent: "claude" });
+      const started = harness.requests.find((r) => r.method === "pane.send_input" && r.params.pane_id === "w1:p3")!;
+      expect(started.params).toEqual({ pane_id: "w1:p3", text: `claude --settings '${file}'`, keys: ["Enter"] });
+      const settings = JSON.parse(fs.readFileSync(file, "utf8"));
+      expect(settings.hooks.PreToolUse[0]).toMatchObject({ matcher: "AskUserQuestion", hooks: [{ type: "command", timeout: 2100 }] });
+      expect(settings.hooks.PermissionRequest[0].hooks[0].command).toContain("--block");
+      expect(settings.hooks.PermissionRequest[0].hooks[0].statusMessage).toContain("Trellis");
+    } finally {
+      if (saved === undefined) delete process.env.TRELLIS_HOOK_DIR;
+      else process.env.TRELLIS_HOOK_DIR = saved;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("reopen prefers agent-free panes in the same workspace and never focuses them", async () => {

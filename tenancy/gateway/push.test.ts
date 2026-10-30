@@ -132,6 +132,15 @@ test("改写：url → /__gw/go/<机器>/...，tag 前缀机器名，多机标�
   expect(sent[4].payload.url).toBe("/__gw/go/office/");
 });
 
+test("收回（resolved）照样中继：url 带着 Herdr 窗格定位参数改写到机器下，tag 与「需要你」同前缀", () => {
+  const waiting = push.rewriteForMachine(push.parseRelayPayload(payload({ kind: "waiting", tag: "trellis:herdr:w1:p1", url: "/?session=s1&pane=w1%3Ap1" }))!, "office", false);
+  expect(waiting.url).toBe("/__gw/go/office/?session=s1&pane=w1%3Ap1");
+  const resolved = push.parseRelayPayload(payload({ kind: "resolved", tag: "trellis:herdr:w1:p1" }));
+  expect(resolved?.kind).toBe("resolved");
+  expect(push.rewriteForMachine(resolved!, "office", false).tag).toBe(waiting.tag);
+  expect(push.parseRelayPayload(payload({ kind: "bogus" }))).toBeNull();
+});
+
 test("单机用户标题不加机器名", () => {
   const out = push.rewriteForMachine(push.parseRelayPayload(payload())!, "host-other", false);
   expect(out.title).toBe("已完成 · 会话");

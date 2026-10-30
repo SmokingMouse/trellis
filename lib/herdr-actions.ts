@@ -1,51 +1,81 @@
 // 浏览器侧的 Herdr 窗格动作：发按键 / 发文本 / 读屏 / 切焦点。
 // 会话内审批卡、/herdr 总览泳道卡、终端抽屉共用这一份，不各写一遍 fetch。
 import type { HerdrInputDelivery, HerdrSendRefusal } from "./herdr-input";
+import { uuid } from "./uuid";
 
 function paneUrl(paneId: string, action: string): string {
   return `/api/herdr/panes/${encodeURIComponent(paneId)}/${action}`;
 }
 
-/** 窗格动作失败；发前读屏拒发（409，什么都没打）时带 refusal。 */
+/**
+ * 窗格动作失败；发前读屏拒发（409，什么都没打）时带 refusal；
+ * 按键 / 作答带的 rev 对不上（409 prompt_changed，什么都没按）时 promptChanged=true。
+ * status：HTTP 状态码（网络层失败时为 0），Outbox 据此判断能不能重发。
+ */
 export class HerdrActionError extends Error {
-  constructor(message: string, readonly refusal?: HerdrSendRefusal) {
+  constructor(
+    message: string,
+    readonly refusal?: HerdrSendRefusal,
+    readonly status = 0,
+    readonly promptChanged = false,
+  ) {
     super(message);
     this.name = "HerdrActionError";
   }
 }
 
+export const HERDR_PROMPT_CHANGED_MESSAGE = "终端里的对话框变了，这次什么都没按：看清新的再选";
+
 async function ensureOk(response: Response): Promise<Response> {
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
     let refusal: HerdrSendRefusal | undefined;
+    let promptChanged = false;
     try {
-      const body = (await response.json()) as { error?: string; delivered?: string } & Partial<HerdrSendRefusal>;
+      const body = (await response.json()) as { error?: string; delivered?: string; code?: string } & Partial<Omit<HerdrSendRefusal, "code">>;
       if (body.error) message = body.error;
-      if (response.status === 409 && body.delivered === "none" && body.code) {
-        refusal = { code: body.code, draft: body.draft, clearable: body.clearable };
+      if (response.status === 409 && body.code === "prompt_changed") {
+        promptChanged = true;
+        message = HERDR_PROMPT_CHANGED_MESSAGE;
+      } else if (response.status === 409 && body.delivered === "none" && body.code) {
+        refusal = { code: body.code as HerdrSendRefusal["code"], draft: body.draft, clearable: body.clearable };
       }
     } catch { /* keep status text */ }
-    throw new HerdrActionError(message, refusal);
+    throw new HerdrActionError(message, refusal, response.status, promptChanged);
   }
   return response;
 }
 
-export async function sendHerdrKeys(paneId: string, keys: string[]): Promise<void> {
+/** expectedRev：卡片上对话框的 rev，服务端发键前重读屏幕核对，对不上抛 promptChanged、什么都不按。 */
+export async function sendHerdrKeys(paneId: string, keys: string[], expectedRev?: string): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "keys"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ keys }),
+    body: JSON.stringify(expectedRev !== undefined ? { keys, expectedRev } : { keys }),
   }));
 }
 
-/** clearDraft：拒发提示里的单行草稿，用户同意清掉它再发（服务端核对输入框里还是它才清）。 */
-export async function sendHerdrInput(paneId: string, text: string, clearDraft?: string): Promise<HerdrInputDelivery> {
+/**
+ * clearDraft：拒发提示里的单行草稿，用户同意清掉它再发（服务端核对输入框里还是它才清）。
+ * clientMsgId：同一条消息重发时带同一个 id，服务端按 TTL 去重、回第一次的结果（Outbox 重发靠它不重复打字）。
+ */
+export async function sendHerdrInput(
+  paneId: string,
+  text: string,
+  clearDraft?: string,
+  clientMsgId: string = newClientMsgId(),
+): Promise<HerdrInputDelivery> {
   const response = await ensureOk(await fetch(paneUrl(paneId, "input"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(clearDraft ? { text, clearDraft } : { text }),
+    body: JSON.stringify(clearDraft ? { text, clearDraft, clientMsgId } : { text, clientMsgId }),
   }));
   return ((await response.json()) as { result: HerdrInputDelivery }).result;
+}
+
+/** 客户端消息 id（client_msg_id）：一条消息一个，重发沿用。 */
+export function newClientMsgId(): string {
+  return uuid();
 }
 
 /** 撤回一条排队中的输入（已送达 / 已失败时服务端回 409 → 抛错）。 */
@@ -56,11 +86,11 @@ export async function cancelHerdrInput(paneId: string, inputId: string): Promise
 }
 
 /** 立即打字进窗格（不排队）；submit 时文字后跟一个 Enter，原子送出。 */
-export async function sendHerdrText(paneId: string, text: string, submit = true): Promise<void> {
+export async function sendHerdrText(paneId: string, text: string, submit = true, expectedRev?: string): Promise<void> {
   await ensureOk(await fetch(paneUrl(paneId, "text"), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, submit }),
+    body: JSON.stringify(expectedRev !== undefined ? { text, submit, expectedRev } : { text, submit }),
   }));
 }
 

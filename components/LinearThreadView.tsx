@@ -1092,7 +1092,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         })
         )}
         {isHerdr && herdrPane && (
-          <div className="mt-4">
+          // data-herdr-session-card：点「需要你」通知落地后按窗格 id 定位到这里（hooks/usePushBridge）。
+          <div className="mt-4" data-herdr-session-card={herdrPane.paneId}>
             <HerdrSessionSwipeCard>
               <HerdrInteractionCard pane={herdrPane} />
             </HerdrSessionSwipeCard>

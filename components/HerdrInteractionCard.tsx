@@ -8,24 +8,24 @@ import {
   MessageCircleQuestion,
   MessagesSquare,
   ShieldCheck,
-  Square,
-  SquareCheck,
   SquareTerminal,
 } from "lucide-react";
-import { Badge, Button, Icon, Input, Pill, cn } from "@/components/ui";
+import { Button, Icon, Input, Pill, cn } from "@/components/ui";
 import { herdrPanePrompt, type HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
   herdrApproval,
   herdrAskQuestions,
   herdrScreenQuestionStep,
-  type HerdrAskOption,
-  type HerdrAskQuestion,
 } from "@/lib/herdr-console";
-import { readHerdrPane, readHerdrPanePending, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
+import { HerdrBlockingCard, blockingAnswered } from "@/components/herdr/HerdrBlockingCard";
+import { OptionList, hookItems } from "@/components/herdr/HerdrOptionList";
+import { HerdrActionError, readHerdrPane, readHerdrPanePending, sendHerdrKeys, sendHerdrText } from "@/lib/herdr-actions";
 import {
   herdrFreeTextReady,
   herdrOptionKeys,
+  herdrPromptOptionKeys,
+  herdrScreenRev,
   herdrScreenSignature,
   parseHerdrScreen,
   type HerdrScreenPrompt,
@@ -40,16 +40,9 @@ const SOURCE_TITLE: Record<CardSource, string> = {
   terminal: "数据来源：原始终端",
 };
 
-export type HerdrScreenPromptSummary = { kind: "approval" | "question"; tool: string | null };
+export type HerdrScreenPromptSummary = { kind: "approval" | "question" | "dialog"; tool: string | null };
 
-const RECOMMENDED = /\s*[（(]\s*(推荐|recommended)\s*[)）]\s*$/i;
 const SCREEN_LINES = 40;
-
-function options(question: HerdrAskQuestion): HerdrAskOption[] {
-  return Array.isArray(question.options)
-    ? (question.options as HerdrAskOption[])
-    : [];
-}
 
 /** 「总是允许」按钮上的对象：Bash 取命令前两个词，其余用工具名。 */
 function alwaysTarget(prompt: { tool: string; summary: string }): string {
@@ -57,114 +50,6 @@ function alwaysTarget(prompt: { tool: string; summary: string }): string {
     return prompt.summary.trim().split(/\s+/).slice(0, 2).join(" ");
   }
   return prompt.tool;
-}
-
-type OptionItem = {
-  key: string;
-  /** TUI 序号（1 起） */
-  index: number;
-  label: string;
-  description?: string;
-  recommended?: boolean;
-  checked?: boolean;
-};
-
-/**
- * 选项卡片列表：hook 路径（AskUserQuestion tool_input）与读屏路径共用这一套。
- * 纵向列表：标题 + 弱色描述 + 「推荐」标记；宽的会话卡在 sm 以上两列。
- */
-function OptionList({
-  items,
-  columns,
-  clampDescription,
-  multiSelect = false,
-  disabled,
-  onPick,
-}: {
-  items: OptionItem[];
-  columns: boolean;
-  /** 总览卡里描述只留一行（悬停看全文） */
-  clampDescription: boolean;
-  multiSelect?: boolean;
-  disabled: boolean;
-  onPick: (item: OptionItem) => void;
-}) {
-  return (
-    <div className={cn("-mx-2 mt-1.5 grid gap-0.5", columns && "sm:grid-cols-2 sm:gap-1")}>
-      {items.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          data-herdr-option={item.index}
-          data-mobile-target="herdr-option"
-          aria-pressed={multiSelect ? item.checked === true : undefined}
-          disabled={disabled}
-          onClick={() => onPick(item)}
-          title={item.description ? `${item.label}\n${item.description}` : item.label}
-          className={cn(
-            // bui Approval Card 的选项行：无框，选中 = accent 淡底；推荐项靠「推荐」徽标说
-            "flex min-h-11 min-w-0 items-start gap-2.5 rounded-field px-2 py-[9px] text-left text-ui text-ink transition-colors disabled:opacity-60 sm:min-h-[38px]",
-            item.checked ? "bg-accent-muted" : "hover:bg-surface-hover",
-          )}
-        >
-          {multiSelect ? (
-            <span className="grid size-5 shrink-0 place-items-center">
-              <Icon
-                icon={item.checked ? SquareCheck : Square}
-                size="sm"
-                className={item.checked ? "text-accent" : "text-ink-faint"}
-              />
-            </span>
-          ) : (
-            // 序号徽标（就是要发给终端的那个键）
-            <span
-              className={cn(
-                "grid size-5 shrink-0 place-items-center rounded-chip font-mono text-nano tabular-nums",
-                item.checked ? "bg-accent text-accent-fg" : "bg-surface-muted text-ink-muted shadow-hairline",
-              )}
-            >
-              {item.index}
-            </span>
-          )}
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate text-[13.5px] leading-5">{item.label}</span>
-              {item.recommended && (
-                <Badge variant="accent" className="shrink-0">推荐</Badge>
-              )}
-            </span>
-            {item.description && (
-              <span
-                className={cn(
-                  "mt-0.5 block text-label text-ink-faint",
-                  clampDescription && "truncate",
-                )}
-              >
-                {item.description}
-              </span>
-            )}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function hookItems(question: HerdrAskQuestion, selected: number[]): OptionItem[] {
-  return options(question).map((option, index) => {
-    const raw = typeof option.label === "string" ? option.label : `选项 ${index + 1}`;
-    return {
-      key: `${index}:${raw}`,
-      index: index + 1,
-      label: raw.replace(RECOMMENDED, "").trim() || raw,
-      recommended: RECOMMENDED.test(raw),
-      description:
-        typeof option.description === "string" && option.description
-          ? option.description
-          : undefined,
-      checked: selected.includes(index),
-    };
-  });
 }
 
 type ApprovalView = {
@@ -189,14 +74,7 @@ function screenApproval(prompt: HerdrScreenPrompt): ApprovalView {
   };
 }
 
-export function HerdrInteractionCard({
-  pane,
-  compact = false,
-  embedded = false,
-  terminalFallback = false,
-  footer,
-  onScreenPrompt,
-}: {
+type HerdrInteractionCardProps = {
   pane: HerdrPaneView;
   compact?: boolean;
   /** 嵌进 /herdr 总览的「需要你」卡：外框和标题行由宿主卡片画，这里只出内容 + 动作 */
@@ -207,7 +85,36 @@ export function HerdrInteractionCard({
   footer?: ReactNode;
   /** 读屏认出（或不再认出）选择卡时通知宿主——总览卡标题行据此显示「提问」/「要执行 Bash」 */
   onScreenPrompt?: (prompt: HerdrScreenPromptSummary | null) => void;
-}) {
+  /**
+   * 窗格不是 blocked 也读屏找对话框：信任目录这类对话框 herdr 可能报 idle，
+   * 发消息被拒（dialog_open）后输入框据此临时挂一张卡。
+   */
+  probeScreen?: boolean;
+};
+
+/**
+ * 两条作答路径分流：
+ *   阻塞 hook（trellis 拉起的会话，pane.hook.blocking）→ HerdrBlockingCard，结构化作答 API；
+ *   其余 → HerdrKeysCard，往窗格发按键（原有路径，原样保留）。
+ */
+export function HerdrInteractionCard(props: HerdrInteractionCardProps) {
+  const blocking = props.pane.hook?.blocking;
+  const answered = blockingAnswered(props.pane);
+  if (props.pane.alive && props.pane.status === "waiting" && (blocking?.status === "pending" || answered)) {
+    return <HerdrBlockingCard key={blocking?.id ?? "answered"} {...props} />;
+  }
+  return <HerdrKeysCard {...props} />;
+}
+
+function HerdrKeysCard({
+  pane,
+  compact = false,
+  embedded = false,
+  terminalFallback = false,
+  footer,
+  onScreenPrompt,
+  probeScreen = false,
+}: HerdrInteractionCardProps) {
   // 数据源优先级 hook > transcript（jsonl 里未完成的 tool_use）> 读屏。前两者同一形状、同一套渲染。
   const panePrompt = useMemo(
     () => herdrPanePrompt({ hook: pane.hook, transcript: pane.transcript }),
@@ -218,7 +125,7 @@ export function HerdrInteractionCard({
   const questions = useMemo(() => herdrAskQuestions(structured), [structured]);
   const hookApproval = useMemo(() => herdrApproval(structured), [structured]);
   // 没有 hook / transcript 的「等人」数据，但 Herdr 报 blocked：读屏。
-  const screenMode = pane.status === "blocked" && pane.hook?.state !== "waiting" && !transcriptMode;
+  const screenMode = (pane.status === "blocked" || probeScreen) && pane.hook?.state !== "waiting" && !transcriptMode;
   // 读屏认不出选择卡时，是否退回原始终端 + 按键
   const rawAllowed = terminalFallback || (pane.agentKind === "codex" && !pane.hook);
   const waiting = pane.status === "waiting";
@@ -242,6 +149,8 @@ export function HerdrInteractionCard({
   // 多选题读屏只能看到勾选状态、不知道确认键落在哪 —— 交还给原始终端
   const screenPrompt = parsed && !parsed.multiSelect ? parsed : null;
   const signature = herdrScreenSignature(screenPrompt);
+  // 服务端发键前用它核对屏幕（/keys、/text 的 expectedRev），对不上 409 prompt_changed
+  const rev = herdrScreenRev(screenPrompt);
   const showRaw = screenMode && !screenPrompt && (rawAllowed || parsed?.multiSelect === true);
   const visible = pane.alive && (waiting || Boolean(screenPrompt) || showRaw);
   const summaryKind = screenPrompt?.kind ?? null;
@@ -346,6 +255,7 @@ export function HerdrInteractionCard({
     keys: string[],
     finalAnswer = true,
     advanceQuestion = false,
+    expectedRev?: string,
   ) => {
     if (sending.current || answerState === "answered") return false;
     sending.current = true;
@@ -359,7 +269,7 @@ export function HerdrInteractionCard({
           return false;
         }
       }
-      await sendHerdrKeys(pane.paneId, keys);
+      await sendHerdrKeys(pane.paneId, keys, expectedRev);
       if (finalAnswer) setAnswerState("answered");
       else setAnswerState("idle");
       if (advanceQuestion) {
@@ -368,7 +278,14 @@ export function HerdrInteractionCard({
       }
       void refreshHerdrFleet();
       return true;
-    } catch {
+    } catch (error) {
+      if (error instanceof HerdrActionError && error.promptChanged) {
+        // 服务端重读屏幕发现对话框变了，什么都没按：刷新卡片给用户看新的
+        setErrorText(error.message);
+        setAnswerState("error");
+        void loadScreen();
+        return false;
+      }
       setErrorText("按键发送失败，请重试");
       setAnswerState("error");
       return false;
@@ -384,6 +301,7 @@ export function HerdrInteractionCard({
   const sendScreenKeys = async (keys: string[]) => {
     if (sending.current || answerState === "answered") return;
     const expected = signature;
+    const expectedRev = rev;
     const fresh = await loadScreen();
     if (fresh === null) {
       setErrorText("读屏失败，没有发送");
@@ -398,7 +316,7 @@ export function HerdrInteractionCard({
     }
     // 一律先进「已回答」：多题的下一题 / Review 页换上来时签名变了，上面的 effect 会复位；
     // 单题 / 审批答完后窗格离开 blocked，status 变化同样复位。
-    const sent = await sendKeys(keys, true);
+    const sent = await sendKeys(keys, true, false, expectedRev);
     if (!sent) return;
     answeredSignature.current = expected;
     setTimeout(() => void loadScreen(), 700);
@@ -414,6 +332,7 @@ export function HerdrInteractionCard({
     const text = freeText.trim();
     if (!text || sending.current || answerState === "answered") return;
     const expected = signature;
+    const expectedRev = rev;
     const before = screenPrompt;
     const fresh = await loadScreen();
     const current = fresh === null ? null : parseHerdrScreen(fresh);
@@ -425,28 +344,32 @@ export function HerdrInteractionCard({
     sending.current = true;
     setAnswerState("sending");
     try {
-      await sendHerdrKeys(pane.paneId, herdrOptionKeys({ index: freeIndex }));
+      await sendHerdrKeys(pane.paneId, herdrOptionKeys({ index: freeIndex }), expectedRev);
       // 读屏接口有 1 秒服务端缓存，TUI 重绘也要一点时间：最多等约 3 秒看 ❯ 落位
       let ready = false;
+      let focusedRev = "";
       for (let attempt = 0; attempt < 6 && !ready; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 500));
         const focused = await loadScreen();
-        ready = herdrFreeTextReady(before, focused === null ? null : parseHerdrScreen(focused), freeIndex);
+        const focusedPrompt = focused === null ? null : parseHerdrScreen(focused);
+        ready = herdrFreeTextReady(before, focusedPrompt, freeIndex);
+        focusedRev = herdrScreenRev(focusedPrompt);
       }
       if (!ready) {
         setErrorText(`已按 ${freeIndex} 选中「Type something」，但终端没进入预期的输入状态，文字没有发送；请展开终端原文看看`);
         setAnswerState("error");
         return;
       }
-      await sendHerdrText(pane.paneId, text, true);
+      await sendHerdrText(pane.paneId, text, true, focusedRev);
       answeredSignature.current = expected;
       setAnswerState("answered");
       setFreeText("");
       void refreshHerdrFleet();
       setTimeout(() => void loadScreen(), 700);
-    } catch {
-      setErrorText("发送失败，请重试");
+    } catch (error) {
+      setErrorText(error instanceof HerdrActionError && error.promptChanged ? error.message : "发送失败，请重试");
       setAnswerState("error");
+      if (error instanceof HerdrActionError && error.promptChanged) void loadScreen();
     } finally {
       sending.current = false;
     }
@@ -500,7 +423,9 @@ export function HerdrInteractionCard({
         alwaysTitle: "发按键 2：允许并记住，下次不再问",
       }
     : screenApprovalView;
-  const screenQuestion = screenPrompt?.kind === "question" ? screenPrompt : null;
+  // 提问卡与 hook 盖不住的对话框（信任目录 / 模型选择等，kind=dialog）共用选项列表渲染
+  const screenQuestion = screenPrompt && screenPrompt.kind !== "approval" ? screenPrompt : null;
+  const screenDialog = screenPrompt?.kind === "dialog";
   const multi = screenQuestion?.multiQuestion;
   // 卡内有自由输入框时，宿主的「回复…」就重复了，不再渲染
   const freeOption = screenQuestion?.options.find((option) => option.isFreeText) ?? null;
@@ -579,7 +504,7 @@ export function HerdrInteractionCard({
             icon={showRaw ? SquareTerminal : approval ? ShieldCheck : MessageCircleQuestion}
             size="sm"
           />
-          {approval && !showRaw ? "需要你批准" : showRaw ? "终端在等你" : "Herdr 正在等你回答"}
+          {approval && !showRaw ? "需要你批准" : showRaw ? "终端在等你" : screenDialog ? "终端在问你" : "Herdr 正在等你回答"}
         </Pill>
         {approval && !showRaw && (
           <span className="inline-flex h-5.5 items-center rounded-chip bg-surface-muted px-[7px] font-mono text-[11.5px] text-ink-muted shadow-hairline">
@@ -649,6 +574,11 @@ export function HerdrInteractionCard({
           <div className="text-sm font-medium">
             {screenQuestion.title ?? "请选择一个选项"}
           </div>
+          {screenDialog && screenQuestion.context.length > 0 && (
+            <div className="mt-0.5 whitespace-pre-wrap text-label text-ink-faint" data-herdr-dialog-context>
+              {screenQuestion.context.join("\n")}
+            </div>
+          )}
           <OptionList
             items={screenQuestion.options
               .filter((option) => !option.isFreeText && !option.isChat)
@@ -662,7 +592,7 @@ export function HerdrInteractionCard({
             columns={columns}
             clampDescription={embedded}
             disabled={busy}
-            onPick={(item) => void sendScreenKeys(herdrOptionKeys(item))}
+            onPick={(item) => void sendScreenKeys(herdrPromptOptionKeys(screenQuestion, item.index))}
           />
           {(freeOption || screenQuestion.options.some((option) => option.isChat)) && (
             <form
@@ -698,7 +628,7 @@ export function HerdrInteractionCard({
                     data-herdr-chat-option={option.index}
                     disabled={busy}
                     title={`发按键 ${option.index}：${option.label}`}
-                    onClick={() => void sendScreenKeys(herdrOptionKeys(option))}
+                    onClick={() => void sendScreenKeys(herdrPromptOptionKeys(screenQuestion, option.index))}
                     className="min-h-11 sm:min-h-8"
                   >
                     <Icon icon={MessagesSquare} size="sm" />

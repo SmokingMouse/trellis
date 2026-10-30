@@ -98,7 +98,11 @@ export class ConsoleHub {
   }
 }
 
-const shared = globalThis as typeof globalThis & { __trellisConsoleHub?: ConsoleHub };
+const shared = globalThis as typeof globalThis & {
+  __trellisConsoleHub?: ConsoleHub;
+  __trellisConsoleTaps?: Set<(kind: ConsoleChangeKind) => void>;
+};
+const taps = (shared.__trellisConsoleTaps ??= new Set());
 
 /** 已建好的 hub（没人开过 /api/events 时为 null —— 此时通知直接丢弃）。 */
 export function consoleHub(): ConsoleHub | null {
@@ -110,5 +114,16 @@ export function installConsoleHub(create: () => ConsoleHub): ConsoleHub {
 }
 
 export function notifyConsoleChange(kind: ConsoleChangeKind): void {
+  // 服务端旁听（Herdr 的 Web Push，lib/server/herdr-push.ts）：不依赖有没有页面连着
+  // /api/events。旁听者自己负责合并与降本，这里只转一下。
+  for (const tap of taps) {
+    try { tap(kind); } catch { /* 旁听者的问题不影响 hook 应答 */ }
+  }
   shared.__trellisConsoleHub?.notify(kind);
+}
+
+/** 旁听所有变更通知（含没人订阅 /api/events 时）。返回退订函数。 */
+export function tapConsoleChanges(listener: (kind: ConsoleChangeKind) => void): () => void {
+  taps.add(listener);
+  return () => { taps.delete(listener); };
 }

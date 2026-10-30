@@ -54,6 +54,7 @@ import {
   useIsNarrowViewport,
 } from "@/hooks/useIsMobile";
 import { useScrollHideState } from "@/hooks/useScrollHide";
+import { useNetworkTitle } from "@/hooks/useNetworkTitle";
 import { useCurrentHerdrPane, useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { isHerdrSession } from "@/lib/herdr-ui";
@@ -221,6 +222,8 @@ function basename(p: string): string {
 
 export function Header({ isMobile }: { isMobile: boolean }) {
   const isNarrowViewport = useIsNarrowViewport();
+  // 弱网：标题位显示「等待网络 / 连接中…」（不弹横幅）
+  const networkTitle = useNetworkTitle();
   const { isHidden: scrollHidden, reveal: revealScrollChrome } =
     useScrollHideState();
   const session = useSessionStore((s) => s.session);
@@ -323,7 +326,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     const headerHidden = scrollHidden;
     // 原线性 thread 头（56px，「模式 · 线性」+ 标题）并进这里：标题下一行小字副标题。
     // Herdr 会话的窗格信息由下面的 fleet pill 承担；fleet 不可用时退成「Herdr 会话」小字。
-    const subtitle = !session
+    const subtitle = networkTitle
+      ? { tone: "warn" as const, text: networkTitle }
+      : !session
       ? null
       : isHerdrSession(session, herdrFleet)
         ? { tone: "neutral" as const, text: "Herdr 会话" }
@@ -377,10 +382,11 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 ) : (
                   <StatusDot tone="neutral" />
                 )}
-                <span className="truncate">
-                  {currentHerdrPane
-                    ? `${currentHerdrPane.tabLabel} · ${currentHerdrPane.title}`
-                    : "Herdr 总览"}
+                <span className="truncate" data-header-network={networkTitle ? "" : undefined}>
+                  {networkTitle ??
+                    (currentHerdrPane
+                      ? `${currentHerdrPane.tabLabel} · ${currentHerdrPane.title}`
+                      : "Herdr 总览")}
                 </span>
                 <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
               </button>
@@ -618,6 +624,11 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                   {sessionTitle}
                 </span>
               </Tooltip>
+              {networkTitle && (
+                <span data-header-network role="status" className="shrink-0 text-label text-warn-ink">
+                  {networkTitle}
+                </span>
+              )}
               <div className="contents max-md:hidden">
                 <ModeBadge hideWorkspace />
               </div>
@@ -642,6 +653,11 @@ export function Header({ isMobile }: { isMobile: boolean }) {
               className={cn("min-w-0 truncate text-[14px] font-medium text-ink-muted", !herdrOpen && "max-md:hidden")}
             >
               {viewTitle}
+            </span>
+          )}
+          {!session && networkTitle && (
+            <span data-header-network role="status" className="shrink-0 text-label text-warn-ink">
+              {networkTitle}
             </span>
           )}
         </nav>

@@ -173,6 +173,18 @@ describe("Herdr UI fleet projection", () => {
     }
   });
 
+  test("挂着阻塞交互（pending）的 waiting 记录不受 5 分钟 TTL 影响；答过的照常过期", () => {
+    const now = 1_000_000;
+    const doneFleet = structuredClone(fleet);
+    doneFleet.workspaces[0].tabs[0].panes[1].agent_status = "done";
+    const blocking = { id: "ix_0123456789abcdef0123", kind: "question" as const, toolName: "AskUserQuestion", toolUseId: "t1", createdAt: now, connected: true };
+    for (const [status, expected] of [["pending", "waiting"], ["resolved", "done"]] as const) {
+      const hooks: HerdrHookRecord[] = [{ sessionId: "claude-session", agent: "claude", state: "waiting", toolName: "AskUserQuestion", interactivePrompt: {}, paneKey: "p-waiting", updatedAt: now - HERDR_HOOK_TTL_MS - 1, blocking: { ...blocking, status } }];
+      const pane = buildHerdrWorkspaceViews(doneFleet, hooks, now)[0].panes.find(p => p.paneId === "p-waiting");
+      expect(pane?.status).toBe(expected);
+    }
+  });
+
   test("a reused pane cannot inherit the prior session's waiting hook", () => {
     const hooks: HerdrHookRecord[] = [{ sessionId: "old-session", agent: "claude", state: "waiting", toolName: null, interactivePrompt: {}, paneKey: "p-waiting", updatedAt: Date.now() }];
     const views = buildHerdrWorkspaceViews(fleet, hooks);

@@ -1,7 +1,8 @@
 // 端点文件的**写**侧，服务启动时跑一次（instrumentation.ts）。
 //
-//   $HOME/.trellis/hooks/endpoint.env    端口 + 口令
-//   $HOME/.trellis/hooks/trellis-hook.sh 仓库里那份的副本（chmod +x）
+//   $HOME/.trellis/hooks/endpoint.env           端口 + 口令
+//   $HOME/.trellis/hooks/trellis-hook.sh        仓库里那份的副本（chmod +x）
+//   $HOME/.trellis/hooks/blocking-settings.json trellis 拉起的 claude 的 --settings（阻塞 hook）
 //
 // 为什么脚本要复制出去、而不是让 settings.json 直接指向仓库路径：settings.json
 // 跟着 dotfiles 跨机器走，指向某个 checkout 的绝对路径换台机器就断；
@@ -15,6 +16,7 @@ import {
   hooksDir,
   readEndpointFile,
 } from "./endpoint";
+import { writeBlockingSettings } from "./blocking-settings";
 
 /** 当前监听端口。TRELLIS_PORT 由 server.ts 这道大门下发给 Next 子进程。 */
 function currentPort(): number {
@@ -26,6 +28,8 @@ export type InstallResult = {
   reason?: string;
   endpoint?: string;
   script?: string;
+  /** trellis 拉起的 claude 用的 --settings（阻塞 hook，见 ./blocking-settings.ts） */
+  blockingSettings?: string;
   port?: number;
 };
 
@@ -61,7 +65,8 @@ export function installHookEndpoint(): InstallResult {
       fs.copyFileSync(src, dest);
       fs.chmodSync(dest, 0o755);
     }
-    return { installed: true, endpoint, script: dest, port };
+    const blockingSettings = writeBlockingSettings();
+    return { installed: true, endpoint, script: dest, blockingSettings, port };
   } catch (e) {
     return { installed: false, reason: String(e) };
   }

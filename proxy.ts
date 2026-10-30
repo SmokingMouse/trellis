@@ -25,7 +25,8 @@ const TOKEN = process.env.TRELLIS_AUTH_TOKEN;
 // (X-Trellis-Hook-Token, compared in constant time against
 // ~/.trellis/hooks/endpoint.env) because the caller is a `sh` hook fired by
 // Claude Code — it has no browser and therefore no cookie. Only the ingest
-// endpoint is opened; GET /api/hooks/state stays behind the cookie gate.
+// endpoint (plus its blocking long-poll twin) is opened; GET /api/hooks/state
+// and the answer route /api/herdr/interactions/* stay behind the cookie gate.
 function isPublicPath(pathname: string): boolean {
   return (
     pathname === "/login" ||
@@ -35,6 +36,8 @@ function isPublicPath(pathname: string): boolean {
     pathname === "/api/login/passkey/options" ||
     pathname === "/api/login/passkey/verify" ||
     pathname === "/api/hooks/claude" ||
+    // 阻塞 hook 的长轮询：同一个 X-Trellis-Hook-Token 口令（agent-hooks/auth.ts），同理放行。
+    pathname === "/api/hooks/claude/interaction" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||

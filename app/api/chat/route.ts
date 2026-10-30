@@ -61,6 +61,7 @@ import { sessionCwd } from "@/lib/paths";
 import type { NodeAttachment } from "@/lib/types";
 import { buildNodeRefContext } from "@/lib/server/node-refs";
 import { parseNodeRefs, readableNodeRefs } from "@/lib/node-refs";
+import { noteChatCreated, withChatIdempotency } from "@/lib/server/chat-idempotency";
 
 const VALID_MODES: Mode[] = ["chat", "project"];
 function isMode(s: unknown): s is Mode {
@@ -231,7 +232,12 @@ function buildFileAttachmentSuffix(
   return `\n\n[用户上传的附件]\n${parts.join("\n\n")}`;
 }
 
+// 发送幂等：请求体带 clientMsgId 时 TTL 内同一个 id 只起一轮，重复请求回第一次的结果（见 chat-idempotency.ts）。
 export async function POST(req: Request) {
+  return withChatIdempotency(req, handleChatPost);
+}
+
+async function handleChatPost(req: Request) {
   let body: ChatRequest;
   try {
     body = await req.json();
@@ -550,6 +556,7 @@ export async function POST(req: Request) {
         fork: body.kind === "branch" && (body.fork === true || !!body.parentAnchor),
         retry: body.kind === "retry", permission: permission?.success ? permission.data : undefined,
         effort: typeof asOptions.effort === "string" ? asOptions.effort : process.env.TRELLIS_AS_EFFORT });
+      noteChatCreated(req, nodeId, createdEvent);
       return projectSSE(req, run, createdEvent);
     } catch (error) {
       if (!(error instanceof DaemonUnavailable) || getSession(trellisSessionId)?.origin === "external") {
@@ -962,6 +969,7 @@ export async function POST(req: Request) {
         : undefined,
   });
 
+  noteChatCreated(req, nodeId, createdEvent);
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {

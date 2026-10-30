@@ -107,9 +107,13 @@ export function screenHasDialog(plain: string): boolean {
   return false;
 }
 
-type InputBox = { raw: string[]; plain: string[] } | "clipped" | null;
+type InputBox = { raw: string[]; plain: string[]; footer: boolean } | "clipped" | null;
 
-/** Claude Code 的输入框：屏幕上最后两条横线之间的行。只看得到下沿 = 草稿比窗格还高。 */
+/**
+ * Claude Code 的输入框：屏幕上最后两条横线之间的行。只看得到下沿 = 草稿比窗格还高。
+ * footer：下沿横线下面紧跟着页脚（`? for shortcuts` / 权限模式 / statusline 等任何非空行）。
+ * 启动中、信任目录这类对话框刚关掉还没画完时只有横线没有页脚 —— 不算就绪。
+ */
 function findInputBox(ansi: string): InputBox {
   const raw = ansi.replace(/\r/g, "").split("\n");
   const plain = raw.map((line) => stripAnsi(line).replace(/\s+$/, ""));
@@ -119,7 +123,8 @@ function findInputBox(ansi: string): InputBox {
   let start = end - 1;
   while (start >= 0 && !isRule(plain[start])) start--;
   if (start < 0) return "clipped";
-  return { raw: raw.slice(start + 1, end), plain: plain.slice(start + 1, end) };
+  const footer = plain.slice(end + 1, end + 5).some((line) => line.trim() !== "");
+  return { raw: raw.slice(start + 1, end), plain: plain.slice(start + 1, end), footer };
 }
 
 /**
@@ -174,9 +179,11 @@ export function checkClaudeSend(ansi: string): HerdrSendCheck {
   const afterPrompt = box.plain[0].slice(1);
   const pill = afterPrompt.match(IDE_PILL_RE)?.[0] ?? "";
   const rest = [afterPrompt.slice(pill.length), ...box.plain.slice(1)].join("\n").replace(/\u00a0/g, " ");
-  if (!rest.trim()) return { ok: true };
+  // 空输入框还要看得到页脚才算就绪（见 findInputBox）
+  const ready: HerdrSendCheck = box.footer ? { ok: true } : { ok: false, code: "screen_unknown" };
+  if (!rest.trim()) return ready;
   if (PLACEHOLDER_RE.test(box.plain.join(" "))) return { ok: false, code: "input_draft", draft: text };
-  if (!hasTypedText(box.raw, [...pill].length)) return { ok: true };
+  if (!hasTypedText(box.raw, [...pill].length)) return ready;
 
   const draft = rest.trim();
   const refusal: HerdrSendCheck = { ok: false, code: "input_draft", draft };

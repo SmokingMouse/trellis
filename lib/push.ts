@@ -33,7 +33,8 @@ export function pushKindAllowed(settings: PushSettings, kind: PushKind): boolean
 // ── payload ────────────────────────────────────────────────────────────────
 
 export type PushPayload = {
-  kind: PushKind | "test";
+  /** resolved = 收回：同 tag 的「需要你」已被处理（public/sw.js 静默替换后关掉）。 */
+  kind: PushKind | "test" | "resolved";
   title: string;
   body: string;
   /** 通知 tag：同一会话后来的一条原地替换前一条，不在通知中心叠一串。 */
@@ -47,10 +48,16 @@ export type PushPayload = {
   badge?: number;
 };
 
-/** 角标数：待处理快照里涉及的会话数（同一会话多项只算一个，与页面 lib/attention 同口径）。
- *  服务端看不到 Herdr 窗格状态与页面里「提交中」的项，那两处由页面打开时校正。 */
-export function waitingBadgeCount(items: readonly Pick<PendingItem, "sessionId">[]): number {
-  return new Set(items.map((i) => i.sessionId)).size;
+/** 角标数：待处理快照里涉及的会话数（同一会话多项只算一个，与页面 lib/attention 同口径），
+ *  再加上 Herdr 里「需要你」的窗格（lib/server/herdr-push.ts 维护；绑定的会话已在快照里
+ *  的不重复算）。页面里「提交中」的项服务端看不到，由页面打开时校正。 */
+export function waitingBadgeCount(
+  items: readonly Pick<PendingItem, "sessionId">[],
+  herdr: readonly { paneId: string; sessionId: string | null }[] = [],
+): number {
+  const keys = new Set(items.map((i) => i.sessionId));
+  for (const pane of herdr) keys.add(pane.sessionId ?? `herdr:${pane.paneId}`);
+  return keys.size;
 }
 
 const BODY_MAX = 140;
@@ -73,10 +80,29 @@ export function plainSnippet(markdown: string, max = BODY_MAX): string {
   return clip(text, max);
 }
 
-export function sessionUrl(sessionId: string, nodeId?: string | null): string {
+// 点通知直达单张卡：url 带定位参数，落地页（hooks/usePushBridge）读到后滚到并聚焦那张卡。
+//   ?session=S&node=N&focus=pending  自起会话的待处理卡（LinearThreadView 的 pendingNavigation）
+//   ?session=S&pane=P               绑定了会话的 Herdr 窗格（会话页底部的交互卡）
+//   ?view=herdr&pane=P              没绑会话的 Herdr 窗格（总览「需要你」泳道里的卡）
+// 经 hub 中继时网关把 url 改写成 /__gw/go/<机器>/...，查询串原样带过去（gateway.ts 的 302）。
+export const PUSH_FOCUS_PARAMS = { focus: "focus", pane: "pane" } as const;
+
+export function sessionUrl(sessionId: string, nodeId?: string | null, focusPending = false): string {
   const q = new URLSearchParams({ session: sessionId });
   if (nodeId) q.set("node", nodeId);
+  if (nodeId && focusPending) q.set(PUSH_FOCUS_PARAMS.focus, "pending");
   return `/?${q.toString()}`;
+}
+
+export function herdrPaneUrl(paneId: string, sessionId: string | null): string {
+  const q = sessionId ? new URLSearchParams({ session: sessionId }) : new URLSearchParams({ view: "herdr" });
+  q.set(PUSH_FOCUS_PARAMS.pane, paneId);
+  return `/?${q.toString()}`;
+}
+
+/** Herdr 窗格的通知 tag：同一窗格的「需要你」/「已完成」/ 收回互相原地替换。 */
+export function herdrPushTag(paneId: string): string {
+  return `trellis:herdr:${paneId}`;
 }
 
 export function buildPushPayload(e: {
@@ -104,9 +130,38 @@ export function buildPushPayload(e: {
     title,
     body,
     tag: `trellis:${e.sessionId}`,
-    url: sessionUrl(e.sessionId, e.nodeId),
+    url: sessionUrl(e.sessionId, e.nodeId, e.kind === "waiting"),
     sessionId: e.sessionId,
     nodeId: e.nodeId ?? null,
+  };
+}
+
+/** Herdr 窗格的推送。where = 「workspace · tab」，标题靠它说清是哪个窗格。 */
+export function buildHerdrPushPayload(e: {
+  kind: PushKind | "resolved";
+  paneId: string;
+  sessionId: string | null;
+  where: string;
+  /** waiting：要执行什么 / 问了什么（lib/herdr-console herdrAttentionText）；done：最后一条回复。 */
+  text?: string | null;
+}): PushPayload {
+  const where = clip(e.where.trim() || e.paneId, TITLE_MAX);
+  const title =
+    e.kind === "done" ? `已完成 · ${where}` : e.kind === "waiting" ? `需要你 · ${where}` : `已处理 · ${where}`;
+  const body =
+    e.kind === "done"
+      ? (e.text && plainSnippet(e.text)) || "这一轮跑完了"
+      : e.kind === "waiting"
+        ? (e.text && clip(e.text, BODY_MAX)) || "终端在等你输入"
+        : "已经处理掉了";
+  return {
+    kind: e.kind,
+    title,
+    body,
+    tag: herdrPushTag(e.paneId),
+    url: e.kind === "waiting" ? herdrPaneUrl(e.paneId, e.sessionId) : e.sessionId ? sessionUrl(e.sessionId) : herdrPaneUrl(e.paneId, null),
+    sessionId: e.sessionId,
+    nodeId: null,
   };
 }
 
