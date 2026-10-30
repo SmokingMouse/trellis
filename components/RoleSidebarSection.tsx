@@ -19,10 +19,18 @@ import type { Role } from "@/lib/roles";
 
 const VISIBLE = 5;
 
-/** 侧栏副标题只要一小截：介绍按标点截第一句，再限长。 */
+/** 侧栏副标题只要一小截：介绍按标点截第一句，再按显示宽度限长（8 个汉字；半角字符算半个，
+ * 「配置 Trellis」这种中英混排不会被截成「配置 Trel…」）。 */
 function shortIntro(intro: string): string {
   const first = intro.trim().split(/[。，,.；;！!？?\n]/)[0] ?? "";
-  return first.length > 8 ? `${first.slice(0, 8)}…` : first;
+  let width = 0;
+  let out = "";
+  for (const ch of first) {
+    width += /[\x20-\x7e]/.test(ch) ? 1 : 2;
+    if (width > 16) return `${out}…`;
+    out += ch;
+  }
+  return out;
 }
 
 export function RoleSidebarSection({ mobile = false }: { mobile?: boolean }) {
