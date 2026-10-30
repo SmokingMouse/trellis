@@ -65,6 +65,10 @@ import { isButlerSession } from "@/lib/butler";
 import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { RoleMemoryLines, useRoleMemorySync } from "./RoleMemoryLines";
 import { clockLabel, dayDividerLabel, sameLocalDay } from "@/lib/role-timeline";
+import { RoleNightlyCard } from "./RoleNightlyCard";
+import { RoleTaskCards } from "./RoleTaskCards";
+import { SystemNodeCard } from "./SystemNodeCard";
+import { useRoleBackgroundTasks } from "@/hooks/useRoleBackgroundTasks";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -203,11 +207,16 @@ function lineThrough(
  */
 function roleThread(nodes: Record<string, ChatNode>, activeNodeId: string | null) {
   const byParent = childrenIndex(nodes);
-  const roots = Object.values(nodes)
-    .filter((n) => !n.parentId)
-    .sort((a, b) => a.createdAt - b.createdAt || nodeSort(a, b));
   const anchorNode = activeNodeId ? nodes[activeNodeId] : undefined;
   const anchorRoot = anchorNode ? (ancestorsOf(anchorNode.id, nodes).at(-1) ?? anchorNode.id) : null;
+  // P2：系统节点（夜间整理卡等）不参与串线，按时间插回去；被收起的根（例行回答 [SILENT]）
+  // 不画，除非正锚在它上面（从链接点进来）。
+  const roots = Object.values(nodes)
+    .filter((n) => !n.parentId && !n.systemMeta && (!n.hiddenAt || n.id === anchorRoot))
+    .sort((a, b) => a.createdAt - b.createdAt || nodeSort(a, b));
+  const systemRoots = Object.values(nodes)
+    .filter((n) => !n.parentId && n.systemMeta)
+    .sort((a, b) => a.createdAt - b.createdAt);
   const thread: ChatNode[] = [];
   const topicStarts = new Set<string>();
   const branchesByNode = new Map<string, ChatNode[]>();
@@ -220,6 +229,10 @@ function roleThread(nodes: Record<string, ChatNode>, activeNodeId: string | null
       if (branches.length > 0) branchesByNode.set(line[i].id, branches);
     }
     thread.push(...line);
+  }
+  for (const sys of systemRoots) {
+    const at = thread.findIndex((n) => n.createdAt > sys.createdAt);
+    thread.splice(at < 0 ? thread.length : at, 0, sys);
   }
   // 没有显式锚点就锚在最后一轮（最新话题的末尾）。
   const anchorId = anchorNode ? anchorNode.id : (thread.at(-1)?.id ?? null);
@@ -334,6 +347,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const role = useCurrentRole();
   const isRole = role !== null && !isHerdr;
   useRoleMemorySync(isRole ? role.id : null);
+  useRoleBackgroundTasks(isRole ? role.id : null, nodes);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -446,10 +460,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     [nodes],
   );
 
-  const tipNode =
-    threadData.thread.length > 0
-      ? threadData.thread[threadData.thread.length - 1]
-      : null;
+  // 系统节点不是一轮对话：输入框永远接在最后一个真实节点后面（不参与 resume，见 lib/server/system-node.ts）。
+  const tipNode = threadData.thread.findLast((n) => !n.systemMeta) ?? null;
   const tipStreamingId =
     tipNode && tipNode.status === "streaming" ? tipNode.id : null;
   // Herdr 镜像的最后一轮：库里是 done，运行态看窗格（S184 hook 驱动）。
@@ -1056,10 +1068,46 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         ) : (
           threadData.thread.map((node, idx) => {
             const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
+            // 系统节点（夜间整理卡等）：只画卡片 + 跨天分隔，不当轮次（无分叉 / 删除 / 压缩判定）。
+            if (node.systemMeta) {
+              const sysDayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
+              return (
+                <Fragment key={node.id}>
+                  {sysDayBreak && (
+                    <div
+                      data-role-day-divider
+                      role="separator"
+                      aria-label={dayDividerLabel(node.createdAt)}
+                      className={`${idx > 0 ? "mt-6" : "mt-1"} mb-5 flex items-center gap-3 text-[11.5px] font-medium text-ink-faint select-none`}
+                    >
+                      <div className="flex-1 border-t border-line" />
+                      <span className="tabular-nums">{dayDividerLabel(node.createdAt)}</span>
+                      <div className="flex-1 border-t border-line" />
+                    </div>
+                  )}
+                  <section
+                    ref={setRoundRef(node.id)}
+                    data-thread-node-id={node.id}
+                    data-system-node={node.systemMeta.kind}
+                    tabIndex={-1}
+                    className={`scroll-mt-3 min-w-0 max-w-full outline-none ${sysDayBreak ? "pb-6" : "pt-4 pb-6"}`}
+                  >
+                    {isRole && node.systemMeta.kind === "role-nightly" ? (
+                      <RoleNightlyCard role={role} node={node} />
+                    ) : (
+                      <SystemNodeCard node={node} />
+                    )}
+                  </section>
+                </Fragment>
+              );
+            }
+            const prevReal = prevNode?.systemMeta
+              ? threadData.thread.slice(0, idx).findLast((n) => !n.systemMeta)
+              : prevNode;
             // 角色时间线：新话题的首轮与上一轮不在同一个 claude 会话里，不做压缩判定。
             const topicStart = isRole && Boolean(threadData.topicStarts?.has(node.id));
             const dayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
-            const isCompacted = !topicStart && isContextCompacted(node, prevNode);
+            const isCompacted = !topicStart && isContextCompacted(node, prevReal);
             const divided = isCompacted || topicStart || dayBreak;
             const branches = threadData.branchesByNode.get(node.id) ?? [];
             const isActive = node.id === threadData.anchorId;
@@ -1143,6 +1191,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   />
                   {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
                   {isRole && <RoleMemoryLines role={role} node={node} />}
+                  {isRole && <RoleTaskCards roleId={role.id} nodeId={node.id} />}
 
                   {branches.length > 0 && (
                     <div className="mt-2">

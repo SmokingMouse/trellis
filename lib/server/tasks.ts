@@ -22,6 +22,12 @@ import {
   type LarkTaskBindingInput,
 } from "./lark/task-target";
 import { taskLarkPushContent, taskRunStatusText } from "./lark/task-push-policy";
+import {
+  createRoleRoutineRoot,
+  roleRoutineTask,
+  routineQuestion,
+  settleRoleRoutineRun,
+} from "./role-routines";
 
 // S88: 自动化任务的执行层。
 //
@@ -426,6 +432,9 @@ function ensureHomeTaskSession(task: Task, question: string, now: number): {
   sessionId: string;
   nodeId: string;
 } {
+  // 角色例行（docs/roles-p2.md）：落进角色固定会话（新根 = 新话题），不建 task home 会话。
+  const roleRoot = createRoleRoutineRoot(task, question, now);
+  if (roleRoot) return roleRoot;
   const nodeId = crypto.randomUUID();
   // S117: home 会话在侧栏可见可删可归档了，指针可能悬挂 —— 会话行没了就当
   // 从没建过，走下面的新建分支（新 id 会覆盖旧指针）。
@@ -599,9 +608,11 @@ function failRun(task: Task, runId: string, message: string): StartTaskRunResult
 }
 
 /** 真正 spawn 的那一步。从 pending 队列捞起来的 run 也走这里。 */
-export function launch(task: Task, runId: string): StartTaskRunResult {
+export function launch(taskRow: Task, runId: string): StartTaskRunResult {
   const now = Date.now();
-  const question = task.prompt;
+  // 角色例行：project 模式 + 角色当下的工作目录；「没发现就不出声」的追加 [SILENT] 约定。
+  const task = roleRoutineTask(taskRow);
+  const question = routineQuestion(task);
 
   // ★ spawn 前必须验工作目录存在。
   //
@@ -723,6 +734,14 @@ export function finishTaskRun(
     .run(status, Date.now(), r.errorMessage ?? null, r.usage.input, r.usage.output, runId);
 
   const task = run ? getTask(run.taskId) : null;
+  // 角色例行回答 [SILENT]：这一轮在角色时间线里收起。best-effort，不影响收尾。
+  if (run) {
+    try {
+      settleRoleRoutineRun(run.taskId, run.nodeId, status);
+    } catch (e) {
+      console.error("[tasks] settleRoleRoutineRun 失败", e);
+    }
+  }
   publishTaskEvent({ type: "run_finished", taskId: run?.taskId ?? "", runId, status });
 
   // 通知节流：成功是常态，每次都推会让人一周内关掉通知 —— 那才是真正的失效。

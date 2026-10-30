@@ -5,9 +5,11 @@ import { useRoleStore } from "@/stores/roleStore";
 import { Icon, Pill, Skeleton } from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
 import { MEMORY_TYPE_LABEL, type MemoryType, type Role } from "@/lib/roles";
+import { RoleGlanceBlocks } from "./RoleGlanceBlocks";
 
 // 角色一览（原型 09-roles.html 的 .glance，对应 Cindy 的 At a glance）：不离开对话就能看清
-// 「它是谁、记得什么、在哪干活」。P1 只做人设 / 最近记忆 / 目录 / 模型，例行、渠道、后台任务是 P2。
+// 「它是谁、记得什么、在哪干活」。P1：人设 / 最近记忆 / 目录 / 模型；P2：例行 / 渠道 / 后台任务
+// （RoleGlanceBlocks，排在最近记忆之后，同原型顺序）。
 // 桌面右栏照 ButlerPanel 的 --trellis-rp 机制占位（≥1280px 才出，300px）；手机顶栏点头像出
 // 同一份内容的底部 sheet（RoleGlanceContent）。记忆列表由 LinearThreadView 的 useRoleMemorySync 保鲜。
 
@@ -80,6 +82,8 @@ export function RoleGlanceContent({ role }: { role: Role }) {
           ))
         )}
       </Section>
+
+      <RoleGlanceBlocks role={role} Section={Section} settingsHref={(tab) => roleSettingsHref(role.id, tab)} />
 
       <Section icon={FolderOpen} title="默认目录">
         <div className="px-3 py-2.5">

@@ -1,3 +1,5 @@
+import type { SystemNodeMeta } from "./role-changes";
+
 export type NodeStatus = "streaming" | "done" | "error";
 
 // "qa" — original question/answer node. "reference" — passive material
@@ -275,6 +277,9 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
+  // 角色 P2：系统节点（不是模型回复，见 lib/server/system-node.ts）。前端按 systemMeta.kind
+  // 换渲染（夜间整理卡等），不画成问答、不给分叉 / 删除、不当输入框的接续目标。
+  systemMeta?: SystemNodeMeta | null;
 };
 
 export type Bookmark = {

@@ -12,6 +12,7 @@ import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import { readableNodeRefs } from "@/lib/node-refs";
+import { isSystemNodeKind, type SystemNodeMeta } from "@/lib/role-changes";
 import type { RecentChainRow } from "@/lib/recent";
 import {
   BOOKMARK_QUESTION_LIMIT,
@@ -124,6 +125,8 @@ export type ApiNode = {
   // 'session' = 会话人设（不挂 chip，否则每张卡都有一枚是噪音）。
   agentId: string | null;
   agentScope: "session" | "mention" | null;
+  // 角色 P2：系统节点（夜间整理卡等，见 lib/server/system-node.ts）的 meta。普通问答 = null。
+  systemMeta?: SystemNodeMeta | null;
 };
 
 type NodeRow = {
@@ -159,6 +162,7 @@ type NodeRow = {
   hidden_at: number | null;
   agent_id: string | null;
   agent_scope: string | null;
+  system_meta_json: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
@@ -166,7 +170,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, bookmarked_at, attachments_json, tool_calls_json,
-       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
+       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope, system_meta_json`;
 
 type SessionRow = {
   kind: string;
@@ -296,7 +300,20 @@ function rowToNode(r: NodeRow): ApiNode {
     hiddenAt: r.hidden_at,
     agentId: r.agent_id,
     agentScope: r.agent_scope === "mention" ? "mention" : r.agent_scope === "session" ? "session" : null,
+    ...(r.system_meta_json ? { systemMeta: parseSystemMeta(r.system_meta_json) } : {}),
   };
+}
+
+function parseSystemMeta(raw: string): SystemNodeMeta | null {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (v && typeof v === "object" && isSystemNodeKind((v as { kind?: unknown }).kind)) {
+      return v as SystemNodeMeta;
+    }
+  } catch {
+    /* 坏 JSON：当普通节点 */
+  }
+  return null;
 }
 
 // S1：路径 → workspace id，永不抛。归组是分组视图的锦上添花，任何失败

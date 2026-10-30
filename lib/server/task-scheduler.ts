@@ -13,6 +13,7 @@ import {
 } from "./tasks";
 import { checkAuthAlerts } from "./auth-health";
 import { checkDiskAlert } from "./disk-watch";
+import { tickRoleNightly } from "./role-nightly";
 
 // S88: 定时调度器。挂在 instrumentation.ts（进程唯一的启动钩子）。
 //
@@ -158,6 +159,11 @@ async function catchUp(): Promise<void> {
   }
 }
 
+/** 测试用：直接跑一次 tick（不等整分钟）。 */
+export function runSchedulerTickForTests(): Promise<void> {
+  return tick();
+}
+
 async function tick(): Promise<void> {
   try {
     const now = new Date();
@@ -188,6 +194,9 @@ async function tick(): Promise<void> {
     }
 
     await pollGitTriggers(now.getTime());
+    // 角色夜间整理（docs/roles-p2.md）：自带「每槽只跑一次 + 6h 补跑」，所以每分钟调、
+    // 重启后第一次 tick 就是 catch-up。不 await —— 一次整理要几十秒，别拖住下一分钟的 tick。
+    void tickRoleNightly(now).catch((e) => console.error("[scheduler] 夜间整理失败：", e));
     // S95: 每小时（:07，避开整点的 cron 高峰）复查授权健康。
     if (now.getMinutes() === 7) void checkAuthAlerts();
     // S176: 每 5 分钟一次水位。statfs 是一次 syscall，比授权探测（spawn CLI）

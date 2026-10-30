@@ -24,6 +24,8 @@ import {
   type RoleOpenResult,
 } from "@/lib/roles";
 import type { AgentSpawn } from "@/lib/llm/types";
+import { ensureRoleSkillsLink } from "./role-changes";
+import { roleBackgroundTaskHint } from "./role-prompt-extras";
 
 // 角色 P1 的服务端（设计见 docs/roles-p1.md，共享类型见 lib/roles.ts）。
 //
@@ -682,9 +684,11 @@ export function roleSpawnExtras(
 ): Pick<AgentSpawn, "addDirs" | "appendSystemPrompt"> | null {
   if (a.kind !== "role" || !a.memoryEnabled) return null;
   const homeDir = ensureRoleDir(a.slug);
+  // P2：角色技能经 <homeDir>/.claude/skills -> ../skills 被 --add-dir 发现（见 role-changes.ts）。
+  ensureRoleSkillsLink(homeDir);
   return {
     ...(cwd && samePath(cwd, homeDir) ? {} : { addDirs: [homeDir] }),
-    appendSystemPrompt: buildRoleMemoryPrompt({ name: a.name, homeDir }),
+    appendSystemPrompt: `${buildRoleMemoryPrompt({ name: a.name, homeDir })}\n\n${roleBackgroundTaskHint()}`,
   };
 }
 

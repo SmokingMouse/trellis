@@ -11,6 +11,8 @@ import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { adoptRoleHomeSession, planRoleNewSession, roleSpawnExtras } from "@/lib/server/roles";
+import { isSystemNode } from "@/lib/server/system-node";
+import { recordRoleBackgroundTask } from "@/lib/server/role-routines";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
 import {
   applyAutoTitle,
@@ -287,6 +289,13 @@ async function handleChatPost(req: Request) {
     );
   }
 
+  // 系统节点（夜间整理卡等，lib/server/system-node.ts）不是一轮对话：没有 CLI 会话可接，
+  // 也没有问题可重跑。前端本来就不把它当接续目标，这里兜住绕过前端的请求。
+  const systemTarget = body.kind === "branch" ? body.parentNodeId : body.kind === "retry" ? body.nodeId : null;
+  if (systemTarget && isSystemNode(systemTarget)) {
+    return Response.json({ error: "系统消息不能接着问或重试" }, { status: 409 });
+  }
+
   const providerId = isProviderId(body.provider)
     ? body.provider
     : DEFAULT_PROVIDER;
@@ -435,6 +444,13 @@ async function handleChatPost(req: Request) {
           createdEvent = { type: "created", session: getSession(trellisSessionId) ?? session, node };
         } else {
           createdEvent = { type: "created", session, node };
+          // 角色在对话里开的后台任务（trellisctl ask --new 带 originNodeId）：记下来，
+          // 角色时间线画任务卡、一览列最近几个。来源不是角色会话就什么都不做。
+          recordRoleBackgroundTask({
+            originNodeId: (body as { originNodeId?: unknown }).originNodeId,
+            sessionId: trellisSessionId,
+            nodeId,
+          });
         }
       }
       questionForLLM = body.question;

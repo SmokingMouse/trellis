@@ -1168,6 +1168,8 @@ function migrate(db: Database) {
     "UPDATE lark_inbox SET status = 'error' WHERE status = 'processing'",
   ).run();
 
+  ensureRolesP2Schema(db);
+
   // First-boot backfill: if the search_index has zero rows but the DB
   // already holds data (upgrade from a pre-Stage-16 build), seed it
   // from the existing tables in a single transaction. Idempotent —
@@ -1206,6 +1208,66 @@ function migrate(db: Database) {
       tx();
     }
   }
+}
+
+// 角色 P2 · A 包（docs/roles-p2.md）：夜间整理、系统节点、例行、后台任务。
+//
+//  · nodes.system_meta_json：系统节点（夜间整理卡 / 跟进报告 / 群聊轮次结束）的 meta，
+//    NULL = 普通问答。单独加列而不复用 kind / ref_meta_json —— kind 有一堆按 'qa' /
+//    'reference' 分支的老代码，ref_meta_json 是参考卡的结构；挪用任何一个都得逐处排查。
+//  · agents.nightly_freq：夜间整理频率（daily / weekly / off），只对角色有意义。
+//  · role_nightly：每个角色的整理游标与上次结果；last_slot 是抢槽去重（同一计划槽只跑一次）。
+//  · role_changes：整理提案，接受 / 拒绝 / 撤销（before_json = 应用前的文件快照）。
+//  · tasks.quiet_if_nothing：例行「没发现就不出声」。
+//  · role_bg_tasks：角色在对话里开的后台会话（trellisctl ask --new 带 originNodeId）。
+export function ensureRolesP2Schema(db: Database): void {
+  const addCol = (table: string, name: string, ddl: string) => {
+    const has = db.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(name);
+    if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  };
+  addCol("nodes", "system_meta_json", "TEXT");
+  addCol("agents", "nightly_freq", "TEXT NOT NULL DEFAULT 'daily'");
+  addCol("tasks", "quiet_if_nothing", "INTEGER NOT NULL DEFAULT 0");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS role_nightly (
+      role_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+      cursor_at INTEGER,
+      last_slot INTEGER,
+      last_run_at INTEGER,
+      last_status TEXT,
+      last_error TEXT,
+      running INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS role_changes (
+      id TEXT PRIMARY KEY,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      node_id TEXT,
+      kind TEXT NOT NULL CHECK (kind IN ('add','merge','delete','skill')),
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','applied','rejected','reverted','failed')),
+      before_json TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      reverted_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS role_changes_role ON role_changes(role_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS role_changes_node ON role_changes(node_id);
+
+    CREATE TABLE IF NOT EXISTS role_bg_tasks (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      origin_session_id TEXT NOT NULL,
+      origin_node_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS role_bg_tasks_role ON role_bg_tasks(role_id, created_at DESC);
+  `);
+  // 进程没了整理也没了：running 标记不收尸的话，这个角色以后永远「正在整理」。
+  db.prepare("UPDATE role_nightly SET running = 0 WHERE running = 1").run();
 }
 
 export function ensureHerdrSchema(db: Database): void {
