@@ -5,7 +5,8 @@ import { InteractionForm } from "./InteractionForm";
 test("审批动作主次明确：允许一次为主按钮、作用域是次级分段选择、拒绝描边，手机保留触控高度", () => {
   const html = renderToStaticMarkup(<InteractionForm nodeId="test" interaction={{toolUseId:"a",toolName:"Bash",input:{command:"echo safe"}}} />);
   const button = (name: string) => html.match(new RegExp(`<button[^>]*data-mobile-target="permission-${name}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
-  expect(button("allow")).toContain("bg-accent ");
+  // 主按钮 = 墨色实底（51ca749 起 primary 不再是亮蓝）
+  expect(button("allow")).toContain("bg-ink ");
   expect(button("allow")).toContain("允许一次");
   expect(button("allow")).toContain('data-scope="once"');
   expect(button("deny")).toContain("shadow-btn");
@@ -16,6 +17,7 @@ test("审批动作主次明确：允许一次为主按钮、作用域是次级�
   for (const label of ["仅本次", "本会话", "所有会话"]) expect(scope).toContain(label);
   expect(scope).toMatch(/aria-checked="true"[^>]*data-value="once"/);
   expect((scope.match(/max-md:min-h-11/g) ?? []).length).toBe(3);
+  expect(scope).not.toContain("bg-ink ");
   expect(scope).not.toContain("bg-accent");
   // 仅本次时不出规则预览；顺序：作用域 → 允许 → 拒绝
   expect(html).not.toContain("data-approval-rule-preview");
