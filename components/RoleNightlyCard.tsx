@@ -9,8 +9,9 @@ import { MEMORY_TYPE_LABEL, type Role } from "@/lib/roles";
 import { clockLabel } from "@/lib/role-timeline";
 import { ROLE_CHANGE_LABEL, roleChangeTitle, type RoleChange, type RoleChangeKind } from "@/lib/role-changes";
 import type { ChatNode } from "@/lib/types";
+import { systemNodeMeta } from "@/lib/node-meta";
 
-// 夜间整理卡（原型 09-roles.html s-role 的 .chg）：时间线里 systemMeta.kind === 'role-nightly'
+// 夜间整理卡（原型 09-roles.html s-role 的 .chg）：时间线里 meta.kind === 'role-nightly'
 // 的系统节点画成它。逐条 ✓ ✗、全部接受；已接受的 7 天内可撤销（沿用管家改动卡的确认 / 撤销语义）。
 
 const KIND_TONE: Record<RoleChangeKind, "positive" | "accent" | "neutral" | "fork"> = {
@@ -69,7 +70,7 @@ export function RoleNightlyCard({ role, node }: { role: Role; node: ChatNode }) 
     void loadChanges(role.id, node.id);
   }, [loadChanges, role.id, node.id]);
 
-  const meta = node.systemMeta ?? null;
+  const meta = systemNodeMeta(node);
   const subtitle = typeof meta?.subtitle === "string" ? meta.subtitle : "";
   const list = changes ?? EMPTY;
   const pending = list.filter((c) => c.status === "pending").length;

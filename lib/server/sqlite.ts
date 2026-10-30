@@ -867,6 +867,42 @@ function migrate(db: Database) {
     if (!has) db.exec(`ALTER TABLE nodes ADD COLUMN ${col} TEXT`);
   }
 
+  // 节点附带的结构化标记（docs/roles-p2.md 共享约定）：系统节点的 meta.kind
+  // （role-nightly / role-follow / group-round-end）、群聊消息的作者与引用等。
+  // NULL = 普通问答节点。前端靠 meta.kind 换渲染。
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'meta_json'").get()) {
+    db.exec("ALTER TABLE nodes ADD COLUMN meta_json TEXT");
+  }
+
+  // 角色 P2 · 群聊（docs/roles-p2.md B）：群 = sessions.kind='group' 的一行。
+  //   group_members   成员（角色），各自在群里有一条自己的 CLI 会话（cli_session_id），
+  //                   last_seen_seq = 已喂给它的最后一条群消息的 nodes.rowid（只喂增量）。
+  //   group_settings  没人 @ 时的发言策略与每轮上限。
+  // 两张表都跟着会话 / 角色级联删除：删群不留成员，删角色它就退群。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS group_members (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      cli_session_id TEXT,
+      cli_family TEXT,
+      cli_cwd TEXT,
+      last_seen_seq INTEGER NOT NULL DEFAULT 0,
+      joined_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, role_id)
+    );
+    CREATE INDEX IF NOT EXISTS group_members_role ON group_members(role_id);
+
+    CREATE TABLE IF NOT EXISTS group_settings (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      reply_policy TEXT NOT NULL DEFAULT 'route'
+        CHECK(reply_policy IN ('route','all','mention-only')),
+      max_passes INTEGER NOT NULL DEFAULT 3,
+      max_messages INTEGER NOT NULL DEFAULT 10,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
   // S88: 自动化任务。三张表的切分理由见 progress/custom-agents-plan.md：
   //
   //   tasks          「agent + prompt + workspace」冻成一个按钮
@@ -1212,9 +1248,8 @@ function migrate(db: Database) {
 
 // 角色 P2 · A 包（docs/roles-p2.md）：夜间整理、系统节点、例行、后台任务。
 //
-//  · nodes.system_meta_json：系统节点（夜间整理卡 / 跟进报告 / 群聊轮次结束）的 meta，
-//    NULL = 普通问答。单独加列而不复用 kind / ref_meta_json —— kind 有一堆按 'qa' /
-//    'reference' 分支的老代码，ref_meta_json 是参考卡的结构；挪用任何一个都得逐处排查。
+//  · 系统节点（夜间整理卡 / 跟进报告 / 群聊轮次结束）的 meta 用 migrate() 里加的
+//    nodes.meta_json（与群聊消息标记共用一列，kind 区分，见 lib/node-meta.ts）。
 //  · agents.nightly_freq：夜间整理频率（daily / weekly / off），只对角色有意义。
 //  · role_nightly：每个角色的整理游标与上次结果；last_slot 是抢槽去重（同一计划槽只跑一次）。
 //  · role_changes：整理提案，接受 / 拒绝 / 撤销（before_json = 应用前的文件快照）。
@@ -1225,7 +1260,6 @@ export function ensureRolesP2Schema(db: Database): void {
     const has = db.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(name);
     if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
   };
-  addCol("nodes", "system_meta_json", "TEXT");
   addCol("agents", "nightly_freq", "TEXT NOT NULL DEFAULT 'daily'");
   addCol("tasks", "quiet_if_nothing", "INTEGER NOT NULL DEFAULT 0");
   db.exec(`

@@ -8,6 +8,7 @@ import { RoleError, adoptRoleHomeSession, ensureRoleDir, planRoleNewSession } fr
 import { createTask, createTrigger, deleteTask, getTask, listRuns, listTriggers, updateTask, type Task } from "./tasks";
 import { ensureRoleSkillsLink, readRoleSkills } from "./role-changes";
 import { parseCron } from "@/lib/cron";
+import { notSystemNodeSql } from "@/lib/node-meta";
 import {
   ROLE_SKILL_NAME_RE,
   ROUTINE_QUIET_SUFFIX,
@@ -313,7 +314,7 @@ export function listRoleBackgroundTasks(roleId: string, limit = 20): RoleBackgro
   }[];
   const nodeStmt = getDB().query(
     `SELECT status, created_at, duration_ms FROM nodes
-      WHERE session_id = ? AND system_meta_json IS NULL ORDER BY created_at ASC`,
+      WHERE session_id = ? AND ${notSystemNodeSql("meta_json")} ORDER BY created_at ASC`,
   );
   return rows.map((r) => {
     const nodes = nodeStmt.all(r.sessionId) as { status: string; created_at: number; duration_ms: number | null }[];

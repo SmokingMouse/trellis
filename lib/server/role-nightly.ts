@@ -8,6 +8,7 @@ import { getAgent, listAgents, type AgentRecord } from "./agents";
 import { RoleError, ensureRoleDir, openRole } from "./roles";
 import { appendSystemNode } from "./system-node";
 import { insertRoleChanges, parseNightlyProposal, proposalContext, readRoleSkills } from "./role-changes";
+import { notSystemNodeSql } from "@/lib/node-meta";
 import {
   NIGHTLY_FREQUENCY_LABEL,
   ROLE_CHANGE_LABEL,
@@ -149,7 +150,7 @@ function newNodesSince(roleId: string, cursor: number | null): NewNode[] {
       .query(
         `SELECT n.id, n.question, n.response, n.created_at AS createdAt
            FROM nodes n JOIN sessions s ON s.id = n.session_id
-          WHERE s.agent_id = ? AND n.status = 'done' AND n.system_meta_json IS NULL
+          WHERE s.agent_id = ? AND n.status = 'done' AND ${notSystemNodeSql("n.meta_json")}
             AND n.kind = 'qa' AND n.created_at > ?
           ORDER BY n.created_at ASC`,
       )

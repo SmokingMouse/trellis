@@ -11,7 +11,7 @@ import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { adoptRoleHomeSession, planRoleNewSession, roleSpawnExtras } from "@/lib/server/roles";
-import { isSystemNode } from "@/lib/server/system-node";
+import { isSystemNodeId } from "@/lib/server/system-node";
 import { recordRoleBackgroundTask } from "@/lib/server/role-routines";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
 import {
@@ -282,6 +282,11 @@ async function handleChatPost(req: Request) {
     }
     return null;
   })();
+  // 群聊（docs/roles-p2.md B）不走单人问答链：一条消息要编排多位成员，入口是
+  // POST /api/groups/[id]/messages。挡在这里，免得画布 / 重试把群节点当普通节点续聊。
+  if (targetSession?.kind === "group") {
+    return Response.json({ error: "群聊消息请走 /api/groups/[id]/messages" }, { status: 409 });
+  }
   if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
     return Response.json(
       { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
@@ -292,7 +297,7 @@ async function handleChatPost(req: Request) {
   // 系统节点（夜间整理卡等，lib/server/system-node.ts）不是一轮对话：没有 CLI 会话可接，
   // 也没有问题可重跑。前端本来就不把它当接续目标，这里兜住绕过前端的请求。
   const systemTarget = body.kind === "branch" ? body.parentNodeId : body.kind === "retry" ? body.nodeId : null;
-  if (systemTarget && isSystemNode(systemTarget)) {
+  if (systemTarget && isSystemNodeId(systemTarget)) {
     return Response.json({ error: "系统消息不能接着问或重试" }, { status: 409 });
   }
 

@@ -1,8 +1,9 @@
 "use client";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Bot, CalendarClock, ConciergeBell, Cpu, Stethoscope, type LucideIcon } from "lucide-react";
 import { QuestionInput, type QuestionInputHandle } from "@/components/QuestionInput";
 import { Icon, cn } from "@/components/ui";
+import { useComposerInsertStore } from "@/stores/composerInsertStore";
 
 // 管家草稿首页：还没有管家会话时 /butler 落到这里。发出第一句 = streamRoot
 // 带着管家 agentId 建会话（见 sessionStore 的 butlerDraft），之后就是普通会话。
@@ -35,6 +36,14 @@ const STARTERS: { icon: LucideIcon; title: string; hint: string; prompt: string 
 
 export function ButlerHome({ isMobile }: { isMobile: boolean }) {
   const inputRef = useRef<QuestionInputHandle>(null);
+  // 群聊上限卡「让管家记成任务」（components/GroupTimeline.tsx）：还没有管家会话时，
+  // 草稿投递到固定键 "butler-draft"，这里取走填进输入框（不替用户发）。
+  const pendingInsert = useComposerInsertStore((s) => s.pending);
+  useEffect(() => {
+    if (!pendingInsert || pendingInsert.sessionId !== "butler-draft") return;
+    inputRef.current?.fill(pendingInsert.text);
+    useComposerInsertStore.getState().consumeComposerInsert(pendingInsert.id);
+  }, [pendingInsert]);
   return (
     <main
       data-butler-home

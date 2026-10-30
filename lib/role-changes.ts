@@ -5,17 +5,6 @@
 // 里插一个 meta.kind='role-nightly' 的系统节点。时间线认出它画成整理卡，用户逐条接受 /
 // 拒绝；接受才落成文件，7 天内可按 before_json 撤销。
 
-/** 会话里「不是模型回复」的系统节点种类（appendSystemNode 的 kind，见 lib/server/system-node.ts）。 */
-export const SYSTEM_NODE_KINDS = ["role-nightly", "role-follow", "group-round-end"] as const;
-export type SystemNodeKind = (typeof SYSTEM_NODE_KINDS)[number];
-
-/** nodes.system_meta_json 解析后的形状：kind 必有，其余由各 kind 自定。 */
-export type SystemNodeMeta = { kind: SystemNodeKind } & Record<string, unknown>;
-
-export function isSystemNodeKind(v: unknown): v is SystemNodeKind {
-  return typeof v === "string" && (SYSTEM_NODE_KINDS as readonly string[]).includes(v);
-}
-
 // ---------------------------------------------------------------- 提案
 
 export const ROLE_CHANGE_KINDS = ["add", "merge", "delete", "skill"] as const;

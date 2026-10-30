@@ -1,4 +1,4 @@
-import type { SystemNodeMeta } from "./role-changes";
+import type { NodeMeta } from "./node-meta";
 
 export type NodeStatus = "streaming" | "done" | "error";
 
@@ -277,9 +277,10 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
-  // 角色 P2：系统节点（不是模型回复，见 lib/server/system-node.ts）。前端按 systemMeta.kind
-  // 换渲染（夜间整理卡等），不画成问答、不给分叉 / 删除、不当输入框的接续目标。
-  systemMeta?: SystemNodeMeta | null;
+  // 结构化标记（nodes.meta_json，lib/node-meta.ts）：系统节点（夜间整理卡 / 跟进报告 /
+  // 群聊轮次结束）按 meta.kind 换渲染，不画成问答、不给分叉 / 删除、不当输入框的接续目标；
+  // 群聊消息（group-user / group-reply）带作者与引用，是普通对话内容。null = 普通问答。
+  meta?: NodeMeta | null;
 };
 
 export type Bookmark = {

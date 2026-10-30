@@ -205,11 +205,16 @@ describe("appendSystemNode", () => {
     expect(n.question).toBe("夜间整理");
     expect(n.response).toBe("- 新增：x");
     // meta 里误带的 kind 不能把类型改掉
-    expect(n.systemMeta).toEqual({ roleId: "r", kind: "role-nightly" });
+    expect(n.meta).toEqual({ roleId: "r", kind: "role-nightly" });
     expect(repo.getSession(sessionId)!.rootNodeId).toBe(before.rootNodeId);
-    expect(systemNode.isSystemNode(sys)).toBeTrue();
-    expect(systemNode.isSystemNode(nodeId)).toBeFalse();
-    expect(repo.getNode(nodeId)!.systemMeta).toBeUndefined();
+    expect(systemNode.isSystemNodeId(sys)).toBeTrue();
+    expect(systemNode.isSystemNodeId(nodeId)).toBeFalse();
+    expect(repo.getNode(nodeId)!.meta).toBeNull();
+    // 同一列也装群聊消息标记（group-user / group-reply）：带 meta 不等于系统节点
+    db().prepare("UPDATE nodes SET meta_json = ? WHERE id = ?").run(JSON.stringify({ kind: "group-user" }), nodeId);
+    expect(repo.getNode(nodeId)!.meta).toEqual({ kind: "group-user" });
+    expect(systemNode.isSystemNodeId(nodeId)).toBeFalse();
+    db().prepare("UPDATE nodes SET meta_json = NULL WHERE id = ?").run(nodeId);
     const hits = db().query("SELECT COUNT(*) AS n FROM search_index WHERE source_id = ?").get(sys) as { n: number };
     expect(hits.n).toBe(0);
   });
@@ -290,8 +295,8 @@ describe("夜间整理：跳过与提案", () => {
     if (r.status !== "ran") throw new Error("unreachable");
     const card = repo.getNode(r.nodeId)!;
     expect(card.sessionId).toBe(sessionId);
-    expect(card.systemMeta?.kind).toBe("role-nightly");
-    expect(card.systemMeta?.read).toBe(1);
+    expect(card.meta?.kind).toBe("role-nightly");
+    expect(card.meta?.read).toBe(1);
     const list = changes.listRoleChanges(role.id, { nodeId: r.nodeId });
     expect(list.map((c) => [c.kind, c.status])).toEqual([
       ["add", "pending"],
@@ -314,7 +319,7 @@ describe("夜间整理：跳过与提案", () => {
     const r = await nightly.runRoleNightly(role.id);
     expect(r.status).toBe("error");
     expect(nightly.getNightlyState(role.id).cursorAt).toBeNull();
-    expect(repo.getSessionNodes(sessionId).some((n) => n.systemMeta)).toBeFalse();
+    expect(repo.getSessionNodes(sessionId).some((n) => n.meta)).toBeFalse();
   });
 
   test("空提案 → empty，推进游标，不出声", async () => {
@@ -322,7 +327,7 @@ describe("夜间整理：跳过与提案", () => {
     output = '{"summary":"没什么","changes":[]}';
     expect((await nightly.runRoleNightly(role.id)).status).toBe("empty");
     expect(nightly.getNightlyState(role.id).cursorAt).not.toBeNull();
-    expect(repo.getSessionNodes(sessionId).some((n) => n.systemMeta)).toBeFalse();
+    expect(repo.getSessionNodes(sessionId).some((n) => n.meta)).toBeFalse();
   });
 
   test("模型抛错 → error 状态、running 复位", async () => {
