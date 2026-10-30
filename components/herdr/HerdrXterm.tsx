@@ -6,6 +6,33 @@ import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+/** 终端配色：轮询版和实时版（HerdrLiveTerminal）共用。 */
+export const HERDR_XTERM_THEME = {
+  background: "#0a0b10",
+  foreground: "#e4e6ee",
+  cursor: "#e4e6ee",
+  selectionBackground: "rgba(120, 130, 200, 0.3)",
+  black: "#0a0b10",
+  red: "#f85149",
+  green: "#3fb950",
+  yellow: "#d29922",
+  blue: "#58a6ff",
+  magenta: "#bc8cff",
+  cyan: "#39c5cf",
+  white: "#b1bac4",
+  brightBlack: "#484f58",
+  brightRed: "#ff7b72",
+  brightGreen: "#56d364",
+  brightYellow: "#e3b341",
+  brightBlue: "#79c0ff",
+  brightMagenta: "#d2a8ff",
+  brightCyan: "#56d4dd",
+  brightWhite: "#f0f6fc",
+};
+
+export const HERDR_XTERM_FONT =
+  'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+
 export interface HerdrXtermProps {
   ansiText: string;
   className?: string;
@@ -40,30 +67,9 @@ export const HerdrXterm = memo(function HerdrXterm({
         cursorStyle: "bar",
         disableStdin: true, // 只读展示，输入通过底部的 Composer 发送
         fontSize,
-        fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+        fontFamily: HERDR_XTERM_FONT,
         lineHeight: 1.25,
-        theme: {
-          background: "#0a0b10",
-          foreground: "#e4e6ee",
-          cursor: "#e4e6ee",
-          selectionBackground: "rgba(120, 130, 200, 0.3)",
-          black: "#0a0b10",
-          red: "#f85149",
-          green: "#3fb950",
-          yellow: "#d29922",
-          blue: "#58a6ff",
-          magenta: "#bc8cff",
-          cyan: "#39c5cf",
-          white: "#b1bac4",
-          brightBlack: "#484f58",
-          brightRed: "#ff7b72",
-          brightGreen: "#56d364",
-          brightYellow: "#e3b341",
-          brightBlue: "#79c0ff",
-          brightMagenta: "#d2a8ff",
-          brightCyan: "#56d4dd",
-          brightWhite: "#f0f6fc",
-        },
+        theme: HERDR_XTERM_THEME,
         convertEol: true,
         scrollback: 3000,
       });

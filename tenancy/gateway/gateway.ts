@@ -39,6 +39,7 @@ import { handleNodesAPI, handlePair, ownsNode } from "./nodes-api";
 import { exportBlocked, parseVia, targetFor, type Target } from "./node-targets";
 import { RELAY_DISPATCH_PREFIX, RELAY_MACHINES_PATH, handleRelayDispatch, relayOnlyBlocked } from "./relay-dispatch";
 import { GATEWAY_PUSH_PATHS, handleGatewayPush, handleRelayPush } from "./push";
+import { wsProxy, type ProxySocketData } from "./ws-proxy";
 
 const PORT = Number(process.env.TRELLIS_GW_PORT) || 3200;
 const argv = process.argv.slice(2);
@@ -196,20 +197,7 @@ async function proxyHTTP(req: Request, url: URL, tenant: Tenant): Promise<Respon
   }
 }
 
-type ProxySocketData = {
-  kind: "proxy";
-  target: string;
-  cookie: string;
-  protocols: string[];
-  upstream?: WebSocket;
-  queue: (string | Uint8Array)[];
-};
-
 type SocketData = ProxySocketData | TunnelSocketData;
-
-function closeClient(ws: ServerWebSocket<ProxySocketData>, code = 1011, reason = "upstream closed") {
-  try { ws.close(code, reason); } catch { /* already closed */ }
-}
 
 function startGateway(): void {
   const db = getGatewayDB();
@@ -379,45 +367,21 @@ function startGateway(): void {
           tunnelOpen(db, ws as ServerWebSocket<TunnelSocketData>);
           return;
         }
-        const data = ws.data;
-        const client = ws as ServerWebSocket<ProxySocketData>;
-        // Bun 的 WebSocket 客户端支持握手自定义 headers/protocols(bun-types WebSocketOptionsHeaders);
-        // next build 的 tsc 走 DOM lib 看不到这个扩展签名,局部断言之。
-        type BunWebSocketCtor = new (
-          url: string,
-          opts?: { headers?: Record<string, string>; protocols?: string[] },
-        ) => WebSocket;
-        const options = { headers: { cookie: data.cookie }, protocols: data.protocols };
-        const upstream = new (WebSocket as unknown as BunWebSocketCtor)(data.target, options);
-        upstream.binaryType = "arraybuffer";
-        data.upstream = upstream;
-        upstream.onopen = () => {
-          for (const message of data.queue) upstream.send(message);
-          data.queue.length = 0;
-        };
-        upstream.onmessage = (event) => {
-          if (event.data instanceof ArrayBuffer) ws.send(new Uint8Array(event.data));
-          else ws.send(event.data);
-        };
-        upstream.onclose = (event) => closeClient(client, event.code || 1000, event.reason);
-        upstream.onerror = () => closeClient(client);
+        wsProxy.open(ws as ServerWebSocket<ProxySocketData>);
       },
       message(ws, message) {
         if (ws.data.kind === "tunnel") {
           tunnelMessage(db, ws as ServerWebSocket<TunnelSocketData>, message);
           return;
         }
-        const data = ws.data;
-        const frame = typeof message === "string" ? message : new Uint8Array(message);
-        if (data.upstream?.readyState === WebSocket.OPEN) data.upstream.send(frame);
-        else data.queue.push(frame);
+        wsProxy.message(ws as ServerWebSocket<ProxySocketData>, message);
       },
       close(ws, code, reason) {
         if (ws.data.kind === "tunnel") {
           tunnelClose(ws as ServerWebSocket<TunnelSocketData>);
           return;
         }
-        try { ws.data.upstream?.close(code, reason); } catch { /* already closed */ }
+        wsProxy.close(ws as ServerWebSocket<ProxySocketData>, code, reason);
       },
     },
   });

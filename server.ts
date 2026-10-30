@@ -7,8 +7,9 @@
 // 「WS 可用」的位置，就是在 Next 前面放一个 Bun.serve —— 它的原生 WebSocket 是好的。
 //
 //   :PORT  server.ts (Bun.serve)
-//      ├─ /term/*  → ttyd 127.0.0.1:<ttydPort>   （HTTP + WS，先校 cookie）
-//      └─ /*       → next start 127.0.0.1:<nextPort>
+//      ├─ /term/*        → ttyd 127.0.0.1:<ttydPort>   （HTTP + WS，先校 cookie）
+//      ├─ /herdr-stream  → herdr 窗格实时终端流（WS，先校 cookie；lib/herdr-stream.ts）
+//      └─ /*             → next start 127.0.0.1:<nextPort>
 //
 // 三条承重属性都已实测：WS upgrade 通、**SSE 逐条增量到达**（~4ms 开销，没被
 // 缓冲——trellis 整个对话是 SSE，缓冲了就全瘫）、POST 请求体透传。
@@ -16,12 +17,19 @@
 // 部署面刻意零改动：launchd plist 调的是 `bun --bun run start -- -p 3088`，
 // 我们只把 package.json 的 start 指到本文件，并在这里认 `-p`。
 
-import { spawn, type Subprocess } from "bun";
+import { spawn, type ServerWebSocket, type Subprocess } from "bun";
 import { AUTH_COOKIE } from "./lib/auth-cookie";
 import { hasTtyd, ttydHostDependencyNote } from "./lib/ttyd-dependency";
 import { diskHealthField } from "./lib/disk-space";
 import { startHubTunnel, type HubTunnelHandle } from "./lib/hub-tunnel";
 import { resolveHubNodeConfig } from "./lib/hub-node-config";
+import {
+  closeAllHerdrStreams,
+  handleHerdrStreamRequest,
+  herdrStreamSocket,
+  type HerdrStreamSocketData,
+} from "./lib/herdr-stream";
+import { HERDR_STREAM_PATH } from "./lib/herdr-stream-protocol";
 import {
   deployPaths,
   isDeployStateFresh,
@@ -204,6 +212,8 @@ async function superviseNext(): Promise<void> {
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  // 实时终端流的 observe 子进程归大门管，Next 排空管不到它们。
+  closeAllHerdrStreams();
   if (nextReady) {
     try {
       await fetch(`${NEXT_UP}/api/internal/shutdown`, {
@@ -360,6 +370,7 @@ void superviseNext();
 // 每条 WS 连接随身带的上下文：目标 ttyd 端口 / 路径，以及上游连接与
 // 「上游还没连上时」的待发队列。
 type TermSocket = {
+  kind: "term";
   port: number;
   path: string;
   search: string;
@@ -367,7 +378,10 @@ type TermSocket = {
   q: (string | Uint8Array)[];
 };
 
-Bun.serve<TermSocket>({
+// 两种 WS 共用一个 websocket 处理器，按 data.kind 分流。
+type GateSocket = TermSocket | HerdrStreamSocketData;
+
+Bun.serve<GateSocket>({
   port: PORT,
   // SSE / 长连接不能被空闲超时掐死。trellis 的一轮生成可以几分钟不吐字节
   // （思考期），默认 idleTimeout 会当场断流。
@@ -406,6 +420,11 @@ Bun.serve<TermSocket>({
       });
     }
 
+    // 实时终端流不经 Next：Next 重启 / 维护页期间照样能看能打字。
+    if (url.pathname === HERDR_STREAM_PATH) {
+      return handleHerdrStreamRequest(req, server, authed(req));
+    }
+
     if (url.pathname === "/term" || url.pathname.startsWith("/term/")) {
       if (!authed(req)) return new Response("Unauthorized", { status: 401 });
       // /term 的端口发现要问 Next，Next 不在就没得问。
@@ -418,7 +437,7 @@ Bun.serve<TermSocket>({
       const path = url.pathname.replace(/^\/term/, "") || "/";
 
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        if (server.upgrade(req, { data: { port, path, search: url.search, q: [] } })) {
+        if (server.upgrade(req, { data: { kind: "term", port, path, search: url.search, q: [] } })) {
           return undefined;
         }
         return new Response("upgrade failed", { status: 400 });
@@ -485,6 +504,10 @@ Bun.serve<TermSocket>({
   websocket: {
     idleTimeout: 0,
     open(ws) {
+      if (ws.data.kind === "herdr") {
+        herdrStreamSocket.open(ws as ServerWebSocket<HerdrStreamSocketData>);
+        return;
+      }
       const d = ws.data;
       const up = new WebSocket(
         `ws://127.0.0.1:${d.port}${d.path}${d.search}`,
@@ -504,11 +527,22 @@ Bun.serve<TermSocket>({
       up.onerror = () => ws.close();
     },
     message(ws, msg) {
+      if (ws.data.kind === "herdr") {
+        herdrStreamSocket.message(ws as ServerWebSocket<HerdrStreamSocketData>, msg);
+        return;
+      }
       const d = ws.data;
       if (d.up && d.up.readyState === 1) d.up.send(msg);
       else d.q.push(msg as string | Uint8Array);
     },
+    drain(ws) {
+      if (ws.data.kind === "herdr") herdrStreamSocket.drain(ws as ServerWebSocket<HerdrStreamSocketData>);
+    },
     close(ws) {
+      if (ws.data.kind === "herdr") {
+        herdrStreamSocket.close(ws as ServerWebSocket<HerdrStreamSocketData>);
+        return;
+      }
       try {
         ws.data.up?.close();
       } catch {

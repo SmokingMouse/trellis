@@ -41,8 +41,10 @@ type InlineAgentDef = {
  * 否则老 hash 命中缓存目录，新逻辑对存量 agent 永远不生效（本文件的 Skill
  * 自动补全就踩过一次：改了代码、pack 没重建、行为纹丝不动）。
  * v3：技能源从单根 ~/.claude/skills 改为多根（+ trellis 自带 skills/）——
- * 存量 pack 可能缺内置技能的 symlink，必须重物化。 */
-const PACK_FORMAT = 3;
+ * 存量 pack 可能缺内置技能的 symlink，必须重物化。
+ * v4：agents/<slug>.md 正文改走 claudeAgentPrompt（空人设兜底）——存量 pack 的
+ * 空正文会让 claude 零输出，必须重物化。 */
+const PACK_FORMAT = 4;
 
 /** agent 实际拿到的工具白名单。
  *

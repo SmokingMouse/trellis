@@ -4,9 +4,11 @@ import { LARK_THREAD_TABLES_SQL } from "@/lib/server/lark/protocol";
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { BUILTIN_AGENT_SEEDS, PREVIOUS_BUILTIN_PROMPTS } from "@/lib/agent-presets";
 import { trellisDbPath } from "@/lib/disk-space";
 import { dbWaitBudgetMs } from "./db-error";
+import { assertProdDbAccessAllowed } from "./prod-db-guard";
 
 let _db: Database | null = null;
 
@@ -16,9 +18,20 @@ function dbPath(): string {
   return trellisDbPath();
 }
 
+/** 本模块所在目录：bun 直接跑时是真实路径；Next 打包后可能是占位路径，守卫会忽略不存在的目录。 */
+function moduleDir(): string | undefined {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return undefined;
+  }
+}
+
 export function getDB(): Database {
   if (_db) return _db;
   const file = dbPath();
+  // worktree 里的代码别把还没上线的迁移跑进 prod 库，见 prod-db-guard.ts
+  assertProdDbAccessAllowed(file, moduleDir());
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
   db.exec("PRAGMA journal_mode = WAL");

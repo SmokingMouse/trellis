@@ -1,14 +1,12 @@
 // ui-guard-allow-file(hex): terminal high contrast theme
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   ChevronDown,
   MessagesSquare,
   Plus,
   RotateCcw,
-  SquareTerminal,
-  X,
 } from "lucide-react";
 import {
   Button,
@@ -16,43 +14,31 @@ import {
   IconButton,
   Spinner,
   StatusDot,
-  cn,
   toast,
 } from "@/components/ui";
 import {
-  openHerdrConsolePane,
   useCurrentHerdrPane,
   useHerdrConsole,
 } from "@/hooks/useHerdrConsole";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
-import {
-  createHerdrTab,
-  readHerdrPane,
-  sendHerdrCommand,
-} from "@/lib/herdr-actions";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { createHerdrTab, sendHerdrCommand } from "@/lib/herdr-actions";
 import { useHerdrConsoleStore } from "@/stores/herdrConsoleStore";
 import { useSessionStore } from "@/stores/sessionStore";
-import { HerdrTerminalReflow } from "./HerdrTerminalReflow";
-import { HerdrXterm } from "./HerdrXterm";
+import { HerdrLiveStatusPill, HerdrPaneControls, HerdrPaneScreen, useHerdrPaneTerminal } from "./HerdrPaneTerminal";
 
-const LINES = 1000;
 const POLL_MS = 2500;
 
-const KEYS: { label: string; key: string; title: string }[] = [
-  { label: "Tab", key: "Tab", title: "Tab 自动补全" },
-  { label: "Enter", key: "Enter", title: "回车" },
-  { label: "Esc", key: "Escape", title: "Esc" },
-  { label: "Ctrl-C", key: "ctrl+c", title: "Ctrl-C 中断" },
-  { label: "↑", key: "up", title: "上方向键" },
-  { label: "↓", key: "down", title: "下方向键" },
-  { label: "1", key: "1", title: "按键 1" },
-  { label: "2", key: "2", title: "按键 2" },
-];
+// 手机全屏终端工作台：默认实时终端（能直接用软键盘打字，辅助键栏补 Esc/Ctrl/方向键），
+// 实时流不可用时退回轮询读屏。和桌面抽屉共用 HerdrPaneTerminal。
 
 export function HerdrMobileWorkbench() {
   const hc = useHerdrConsole();
   const current = useCurrentHerdrPane(hc.panes);
-  const active = useHerdrConsoleStore((s) => s.mobileTerminalView);
+  // openDrawer 会同时置 mobileTerminalView（一个动作两端都能打开），桌面上要靠这里挡住：
+  // 否则桌面同时出抽屉和这块全屏工作台，还会对同一窗格开两条实时流。
+  const isMobile = useIsMobile();
+  const active = useHerdrConsoleStore((s) => s.mobileTerminalView) && isMobile === true;
   const explicit = useHerdrConsoleStore((s) => s.drawerPaneId);
   const close = () => useHerdrConsoleStore.getState().setMobileTerminalView(false);
   const toggleFleetPicker = useHerdrConsoleStore((s) => s.toggleFleetPicker);
@@ -62,59 +48,17 @@ export function HerdrMobileWorkbench() {
     ? hc.panes.find((p) => p.paneId === explicit && p.lane !== "off") ?? null
     : current;
 
-  const [screen, setScreen] = useState<{ paneId: string; text: string; error: string | null } | null>(null);
-  const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"terminal" | "reflow" | "raw">("terminal");
   const [customCmd, setCustomCmd] = useState("");
-  const [isScrolledUp, setIsScrolledUp] = useState(false);
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-
   const paneId = target?.paneId ?? null;
-
-  const load = useCallback(async (id: string, mode = viewMode) => {
-    setLoading(true);
-    try {
-      const format = mode === "terminal" ? "ansi" : "text";
-      const next = await readHerdrPane(id, LINES, format);
-      setScreen({ paneId: id, text: next, error: null });
-    } catch (err) {
-      setScreen((prev) => ({
-        paneId: id,
-        text: prev?.paneId === id ? prev.text : "",
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    } finally {
-      setLoading(false);
-    }
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (!paneId || !active) return;
-    stickRef.current = true;
-    const tick = () => {
-      if (document.visibilityState === "visible") void load(paneId);
-    };
-    const first = setTimeout(tick, 0);
-    const timer = setInterval(tick, POLL_MS);
-    return () => {
-      clearTimeout(first);
-      clearInterval(timer);
-    };
-  }, [paneId, active, load]);
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (el && stickRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [screen]);
+  const term = useHerdrPaneTerminal({
+    paneId,
+    active,
+    readOnly: hc.readOnly || !hc.available,
+    pollMs: POLL_MS,
+  });
 
   if (!active || !target) return null;
-
-  const own = screen?.paneId === target.paneId ? screen : null;
 
   const executeCmd = async (cmd: string) => {
     if (!cmd.trim() || !target) return;
@@ -122,24 +66,9 @@ export function HerdrMobileWorkbench() {
     try {
       await sendHerdrCommand(target.paneId, cmd.trim(), ["Enter"]);
       setCustomCmd("");
-      setTimeout(() => void load(target.paneId), 200);
+      term.afterSend();
     } catch (err) {
       toast.error(`发送失败: ${cmd}`, {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setSending(null);
-    }
-  };
-
-  const pressKey = async (key: string, label: string) => {
-    if (!target) return;
-    setSending(key);
-    try {
-      await sendHerdrCommand(target.paneId, "", [key]);
-      setTimeout(() => void load(target.paneId), 200);
-    } catch (err) {
-      toast.error(`按键 ${label} 失败`, {
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -208,21 +137,19 @@ export function HerdrMobileWorkbench() {
             </button>
           )}
 
+          <HerdrLiveStatusPill t={term} />
+
           <button
             type="button"
             title="切换真实终端(xterm)、重排卡片与原始字符"
-            onClick={() => {
-              const nextMode = viewMode === "terminal" ? "reflow" : viewMode === "reflow" ? "raw" : "terminal";
-              setViewMode(nextMode);
-              if (target) void load(target.paneId, nextMode);
-            }}
+            onClick={term.cycleViewMode}
             className="rounded-field border border-[#25293d] bg-[#141624] px-2 py-0.5 font-mono text-nano text-[#8e96ac] hover:text-ink active:bg-[#1a1e2e]"
           >
-            {viewMode === "terminal" ? "终端" : viewMode === "reflow" ? "重排" : "原始"}
+            {term.viewMode === "terminal" ? "终端" : term.viewMode === "reflow" ? "重排" : "原始"}
           </button>
 
-          <IconButton label="刷新" size="sm" onClick={() => void load(target.paneId)} disabled={loading}>
-            <Icon icon={RotateCcw} size="sm" className={loading ? "animate-spin" : undefined} />
+          <IconButton label={term.liveMode ? "重新连接" : "刷新"} size="sm" onClick={term.refresh} disabled={term.loading}>
+            <Icon icon={RotateCcw} size="sm" className={term.loading ? "animate-spin motion-reduce:animate-none" : undefined} />
           </IconButton>
 
           <IconButton label="新建Tab" size="sm" onClick={handleCreateTab}>
@@ -232,49 +159,7 @@ export function HerdrMobileWorkbench() {
       </header>
 
       {/* 2. 满屏打平终端视口 (Flat Full-Bleed Terminal Screen) */}
-      <div className="relative w-full max-w-full min-w-0 min-h-0 flex-1 flex flex-col bg-[#0a0b10] overflow-hidden">
-        {own?.error ? (
-          <div className="p-3 text-danger font-medium">读屏不可用：{own.error}</div>
-        ) : !own?.text ? (
-          <div className="flex h-32 items-center justify-center gap-2 text-ink-faint">
-            <Spinner size="sm" label="正在连接终端流..." />
-          </div>
-        ) : viewMode === "terminal" ? (
-          <HerdrXterm ansiText={own.text} />
-        ) : (
-          <div
-            ref={scrollRef}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-              const atBottom = dist < 36;
-              stickRef.current = atBottom;
-              setIsScrolledUp(!atBottom);
-            }}
-            className="w-full max-w-full min-w-0 m-0 flex-1 overflow-y-auto overflow-x-hidden p-2.5 font-mono text-[11.5px] leading-relaxed select-text"
-          >
-            <HerdrTerminalReflow text={own.text} raw={viewMode === "raw"} />
-          </div>
-        )}
-
-        {/* 往上翻时提示回到底部 (非 xterm 模式下) */}
-        {viewMode !== "terminal" && isScrolledUp && (
-          <button
-            type="button"
-            onClick={() => {
-              const el = scrollRef.current;
-              if (el) {
-                el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-                stickRef.current = true;
-                setIsScrolledUp(false);
-              }
-            }}
-            className="absolute bottom-3 right-3 z-20 flex items-center gap-1 rounded-full border border-line-strong bg-surface-raised/95 px-3 py-1 font-mono text-label font-medium text-ink shadow-lg backdrop-blur-sm active:bg-surface-muted"
-          >
-            <span>↓ 回到底部</span>
-          </button>
-        )}
-      </div>
+      <HerdrPaneScreen t={term} mobile />
 
       {/* 3. 底部操作栏：本地中文输入框 (Composer) */}
       <form
@@ -334,24 +219,8 @@ export function HerdrMobileWorkbench() {
         </button>
       </div>
 
-      {/* 5. 常驻物理级辅助按键条 (Keybar) */}
-      <div className="w-full shrink-0 border-t border-[#1a1d2b] bg-[#08090d] px-2 py-1.5">
-        <div className="flex flex-wrap gap-1">
-          {KEYS.map(({ label, key, title }) => (
-            <Button
-              key={key}
-              variant="secondary"
-              size="sm"
-              title={title}
-              disabled={sending !== null}
-              onClick={() => void pressKey(key, label)}
-              className="font-mono text-nano border-[#24283c] bg-[#141624] text-[#a0a8be] hover:bg-[#1c2032] hover:text-ink"
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      </div>
+      {/* 5. 工具条 + 辅助键栏（粘滞 Ctrl/Alt/⇧、方向键长按连发） */}
+      <HerdrPaneControls t={term} variant="full" />
     </div>
   );
 }
