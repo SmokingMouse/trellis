@@ -17,7 +17,6 @@ import {
   FolderGit2,
   GitBranch,
   House,
-  ConciergeBell,
   Inbox,
   ListFilter,
   MessageSquare,
@@ -104,6 +103,8 @@ import { type HerdrSessionStatus } from "@/lib/herdr-ui";
 import { isBoolean, isStringArray, useSidebarPreference } from "@/hooks/useSidebarPreference";
 import { deleteWithUndo } from "@/lib/undoable";
 import { isButlerSession } from "@/lib/butler";
+import { RoleSidebarSection } from "@/components/RoleSidebarSection";
+import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { belongsToHerdrMode, herdrOffline, isOwnSession, selectSidebarSessions, sessionLocation, sidebarSource, projectPresentation, type SidebarLayout, type SidebarSource } from "@/lib/sidebar-view";
 
 const isLayout = (v: unknown): v is SidebarLayout => v === "project" || v === "time";
@@ -157,9 +158,10 @@ export function SessionSidebar() {
   const newConversation = useSessionStore((s) => s.newConversation);
   const newSandboxConversation = useSessionStore((s) => s.newSandboxConversation);
   const openHome = useSessionStore((s) => s.openHome);
-  const homeActive = useSessionStore((s) => !s.session && s.homeOpen && !s.butlerDraft);
+  const homeActive = useSessionStore((s) => !s.session && s.homeOpen && !s.butlerDraft && !s.roleDraft);
   const butlerActive = useSessionStore((s) => s.butlerDraft ? !s.session : isButlerSession(s.session));
-  const openButler = useSessionStore((s) => s.openButler);
+  // 角色对话（含草稿）有自己的高亮行，「对话」导航行让位。
+  const roleActive = useCurrentRole() !== null;
   const renameSession = useSessionStore((s) => s.renameSession);
   const archiveSession = useSessionStore((s) => s.archiveSession);
   const deleteSession = useSessionStore((s) => s.deleteSession);
@@ -1101,17 +1103,11 @@ export function SessionSidebar() {
               aria-current={homeActive ? "page" : undefined}
               onClick={() => openHome()}
             />
-            <ModeNavRows mode={mode} chatActive={mode === "chat" && !homeActive && !butlerActive} />
-            <NavRow
-              icon={ConciergeBell}
-              label="管家"
-              active={butlerActive}
-              title="管家：用对话配置 Trellis"
-              data-sidebar-butler
-              data-mobile-target="drawer-butler"
-              aria-current={butlerActive ? "page" : undefined}
-              onClick={() => void openButler()}
-            />
+            <ModeNavRows mode={mode} chatActive={mode === "chat" && !homeActive && !butlerActive && !roleActive} />
+          </GlideList>
+          {/* 角色分区（docs/roles-p1.md）：导航与「会话」之间。原导航里的「管家」行并进这里的末行。 */}
+          <GlideList>
+            <RoleSidebarSection />
           </GlideList>
           {/* 原型 .sb-sec：左「会话」，右侧控件。data-sidebar-toolbar 只在对话模式出现（同原工具条）。 */}
           <div data-sidebar-section className="mt-2.5 flex h-7.5 items-center gap-1 pl-2">
@@ -1174,16 +1170,6 @@ export function SessionSidebar() {
             className={homeActive ? "border border-line bg-surface-hover" : "border border-line"}
           >
             <Icon icon={House} selected={homeActive} />
-          </IconButton>
-          <IconButton
-            label="管家：用对话配置 Trellis"
-            data-sidebar-butler
-            data-mobile-target="drawer-butler"
-            aria-current={butlerActive ? "page" : undefined}
-            onClick={() => void openButler()}
-            className={butlerActive ? "border border-line bg-surface-hover" : "border border-line"}
-          >
-            <Icon icon={ConciergeBell} selected={butlerActive} />
           </IconButton>
           {/* CLI 同步：接入本机 Claude Code / Codex 会话（双向）。手机端收在「高级操作」里。 */}
           <IconButton
@@ -1277,6 +1263,8 @@ export function SessionSidebar() {
         {/* 整棵树一块悬停滑块（GlideList）：会话行与可折叠的分组行挂 data-glide-row。
             只认鼠标 / 触控板，触屏照旧走 .press-row。 */}
         <GlideList>
+        {/* 手机抽屉：角色分区排在列表最上面（随列表滚动）；管家入口在它的末行。 */}
+        {mobile && mode === "chat" && <RoleSidebarSection mobile />}
         {mode === "herdr" ? (
           <HerdrModeSidebar pinned={<>{renderAttention()}{renderHubInbox()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
