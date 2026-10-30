@@ -155,6 +155,7 @@ describe("agents：冲突跳过 / 覆盖", () => {
     expect(a.warnings.join()).toContain("no-such-skill-xyz");
     expect(sync.applyImport(pkg, null).find((r) => r.key === "sync-a")?.outcome).toBe("created");
     expect(sync.previewImport(pkg).find((i) => i.key === "sync-a")?.status).toBe("same");
+    expect(sync.applyImport(pkg, null).find((r) => r.key === "sync-a")?.outcome).toBe("unchanged");
 
     // 目标改了提示词 → conflict
     updateAgent(getAgentBySlug("sync-a")!.id, { systemPrompt: "target-local" });

@@ -437,7 +437,11 @@ export function applyImport(
   const results: ImportResultItem[] = [];
   for (const p of plans) {
     const { kind, key, label, status } = p.diff;
-    const sel = selections ? byId.get(itemId(kind, key)) : status === "new" ? { kind, key } : undefined;
+    const sel = selections
+      ? byId.get(itemId(kind, key))
+      : status === "new" || status === "same"
+        ? { kind, key }
+        : undefined;
     const action = decideAction(status, sel);
     const base = { kind, key, label };
     if (action === "unchanged") {
