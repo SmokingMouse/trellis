@@ -23,6 +23,10 @@ const ANSWER_CLIP = 4_000;
 const QUESTION_CLIP = 2_000;
 const MEMORY_MAX = 12;
 const TIMEOUT_MS = 180_000;
+// 显式指定模型，同夜间整理（role.model ?? "sonnet"）：裸 `claude -p` 跟的是 CLI 默认模型 / 环境里的
+// ANTHROPIC_MODEL —— 本机默认是最贵的那档，环境变量还可能指向一个限额用尽的号（2026-10-30 实测：
+// 继承来的 ANTHROPIC_MODEL 429，提炼两次都空手而归）。
+const DISTILL_MODEL = "sonnet";
 
 // ── 来源会话 ──────────────────────────────────────────────────────────────
 
@@ -218,7 +222,18 @@ export const claudeDistillRunner: DistillRunner = (systemPrompt, prompt) =>
     };
     const proc = spawn(
       "claude",
-      ["-p", "--output-format", "text", "--no-session-persistence", "--tools", "", "--system-prompt", systemPrompt],
+      [
+        "-p",
+        "--output-format",
+        "text",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--system-prompt",
+        systemPrompt,
+        "--model",
+        DISTILL_MODEL,
+      ],
       { cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] },
     );
     const timer = setTimeout(() => {
@@ -241,7 +256,9 @@ export const claudeDistillRunner: DistillRunner = (systemPrompt, prompt) =>
     proc.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        console.warn(`[roles/distill] claude 退出码 ${code}：${Buffer.concat(err).toString("utf8").slice(0, 500)}`);
+        // -p 文本模式下 API 错误（429 / 模型不存在）打在 stdout，stderr 常是空的：两边都记。
+        const detail = [Buffer.concat(err), Buffer.concat(out)].map((b) => b.toString("utf8").trim()).filter(Boolean);
+        console.warn(`[roles/distill] claude 退出码 ${code}：${detail.join(" / ").slice(0, 500)}`);
         return finish(null);
       }
       finish(Buffer.concat(out).toString("utf8").trim() || null);

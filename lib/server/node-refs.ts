@@ -42,9 +42,28 @@ export type RefCandidateSession = {
 type NodeLite = {
   id: string;
   question: string;
+  /** 回答开头（预览兜底用，见 nodePreview） */
+  response_head: string | null;
+  /** 作答的 agent / 角色名（群聊发言的「谁说的」） */
+  agent_name: string | null;
   topic_label: string | null;
   created_at: number;
 };
+
+// 候选节点的查询列：回答只取开头，够预览就行。
+const NODE_LITE_COLS = `n.id, n.question, substr(n.response, 1, 400) AS response_head, a.name AS agent_name,
+       n.topic_label, n.created_at`;
+const NODE_LITE_FROM = "nodes n LEFT JOIN agents a ON a.id = n.agent_id";
+
+/** 候选里显示的那一行：通常是提问；群聊发言（group-reply）的 question 是空的、正文在
+ * response，就退到「谁：说了什么」，免得群聊候选只剩一个序号。 */
+function nodePreview(r: NodeLite): string {
+  const q = r.question.trim();
+  if (q) return q;
+  const a = (r.response_head ?? "").trim();
+  if (!a) return "";
+  return r.agent_name ? `${r.agent_name}：${a}` : a;
+}
 
 function ordinal(sessionId: string, createdAt: number): number {
   const row = getDB()
@@ -57,7 +76,7 @@ function toCandidateNode(sessionId: string, r: NodeLite): RefCandidateNode {
   return {
     nodeId: r.id,
     index: ordinal(sessionId, r.created_at),
-    question: r.question.slice(0, 200),
+    question: nodePreview(r).slice(0, 200),
     topicLabel: r.topic_label,
     createdAt: r.created_at,
   };
@@ -66,9 +85,9 @@ function toCandidateNode(sessionId: string, r: NodeLite): RefCandidateNode {
 function latestDoneNode(sessionId: string): RefCandidateNode | null {
   const r = getDB()
     .prepare(
-      `SELECT id, question, topic_label, created_at FROM nodes
-       WHERE session_id = ? AND status = 'done' AND ${notSystemNodeSql("meta_json")}
-       ORDER BY created_at DESC LIMIT 1`,
+      `SELECT ${NODE_LITE_COLS} FROM ${NODE_LITE_FROM}
+       WHERE n.session_id = ? AND n.status = 'done' AND ${notSystemNodeSql("n.meta_json")}
+       ORDER BY n.created_at DESC LIMIT 1`,
     )
     .get(sessionId) as NodeLite | undefined;
   return r ? toCandidateNode(sessionId, r) : null;
@@ -140,9 +159,9 @@ export function listRefNodes(sessionId: string, limit = 50): RefCandidateNode[] 
   if (!session || !VISIBLE_KINDS.has(session.kind ?? "user")) return null;
   const rows = getDB()
     .prepare(
-      `SELECT id, question, topic_label, created_at FROM nodes
-       WHERE session_id = ? AND status = 'done'
-       ORDER BY created_at DESC LIMIT ?`,
+      `SELECT ${NODE_LITE_COLS} FROM ${NODE_LITE_FROM}
+       WHERE n.session_id = ? AND n.status = 'done'
+       ORDER BY n.created_at DESC LIMIT ?`,
     )
     .all(sessionId, limit) as NodeLite[];
   return rows.map((r) => toCandidateNode(sessionId, r));

@@ -140,6 +140,31 @@ describe("搜索 / @ 引用纳入角色与群聊", () => {
     expect(nodeRefs.listRefNodes("s-internal")).toBeNull();
     expect(nodeRefs.resolveNodeRef({ sessionId: "s-role", nodeId: "s-role-n1" } as never)?.response).toBe("回答 s-role");
   });
+
+  test("群聊候选：默认节点是最后一条发言（不是轮次结束卡），预览退到「谁：说了什么」", () => {
+    const r = roles.createRole({ name: "写作教练" });
+    seed("s-grp", { kind: "group", question: "@写作教练 开头怎么写" });
+    const db = sqlite.getDB();
+    db.prepare("UPDATE nodes SET meta_json = ? WHERE id = ?").run(JSON.stringify({ kind: "group-user" }), "s-grp-n1");
+    const t = Date.now() + 1000;
+    repo.createRootInSession({ sessionId: "s-grp", nodeId: "s-grp-reply", question: "", now: t });
+    db.prepare("UPDATE nodes SET status = 'done', response = ?, agent_id = ?, meta_json = ? WHERE id = ?").run(
+      "先改写题目，再亮立场。",
+      r.id,
+      JSON.stringify({ kind: "group-reply", roleId: r.id, pass: 1, roundId: "r1", replyTo: null }),
+      "s-grp-reply",
+    );
+    repo.createRootInSession({ sessionId: "s-grp", nodeId: "s-grp-end", question: "这一轮先停在这。", now: t + 1000 });
+    db.prepare("UPDATE nodes SET status = 'done', response = '这一轮先停在这。', meta_json = ? WHERE id = ?").run(
+      JSON.stringify({ kind: "group-round-end", roundId: "r1" }),
+      "s-grp-end",
+    );
+    const latest = nodeRefs.listRefCandidates("").find((c) => c.sessionId === "s-grp")?.latest;
+    expect(latest?.nodeId).toBe("s-grp-reply");
+    expect(latest?.question).toBe("写作教练：先改写题目，再亮立场。");
+    const listed = nodeRefs.listRefNodes("s-grp")!;
+    expect(listed.find((n) => n.nodeId === "s-grp-n1")?.question).toBe("@写作教练 开头怎么写");
+  });
 });
 
 describe("系统节点", () => {

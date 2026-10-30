@@ -56,6 +56,17 @@ const STATUS_TEXT: Record<NonNullable<RoleNightlyState["lastStatus"]>, string> =
   error: "失败",
 };
 
+// 例行最近一次执行的状态（task_runs.status）。没列到的原样显示。
+const RUN_STATUS_TEXT: Record<string, string> = {
+  pending: "排队中",
+  running: "在跑",
+  done: "完成",
+  error: "失败",
+  timeout: "超时",
+  skipped: "跳过",
+  aborted: "已中止",
+};
+
 function when(ms: number | null): string {
   return ms
     ? new Date(ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
@@ -81,7 +92,7 @@ function FollowSection({ role }: { role: Role }) {
         跟进
       </h2>
       <div className="rounded-card bg-surface-raised shadow-raise">
-        <RoleFollowToggle roleId={role.id} roleName={role.name} className="px-3.5 py-3" />
+        <RoleFollowToggle roleId={role.id} roleName={role.name} className="p-4" />
       </div>
     </section>
   );
@@ -256,7 +267,7 @@ function RoutineList({ role }: { role: Role }) {
                 </div>
                 <div className="truncate text-label text-ink-muted">
                   {routineSubtitle(r)}
-                  {r.lastRun ? ` · 上次 ${when(r.lastRun.at)} ${r.lastRun.status}` : ""}
+                  {r.lastRun ? ` · 上次 ${when(r.lastRun.at)} ${RUN_STATUS_TEXT[r.lastRun.status] ?? r.lastRun.status}` : ""}
                 </div>
               </div>
               <label className="flex shrink-0 items-center gap-1.5 text-label text-ink-muted max-md:hidden">
