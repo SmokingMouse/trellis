@@ -6,6 +6,7 @@ import { Button, Checkbox, ErrorCallout, Icon, IconButton, Input, Modal, cn } fr
 import { RoleAvatar } from "@/components/ui/Avatar";
 import { RoleField } from "@/components/RoleFields";
 import { useRoleStore } from "@/stores/roleStore";
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 import { useGroupStore } from "@/stores/groupStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { GROUP_MAX_MEMBERS, GROUP_MIN_MEMBERS } from "@/lib/groups";
@@ -35,7 +36,7 @@ export function NewGroupModal({ onClose }: { onClose: () => void }) {
     if (!loaded) void refresh();
   }, [loaded, refresh]);
 
-  const usable = roles.filter((r) => r.enabled);
+  const usable = roles.filter((r) => r.enabled && r.id !== BUTLER_AGENT_ID);
   const full = picked.length >= GROUP_MAX_MEMBERS;
   const canCreate = !!name.trim() && picked.length >= GROUP_MIN_MEMBERS && !busy;
 

@@ -86,6 +86,10 @@ describe("建群与设置", () => {
     expect(bad.status).toBe(400);
     const notRole = await listRoute.POST(req("/api/groups", { name: "x", roleIds: [A.id, "nope"] }));
     expect(notRole.status).toBe(400);
+    // 管家迁成角色后也不收进群聊
+    const butler = await listRoute.POST(req("/api/groups", { name: "x", roleIds: [A.id, "builtin-trellis-admin"] }));
+    expect(butler.status).toBe(400);
+    expect(((await butler.json()) as { error: string }).error).toContain("管家不能加进群聊");
     const g = await newGroup();
     expect(g.members.map((m) => m.name)).toEqual(["Iris", "老周", "小满"]);
     expect(g.settings).toEqual({ replyPolicy: "route", maxPasses: 3, maxMessages: 10 });

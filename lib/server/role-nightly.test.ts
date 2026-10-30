@@ -625,6 +625,8 @@ describe("例行", () => {
     expect(t.agentId).toBe(role.id);
     expect(t.contextMode).toBe("project");
     expect(t.homeSessionId).toBeNull();
+    // 无人值守的定时跑默认用 sonnet，不落到默认的 opus
+    expect(t.providerId).toBe("claude-sonnet");
     expect(routines.listRoleRoutines(role.id).map((x) => x.taskId)).toEqual([r.taskId]);
     expect(() => routines.createRoleRoutine(role.id, { name: "", prompt: "x", trigger: { kind: "daily", time: "09:00" } })).toThrow();
     expect(() => routines.createRoleRoutine(role.id, { name: "x", prompt: "x", trigger: { kind: "cron", expr: "nope" } })).toThrow();

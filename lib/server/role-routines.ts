@@ -213,6 +213,9 @@ export function createRoleRoutine(roleId: string, body: unknown): RoleRoutine {
     contextMode: "project",
     workspacePath: plan.workspacePath,
     enabled: input.enabled ?? true,
+    // 无人值守的定时跑，默认用便宜的 sonnet（夜间整理同理）；角色自己设了模型时
+    // 由角色定义里的 model 决定，和对话一致。
+    providerId: "claude-sonnet",
     // 例行的结果就在角色时间线里，用户自己会看到；只有失败才通知。
     notifyOn: "error",
   });

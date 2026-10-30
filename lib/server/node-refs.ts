@@ -160,7 +160,7 @@ export function listRefNodes(sessionId: string, limit = 50): RefCandidateNode[] 
   const rows = getDB()
     .prepare(
       `SELECT ${NODE_LITE_COLS} FROM ${NODE_LITE_FROM}
-       WHERE n.session_id = ? AND n.status = 'done'
+       WHERE n.session_id = ? AND n.status = 'done' AND ${notSystemNodeSql("n.meta_json")}
        ORDER BY n.created_at DESC LIMIT ?`,
     )
     .all(sessionId, limit) as NodeLite[];

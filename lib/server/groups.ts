@@ -1,4 +1,5 @@
 import "server-only";
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -329,6 +330,8 @@ function parseRoleIds(v: unknown, field: string): string[] {
   for (const id of ids) {
     const a = getAgent(id);
     if (!a || a.kind !== "role") throw new GroupError(`不是角色：${id}`, 400);
+    // 管家是配置 Trellis 的助手，不进群聊；讨论要落成任务走上限卡的「让管家记成任务」
+    if (a.id === BUTLER_AGENT_ID) throw new GroupError("管家不能加进群聊", 400);
     if (!a.enabled) throw new GroupError(`角色已停用：${a.name}`, 400);
   }
   return ids;

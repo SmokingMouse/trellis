@@ -183,5 +183,7 @@ describe("系统节点", () => {
     expect(repo.getNode("s-sys-n1")!.meta).toBeNull();
     expect(repo.searchAll("超时独角兽")).toEqual([]);
     expect(nodeRefs.listRefCandidates("").find((c) => c.sessionId === "s-sys")?.latest?.nodeId).toBe("s-sys-n1");
+    // 展开会话的节点列表同样不列系统节点
+    expect(nodeRefs.listRefNodes("s-sys")!.map((x) => x.nodeId)).toEqual(["s-sys-n1"]);
   });
 });

@@ -6,6 +6,7 @@ import { RoleAvatar } from "@/components/ui/Avatar";
 import { GroupAvatarStack } from "./GroupAvatar";
 import { useGroupStore } from "@/stores/groupStore";
 import { useRoleStore } from "@/stores/roleStore";
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   GROUP_MAX_MEMBERS,
@@ -95,7 +96,9 @@ export function GroupSettingsBody({ group }: { group: Group }) {
     if (typeof r === "string") toast.error(r);
   };
   const s = group.settings;
-  const candidates = roles.filter((r) => r.enabled && !group.members.some((m) => m.roleId === r.id));
+  const candidates = roles.filter(
+    (r) => r.enabled && r.id !== BUTLER_AGENT_ID && !group.members.some((m) => m.roleId === r.id),
+  );
   const full = group.members.length >= GROUP_MAX_MEMBERS;
 
   return (
