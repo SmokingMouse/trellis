@@ -95,3 +95,37 @@ export type RoleBadge = { id: string; name: string; avatarHue: number; avatarGly
 
 /** 会话来源标记：角色会话带 role，群聊 kind='group'（成员头像由包 B 自己画）。 */
 export type SessionRoleTag = { sessionKind: string; role: RoleBadge | null };
+
+// ── 从会话提炼（新建弹窗第三个起点，docs/roles-p2.md C）─────────────────────────
+// 选一段聊得好的会话 → 服务端读它的问答（截到最近 ~40k 字）→ 一次模型调用产出人设草稿
+// 和初始记忆 → 预填表单；创建时把记忆一并写进角色目录。
+
+/** GET /api/roles/distill/sources 的一项：最近 50 个普通会话。 */
+export type DistillSource = {
+  sessionId: string;
+  title: string;
+  /** 工作目录末段；chat 会话 = null */
+  workspace: string | null;
+  /** 已完成的问答轮数 */
+  nodeCount: number;
+  updatedAt: number;
+};
+
+/** 草稿里的一条记忆；file 是服务端挑好的文件名（PUT /api/roles/[id]/memories/[file] 用）。 */
+export type DistillMemory = {
+  file: string;
+  name: string;
+  description: string;
+  type: "user" | "feedback" | "project" | "reference";
+  body: string;
+};
+
+/** POST /api/roles/distill 的返回。 */
+export type RoleDraft = {
+  name: string;
+  intro: string;
+  systemPrompt: string;
+  memories: DistillMemory[];
+  /** 来源会话（回显用） */
+  source: { sessionId: string; title: string; nodeCount: number; truncated: boolean };
+};
