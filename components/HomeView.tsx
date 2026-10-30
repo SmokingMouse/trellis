@@ -368,19 +368,20 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                           </span>
                         </span>
                         <span className="ml-auto flex shrink-0 items-center gap-1.5 md:relative">
-                          {/* 桌面原型 .trow 行尾只留一个「去处理」（排最右）；允许 / 拒绝收进行 hover / focus-within 才出现。手机照旧全显。 */}
-                          <Button
-                            size="sm"
-                            variant={item.kind === "approval" && isMobile ? "ghost" : "secondary"}
-                            onClick={() => void jump(item)}
-                          >
-                            去处理
-                          </Button>
-                          {item.kind === "approval" && (
-                            <span className={ROW_SECONDARY}>
+                          {/* 桌面原型 .trow 行尾只留一个常显主操作：审批行是「允许一次」（9/28 裁决：允许一次为主按钮，
+                              不能藏进 hover），提问行是「去处理」；其余（拒绝 / 去处理）收进行 hover / focus-within。手机照旧全显。 */}
+                          {item.kind === "approval" ? (
+                            <>
+                              <span className={ROW_SECONDARY}>
+                                <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
+                                <Button size="sm" variant="ghost" onClick={() => void jump(item)}>去处理</Button>
+                              </span>
                               <Button size="sm" variant="primary" onClick={() => void decide(item, true)}>允许一次</Button>
-                              <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
-                            </span>
+                            </>
+                          ) : (
+                            <Button size="sm" variant="secondary" onClick={() => void jump(item)}>
+                              去处理
+                            </Button>
                           )}
                         </span>
                       </li>
