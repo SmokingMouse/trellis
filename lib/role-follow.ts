@@ -68,13 +68,17 @@ export function followTitle(items: readonly Pick<RoleFollowItem, "state">[]): st
   return `跟进：${parts.join("、")}`;
 }
 
-/** 节点正文 / 飞书消息：markdown 清单，每项链接到会话。base 给了就拼绝对链接（飞书用）。 */
-export function followChecklistMarkdown(items: readonly RoleFollowItem[], base?: string | null): string {
-  const root = base ? base.replace(/\/+$/, "") : "";
+/** 节点正文 / 飞书消息：markdown 清单，每项链接到会话。
+ * links：relative（默认，站内）/ 给一个公开地址拼绝对链接（飞书用）/ null = 不带链接（飞书没配公开地址）。 */
+export function followChecklistMarkdown(
+  items: readonly RoleFollowItem[],
+  links: "relative" | string | null = "relative",
+): string {
+  const root = links === "relative" ? "" : (links ?? "").replace(/\/+$/, "");
   return items
     .map((i) => {
       const title = oneLine(i.title || "未命名会话", 60).replace(/[[\]]/g, "");
-      const link = i.sessionId ? `[${title}](${root}${followSessionHref(i.sessionId)})` : title;
+      const link = i.sessionId && links !== null ? `[${title}](${root}${followSessionHref(i.sessionId)})` : title;
       const detail = i.detail ? ` — ${oneLine(i.detail, 100)}` : "";
       return `- [ ] **${FOLLOW_STATE_LABEL[i.state]}** ${link}${detail}`;
     })
