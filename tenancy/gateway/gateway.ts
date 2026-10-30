@@ -36,6 +36,7 @@ import {
 } from "./tunnel";
 import type { SessionUser } from "./auth";
 import { handleNodesAPI, handlePair, ownsNode } from "./nodes-api";
+import { exportBlocked, parseVia, targetFor, type Target } from "./node-targets";
 
 const PORT = Number(process.env.TRELLIS_GW_PORT) || 3200;
 const argv = process.argv.slice(2);
@@ -103,17 +104,13 @@ async function nodeCLI(args: string[]): Promise<void> {
 // ── 多机路由 ────────────────────────────────────────────────────────────────
 // 用户自己的 tenant 是默认 node；trellis_node cookie 选中一个**属于他的**远端
 // node 时改路由过去。前端零改动：它看到的永远是同源 /api。
-type Target = { tenant: Tenant } | { offline: string } | null;
-
 function resolveTarget(req: Request, user: SessionUser): Target {
   const selected = readCookie(req.headers.get("cookie"), NODE_COOKIE);
-  if (selected && selected !== user.tenant && ownsNode(getGatewayDB(), user, selected)) {
-    const n = liveNode(selected);
-    if (!n) return { offline: selected };
-    return { tenant: { name: selected, hostPort: n.port, authToken: n.gateToken, kind: "remote" } };
+  if (selected && selected !== user.tenant) {
+    const target = targetFor(getGatewayDB(), user, selected);
+    if (target) return target;
   }
-  const tenant = getTenant(user.tenant);
-  return tenant ? { tenant } : null;
+  return targetFor(getGatewayDB(), user, user.tenant);
 }
 
 function nodeCookie(name: string | null, isSecure: boolean): string {
@@ -325,6 +322,18 @@ function startGateway(): void {
           },
         });
       }
+      if (url.pathname.startsWith("/__gw/via/")) {
+        const via = parseVia(url.pathname);
+        if (!via) return Response.json({ error: "bad via path" }, { status: 400 });
+        const target = targetFor(db, user, via.name);
+        if (!target) return Response.json({ error: "unknown node" }, { status: 404 });
+        if ("offline" in target) return Response.json({ error: `机器 ${via.name} 离线`, offline: true }, { status: 503 });
+        const blocked = exportBlocked(db, user, via.name, via.path);
+        if (blocked) return blocked;
+        const upstreamURL = new URL(url);
+        upstreamURL.pathname = via.path;
+        return proxyHTTP(req, upstreamURL, target.tenant);
+      }
       if (url.pathname.startsWith("/__gw/api/")) {
         return handleGatewayAPI(req, url, user, db);
       }
@@ -337,6 +346,8 @@ function startGateway(): void {
       if (!target) return maintenancePage();
       if ("offline" in target) return nodeOfflinePage(target.offline, user.tenant);
       const { tenant } = target;
+      const blocked = exportBlocked(db, user, tenant.name, url.pathname);
+      if (blocked) return blocked;
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const protocols = (req.headers.get("sec-websocket-protocol") || "")
           .split(",").map((value) => value.trim()).filter(Boolean);

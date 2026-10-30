@@ -8,6 +8,7 @@ import { requestOrigin } from "./api";
 import { NODE_COOKIE, readCookie } from "./proxy-util";
 import { getTenant } from "./tenants";
 import { createPairing, listNodes, liveNode, redeemPairing, revokeNode } from "./tunnel";
+import { nodePolicy, setNodePolicy } from "./node-targets";
 
 function error(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
@@ -30,6 +31,7 @@ export function nodesFor(db: Database, user: SessionUser, req: Request) {
       version: null,
       lastSeenAt: null,
       connectedAt: null,
+      policy: nodePolicy(db, user, user.tenant),
     },
     ...remote.map((row) => {
       const n = liveNode(row.name);
@@ -41,6 +43,7 @@ export function nodesFor(db: Database, user: SessionUser, req: Request) {
         version: n?.version || null,
         lastSeenAt: row.last_seen_at,
         connectedAt: n?.connectedAt ?? null,
+        policy: nodePolicy(db, user, row.name),
       };
     }),
   ];
@@ -77,6 +80,16 @@ export async function handleNodesAPI(req: Request, url: URL, user: SessionUser, 
     );
   }
   const one = url.pathname.match(/^\/__gw\/api\/nodes\/([a-z0-9-]{1,32})$/);
+  // PATCH /__gw/api/nodes/<name> { shareOut?, acceptDispatch? }：改外流策略（本机也能改）。
+  if (one && req.method === "PATCH") {
+    const name = one[1];
+    if (name !== user.tenant && !ownsNode(db, user, name)) return error(404, "not found");
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    const patch: { shareOut?: boolean; acceptDispatch?: boolean } = {};
+    if (typeof body?.shareOut === "boolean") patch.shareOut = body.shareOut;
+    if (typeof body?.acceptDispatch === "boolean") patch.acceptDispatch = body.acceptDispatch;
+    return Response.json({ name, policy: setNodePolicy(db, user, name, patch) });
+  }
   if (one && req.method === "DELETE") {
     if (!ownsNode(db, user, one[1])) return error(404, "not found");
     revokeNode(db, one[1]);
