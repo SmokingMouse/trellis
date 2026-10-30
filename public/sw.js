@@ -15,8 +15,9 @@
 // 部署后脚本 URL 变 → 浏览器装新 SW → activate 删掉不属于本版本的缓存，再预热新 shell。
 // v=dev（next dev）时不接管任何请求：dev 的 chunk 没有 hash，cache-first 会卡住 HMR。
 //
-// 推送 payload 由 lib/push.ts buildPushPayload 构造（badge 由 lib/server/push.ts 发送时补）：
-//   { kind, title, body, tag, url, sessionId, nodeId, badge? }
+// 推送 payload 由 lib/push.ts buildPushPayload / buildHerdrPushPayload 构造（badge 由
+// lib/server/push.ts 发送时补）：
+//   { kind: done | waiting | resolved | test, title, body, tag, url, sessionId, nodeId, badge? }
 // 经 hub 中继时网关会改写（tenancy/gateway/push.ts）：url → /__gw/go/<机器>/...，tag 前缀机器名，
 // badge 为各机器之和。
 
@@ -199,9 +200,25 @@ self.addEventListener("push", (event) => {
   };
   // 前台判定在服务端做（页面心跳，见 hooks/usePushBridge），到这里的都该显示 ——
   // iOS 对「收到推送却不弹通知」的 SW 会直接吊销订阅，所以这里永远 showNotification。
+  //
+  // 收回（kind = resolved，lib/server/herdr-push.ts）：同 tag 静默替换掉那条「需要你」，再把它
+  // 关掉。仍然先 showNotification，守住上面那条 iOS 规矩；替换不响（renotify 关、silent 开）。
+  const resolved = data.kind === "resolved";
+  if (resolved) {
+    options.renotify = false;
+    options.silent = true;
+  }
   event.waitUntil(
     (async () => {
       await self.registration.showNotification(title, options);
+      if (resolved) {
+        try {
+          const shown = await self.registration.getNotifications({ tag: options.tag });
+          for (const n of shown) n.close();
+        } catch {
+          /* 不支持 getNotifications：留着那条「已处理」，下一条同 tag 的会替换它 */
+        }
+      }
       await applyBadge(data.badge);
       // 告诉打开着的页面（验收 / 调试用；页面不处理也无妨）。
       const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
@@ -230,8 +247,17 @@ self.addEventListener("notificationclick", (event) => {
         // 经 hub 中继来的通知（url = /__gw/go/<机器>/...）必须整页导航：网关要换机器 cookie，
         // 站内切会话会在「当前那台」上找这个 sessionId，切错机器。
         const viaHub = target.pathname.startsWith("/__gw/go/");
-        if (home && data.sessionId && !viaHub) {
-          home.postMessage({ type: "trellis-open-session", sessionId: data.sessionId, nodeId: data.nodeId });
+        // url 里的定位参数（?focus=pending / ?pane=<窗格>，lib/push.ts）一并交给页面：
+        // 站内切过去之后滚到并聚焦那张卡（hooks/usePushBridge）。没绑会话的 Herdr 窗格
+        // （?view=herdr&pane=）同样站内处理：打开总览再定位。
+        const pane = target.searchParams.get("pane");
+        if (home && !viaHub && (data.sessionId || pane)) {
+          home.postMessage({
+            type: "trellis-open-session",
+            sessionId: data.sessionId,
+            nodeId: data.nodeId,
+            url: target.pathname + target.search,
+          });
           return;
         }
         if ("navigate" in client) {
