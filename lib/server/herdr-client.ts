@@ -4,6 +4,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { HerdrInputDelivery, HerdrSendRefusal } from "../herdr-input";
 import { HERDR_CLEAR_DRAFT_KEYS, checkHerdrSend, herdrSendRefusalMessage } from "../herdr-send-guard";
+import { herdrScreenPromptWithRev, type HerdrScreenPrompt } from "../herdr-screen-parse";
 import {
   HERDR_PROTOCOL,
   MIN_HERDR_PROTOCOL,
@@ -84,6 +85,8 @@ type ClientOptions = {
   silenceIntervalMs?: number;
   healthIntervalMs?: number;
   random?: () => number;
+  /** 发前读屏第一次过关后隔多久再读一次（默认 SEND_RECHECK_MS）。 */
+  sendRecheckMs?: number;
 };
 
 type QueuedLine = { raw: string; replay: boolean };
@@ -125,6 +128,23 @@ export function isHerdrSendRefused(error: unknown): error is HerdrSendRefusedErr
   return error instanceof Error && error.name === "HerdrSendRefusedError" &&
     typeof (error as { refusal?: unknown }).refusal === "object";
 }
+
+/** 按键 / 作答带的 expectedRev 与此刻屏幕上的对话框对不上：什么都没按。rev / prompt 是现在屏幕上的。 */
+export class HerdrPromptChangedError extends HerdrApiError {
+  constructor(readonly rev: string, readonly prompt: HerdrScreenPrompt | null) {
+    super("终端里的对话框变了（可能已在电脑上答过），这次什么都没按", "prompt_changed");
+    this.name = "HerdrPromptChangedError";
+  }
+}
+
+/** 同 isHerdrSendRefused：跨 bundle 按 name 认。 */
+export function isHerdrPromptChanged(error: unknown): error is HerdrPromptChangedError {
+  return error instanceof Error && error.name === "HerdrPromptChangedError" &&
+    typeof (error as { rev?: unknown }).rev === "string";
+}
+
+/** 发前读屏第一次过关后隔多久再读一次：两次都过关才打字（启动 / 对话框刚关时屏幕还在变）。 */
+const SEND_RECHECK_MS = 300;
 
 export class HerdrUnavailableError extends Error {
   constructor(message = "Herdr is unavailable") {
@@ -196,6 +216,7 @@ export class HerdrClient {
   private readonly silenceIntervalMs: number;
   private readonly healthIntervalMs: number;
   private readonly random: () => number;
+  private readonly sendRecheckMs: number;
   private requestId = 0;
   private inFlight = 0;
   private readonly waiters: (() => void)[] = [];
@@ -259,6 +280,7 @@ export class HerdrClient {
     this.silenceIntervalMs = options.silenceIntervalMs ?? 30_000;
     this.healthIntervalMs = options.healthIntervalMs ?? 5_000;
     this.random = options.random ?? Math.random;
+    this.sendRecheckMs = options.sendRecheckMs ?? SEND_RECHECK_MS;
   }
 
   get state(): HerdrClientState {
@@ -449,6 +471,11 @@ export class HerdrClient {
       await Bun.sleep(150);
       check = await read();
     }
+    // 就绪要连续两次读屏都满足：信任目录这类对话框可能正被画出来 / 刚关掉，单次读屏可能撞在中间态上
+    if (check.ok && pane.agent === "claude") {
+      await Bun.sleep(this.sendRecheckMs);
+      check = await read();
+    }
     if (!check.ok) {
       const refusal: HerdrSendRefusal = { code: check.code };
       if (check.draft !== undefined) refusal.draft = check.draft;
@@ -457,9 +484,32 @@ export class HerdrClient {
     }
   }
 
-  async sendKeys(paneId: string, keys: string[]): Promise<Record<string, unknown>> {
+  async sendKeys(paneId: string, keys: string[], expectedRev?: string): Promise<Record<string, unknown>> {
     this.requireAgentPane(paneId);
+    if (expectedRev !== undefined) await this.checkPromptRev(paneId, expectedRev);
     return this.request("pane.send_keys", { pane_id: paneId, keys });
+  }
+
+  /**
+   * 读屏认出此刻的对话框（与卡片同一口径：recent 200 行切最后 HERDR_PROMPT_LINES 行，不走读屏接口的缓存）。
+   * 读不到屏幕时 prompt 为 null、rev 为 ""。
+   */
+  async readPrompt(paneId: string): Promise<{ prompt: HerdrScreenPrompt | null; rev: string }> {
+    const result = await this.request<{ read?: { text?: unknown } }>("pane.read", {
+      pane_id: paneId,
+      source: "recent",
+      lines: 200,
+      format: "text",
+    });
+    const text = result?.read?.text;
+    if (typeof text !== "string") throw new HerdrApiError("pane.read returned no read.text", "bad_response");
+    return herdrScreenPromptWithRev(text);
+  }
+
+  /** 发键前核对卡片 rev：对不上抛 HerdrPromptChangedError，什么都不按。 */
+  private async checkPromptRev(paneId: string, expectedRev: string): Promise<void> {
+    const current = await this.readPrompt(paneId);
+    if (current.rev !== expectedRev) throw new HerdrPromptChangedError(current.rev, current.prompt);
   }
 
   /**
@@ -467,8 +517,9 @@ export class HerdrClient {
    * 要往卡内输入框里打字」用。文字与回车在同一个 pane.send_input 里原子送出——与
    * splitAndResume / enqueueInput 同一个已验证的请求形状。只读降级由 request() 拒写（503）。
    */
-  async sendText(paneId: string, text: string, submit = true): Promise<Record<string, unknown>> {
+  async sendText(paneId: string, text: string, submit = true, expectedRev?: string): Promise<Record<string, unknown>> {
     this.requireAgentPane(paneId);
+    if (expectedRev !== undefined) await this.checkPromptRev(paneId, expectedRev);
     return this.request("pane.send_input", { pane_id: paneId, text, keys: submit ? ["Enter"] : [] });
   }
 

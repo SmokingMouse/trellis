@@ -11,7 +11,9 @@ const {
   HerdrClient,
   HerdrUnavailableError,
   resolveHerdrSocketPath,
+  isHerdrPromptChanged,
 } = await import("./herdr-client");
+const { herdrScreenRev, parseHerdrScreen } = await import("../herdr-screen-parse");
 
 type RequestEnvelope = {
   id: string;
@@ -166,6 +168,7 @@ function clientFor(server: FakeHerdr, extra: ConstructorParameters<typeof HerdrC
     silenceIntervalMs: 60_000,
     healthIntervalMs: 50,
     random: () => 0.5,
+    sendRecheckMs: 5,
     ...extra,
   });
   clients.push(client);
@@ -664,6 +667,99 @@ describe("HerdrClient", () => {
       const client = clientFor(server);
       await client.start();
       expect((await client.enqueueInput("w1:p1", "hi", 500)).status).toBe("delivered");
+    });
+  });
+
+  describe("就绪判定：连续两次读屏 + 输入框页脚", () => {
+    const sent = (server: FakeHerdr) => server.requests.filter(r => r.method === "pane.send_input");
+    const reads = (server: FakeHerdr) => server.requests.filter(r => r.method === "pane.read");
+
+    test("两次读屏都就绪才发", async () => {
+      const server = new FakeHerdr();
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      expect((await client.enqueueInput("w1:p1", "hi", 500)).status).toBe("delivered");
+      expect(reads(server)).toHaveLength(2);
+    });
+
+    test("第一次读屏就绪、第二次冒出信任目录对话框 → 拒发，什么都没打", async () => {
+      const server = new FakeHerdr();
+      server.screens = [EMPTY_CLAUDE_SCREEN, TRUST_DIALOG_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.enqueueInput("w1:p1", "hi", 500)).rejects.toMatchObject({ code: "dialog_open" });
+      expect(sent(server)).toHaveLength(0);
+    });
+
+    test("输入框下面没有页脚（启动中 / 对话框刚关掉）→ screen_unknown", async () => {
+      const server = new FakeHerdr();
+      server.screens = [["⏺ done", "", RULE, "❯\u00a0\x1b[0m\x1b[7m \x1b[0m", RULE].join("\n")];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.enqueueInput("w1:p1", "hi", 500)).rejects.toMatchObject({ code: "screen_unknown" });
+      expect(sent(server)).toHaveLength(0);
+    });
+  });
+
+  describe("按键 / 作答带 expectedRev", () => {
+    const keys = (server: FakeHerdr) => server.requests.filter(r => r.method === "pane.send_keys");
+    const trustRev = herdrScreenRev(parseHerdrScreen(TRUST_DIALOG_SCREEN));
+
+    test("rev 对得上：重读屏幕（recent 200 行纯文本）后再按", async () => {
+      const server = new FakeHerdr();
+      server.screens = [TRUST_DIALOG_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await client.sendKeys("w1:p1", ["Enter"], trustRev);
+      const read = server.requests.find(r => r.method === "pane.read");
+      expect(read?.params).toMatchObject({ pane_id: "w1:p1", source: "recent", lines: 200, format: "text" });
+      expect(keys(server).map(r => r.params.keys)).toEqual([["Enter"]]);
+    });
+
+    test("rev 对不上（对话框变了 / 已答过）→ HerdrPromptChangedError，什么都没按", async () => {
+      const server = new FakeHerdr();
+      server.screens = [EMPTY_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      const error = await client.sendKeys("w1:p1", ["Enter"], trustRev).catch((e: unknown) => e);
+      expect(isHerdrPromptChanged(error)).toBeTrue();
+      expect(error).toMatchObject({ code: "prompt_changed", rev: "", prompt: null });
+      expect(keys(server)).toHaveLength(0);
+    });
+
+    test("❯ 在无序号对话框里挪了一行 → rev 变了，拒按", async () => {
+      const server = new FakeHerdr();
+      server.screens = [TRUST_DIALOG_SCREEN.replace(" ❯ Yes", "   Yes").replace("   No, exit", " ❯ No, exit")];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.sendKeys("w1:p1", ["Enter"], trustRev)).rejects.toMatchObject({ code: "prompt_changed" });
+      expect(keys(server)).toHaveLength(0);
+    });
+
+    test("不带 expectedRev 的旧调用照常直接发、不读屏", async () => {
+      const server = new FakeHerdr();
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await client.sendKeys("w1:p1", ["Escape"]);
+      expect(server.requests.some(r => r.method === "pane.read")).toBeFalse();
+      expect(keys(server)).toHaveLength(1);
+    });
+
+    test("sendText 同样核对 rev", async () => {
+      const server = new FakeHerdr();
+      server.screens = [EMPTY_CLAUDE_SCREEN];
+      servers.push(server);
+      const client = clientFor(server);
+      await client.start();
+      await expect(client.sendText("w1:p1", "answer", true, trustRev)).rejects.toMatchObject({ code: "prompt_changed" });
+      expect(server.requests.some(r => r.method === "pane.send_input")).toBeFalse();
     });
   });
 

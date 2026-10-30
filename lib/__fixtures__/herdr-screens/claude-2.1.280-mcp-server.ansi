@@ -1,0 +1,11 @@
+[0m[38;2;255;193;7m───────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [0m[1m[38;2;255;193;7mNew MCP server found in this project: demo[0m
+
+  MCP servers may execute code or access system resources. All tool calls require approval. Learn more in
+  the MCP documentation.
+
+    Use this MCP server
+    Use this and all future MCP servers in this project
+  [0m[38;2;177;185;249m❯ Continue without using this MCP server[0m
+
+  [0m[3m[38;2;153;153;153mEnter to confirm · Esc to cancel[0m

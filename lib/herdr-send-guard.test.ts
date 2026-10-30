@@ -141,3 +141,31 @@ describe("herdrSendRefusalMessage", () => {
     expect(herdrSendRefusalMessage("dialog_open")).toContain("对话框");
   });
 });
+
+describe("就绪判定 · 2026-10-30 本机 claude 2.1.280 实录（herdr 0.9.3）", () => {
+  test("默认权限模式的空输入框（页脚 `? for shortcuts`）→ 可以发", () => {
+    expect(checkClaudeSend(screen("ready-default"))).toEqual({ ok: true });
+    expect(checkClaudeSend(screen("ready-default", "txt"))).toEqual({ ok: true });
+  });
+
+  for (const name of ["trust-no", "mcp-server", "theme", "login"]) {
+    test(`${name} 对话框 → dialog_open（herdr 0.9.3 报 blocked，旧版报 idle 也一样拦）`, () => {
+      expect(checkClaudeSend(screen(name))).toMatchObject({ ok: false });
+      expect(checkClaudeSend(screen(name)).ok).toBeFalse();
+    });
+  }
+
+  test("信任目录（❯ 默认停在 No, exit）→ dialog_open", () => {
+    expect(checkClaudeSend(screen("trust-no"))).toEqual({ ok: false, code: "dialog_open" });
+  });
+
+  test("只有输入框没有页脚 → screen_unknown（不算就绪）", () => {
+    const noFooter = ["⏺ 历史输出", "", RULE, "❯\u00a0" + CURSOR, RULE].join("\n");
+    expect(checkClaudeSend(noFooter)).toEqual({ ok: false, code: "screen_unknown" });
+  });
+
+  test("没有页脚但有草稿 → 照样报 input_draft（说清电脑上有什么）", () => {
+    const draft = ["⏺ 历史输出", "", RULE, "❯\u00a0half" + CURSOR, RULE].join("\n");
+    expect(checkClaudeSend(draft)).toMatchObject({ ok: false, code: "input_draft" });
+  });
+});
