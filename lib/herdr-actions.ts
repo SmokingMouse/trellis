@@ -1,6 +1,7 @@
 // 浏览器侧的 Herdr 窗格动作：发按键 / 发文本 / 读屏 / 切焦点。
 // 会话内审批卡、/herdr 总览泳道卡、终端抽屉共用这一份，不各写一遍 fetch。
 import type { HerdrInputDelivery, HerdrSendRefusal } from "./herdr-input";
+import { uuid } from "./uuid";
 
 function paneUrl(paneId: string, action: string): string {
   return `/api/herdr/panes/${encodeURIComponent(paneId)}/${action}`;
@@ -74,9 +75,7 @@ export async function sendHerdrInput(
 
 /** 客户端消息 id（client_msg_id）：一条消息一个，重发沿用。 */
 export function newClientMsgId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return uuid();
 }
 
 /** 撤回一条排队中的输入（已送达 / 已失败时服务端回 409 → 抛错）。 */

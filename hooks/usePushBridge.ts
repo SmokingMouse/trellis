@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { PRESENCE_BEAT_MS } from "@/lib/push";
 import { registerPushWorker } from "@/lib/push-client";
+import { uuid } from "@/lib/uuid";
 import { herdrCardSelector, parsePushFocus, stripPushFocus, type PushFocus } from "@/lib/push-focus";
 
 // 定位要等目标渲染出来（会话载入、fleet 首拉、总览泳道），等这么久还没有就算了。
@@ -112,7 +113,7 @@ export function usePushBridge(): void {
   }, []);
 
   useEffect(() => {
-    clientIdRef.current ??= crypto.randomUUID();
+    clientIdRef.current ??= uuid();
     const clientId = clientIdRef.current;
     const report = (visible: boolean, beacon = false) => {
       const body = JSON.stringify({ clientId, sessionId, visible });
