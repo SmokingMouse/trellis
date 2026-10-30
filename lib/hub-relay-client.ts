@@ -63,3 +63,22 @@ export async function postToHub(
     signal: AbortSignal.timeout(15_000),
   });
 }
+
+/** 任意方法调 hub 的 /__gw/relay/*（跨机派活要 GET 取结果，且等目标机器建会话比推送久）。
+ *  没挂 hub 返回 null；网络错误照常抛出。测试注入同 setHubRelayPosterForTests。 */
+export async function requestHub(
+  method: "GET" | "POST",
+  path: `/__gw/relay/${string}`,
+  body?: unknown,
+  opts: { timeoutMs?: number; target?: HubRelayTarget | null } = {},
+): Promise<Response | null> {
+  const target = opts.target === undefined ? hubRelayTarget() : opts.target;
+  if (!target) return null;
+  const poster = shared.trellisHubRelayPoster ?? ((url, init) => fetch(url, init));
+  return poster(`${target.hubURL}${path}`, {
+    method,
+    headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...target.headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 45_000),
+  });
+}
