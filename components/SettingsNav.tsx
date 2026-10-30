@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CircleArrowUp,
   Cpu,
+  FolderSync,
   KeyRound,
   MessagesSquare,
   Network,
@@ -38,6 +39,7 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   "key-round": KeyRound,
   "circle-arrow-up": CircleArrowUp,
   network: Network,
+  "folder-sync": FolderSync,
 };
 
 // S89: 管理台的 tab 导航。

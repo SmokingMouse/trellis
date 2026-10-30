@@ -22,7 +22,8 @@ export type SettingsTabIconKey =
   | "shield-check"
   | "key-round"
   | "circle-arrow-up"
-  | "network";
+  | "network"
+  | "folder-sync";
 
 /** 导航分组。顺序即渲染顺序。 */
 export const SETTINGS_TAB_GROUPS = [
@@ -88,6 +89,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
     group: "connect",
     icon: "network",
     title: "经 hub 用一套界面访问多台机器：添加 / 撤销机器、切换，以及本机接入 hub",
+  },
+  {
+    segment: "sync",
+    label: "配置同步",
+    group: "connect",
+    icon: "folder-sync",
+    title: "把技能、Agent、审批规则、模型配置从一台机器选择性同步到另一台（单向、手动、可预览；密钥不同步）",
   },
   {
     segment: "workspaces",
