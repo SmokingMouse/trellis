@@ -13,10 +13,16 @@ const prevVapid = process.env.TRELLIS_PUSH_VAPID_PATH;
 const vapidFile = path.join(dir, ".trellis", "push-vapid.json");
 process.env.TRELLIS_DB_PATH = path.join(dir, "data.db");
 process.env.TRELLIS_PUSH_VAPID_PATH = vapidFile;
+// hub 中继：默认「没挂 hub」——别读到本机真的 ~/.trellis/hub-node.json / 环境变量。
+const prevHub = { file: process.env.TRELLIS_HUB_NODE_FILE, url: process.env.TRELLIS_HUB_RELAY_URL, token: process.env.TRELLIS_AUTH_TOKEN, hubURL: process.env.TRELLIS_HUB_URL };
+process.env.TRELLIS_HUB_NODE_FILE = path.join(dir, "hub-node.json");
+delete process.env.TRELLIS_HUB_RELAY_URL;
+delete process.env.TRELLIS_HUB_URL;
 const sqlite = await import("./sqlite");
 sqlite.resetDBForTests();
 const push = await import("./push");
 const { persistPendingInteraction } = await import("./repo");
+const relayClient = await import("../hub-relay-client");
 
 afterAll(() => {
   push.setPushSenderForTests(null);
@@ -25,6 +31,11 @@ afterAll(() => {
   else process.env.TRELLIS_DB_PATH = prevDb;
   if (prevVapid === undefined) delete process.env.TRELLIS_PUSH_VAPID_PATH;
   else process.env.TRELLIS_PUSH_VAPID_PATH = prevVapid;
+  relayClient.setHubRelayPosterForTests(null);
+  for (const [k, v] of [["TRELLIS_HUB_NODE_FILE", prevHub.file], ["TRELLIS_HUB_RELAY_URL", prevHub.url], ["TRELLIS_AUTH_TOKEN", prevHub.token], ["TRELLIS_HUB_URL", prevHub.hubURL]] as const) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -141,4 +152,51 @@ test("触发点接线：节点出现待审批 → 快照重算 → 推「等你�
   persistPendingInteraction(b.nodeId, { toolUseId: "tu-2", toolName: "AskUserQuestion", input: {} } as Parameters<typeof persistPendingInteraction>[1]);
   await flush();
   expect(sent.filter((s) => s.payload.kind === "waiting").length).toBe(1);
+});
+
+test("挂在 hub 下：本机没有订阅也照样交给 hub 中继（tenant 凭证），本机订阅另走直发", async () => {
+  type Posted = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
+  const posted: Posted[] = [];
+  relayClient.setHubRelayPosterForTests(async (url, init) => {
+    posted.push({ url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) });
+    return Response.json({ sent: 1, removed: 0, failed: [] });
+  });
+  process.env.TRELLIS_HUB_RELAY_URL = "http://127.0.0.1:3200/";
+  process.env.TRELLIS_AUTH_TOKEN = "tenant-token";
+  try {
+    const a = seedSession();
+    push.pushTurnDone(a.nodeId);
+    await flush();
+    expect(sent.length).toBe(0);
+    expect(posted.length).toBe(1);
+    expect(posted[0].url).toBe("http://127.0.0.1:3200/__gw/relay/push");
+    expect(posted[0].headers.authorization).toBe("Bearer tenant-token");
+    expect(posted[0].body).toMatchObject({ kind: "done", sessionId: a.sessionId, url: `/?session=${a.sessionId}&node=${a.nodeId}` });
+    expect(typeof posted[0].body.badge).toBe("number");
+
+    // 本机也有直连订阅：两条路都走
+    push.saveSubscription(sub("direct"), null);
+    const b = seedSession();
+    push.pushTurnDone(b.nodeId);
+    await flush();
+    expect(sent.map((s) => s.endpoint)).toEqual([sub("direct").endpoint]);
+    expect(posted.length).toBe(2);
+  } finally {
+    delete process.env.TRELLIS_HUB_RELAY_URL;
+    delete process.env.TRELLIS_AUTH_TOKEN;
+    relayClient.setHubRelayPosterForTests(null);
+  }
+});
+
+test("远端 node：hub-node.json 优先，带 node token + x-trellis-node", async () => {
+  const { writeHubNodeFile } = await import("../hub-node-config");
+  writeHubNodeFile({ hubURL: "https://hub.example", nodeName: "office", nodeToken: "tn_x" }, process.env.TRELLIS_HUB_NODE_FILE);
+  try {
+    const t = relayClient.hubRelayTarget();
+    expect(t).toEqual({ hubURL: "https://hub.example", headers: { authorization: "Bearer tn_x", "x-trellis-node": "office" }, via: "node" });
+    expect(relayClient.hubRelayTarget({ ...process.env, TRELLIS_HUB_RELAY: "off" })).toBeNull();
+  } finally {
+    rmSync(process.env.TRELLIS_HUB_NODE_FILE!, { force: true });
+  }
+  expect(relayClient.hubRelayTarget()).toBeNull();
 });

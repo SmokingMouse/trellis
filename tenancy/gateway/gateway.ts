@@ -37,6 +37,7 @@ import {
 import type { SessionUser } from "./auth";
 import { handleNodesAPI, handlePair, ownsNode } from "./nodes-api";
 import { exportBlocked, parseVia, targetFor, type Target } from "./node-targets";
+import { GATEWAY_PUSH_PATHS, handleGatewayPush, handleRelayPush } from "./push";
 
 const PORT = Number(process.env.TRELLIS_GW_PORT) || 3200;
 const argv = process.argv.slice(2);
@@ -229,6 +230,8 @@ function startGateway(): void {
         return new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/__gw/pair") return handlePair(req, db, clientIP(req));
+      // 机器 → hub 推送中继：机器凭证认证（relay-auth.ts），不走用户 session。
+      if (url.pathname === "/__gw/relay/push") return handleRelayPush(req, db);
       if (url.pathname === "/__gw/login") {
         if (req.method === "GET") return loginPage();
         if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
@@ -341,6 +344,8 @@ function startGateway(): void {
       if ((req.method === "POST" || req.method === "DELETE") && url.pathname === "/api/login") {
         return new Response("Not Found", { status: 404 });
       }
+      // 统一推送：订阅 / 公钥 / 测试由网关接住（网关 VAPID），见 push.ts。
+      if (GATEWAY_PUSH_PATHS.has(url.pathname)) return handleGatewayPush(req, url, user, db);
 
       const target = resolveTarget(req, user);
       if (!target) return maintenancePage();
