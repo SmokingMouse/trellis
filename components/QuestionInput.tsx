@@ -7,7 +7,8 @@ import { AgentPicker } from "./AgentPicker";
 import { FEYNMAN_PROMPT } from "@/lib/agent-presets";
 import { ZoneEditor } from "./ZoneEditor";
 import { isSendCombo, sendHint } from "@/lib/send-key";
-import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
+import { matchCommands, parseCommand, type Command, type CommandScope, type CommandStore } from "@/lib/commands";
+import type { Role } from "@/lib/roles";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { providerFamily } from "@/lib/llm";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -72,8 +73,11 @@ export function QuestionInput({
   autoFocus = true,
   controlRef,
   butler = false,
+  role = null,
 }: {
   isMobile: boolean;
+  /** 角色草稿（RoleHome）：同管家，mode / agent / 目录由角色钉死，选择器藏掉 */
+  role?: Pick<Role, "name"> | null;
   /** 管家草稿：mode / agent / 增强档都由管家钉死，藏掉这几个选择器免得误导 */
   butler?: boolean;
   /** screen = 独占的新会话首屏（原样）；home = 嵌进首页，去掉品牌头、起步词和底部入口 */
@@ -82,6 +86,8 @@ export function QuestionInput({
   controlRef?: Ref<QuestionInputHandle>;
 }) {
   const embedded = variant === "home";
+  // 管家 / 角色草稿都把 mode、agent 钉死了：藏掉模式 / Agent / 增强等选择器，也不建空白沙箱。
+  const pinned = butler || Boolean(role);
   const [q, setQ] = useState("");
   // `@` 引用其他会话 / 节点作为上下文（lib/node-refs.ts）：新会话首问就能带上别处的结论。
   const [refs, setRefs] = useState<NodeRef[]>([]);
@@ -184,7 +190,7 @@ export function QuestionInput({
   // Project 模式没选工作区不再拦发送：发送时自动建一个空白沙箱
   // （~/.trellis/scratch/ 下），学习问答不用先挑目录。
   const needsWorkspace = false;
-  const autoSandbox = !butler && draftMode !== "chat" && !draftWorkspacePath;
+  const autoSandbox = !pinned && draftMode !== "chat" && !draftWorkspacePath;
   // Attachments: tool-capable modes take any whitelisted file (staged to
   // disk for the agent); pure chat is limited to images + inlineable text.
   const att = useAttachmentUploads(skillCapable ? "all" : "chat-safe");
@@ -199,7 +205,10 @@ export function QuestionInput({
     setProvider,
     provider,
     providerCatalog,
+    // 角色草稿里 /remember 就是第一句话（发出即建会话）。
+    ...(role ? { sendMessage: (message: string) => void streamRoot(message) } : {}),
   };
+  const commandScope: CommandScope = role ? "role" : "default";
 
   // Accept either marker for discovery; selection normalizes to the active
   // CLI's native invocation (`/name` for Claude, `$name` for Codex).
@@ -217,7 +226,7 @@ export function QuestionInput({
   // C1: Trellis commands match in *every* mode (first-class). They render
   // above skills in the shared "/" dropdown. matchCommands gates on the same
   // "/name" (no space) shape as skills, so the two lists co-exist cleanly.
-  const matchedCommands = matchCommands(q);
+  const matchedCommands = matchCommands(q, commandScope);
   const nodeRefs = useNodeRefMentions(
     q,
     matchedCommands.length === 0 && matchedSkills.length === 0 && refs.length < MAX_NODE_REFS,
@@ -281,7 +290,7 @@ export function QuestionInput({
     // /command runs locally against the store and never streams. Skill
     // commands (/skill-name) aren't in the command registry, so parseCommand
     // returns null and they fall through to streamRoot → claude CLI as before.
-    const parsed = refs.length === 0 ? parseCommand(trimmed) : null;
+    const parsed = refs.length === 0 ? parseCommand(trimmed, commandScope) : null;
     if (parsed) {
       const note = parsed.command.run(commandStore, parsed.args);
       if (note) {
@@ -340,7 +349,9 @@ export function QuestionInput({
         ? "等待附件上传…"
         : butler
           ? "发给管家"
-          : "开始探索";
+          : role
+            ? "发送"
+            : "开始探索";
 
   return (
     <div
@@ -365,7 +376,7 @@ export function QuestionInput({
         {/* 桌面：模式 / Agent / 增强模式 / 模型都在输入框底栏（原型 .c-bar）；手机仍是一行摘要 + 「更多设置」sheet。
             S89: Agent 选择两个 mode 都出现（服务端 chat/route.ts 对 agentId 的钳制只看「claude 家族」、
             不看 mode）。增强模式是 chat 专属。 */}
-        {!butler && isMobile && (
+        {!pinned && isMobile && (
           <button
             type="button"
             data-mobile-target="new-session-config-summary"
@@ -436,6 +447,8 @@ export function QuestionInput({
             placeholder={
               butler
                 ? "比如：每天 9 点跑一次仓库日报；给写作 Agent 加上 web-fetch 技能"
+                : role
+                ? `跟${role.name}说点什么，/new 开新话题`
                 : isFeynman
                 ? "讲讲你对某个概念的理解——AI 会复述、挑漏洞、追问你没讲清的地方。讲不清的点，选中它 ⌘K 开子节点继续深讲。"
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
@@ -504,7 +517,7 @@ export function QuestionInput({
             >
               <Icon icon={Plus} />
             </IconButton>
-            {!butler && (
+            {!pinned && (
               <div data-composer-context="" className="flex min-w-0 shrink-0 flex-wrap md:flex-nowrap items-center gap-1">
                 <ModePicker variant="toolbar" />
                 <AgentPicker variant="toolbar" />

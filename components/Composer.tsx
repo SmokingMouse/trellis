@@ -22,7 +22,8 @@ import type { ComposerQueueItem } from "./ComposerShell";
 import { appendToDraft, useComposerInsertStore } from "@/stores/composerInsertStore";
 import { sessionScopedKey } from "@/lib/prefs";
 import { sendHint } from "@/lib/send-key";
-import { matchCommands, parseCommand, type Command, type CommandStore } from "@/lib/commands";
+import { matchCommands, parseCommand, type Command, type CommandScope, type CommandStore } from "@/lib/commands";
+import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { useSkillSuggestions } from "@/hooks/useSkillSuggestions";
 import { useAgentMentions, splitMention } from "@/hooks/useAgentMentions";
 import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
@@ -210,7 +211,11 @@ export function Composer({
   // Transient note when a command no-ops (e.g. unknown /model arg) or echoes
   // its usage. Cleared on the next keystroke.
   const [cmdNotice, setCmdNotice] = useState<string | null>(null);
-  const matchedCommands = matchCommands(text);
+  // 角色会话：命令表换成角色版（/new = 新话题、/remember），底栏去掉模式 / Agent chip
+  // （角色把 mode 和 agent 都钉死了，露出来只会误导）。
+  const role = useCurrentRole();
+  const commandScope: CommandScope = role ? "role" : "default";
+  const matchedCommands = matchCommands(text, commandScope);
   // `@` 引用会话 / 节点：与 `/` 补全互斥（有命令 / 技能命中时不出）；与 @agent 同屏。
   const nodeRefs = useNodeRefMentions(
     text,
@@ -262,6 +267,12 @@ export function Composer({
     setProvider,
     provider,
     providerCatalog,
+    ...(role
+      ? {
+          streamRoot: (question: string, opts: { attachToCurrentSession: true }) => streamRoot(question, opts),
+          sendMessage: (message: string) => sendPlain(message),
+        }
+      : {}),
   };
 
   // Shared by submit-interception and dropdown pick: run a command, echo its
@@ -466,7 +477,7 @@ export function Composer({
     // C1: intercept bare Trellis commands BEFORE any send-to-LLM path — they
     // don't need a target node (/new, /switch work even mid-stream). Skill
     // commands aren't in the registry → parseCommand null → fall through.
-    const parsed = refs.length === 0 ? parseCommand(trimmed) : null;
+    const parsed = refs.length === 0 ? parseCommand(trimmed, commandScope) : null;
     if (parsed) {
       runCommand(parsed.command, parsed.args);
       return;
@@ -509,6 +520,19 @@ export function Composer({
     });
     onSubmitted?.();
     if (mobileCompact) setMobileExpanded(false);
+  };
+
+  // 命令代发的一句普通消息（角色的 /remember）：不带附件 / 引用，回复进行中就排队。
+  const sendPlain = (message: string) => {
+    if ((!targetNode && !emptyExternal) || externalEnded) return;
+    if (isStreaming && targetNode) {
+      enqueueMessage(message, []);
+      return;
+    }
+    void (targetNode
+      ? streamBranch(targetNode.id, message, null, { fork })
+      : streamRoot(message, { attachToCurrentSession: true }));
+    onSubmitted?.();
   };
 
   const cancelQueued = (id: string) => {
@@ -816,7 +840,7 @@ export function Composer({
       onDropFiles={att.handleDrop}
       // 原型 .c-bar：[附件][草图][展开][模式 chip（含 Agent）] … [发送到][模型][发送]，与首页输入框同一顺序
       chipsAfterTools
-      chips={<ModeBadge />}
+      chips={role ? undefined : <ModeBadge />}
       trailing={<ModelPicker />}
       tools={
         <>

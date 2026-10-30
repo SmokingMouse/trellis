@@ -39,7 +39,7 @@ import {
   isHerdrSession,
 } from "@/lib/herdr-ui";
 import type { ChatNode } from "@/lib/types";
-import { ArrowDown, ChevronRight, GitBranch, Layers, MessageSquareDashed, Workflow, X } from "lucide-react";
+import { ArrowDown, ChevronRight, GitBranch, Layers, MessageSquareDashed, Scissors, Workflow, X } from "lucide-react";
 import {
   Button,
   Icon,
@@ -62,6 +62,9 @@ import { HerdrDrawerToggle } from "./herdr/HerdrDrawerToggle";
 import { HerdrSessionGestures, HerdrSessionSwipeCard } from "./herdr/HerdrSessionGestures";
 import { ButlerChangeCards } from "./ButlerChangeCards";
 import { isButlerSession } from "@/lib/butler";
+import { useCurrentRole } from "@/hooks/useCurrentRole";
+import { RoleMemoryLines, useRoleMemorySync } from "./RoleMemoryLines";
+import { clockLabel, dayDividerLabel, sameLocalDay } from "@/lib/role-timeline";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -169,6 +172,60 @@ export function visibleThreadLeafId(
   return leaf?.id ?? null;
 }
 
+/**
+ * 一条锚定的线：锚点的祖先 → 锚点 → preferredChild 一路向下。普通会话的 threadData
+ * 与角色时间线（每个根各走一条）共用这套择路。
+ */
+function lineThrough(
+  anchor: ChatNode,
+  nodes: Record<string, ChatNode>,
+  byParent: Map<string, ChatNode[]>,
+): ChatNode[] {
+  const up = ancestorsOf(anchor.id, nodes)
+    .reverse()
+    .map((id) => nodes[id])
+    .filter((n): n is ChatNode => Boolean(n));
+  const down: ChatNode[] = [];
+  let cur: ChatNode | undefined = anchor;
+  while (cur) {
+    const child: ChatNode | undefined = preferredChild(byParent.get(cur.id), byParent);
+    if (!child) break;
+    down.push(child);
+    cur = child;
+  }
+  return [...up, anchor, ...down];
+}
+
+/**
+ * 角色时间线（docs/roles-p1.md）：角色只有一条对话，会话里所有根按时间先后串成一条，
+ * 根与根之间由调用方画「新话题」。锚点所在的那个根沿锚点走（点进分支时分支照样露出来），
+ * 其余根沿 preferredChild 主干走。branchesByNode 只在各自那条线内部算，不跨根。
+ */
+function roleThread(nodes: Record<string, ChatNode>, activeNodeId: string | null) {
+  const byParent = childrenIndex(nodes);
+  const roots = Object.values(nodes)
+    .filter((n) => !n.parentId)
+    .sort((a, b) => a.createdAt - b.createdAt || nodeSort(a, b));
+  const anchorNode = activeNodeId ? nodes[activeNodeId] : undefined;
+  const anchorRoot = anchorNode ? (ancestorsOf(anchorNode.id, nodes).at(-1) ?? anchorNode.id) : null;
+  const thread: ChatNode[] = [];
+  const topicStarts = new Set<string>();
+  const branchesByNode = new Map<string, ChatNode[]>();
+  for (const root of roots) {
+    const line = lineThrough(root.id === anchorRoot && anchorNode ? anchorNode : root, nodes, byParent);
+    if (thread.length > 0) topicStarts.add(line[0].id);
+    for (let i = 0; i < line.length; i++) {
+      const nextId = line[i + 1]?.id;
+      const branches = (byParent.get(line[i].id) ?? []).filter((c) => c.id !== nextId);
+      if (branches.length > 0) branchesByNode.set(line[i].id, branches);
+    }
+    thread.push(...line);
+  }
+  // 没有显式锚点就锚在最后一轮（最新话题的末尾）。
+  const anchorId = anchorNode ? anchorNode.id : (thread.at(-1)?.id ?? null);
+  return { anchorId, thread, branchesByNode, topicStarts };
+}
+
 // How close to the bottom (px) still counts as "following" — scrolling
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;
@@ -273,6 +330,10 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     setTabActionsSlot(document.getElementById("trellis-tab-actions"));
   }, []);
   const butler = isButlerSession(session);
+  // 角色会话：所有根串成一条时间线 + 新话题 / 日期分隔 + 记忆行。role 为 null 时下面一律走原路。
+  const role = useCurrentRole();
+  const isRole = role !== null && !isHerdr;
+  useRoleMemorySync(isRole ? role.id : null);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -332,7 +393,13 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     setComposerExpanded(false);
   }, [session?.id]);
 
-  const threadData = useMemo(() => {
+  const threadData = useMemo((): {
+    anchorId: string | null;
+    thread: ChatNode[];
+    branchesByNode: Map<string, ChatNode[]>;
+    topicStarts?: Set<string>;
+  } => {
+    if (isRole) return roleThread(nodes, activeNodeId);
     const anchor =
       activeNodeId && nodes[activeNodeId]
         ? nodes[activeNodeId]
@@ -370,7 +437,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       if (branches.length > 0) branchesByNode.set(n.id, branches);
     }
     return { anchorId: anchor.id, thread, branchesByNode };
-  }, [activeNodeId, nodes, session?.rootNodeId]);
+  }, [activeNodeId, nodes, session?.rootNodeId, isRole]);
 
   const entering = useEnteringTurns(session?.id ?? null, nodes, threadData.thread);
 
@@ -903,7 +970,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 title: `内容宽度：${opt.label}`,
               }))}
             />
-            {!isHerdr && (
+            {/* 角色会话强制线性（多个话题串成一条时间线），画布入口不给 */}
+            {!isHerdr && !isRole && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -988,7 +1056,11 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         ) : (
           threadData.thread.map((node, idx) => {
             const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
-            const isCompacted = isContextCompacted(node, prevNode);
+            // 角色时间线：新话题的首轮与上一轮不在同一个 claude 会话里，不做压缩判定。
+            const topicStart = isRole && Boolean(threadData.topicStarts?.has(node.id));
+            const dayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
+            const isCompacted = !topicStart && isContextCompacted(node, prevNode);
+            const divided = isCompacted || topicStart || dayBreak;
             const branches = threadData.branchesByNode.get(node.id) ?? [];
             const isActive = node.id === threadData.anchorId;
             const canDelete =
@@ -1004,6 +1076,33 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             const isBranchTarget = branchFrom?.id === node.id;
             return (
               <Fragment key={node.id}>
+                {dayBreak && (
+                  <div
+                    data-role-day-divider
+                    role="separator"
+                    aria-label={dayDividerLabel(node.createdAt)}
+                    className={`${idx > 0 ? "mt-6" : "mt-1"} mb-5 flex items-center gap-3 text-[11.5px] font-medium text-ink-faint select-none`}
+                  >
+                    <div className="flex-1 border-t border-line" />
+                    <span className="tabular-nums">{dayDividerLabel(node.createdAt)}</span>
+                    <div className="flex-1 border-t border-line" />
+                  </div>
+                )}
+                {topicStart && (
+                  <div
+                    data-role-topic-divider
+                    role="separator"
+                    aria-label={`新话题 · ${clockLabel(node.createdAt)}`}
+                    className={`${dayBreak ? "" : "mt-6"} mb-1 flex items-center gap-2 rounded-card bg-surface-muted px-3 py-2 text-label text-ink-muted shadow-hairline select-none`}
+                  >
+                    <Icon icon={Scissors} size="sm" className="shrink-0 text-ink-faint" />
+                    <span className="min-w-0">
+                      <b className="font-semibold text-ink">新话题</b>
+                      <span className="tabular-nums"> · {clockLabel(node.createdAt)}</span>
+                      <span className="max-md:hidden"> · 从这里起上下文重新开始，记忆不受影响</span>
+                    </span>
+                  </div>
+                )}
                 {isCompacted && (
                   <div
                     className="mt-6 mb-1 flex items-center gap-3 text-label text-ink-faint select-none"
@@ -1028,7 +1127,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   // Faint rule between turns so where one answer ends is
                   // visible without bringing card frames back. 手机上减线：
                   // 轮次之间只靠间距分开（用户消息自带浅灰块，足够当分隔）。
-                  className={`group/turn scroll-mt-3 pb-7 max-md:pb-6 outline-none min-w-0 max-w-full ${idx > 0 && !isCompacted ? "pt-6 max-md:pt-4 md:border-t md:border-line" : "pt-1"}`}
+                  className={`group/turn scroll-mt-3 pb-7 max-md:pb-6 outline-none min-w-0 max-w-full ${idx > 0 && !divided ? "pt-6 max-md:pt-4 md:border-t md:border-line" : "pt-1"}`}
                 >
                   <TurnCard
                     node={node}
@@ -1043,6 +1142,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                     mirrorRun={node.id === tipNode?.id ? mirrorRunLabel : null}
                   />
                   {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
+                  {isRole && <RoleMemoryLines role={role} node={node} />}
 
                   {branches.length > 0 && (
                     <div className="mt-2">
@@ -1197,7 +1297,9 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               placeholder={
                 branchFromNode
                   ? `从 #${nodeIndices[branchFromNode.id] ?? "?"} 分叉提问…`
-                  : "继续对话…  输入 / 调出命令，选中正文可分叉追问"
+                  : isRole
+                    ? `跟${role.name}说点什么，/new 开新话题`
+                    : "继续对话…  输入 / 调出命令，选中正文可分叉追问"
               }
               onSubmitted={branchFromNode ? () => setBranchFrom(null) : undefined}
               onEscape={branchFromNode ? () => setBranchFrom(null) : undefined}

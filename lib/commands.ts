@@ -36,7 +36,14 @@ export type CommandStore = {
   // Live model catalog (GET /api/providers) — falls back to the static
   // PROVIDERS list when empty (e.g. store not yet hydrated).
   providerCatalog: ProviderInfo[];
+  // 角色场景（scope = "role"）才用到的两样：开新话题时直接带上首句，以及 /remember
+  // 按普通消息发出去。普通场景不传。
+  streamRoot?: (question: string, opts: { attachToCurrentSession: true }) => unknown;
+  sendMessage?: (text: string) => void;
 };
+
+/** 命令表的场景：角色对话里 `/new` 是新话题、多一个 `/remember`；其余场景照旧。 */
+export type CommandScope = "default" | "role";
 
 export type Command = {
   name: string;
@@ -142,14 +149,57 @@ export const COMMANDS: Command[] = [
   },
 ];
 
-const COMMAND_NAMES = new Set(COMMANDS.map((c) => c.name));
+// 角色对话的命令表（docs/roles-p1.md）：角色只有一条时间线，没有「新会话」——
+// `/new` 改成新话题（与 /clear 同一条路：当前会话里开一个新根，上下文重开、记忆不动）；
+// `/remember <事>` 就是一句普通消息，加个「请记下：」前缀让角色按记忆规矩写文件。
+// 其余命令沿用默认表（/clear 留着当 /new 的别名）。
+export const REMEMBER_PREFIX = "请记下：";
+
+const ROLE_ONLY: Command[] = [
+  {
+    name: "new",
+    description: "新话题：从这里起上下文重新开始，记忆保留",
+    hint: "可直接带上第一句，如 /new 帮我看下这个 PR",
+    requiresSession: true,
+    run: (store, args) => {
+      if (!store.session) return "还没开始聊——直接说就是第一个话题";
+      const first = args.trim();
+      if (first && store.streamRoot) {
+        void store.streamRoot(first, { attachToCurrentSession: true });
+        return;
+      }
+      store.setComposeRootOpen(true);
+    },
+  },
+  {
+    name: "remember",
+    description: "让它记下一件事",
+    hint: "<要记的事>，如 /remember 报告多用表格",
+    run: (store, args) => {
+      const what = args.trim();
+      if (!what) return "用法：/remember <要记的事>";
+      if (!store.sendMessage) return "现在发不出消息";
+      store.sendMessage(`${REMEMBER_PREFIX}${what}`);
+    },
+  },
+];
+
+const ROLE_COMMANDS: Command[] = [
+  ...ROLE_ONLY,
+  ...COMMANDS.filter((c) => !ROLE_ONLY.some((r) => r.name === c.name)),
+];
+
+/** 某个场景下的命令表。 */
+export function commandsFor(scope: CommandScope = "default"): Command[] {
+  return scope === "role" ? ROLE_COMMANDS : COMMANDS;
+}
 
 // prefix-match against the leading "/name" token (same shape as
 // useSkillSuggestions): text must start with "/" and have no space yet.
-export function matchCommands(text: string): Command[] {
+export function matchCommands(text: string, scope: CommandScope = "default"): Command[] {
   if (!text.startsWith("/") || text.includes(" ")) return [];
   const q = text.slice(1).toLowerCase();
-  return COMMANDS.filter((c) => c.name.toLowerCase().includes(q));
+  return commandsFor(scope).filter((c) => c.name.toLowerCase().includes(q));
 }
 
 // Parse a submitted input into a Trellis command + its args, or null if the
@@ -158,14 +208,15 @@ export function matchCommands(text: string): Command[] {
 // handler uses to decide local-execute vs send-to-LLM.
 export function parseCommand(
   text: string,
+  scope: CommandScope = "default",
 ): { command: Command; args: string } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;
   const spaceIdx = trimmed.search(/\s/);
   const name = (spaceIdx === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIdx))
     .toLowerCase();
-  if (!COMMAND_NAMES.has(name)) return null;
-  const command = COMMANDS.find((c) => c.name === name)!;
+  const command = commandsFor(scope).find((c) => c.name === name);
+  if (!command) return null;
   const args = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
   return { command, args };
 }

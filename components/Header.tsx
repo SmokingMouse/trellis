@@ -13,8 +13,10 @@ import {
   Keyboard,
   Menu,
   MessagesSquare,
+  Brain,
   NotebookPen,
   PanelLeftOpen,
+  PanelRight,
   Plus,
   Search,
   Settings,
@@ -72,6 +74,11 @@ import {
   safeFilename,
 } from "@/lib/export";
 import type { ChatNode } from "@/lib/types";
+import { useCurrentRole } from "@/hooks/useCurrentRole";
+import { useRoleStore } from "@/stores/roleStore";
+import { RoleAvatar } from "@/components/ui/Avatar";
+import { Drawer } from "@/components/ui/Drawer";
+import { RoleGlanceContent, roleSettingsHref } from "@/components/RoleGlancePanel";
 
 // W4：Header 分三组（照 docs/ui-redesign/mockups/01-workbench.html）——
 //   左 = 导航：（侧栏收起时的）展开键 + 品牌 + 面包屑（工作区 › 会话名）
@@ -253,6 +260,11 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const toggleMobileTerminalView = useHerdrConsoleStore((s) => s.toggleMobileTerminalView);
   const viewMode = useSessionStore((s) => s.viewMode);
   const butlerDraft = useSessionStore((s) => s.butlerDraft);
+  // 角色会话 / 角色草稿：顶栏换成角色的「名片」（头像 + 名字 + 介绍）与目录、记忆、一览、设置。
+  const role = useCurrentRole();
+  const glanceOpen = useRoleStore((s) => s.glanceOpen);
+  const setGlanceOpen = useRoleStore((s) => s.setGlanceOpen);
+  const [roleSheetOpen, setRoleSheetOpen] = useState(false);
   const { fleet: herdrFleet } = useHerdrFleet();
   const mainScrolled = useMainScrolled(
     isMobile,
@@ -390,6 +402,27 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 </span>
                 <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
               </button>
+            ) : role ? (
+              // 手机：一览收进头像——点名片出底部 sheet（原型 s-mobile「角色对话：一览收进头像」）
+              <button
+                type="button"
+                data-mobile-target="header-role"
+                data-header-role={role.id}
+                onClick={() => setRoleSheetOpen(true)}
+                className="press flex min-h-11 min-w-0 items-center gap-2 rounded-field px-2"
+              >
+                <RoleAvatar role={role} size="sm" />
+                <span className="flex min-w-0 flex-col items-start leading-tight">
+                  <span data-header-title className="max-w-full truncate text-ui font-semibold text-ink-strong">
+                    {role.name}
+                  </span>
+                  {networkTitle ? (
+                    <span data-header-network className="truncate text-nano text-warn-ink">{networkTitle}</span>
+                  ) : (
+                    <span className="max-w-full truncate text-nano text-ink-faint">记得 {role.memoryCount} 条 · 点开一览</span>
+                  )}
+                </span>
+              </button>
             ) : (
               <div className="flex min-w-0 flex-col items-center leading-tight" title={title}>
                 <span className="block max-w-full truncate text-ui font-semibold text-ink-strong">
@@ -470,6 +503,28 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             className="fixed top-0 inset-x-0 z-50 border-0 bg-surface-canvas p-0"
             style={{ height: "max(var(--safe-top), 24px)" }}
           />
+        )}
+        {role && (
+          <Drawer open={roleSheetOpen} onClose={() => setRoleSheetOpen(false)} title={`${role.name}：一览`}>
+            <div className="shrink-0 flex items-center justify-between border-b border-line-faint px-4 py-2">
+              <span className="text-reading font-semibold text-ink-strong">一览</span>
+              <div className="flex items-center gap-1">
+                <a
+                  href={roleSettingsHref(role.id)}
+                  aria-label="角色设置"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-faint hover:bg-surface-hover hover:text-ink"
+                >
+                  <Icon icon={Settings} />
+                </a>
+                <IconButton label="关闭一览" onClick={() => setRoleSheetOpen(false)} className="min-h-11 min-w-11" tooltip={false}>
+                  <Icon icon={X} />
+                </IconButton>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              <RoleGlanceContent role={role} />
+            </div>
+          </Drawer>
         )}
         <MobileOverflowMenu
           open={mobileOverflowOpen}
@@ -613,7 +668,31 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           className="flex min-w-0 items-center gap-2 text-ui text-ink-muted"
         >
           {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint max-md:hidden" />}
-          {session ? (
+          {role ? (
+            // 角色名片（原型 .who）：点开角色设置。会话标题对角色没有意义——它只有一条对话。
+            <>
+              <Tooltip content="角色设置">
+                <a
+                  href={roleSettingsHref(role.id)}
+                  data-header-role={role.id}
+                  className="-ml-1.5 flex min-w-0 items-center gap-2.5 rounded-field px-1.5 py-1 transition-colors duration-100 hover:bg-surface-hover"
+                >
+                  <RoleAvatar role={role} size="md" />
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span data-header-title className="shrink-0 text-[14px] font-semibold text-ink">
+                      {role.name}
+                    </span>
+                    {role.intro && <span className="min-w-0 truncate text-label text-ink-faint">{role.intro}</span>}
+                  </span>
+                </a>
+              </Tooltip>
+              {networkTitle && (
+                <span data-header-network role="status" className="shrink-0 text-label text-warn-ink">
+                  {networkTitle}
+                </span>
+              )}
+            </>
+          ) : session ? (
             <>
               <Tooltip content={sessionTitle}>
                 <span
@@ -655,7 +734,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
               {viewTitle}
             </span>
           )}
-          {!session && networkTitle && (
+          {!session && !role && networkTitle && (
             <span data-header-network role="status" className="shrink-0 text-label text-warn-ink">
               {networkTitle}
             </span>
@@ -665,6 +744,54 @@ export function Header({ isMobile }: { isMobile: boolean }) {
 
       {/* ── 中：会话语境（用量 / 上下文浮层） ── */}
       <div data-header-group="context" className="ml-auto flex min-w-0 shrink items-center gap-1.5 md:shrink-0">
+        {role && (
+          <div data-header-role-actions className="flex shrink-0 items-center gap-1.5 max-md:hidden">
+            <Tooltip content={`跑在 ${role.workDir ?? role.homeDir}${session?.workspacePath ? "（点击浏览文件）" : ""}`}>
+              <button
+                type="button"
+                data-header-workspace
+                disabled={!session?.workspacePath}
+                onClick={() => setWorkspaceFilesOpen(true)}
+                className="inline-flex h-6 max-w-44 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-2 text-[11.5px] text-ink-muted shadow-hairline transition-colors duration-100 hover:bg-surface-hover hover:text-ink disabled:hover:bg-surface-muted disabled:hover:text-ink-muted"
+              >
+                <Icon icon={FolderOpen} size="sm" className="size-3 shrink-0 text-ink-faint" />
+                <span className="truncate font-mono">{basename(role.workDir ?? role.homeDir)}</span>
+              </button>
+            </Tooltip>
+            <Tooltip content="它记得的东西">
+              <a
+                href={roleSettingsHref(role.id, "memory")}
+                data-header-role-memory
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-2 text-[11.5px] text-ink-muted shadow-hairline transition-colors duration-100 hover:bg-surface-hover hover:text-ink"
+              >
+                <Icon icon={Brain} size="sm" className="size-3 shrink-0 text-fork" />
+                <span className="tabular-nums">记得 {role.memoryCount} 条</span>
+              </a>
+            </Tooltip>
+            {/* 一览右栏只在 ≥1280px 出现，开关也只在那里露（IconButton 没有 tailwind-merge，用 max-* 藏） */}
+            {session && (
+              <IconButton
+                label={glanceOpen ? "收起一览" : "展开一览"}
+                aria-pressed={glanceOpen}
+                data-header-glance-toggle
+                onClick={() => setGlanceOpen(!glanceOpen)}
+                className={cn("max-[1279.98px]:hidden", glanceOpen && "text-ink")}
+              >
+                <Icon icon={PanelRight} selected={glanceOpen} />
+              </IconButton>
+            )}
+            <Tooltip content="角色设置">
+              <a
+                href={roleSettingsHref(role.id)}
+                aria-label="角色设置"
+                data-header-role-settings
+                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-faint transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+              >
+                <Icon icon={Settings} />
+              </a>
+            </Tooltip>
+          </div>
+        )}
         {/* 桌面（md+）模型在输入框底栏选；md 以下的「转桌面版」窄屏保持原样留在顶栏。 */}
         <div className="contents md:hidden">
           <ModelPicker />
