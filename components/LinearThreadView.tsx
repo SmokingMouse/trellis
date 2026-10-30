@@ -145,6 +145,30 @@ function firstRoot(nodes: Record<string, ChatNode>, rootNodeId?: string | null) 
     .sort(nodeSort)[0] ?? null;
 }
 
+/**
+ * 线性 thread 当前展示的那条分支的叶节点 id（与下面 threadData 同一套择路：锚点 →
+ * preferredChild 一路向下）。会话接力用它决定「导出到哪一轮为止」。乐观节点（还没
+ * 落库）跳过，退回最近的已落库祖先；一个都没有返回 null（服务端退回最近节点）。
+ */
+export function visibleThreadLeafId(
+  nodes: Record<string, ChatNode>,
+  activeNodeId: string | null,
+  rootNodeId?: string | null,
+): string | null {
+  const anchor = activeNodeId && nodes[activeNodeId] ? nodes[activeNodeId] : firstRoot(nodes, rootNodeId);
+  if (!anchor) return null;
+  const byParent = childrenIndex(nodes);
+  let cur: ChatNode = anchor;
+  for (let i = 0; i < 5000; i++) {
+    const child = preferredChild(byParent.get(cur.id), byParent);
+    if (!child) break;
+    cur = child;
+  }
+  let leaf: ChatNode | undefined = cur;
+  while (leaf && isOptimisticNodeId(leaf.id)) leaf = leaf.parentId ? nodes[leaf.parentId] : undefined;
+  return leaf?.id ?? null;
+}
+
 // How close to the bottom (px) still counts as "following" — scrolling
 // further up than this pauses the stream auto-follow until the user returns.
 const FOLLOW_SLACK_PX = 120;

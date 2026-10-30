@@ -955,6 +955,13 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE sessions ADD COLUMN pinned_at INTEGER");
   }
 
+  // 会话接力（lib/server/session-relay.ts）：从别的机器导入的会话记一份来源
+  // {from, sourceSessionId, sourceLeafNodeId, exportedAt, importedAt, importedNodeIds}。
+  // NULL = 本机原生。chat 链路据此在「历史不在 CLI session 里」时把导入的整条链折叠进上下文。
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'relay_json'").get()) {
+    db.exec("ALTER TABLE sessions ADD COLUMN relay_json TEXT");
+  }
+
   // 飞书是入口，Trellis 的 session/node 树仍是对话真源。bot 只保存连接与执行配置，
   // chat 只保存飞书会话到树链尾的映射，inbox 只承担消息去重；三者不复制回答正文。
   db.exec(`
