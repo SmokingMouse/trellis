@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { DEFAULT_PROVIDER, providerFamily } from "@/lib/llm";
 import { getProvider } from "@/lib/llm/server";
 import { sessionCwd } from "@/lib/paths";
-import { resolveAgentSpawn } from "@/lib/server/agent-pack";
+import { resolveRoleAwareSpawn } from "@/lib/server/role-spawn";
 import { getAgentBySlug, resolveEnabledAgent, type AgentRecord } from "@/lib/server/agents";
 import {
   extractAgentSlug,
@@ -442,9 +442,9 @@ async function runAgentTurn(args: {
       ? []
       : buildHistoryForNode(turn.nodeId, { maxDepth: 50 });
   const agentRecord = mention ?? (family !== "mock" ? resolveEnabledAgent(bot.agentId) : null);
-  const agentSpawn = agentRecord && family !== "mock"
-    ? resolveAgentSpawn(agentRecord, family, bot.workspacePath)
-    : null;
+  // 角色记忆（docs/roles-p2.md C）：bot 绑的是角色就挂角色目录 + 记忆说明。@外援那一轮不挂
+  // （与 chat 路由同：外援的人设与记忆不进主线）。mode / cwd 仍按 bot 的工作目录定。
+  const agentSpawn = resolveRoleAwareSpawn(agentRecord, family, bot.workspacePath, spawnCwd, { mention: !!mention });
   if (agentRecord) setNodeAgent(turn.nodeId, agentRecord.id, mention ? "mention" : "session");
 
   await new Promise<void>((resolve, reject) => {

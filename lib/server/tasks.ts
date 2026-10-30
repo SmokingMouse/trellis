@@ -4,7 +4,7 @@ import { SQLiteError } from "bun:sqlite";
 import { getDB } from "./sqlite";
 import { createSessionWithRoot, createRootInSession, getNode, setNodeAgent } from "./repo";
 import { resolveEnabledAgent } from "./agents";
-import { resolveAgentSpawn } from "./agent-pack";
+import { roleDefaultWorkspace, resolveRoleAwareSpawn } from "./role-spawn";
 import { startRun, abortRun } from "./run-bus";
 import { getProvider } from "@/lib/llm/server";
 import { providerFamily, DEFAULT_PROVIDER, isProviderId } from "@/lib/llm";
@@ -599,8 +599,13 @@ function failRun(task: Task, runId: string, message: string): StartTaskRunResult
 }
 
 /** 真正 spawn 的那一步。从 pending 队列捞起来的 run 也走这里。 */
-export function launch(task: Task, runId: string): StartTaskRunResult {
+export function launch(taskRow: Task, runId: string): StartTaskRunResult {
   const now = Date.now();
+  // 角色任务（docs/roles-p2.md C）：project 模式没配目录时落到角色的工作目录，与角色会话同规则。
+  const task: Task = {
+    ...taskRow,
+    workspacePath: roleDefaultWorkspace(resolveEnabledAgent(taskRow.agentId), taskRow.contextMode, taskRow.workspacePath),
+  };
   const question = task.prompt;
 
   // ★ spawn 前必须验工作目录存在。
@@ -622,13 +627,12 @@ export function launch(task: Task, runId: string): StartTaskRunResult {
   const family = providerFamily(providerId);
   const llm = getProvider(providerId, { mode: task.contextMode as never });
 
-  const agentRecord = family !== "mock" ? resolveEnabledAgent(task.agentId) : null;
-  const agentSpawn = agentRecord && family !== "mock"
-    ? resolveAgentSpawn(agentRecord, family, task.workspacePath)
-    : null;
-  if (agentRecord) setNodeAgent(nodeId, agentRecord.id, "session");
-
   const spawnCwd = sessionCwd(task.contextMode as never, task.workspacePath);
+
+  const agentRecord = family !== "mock" ? resolveEnabledAgent(task.agentId) : null;
+  // 角色记忆：挂角色目录 + 追加记忆说明（非角色 / 记忆关掉 → 原样）。
+  const agentSpawn = resolveRoleAwareSpawn(agentRecord, family, task.workspacePath, spawnCwd);
+  if (agentRecord) setNodeAgent(nodeId, agentRecord.id, "session");
 
   getDB()
     .prepare(
