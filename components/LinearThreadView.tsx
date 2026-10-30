@@ -61,7 +61,10 @@ import { HerdrInteractionCard } from "./HerdrInteractionCard";
 import { HerdrDrawerToggle } from "./herdr/HerdrDrawerToggle";
 import { HerdrSessionGestures, HerdrSessionSwipeCard } from "./herdr/HerdrSessionGestures";
 import { ButlerChangeCards } from "./ButlerChangeCards";
-import { isButlerSession } from "@/lib/butler";
+import { BUTLER_AGENT_ID, isButlerSession } from "@/lib/butler";
+import { isSystemNode } from "@/lib/system-node-meta";
+import { useRoleStore } from "@/stores/roleStore";
+import { RoleFollowCard } from "./RoleFollowCard";
 import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { RoleMemoryLines, useRoleMemorySync } from "./RoleMemoryLines";
 import { clockLabel, dayDividerLabel, sameLocalDay } from "@/lib/role-timeline";
@@ -211,7 +214,13 @@ function roleThread(nodes: Record<string, ChatNode>, activeNodeId: string | null
   const thread: ChatNode[] = [];
   const topicStarts = new Set<string>();
   const branchesByNode = new Map<string, ChatNode[]>();
+  const systemRoots: ChatNode[] = [];
   for (const root of roots) {
+    // 系统节点（跟进报告等，lib/system-node-meta.ts）不是新话题：单独收起来，下面按时间插回。
+    if (isSystemNode(root)) {
+      systemRoots.push(root);
+      continue;
+    }
     const line = lineThrough(root.id === anchorRoot && anchorNode ? anchorNode : root, nodes, byParent);
     if (thread.length > 0) topicStarts.add(line[0].id);
     for (let i = 0; i < line.length; i++) {
@@ -220,6 +229,12 @@ function roleThread(nodes: Record<string, ChatNode>, activeNodeId: string | null
       if (branches.length > 0) branchesByNode.set(line[i].id, branches);
     }
     thread.push(...line);
+  }
+  // 系统节点按时间插到第一条比它晚的轮次前面（续聊接在旧线上时，卡片仍落在它发生的时刻）。
+  for (const sys of systemRoots) {
+    const at = thread.findIndex((n) => n.createdAt > sys.createdAt);
+    if (at === -1) thread.push(sys);
+    else thread.splice(at, 0, sys);
   }
   // 没有显式锚点就锚在最后一轮（最新话题的末尾）。
   const anchorId = anchorNode ? anchorNode.id : (thread.at(-1)?.id ?? null);
@@ -333,7 +348,14 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // 角色会话：所有根串成一条时间线 + 新话题 / 日期分隔 + 记忆行。role 为 null 时下面一律走原路。
   const role = useCurrentRole();
   const isRole = role !== null && !isHerdr;
-  useRoleMemorySync(isRole ? role.id : null);
+  // 管家（P2 起是内置角色）的固定会话也按角色时间线串：它不走 useCurrentRole（顶栏 / 输入框
+  // 保持管家版），但同样一条会话装所有话题、同样会写记忆。
+  const butlerRole = useRoleStore((s) =>
+    butler && session?.kind === "role" ? (s.roles.find((r) => r.id === BUTLER_AGENT_ID) ?? null) : null,
+  );
+  const timelineRole = isRole ? role : !isHerdr ? butlerRole : null;
+  const roleTimeline = timelineRole !== null;
+  useRoleMemorySync(timelineRole?.id ?? null);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -399,7 +421,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     branchesByNode: Map<string, ChatNode[]>;
     topicStarts?: Set<string>;
   } => {
-    if (isRole) return roleThread(nodes, activeNodeId);
+    if (roleTimeline) return roleThread(nodes, activeNodeId);
     const anchor =
       activeNodeId && nodes[activeNodeId]
         ? nodes[activeNodeId]
@@ -437,7 +459,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       if (branches.length > 0) branchesByNode.set(n.id, branches);
     }
     return { anchorId: anchor.id, thread, branchesByNode };
-  }, [activeNodeId, nodes, session?.rootNodeId, isRole]);
+  }, [activeNodeId, nodes, session?.rootNodeId, roleTimeline]);
 
   const entering = useEnteringTurns(session?.id ?? null, nodes, threadData.thread);
 
@@ -446,10 +468,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     [nodes],
   );
 
-  const tipNode =
-    threadData.thread.length > 0
-      ? threadData.thread[threadData.thread.length - 1]
-      : null;
+  // 续聊落点：最后一个真实轮次。系统节点不参与 resume，接在它后面会丢上下文。
+  const tipNode = threadData.thread.findLast((n) => !isSystemNode(n)) ?? null;
   const tipStreamingId =
     tipNode && tipNode.status === "streaming" ? tipNode.id : null;
   // Herdr 镜像的最后一轮：库里是 done，运行态看窗格（S184 hook 驱动）。
@@ -1057,8 +1077,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           threadData.thread.map((node, idx) => {
             const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
             // 角色时间线：新话题的首轮与上一轮不在同一个 claude 会话里，不做压缩判定。
-            const topicStart = isRole && Boolean(threadData.topicStarts?.has(node.id));
-            const dayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
+            const topicStart = roleTimeline && Boolean(threadData.topicStarts?.has(node.id));
+            const dayBreak = roleTimeline && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
             const isCompacted = !topicStart && isContextCompacted(node, prevNode);
             const divided = isCompacted || topicStart || dayBreak;
             const branches = threadData.branchesByNode.get(node.id) ?? [];
@@ -1129,20 +1149,24 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   // 轮次之间只靠间距分开（用户消息自带浅灰块，足够当分隔）。
                   className={`group/turn scroll-mt-3 pb-7 max-md:pb-6 outline-none min-w-0 max-w-full ${idx > 0 && !divided ? "pt-6 max-md:pt-4 md:border-t md:border-line" : "pt-1"}`}
                 >
-                  <TurnCard
-                    node={node}
-                    readOnly={isHerdr}
-                    index={nodeIndices[node.id] ?? idx + 1}
-                    isActive={isActive}
-                    canBranch={canBranch}
-                    branchArmed={isBranchTarget}
-                    onBranch={armBranch}
-                    canDelete={canDelete}
-                    onDelete={confirmDelete}
-                    mirrorRun={node.id === tipNode?.id ? mirrorRunLabel : null}
-                  />
+                  {node.meta?.kind === "role-follow" ? (
+                    <RoleFollowCard node={node} />
+                  ) : (
+                    <TurnCard
+                      node={node}
+                      readOnly={isHerdr}
+                      index={nodeIndices[node.id] ?? idx + 1}
+                      isActive={isActive}
+                      canBranch={canBranch && !isSystemNode(node)}
+                      branchArmed={isBranchTarget}
+                      onBranch={armBranch}
+                      canDelete={canDelete}
+                      onDelete={confirmDelete}
+                      mirrorRun={node.id === tipNode?.id ? mirrorRunLabel : null}
+                    />
+                  )}
                   {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
-                  {isRole && <RoleMemoryLines role={role} node={node} />}
+                  {timelineRole && <RoleMemoryLines role={timelineRole} node={node} />}
 
                   {branches.length > 0 && (
                     <div className="mt-2">

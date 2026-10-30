@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { findMentionQuery, type NodeRef } from "@/lib/node-refs";
+import type { RoleBadge } from "@/lib/role-follow";
 
 // `@` 引用其他会话 / 节点的补全（lib/node-refs.ts）。与 useAgentMentions 并存：
 //   - 输入框末尾在打 `@查询`（行首或空白后的 @）就出「会话」候选；
@@ -24,7 +25,15 @@ export type RefCandidateSession = {
   updatedAt: number;
   mode: string;
   latest: RefCandidateNode | null;
+  /** 'role' = 角色固定会话（带 role）、'group' = 群聊；老服务端不给 = 普通会话 */
+  sessionKind?: string;
+  role?: RoleBadge | null;
 };
+
+/** 候选行 / 引用标记上显示的名字：角色会话用角色名（一条会话装着它全部话题，标题只是首问）。 */
+export function refSessionLabel(s: Pick<RefCandidateSession, "title" | "role">): string {
+  return s.role?.name || s.title || "未命名会话";
+}
 
 /** 下拉里的一行：会话（选中 = 引用最新节点）或展开后的具体节点。 */
 export type RefPickItem =
@@ -37,7 +46,7 @@ export function refFromItem(item: RefPickItem): NodeRef | null {
   return {
     sessionId: item.session.sessionId,
     nodeId: node.nodeId,
-    title: item.session.title,
+    title: refSessionLabel(item.session),
     index: node.index,
   };
 }
