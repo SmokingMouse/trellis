@@ -119,14 +119,14 @@ export default function SecuritySettingsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 md:max-w-[760px]">
       <PageHeader
         title="登录与 Passkey"
         count={items?.length}
         countUnit="把"
         subtitle="添加 passkey 后，登录页可用 Face ID / Touch ID 直接进入；口令登录始终可用"
         actions={
-          <IconButton label="刷新" onClick={() => void load()}>
+          <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => void load()}>
             <Icon icon={RefreshCw} />
           </IconButton>
         }
@@ -142,7 +142,7 @@ export default function SecuritySettingsPage() {
           </p>
         ) : (
           <form
-            className="flex items-end gap-2 max-md:flex-col max-md:items-stretch"
+            className="flex items-end gap-2 max-md:flex-col max-md:items-stretch md:max-w-[520px]"
             onSubmit={(e) => {
               e.preventDefault();
               void add();
@@ -158,10 +158,10 @@ export default function SecuritySettingsPage() {
                 maxLength={64}
                 placeholder="例如：我的 iPhone"
                 onChange={(e) => setName(e.target.value)}
-                className="min-h-10"
+                className="min-h-10 md:min-h-8"
               />
             </div>
-            <Button type="submit" variant="primary" className="min-h-10" loading={adding} data-passkey-add>
+            <Button type="submit" variant="primary" className="min-h-10 md:min-h-8" loading={adding} data-passkey-add>
               <Icon icon={KeyRound} />
               添加 Passkey
             </Button>
@@ -186,7 +186,7 @@ export default function SecuritySettingsPage() {
           icon={KeyRound}
           title="还没有 Passkey"
           description="在上面添加一把，之后在登录页点「用 Passkey 登录」即可。"
-          className="rounded-card bg-surface-raised shadow-raise"
+          className="rounded-card bg-surface-raised shadow-raise md:py-8"
         />
       )}
 

@@ -348,7 +348,7 @@ export default function TasksPage() {
         }
         actions={
           <>
-            <IconButton label="刷新" onClick={refresh} disabled={refreshing}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={refresh} disabled={refreshing}>
               {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={startNew}>
@@ -363,7 +363,7 @@ export default function TasksPage() {
         <ErrorCallout error={loadError} title="任务列表加载失败" onRetry={refresh} />
       ) : tasks === null ? (
         <div role="status" aria-label="加载中" className="flex flex-col md:flex-row gap-6">
-          <div className="md:w-[300px] shrink-0 rounded-card bg-surface-raised shadow-raise divide-y divide-line">
+          <div className="md:w-[360px] shrink-0 rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[60, 45, 55].map((w) => (
               <div key={w} className="flex gap-2.5 px-3.5 py-3">
                 <Skeleton className="mt-1 size-2 rounded-full" />
@@ -398,7 +398,7 @@ export default function TasksPage() {
       <div className="flex flex-col md:flex-row gap-6">
         {/* 左：任务列表 */}
         {taskList.length > 0 && (
-        <div className="ui-enter-up md:w-[300px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
+        <div className="ui-enter-up md:w-[360px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
           {taskList.map((t) => {
             const active = selectedId === t.id;
             return (
@@ -817,6 +817,8 @@ export default function TasksPage() {
           ) : (
             <EmptyState
               compact
+              icon={CalendarClock}
+              className="md:h-full md:min-h-[160px] md:rounded-card md:border md:border-dashed md:border-line"
               title="选一个任务看详情"
               description="左边选一个任务查看触发器和运行记录，或在右上角新建一个。"
             />

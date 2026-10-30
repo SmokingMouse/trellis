@@ -184,6 +184,7 @@ export default function SettingsPage() {
             <>
               <IconButton
                 label="检查更新"
+                className="md:bg-surface-raised md:shadow-btn"
                 onClick={check}
                 disabled={!repoOk || checking}
               >
