@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent } from "react";
 import { Anchor, ArrowUp, Cpu, Paperclip, Square } from "lucide-react";
 import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
 import { COMPOSER_TOOL_ICON, ComposerShell, type ComposerQueueItem } from "./ComposerShell";
@@ -11,7 +11,10 @@ import { refreshHerdrFleet, useHerdrFleet } from "@/hooks/useHerdrFleet";
 import { useHerdrConsole } from "@/hooks/useHerdrConsole";
 import { useSlashNav } from "@/hooks/useSlashNav";
 import { useHerdrReopen } from "@/hooks/useHerdrReopen";
-import { HerdrActionError, cancelHerdrInput, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
+import { HerdrActionError, cancelHerdrInput, newClientMsgId, sendHerdrInput, sendHerdrKeys } from "@/lib/herdr-actions";
+import { newOutboxItem, outboxFor, type OutboxItem } from "@/lib/outbox";
+import { outbox, outboxFailure } from "@/lib/outbox-client";
+import { HerdrInteractionCard } from "./HerdrInteractionCard";
 import { herdrSendTarget } from "@/lib/herdr-mode";
 import type { HerdrPaneView } from "@/lib/herdr-ui";
 import {
@@ -39,8 +42,12 @@ import { classifyFile, acceptFor } from "@/lib/attachments";
 //   - 排队：服务端队列在窗格空闲后自动送达，列表可撤回 / 打断后立即发送；
 //   - 附件 / 粘贴图片：走现有 /api/uploads，再物化成带原名的文件，把绝对路径插进消息；
 //   - 窗格离线：外壳禁用 + 通知行里的「在 Herdr 里重新打开」。
+//   - 弱网：发送失败（网络 / 网关）的消息进 Outbox（lib/outbox.ts），排在列表里「等待网络」，恢复后按序自动重发；
+//     每条带 client_msg_id，服务端去重，不会重复打字；
+//   - 发消息被拒是因为终端开着对话框（dialog_open，如信任目录）时，临时挂一张读屏卡（按 rev 防错作答）。
 
 const MAX_UPLOADS = 6;
+const NO_OUTBOX: OutboxItem[] = [];
 
 function useClaudeCommands(workspace: string | null, enabled: boolean): ClaudeSlashCommand[] {
   const [commands, setCommands] = useState<ClaudeSlashCommand[]>(CLAUDE_BUILTIN_COMMANDS);
@@ -89,6 +96,9 @@ export function HerdrComposer({
   const [clearableDraft, setClearableDraft] = useState<string | null>(null);
   const [queue, setQueue] = useState<HerdrQueuedInput[]>([]);
   const [uploading, setUploading] = useState(0);
+  // 发消息被 dialog_open 拒了：挂读屏卡（窗格可能报 idle，正常的 blocked 卡出不来）
+  const [dialogProbe, setDialogProbe] = useState(false);
+  const outboxItems = useSyncExternalStore(outbox().subscribe, outbox().snapshot, () => NO_OUTBOX);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const deliveredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,7 +142,29 @@ export function HerdrComposer({
     setDelivered(false);
     setNotice(null);
     setClearableDraft(null);
+    setDialogProbe(false);
   }
+
+  // 本窗格在 Outbox 里的消息：等网络的显示在排队列表；调度器重发时被拒的（failed）放回输入框
+  const paneOutbox = useMemo(
+    () => (paneId ? outboxFor(outboxItems, "herdr", paneId) : NO_OUTBOX),
+    [outboxItems, paneId],
+  );
+  const waitingOutbox = paneOutbox.filter((item) => !item.failed);
+  const failedOutbox = paneOutbox.find((item) => item.failed);
+  // 渲染期接手（同 fleet 回执对账的做法），只认一次；从 Outbox 删掉是外部副作用，放 effect
+  const [takenOutbox, setTakenOutbox] = useState<string | null>(null);
+  if (failedOutbox?.failed && takenOutbox !== failedOutbox.id) {
+    const { failed } = failedOutbox;
+    setTakenOutbox(failedOutbox.id);
+    setText((current) => restoreDraft(current, failedOutbox.text));
+    setNotice(`${failed.message}；已放回输入框`);
+    setClearableDraft(failed.clearable ?? null);
+    if (failed.code === "dialog_open") setDialogProbe(true);
+  }
+  useEffect(() => {
+    if (takenOutbox) outbox().remove(takenOutbox);
+  }, [takenOutbox]);
 
   // 排队列表 × fleet 回执对账：送达 / 撤回移除，失败把文字放回输入框。
   // 回执变了才对一次账（渲染期调整状态，不走 effect）；回执缺失不判过期 —— 刚入队时
@@ -151,6 +183,7 @@ export function HerdrComposer({
           .find((d) => d?.refusal);
         setNotice(refused?.error ? `${refused.error}；已放回输入框` : "排队的消息没能送达，已放回输入框");
         setClearableDraft(refused?.refusal?.clearable ?? null);
+        if (refused?.refusal?.code === "dialog_open") setDialogProbe(true);
       }
     }
   }
@@ -170,8 +203,17 @@ export function HerdrComposer({
     setNotice(null);
     setClearableDraft(null);
     setDelivered(false);
+    // 先落 Outbox 再发：请求失败在网络层时它还在盘上，刷新页面也会接着重发（同一个 client_msg_id）
+    const clientMsgId = newClientMsgId();
+    const box = outbox();
+    box.add(
+      newOutboxItem({ id: clientMsgId, kind: "herdr", target: paneId, text: outgoing, payload: clearDraft ? { clearDraft } : {} }),
+      true,
+    );
     try {
-      const result = await sendHerdrInput(paneId, outgoing, clearDraft);
+      const result = await sendHerdrInput(paneId, outgoing, clearDraft, clientMsgId);
+      box.remove(clientMsgId);
+      setDialogProbe(false);
       setText((current) => (current === text ? "" : current));
       if (result.status === "queued") {
         // 推送可能先于 POST 应答把这条并进列表了：按 inputId 去重。
@@ -186,10 +228,21 @@ export function HerdrComposer({
       if (mobileCompact) setMobileExpanded(false);
       void refreshHerdrFleet();
     } catch (error) {
+      const failure = outboxFailure(error);
+      if (failure.retry) {
+        // 网络 / 网关失败：留在 Outbox 里等网络，输入框腾出来；列表里能看到、能撤回
+        box.retry(clientMsgId, failure.message);
+        box.release(clientMsgId);
+        setText((current) => (current === text ? "" : current));
+        if (mobileCompact) setMobileExpanded(false);
+        return;
+      }
+      box.remove(clientMsgId);
       if (error instanceof HerdrActionError && error.refusal) {
         // 什么都没打，文字还在输入框里：直接说原因，单行草稿给一键清空重发。
         setNotice(error.message);
         setClearableDraft(error.refusal.clearable ?? null);
+        if (error.refusal.code === "dialog_open") setDialogProbe(true);
       } else {
         setNotice(`发送失败：${error instanceof Error ? error.message : String(error)}`);
       }
@@ -363,7 +416,22 @@ export function HerdrComposer({
     </IconButton>
   );
 
-  const queueItems: ComposerQueueItem[] = queue.map((item, i) => ({
+  const outboxQueueItems: ComposerQueueItem[] = waitingOutbox.map((item) => ({
+    id: `outbox:${item.id}`,
+    text: item.text,
+    label: "等待网络",
+    actions: [
+      {
+        label: "撤回",
+        onClick: () => {
+          outbox().remove(item.id);
+          setText((current) => restoreDraft(current, item.text));
+          ref.current?.focus();
+        },
+      },
+    ],
+  }));
+  const queueItems: ComposerQueueItem[] = [...outboxQueueItems, ...queue.map((item, i) => ({
     id: item.inputId,
     text: item.text,
     actions: [
@@ -372,10 +440,12 @@ export function HerdrComposer({
         : []),
       { label: "撤回", onClick: () => void withdraw(item) },
     ],
-  }));
+  }))];
 
   const statusHint = offline
     ? ""
+    : waitingOutbox.length > 0
+      ? `${waitingOutbox.length} 条等待网络，恢复后自动按顺序发送`
     : working
       ? queue.length > 0
         ? `窗格工作中 · ${queue.length} 条排队，空闲后自动发送`
@@ -502,6 +572,12 @@ export function HerdrComposer({
         "aria-label": "发给 Herdr 的消息",
       }}
       beforeCard={
+        <>
+        {dialogProbe && pane && pane.status !== "blocked" && (
+          <div className="mb-2" data-herdr-dialog-probe="">
+            <HerdrInteractionCard pane={pane} probeScreen compact />
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -514,6 +590,7 @@ export function HerdrComposer({
           }}
           className="hidden"
         />
+        </>
       }
     />
   );

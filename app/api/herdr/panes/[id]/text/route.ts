@@ -1,6 +1,7 @@
 import {
   HerdrApiError,
   HerdrUnavailableError,
+  isHerdrPromptChanged,
 } from "@/lib/server/herdr-client";
 import { getHerdrFleetService } from "@/lib/server/herdr-fleet";
 
@@ -14,7 +15,8 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  let body: { text?: unknown; submit?: unknown };
+  // expectedRev：同 /keys —— 打字前重读屏幕核对卡片 rev，对不上 409 prompt_changed、什么都不打。
+  let body: { text?: unknown; submit?: unknown; expectedRev?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -33,13 +35,22 @@ export async function POST(
   if (body.submit !== undefined && typeof body.submit !== "boolean") {
     return Response.json({ error: "submit must be boolean" }, { status: 400 });
   }
+  if (body.expectedRev !== undefined && (typeof body.expectedRev !== "string" || body.expectedRev.length > 64)) {
+    return Response.json({ error: "expectedRev must be a string" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const service = getHerdrFleetService();
     await service.ensureStarted();
-    const result = await service.text(id, body.text, body.submit !== false);
+    const result = await service.text(id, body.text, body.submit !== false, body.expectedRev as string | undefined);
     return Response.json({ ok: true, result });
   } catch (error) {
+    if (isHerdrPromptChanged(error)) {
+      return Response.json(
+        { error: error.message, code: "prompt_changed", delivered: "none", rev: error.rev, prompt: error.prompt },
+        { status: 409 },
+      );
+    }
     const status =
       error instanceof HerdrUnavailableError
         ? 503

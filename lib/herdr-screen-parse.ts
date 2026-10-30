@@ -1,6 +1,8 @@
 // 读屏解析：拿不到 hook 结构化数据时，从 Herdr 读到的终端文本里认出
-// Claude Code 的「提问（AskUserQuestion）/ 权限审批」选择卡，
+// Claude Code 的「提问（AskUserQuestion）/ 权限审批」选择卡，以及 hook 盖不住的对话框
+// （信任目录、MCP 服务器、Bypass 警告、模型 / 主题 / 登录方式选择），
 // 让 HerdrInteractionCard 仍能渲染成可点选的选项卡片，而不是一大块原始终端。
+// 每张卡带一个 rev（herdrScreenRev）：服务端发键前重读屏幕，rev 对不上就什么都不按。
 //
 // 纯函数，不依赖浏览器 / 服务端，单测见 herdr-screen-parse.test.ts。
 // 识别不出就返回 null —— 宁可退回原始终端，也不猜错一个会被点下去的选项。
@@ -21,8 +23,19 @@ export type HerdrScreenOption = {
 
 export type HerdrScreenTab = { label: string; done: boolean };
 
+/** hook 盖不住的对话框种类（kind=dialog 时）；认不出具体是哪种但形状对的是 other。 */
+export type HerdrDialogKind = "trust" | "mcp" | "bypass" | "model" | "theme" | "login" | "other";
+
 export type HerdrScreenPrompt = {
-  kind: "question" | "approval";
+  /** dialog：不是 AskUserQuestion / 权限审批，而是 Claude Code 自己的对话框，渲染成通用「终端在问你」卡 */
+  kind: "question" | "approval" | "dialog";
+  /** kind=dialog 时是哪种对话框 */
+  dialog?: HerdrDialogKind;
+  /**
+   * 选项没有序号（信任目录 / MCP / Bypass 警告）：只能从 ❯ 当前位置按 ↑/↓ 移过去再 Enter，
+   * 所以这种卡的 rev 把 ❯ 位置也算进去（见 herdrScreenRev）。
+   */
+  unnumbered?: boolean;
   /** 选项块上方最近的那段文字（题目 / Do you want to proceed?）；截断拿不到时为 null */
   title: string | null;
   /** 标题上方、分隔线以下的说明行（审批卡的命令 / 文件名等） */
@@ -133,7 +146,108 @@ export function parseHerdrScreen(text: string): HerdrScreenPrompt | null {
     if (!block) continue;
     return block;
   }
-  return null;
+  return parseUnnumbered(lines);
+}
+
+/** 整段对话框文字（标题 + 上方说明）认出是哪种 Claude Code 对话框；都不是返回 undefined。 */
+function classifyDialog(text: string, title: string | null): HerdrDialogKind | undefined {
+  if (/trust (?:this|the files in this) folder|project you created or one you trust/i.test(text)) return "trust";
+  if (/New MCP servers? found/i.test(text)) return "mcp";
+  if (/Bypass Permissions mode/i.test(text)) return "bypass";
+  if (title && /^select model\b/i.test(title)) return "model";
+  if (/Choose the text style|run \/theme/i.test(text)) return "theme";
+  if (/Select login method/i.test(text)) return "login";
+  return undefined;
+}
+
+const CURSOR_ROW_RE = /^(\s*)❯\s+(\S.*)$/;
+const DIALOG_LINK_RE = /^(Security guide|Learn more|https?:\/\/\S+)$/i;
+
+/**
+ * 无序号的选择列表（信任目录 / MCP 服务器 / Bypass 警告）：最后 30 行里有 `❯ 标签` 光标行，
+ * 上下紧挨着与它标签同列对齐的兄弟行，且底部有对话框按键提示（Enter to confirm · Esc to cancel）。
+ * 这种卡只能按方向键选，认错一行就会选错 —— 任何一条对不上都返回 null。
+ */
+function parseUnnumbered(lines: string[]): HerdrScreenPrompt | null {
+  let footerSeen = false;
+  for (let i = lines.length - 1, seen = 0; i >= 0 && seen < 4; i--) {
+    if (isBlank(lines[i])) continue;
+    seen++;
+    if (FOOTER_RE.test(lines[i])) footerSeen = true;
+  }
+  if (!footerSeen) return null;
+
+  let cursor = -1;
+  let column = 0;
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 30; i--) {
+    const m = lines[i].match(CURSOR_ROW_RE);
+    if (m) {
+      cursor = i;
+      column = lines[i].indexOf(m[2], m[1].length + 1);
+      break;
+    }
+  }
+  if (cursor < 0) return null;
+  const sibling = (line: string | undefined) =>
+    line !== undefined &&
+    !isBlank(line) &&
+    !FOOTER_RE.test(line) &&
+    !isSeparator(line) &&
+    line.length > column &&
+    line.slice(0, column).trim() === "" &&
+    line[column] !== " ";
+  let top = cursor;
+  let bottom = cursor;
+  while (sibling(lines[top - 1])) top--;
+  while (sibling(lines[bottom + 1])) bottom++;
+  if (top === bottom) return null;
+  // 列表之后只允许空行 / 分隔线 / 按键提示
+  for (let i = bottom + 1; i < lines.length; i++) {
+    if (!isBlank(lines[i]) && !isSeparator(lines[i]) && !FOOTER_RE.test(lines[i])) return null;
+  }
+
+  // 列表上方到分隔线（或最多 20 行）按空行切段：带问号的最后一段是标题，其余是说明
+  const paragraphs: string[][] = [];
+  let current: string[] = [];
+  for (let i = top - 1, seen = 0; i >= 0 && seen < 20; i--, seen++) {
+    const line = lines[i];
+    if (isSeparator(line)) break;
+    if (isBlank(line)) {
+      if (current.length) paragraphs.unshift(current);
+      current = [];
+      continue;
+    }
+    current.unshift(line.trim());
+  }
+  if (current.length) paragraphs.unshift(current);
+  const texts = paragraphs.map(joinText).filter((text) => !DIALOG_LINK_RE.test(text));
+  let titleAt = -1;
+  for (let i = texts.length - 1; i >= 0; i--) {
+    if (/[?？]/.test(texts[i])) {
+      titleAt = i;
+      break;
+    }
+  }
+  if (titleAt < 0) titleAt = texts.length ? 0 : -1;
+  const title = titleAt >= 0 ? texts[titleAt] : null;
+  const context = texts.filter((_, i) => i !== titleAt);
+
+  const options: HerdrScreenOption[] = [];
+  for (let i = top; i <= bottom; i++) {
+    const label = lines[i].trim().replace(/^❯\s*/, "").trim();
+    options.push({ index: i - top + 1, label });
+  }
+  return {
+    kind: "dialog",
+    dialog: classifyDialog(texts.join("\n"), title) ?? "other",
+    unnumbered: true,
+    title,
+    context,
+    tool: null,
+    options,
+    selectedIndex: cursor - top + 1,
+    multiSelect: false,
+  };
 }
 
 function collectBlock(lines: string[], first: RawOption): HerdrScreenPrompt | null {
@@ -163,16 +277,6 @@ function collectBlock(lines: string[], first: RawOption): HerdrScreenPrompt | nu
   const pointed = raws.filter((raw) => raw.pointer);
   if (pointed.length !== 1) return null;
 
-  // 选择卡必须在屏幕最底部：块之后只允许空行 / 分隔线 / 操作提示，且非空行不超过 3 行
-  let trailing = 0;
-  for (let i = end + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (isBlank(line) || isSeparator(line)) continue;
-    if (FOOTER_RE.test(line)) continue;
-    trailing++;
-  }
-  if (trailing > 3) return null;
-
   // 标题：选项块上方最近的一段非空文字（遇到空行 / 分隔线 / 标签行停）
   let cursor = first.line - 1;
   while (cursor >= 0 && isBlank(lines[cursor])) cursor--;
@@ -184,6 +288,18 @@ function collectBlock(lines: string[], first: RawOption): HerdrScreenPrompt | nu
     cursor--;
   }
   const title = titleParts.length ? joinText(titleParts) : null;
+
+  // 选择卡必须在屏幕最底部：块之后只允许空行 / 分隔线 / 操作提示，且非空行不超过 3 行。
+  // 主题选择下面跟着一段 diff 预览，认得出是它时放宽到 8 行。
+  let trailing = 0;
+  for (let i = end + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (isBlank(line) || isSeparator(line)) continue;
+    if (FOOTER_RE.test(line)) continue;
+    trailing++;
+  }
+  const dialogKind = classifyDialog(lines.slice(Math.max(0, first.line - 16), first.line).join("\n"), title);
+  if (trailing > (dialogKind === "theme" ? 8 : 3)) return null;
 
   // 标题上方：题目标签行（多题）或说明块（审批的命令），都止于分隔线
   let tabs: HerdrScreenTab[] | null = null;
@@ -216,15 +332,16 @@ function collectBlock(lines: string[], first: RawOption): HerdrScreenPrompt | nu
   if (multiSelect) for (const option of options) option.label = option.label.replace(CHECKBOX_RE, "").trim();
 
   const approval =
-    (title !== null && /^do you want to\b/i.test(title)) ||
-    (/^yes\b/i.test(options[0].label) && options.some((option) => /^no\b/i.test(option.label)));
+    !dialogKind &&
+    ((title !== null && /^do you want to\b/i.test(title)) ||
+      (/^yes\b/i.test(options[0].label) && options.some((option) => /^no\b/i.test(option.label))));
   if (approval) for (const option of options) option.approval = approvalRole(option.label);
 
   const toolLine = approval ? context.find((line) => /^[A-Z][\w-]*( command| tool)?$/.test(line) || /^(Bash|Edit|Write|Read|WebFetch|MultiEdit|NotebookEdit)\b/.test(line)) : undefined;
   const tool = toolLine ? toolLine.replace(/\s+(command|tool)$/i, "").split(/[\s(]/)[0] : null;
 
   const result: HerdrScreenPrompt = {
-    kind: approval ? "approval" : "question",
+    kind: dialogKind ? "dialog" : approval ? "approval" : "question",
     title,
     context: approval && toolLine ? context.filter((line) => line !== toolLine) : context,
     tool,
@@ -232,6 +349,23 @@ function collectBlock(lines: string[], first: RawOption): HerdrScreenPrompt | nu
     selectedIndex: pointed[0].index,
     multiSelect,
   };
+  if (dialogKind) {
+    result.dialog = dialogKind;
+    // 启动画面的 logo 字符画不是说明
+    result.context = result.context.filter((line) => /[A-Za-z\u4e00-\u9fff]/.test(line));
+    // 模型选择一行两栏（`Sonnet ✔      Sonnet 5 · Efficient…`）：第一栏是标签，其余当描述
+    for (const option of options) {
+      const [label, ...rest] = option.label.split(/\s{2,}/);
+      if (rest.length && !option.description) {
+        option.label = label;
+        option.description = rest.join(" ");
+      }
+      if (RECOMMENDED_RE.test(option.label)) {
+        option.label = option.label.replace(RECOMMENDED_RE, "").trim();
+        option.recommended = true;
+      }
+    }
+  }
   if (tabs && tabs.length > 1) {
     const current = tabs.findIndex((tab) => !tab.done);
     result.multiQuestion = { total: tabs.length, current: current === -1 ? tabs.length : current + 1, tabs };
@@ -245,6 +379,64 @@ export function herdrScreenSignature(prompt: HerdrScreenPrompt | null): string {
   return JSON.stringify([prompt.kind, prompt.title, prompt.options.map((option) => option.label), prompt.multiQuestion?.current ?? 0]);
 }
 
+/** 发键前核对用的读屏行数：卡片（客户端）和发键接口（服务端）都只看最后这么多行，rev 才对得上。 */
+export const HERDR_PROMPT_LINES = 40;
+
+/** 取读屏文本的最后 HERDR_PROMPT_LINES 行（读屏接口按需切尾，这里与它同一口径）。 */
+export function herdrPromptTail(text: string): string {
+  return text.replace(/\r/g, "").split("\n").slice(-HERDR_PROMPT_LINES).join("\n");
+}
+
+// cyrb53：53 位、同步、浏览器和服务端结果一致，够区分一屏对话框；不做安全用途。
+function hash53(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
+}
+
+/**
+ * 对话框的 rev：对话框区域规范化后的文字（种类、标题、说明、各选项标签与描述、多题当前题号）的哈希。
+ * 有序号的卡按数字直选，与 ❯ 位置无关，rev 不含 ❯；无序号的卡靠方向键从 ❯ 移过去，❯ 动了 rev 就变。
+ * 没有卡返回 ""。
+ */
+export function herdrScreenRev(prompt: HerdrScreenPrompt | null): string {
+  if (!prompt) return "";
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  return hash53(
+    JSON.stringify([
+      prompt.kind,
+      prompt.dialog ?? "",
+      normalize(prompt.title ?? ""),
+      prompt.context.map(normalize),
+      prompt.options.map((option) => [option.index, normalize(option.label), normalize(option.description ?? "")]),
+      prompt.multiSelect,
+      prompt.multiQuestion?.current ?? 0,
+      prompt.unnumbered ? prompt.selectedIndex : 0,
+    ]),
+  );
+}
+
+/** 读屏文本 → 卡 + rev（服务端发键前、pending 接口共用）。 */
+export function herdrScreenPromptWithRev(text: string): { prompt: HerdrScreenPrompt | null; rev: string } {
+  const prompt = parseHerdrScreen(herdrPromptTail(text));
+  return { prompt, rev: herdrScreenRev(prompt) };
+}
+
+/** 选卡上第 N 项要发的键：有序号用数字直选，无序号从 ❯ 当前位置按方向键再 Enter。 */
+export function herdrPromptOptionKeys(prompt: HerdrScreenPrompt, index: number): string[] {
+  if (!prompt.options.some((option) => option.index === index)) {
+    throw new Error(`prompt has no option ${index}`);
+  }
+  return prompt.unnumbered ? herdrArrowKeys(prompt.selectedIndex, index) : herdrOptionKeys({ index });
+}
+
 /**
  * 选第 N 项要发的按键。
  *
@@ -253,7 +445,7 @@ export function herdrScreenSignature(prompt: HerdrScreenPrompt | null): string {
  *   已在真实窗格里校准过（2026-09-07 单题数字即提交；R5 多题数字即进下一题 / Review；权限卡「1」即放行）；
  * - 数字与 ❯ 当前位置无关，读屏和发键之间 ❯ 被挪动也不会选错；方向键方案依赖读屏那一刻的 ❯，
  *   且多发一个 Enter 就会落到下一张卡上。
- * 方向键方案保留在 herdrArrowKeys 里备用（单测覆盖），目前不接线。
+ * 方向键方案（herdrArrowKeys）只给没有序号的对话框用，那里 rev 含 ❯ 位置，❯ 一动就拒发。
  */
 export function herdrOptionKeys(option: Pick<HerdrScreenOption, "index">): string[] {
   if (!Number.isInteger(option.index) || option.index < 1 || option.index > 9) {
@@ -262,7 +454,7 @@ export function herdrOptionKeys(option: Pick<HerdrScreenOption, "index">): strin
   return [String(option.index)];
 }
 
-/** 备用：从 ❯ 当前位置按 ↑/↓ 移到目标项再 Enter。 */
+/** 从 ❯ 当前位置按 ↑/↓ 移到目标项再 Enter：无序号对话框（信任目录等）用，见 herdrPromptOptionKeys。 */
 export function herdrArrowKeys(from: number, to: number): string[] {
   const step = to > from ? "down" : "up";
   return [...Array.from({ length: Math.abs(to - from) }, () => step), "Enter"];

@@ -4,6 +4,7 @@ import {
   HerdrUnavailableError,
 } from "@/lib/server/herdr-client";
 import { getHerdrFleetService } from "@/lib/server/herdr-fleet";
+import { isClientMsgId } from "@/lib/server/idempotency";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  let body: { text?: unknown; clearDraft?: unknown };
+  // clientMsgId：客户端给这条消息的 id（Outbox 重发沿用），TTL 内重复请求回第一次的结果、不重复打字。
+  let body: { text?: unknown; clearDraft?: unknown; clientMsgId?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -31,11 +33,14 @@ export async function POST(
   if (body.clearDraft !== undefined && (typeof body.clearDraft !== "string" || !body.clearDraft || Buffer.byteLength(body.clearDraft, "utf8") > 8 * 1024)) {
     return Response.json({ error: "clearDraft must be a non-empty string" }, { status: 400 });
   }
+  if (body.clientMsgId !== undefined && !isClientMsgId(body.clientMsgId)) {
+    return Response.json({ error: "invalid clientMsgId" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const service = getHerdrFleetService();
     await service.ensureStarted();
-    const result = await service.input(id, body.text, body.clearDraft as string | undefined);
+    const result = await service.input(id, body.text, body.clearDraft as string | undefined, body.clientMsgId as string | undefined);
     return Response.json({ ok: true, status: result.status, result }, { status: result.status === "queued" ? 202 : 200 });
   } catch (error) {
     // 发前读屏拒发：什么都没打（delivered: none），带上原因和电脑端草稿，前端据此提示 / 清空重发。

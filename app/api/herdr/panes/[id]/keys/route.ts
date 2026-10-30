@@ -1,6 +1,7 @@
 import {
   HerdrApiError,
   HerdrUnavailableError,
+  isHerdrPromptChanged,
 } from "@/lib/server/herdr-client";
 import { getHerdrFleetService } from "@/lib/server/herdr-fleet";
 
@@ -11,7 +12,9 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  let body: { keys?: unknown };
+  // expectedRev：卡片上对话框的 rev（pending 接口 / herdrScreenRev）。带了就在发键前重读屏幕核对，
+  // 对不上回 409 prompt_changed、什么都不按；不带的旧调用照常直接发。
+  let body: { keys?: unknown; expectedRev?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -25,13 +28,22 @@ export async function POST(
   ) {
     return Response.json({ error: "expected non-empty { keys: string[] }" }, { status: 400 });
   }
+  if (body.expectedRev !== undefined && (typeof body.expectedRev !== "string" || body.expectedRev.length > 64)) {
+    return Response.json({ error: "expectedRev must be a string" }, { status: 400 });
+  }
   const { id } = await context.params;
   try {
     const service = getHerdrFleetService();
     await service.ensureStarted();
-    const result = await service.keys(id, body.keys as string[]);
+    const result = await service.keys(id, body.keys as string[], body.expectedRev as string | undefined);
     return Response.json({ ok: true, result });
   } catch (error) {
+    if (isHerdrPromptChanged(error)) {
+      return Response.json(
+        { error: error.message, code: "prompt_changed", delivered: "none", rev: error.rev, prompt: error.prompt },
+        { status: 409 },
+      );
+    }
     const status =
       error instanceof HerdrUnavailableError
         ? 503

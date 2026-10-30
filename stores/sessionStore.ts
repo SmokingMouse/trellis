@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import { newOutboxItem } from "@/lib/outbox";
+import { outbox } from "@/lib/outbox-client";
+import { newClientMsgId } from "@/lib/herdr-actions";
+import { toast } from "@/components/ui/Toaster";
 import { NavigationOwner, fetchWithRetry, type NavigationTicket } from "@/lib/client-navigation";
 import { reconcilePending, type PendingSnapshot } from "@/lib/pending";
 import {
@@ -3956,29 +3960,132 @@ async function attachReconnectStream(
   }
 }
 
+// ── 发送幂等 + Outbox（lib/outbox.ts）────────────────────────────────
+// 每次提问带一个 clientMsgId；网络层失败 / 网关维护页时不报错，留在 Outbox 里等网络，恢复后用同一个 id 重发
+// （服务端去重：上一次其实到了就回它的结果，不会重起一轮）。页面刷新时 Outbox 还在盘上，由下面注册的
+// 后台 sender 接着发。应用自己回的 JSON 错误（4xx / 503 Agent 不可达等）不重发 —— 那是确定的失败。
+
+/** 同一 lane 内按序发：已有会话按会话 id，分支按父节点，重试按节点。 */
+function chatOutboxTarget(body: ChatRequestBody): string {
+  if (body.kind === "root") return body.sessionId ?? "new";
+  return body.kind === "branch" ? body.parentNodeId : body.nodeId;
+}
+
+/**
+ * 网关维护页 / 上游超时这种「应用根本没收到」的失败：非 JSON 的 503 / 504。
+ * 502 不算 —— 照旧把「HTTP 502」报给用户（stores/db-write-failure.test.ts），免得坏掉的上游让提问一直转圈。
+ */
+function isTransientChatResponse(res: Response): boolean {
+  if (res.status !== 503 && res.status !== 504) return false;
+  return !(res.headers.get("content-type") ?? "").includes("application/json");
+}
+
+/** SSE 流里第一个 created 事件所属的会话 id；读不到返回 null。读完就断开（run 在服务端照跑）。 */
+async function readCreatedSessionId(body: ReadableStream<Uint8Array>): Promise<string | null> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buffer += decoder.decode(value, { stream: true });
+      const at = buffer.indexOf("\n\n");
+      if (at === -1) continue;
+      try {
+        const event = JSON.parse(buffer.slice(0, at).replace(/^data: /, "")) as {
+          type?: string;
+          session?: { id?: string };
+          node?: { sessionId?: string };
+        };
+        return event.type === "created" ? event.node?.sessionId ?? event.session?.id ?? null : null;
+      } catch {
+        return null;
+      }
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+}
+
+if (typeof window !== "undefined") {
+  // 页面刷新后接手盘上的 chat 消息：发出去、读到 created 就断开，再刷新列表 / 当前会话
+  outbox().registerSender("chat", async (item) => {
+    let res: Response;
+    try {
+      res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item.payload),
+      });
+    } catch (err) {
+      return { ok: false, retry: true, message: err instanceof Error ? err.message : String(err) };
+    }
+    if (!res.ok || !res.body) {
+      if (isTransientChatResponse(res)) return { ok: false, retry: true, message: `HTTP ${res.status}` };
+      const detail = await res.json().then((b) => (b && typeof b.error === "string" ? b.error : null)).catch(() => null);
+      // 没有输入框接手 chat 的失败：提示一声就丢掉（原文在提示里）
+      toast.error("离线时排着的消息没能发出", { description: `${item.text.slice(0, 80)}：${detail ?? `HTTP ${res.status}`}` });
+      return { ok: true };
+    }
+    const sessionId = await readCreatedSessionId(res.body);
+    const store = useSessionStore.getState();
+    store.bumpSessionsRevision();
+    if (sessionId && store.session?.id === sessionId) void store.loadSession(sessionId);
+    return { ok: true };
+  });
+}
+
 async function runStream(
   body: ChatRequestBody,
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  const clientMsgId = newClientMsgId();
+  const payload = { ...body, clientMsgId };
+  const box = outbox();
+  box.add(
+    newOutboxItem({
+      id: clientMsgId,
+      kind: "chat",
+      target: chatOutboxTarget(body),
+      text: body.kind === "retry" ? "（重试）" : body.question,
+      payload,
+    }),
+    true,
+  );
   let res: Response;
   try {
-    res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err) {
-    // User-initiated abort: don't surface as a generic error in the UI —
-    // the server-side finally block will mark the row as aborted, and
-    // hydrate / live SSE catch-up will reflect that on next load.
-    if (signal?.aborted) return;
-    onEvent({
-      type: "error",
-      message: err instanceof Error ? err.message : String(err),
-    });
-    return;
+    for (;;) {
+      try {
+        res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal,
+        });
+      } catch (err) {
+        // User-initiated abort: don't surface as a generic error in the UI —
+        // the server-side finally block will mark the row as aborted, and
+        // hydrate / live SSE catch-up will reflect that on next load.
+        if (signal?.aborted) return;
+        // 网络层失败：节点保持「进行中」，标题位显示「等待网络」，恢复后同一个 clientMsgId 重发
+        box.retry(clientMsgId, err instanceof Error ? err.message : String(err));
+        await box.waitForRetry(clientMsgId, signal);
+        if (signal?.aborted) return;
+        continue;
+      }
+      if (isTransientChatResponse(res)) {
+        box.retry(clientMsgId, `HTTP ${res.status}`);
+        await box.waitForRetry(clientMsgId, signal);
+        if (signal?.aborted) return;
+        continue;
+      }
+      break;
+    }
+  } finally {
+    // 拿到了确定的响应（或用户中止）：这条不再需要 Outbox
+    box.remove(clientMsgId);
   }
   if (!res.ok || !res.body) {
     // S176：服务端已经把「磁盘满 / 数据库写入失败」这类原因写在 body 的 error
