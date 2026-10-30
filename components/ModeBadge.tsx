@@ -17,7 +17,12 @@ import { Icon, StatusDot, Tooltip } from "@/components/ui";
 // a new session. (Browsing the workspace's files lives on the breadcrumb and
 // the「更多」menu — a status chip that secretly acts as a button proved
 // undiscoverable.)
-export function ModeBadge() {
+export function ModeBadge({
+  hideWorkspace = false,
+}: {
+  /** 顶栏里工作区另有一枚可点的 chip（打开工作区文件），这里只留模式 / Agent / 需确认 */
+  hideWorkspace?: boolean;
+} = {}) {
   const session = useSessionStore((s) => s.session);
   const agentId = session?.agentId ?? null;
   const [agentLookup, setAgentLookup] = useState<{
@@ -73,7 +78,7 @@ export function ModeBadge() {
         <StatusDot tone={mode === "project" ? "project" : "chat"} />
         {/* 手机上只留圆点省空间；桌面写出模式名。 */}
         <span className="hidden sm:inline font-medium">{cfg.label}</span>
-        {shortName && (
+        {shortName && !hideWorkspace && (
           <span className={`min-w-0 truncate font-mono max-w-[6rem] sm:max-w-[9rem] ${mode === "project" ? "opacity-75" : "text-ink-muted"}`}>
             {shortName}
           </span>

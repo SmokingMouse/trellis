@@ -153,7 +153,7 @@ export function ModelPicker() {
       <Popover
         open={open}
         onClose={() => setOpen(false)}
-        wrapperClassName="min-w-0"
+        wrapperClassName="min-w-0 max-w-56"
         panelClassName="w-80 max-h-[30rem] flex flex-col text-ui overflow-hidden"
         trigger={
           <button
@@ -162,7 +162,9 @@ export function ModelPicker() {
             aria-label={`切换模型，当前 ${current.shortLabel}`}
             aria-expanded={open}
             data-model-picker-trigger
-            className={`${COMPOSER_TOOL_PILL} max-w-56`}
+            // 宽度由外层 wrapper 约束（max-w-56）：底栏挤时 wrapper 被 flex 压窄，按钮跟着截断，
+            // 不能自己再撑一个 max-w——否则会溢出 wrapper 盖住右边的发送钮。
+            className={`${COMPOSER_TOOL_PILL} max-w-full`}
           >
             <Icon icon={Cpu} size="sm" />
             <span className="text-nano text-ink-faint">{currentBadge}</span>

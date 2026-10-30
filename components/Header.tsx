@@ -5,7 +5,6 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronRight,
-  LayoutGrid,
   Download,
   Ellipsis,
   FileDiff,
@@ -247,6 +246,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const mobileTerminalView = useHerdrConsoleStore((s) => s.mobileTerminalView);
   const toggleMobileTerminalView = useHerdrConsoleStore((s) => s.toggleMobileTerminalView);
   const viewMode = useSessionStore((s) => s.viewMode);
+  const butlerDraft = useSessionStore((s) => s.butlerDraft);
   const { fleet: herdrFleet } = useHerdrFleet();
   const mainScrolled = useMainScrolled(
     isMobile,
@@ -508,6 +508,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const narrowDesktopOverride = isNarrowViewport;
   const workspaceName = session?.workspacePath ? basename(session.workspacePath) : null;
   const sessionTitle = session?.title.trim() || "新会话";
+  const viewTitle = herdrOpen ? "Herdr 总览" : homeOpen ? (butlerDraft ? "管家" : "首页") : "新会话";
 
   const exportAs = (format: "markdown" | "json") => {
     if (!session) return;
@@ -593,58 +594,61 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           </button>
         </Tooltip>
         </div>
-        {session && (
-          <nav
-            aria-label="当前位置"
-            data-header-breadcrumb
-            className="flex min-w-0 items-center gap-1 text-ui text-ink-muted"
-          >
-            {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
-            {/* 工作区 = 小 chip（原型 .chip：6px 圆角、muted 底、发丝环、11.5px） */}
-            {workspaceName ? (
-              <Tooltip content={`${session.workspacePath}（点击浏览工作区文件）`}>
-                <button
-                  type="button"
-                  onClick={() => setWorkspaceFilesOpen(true)}
-                  className="inline-flex h-5.5 max-w-40 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline transition-colors duration-100 hover:bg-surface-hover hover:text-ink"
+        {/* 页面标题 + 语境 chip（原型 .topbar：.title 14px medium，后跟模式 pill / 工作区 chip）。
+            会话里：会话名 → 模式 chip（含 Agent / 需确认）→ 工作区 chip（点开工作区文件）；
+            其它视图只有标题。模型不在顶栏选——在输入框底栏（首页 / 线性 thread 都有）。 */}
+        <nav
+          aria-label="当前位置"
+          data-header-breadcrumb
+          className="flex min-w-0 items-center gap-2 text-ui text-ink-muted"
+        >
+          {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint max-md:hidden" />}
+          {session ? (
+            <>
+              <Tooltip content={sessionTitle}>
+                <span
+                  tabIndex={0}
+                  data-header-title
+                  className="min-w-0 truncate text-[14px] font-medium text-ink"
                 >
-                  <Icon icon={FolderOpen} size="sm" className="size-3 shrink-0 text-ink-faint" />
-                  <span className="truncate">{workspaceName}</span>
-                </button>
+                  {sessionTitle}
+                </span>
               </Tooltip>
-            ) : (
-              <span className="inline-flex h-5.5 shrink-0 items-center rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline">对话</span>
-            )}
-            <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint" />
-            <Tooltip content={sessionTitle}>
-              <span
-                tabIndex={0}
-                className="min-w-0 truncate px-1 text-[14px] font-medium text-ink"
-              >
-                {sessionTitle}
-              </span>
-            </Tooltip>
-          </nav>
-        )}
-        {!session && herdrOpen && (
-          <nav aria-label="当前位置" data-header-breadcrumb className="flex min-w-0 items-center gap-1 text-ui text-ink-muted">
-            {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
-            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] font-medium text-ink">
-              <Icon icon={LayoutGrid} size="sm" className="text-ink-muted" />
-              Herdr 总览
+              <div className="contents max-md:hidden">
+                <ModeBadge hideWorkspace />
+              </div>
+              {workspaceName && (
+                <Tooltip content={`${session.workspacePath}（点击浏览工作区文件）`}>
+                  <button
+                    type="button"
+                    data-header-workspace
+                    onClick={() => setWorkspaceFilesOpen(true)}
+                    className="inline-flex h-5.5 max-w-40 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline transition-colors duration-100 hover:bg-surface-hover hover:text-ink"
+                  >
+                    <Icon icon={FolderOpen} size="sm" className="size-3 shrink-0 text-ink-faint" />
+                    <span className="truncate font-mono">{workspaceName}</span>
+                  </button>
+                </Tooltip>
+              )}
+            </>
+          ) : (
+            <span
+              data-header-title
+              // md 以下（「转桌面版」窄屏）原先只在 Herdr 总览露标题，保持原样
+              className={cn("min-w-0 truncate text-[14px] font-medium text-ink-muted", !herdrOpen && "max-md:hidden")}
+            >
+              {viewTitle}
             </span>
-          </nav>
-        )}
+          )}
+        </nav>
       </div>
 
-      {/* ── 中：会话语境 ── */}
-      {/* 窄屏（手机用户手动「转桌面版」）下这一组可以收缩：模式 chip 让位，模型名截断，
-          不能盖住左侧的汉堡键。 */}
-      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5 md:shrink-0">
-        <div className="contents max-md:hidden">
-          <ModeBadge />
+      {/* ── 中：会话语境（用量 / 上下文浮层） ── */}
+      <div data-header-group="context" className="ml-auto flex min-w-0 shrink items-center gap-1.5 md:shrink-0">
+        {/* 桌面（md+）模型在输入框底栏选；md 以下的「转桌面版」窄屏保持原样留在顶栏。 */}
+        <div className="contents md:hidden">
+          <ModelPicker />
         </div>
-        <ModelPicker />
         {session && (
           <Popover
             open={ctxPopoverOpen}
@@ -691,24 +695,13 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       </div>
 
       {/* ── 右：系统 ── */}
-      <div data-header-group="system" className="ml-auto flex shrink-0 items-center justify-end gap-1">
-        <Tooltip content="搜索会话与节点内容" shortcut="⌘P">
-          <button
-            type="button"
-            aria-label="搜索"
-            onClick={() => setSearchOpen(true)}
-            className="mr-1 hidden h-7 w-44 items-center gap-1.5 rounded-field bg-surface-muted px-2.5 text-[12.5px] text-ink-faint shadow-inset-field transition-colors duration-100 hover:text-ink-muted lg:inline-flex"
-          >
-            <Icon icon={Search} size="sm" />
-            <span className="flex-1 text-left">搜索</span>
-            <Kbd>⌘P</Kbd>
-          </button>
-        </Tooltip>
+      <div data-header-group="system" className="flex shrink-0 items-center justify-end gap-1">
         <IconButton
           label="搜索"
+          title="搜索会话与节点内容"
           shortcut="⌘P"
+          data-header-search
           onClick={() => setSearchOpen(true)}
-          className="lg:hidden"
         >
           <Icon icon={Search} />
         </IconButton>

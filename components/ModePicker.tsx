@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { modeStyle } from "@/lib/mode-style";
 import type { Mode } from "@/lib/llm";
@@ -10,8 +10,17 @@ import {
   workspaceRequired,
 } from "@/lib/run-config";
 import { WorkspaceField } from "./run-config/WorkspaceField";
-import { ShieldCheck, Zap } from "lucide-react";
+import { ChevronDown, ShieldCheck, Zap } from "lucide-react";
 import { Icon } from "./ui/Icon";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "./ui/DropdownMenu";
+import { COMPOSER_TOOL_PILL } from "./ComposerShell";
 
 // Stage 14: the mode picker only appears in the new-session draft state
 // (the empty QuestionInput). It edits draftMode + draftWorkspacePath in
@@ -65,7 +74,13 @@ const ICONS: Record<Mode, () => React.ReactElement> = {
   project: LinkIcon,
 };
 
-export function ModePicker() {
+export function ModePicker({
+  variant = "default",
+}: {
+  /** default = 分段器 + 工作区 + 审批（手机「更多设置」sheet 用）；
+   *  toolbar = 桌面输入框底栏里的紧凑胶囊（原型 .c-bar 的「Chat ⌄」），点开是同一组单选 */
+  variant?: "default" | "toolbar";
+} = {}) {
   const mode = useSessionStore((s) => s.draftMode);
   const setMode = useSessionStore((s) => s.setDraftMode);
   const workspacePath = useSessionStore((s) => s.draftWorkspacePath);
@@ -74,6 +89,8 @@ export function ModePicker() {
   const requireApproval = useSessionStore((s) => s.draftRequireApproval);
   const setRequireApproval = useSessionStore((s) => s.setDraftRequireApproval);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 工具栏胶囊：选 Project 时要自动弹出工作区选择框，别让菜单关闭时把焦点抢回触发钮
+  const skipMenuFocusRestore = useRef(false);
 
   const OPTIONS = contextModeOptions(provider);
   const needsWorkspace = workspaceRequired(mode);
@@ -90,9 +107,96 @@ export function ModePicker() {
     } else if (!workspacePath) {
       // Project needs a path. Open picker; user can't leave it dangling
       // because the submit gate also re-checks.
+      skipMenuFocusRestore.current = true;
       setPickerOpen(true);
     }
   };
+
+  const workspaceField = needsWorkspace && (
+    <WorkspaceField
+      value={workspacePath}
+      onChange={setWorkspacePath}
+      placeholder="空白沙箱（自动）"
+      className={
+        variant === "toolbar"
+          ? "max-w-32 rounded-full!"
+          : "max-w-[10rem] max-md:max-w-none max-md:w-full"
+      }
+      open={pickerOpen}
+      onOpenChange={setPickerOpen}
+    />
+  );
+
+  if (variant === "toolbar") {
+    const current = OPTIONS.find((opt) => opt.id === mode) ?? OPTIONS[0];
+    const CurrentIcon = ICONS[current.id];
+    return (
+      <div data-mode-picker="toolbar" className="inline-flex min-w-0 items-center gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Context mode：${current.label}`}
+              title={current.title}
+              className={COMPOSER_TOOL_PILL}
+            >
+              <span className={`inline-flex ${modeStyle(current.id).text}`}>
+                <CurrentIcon />
+              </span>
+              <span>{current.label}</span>
+              <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="w-72"
+            onCloseAutoFocus={(e) => {
+              if (!skipMenuFocusRestore.current) return;
+              skipMenuFocusRestore.current = false;
+              e.preventDefault();
+            }}
+          >
+            <DropdownMenuLabel>Context mode</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={mode} onValueChange={(v) => handleSelect(v as Mode)}>
+              {OPTIONS.map((opt) => {
+                const OptIcon = ICONS[opt.id];
+                return (
+                  <DropdownMenuRadioItem key={opt.id} value={opt.id} title={opt.title} className="py-1.5">
+                    <span className="flex min-w-0 items-start gap-2">
+                      <span className={`mt-0.5 inline-flex shrink-0 ${modeStyle(opt.id).text}`}>
+                        <OptIcon />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block font-medium">{opt.label}</span>
+                        <span className="block truncate text-label text-ink-faint">{opt.short}</span>
+                      </span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                );
+              })}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {workspaceField}
+        {showApproval && (
+          <button
+            type="button"
+            onClick={() => setRequireApproval(!requireApproval)}
+            title={approval.title}
+            aria-pressed={requireApproval}
+            className={
+              requireApproval
+                ? "press inline-flex h-7 items-center gap-1.5 rounded-full bg-accent-muted px-2 text-[12.5px] font-medium text-accent-ink ring-1 ring-inset ring-accent-line transition-colors duration-100"
+                : COMPOSER_TOOL_PILL
+            }
+          >
+            <Icon icon={approval.icon === "shield" ? ShieldCheck : Zap} size="sm" />
+            <span>{approval.label}</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -132,16 +236,7 @@ export function ModePicker() {
         })}
       </div>
 
-      {needsWorkspace && (
-        <WorkspaceField
-          value={workspacePath}
-          onChange={setWorkspacePath}
-          placeholder="空白沙箱（自动）"
-          className="max-w-[10rem] max-md:max-w-none max-md:w-full"
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-        />
-      )}
+      {workspaceField}
 
       {showApproval && (
         <button
