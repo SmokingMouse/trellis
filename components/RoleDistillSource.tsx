@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, MessageSquare, Search } from "lucide-react";
+import { ChevronDown, MessageSquare, Search } from "lucide-react";
 import { Button, ErrorCallout, Icon, Input, PixelLoader, cn } from "@/components/ui";
 import type { DistillSource, RoleDraft } from "@/lib/role-follow";
 
@@ -162,7 +162,7 @@ export function RoleDistillSource({
         <Icon icon={MessageSquare} size="sm" className="shrink-0 text-ink-faint" />
         <span className="min-w-0 flex-1 truncate text-ui text-ink">{picked.title}</span>
         <span className="shrink-0 text-label tabular-nums text-ink-faint">{sourceMeta(picked)}</span>
-        <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint" />
+        <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
       </button>
       {busy ? (
         <div role="status" className="flex items-center gap-2 rounded-card bg-surface-muted px-3 py-2.5 text-label text-ink-muted shadow-hairline">
@@ -180,13 +180,16 @@ export function RoleDistillSource({
 
 function DraftSummary({ draft }: { draft: RoleDraft }) {
   const n = draft.memories.length;
-  const examples = draft.memories.slice(0, 2).map((m) => `「${m.description || m.name}」`);
+  // 例子用记忆的一句话说明；模型自己带的引号去掉，免得「“…”」套娃
+  const examples = draft.memories
+    .slice(0, 2)
+    .map((m) => `「${(m.description || m.name).replace(/^[「“"']+|[」”"']+$/g, "")}」`);
   return (
     <div data-distill-draft className="rounded-card bg-surface-muted px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-muted shadow-hairline">
       <b className="font-semibold text-ink">提炼出的草稿</b>（下面都能改）：{draft.intro || draft.name}
       {n > 0 ? (
         <>
-          ；从这段对话里带走 {n} 条记忆{examples.length ? `，比如${examples.join("")}` : ""}，创建时一并写进它的记忆。
+          ；从这段对话里带走 {n} 条记忆{examples.length ? `，比如${examples.join("")}` : ""}。
         </>
       ) : (
         "；这段对话里没有值得长期记住的事，记忆从空白开始。"

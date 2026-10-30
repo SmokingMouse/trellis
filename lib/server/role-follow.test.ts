@@ -176,7 +176,7 @@ describe("开关与扫描", () => {
     expect(node.question).toBe("跟进：1 个等你、1 个失败、1 个完成");
     expect(node.response).toContain("[会话 new-fail](/?session=new-fail)");
     expect(node.meta?.kind).toBe("role-follow");
-    expect((node.meta as { items: unknown[] }).items.length).toBe(3);
+    expect((node.meta as unknown as { items: unknown[] }).items.length).toBe(3);
     expect(pushes.length).toBe(1);
     expect(pushes[0]).toMatchObject({ botId: bot.id, chatId: "oc_p2p" });
     expect(pushes[0].markdown).toContain("https://trellis.example.com/?session=new-fail");

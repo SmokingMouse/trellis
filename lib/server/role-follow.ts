@@ -213,6 +213,11 @@ export function observeSessions(now: number): FollowObservation[] {
   const out: FollowObservation[] = [];
   for (const r of rows) {
     const base = { subject: `s:${r.id}`, source: "session" as const, sessionId: r.id, title: r.title || "未命名会话" };
+    // 说明和标题一样（首问就是标题）就不重复
+    const about = (t: string | null | undefined) => {
+      const e = excerpt(t);
+      return e && e !== excerpt(base.title) ? e : null;
+    };
     if (waiting.has(r.id)) {
       const p = pending.find((x) => x.sessionId === r.id)!;
       out.push({ ...base, state: "waiting", token: p.nodeId, detail: excerpt(p.summary) });
@@ -224,14 +229,14 @@ export function observeSessions(now: number): FollowObservation[] {
         ...base,
         state: "running",
         token: r.node_id,
-        detail: excerpt(r.topic_label ?? r.question),
+        detail: about(r.topic_label ?? r.question),
         progressSig: `${r.resp_len ?? 0}:${r.tools_len ?? 0}`,
         progressAt: null,
       });
     } else if (r.status === "error" && r.error_message !== "aborted") {
       out.push({ ...base, state: "failed", token: r.node_id, detail: excerpt(r.error_message, 120) });
     } else if (r.status === "done" && r.read_at === null) {
-      out.push({ ...base, state: "done", token: r.node_id, detail: excerpt(r.topic_label ?? r.question) });
+      out.push({ ...base, state: "done", token: r.node_id, detail: about(r.topic_label ?? r.question) });
     }
   }
   return out;
