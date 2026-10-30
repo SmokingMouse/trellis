@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-import { readHookToken } from "@/lib/server/agent-hooks/endpoint";
+import { rejectHookRequest } from "@/lib/server/agent-hooks/auth";
+import { cancelInteractionsForEvent } from "@/lib/server/agent-hooks/interactions";
 import { recordClaudeHook } from "@/lib/server/agent-hooks/store";
 import { nudgeCliTranscript } from "@/lib/server/cli-sync-watcher";
 import { notifyConsoleChange } from "@/lib/server/console-events";
@@ -8,17 +8,7 @@ import type { ClaudeHookPayload } from "@/lib/server/agent-hooks/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const HOOK_TOKEN_HEADER = "x-trellis-hook-token";
-
-/**
- * 常量时间比对。先各自 sha256 再比 —— 直接比字符串会按长度早退，
- * 而 timingSafeEqual 要求等长（长度不同会抛，本身也是一次泄漏）。
- */
-function tokenMatches(given: string, expected: string): boolean {
-  const a = createHash("sha256").update(given).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
-}
+export { HOOK_TOKEN_HEADER } from "@/lib/server/agent-hooks/auth";
 
 /**
  * POST /api/hooks/claude —— Claude Code hook 的落点。
@@ -31,15 +21,8 @@ function tokenMatches(given: string, expected: string): boolean {
  * 脚本那边 --max-time 1.5 会兜底，但我们自己也别慢。
  */
 export async function POST(req: Request) {
-  const expected = readHookToken();
-  if (!expected) {
-    // 端点文件还没写（TRELLIS_HOOKS=off 或启动钩子失败）= 这个口没开。
-    return Response.json({ error: "hooks not enabled" }, { status: 503 });
-  }
-  const given = req.headers.get(HOOK_TOKEN_HEADER) ?? "";
-  if (!given || !tokenMatches(given, expected)) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const rejected = rejectHookRequest(req);
+  if (rejected) return rejected;
 
   let form: FormData;
   try {
@@ -61,8 +44,16 @@ export async function POST(req: Request) {
   const paneKey = typeof paneKeyField === "string" ? paneKeyField : null;
 
   const record = recordClaudeHook(payload, { paneKey });
+  // 阻塞交互的收尾：这次工具调用已经往下走了 / 这一轮过去了（用户在电脑上 Esc 掉了挂着的
+  // hook），还挂着的卡作废。只是一条按 session 走索引的 SELECT，不拖慢快路径。
+  let cancelled = 0;
+  try {
+    cancelled = cancelInteractionsForEvent(payload);
+  } catch {
+    /* 收尾失败不影响应答 */
+  }
   // 控制台推送：待答卡的收起 / 弹出靠这一下（合并窗口 100ms，无订阅者时零成本）。
-  if (record) notifyConsoleChange("hook");
+  if (record || cancelled > 0) notifyConsoleChange("hook");
   // Hook 驱动同步：每个事件都意味着 transcript 刚追加过（或马上追加），让镜像立刻
   // 重导，而不是等 fs.watch 的 600ms 去抖。只对已镜像的文件生效；失败不影响应答。
   const transcriptPath =

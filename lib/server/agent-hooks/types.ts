@@ -92,4 +92,23 @@ export const AGENT_HOOK_TABLES_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS agent_hook_state_updated ON agent_hook_state(updated_at);
+
+  -- 阻塞交互：trellis 拉起的会话里，hook 挂住等 Trellis 作答（./interactions.ts）。
+  -- 落库是为了挺过 trellis 重启：答了还没被 hook 取走的决定不能丢。
+  CREATE TABLE IF NOT EXISTS agent_hook_interaction (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    pane_key TEXT,
+    kind TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_use_id TEXT,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    resolution TEXT,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    resolved_at INTEGER
+  );
+
+  CREATE INDEX IF NOT EXISTS agent_hook_interaction_session ON agent_hook_interaction(session_id, status);
 `;
