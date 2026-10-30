@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import {
   Anchor,
   Archive,
+  ArrowRightLeft,
   BellDot,
   ArchiveRestore,
   Bookmark,
@@ -28,6 +29,7 @@ import {
   Plug,
   Plus,
   Search,
+  Server,
   Trash2,
   BrushCleaning,
   type LucideIcon,
@@ -86,6 +88,10 @@ import { MobileNavDrawer } from "@/components/MobileNavDrawer";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { LocalMachineCard, NodeSwitcher } from "./NodeSwitcher";
+import { HubInboxRows } from "@/components/HubInbox";
+import { useCanRelay, useHubInbox } from "@/hooks/useHubNodes";
+import { mergeInbox } from "@/lib/hub-fanout";
+import { openRelayForSession } from "./RelaySessionDialog";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { switchAppMode, useAppMode } from "@/hooks/useAppMode";
 import { useHerdrConsole } from "@/hooks/useHerdrConsole";
@@ -137,6 +143,8 @@ export function SessionSidebar() {
   // Herdr 会话搬去了 Herdr 模式，来源筛选里不再有「Herdr」；旧偏好落回「我的会话」。
   const source: SidebarSource = storedSource === "herdr" ? "mine" : storedSource;
   const mode = useAppMode();
+  // 会话接力入口：只在经 hub 且有别的在线机器时出现在行菜单里。
+  const canRelay = useCanRelay();
   const [includeArchived, setIncludeArchived] = useSidebarPreference("include-archived", false, isBoolean);
   const { statuses: herdrStatus, available: herdrAvailable } = useHerdrSessionStatuses();
   const fleetSessionKey = [...herdrStatus.keys()].sort().join(",");
@@ -672,6 +680,14 @@ export function SessionSidebar() {
             }
           }}
           onArchive={toggleArchive}
+          onRelay={
+            canRelay
+              ? () => {
+                  setMobileNavOpen(false);
+                  openRelayForSession(s);
+                }
+              : undefined
+          }
           swipe={
             swipeGestures
               ? {
@@ -760,6 +776,43 @@ export function SessionSidebar() {
         />
         {!isCollapsed && (
           <IndentGuide level={0}>{attentionRows.map((r) => renderRow(r.session, 1))}</IndentGuide>
+        )}
+      </div>
+    );
+  };
+
+  // 「其他机器」区（hub 多机互联）：别的机器上等你回答 / 在跑 / 刚完成的会话，紧跟「等你处理」。
+  // 当前机器自己的这些已在上面「等你处理」与行首状态槽里，这里只列其他机器，不重复。
+  // 不是多机（直连单人版 / 只有 hub 本机）时 hubInbox 为 null，整组不画；有远端但全空也不画，
+  // 只剩离线机器时仍画灰行（让人知道那台看不到，而不是没事）。点行整页切到那台机器的会话。
+  const hubInbox = useHubInbox();
+  const hubMerged = useMemo(() => (hubInbox ? mergeInbox(hubInbox) : null), [hubInbox]);
+  const renderHubInbox = () => {
+    if (!hubMerged || (hubMerged.items.length === 0 && hubMerged.unavailable.length === 0)) return null;
+    const id = "__hub_inbox";
+    const isCollapsed = collapsed.has(id);
+    const { items, unavailable } = hubMerged;
+    const count = (s: string) => items.filter((i) => i.status === s).length;
+    return (
+      <div data-sidebar-hub-inbox className="mb-1.5">
+        <GroupRow
+          level={0}
+          icon={Server}
+          collapsed={isCollapsed}
+          label="其他机器"
+          title={`其他机器 · ${[
+            count("waiting") ? `${count("waiting")} 个等你回答` : "",
+            count("running") ? `${count("running")} 个在跑` : "",
+            count("done") ? `${count("done")} 个刚完成` : "",
+            unavailable.length ? `${unavailable.length} 台连不上` : "",
+          ].filter(Boolean).join(" · ") || "暂无"}（点击切到那台机器打开）`}
+          badge={items.length ? String(items.length) : null}
+          onToggle={() => toggleCollapsed(id)}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>
+            <HubInboxRows items={items} unavailable={unavailable} padLeft={PAD(1)} />
+          </IndentGuide>
         )}
       </div>
     );
@@ -1225,10 +1278,11 @@ export function SessionSidebar() {
             只认鼠标 / 触控板，触屏照旧走 .press-row。 */}
         <GlideList>
         {mode === "herdr" ? (
-          <HerdrModeSidebar pinned={<>{renderAttention()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
+          <HerdrModeSidebar pinned={<>{renderAttention()}{renderHubInbox()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
         <>
         {renderAttention()}
+        {renderHubInbox()}
         {renderPinned()}
         {visibleSessions.length === 0 ? (
           pinnedSessions.length > 0 || attentionRows.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
@@ -1637,6 +1691,7 @@ function SidebarRow({
   onCancelEdit,
   onCommit,
   onArchive,
+  onRelay,
   onDelete,
   swipe,
 }: {
@@ -1665,6 +1720,8 @@ function SidebarRow({
   onCancelEdit: () => void;
   onCommit: (title: string) => void | Promise<void>;
   onArchive: () => void;
+  /** 接力到其他机器；不传 = 菜单里不出现（不在 hub 后面 / 没有别的在线机器） */
+  onRelay?: () => void;
   onDelete: () => void;
   /** 手机 / 触屏的左右滑动操作；不传 = 不启用（桌面） */
   swipe?: {
@@ -1706,8 +1763,9 @@ function SidebarRow({
     },
     { label: "重命名", onSelect: onStartEdit },
     { label: session.archived ? "恢复（取消归档）" : "归档", onSelect: onArchive },
+    ...(onRelay ? [{ label: "接力到其他机器…", onSelect: onRelay }] : []),
     { label: "删除…", danger: true, onSelect: onDelete },
-  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onDelete]);
+  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onRelay, onDelete]);
 
   useEffect(() => {
     if (editing) {
@@ -1912,6 +1970,7 @@ function SidebarRow({
               onUnpin={onUnpin ?? onPin}
               onRename={onStartEdit}
               onArchive={onArchive}
+              onRelay={onRelay}
               onDelete={onDelete}
             />
           </div>
@@ -1956,6 +2015,7 @@ function SessionRowMenu({
   onUnpin,
   onRename,
   onArchive,
+  onRelay,
   onDelete,
 }: {
   isPinned: boolean;
@@ -1964,6 +2024,7 @@ function SessionRowMenu({
   onUnpin: () => void;
   onRename: () => void;
   onArchive: () => void;
+  onRelay?: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -1991,6 +2052,11 @@ function SessionRowMenu({
         <DropdownMenuItem icon={<Icon icon={archived ? ArchiveRestore : Archive} />} onSelect={onArchive}>
           {archived ? "恢复（取消归档）" : "归档"}
         </DropdownMenuItem>
+        {onRelay && (
+          <DropdownMenuItem icon={<Icon icon={ArrowRightLeft} />} onSelect={onRelay}>
+            接力到其他机器…
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem danger icon={<Icon icon={Trash2} />} onSelect={onDelete}>
           删除…

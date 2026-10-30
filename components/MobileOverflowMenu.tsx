@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useDiffReviewStore } from "@/stores/diffReviewStore";
 import {
+  ArrowRightLeft,
   Bookmark,
   CalendarClock,
   Check,
@@ -35,6 +36,8 @@ import {
 import { PALETTES } from "@/lib/themes";
 import { useTheme } from "@/hooks/useTheme";
 import { setDesktopModeOverride } from "@/hooks/useIsMobile";
+import { useCanRelay } from "@/hooks/useHubNodes";
+import { openRelayForSession } from "@/components/RelaySessionDialog";
 import {
   downloadFile,
   exportJSON,
@@ -135,6 +138,7 @@ export function MobileOverflowMenu({
   const [modelsOpen, setModelsOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
+  const canRelay = useCanRelay();
   const act = (fn: () => void) => {
     onClose();
     fn();
@@ -279,6 +283,16 @@ export function MobileOverflowMenu({
                     导出 JSON
                   </button>
                 </div>
+              )}
+              {/* 会话接力：只在经 hub 且有别的在线机器时出现 */}
+              {canRelay && (
+                <MenuButton
+                  target="overflow-relay"
+                  icon={ArrowRightLeft}
+                  onClick={() => act(() => openRelayForSession(session))}
+                >
+                  接力到其他机器…
+                </MenuButton>
               )}
               <div
                 data-mobile-target="overflow-mode"

@@ -7,6 +7,7 @@ import {
   MessageSquare,
   NotebookPen,
   Search,
+  Server,
   SearchX,
   User,
   type LucideIcon,
@@ -24,6 +25,9 @@ import {
   cn,
 } from "@/components/ui";
 import { modeStyle } from "@/lib/mode-style";
+import { goHref } from "@/lib/gw-client";
+import { fanOut, groupSearch, sessionPath, type SearchGroup } from "@/lib/hub-fanout";
+import { useHubNodes, useOtherNodes } from "@/hooks/useHubNodes";
 
 // Stage 16: cross-session full-text search modal. ⌘P (Cmd/Ctrl+P) opens
 // it from anywhere; the global keydown listener is owned by this
@@ -32,6 +36,10 @@ import { modeStyle } from "@/lib/mode-style";
 // 1 个字起搜：后端 search_index 是 FTS5 trigram（三字滑窗），≥3 字走 MATCH；
 // 1–2 字（「向量」「AI」「钱」）由 lib/server/repo.ts 的 searchAll 回退到参数化
 // LIKE，返回结构一致。
+//
+// 多机（经 hub 且有远端机器）时多一个「本机 / 所有机器」范围：所有机器 = 本机 /api/search
+// 先出，其他在线机器经 /__gw/via/<node>/api/search 并发补上（lib/hub-fanout，每台独立超时、
+// 失败隔离），结果按机器分组。远端命中点击整页切到那台机器的会话（/__gw/go/<node>/?session=…）。
 
 const MIN_QUERY = 1;
 const DEBOUNCE_MS = 200;
@@ -52,6 +60,10 @@ type Result = {
 };
 
 type FacetKey = "all" | "chat" | "project";
+type ScopeKey = "local" | "nodes";
+
+// 远端每台只要前 40 条：分组展示，一台不该挤掉别的机器。
+const REMOTE_LIMIT = 40;
 
 export function SearchModal() {
   const open = useSessionStore((s) => s.searchOpen);
@@ -81,6 +93,14 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [results, setResults] = useState<Result[]>([]);
+  // 远端结果连同它对应的查询键存：键对不上（换了词 / 切回本机）就当没有，不必在 effect 里清空。
+  const [remote, setRemote] = useState<{ key: string; groups: SearchGroup<Result>[] } | null>(null);
+  const [scope, setScope] = useState<ScopeKey>("local");
+  const hubNodes = useHubNodes();
+  const others = useOtherNodes();
+  const multi = others.length > 0;
+  const allNodes = multi && scope === "nodes";
+  const localName = hubNodes?.find((n) => n.current)?.name ?? "本机";
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -137,20 +157,53 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
     };
   }, [debounced, retryKey]);
 
-  const filtered = useMemo(() => {
-    if (facet === "all") return results;
-    return results.filter((r) => r.sessionMode === facet);
-  }, [results, facet]);
+  // 「所有机器」：其他在线机器并发搜，和本机那一路互不等待。
+  const othersKey = others.map((n) => `${n.name}:${n.online ? 1 : 0}`).join(",");
+  const othersRef = useRef(others);
+  useEffect(() => { othersRef.current = others; });
+  const remoteKey = debounced && allNodes ? `${debounced}\n${othersKey}\n${retryKey}` : "";
+  useEffect(() => {
+    if (!remoteKey) return;
+    const controller = new AbortController();
+    void fanOut<{ results?: Result[] }>(
+      othersRef.current,
+      `/api/search?q=${encodeURIComponent(debounced)}&limit=${REMOTE_LIMIT}`,
+      { signal: controller.signal },
+    ).then((res) => {
+      if (!controller.signal.aborted) setRemote({ key: remoteKey, groups: groupSearch<Result>(null, res) });
+    });
+    return () => controller.abort();
+  }, [remoteKey, debounced]);
+  const remoteLoading = !!remoteKey && remote?.key !== remoteKey;
+  const remoteGroups = remoteKey && remote?.key === remoteKey ? remote.groups : null;
 
-  // Flatten to a (resultIdx, hitIdx) cursor list for keyboard navigation.
-  // Building this once per render is fine — at most ~80 entries.
+  // 分组：本机一组（单机 / 只搜本机时就这一组、不画机器标题）+ 远端各机器。facet 在组内筛。
+  const groups = useMemo(() => {
+    const local = { node: localName, results };
+    const all = [...groupSearch<Result>(local, []), ...(remoteGroups ?? [])];
+    if (facet === "all") return all;
+    return all.map((g) => (g.status === "ok" ? { ...g, results: g.results.filter((r) => r.sessionMode === facet) } : g));
+  }, [results, remoteGroups, localName, facet]);
+
+  // Flatten to a (group, result, hit) cursor list for keyboard navigation.
+  // Building this once per render is fine — at most a few hundred entries.
   const flatHits = useMemo(() => {
-    const list: { resultIdx: number; hitIdx: number }[] = [];
-    filtered.forEach((r, ri) => {
-      r.hits.forEach((_, hi) => list.push({ resultIdx: ri, hitIdx: hi }));
+    const list: { groupIdx: number; resultIdx: number; hitIdx: number }[] = [];
+    groups.forEach((g, gi) => {
+      if (g.status !== "ok") return;
+      g.results.forEach((r, ri) => {
+        r.hits.forEach((_, hi) => list.push({ groupIdx: gi, resultIdx: ri, hitIdx: hi }));
+      });
     });
     return list;
-  }, [filtered]);
+  }, [groups]);
+  const resultCount = groups.reduce((n, g) => n + (g.status === "ok" ? g.results.length : 0), 0);
+
+  const onJumpIn = (g: SearchGroup<Result>, r: Result, h: Hit) => {
+    if (g.local) return onJump(r, h);
+    // 远端：整页切机器。笔记命中只能定位到会话（笔记 id 不是节点 id）。
+    window.location.assign(goHref(g.node, sessionPath(r.sessionId, h.sourceKind === "note" ? null : h.sourceId)));
+  };
 
   const onJump = (r: Result, h: Hit) => {
     if (h.sourceKind === "note") {
@@ -201,9 +254,10 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       e.preventDefault();
       const target = flatHits[cursor];
       if (!target) return;
-      const r = filtered[target.resultIdx];
+      const g = groups[target.groupIdx];
+      const r = g?.status === "ok" ? g.results[target.resultIdx] : undefined;
       const h = r?.hits[target.hitIdx];
-      if (r && h) onJump(r, h);
+      if (g && r && h) onJumpIn(g, r, h);
     }
   };
 
@@ -217,7 +271,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
   }, [cursor]);
 
   const empty =
-    !loading && !error && debounced.length > 0 && filtered.length === 0;
+    !loading && !remoteLoading && !error && debounced.length > 0 && resultCount === 0;
 
   const facetOptions = (["all", "chat", "project"] as FacetKey[]).map((f) => ({
     value: f,
@@ -246,7 +300,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           aria-label="搜索"
           className="flex-1 min-w-0 bg-transparent outline-none text-[15px] text-ink placeholder:text-ink-faint"
         />
-        {loading ? <Spinner size="sm" label="搜索中" /> : null}
+        {loading || remoteLoading ? <Spinner size="sm" label="搜索中" /> : null}
         <Kbd>Esc</Kbd>
       </div>
 
@@ -259,6 +313,22 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           onValueChange={setFacet}
           options={facetOptions}
         />
+        {multi && (
+          <SegmentedControl<ScopeKey>
+            size="sm"
+            aria-label="搜索范围"
+            className="ml-auto"
+            value={scope}
+            onValueChange={(v) => {
+              setScope(v);
+              setCursor(0);
+            }}
+            options={[
+              { value: "local", label: "本机" },
+              { value: "nodes", label: "所有机器" },
+            ]}
+          />
+        )}
       </div>
 
       {/* Results */}
@@ -293,12 +363,27 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
             }
           />
         )}
-        {filtered.map((r, ri) => (
+        {groups.map((g, gi) => {
+          if (g.status !== "ok") {
+            return (
+              <div key={`off:${g.node}`} data-search-node={g.node} className="pb-1">
+                <NodeHeading name={g.node} />
+                <div className="px-2.5 py-1.5 text-label text-ink-faint opacity-70">
+                  {g.status === "offline" ? "这台机器离线，没搜到不代表没有" : `暂时连不上${g.error ? `（${g.error}）` : ""}`}
+                </div>
+              </div>
+            );
+          }
+          if (g.results.length === 0) return null;
+          return (
+            <div key={`n:${g.node}`} data-search-node={allNodes ? g.node : undefined}>
+              {allNodes && <NodeHeading name={g.node} local={g.local} />}
+              {g.results.map((r, ri) => (
           <div key={r.sessionId} className="pb-1">
             <SessionHeading result={r} />
             {r.hits.map((h, hi) => {
               const flatIdx = flatHits.findIndex(
-                (x) => x.resultIdx === ri && x.hitIdx === hi,
+                (x) => x.groupIdx === gi && x.resultIdx === ri && x.hitIdx === hi,
               );
               const active = flatIdx === cursor;
               const kind = HIT_KIND[h.sourceKind];
@@ -308,7 +393,8 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
                   type="button"
                   data-cursor={flatIdx}
                   onMouseEnter={() => setCursor(flatIdx)}
-                  onClick={() => onJump(r, h)}
+                  onClick={() => onJumpIn(g, r, h)}
+                  aria-label={g.local ? undefined : `${g.node} 上的${kind.label}：${h.matchText || r.sessionTitle}，切到这台机器打开`}
                   // 原型 .pal-row：高亮行 = hover 底 + 行尾 ↵ 提示；光标跟着指针走（onMouseEnter）
                   className={cn(
                     "press-row w-full text-left px-2.5 py-2 min-h-[38px] rounded-field flex items-start gap-2.5 transition-colors duration-100",
@@ -335,7 +421,10 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
               );
             })}
           </div>
-        ))}
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {/* Footer hints */}
@@ -355,6 +444,17 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
         </span>
       </div>
     </Modal>
+  );
+}
+
+// 「所有机器」范围下的机器分组头：比会话组头再高一级（墨色小字 + 机器图标 + 下方发丝线）。
+function NodeHeading({ name, local = false }: { name: string; local?: boolean }) {
+  return (
+    <div className="mx-1 mt-1.5 flex items-center gap-1.5 border-b border-line-faint px-1.5 pb-1 pt-1 text-[12px] font-semibold text-ink-muted">
+      <Icon icon={Server} size="sm" className="size-3.5 shrink-0 text-ink-faint" />
+      <span className="truncate">{name}</span>
+      {local && <span className="shrink-0 font-normal text-ink-faint">本机</span>}
+    </div>
   );
 }
 

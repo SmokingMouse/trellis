@@ -16,12 +16,13 @@ import {
   Skeleton,
   Spinner,
   StatusDot,
+  Switch,
   Textarea,
   toast,
   useConfirm,
 } from "@/components/ui";
-import { createNodePairing, fetchNodes, revokeNode } from "@/lib/gw-client";
-import type { GwNode, GwNodeCreateResponse } from "@/lib/gw-types";
+import { createNodePairing, fetchNodes, revokeNode, setNodePolicy } from "@/lib/gw-client";
+import type { GwNode, GwNodeCreateResponse, GwNodePolicy } from "@/lib/gw-types";
 import { copyText } from "@/lib/clipboard";
 import { formatRelativeTime } from "@/lib/relative-time";
 
@@ -92,6 +93,15 @@ export default function NodesSettingsPage() {
     }
   };
 
+  const handlePolicy = async (node: GwNode, patch: Partial<GwNodePolicy>) => {
+    try {
+      const { policy } = await setNodePolicy(node.name, patch);
+      setNodes((list) => list?.map((n) => (n.name === node.name ? { ...n, policy } : n)) ?? list);
+    } catch (err) {
+      toast.error("保存失败", { description: err instanceof Error ? err.message : "稍后重试" });
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
@@ -156,6 +166,7 @@ export default function NodesSettingsPage() {
                 node={node}
                 busy={busyName === node.name}
                 onRevoke={() => void handleRevoke(node)}
+                onPolicy={(patch) => void handlePolicy(node, patch)}
               />
             ))}
           </ul>
@@ -180,11 +191,13 @@ function NodeRow({
   index,
   busy,
   onRevoke,
+  onPolicy,
 }: {
   node: GwNode;
   index: number;
   busy: boolean;
   onRevoke: () => void;
+  onPolicy: (patch: Partial<GwNodePolicy>) => void;
 }) {
   const sha = shortSha(node.version);
   // .mcard：键值对（版本 / 连上于 / 最后心跳），值用 mono；没有的数据不编。
@@ -218,6 +231,23 @@ function NodeRow({
           ))}
         </dl>
       )}
+      {/* 外流策略：远端机器默认全关（多是公司 devbox），网关据此拦 /api/export/* 和派活。 */}
+      <div className="flex flex-col gap-1.5 text-label">
+        <PolicySwitch
+          label="允许内容离开这台机器"
+          machine={node.name}
+          hint="会话接力、配置同步、向别的机器派活时作为来源"
+          checked={node.policy.shareOut}
+          onChange={(v) => onPolicy({ shareOut: v })}
+        />
+        <PolicySwitch
+          label="允许别的机器往这台派活"
+          machine={node.name}
+          hint="其他机器上的 agent 可以在这台新开会话执行任务"
+          checked={node.policy.acceptDispatch}
+          onChange={(v) => onPolicy({ acceptDispatch: v })}
+        />
+      </div>
       {(!node.current || node.kind === "remote") && (
         <div className="mt-auto flex items-center gap-2">
           {!node.current &&
@@ -242,6 +272,30 @@ function NodeRow({
         </div>
       )}
     </li>
+  );
+}
+
+function PolicySwitch({
+  label,
+  machine,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  machine: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2">
+      <span className="min-w-0 flex-1">
+        <span className="block text-ink">{label}</span>
+        <span className="block text-[11.5px] text-ink-faint">{hint}</span>
+      </span>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={`${machine}：${label}`} />
+    </label>
   );
 }
 

@@ -92,7 +92,11 @@ export type GwNode = {
   version: string | null;
   lastSeenAt: number | null;
   connectedAt: number | null;
+  /** 外流策略：shareOut = 允许内容离开这台机器；acceptDispatch = 允许别的机器往这台派活。 */
+  policy: GwNodePolicy;
 };
+
+export type GwNodePolicy = { shareOut: boolean; acceptDispatch: boolean };
 
 export type GwNodeCreateResponse = {
   name: string;

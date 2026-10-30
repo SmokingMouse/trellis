@@ -1,10 +1,9 @@
 import "server-only";
-import crypto from "node:crypto";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import webpush from "web-push";
 import { getDB } from "./sqlite";
+import { postToHub, hubRelayTarget } from "../hub-relay-client";
+import { loadOrCreateVapid, safeHost, sendOptionsFor, webPushSend, type PushSendOptions, type VapidKeys } from "../push-send";
 import {
   buildPushPayload,
   dedupeKey,
@@ -51,57 +50,14 @@ const presence = (shared.trellisPushPresence ??= new Map());
 // 文件里，绝不进库、不进 git、不回给前端（前端只拿公钥）。换了私钥 = 所有既有订阅
 // 作废（推送服务按公钥认人），所以只生成一次、之后只读。
 
-type VapidKeys = { publicKey: string; privateKey: string; subject: string };
-
 // TRELLIS_PUSH_VAPID_PATH 只给单测用：Bun 的 os.homedir() 不认进程内改写的 HOME，
 // 测试没法靠改 HOME 把文件挪进临时目录（启动前设 HOME 则照常生效）。
 function vapidPath(): string {
   return process.env.TRELLIS_PUSH_VAPID_PATH || path.join(os.homedir(), ".trellis", "push-vapid.json");
 }
 
-// Apple 的推送服务要求 JWT sub 是 mailto: 或 https:，localhost 一类会被拒（BadJwtToken）。
-const DEFAULT_SUBJECT = "mailto:trellis@users.noreply.github.com";
-
-function readVapidFile(file: string): VapidKeys | null {
-  try {
-    const v = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<VapidKeys>;
-    if (typeof v.publicKey !== "string" || typeof v.privateKey !== "string") return null;
-    return { publicKey: v.publicKey, privateKey: v.privateKey, subject: v.subject || DEFAULT_SUBJECT };
-  } catch {
-    return null;
-  }
-}
-
 export function getVapidKeys(): VapidKeys {
-  if (shared.trellisPushVapid) return shared.trellisPushVapid;
-  const file = vapidPath();
-  let keys = readVapidFile(file);
-  if (!keys) {
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    const fresh = webpush.generateVAPIDKeys();
-    const next: VapidKeys = {
-      publicKey: fresh.publicKey,
-      privateKey: fresh.privateKey,
-      subject: process.env.TRELLIS_PUSH_SUBJECT || DEFAULT_SUBJECT,
-    };
-    try {
-      // wx：两个 bundle 同时首次生成时只有一个写得进去，另一个读回赢家的。
-      fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-      keys = next;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      keys = readVapidFile(file);
-      if (!keys) throw new Error(`${file} 已存在但读不出密钥`);
-    }
-  }
-  // umask / 手动拷贝都可能让权限变宽，每次进程首读都收紧一次。
-  try {
-    fs.chmodSync(file, 0o600);
-  } catch {
-    /* 只读挂载等：读得出来就照用 */
-  }
-  shared.trellisPushVapid = keys;
-  return keys;
+  return (shared.trellisPushVapid ??= loadOrCreateVapid(vapidPath()));
 }
 
 // ── 设置 ───────────────────────────────────────────────────────────────────
@@ -146,54 +102,14 @@ function listSubscriptions(endpoint?: string): SubRow[] {
 
 // ── 发送 ───────────────────────────────────────────────────────────────────
 
-type SendOptions = { TTL: number; urgency: "normal" | "high"; topic?: string };
-type Sender = (sub: SubRow, body: string, opts: SendOptions) => Promise<{ statusCode: number }>;
+type Sender = (sub: SubRow, body: string, opts: PushSendOptions) => Promise<{ statusCode: number }>;
 
 /** 测试注入：替换真实的网络发送。传 null 恢复。 */
 export function setPushSenderForTests(sender: Sender | null): void {
   shared.trellisPushSender = sender ?? undefined;
 }
 
-// 推送端点在公网（FCM / APNs / Mozilla）。本机若靠 http(s)_proxy 出网（实测 FCM 直连不通），
-// web-push 不会自己读环境变量，要显式传 proxy。TRELLIS_PUSH_PROXY 优先，设成 "off" 强制直连。
-function proxyFor(endpoint: string): string | undefined {
-  const explicit = process.env.TRELLIS_PUSH_PROXY;
-  if (explicit === "off") return undefined;
-  const proxy = explicit || process.env.https_proxy || process.env.HTTPS_PROXY;
-  if (!proxy) return undefined;
-  if (!explicit) {
-    const host = new URL(endpoint).hostname;
-    const noProxy = (process.env.no_proxy || process.env.NO_PROXY || "")
-      .split(",")
-      .map((s) => s.trim().replace(/^\*?\./, ""))
-      .filter(Boolean);
-    if (noProxy.some((d) => host === d || host.endsWith(`.${d}`))) return undefined;
-  }
-  return proxy;
-}
-
-const realSender: Sender = async (sub, body, opts) => {
-  const vapid = getVapidKeys();
-  const res = await webpush.sendNotification(
-    { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-    body,
-    {
-      TTL: opts.TTL,
-      urgency: opts.urgency,
-      ...(opts.topic ? { topic: opts.topic } : {}),
-      vapidDetails: { subject: vapid.subject, publicKey: vapid.publicKey, privateKey: vapid.privateKey },
-      proxy: proxyFor(sub.endpoint),
-      timeout: 10_000,
-    },
-  );
-  return { statusCode: res.statusCode };
-};
-
-/** Topic 头：推送服务对同 topic 的未投递消息只留最新一条（手机离线时防积压）。
- *  规范限 ≤32 个 base64url 字符，所以取 hash。 */
-function topicFor(tag: string): string {
-  return crypto.createHash("sha256").update(tag).digest("base64url").slice(0, 32);
-}
+const realSender: Sender = (sub, body, opts) => webPushSend(getVapidKeys(), sub, body, opts);
 
 export type SendReport = {
   sent: number;
@@ -205,12 +121,7 @@ export async function sendPush(payload: PushPayload, opts: { endpoint?: string }
   const subs = listSubscriptions(opts.endpoint);
   const sender = shared.trellisPushSender ?? realSender;
   const body = JSON.stringify(payload);
-  const sendOpts: SendOptions = {
-    // 「等你回答」一直有效到被处理；「完成」过了几小时再收到也没什么意义了。
-    TTL: payload.kind === "waiting" ? 24 * 3600 : 6 * 3600,
-    urgency: payload.kind === "waiting" ? "high" : "normal",
-    topic: topicFor(payload.tag),
-  };
+  const sendOpts = sendOptionsFor(payload.kind, payload.tag);
   const report: SendReport = { sent: 0, removed: 0, failed: [] };
   await Promise.all(
     subs.map(async (sub) => {
@@ -235,14 +146,6 @@ export async function sendPush(payload: PushPayload, opts: { endpoint?: string }
   return report;
 }
 
-function safeHost(endpoint: string): string {
-  try {
-    return new URL(endpoint).host;
-  } catch {
-    return "?";
-  }
-}
-
 // ── 前台心跳 ───────────────────────────────────────────────────────────────
 
 export function reportPresence(clientId: string, sessionId: string | null, visible: boolean): void {
@@ -256,7 +159,8 @@ export function reportPresence(clientId: string, sessionId: string | null, visib
 
 function gate(kind: PushKind, sessionId: string): boolean {
   if (!pushKindAllowed(readPushSettings(), kind)) return false;
-  if (countSubscriptions() === 0) return false;
+  // 本机没订阅不代表没人收：挂在 hub 下时还要交给 hub 中继（见 fire）。
+  if (countSubscriptions() === 0 && !hubRelayTarget()) return false;
   const now = Date.now();
   if (isSessionForeground(presence, sessionId, now)) return false;
   return takeDedupeSlot(dedupe, dedupeKey(kind, sessionId), now);
@@ -268,8 +172,35 @@ function currentBadge(): number {
   return waitingBadgeCount(shared.trellisPendingSnapshot?.items ?? []);
 }
 
+// ── hub 中继 ───────────────────────────────────────────────────────────────
+//
+// 经 hub 访问时所有机器同源，浏览器只有一份订阅，绑的是网关自己的 VAPID；各机器的订阅
+// 表里没有它。所以挂在 hub 下的机器每次触发都把 payload 交给 hub（/__gw/relay/push），
+// 由网关改写点击链接、按用户扇出。直连本机（例如 trellis.home:3088）的订阅仍由这里
+// 自己发，两条路并存。凭证 / hub 地址见 lib/hub-relay-client.ts。
+
+/** 交给 hub 中继。失败只记日志：hub 不在线不影响本机直连订阅。 */
+export async function relayPushToHub(payload: PushPayload): Promise<boolean> {
+  try {
+    const res = await postToHub("/__gw/relay/push", payload);
+    if (!res) return false;
+    if (!res.ok) {
+      console.warn(`[push] hub 中继被拒（HTTP ${res.status}）：${(await res.text().catch(() => "")).slice(0, 200)}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[push] hub 中继失败：", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 function fire(payload: PushPayload): void {
-  void sendPush({ ...payload, badge: currentBadge() }).catch((err) => console.warn("[push] 发送异常：", err));
+  const full = { ...payload, badge: currentBadge() };
+  if (countSubscriptions() > 0) {
+    void sendPush(full).catch((err) => console.warn("[push] 发送异常：", err));
+  }
+  if (hubRelayTarget()) void relayPushToHub(full);
 }
 
 /** 一轮回答正常结束（run-bus / AS 两条执行路径的终态处各调一次）。 */

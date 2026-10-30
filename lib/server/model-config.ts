@@ -312,3 +312,62 @@ function writeEnvVar(envPath: string, key: string, value: string): void {
   fs.writeFileSync(envPath, lines.join("\n") + "\n", { mode: 0o600 });
   fs.chmodSync(envPath, 0o600); // writeFileSync mode only applies on create
 }
+
+// ── 配置同步（lib/server/config-sync-models.ts）用的原始读写 ────────────────
+// 同步要搬的是 provider 整块（含 claude / codex / model_settings 子块），表单那套
+// 只认名字的 ModelConfigProvider 不够用。这里只给原始 JS 视图与整块写入；打码 / 还原
+// 密钥在 config-sync-models.ts 里做。本文件「不回传 key 值」的契约不变：key 值只住在
+// env_file，这里只读 env_file 的变量名、从不读值。
+
+export const PROVIDER_NAME_RE = NAME_RE;
+export const API_KEY_ENV_RE = ENV_RE;
+
+export type RawEndpoints = {
+  providers: Record<string, Record<string, unknown>>;
+  defaultModel: string | null;
+  envFile: string | null;
+};
+
+/** 当前生效的 providers 原始块（远端模式 = 合并视图）。文件不存在 = 空。 */
+export function readRawEndpointsForSync(): RawEndpoints {
+  type Js = { providers?: Record<string, Record<string, unknown>>; default?: string; env_file?: string };
+  let js: Js;
+  if (isRemote()) {
+    clearEndpointsCache();
+    js = loadEndpoints() as unknown as Js;
+  } else {
+    js = (readDoc(configPath())?.toJS() ?? {}) as Js;
+  }
+  return {
+    providers: js.providers ?? {},
+    defaultModel: js.default ?? null,
+    envFile: js.env_file ?? null,
+  };
+}
+
+/** 目标机器上这个 api_key_env 有没有值（process.env 或 env_file 里非空）。只看名字。 */
+export function apiKeyPresent(apiKeyEnv: string, envFile: string | null): boolean {
+  if (process.env[apiKeyEnv]) return true;
+  return envFile ? envFileKeys(expandHome(envFile)).has(apiKeyEnv) : false;
+}
+
+/** 整块写入 providers.<name>（新增或覆盖）。写坏了（loadEndpoints 校验不过）就回滚原文件。 */
+export function writeProviderBlockForSync(name: string, block: Record<string, unknown>): void {
+  if (!NAME_RE.test(name)) throw new Error(`非法 provider 名：${name}`);
+  const p = configPath();
+  const before = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+  const doc = readDoc(p) ?? newDoc();
+  doc.setIn(["providers", name], doc.createNode(block));
+  if (!isRemote() && !doc.get("default")) {
+    const models = Array.isArray(block.models) ? block.models : [];
+    if (models.length) doc.set("default", modelName(models[0]));
+  }
+  try {
+    writeConfig(p, doc);
+  } catch (e) {
+    if (before === null) fs.rmSync(p, { force: true });
+    else fs.writeFileSync(p, before, "utf8");
+    clearEndpointsCache();
+    throw e;
+  }
+}
