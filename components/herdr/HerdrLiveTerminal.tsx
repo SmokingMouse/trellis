@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { cn, toast } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import { HerdrStreamClient, type HerdrStreamStatus } from "@/lib/herdr-stream-client";
-import { PASTE_LIMIT_BYTES, SCROLL_MAX, type HerdrStreamServerMessage } from "@/lib/herdr-stream-protocol";
+import { PASTE_LIMIT_BYTES, SCROLL_MAX, WHEEL_LINES_MAX, type HerdrStreamServerMessage } from "@/lib/herdr-stream-protocol";
 import {
   applyModifiers,
   autoFontSize,
@@ -127,6 +127,8 @@ export function HerdrLiveTerminal({
   // pane.scroll 的累计偏移（行，离底部）。打字 / 点一下回到 0。
   const scrollRef = useRef({ offset: 0, max: SCROLL_MAX });
   const scrollSendRef = useRef<number | null>(null);
+  // 待发的滚轮行数（正 = 往上翻）和最后一次指针所在单元格；一帧合并发一次。
+  const wheelRef = useRef({ lines: 0, col: 0, row: 0, raf: null as number | null });
 
   // 回调与易变属性走 ref：xterm 和 WS 只建一次，不因为父组件重渲染而重连。
   // 在 layout effect 里同步（render 期间不许写 ref），且排在下面 refit 的 layout effect 之前。
@@ -147,6 +149,28 @@ export function HerdrLiveTerminal({
       scrollSendRef.current = requestAnimationFrame(() => {
         scrollSendRef.current = null;
         send({ t: "scroll", offset: scrollRef.current.offset });
+      });
+    },
+    [send],
+  );
+
+  // 滚轮 / 单指滑动都发「滚轮手势」，由 herdr 决定翻它的历史还是转给全屏应用
+  // （Claude Code 的对话只能这样翻，见 lib/herdr-stream.ts 的「滚轮」一节）。
+  const wheel = useCallback(
+    (lines: number, col: number, row: number) => {
+      const w = wheelRef.current;
+      w.lines += lines;
+      w.col = col;
+      w.row = row;
+      if (w.raf !== null) return;
+      w.raf = requestAnimationFrame(() => {
+        w.raf = null;
+        // 超过单条上限（herdr 手势最多 100 行）就拆成几条，别丢。
+        while (w.lines !== 0) {
+          const n = Math.min(WHEEL_LINES_MAX, Math.abs(w.lines));
+          send({ t: "wheel", dir: w.lines > 0 ? "up" : "down", lines: n, col: w.col, row: w.row });
+          w.lines -= Math.sign(w.lines) * n;
+        }
       });
     },
     [send],
@@ -366,6 +390,8 @@ export function HerdrLiveTerminal({
       clientRef.current = null;
       if (scrollSendRef.current !== null) cancelAnimationFrame(scrollSendRef.current);
       scrollSendRef.current = null;
+      if (wheelRef.current.raf !== null) cancelAnimationFrame(wheelRef.current.raf);
+      wheelRef.current = { lines: 0, col: 0, row: 0, raf: null };
       try {
         term?.dispose();
       } catch {
@@ -399,6 +425,16 @@ export function HerdrLiveTerminal({
       return h > 0 ? h : 14;
     };
     const canScrollY = () => vp.scrollHeight > vp.clientHeight + 1;
+    // 指针 → 单元格（0 起）。全屏应用可能按位置决定滚哪块，所以带上。
+    const cellAt = (x: number, y: number) => {
+      const screen = hostRef.current?.querySelector(".xterm-screen") as HTMLElement | null;
+      const { cols, rows } = gridRef.current;
+      if (!screen) return { col: 0, row: rows - 1 };
+      const r = screen.getBoundingClientRect();
+      const col = Math.floor(((x - r.left) / Math.max(1, r.width)) * cols);
+      const row = Math.floor(((y - r.top) / Math.max(1, r.height)) * rows);
+      return { col: Math.max(0, Math.min(cols - 1, col)), row: Math.max(0, Math.min(rows - 1, row)) };
+    };
 
     // 滚轮：视口自己能竖向滚（手动大字号溢出）就交给原生滚动；否则翻 herdr 的历史。
     // 同样在捕获阶段截住，免得 xterm 在某些缓冲模式下把滚轮翻译成方向键发出去。
@@ -417,8 +453,9 @@ export function HerdrLiveTerminal({
       const lines = swipeLines(wheelRemainder, cellHeight());
       if (lines === 0) return;
       wheelRemainder -= lines * cellHeight();
-      // 向下滚 = 往新内容走 = 离底部更近。
-      setScroll(scrollRef.current.offset - lines);
+      // 向下滚 = 往新内容走：滚轮手势里是 down。
+      const c = cellAt(e.clientX, e.clientY);
+      wheel(-lines, c.col, c.row);
     };
 
     // 触摸：单指竖滑翻历史（视口自己能竖向滚时让原生滚）；轻点聚焦并回到底部；双指捏合改字号。
@@ -453,7 +490,13 @@ export function HerdrLiveTerminal({
         const dx = p.clientX - touch.x;
         const dy = p.clientY - touch.y;
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-        touch.mode = Math.abs(dy) > Math.abs(dx) && !canScrollY() ? "scroll" : "native";
+        // 视口自己能竖向滚（字号放大溢出）时先让原生滚；已经滚到这个方向的尽头了，
+        // 再往同方向划就接着翻终端历史——否则手机上划到顶就再也翻不动了。
+        const vertical = Math.abs(dy) > Math.abs(dx);
+        const atTop = vp.scrollTop <= 0;
+        const atBottom = vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 1;
+        const edge = !canScrollY() || (dy > 0 && atTop) || (dy < 0 && atBottom);
+        touch.mode = vertical && edge ? "scroll" : "native";
       }
       if (touch.mode !== "scroll") return;
       e.preventDefault();
@@ -462,8 +505,9 @@ export function HerdrLiveTerminal({
       const lines = swipeLines(touch.remainder, cellHeight());
       if (lines === 0) return;
       touch.remainder -= lines * cellHeight();
-      // 手指往下拖 = 看更早的内容 = 离底部更远。
-      setScroll(scrollRef.current.offset + lines);
+      // 手指往下拖 = 看更早的内容 = 滚轮 up。
+      const c = cellAt(p.clientX, p.clientY);
+      wheel(lines, c.col, c.row);
     };
     const onTouchEnd = (e: TouchEvent) => {
       const t = touch;
@@ -491,7 +535,7 @@ export function HerdrLiveTerminal({
       vp.removeEventListener("touchend", onTouchEnd);
       vp.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [selectMode, sendPaste, setScroll]);
+  }, [selectMode, sendPaste, setScroll, wheel]);
 
   // 双指缩放结束后才持久化（缩放过程中每一帧都写 localStorage 没必要）。
   useEffect(() => {

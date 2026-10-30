@@ -54,6 +54,10 @@ const COALESCE_FLUSH_BYTES = 512 * 1024;
 const GEOMETRY_POLL_MS = 15_000;
 /** 收到 full 帧后稍等再查：拖分割线时会连吐好几帧 full，合并成一次。 */
 const GEOMETRY_DEBOUNCE_MS = 150;
+/** 滚轮控制连接闲置多久释放。挂着期间真实窗格若被用户改尺寸，control 可能按旧尺寸拉回去，所以要短。 */
+const WHEEL_IDLE_MS = 1_500;
+/** 滚完多久回报一次 herdr 的滚动位置（翻的是 herdr 自己的历史时，浏览器靠它知道「不在底部」）。 */
+const WHEEL_REPORT_MS = 150;
 const RPC_TIMEOUT_MS = 5_000;
 /** 每连接排队中的输入上限。超了说明 herdr 卡住了，拒收比无限堆积好。 */
 const INPUT_QUEUE_MAX = 64;
@@ -241,6 +245,13 @@ export class HerdrStream {
   private inputDepth = 0;
   private pendingScroll: number | null = null;
   private scrolling = false;
+  /** herdr 最近一次回报的滚动位置（离底部几行），滚轮回退到 pane.scroll 时从这里累加。 */
+  private lastOffset = 0;
+  private wheel: { child: Subprocess<"pipe", "ignore", "ignore">; cols: number; rows: number } | null = null;
+  private wheelIdle: ReturnType<typeof setTimeout> | null = null;
+  private wheelReport: ReturnType<typeof setTimeout> | null = null;
+  /** control 起不来（herdr 太旧 / 被拒）就不再试，滚轮退回 pane.scroll。 */
+  private wheelBroken = false;
   private readOnly = false;
   private disposed = false;
 
@@ -295,6 +306,8 @@ export class HerdrStream {
     if (this.geometryDebounce) clearTimeout(this.geometryDebounce);
     this.geometryDebounce = null;
     void this.refreshGeometry().then((changed) => {
+      // 尺寸变了：滚轮控制连接是按旧尺寸挂的，立刻放掉，免得它把窗格拉回旧尺寸。
+      if (changed) this.releaseWheel();
       if (changed && !this.stalled && !this.disposed) this.startObserve();
     });
   }
@@ -497,6 +510,10 @@ export class HerdrStream {
         this.pendingScroll = msg.offset;
         void this.runScroll();
         return;
+      case "wheel":
+        if (this.refuseWrite()) return;
+        this.onWheel(msg.dir, msg.lines, msg.col, msg.row);
+        return;
       case "input":
         this.enqueueInput(splitInput(msg.data));
         return;
@@ -555,7 +572,10 @@ export class HerdrStream {
           { pane_id: this.paneId },
         );
         const s = info.pane.scroll;
-        if (s) this.send({ t: "scrolled", offset: s.offset_from_bottom, max: s.max_offset_from_bottom });
+        if (s) {
+          this.lastOffset = s.offset_from_bottom;
+          this.send({ t: "scrolled", offset: s.offset_from_bottom, max: s.max_offset_from_bottom });
+        }
       }
     } catch (e) {
       this.send({ t: "error", code: "input_failed", message: `滚动失败：${e instanceof Error ? e.message : e}` });
@@ -587,12 +607,130 @@ export class HerdrStream {
     }
   }
 
+  // ── 滚轮 ──────────────────────────────────────────────────────────────────
+  //
+  // 为什么不只用 pane.scroll：它翻的是 herdr 自己存的历史，而 Claude Code / Codex 这类
+  // 全屏应用跑在备用屏上，herdr 那边没有历史（实测这些窗格 max_offset_from_bottom 全是
+  // 0），一划就到头。原生 herdr 里滚轮能翻，是因为 herdr 按应用开的鼠标模式把滚轮编码
+  // 成 `\x1b[<64;…M` 转给应用、让应用自己翻对话；普通 shell 则翻 herdr 的历史。
+  //
+  // 这个判断只有 herdr 能做（observe 的帧里不带鼠标 / 备用屏模式），而它只在终端客户端
+  // 协议里开放：`herdr terminal session control` 的 stdin 收 terminal.scroll 手势。
+  // control 连接会把窗格调到它声明的尺寸（不带 --cols/--rows 实测被改成 120×40），
+  // 所以必须带上刚查到的真实尺寸——这样等于「按原尺寸重设一次」，实测 PTY 尺寸不变；
+  // 查不到真实尺寸时宁可退回 pane.scroll 也不挂 control。
+
+  private onWheel(dir: "up" | "down", lines: number, col: number, row: number): void {
+    if (this.wheelBroken || this.gridSource !== "pane") {
+      // 退回 pane.scroll：只能翻 herdr 自己的历史，全屏应用里翻不动，但至少 shell 能用。
+      const next = Math.max(0, this.lastOffset + (dir === "up" ? lines : -lines));
+      this.lastOffset = next;
+      this.pendingScroll = next;
+      void this.runScroll();
+      return;
+    }
+    const w = this.ensureWheel();
+    if (!w) return this.onWheel(dir, lines, col, row);
+    const cmd = {
+      type: "terminal.scroll",
+      direction: dir,
+      lines,
+      source: "wheel",
+      column: Math.min(col, w.cols - 1),
+      row: Math.min(row, w.rows - 1),
+    };
+    try {
+      w.child.stdin.write(JSON.stringify(cmd) + "\n");
+      w.child.stdin.flush();
+    } catch {
+      this.releaseWheel();
+      return;
+    }
+    if (this.wheelIdle) clearTimeout(this.wheelIdle);
+    this.wheelIdle = setTimeout(() => this.releaseWheel(), WHEEL_IDLE_MS);
+    if (this.wheelReport) clearTimeout(this.wheelReport);
+    this.wheelReport = setTimeout(() => void this.reportScroll(), WHEEL_REPORT_MS);
+  }
+
+  private ensureWheel(): NonNullable<HerdrStream["wheel"]> | null {
+    const { cols, rows } = this.grid;
+    if (this.wheel && this.wheel.cols === cols && this.wheel.rows === rows) return this.wheel;
+    this.releaseWheel();
+    const bin = herdrBin();
+    if (!bin || this.disposed) return null;
+    let child: Subprocess<"pipe", "ignore", "ignore">;
+    try {
+      child = spawn({
+        // 不带 --takeover：别人（Mac 上的 herdr）正在控制时让 herdr 自己裁决，不抢。
+        cmd: [bin, "terminal", "session", "control", this.paneId, "--cols", String(cols), "--rows", String(rows)],
+        stdin: "pipe",
+        // control 的 stdout 也是帧流，显示用的是 observe 那条，这里不要。
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+    } catch {
+      this.wheelBroken = true;
+      return null;
+    }
+    const startedAt = Date.now();
+    const w = { child, cols, rows };
+    this.wheel = w;
+    void child.exited.then((code) => {
+      if (this.wheel === w) this.wheel = null;
+      // 一挂上就以非零码退出 = 这版 herdr 不支持 / 被拒，以后别再试。
+      if (code !== 0 && Date.now() - startedAt < 1_000) this.wheelBroken = true;
+    });
+    return w;
+  }
+
+  private releaseWheel(): void {
+    if (this.wheelIdle) clearTimeout(this.wheelIdle);
+    this.wheelIdle = null;
+    const w = this.wheel;
+    if (!w) return;
+    this.wheel = null;
+    try {
+      w.child.stdin.write(JSON.stringify({ type: "terminal.release" }) + "\n");
+      w.child.stdin.end();
+    } catch {
+      /* 已经没了 */
+    }
+    // 正常 release 后它自己退出；兜底一秒后强杀，别留孤儿。
+    setTimeout(() => {
+      try {
+        w.child.kill();
+      } catch {
+        /* 已经退了 */
+      }
+    }, 1_000);
+  }
+
+  private async reportScroll(): Promise<void> {
+    this.wheelReport = null;
+    if (this.disposed) return;
+    try {
+      const info = await rpc<{ pane: { scroll?: { offset_from_bottom: number; max_offset_from_bottom: number } } }>(
+        "pane.get",
+        { pane_id: this.paneId },
+      );
+      const s = info.pane.scroll;
+      if (s) {
+        this.lastOffset = s.offset_from_bottom;
+        this.send({ t: "scrolled", offset: s.offset_from_bottom, max: s.max_offset_from_bottom });
+      }
+    } catch {
+      /* 回报是尽力而为 */
+    }
+  }
+
   /** 关连接 + 杀子进程 + 停所有定时器。幂等；WS 的 close 回调也走这里。 */
   dispose(reason: string, code = 1000): void {
     if (this.disposed) return;
     this.disposed = true;
     live.delete(this);
     this.killChild();
+    this.releaseWheel();
+    if (this.wheelReport) clearTimeout(this.wheelReport);
     if (this.flushTimer) clearTimeout(this.flushTimer);
     if (this.drainTimer) clearInterval(this.drainTimer);
     if (this.geometryTimer) clearInterval(this.geometryTimer);

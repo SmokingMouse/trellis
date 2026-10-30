@@ -134,6 +134,18 @@ describe("参数校验", () => {
     expect(parseClientMessage('{"t":"key","key":"shift+enter"}')).toEqual({ t: "key", key: "shift+enter" });
     expect(parseClientMessage('{"t":"key","key":"Home"}')).toHaveProperty("error");
     expect(parseClientMessage('{"t":"scroll","offset":12}')).toEqual({ t: "scroll", offset: 12 });
+    expect(parseClientMessage('{"t":"wheel","dir":"up","lines":3,"col":10,"row":4}')).toEqual({
+      t: "wheel",
+      dir: "up",
+      lines: 3,
+      col: 10,
+      row: 4,
+    });
+    // 方向只认 up/down；行数 1–100（herdr 手势上限）；坐标不许负。
+    expect(parseClientMessage('{"t":"wheel","dir":"left","lines":3,"col":0,"row":0}')).toHaveProperty("error");
+    expect(parseClientMessage('{"t":"wheel","dir":"up","lines":0,"col":0,"row":0}')).toHaveProperty("error");
+    expect(parseClientMessage('{"t":"wheel","dir":"up","lines":101,"col":0,"row":0}')).toHaveProperty("error");
+    expect(parseClientMessage('{"t":"wheel","dir":"down","lines":1,"col":-1,"row":0}')).toHaveProperty("error");
     expect(parseClientMessage('{"t":"scroll","offset":-1}')).toHaveProperty("error");
     expect(parseClientMessage('{"t":"resize","cols":80,"rows":24}')).toEqual({ t: "resize", cols: 80, rows: 24 });
     expect(parseClientMessage('{"t":"resize","cols":1000,"rows":24}')).toHaveProperty("error");
