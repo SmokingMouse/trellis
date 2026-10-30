@@ -245,6 +245,10 @@ export function detachHomeSession(sessionId: string): void {
   getDB()
     .prepare("UPDATE tasks SET home_session_id = NULL WHERE home_session_id = ?")
     .run(sessionId);
+  // 角色的固定会话同理（docs/roles-p1.md）：归档 / 删除后下一条消息重开新会话。
+  getDB()
+    .prepare("UPDATE agents SET home_session_id = NULL WHERE home_session_id = ?")
+    .run(sessionId);
 }
 
 export function deleteTask(id: string): boolean {
