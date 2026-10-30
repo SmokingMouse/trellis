@@ -1131,6 +1131,8 @@ async function cmdAsk() {
     payload = { kind: "root", sessionId: sessT, question };
   } else {
     payload = { kind: "root", question };
+    // 在 Trellis 会话里开的新会话记下来源节点：角色时间线据此画「后台任务」卡（docs/roles-p2.md）。
+    if (SELF_NODE) payload.originNodeId = SELF_NODE;
     const ws = flagVal("--workspace");
     if (ws) {
       const abs = path.resolve(ws);
