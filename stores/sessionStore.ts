@@ -762,6 +762,9 @@ type Actions = {
   // (network restored), and at the tail of loadSession. Idempotent —
   // running it 3x in a row is the same as running it once.
   reconnectStreamingNodes: () => void;
+  // 群聊（hooks/useGroupEvents）：服务端编排出的新节点 / 节点更新推进当前会话。
+  // 不是当前会话的节点忽略；本地流式中的节点只合并 meta（正文与终态归流式通道管）。
+  ingestServerNode: (node: unknown) => void;
   // Most recently registered streaming nodeId (for Esc to find a target
   // when activeNodeId isn't itself streaming).
   latestStreamingNodeId: () => string | null;
@@ -1202,6 +1205,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   openRole: async (roleId) => {
+    // 管家（P2 起是内置角色）保留自己的一套体验：管家草稿首页、ButlerPanel、改动卡。
+    if (roleId === BUTLER_AGENT_ID) return get().openButler();
     // /open 只回 home 会话 id（还在就给，归档 / 没聊过 = null），不建会话 ——
     // 第一句话发出去才建，免得点一下就多一条空会话。
     const r = await useRoleStore.getState().open(roleId);
@@ -2012,6 +2017,26 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       if (STREAM_CONTROLLERS.has(n.id)) continue;
       void attachReconnectStream(n.id, set, get);
     }
+  },
+
+  ingestServerNode: (raw) => {
+    const node = raw as ApiNode;
+    if (!node || typeof node.id !== "string" || node.sessionId !== get().session?.id) return;
+    set((s) => {
+      const cur = s.nodes[node.id];
+      // 本地还在流式：终态与正文由流式通道收尾（两条 SSE 的先后不保证），这里只合并 meta。
+      if (cur && cur.status === "streaming") {
+        return { nodes: { ...s.nodes, [node.id]: { ...cur, meta: node.meta ?? cur.meta } } };
+      }
+      const next = apiNodeToChatNode(node);
+      return {
+        nodes: {
+          ...s.nodes,
+          [node.id]: cur ? { ...next, toolCalls: cur.toolCalls.length ? cur.toolCalls : next.toolCalls } : next,
+        },
+      };
+    });
+    if (node.status === "streaming") get().reconnectStreamingNodes();
   },
 
   latestStreamingNodeId: () => {

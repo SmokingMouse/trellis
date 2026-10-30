@@ -12,6 +12,9 @@ import { ensureWorkspaceForPath, touchWorkspace } from "./workspaces";
 import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import { readableNodeRefs } from "@/lib/node-refs";
+import { parseNodeMeta, type NodeMeta } from "@/lib/node-meta";
+import type { SessionRoleTag } from "@/lib/role-follow";
+import { roleBadgeMap, sessionRoleTag } from "./role-badges";
 import type { RecentChainRow } from "@/lib/recent";
 import {
   BOOKMARK_QUESTION_LIMIT,
@@ -124,6 +127,9 @@ export type ApiNode = {
   // 'session' = 会话人设（不挂 chip，否则每张卡都有一枚是噪音）。
   agentId: string | null;
   agentScope: "session" | "mention" | null;
+  // 结构化标记（nodes.meta_json，lib/node-meta.ts）：系统节点的 meta.kind、群聊消息的
+  // 作者 / 引用。null = 普通问答。是不是系统节点看 isSystemNode，不看 meta 非空。
+  meta: NodeMeta | null;
 };
 
 type NodeRow = {
@@ -159,6 +165,7 @@ type NodeRow = {
   hidden_at: number | null;
   agent_id: string | null;
   agent_scope: string | null;
+  meta_json: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
@@ -166,7 +173,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, bookmarked_at, attachments_json, tool_calls_json,
-       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
+       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope, meta_json`;
 
 type SessionRow = {
   kind: string;
@@ -296,6 +303,7 @@ function rowToNode(r: NodeRow): ApiNode {
     hiddenAt: r.hidden_at,
     agentId: r.agent_id,
     agentScope: r.agent_scope === "mention" ? "mention" : r.agent_scope === "session" ? "session" : null,
+    meta: parseNodeMeta(r.meta_json),
   };
 }
 
@@ -2237,7 +2245,7 @@ export type SearchResult = {
   sessionMode: string;
   sessionWorkspacePath: string | null;
   hits: SearchHit[];
-};
+} & SessionRoleTag;
 
 // trigram needs ≥ 3 chars per query token. Below that, FTS5 MATCH returns 0
 // rows, so 1–2 char queries（中文里最常见的「向量」「钱包」、英文缩写「AI」）
@@ -2310,6 +2318,8 @@ type SearchRow = {
   title: string;
   context_mode: string;
   workspace_path: string | null;
+  kind: string | null;
+  agent_id: string | null;
 };
 
 // 1–2 字查询的回退：search_index.text 上参数化 LIKE，按会话最近更新排序。
@@ -2321,7 +2331,7 @@ function searchAllLike(query: string, limit: number): SearchRow[] {
     raws = db
       .prepare(
         `SELECT si.text, si.source_kind, si.source_id, si.session_id,
-                s.title, s.context_mode, s.workspace_path
+                s.title, s.context_mode, s.workspace_path, s.kind, s.agent_id
          FROM search_index si
          JOIN sessions s ON s.id = si.session_id
          WHERE si.text LIKE ? ESCAPE '\\'
@@ -2362,7 +2372,7 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
           `SELECT si.source_kind, si.source_id, si.session_id,
                   snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
                   snippet(search_index, 0, '', '', '', 12) AS match_text,
-                  s.title, s.context_mode, s.workspace_path,
+                  s.title, s.context_mode, s.workspace_path, s.kind, s.agent_id,
                   bm25(search_index) AS rank
            FROM search_index si
            JOIN sessions s ON s.id = si.session_id
@@ -2382,6 +2392,8 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
   // Preserve bm25 order (already ASC) when grouping. Sessions surface in
   // the order their best hit was ranked.
   const groups = new Map<string, SearchResult>();
+  // 角色固定会话（kind='role'）带上角色头像 / 名字（docs/roles-p2.md C）。
+  const badges = rows.some((r) => r.kind === "role") ? roleBadgeMap() : new Map();
   for (const r of rows) {
     let g = groups.get(r.session_id);
     if (!g) {
@@ -2390,6 +2402,7 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
         sessionTitle: r.title,
         sessionMode: r.context_mode,
         sessionWorkspacePath: r.workspace_path,
+        ...sessionRoleTag(r.kind, r.agent_id, badges),
         hits: [],
       };
       groups.set(r.session_id, g);

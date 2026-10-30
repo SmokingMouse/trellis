@@ -1,11 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, UserRound, Users } from "lucide-react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useRoleStore } from "@/stores/roleStore";
-import { Icon, IconButton, PixelLoader, StatusDot } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Icon,
+  IconButton,
+  PixelLoader,
+  StatusDot,
+} from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
+import { useGroupStore } from "@/stores/groupStore";
+import { GroupAvatar } from "@/components/GroupAvatar";
+import type { Role } from "@/lib/roles";
+import type { Group } from "@/lib/groups";
 
 // 手机首页顶部的「角色」块（原型 09-roles.html s-mlist）：大头像 + 名字 + 时间 + 一行副标题，
 // 像聊天 App 的会话列表。副标题 P1 先用一句话介绍（接口还不带最后一句话）。
@@ -29,6 +42,21 @@ export function RoleHomeList() {
   useEffect(() => {
     if (!loaded) void useRoleStore.getState().refresh();
   }, [loaded]);
+  // 群聊（docs/roles-p2.md B）和角色混排，规则同侧栏：有活动时间的降序，没聊过的角色垫后。
+  const groups = useGroupStore((s) => s.groups);
+  const groupsLoaded = useGroupStore((s) => s.loaded);
+  const previewSession = useSessionStore((s) => s.previewSession);
+  useEffect(() => {
+    if (!groupsLoaded) void useGroupStore.getState().refresh();
+  }, [groupsLoaded]);
+  type Entry = { kind: "role"; role: Role; at: number | null } | { kind: "group"; group: Group; at: number };
+  const entries: Entry[] = [
+    ...roles.map((role): Entry => ({ kind: "role", role, at: role.lastActiveAt })),
+    ...groups.map((group): Entry => ({ kind: "group", group, at: group.lastActiveAt })),
+  ]
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => ((b.e.at ?? -Infinity) - (a.e.at ?? -Infinity)) || a.i - b.i)
+    .map(({ e }) => e);
 
   const row =
     "press-row flex min-h-15 w-full min-w-0 items-center gap-3 rounded-[14px] px-1.5 py-2.5 text-left";
@@ -39,17 +67,53 @@ export function RoleHomeList() {
         <h2 id="home-roles" className="text-title font-semibold tracking-[-0.02em] text-ink-strong">
           角色
         </h2>
-        <IconButton
-          label="新建角色"
-          onClick={() => useRoleStore.getState().setNewRoleOpen(true)}
-          className="min-h-11 min-w-11"
-          tooltip={false}
-        >
-          <Icon icon={Plus} />
-        </IconButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton label="新建角色或群聊" className="min-h-11 min-w-11" tooltip={false}>
+              <Icon icon={Plus} />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem icon={<UserRound size={16} />} onSelect={() => useRoleStore.getState().setNewRoleOpen(true)}>
+              新建角色
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={<Users size={16} />} onSelect={() => useGroupStore.getState().setNewGroupOpen(true)}>
+              新建群聊
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div className="flex flex-col">
-        {roles.map((r) => {
+        {entries.map((entry) => {
+          if (entry.kind === "group") {
+            const g = entry.group;
+            const running = runningIds.has(g.id);
+            const unread = unreadIds.has(g.id);
+            return (
+              <button key={`g:${g.id}`} type="button" data-home-group={g.id} onClick={() => void previewSession(g.id)} className={row}>
+                <GroupAvatar members={g.members} size="lg" />
+                <span className="min-w-0 flex-1 border-b border-line pb-2.5 -mb-2.5">
+                  <span className="flex items-center gap-1.5 text-reading font-semibold text-ink-strong">
+                    <span className="min-w-0 truncate">{g.name}</span>
+                    <span className="ml-auto shrink-0 text-label font-normal tabular-nums text-ink-faint">
+                      {formatRelativeTimeShort(g.lastActiveAt, now)}
+                    </span>
+                  </span>
+                  <span className="mt-px flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-ui text-ink-muted">
+                      {running
+                        ? "正在讨论…"
+                        : g.lastMessage
+                          ? `${g.lastMessage.name}：${g.lastMessage.text}`
+                          : g.members.map((m) => m.name).join("、")}
+                    </span>
+                    {running ? <PixelLoader size="sm" label={null} /> : unread && <StatusDot tone="unread" label="有新消息" />}
+                  </span>
+                </span>
+              </button>
+            );
+          }
+          const r = entry.role;
           const sid = r.homeSessionId;
           const running = sid ? runningIds.has(sid) : false;
           const unread = sid ? unreadIds.has(sid) : false;

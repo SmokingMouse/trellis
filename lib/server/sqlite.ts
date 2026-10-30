@@ -831,6 +831,20 @@ function migrate(db: Database) {
   seedBuiltinAgents(db);
   upgradeBuiltinPrompts(db);
 
+  // 角色 P4「跟进我的会话」（lib/server/role-follow.ts）：每个被跟进对象（会话 / herdr 窗格）
+  // 上一次扫描时所处的状态。状态没变 = 不出声；对象离开所有状态就删行，再进来才算「新进入」。
+  // progress_sig / progress_at：流式节点的输出指纹与它最后一次变化的时刻，判「卡住」用。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS role_follow_state (
+      subject TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      token TEXT NOT NULL DEFAULT '',
+      progress_sig TEXT,
+      progress_at INTEGER,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
   // 管家改动提案：管家会话里 trellisctl 的配置写请求不直接落库，先存成一条
   // pending 提案（原样的 method/path/body），用户在卡片上确认后才进程内重放
   // 对应路由。before_json = 应用那一刻的快照，撤销据此构造逆请求。
@@ -879,6 +893,43 @@ function migrate(db: Database) {
       .get(col);
     if (!has) db.exec(`ALTER TABLE nodes ADD COLUMN ${col} TEXT`);
   }
+
+  // 节点附带的结构化标记（docs/roles-p2.md 共享约定，lib/node-meta.ts）：一列装两类，按
+  // meta.kind 区分 —— 系统节点（role-nightly / role-follow / group-round-end，「不是模型回复」，
+  // 不参与 resume、不进搜索）与群聊消息标记（group-user / group-reply 的作者、引用、轮次）。
+  // NULL = 普通问答节点。前端靠 meta.kind 换渲染。
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('nodes') WHERE name = 'meta_json'").get()) {
+    db.exec("ALTER TABLE nodes ADD COLUMN meta_json TEXT");
+  }
+
+  // 角色 P2 · 群聊（docs/roles-p2.md B）：群 = sessions.kind='group' 的一行。
+  //   group_members   成员（角色），各自在群里有一条自己的 CLI 会话（cli_session_id），
+  //                   last_seen_seq = 已喂给它的最后一条群消息的 nodes.rowid（只喂增量）。
+  //   group_settings  没人 @ 时的发言策略与每轮上限。
+  // 两张表都跟着会话 / 角色级联删除：删群不留成员，删角色它就退群。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS group_members (
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      cli_session_id TEXT,
+      cli_family TEXT,
+      cli_cwd TEXT,
+      last_seen_seq INTEGER NOT NULL DEFAULT 0,
+      joined_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, role_id)
+    );
+    CREATE INDEX IF NOT EXISTS group_members_role ON group_members(role_id);
+
+    CREATE TABLE IF NOT EXISTS group_settings (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      reply_policy TEXT NOT NULL DEFAULT 'route'
+        CHECK(reply_policy IN ('route','all','mention-only')),
+      max_passes INTEGER NOT NULL DEFAULT 3,
+      max_messages INTEGER NOT NULL DEFAULT 10,
+      updated_at INTEGER NOT NULL
+    );
+  `);
 
   // S88: 自动化任务。三张表的切分理由见 progress/custom-agents-plan.md：
   //
@@ -980,6 +1031,8 @@ function migrate(db: Database) {
     db.exec("ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'");
   }
   db.exec("UPDATE sessions SET kind = 'herdr' WHERE origin = 'herdr' AND kind <> 'herdr'");
+  // 管家迁成内置角色：要 sessions.agent_id / kind 两列都在，所以放在这之后。
+  migrateButlerToRole(db);
 
   // 会话置顶（= 常驻标签）。NULL = 未置顶；非 NULL = 置顶时刻，置顶区按它升序排
   // （先置顶的在前，与标签从左到右的追加顺序一致）。服务端存，多设备同步。
@@ -1181,6 +1234,8 @@ function migrate(db: Database) {
     "UPDATE lark_inbox SET status = 'error' WHERE status = 'processing'",
   ).run();
 
+  ensureRolesP2Schema(db);
+
   // First-boot backfill: if the search_index has zero rows but the DB
   // already holds data (upgrade from a pre-Stage-16 build), seed it
   // from the existing tables in a single transaction. Idempotent —
@@ -1219,6 +1274,64 @@ function migrate(db: Database) {
       tx();
     }
   }
+}
+
+// 角色 P2 · A 包（docs/roles-p2.md）：夜间整理、系统节点、例行、后台任务。
+//
+//  · 系统节点（夜间整理卡 / 跟进报告 / 群聊轮次结束）的 meta 用 migrate() 里加的
+//    nodes.meta_json（与群聊消息标记共用一列，kind 区分，见 lib/node-meta.ts）。
+//  · agents.nightly_freq：夜间整理频率（daily / weekly / off），只对角色有意义。
+//  · role_nightly：每个角色的整理游标与上次结果；last_slot 是抢槽去重（同一计划槽只跑一次）。
+//  · role_changes：整理提案，接受 / 拒绝 / 撤销（before_json = 应用前的文件快照）。
+//  · tasks.quiet_if_nothing：例行「没发现就不出声」。
+//  · role_bg_tasks：角色在对话里开的后台会话（trellisctl ask --new 带 originNodeId）。
+export function ensureRolesP2Schema(db: Database): void {
+  const addCol = (table: string, name: string, ddl: string) => {
+    const has = db.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(name);
+    if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  };
+  addCol("agents", "nightly_freq", "TEXT NOT NULL DEFAULT 'daily'");
+  addCol("tasks", "quiet_if_nothing", "INTEGER NOT NULL DEFAULT 0");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS role_nightly (
+      role_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+      cursor_at INTEGER,
+      last_slot INTEGER,
+      last_run_at INTEGER,
+      last_status TEXT,
+      last_error TEXT,
+      running INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS role_changes (
+      id TEXT PRIMARY KEY,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      node_id TEXT,
+      kind TEXT NOT NULL CHECK (kind IN ('add','merge','delete','skill')),
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','applied','rejected','reverted','failed')),
+      before_json TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      decided_at INTEGER,
+      reverted_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS role_changes_role ON role_changes(role_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS role_changes_node ON role_changes(node_id);
+
+    CREATE TABLE IF NOT EXISTS role_bg_tasks (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      role_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+      origin_session_id TEXT NOT NULL,
+      origin_node_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS role_bg_tasks_role ON role_bg_tasks(role_id, created_at DESC);
+  `);
+  // 进程没了整理也没了：running 标记不收尸的话，这个角色以后永远「正在整理」。
+  db.prepare("UPDATE role_nightly SET running = 0 WHERE running = 1").run();
 }
 
 export function ensureHerdrSchema(db: Database): void {
@@ -1279,6 +1392,39 @@ function seedBuiltinAgents(db: Database) {
     });
   });
   tx();
+}
+
+// 角色 P2：管家迁成内置角色（docs/roles-p2.md C）。kind 还不是 'role' 才动，所以幂等：
+//   · agents 行 kind='role'，头像 / 介绍为空时补上管家的（「管」、255、「配置 Trellis」），
+//     名字还是种子原名「Trellis 管家」就改成侧栏一直叫的「管家」；
+//   · home_session_id = 最近一条未归档的管家会话，并把它标成 kind='role'（侧栏会话列表
+//     里就看不到它了，从「角色」分区进）。其余历史管家会话保持 kind='user'，照旧可见。
+// 跑过之后用户再改头像 / 介绍、归档固定会话，都不会被下次启动改回来。
+export function migrateButlerToRole(db: Database) {
+  const id = "builtin-trellis-admin";
+  const row = db.prepare("SELECT kind, intro, avatar_glyph FROM agents WHERE id = ?").get(id) as
+    | { kind: string; intro: string; avatar_glyph: string }
+    | undefined;
+  if (!row || row.kind === "role") return;
+  db.transaction(() => {
+    const home = db
+      .prepare(
+        `SELECT id FROM sessions
+          WHERE agent_id = ? AND archived = 0 AND kind = 'user'
+          ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(id) as { id: string } | undefined;
+    if (home) db.prepare("UPDATE sessions SET kind = 'role' WHERE id = ?").run(home.id);
+    db.prepare(
+      `UPDATE agents SET kind = 'role',
+              name = CASE WHEN name = 'Trellis 管家' THEN '管家' ELSE name END,
+              intro = CASE WHEN intro = '' THEN '配置 Trellis' ELSE intro END,
+              avatar_glyph = CASE WHEN avatar_glyph = '' THEN '管' ELSE avatar_glyph END,
+              avatar_hue = CASE WHEN avatar_glyph = '' AND avatar_hue = 254 THEN 255 ELSE avatar_hue END,
+              home_session_id = ?
+        WHERE id = ?`,
+    ).run(home?.id ?? null, id);
+  })();
 }
 
 // 内置人设升级：库里仍是某个旧版原文（用户没改过）才换成当前版。与 seed 的

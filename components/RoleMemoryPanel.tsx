@@ -22,13 +22,14 @@ import { RoleField } from "@/components/RoleFields";
 import {
   countMemories,
   groupMemories,
+  memoryExcerpt,
   memoryFileFromName,
   randomHex6,
   searchMemories,
   type MemoryFilter,
 } from "@/lib/role-manage";
 import { formatRelativeTime } from "@/lib/relative-time";
-import { MEMORY_TYPES, MEMORY_TYPE_LABEL, type MemoryType, type Role, type RoleMemory } from "@/lib/roles";
+import { MEMORY_TYPES, MEMORY_TYPE_LABEL, memoryTitle, type MemoryType, type Role, type RoleMemory } from "@/lib/roles";
 import { useRoleStore } from "@/stores/roleStore";
 
 // 角色设置页「记忆」tab（原型 s-memory）：记忆开关、USER.md、按类型分组的记忆列表。
@@ -87,7 +88,7 @@ export function RoleMemoryPanel({ role }: { role: Role }) {
 
   const remove = async (m: RoleMemory) => {
     const ok = await confirm({
-      title: `删除记忆「${m.name}」？`,
+      title: `删除记忆「${memoryTitle(m) || m.file}」？`,
       description: `会删掉 memories/${m.file} 并从 MEMORY.md 索引里去掉；${role.name}以后就不记得这件事了。`,
       confirmLabel: "删除",
       danger: true,
@@ -189,9 +190,12 @@ export function RoleMemoryPanel({ role }: { role: Role }) {
                   {g.items.map((m) => (
                     <li key={m.file} className="group flex items-start gap-3 px-4 py-3">
                       <div className="min-w-0 flex-1">
-                        <div className="text-ui font-medium text-ink-strong">{m.name || m.file}</div>
-                        {m.description && (
-                          <div className="mt-0.5 text-label text-ink-muted">{m.description}</div>
+                        <div className="text-ui font-medium text-ink-strong">{memoryTitle(m) || m.file}</div>
+                        {/* 标题已是 description；这里给正文开头，文件名在下面的元信息里 */}
+                        {memoryExcerpt(m.body) && (
+                          <div className="mt-0.5 line-clamp-2 whitespace-pre-line text-label text-ink-muted">
+                            {memoryExcerpt(m.body)}
+                          </div>
                         )}
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 text-nano text-ink-faint">
                           <span>{formatRelativeTime(m.updatedAt)}更新</span>
@@ -199,10 +203,10 @@ export function RoleMemoryPanel({ role }: { role: Role }) {
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-0.5">
-                        <IconButton label={`编辑「${m.name || m.file}」`} size="sm" onClick={() => setEditing(m)}>
+                        <IconButton label={`编辑「${memoryTitle(m) || m.file}」`} size="sm" onClick={() => setEditing(m)}>
                           <Icon icon={Pencil} size="sm" />
                         </IconButton>
-                        <IconButton label={`删除「${m.name || m.file}」`} size="sm" onClick={() => void remove(m)}>
+                        <IconButton label={`删除「${memoryTitle(m) || m.file}」`} size="sm" onClick={() => void remove(m)}>
                           <Icon icon={Trash2} size="sm" />
                         </IconButton>
                       </div>

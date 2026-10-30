@@ -1,3 +1,5 @@
+import type { NodeMeta } from "./node-meta";
+
 export type NodeStatus = "streaming" | "done" | "error";
 
 // "qa" — original question/answer node. "reference" — passive material
@@ -275,6 +277,10 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
+  // 结构化标记（nodes.meta_json，lib/node-meta.ts）：系统节点（夜间整理卡 / 跟进报告 /
+  // 群聊轮次结束）按 meta.kind 换渲染，不画成问答、不给分叉 / 删除、不当输入框的接续目标；
+  // 群聊消息（group-user / group-reply）带作者与引用，是普通对话内容。null = 普通问答。
+  meta?: NodeMeta | null;
 };
 
 export type Bookmark = {

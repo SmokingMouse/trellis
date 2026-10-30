@@ -1,13 +1,16 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Brain, FolderOpen, UserRound } from "lucide-react";
+import { Brain, FolderOpen, ListChecks, UserRound } from "lucide-react";
+import { RoleFollowToggle } from "@/components/RoleFollowToggle";
 import { useRoleStore } from "@/stores/roleStore";
 import { Icon, Pill, Skeleton } from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
-import { MEMORY_TYPE_LABEL, type MemoryType, type Role } from "@/lib/roles";
+import { MEMORY_TYPE_LABEL, memoryTitle, type MemoryType, type Role } from "@/lib/roles";
+import { RoleGlanceBlocks } from "./RoleGlanceBlocks";
 
 // 角色一览（原型 09-roles.html 的 .glance，对应 Cindy 的 At a glance）：不离开对话就能看清
-// 「它是谁、记得什么、在哪干活」。P1 只做人设 / 最近记忆 / 目录 / 模型，例行、渠道、后台任务是 P2。
+// 「它是谁、记得什么、在哪干活」。P1：人设 / 最近记忆 / 目录 / 模型；P2：例行 / 渠道 / 后台任务
+// （RoleGlanceBlocks，排在最近记忆之后，同原型顺序）。
 // 桌面右栏照 ButlerPanel 的 --trellis-rp 机制占位（≥1280px 才出，300px）；手机顶栏点头像出
 // 同一份内容的底部 sheet（RoleGlanceContent）。记忆列表由 LinearThreadView 的 useRoleMemorySync 保鲜。
 
@@ -69,17 +72,19 @@ export function RoleGlanceContent({ role }: { role: Role }) {
             <a
               key={m.file}
               href={roleSettingsHref(role.id, "memory")}
-              title={m.description || m.name}
+              title={m.file}
               className="flex items-start gap-2 px-3 py-2 text-ui text-ink transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
             >
               <Pill tone={TYPE_TONE[m.type] ?? "neutral"} className="mt-px shrink-0">
                 {MEMORY_TYPE_LABEL[m.type] ?? m.type}
               </Pill>
-              <span className="line-clamp-2 min-w-0 flex-1 leading-snug">{m.name}</span>
+              <span className="line-clamp-2 min-w-0 flex-1 leading-snug">{memoryTitle(m)}</span>
             </a>
           ))
         )}
       </Section>
+
+      <RoleGlanceBlocks role={role} Section={Section} settingsHref={(tab) => roleSettingsHref(role.id, tab)} />
 
       <Section icon={FolderOpen} title="默认目录">
         <div className="px-3 py-2.5">
@@ -106,6 +111,11 @@ export function RoleGlanceContent({ role }: { role: Role }) {
               : persona
             : "还没写人设"}
         </p>
+      </Section>
+
+      {/* 角色 P4「跟进我的会话」：自包含开关（包 C），设置页「例行」tab 也挂同一个 */}
+      <Section icon={ListChecks} title="跟进">
+        <RoleFollowToggle roleId={role.id} roleName={role.name} className="px-3 py-2.5" />
       </Section>
     </div>
   );

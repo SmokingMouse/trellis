@@ -79,6 +79,8 @@ import { useRoleStore } from "@/stores/roleStore";
 import { RoleAvatar } from "@/components/ui/Avatar";
 import { Drawer } from "@/components/ui/Drawer";
 import { RoleGlanceContent, roleSettingsHref } from "@/components/RoleGlancePanel";
+import { useCurrentGroup } from "@/hooks/useCurrentGroup";
+import { GroupHeaderActions, GroupHeaderMobile, GroupHeaderTitle, GroupSettingsBody } from "@/components/GroupHeader";
 
 // W4：Header 分三组（照 docs/ui-redesign/mockups/01-workbench.html）——
 //   左 = 导航：（侧栏收起时的）展开键 + 品牌 + 面包屑（工作区 › 会话名）
@@ -265,6 +267,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   const glanceOpen = useRoleStore((s) => s.glanceOpen);
   const setGlanceOpen = useRoleStore((s) => s.setGlanceOpen);
   const [roleSheetOpen, setRoleSheetOpen] = useState(false);
+  // 群聊（docs/roles-p2.md B）：名片换成叠放头像 + 群名，齿轮开群设置；手机点名片出设置 sheet。
+  const group = useCurrentGroup();
+  const [groupSheetOpen, setGroupSheetOpen] = useState(false);
   const { fleet: herdrFleet } = useHerdrFleet();
   const mainScrolled = useMainScrolled(
     isMobile,
@@ -402,6 +407,15 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 </span>
                 <Icon icon={ChevronDown} size="sm" className="shrink-0 text-ink-faint" />
               </button>
+            ) : group ? (
+              <button
+                type="button"
+                data-mobile-target="header-group"
+                onClick={() => setGroupSheetOpen(true)}
+                className="press flex min-w-0 items-center rounded-field"
+              >
+                <GroupHeaderMobile group={group} networkTitle={networkTitle} />
+              </button>
             ) : role ? (
               // 手机：一览收进头像——点名片出底部 sheet（原型 s-mobile「角色对话：一览收进头像」）
               <button
@@ -503,6 +517,19 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             className="fixed top-0 inset-x-0 z-50 border-0 bg-surface-canvas p-0"
             style={{ height: "max(var(--safe-top), 24px)" }}
           />
+        )}
+        {group && (
+          <Drawer open={groupSheetOpen} onClose={() => setGroupSheetOpen(false)} title={`${group.name}：群设置`}>
+            <div className="shrink-0 flex items-center justify-between border-b border-line-faint px-4 py-2">
+              <span className="text-reading font-semibold text-ink-strong">群设置</span>
+              <IconButton label="关闭群设置" onClick={() => setGroupSheetOpen(false)} className="min-h-11 min-w-11" tooltip={false}>
+                <Icon icon={X} />
+              </IconButton>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              <GroupSettingsBody group={group} />
+            </div>
+          </Drawer>
         )}
         {role && (
           <Drawer open={roleSheetOpen} onClose={() => setRoleSheetOpen(false)} title={`${role.name}：一览`}>
@@ -668,7 +695,16 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           className="flex min-w-0 items-center gap-2 text-ui text-ink-muted"
         >
           {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint max-md:hidden" />}
-          {role ? (
+          {group ? (
+            <>
+              <GroupHeaderTitle group={group} />
+              {networkTitle && (
+                <span data-header-network role="status" className="shrink-0 text-label text-warn-ink">
+                  {networkTitle}
+                </span>
+              )}
+            </>
+          ) : role ? (
             // 角色名片（原型 .who）：点开角色设置。会话标题对角色没有意义——它只有一条对话。
             <>
               <Tooltip content="角色设置">
@@ -744,6 +780,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
 
       {/* ── 中：会话语境（用量 / 上下文浮层） ── */}
       <div data-header-group="context" className="ml-auto flex min-w-0 shrink items-center gap-1.5 md:shrink-0">
+        {group && <GroupHeaderActions group={group} />}
         {role && (
           <div data-header-role-actions className="flex shrink-0 items-center gap-1.5 max-md:hidden">
             <Tooltip content={`跑在 ${role.workDir ?? role.homeDir}${session?.workspacePath ? "（点击浏览文件）" : ""}`}>

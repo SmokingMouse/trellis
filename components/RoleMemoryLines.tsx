@@ -5,7 +5,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useRoleStore } from "@/stores/roleStore";
 import { Icon, toast } from "@/components/ui";
 import { memoryWritesOf, type MemoryWrite } from "@/lib/role-timeline";
-import type { Role } from "@/lib/roles";
+import { memoryTitle, type Role, type RoleMemory } from "@/lib/roles";
 import type { ChatNode } from "@/lib/types";
 
 // 回复下面的「记下了…」行（原型 .memline）：角色每记一条，当场可见、可撤销——记忆最怕偷偷记错。
@@ -38,7 +38,7 @@ export function RoleMemoryLines({ role, node }: { role: Role; node: ChatNode }) 
           key={w.path}
           role={role}
           write={w}
-          name={list?.memories.find((m) => m.file === w.file)?.name ?? null}
+          name={memoryTitleOf(list?.memories, w.file)}
           // 列表拉到了、里面却没有这个文件：已经被删（别处撤销 / 设置页删掉 / 夜间整理合并）。
           missing={listFresh && !list!.memories.some((m) => m.file === w.file)}
         />
@@ -124,4 +124,10 @@ export function useRoleMemorySync(roleId: string | null) {
     // memoryCount 在角色列表上，一并刷新。
     if (settled > 0) void store.refresh();
   }, [roleId, settled]);
+}
+
+/** 列表里这条记忆的人话标题（见 memoryTitle）；列表没拉到或没有这条就是 null。 */
+function memoryTitleOf(memories: RoleMemory[] | undefined, file: string): string | null {
+  const m = memories?.find((x) => x.file === file);
+  return m ? memoryTitle(m) || null : null;
 }

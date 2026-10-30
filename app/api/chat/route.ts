@@ -11,6 +11,8 @@ import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
 import { adoptRoleHomeSession, planRoleNewSession, roleSpawnExtras } from "@/lib/server/roles";
+import { isSystemNodeId } from "@/lib/server/system-node";
+import { recordRoleBackgroundTask } from "@/lib/server/role-routines";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
 import {
   applyAutoTitle,
@@ -280,11 +282,23 @@ async function handleChatPost(req: Request) {
     }
     return null;
   })();
+  // 群聊（docs/roles-p2.md B）不走单人问答链：一条消息要编排多位成员，入口是
+  // POST /api/groups/[id]/messages。挡在这里，免得画布 / 重试把群节点当普通节点续聊。
+  if (targetSession?.kind === "group") {
+    return Response.json({ error: "群聊消息请走 /api/groups/[id]/messages" }, { status: 409 });
+  }
   if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
     return Response.json(
       { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
       { status: 409 },
     );
+  }
+
+  // 系统节点（夜间整理卡等，lib/server/system-node.ts）不是一轮对话：没有 CLI 会话可接，
+  // 也没有问题可重跑。前端本来就不把它当接续目标，这里兜住绕过前端的请求。
+  const systemTarget = body.kind === "branch" ? body.parentNodeId : body.kind === "retry" ? body.nodeId : null;
+  if (systemTarget && isSystemNodeId(systemTarget)) {
+    return Response.json({ error: "系统消息不能接着问或重试" }, { status: 409 });
   }
 
   const providerId = isProviderId(body.provider)
@@ -363,7 +377,7 @@ async function handleChatPost(req: Request) {
           : { type: "created", node };
       } else {
         // New session — body picks the mode + workspace, then locks them.
-        resolvedMode = rolePlan ? "project" : isMode(body.mode) ? body.mode : "chat";
+        resolvedMode = rolePlan ? rolePlan.mode : isMode(body.mode) ? body.mode : "chat";
         const wp =
           typeof body.workspacePath === "string" && body.workspacePath.trim()
             ? body.workspacePath
@@ -390,7 +404,7 @@ async function handleChatPost(req: Request) {
               { status: 400 },
             );
           }
-          resolvedWorkspacePath = rolePlan ? rolePlan.workspacePath : wp;
+          resolvedWorkspacePath = rolePlan?.workspacePath ?? wp;
         }
         // 权限确认钳制：claude / codex 的 project 可开（chat 无文件工具；mock
         // 无审批概念）。codex 走 app-server 审批协议（agent@0.7.0 起），与 claude
@@ -435,6 +449,13 @@ async function handleChatPost(req: Request) {
           createdEvent = { type: "created", session: getSession(trellisSessionId) ?? session, node };
         } else {
           createdEvent = { type: "created", session, node };
+          // 角色在对话里开的后台任务（trellisctl ask --new 带 originNodeId）：记下来，
+          // 角色时间线画任务卡、一览列最近几个。来源不是角色会话就什么都不做。
+          recordRoleBackgroundTask({
+            originNodeId: (body as { originNodeId?: unknown }).originNodeId,
+            sessionId: trellisSessionId,
+            nodeId,
+          });
         }
       }
       questionForLLM = body.question;

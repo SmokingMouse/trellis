@@ -15,11 +15,16 @@ process.env.TRELLIS_DB_PATH = path.join(dir, "data.db");
 const yamlPath = path.join(dir, "endpoints.yaml");
 const envFile = path.join(dir, "sm.env");
 process.env.SM_ENDPOINTS_PATH = yamlPath;
+// 角色目录也指到临时目录（角色一类会写 USER.md / memories/）
+const prevRoles = process.env.TRELLIS_ROLES_DIR;
+const rolesDir = path.join(dir, "roles");
+process.env.TRELLIS_ROLES_DIR = rolesDir;
 
 const sqlite = await import("./sqlite");
 sqlite.resetDBForTests();
 const sync = await import("./config-sync");
 const { createAgent, getAgentBySlug, updateAgent } = await import("./agents");
+const roles = await import("./roles");
 const { grantApprovalRule } = await import("./approval-rules");
 const { clearEndpointsCache } = await import("@smokingmouse/llm");
 const { REDACTED } = await import("@/lib/config-sync");
@@ -31,6 +36,8 @@ afterAll(() => {
   else process.env.TRELLIS_DB_PATH = prevDb;
   if (prevEndpoints === undefined) delete process.env.SM_ENDPOINTS_PATH;
   else process.env.SM_ENDPOINTS_PATH = prevEndpoints;
+  if (prevRoles === undefined) delete process.env.TRELLIS_ROLES_DIR;
+  else process.env.TRELLIS_ROLES_DIR = prevRoles;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -181,6 +188,99 @@ describe("agents：冲突跳过 / 覆盖", () => {
       sync.validatePackage({ format: "trellis-config", version: 1, agents: [{ slug: "../x", name: "x" }] }),
     ).toThrow(sync.ConfigSyncInputError);
     expect(() => sync.validatePackage({ format: "trellis-config", version: 99 })).toThrow("请先更新目标机器");
+  });
+});
+
+describe("roles：往返 / 冲突 / 撞 slug", () => {
+  test("导出含行字段 + USER.md + memories；删掉后导入还原；内置角色（管家）不导出", () => {
+    const r = roles.createRole({ name: "Sync Role", slug: "sync-role", intro: "介绍", systemPrompt: "人设 v1", avatarHue: 150, avatarGlyph: "同", workDir: dir });
+    roles.writeRoleUserMd(r.id, "用户偏好短答\n");
+    roles.writeRoleMemory(r.id, "likes-tea.md", { name: "likes-tea", description: "爱喝茶", type: "user", body: "乌龙\n" });
+    const pkg = roundTrip(sync.exportConfig({ kinds: ["roles"], skillContent: true }));
+    expect(pkg.roles!.map((x) => x.slug)).toEqual(["sync-role"]);
+    const item = pkg.roles![0];
+    expect(item).toMatchObject({ intro: "介绍", avatarHue: 150, avatarGlyph: "同", workDir: dir, memoryEnabled: true, userMd: "用户偏好短答\n" });
+    expect(item.memories).toEqual([{ file: "likes-tea.md", name: "likes-tea", description: "爱喝茶", type: "user", body: "乌龙\n" }]);
+
+    // 「目标机器」：角色行和目录都没有
+    roles.deleteRole(r.id);
+    fs.rmSync(rolesDir, { recursive: true, force: true });
+    expect(sync.previewImport(pkg).find((i) => i.kind === "roles")?.status).toBe("new");
+    expect(sync.applyImport(pkg, null).find((x) => x.kind === "roles")?.outcome).toBe("created");
+    const back = getAgentBySlug("sync-role")!;
+    expect(back.kind).toBe("role");
+    expect(back.systemPrompt).toBe("人设 v1");
+    const mem = roles.listRoleMemories(back.id);
+    expect(mem.userMd).toBe("用户偏好短答\n");
+    expect(mem.memories.map((m) => m.file)).toEqual(["likes-tea.md"]);
+    expect(fs.readFileSync(path.join(rolesDir, "sync-role", "MEMORY.md"), "utf8")).toContain("likes-tea");
+    expect(sync.previewImport(pkg).find((i) => i.kind === "roles")?.status).toBe("same");
+
+    // 目标改了人设 + 多一条本地记忆 → 冲突；覆盖后人设回来、本地记忆保留
+    roles.updateRole(back.id, { systemPrompt: "目标本地" });
+    roles.writeRoleMemory(back.id, "local-only.md", { name: "local", description: "", type: "project", body: "x" });
+    const diff = sync.previewImport(pkg).find((i) => i.kind === "roles")!;
+    expect(diff.status).toBe("conflict");
+    expect(diff.changes).toEqual(["人设"]);
+    expect(diff.warnings.join()).toContain("多出的 1 条记忆保留");
+    expect(sync.applyImport(pkg, null).find((x) => x.kind === "roles")?.outcome).toBe("skipped");
+    expect(
+      sync.applyImport(pkg, [{ kind: "roles", key: "sync-role", overwrite: true }]).find((x) => x.kind === "roles")?.outcome,
+    ).toBe("overwritten");
+    expect(getAgentBySlug("sync-role")!.systemPrompt).toBe("人设 v1");
+    expect(roles.listRoleMemories(back.id).memories.map((m) => m.file).sort()).toEqual(["likes-tea.md", "local-only.md"]);
+  });
+
+  test("workDir 在目标机器不存在 → 置空并提示", () => {
+    const pkg = sync.validatePackage({
+      format: "trellis-config", version: 1, kinds: ["roles"],
+      roles: [{ slug: "far-role", name: "远方", workDir: "/no/such/dir/xyz", memories: [] }],
+    });
+    const d = sync.previewImport(pkg).find((i) => i.kind === "roles")!;
+    expect(d.status).toBe("new");
+    expect(d.warnings.join()).toContain("/no/such/dir/xyz");
+    sync.applyImport(pkg, null);
+    expect(getAgentBySlug("far-role")!.workDir).toBeNull();
+  });
+
+  test("撞 slug：包里的 agent 撞上角色 → 不可同步，角色行一字不改；包里的角色撞上 agent / 内置同理", () => {
+    const r = roles.createRole({ name: "撞名", slug: "clash", systemPrompt: "角色人设" });
+    const before = getAgentBySlug("clash")!;
+    const agentPkg = sync.validatePackage({
+      format: "trellis-config", version: 1, kinds: ["agents"],
+      agents: [{ slug: "clash", name: "外来 agent", systemPrompt: "agent 人设" }],
+    });
+    expect(sync.previewImport(agentPkg).find((i) => i.key === "clash")).toMatchObject({ status: "blocked" });
+    const res = sync.applyImport(agentPkg, [{ kind: "agents", key: "clash", overwrite: true }]);
+    expect(res.find((x) => x.key === "clash")?.outcome).toBe("skipped");
+    expect(getAgentBySlug("clash")).toEqual(before);
+
+    createAgent({ slug: "plain-agent", name: "普通" });
+    const rolePkg = sync.validatePackage({
+      format: "trellis-config", version: 1, kinds: ["roles"],
+      roles: [
+        { slug: "plain-agent", name: "x", memories: [] },
+        { slug: "trellis-admin", name: "假管家", memories: [] },
+      ],
+    });
+    const diffs = sync.previewImport(rolePkg);
+    expect(diffs.map((d) => d.status)).toEqual(["blocked", "blocked"]);
+    sync.applyImport(rolePkg, [
+      { kind: "roles", key: "plain-agent", overwrite: true },
+      { kind: "roles", key: "trellis-admin", overwrite: true },
+    ]);
+    expect(getAgentBySlug("plain-agent")!.kind).toBe("agent");
+    expect(getAgentBySlug("trellis-admin")!.name).not.toBe("假管家");
+    expect(r.slug).toBe("clash");
+  });
+
+  test("记忆文件名路径穿越整包 400", () => {
+    expect(() =>
+      sync.validatePackage({
+        format: "trellis-config", version: 1,
+        roles: [{ slug: "evil", name: "e", memories: [{ file: "../../x.md", name: "x", type: "user", body: "" }] }],
+      }),
+    ).toThrow(sync.ConfigSyncInputError);
   });
 });
 

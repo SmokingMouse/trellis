@@ -24,6 +24,7 @@ import { createAgent, getAgentBySlug, isValidSlug, listAgents, updateAgent, type
 import { grantApprovalRule, listApprovalRules } from "./approval-rules";
 import { applySkill, diffSkill, exportSkills, isSafeRelPath, isValidSkillName, userSkillsRoot } from "./config-sync-skills";
 import { applyModel, exportModels, planModel } from "./config-sync-models";
+import { exportRoles, planRoles, validateRole } from "./config-sync-roles";
 import { API_KEY_ENV_RE, PROVIDER_NAME_RE, readRawEndpointsForSync } from "./model-config";
 import { getAppSetting, setAppSetting } from "./repo";
 import { listSkills } from "./skills";
@@ -33,7 +34,8 @@ import { listSkills } from "./skills";
 //
 // 每类的可移植单元 / 对齐键 / 冲突规则：
 //   skills          目录名         同名内容不同 = 冲突；目标是软链 = 不可同步
-//   agents          slug           只导自定义（builtin=0）；目标同 slug 是内置 = 不可同步
+//   agents          slug           只导自定义（builtin=0）；目标同 slug 是内置 / 是角色 = 不可同步
+//   roles           slug           只导自定义角色 + USER.md + memories/（config-sync-roles.ts）
 //   approval-rules  toolKey        只导「所有会话」规则；同键已有 = 相同（规则只有一个键，无冲突）
 //   models          provider 名 / default   provider 整块比较（密钥按位置还原后再比）
 //   settings        key            白名单 SYNC_SETTING_KEYS
@@ -93,6 +95,8 @@ export function exportConfig(
       pkg.agents = listAgents()
         .filter((a) => !a.builtin)
         .map(agentToPack);
+    } else if (kind === "roles") {
+      pkg.roles = exportRoles();
     } else if (kind === "approval-rules") {
       pkg.approvalRules = listApprovalRules()
         .filter((r) => r.scope === "global")
@@ -268,6 +272,7 @@ export function validatePackage(raw: unknown): ConfigPackage {
     kinds,
     skills: list(raw.skills, "skills").map(validateSkill),
     agents: list(raw.agents, "agents").map(validateAgent),
+    roles: list(raw.roles, "roles").map((v, i) => validateRole(v, i, fail)),
     approvalRules: list(raw.approvalRules, "approvalRules").map(validateRule),
     models: list(raw.models, "models").map(validateModel),
     settings: list(raw.settings, "settings").map(validateSetting),
@@ -328,6 +333,8 @@ function planAll(pkg: ConfigPackage, env: SyncEnv): Plan[] {
       const base = { kind: "agents" as const, key: item.slug, label: item.name, summary: item.description || item.slug, warnings };
       let diff: ConfigDiffItem;
       if (!existing) diff = { ...base, status: "new" };
+      // 角色也是 agents 表里的一行（kind='role'）：撞上它绝不能当成同名 Agent 去覆盖（P1 遗留）。
+      else if (existing.kind === "role") diff = { ...base, status: "blocked", reason: "目标机器上同 slug 的是角色，不覆盖" };
       else if (existing.builtin) diff = { ...base, status: "blocked", reason: "目标机器上同 slug 的是内置 Agent，不覆盖" };
       else {
         const ours = agentToPack(existing);
@@ -347,6 +354,8 @@ function planAll(pkg: ConfigPackage, env: SyncEnv): Plan[] {
       });
     }
   }
+
+  plans.push(...planRoles(pkg.roles ?? []));
 
   if (pkg.approvalRules?.length) {
     const have = new Set(

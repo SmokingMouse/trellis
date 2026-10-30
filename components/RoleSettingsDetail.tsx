@@ -23,13 +23,17 @@ import {
 } from "@/components/ui";
 import { RoleField, RoleHuePicker, RoleModelSelect } from "@/components/RoleFields";
 import { RoleMemoryPanel } from "@/components/RoleMemoryPanel";
+import { RoleCapabilitiesTab } from "@/components/RoleCapabilitiesTab";
+import { RoleChannelsTab } from "@/components/RoleChannelsTab";
+import { RoleRoutinesTab } from "@/components/RoleRoutinesTab";
 import { useHubNodes } from "@/hooks/useHubNodes";
 import { copyText } from "@/lib/clipboard";
 import { copyRoleName, isRoleNameTaken } from "@/lib/role-manage";
 import type { Role, RoleInput } from "@/lib/roles";
 import { useRoleStore } from "@/stores/roleStore";
 
-// 角色设置页（原型 s-memory 的外框）：头部资料 + 四个 tab。tab 写进 ?tab=，刷新 / 从顶栏
+// 角色设置页（原型 s-memory 的外框）：头部资料 + tab（资料 / 人设 / 记忆 / 能力 / 渠道 / 例行 / 高级，
+// 后三个是 P2）。tab 写进 ?tab=，刷新 / 从顶栏
 // 齿轮、「记下了…→改一下」深链进来能直接落到记忆页（docs/roles-p1.md「记下了…」行）。
 // 各 tab 自己带「保存」按钮（同 Agent 页的显式保存）；记忆开关是 Switch，即时生效。
 
@@ -37,6 +41,9 @@ const TABS = [
   { id: "profile", label: "资料" },
   { id: "persona", label: "人设" },
   { id: "memory", label: "记忆" },
+  { id: "capabilities", label: "能力" },
+  { id: "channels", label: "渠道" },
+  { id: "routines", label: "例行" },
   { id: "advanced", label: "高级" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -150,6 +157,15 @@ export function RoleSettingsDetail({ id }: { id: string }) {
         </TabsContent>
         <TabsContent value="memory" className="pt-5">
           <RoleMemoryPanel role={role} />
+        </TabsContent>
+        <TabsContent value="capabilities" className="pt-5">
+          <RoleCapabilitiesTab role={role} />
+        </TabsContent>
+        <TabsContent value="channels" className="pt-5">
+          <RoleChannelsTab role={role} />
+        </TabsContent>
+        <TabsContent value="routines" className="pt-5">
+          <RoleRoutinesTab role={role} />
         </TabsContent>
         <TabsContent value="advanced" className="pt-5">
           <AdvancedTab role={role} roles={roles} />

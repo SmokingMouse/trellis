@@ -88,3 +88,15 @@ export function isRoleNameTaken(
   const n = name.trim();
   return !!n && roles.some((r) => r.id !== selfId && r.name.trim() === n);
 }
+
+/** 记忆列表里的正文摘录：去掉 markdown 列表 / 标题记号、丢掉空行，按行保留（配
+ * whitespace-pre-line + line-clamp 显示前两行）。直接塞原文会把「- 口语痛点」「- 听力
+ * 痛点」挤成一坨。 */
+export function memoryExcerpt(body: string, maxLines = 3): string {
+  return body
+    .split("\n")
+    .map((l) => l.trim().replace(/^#{1,6}\s+/, "").replace(/^[-*+]\s+/, "• "))
+    .filter(Boolean)
+    .slice(0, maxLines)
+    .join("\n");
+}
