@@ -1205,7 +1205,12 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     // /open 只回 home 会话 id（还在就给，归档 / 没聊过 = null），不建会话 ——
     // 第一句话发出去才建，免得点一下就多一条空会话。
     const r = await useRoleStore.getState().open(roleId);
-    if (r?.sessionId) {
+    // null = 请求失败（角色不存在 / 已删 / 断网）：别落一个指向不存在角色的草稿。
+    if (!r) {
+      toast.error("打不开这个角色");
+      return;
+    }
+    if (r.sessionId) {
       await get().previewSession(r.sessionId);
       set({ mobileNavOpen: false });
       return;
