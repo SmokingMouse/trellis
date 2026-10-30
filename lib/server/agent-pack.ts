@@ -123,7 +123,7 @@ function writePack(dir: string, a: AgentRecord): void {
   fm.push("---", "");
   fs.writeFileSync(
     path.join(dir, "agents", `${a.slug}.md`),
-    fm.join("\n") + a.systemPrompt + "\n",
+    fm.join("\n") + claudeAgentPrompt(a) + "\n",
   );
 
   const skillsDir = path.join(dir, "skills");
@@ -238,6 +238,16 @@ function codexAgentPrompt(a: AgentRecord): string {
   return sections.filter(Boolean).join("\n\n---\n\n");
 }
 
+/** claude 侧的人设正文。--agents JSON 里 prompt 是空串时 claude CLI 起不来：不报错、零输出，
+ * Trellis 这边只看到一轮「秒完成」的空回答（2026-10-30 实测：人设留空的角色句句如此）。
+ * 所以空人设兜一句最小的自我介绍；pack 的 md 正文同理。 */
+export function claudeAgentPrompt(
+  a: Pick<AgentRecord, "systemPrompt" | "name" | "description"> & { intro?: string },
+): string {
+  const about = (a.intro || a.description).trim();
+  return a.systemPrompt.trim() || `你是「${a.name}」${about ? `：${about}` : ""}。`;
+}
+
 export function resolveAgentSpawn(
   a: AgentRecord,
   family: "claude" | "codex" = "claude",
@@ -273,7 +283,7 @@ export function resolveAgentSpawn(
     const def: InlineAgentDef = {
       // description 不能为空：claude 用它做 agent 的自述。空串时兜个底。
       description: a.description || a.name,
-      prompt: a.systemPrompt,
+      prompt: claudeAgentPrompt(a),
     };
     // tools 走 --agents JSON 还是走 --tools 是有区别的：前者是「这个 agent 能用
     // 什么」，后者是「这次 spawn 全局有什么」。两处都设，取交集，语义最紧。
@@ -295,7 +305,7 @@ export function resolveAgentSpawn(
       agentsJson: JSON.stringify({
         [a.slug]: {
           description: a.description || a.name,
-          prompt: a.systemPrompt,
+          prompt: claudeAgentPrompt(a),
           ...(a.tools ? { tools: a.tools } : {}),
           ...(a.model ? { model: a.model } : {}),
         },
