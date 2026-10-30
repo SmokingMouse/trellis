@@ -65,6 +65,11 @@ import { isButlerSession } from "@/lib/butler";
 import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { RoleMemoryLines, useRoleMemorySync } from "./RoleMemoryLines";
 import { clockLabel, dayDividerLabel, sameLocalDay } from "@/lib/role-timeline";
+import { useCurrentGroup } from "@/hooks/useCurrentGroup";
+import { useGroupEvents } from "@/hooks/useGroupEvents";
+import { useGroupStore } from "@/stores/groupStore";
+import { GroupMessage, GroupRoundTail, isVisibleGroupNode, useMarkGroupRead } from "./GroupTimeline";
+import { GroupComposer } from "./GroupComposer";
 
 // #7: the unified reading/chat surface for EVERY mode (chat /
 // project). One thread anchored at the active node: ancestors above, the
@@ -334,6 +339,17 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   const role = useCurrentRole();
   const isRole = role !== null && !isHerdr;
   useRoleMemorySync(isRole ? role.id : null);
+  // 群聊（docs/roles-p2.md B）：所有节点按时间一条线，每条交给 GroupMessage；输入框换 GroupComposer。
+  // 外壳（滚动跟随、键盘、输入框停靠）照旧。isGroup 为 false 时下面一律走原路。
+  const isGroup = session?.kind === "group" && !isHerdr;
+  const group = useCurrentGroup();
+  const groupRound = useGroupStore((s) => (isGroup && session ? (s.rounds[session.id] ?? null) : null));
+  const groupsLoaded = useGroupStore((s) => s.loaded);
+  useGroupEvents(isGroup && session ? session.id : null);
+  useMarkGroupRead(isGroup, nodes);
+  useEffect(() => {
+    if (isGroup && !group && !groupsLoaded) void useGroupStore.getState().refresh();
+  }, [isGroup, group, groupsLoaded]);
   const confirmDelete = useConfirmDelete();
   const nodeIndices = useMemo(() => buildNodeIndex(nodes), [nodes]);
   const [openBranches, setOpenBranches] = useState<Set<string>>(new Set());
@@ -400,6 +416,12 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     topicStarts?: Set<string>;
   } => {
     if (isRole) return roleThread(nodes, activeNodeId);
+    if (isGroup) {
+      const thread = Object.values(nodes)
+        .filter(isVisibleGroupNode)
+        .sort((a, b) => a.createdAt - b.createdAt || nodeSort(a, b));
+      return { anchorId: thread.at(-1)?.id ?? null, thread, branchesByNode: new Map<string, ChatNode[]>() };
+    }
     const anchor =
       activeNodeId && nodes[activeNodeId]
         ? nodes[activeNodeId]
@@ -437,7 +459,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       if (branches.length > 0) branchesByNode.set(n.id, branches);
     }
     return { anchorId: anchor.id, thread, branchesByNode };
-  }, [activeNodeId, nodes, session?.rootNodeId, isRole]);
+  }, [activeNodeId, nodes, session?.rootNodeId, isRole, isGroup]);
 
   const entering = useEnteringTurns(session?.id ?? null, nodes, threadData.thread);
 
@@ -971,7 +993,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               }))}
             />
             {/* 角色会话强制线性（多个话题串成一条时间线），画布入口不给 */}
-            {!isHerdr && !isRole && (
+            {!isHerdr && !isRole && !isGroup && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -1023,14 +1045,18 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           <EmptyState
             icon={MessageSquareDashed}
             title={
-              session.origin === "external"
+              isGroup
+                ? "群里还没人说话"
+                : session.origin === "external"
                 ? session.externalStatus === "closed"
                   ? "外部线程已结束"
                   : "外部线程已收编"
                 : "还没有对话"
             }
             description={
-              session.origin === "external" && session.externalStatus !== "closed"
+              isGroup
+                ? "说点什么，@ 指定谁来回；不 @ 时按群设置挑人"
+                : session.origin === "external" && session.externalStatus !== "closed"
                 ? "可以在下方直接提问，或从下面挑一句开始"
                 : undefined
             }
@@ -1056,6 +1082,28 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         ) : (
           threadData.thread.map((node, idx) => {
             const prevNode = idx > 0 ? threadData.thread[idx - 1] : undefined;
+            if (isGroup) {
+              const groupDayBreak = !prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt);
+              return (
+                <Fragment key={node.id}>
+                  {groupDayBreak && (
+                    <div
+                      data-role-day-divider
+                      role="separator"
+                      aria-label={dayDividerLabel(node.createdAt)}
+                      className={`${idx > 0 ? "mt-2" : "mt-1"} mb-5 flex items-center gap-3 text-[11.5px] font-medium text-ink-faint select-none`}
+                    >
+                      <div className="flex-1 border-t border-line" />
+                      <span className="tabular-nums">{dayDividerLabel(node.createdAt)}</span>
+                      <div className="flex-1 border-t border-line" />
+                    </div>
+                  )}
+                  <div ref={setRoundRef(node.id)} data-thread-node-id={node.id} tabIndex={-1} className="scroll-mt-3 outline-none">
+                    <GroupMessage node={node} group={group} isLatest={idx === threadData.thread.length - 1} />
+                  </div>
+                </Fragment>
+              );
+            }
             // 角色时间线：新话题的首轮与上一轮不在同一个 claude 会话里，不做压缩判定。
             const topicStart = isRole && Boolean(threadData.topicStarts?.has(node.id));
             const dayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
@@ -1191,6 +1239,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           );
         })
         )}
+        {isGroup && <GroupRoundTail group={group} round={groupRound} nodes={nodes} />}
         {isHerdr && herdrPane && (
           // data-herdr-session-card：点「需要你」通知落地后按窗格 id 定位到这里（hooks/usePushBridge）。
           <div className="mt-4" data-herdr-session-card={herdrPane.paneId}>
@@ -1242,6 +1291,14 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                 sessionId={session.id}
                 pane={herdrPane}
                 loading={herdrSnapshot.loading}
+                mobileCompact={isMobile}
+                onMobileExpandedChange={onComposerExpandedChange}
+              />
+            ) : null
+          ) : isGroup ? (
+            group ? (
+              <GroupComposer
+                group={group}
                 mobileCompact={isMobile}
                 onMobileExpandedChange={onComposerExpandedChange}
               />

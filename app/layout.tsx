@@ -4,6 +4,7 @@ import "./globals.css";
 import { PREF_KEYS } from "@/lib/prefs";
 import { AppProviders } from "@/components/ui/AppProviders";
 import { NewRoleHost } from "@/components/NewRoleModal";
+import { NewGroupHost } from "@/components/NewGroupModal";
 import { splashStartupImages } from "@/lib/pwa-splash";
 
 export const metadata: Metadata = {
@@ -99,6 +100,7 @@ export default function RootLayout({
           {children}
           {/* 新建角色弹窗：侧栏 ＋ 和设置页都开这一个（开关在 roleStore），挂在根上两边都够得着 */}
           <NewRoleHost />
+          <NewGroupHost />
         </AppProviders>
       </body>
     </html>

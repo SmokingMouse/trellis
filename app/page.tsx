@@ -91,6 +91,8 @@ export default function Home() {
   const roleDraft = useSessionStore((s) => s.roleDraft);
   const openRole = useSessionStore((s) => s.openRole);
   const glanceOpen = useRoleStore((s) => s.glanceOpen);
+  // 群聊（docs/roles-p2.md B）：一条线的时间线，强制线性、不给树浮窗。
+  const isGroup = session?.kind === "group";
   // 管家右栏的刷新信号：本会话里已结束的轮次数 —— 管家每答完一轮（多半刚改了
   // 配置）右栏就重拉一次总览。
   const butlerSettled = useSessionStore((s) =>
@@ -256,10 +258,10 @@ export default function Home() {
 
   useEffect(() => {
     // 角色是一条时间线（所有根串起来），画布对它没有意义，同管家一律落线性。
-    if ((isMobile || herdrControlled || butler || roleId) && sessionId) {
+    if ((isMobile || herdrControlled || butler || roleId || isGroup) && sessionId) {
       setViewMode("linear");
     }
-  }, [isMobile, herdrControlled, butler, roleId, sessionId, setViewMode]);
+  }, [isMobile, herdrControlled, butler, roleId, isGroup, sessionId, setViewMode]);
 
   // 手机端切会话 / 回首页 / 进总览走 View Transition（lib/nav-view-transition：包住 store 的导航动作，
   // 回调里 flushSync 提交）。桌面不装，原样直接替换。
@@ -324,7 +326,7 @@ export default function Home() {
         <LinearThreadView isMobile={isMobile} />
       )}
       {/* 管家会话：右栏换成「当前配置」，树浮窗让位（管家是一条线的对话，不需要树导航） */}
-      {session && viewMode === "linear" && !butler && !role && <TreePanel />}
+      {session && viewMode === "linear" && !butler && !role && !isGroup && <TreePanel />}
       {session && role && !isMobile && glanceOpen && <RoleGlancePanel role={role} />}
       {session && butler && !isMobile && <ButlerPanel refreshKey={`${session.id}:${butlerSettled}`} />}
       {session && butler && <ButlerChangesSync sessionId={session.id} />}
