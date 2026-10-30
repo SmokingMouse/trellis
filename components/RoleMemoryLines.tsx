@@ -59,12 +59,15 @@ function MemoryLine({
   missing: boolean;
 }) {
   const [state, setState] = useState<"idle" | "busy" | "undone">("idle");
+  // 撤销后缓存里就没这条了，名字记在撤销那一刻，划掉的行仍显示原名。
+  const [undoneName, setUndoneName] = useState<string | null>(null);
   const undone = state === "undone";
   const gone = undone || missing;
   const editHref = `/settings/roles/${encodeURIComponent(role.id)}?tab=memory`;
 
   const undo = async () => {
     setState("busy");
+    setUndoneName(name);
     // roleStore.deleteMemory 顺带更新记忆缓存与 memoryCount：一览「最近记住的」、顶栏「记得 N 条」跟着变。
     const err = await useRoleStore.getState().deleteMemory(role.id, write.file);
     if (err) {
@@ -86,7 +89,7 @@ function MemoryLine({
       <Icon icon={Brain} size="sm" className="shrink-0 text-fork" />
       <span className={`min-w-0 flex-1 truncate max-md:basis-[calc(100%-30px)] max-md:whitespace-normal ${gone ? "line-through" : ""}`}>
         {write.tool === "Write" ? "记下了 " : "更新了 "}
-        <b className="font-medium text-ink">{name ?? write.file.replace(/\.md$/, "")}</b>
+        <b className="font-medium text-ink">{name ?? undoneName ?? write.file.replace(/\.md$/, "")}</b>
       </span>
       {undone ? (
         <span className="shrink-0 px-1.5 text-label text-ink-faint">已撤销</span>
