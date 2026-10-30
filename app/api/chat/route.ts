@@ -10,6 +10,7 @@ import { getProvider } from "@/lib/llm/server";
 import { hasAliveHerdrBinding } from "@/lib/server/herdr-bindings";
 import { getAgentBySlug, resolveEnabledAgent } from "@/lib/server/agents";
 import { resolveAgentSpawn } from "@/lib/server/agent-pack";
+import { adoptRoleHomeSession, planRoleNewSession, roleSpawnExtras } from "@/lib/server/roles";
 import { generateTopicLabel, generateSessionTitle } from "@/lib/llm/topic";
 import {
   applyAutoTitle,
@@ -331,10 +332,14 @@ async function handleChatPost(req: Request) {
   try {
     if (body.kind === "root") {
       resolvedAttachments = sanitizeAttachments(body.attachments);
-      if (body.sessionId) {
+      // 角色（docs/roles-p1.md）：新会话请求带的是角色 → 固定会话还在就在里面开新根
+      // （防重复建），否则下面正常建、建完认作固定会话。mode / cwd 一律由角色定。
+      const rolePlan = body.sessionId ? null : planRoleNewSession(body.agentId);
+      const reuseSessionId = body.sessionId ?? rolePlan?.reuseSessionId ?? null;
+      if (reuseSessionId) {
         // Parallel root inside an existing session — mode/workspace stay
         // locked from the existing session row, ignore any body fields.
-        trellisSessionId = body.sessionId;
+        trellisSessionId = reuseSessionId;
         const existing = getSession(trellisSessionId);
         if (!existing) {
           return Response.json({ error: "session not found" }, { status: 404 });
@@ -352,10 +357,13 @@ async function handleChatPost(req: Request) {
           now,
           attachments: resolvedAttachments,
         });
-        createdEvent = { type: "created", node };
+        // 角色草稿态的客户端以为在建新会话：把会话行一起给它。
+        createdEvent = rolePlan
+          ? { type: "created", session: getSession(trellisSessionId), node }
+          : { type: "created", node };
       } else {
         // New session — body picks the mode + workspace, then locks them.
-        resolvedMode = isMode(body.mode) ? body.mode : "chat";
+        resolvedMode = rolePlan ? "project" : isMode(body.mode) ? body.mode : "chat";
         const wp =
           typeof body.workspacePath === "string" && body.workspacePath.trim()
             ? body.workspacePath
@@ -376,13 +384,13 @@ async function handleChatPost(req: Request) {
           resolvedWorkspacePath = null;
         } else {
           // project requires a path.
-          if (!wp) {
+          if (!wp && !rolePlan) {
             return Response.json(
               { error: `${resolvedMode} mode requires workspacePath` },
               { status: 400 },
             );
           }
-          resolvedWorkspacePath = wp;
+          resolvedWorkspacePath = rolePlan ? rolePlan.workspacePath : wp;
         }
         // 权限确认钳制：claude / codex 的 project 可开（chat 无文件工具；mock
         // 无审批概念）。codex 走 app-server 审批协议（agent@0.7.0 起），与 claude
@@ -394,10 +402,12 @@ async function handleChatPost(req: Request) {
         // Both real providers support the product-level Agent abstraction.
         // Claude uses --agent/plugin packs; Codex receives an equivalent
         // persona + selected skill instructions through its system prompt.
-        resolvedAgentId =
-          typeof body.agentId === "string" &&
-          providerFamily(providerId) !== "mock" &&
-          resolveEnabledAgent(body.agentId)
+        // 角色在 mock 下也锁 agent_id：固定会话靠它认主（mock 本身不吃人设）。
+        resolvedAgentId = rolePlan
+          ? rolePlan.role.id
+          : typeof body.agentId === "string" &&
+              providerFamily(providerId) !== "mock" &&
+              resolveEnabledAgent(body.agentId)
             ? body.agentId
             : null;
         trellisSessionId = nid();
@@ -417,8 +427,15 @@ async function handleChatPost(req: Request) {
           agentId: resolvedAgentId,
           bindingType: newProjectBinding(resolvedMode, resolvedAgentId),
           attachments: resolvedAttachments,
+          // 角色目录本身当 cwd 时别把它登记成一个「项目」。
+          registerWorkspace: !(rolePlan && resolvedWorkspacePath === rolePlan.homeDir),
         });
-        createdEvent = { type: "created", session, node };
+        if (rolePlan) {
+          adoptRoleHomeSession(rolePlan.role.id, trellisSessionId);
+          createdEvent = { type: "created", session: getSession(trellisSessionId) ?? session, node };
+        } else {
+          createdEvent = { type: "created", session, node };
+        }
       }
       questionForLLM = body.question;
     } else if (body.kind === "branch") {
@@ -868,9 +885,16 @@ async function handleChatPost(req: Request) {
   // 绝不让「人设没了」变成「会话发不出消息」。
   // @提及优先于会话人设：这一轮是外援答的。
   const agentRecord = mentionActive ? mentionAgent : resolveEnabledAgent(resolvedAgentId);
-  const agentSpawn = agentRecord && family !== "mock"
+  const baseAgentSpawn = agentRecord && family !== "mock"
     ? resolveAgentSpawn(agentRecord, family, resolvedWorkspacePath)
     : null;
+  // 角色记忆：挂角色目录 + 追加记忆说明（记忆关掉 / 非角色 / @提及外援 → 原样）。
+  const roleExtras = baseAgentSpawn && agentRecord && !mentionActive
+    ? roleSpawnExtras(agentRecord, spawnCwd)
+    : null;
+  const agentSpawn = baseAgentSpawn && roleExtras
+    ? { ...baseAgentSpawn, ...roleExtras }
+    : baseAgentSpawn;
   // 每轮落一份「谁答的」。会话级也记 —— agent 定义是 live 引用（改了老会话跟着变），
   // 这一列是事后唯一能追溯「当时哪个 agent 答的」的线索。
   // S176：节点行此刻已经是 status='streaming' 了。从这里到 startRun 之间任何一次

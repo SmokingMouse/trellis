@@ -1074,6 +1074,8 @@ export function createSessionWithRoot(args: {
   requireApproval?: boolean;
   agentId?: string | null;
   attachments?: NodeAttachment[];
+  /** false = 不登记进项目/工作区（角色目录这种 trellis 自管的目录不该冒成一个项目）。 */
+  registerWorkspace?: boolean;
 }): { session: ApiSession; node: ApiNode } {
   const db = getDB();
   const mode = args.mode ?? "chat";
@@ -1089,7 +1091,7 @@ export function createSessionWithRoot(args: {
   // S1：归组。在事务**外**解析 —— ensureWorkspaceForPath 要 spawn git，
   // 放进事务里会让写锁多握几十毫秒。解析失败（目录消失/无 git）返回 null，
   // session 照常创建、只是不归组：归属是锦上添花，绝不该拦住发消息。
-  const workspaceId = workspacePath
+  const workspaceId = workspacePath && args.registerWorkspace !== false
     ? resolveWorkspaceId(workspacePath)
     : null;
   // Limit new AS bindings to the rollout project after canonical workspace

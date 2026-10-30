@@ -33,6 +33,10 @@ import { ButlerHome } from "@/components/ButlerHome";
 import { ButlerPanel } from "@/components/ButlerPanel";
 import { ButlerChangesSync } from "@/components/ButlerChangesSync";
 import { isButlerSession } from "@/lib/butler";
+import { RoleHome } from "@/components/RoleHome";
+import { RoleGlancePanel } from "@/components/RoleGlancePanel";
+import { useCurrentRole } from "@/hooks/useCurrentRole";
+import { useRoleStore } from "@/stores/roleStore";
 import { useHomeShortcut } from "@/hooks/useHomeShortcut";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ScrollHideProvider } from "@/hooks/useScrollHide";
@@ -82,6 +86,11 @@ export default function Home() {
   const butlerDraft = useSessionStore((s) => s.butlerDraft);
   const openButler = useSessionStore((s) => s.openButler);
   const butler = isButlerSession(session);
+  // 角色会话 / 角色草稿（docs/roles-p1.md）：右栏换成一览，树浮窗让位；草稿落 RoleHome。
+  const role = useCurrentRole();
+  const roleDraft = useSessionStore((s) => s.roleDraft);
+  const openRole = useSessionStore((s) => s.openRole);
+  const glanceOpen = useRoleStore((s) => s.glanceOpen);
   // 管家右栏的刷新信号：本会话里已结束的轮次数 —— 管家每答完一轮（多半刚改了
   // 配置）右栏就重拉一次总览。
   const butlerSettled = useSessionStore((s) =>
@@ -166,6 +175,17 @@ export default function Home() {
     void openButler();
   }, [hydrated, deepLinkApplied, openButler]);
 
+  // /?role=<id>：hydrate 完打开角色（有固定会话进会话，没有落草稿）。同时带着 ?session 时
+  // 以会话深链为准（它已经落到那条会话上了），这里不再抢。参数由下面的 URL 同步维护。
+  const roleHandledRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || !deepLinkApplied || roleHandledRef.current) return;
+    roleHandledRef.current = true;
+    const q = new URLSearchParams(window.location.search);
+    const id = q.get("role");
+    if (id && !q.get("session")) void openRole(id);
+  }, [hydrated, deepLinkApplied, openRole]);
+
   // /herdr → /?view=herdr：hydrate 完打开 Herdr 总览。参数在总览期间保留（下面的
   // URL 同步负责），刷新仍落回总览；进任何会话后参数随之消失。
   const herdrHandledRef = useRef(false);
@@ -186,7 +206,7 @@ export default function Home() {
     if (!hydrated || !deepLinkApplied || modeRestoredRef.current) return;
     modeRestoredRef.current = true;
     const q = new URLSearchParams(initialQuery);
-    if (q.get("session") || q.get("view") || q.get("butler")) return;
+    if (q.get("session") || q.get("view") || q.get("butler") || q.get("role")) return;
     if (parseAppMode(readRaw(PREF_KEYS.appMode)) !== "herdr") return;
     const current = useSessionStore.getState().session;
     if (!isHerdrSession(current, fleet)) openHerdr();
@@ -202,6 +222,7 @@ export default function Home() {
   // every mode whenever the user arrives on a (different) session. They can
   // still switch to the canvas; we don't force them back.
   const sessionId = session?.id;
+  const roleId = role?.id ?? null;
   const activeNodeId = useSessionStore((s) => s.activeNodeId);
 
   // F4: the URL is the reloadable form of the current reading position.
@@ -212,6 +233,10 @@ export default function Home() {
     if (!hydrated || !deepLinkApplied) return;
     if (!sessionId && useSessionStore.getState().hydrateError) return;
     const url = migrateMapUrl(new URL(window.location.href));
+    // ?role=<id>：角色草稿与角色会话都挂上，刷新 / 分享能回到同一个角色；别的视图抹掉。
+    // ?role 的深链还没处理完（openRole 在途）时别抢先抹。
+    if (roleId) url.searchParams.set("role", roleId);
+    else if (roleHandledRef.current && !(homeOpen && roleDraft)) url.searchParams.delete("role");
     if (!sessionId) {
       url.searchParams.delete("session");
       url.searchParams.delete("node");
@@ -227,13 +252,14 @@ export default function Home() {
     const next = `${url.pathname}${url.search}${url.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) window.history.replaceState(window.history.state, "", next);
-  }, [activeNodeId, deepLinkApplied, hydrated, sessionId, herdrOpen]);
+  }, [activeNodeId, deepLinkApplied, hydrated, sessionId, herdrOpen, roleId, homeOpen, roleDraft]);
 
   useEffect(() => {
-    if ((isMobile || herdrControlled || butler) && sessionId) {
+    // 角色是一条时间线（所有根串起来），画布对它没有意义，同管家一律落线性。
+    if ((isMobile || herdrControlled || butler || roleId) && sessionId) {
       setViewMode("linear");
     }
-  }, [isMobile, herdrControlled, butler, sessionId, setViewMode]);
+  }, [isMobile, herdrControlled, butler, roleId, sessionId, setViewMode]);
 
   // 手机端切会话 / 回首页 / 进总览走 View Transition（lib/nav-view-transition：包住 store 的导航动作，
   // 回调里 flushSync 提交）。桌面不装，原样直接替换。
@@ -284,14 +310,22 @@ export default function Home() {
         </div>
       )}
       <OfflineBanner />
-      {showHome && (butlerDraft ? <ButlerHome isMobile={isMobile} /> : <HomeView isMobile={isMobile} />)}
+      {showHome &&
+        (butlerDraft ? (
+          <ButlerHome isMobile={isMobile} />
+        ) : roleDraft && role ? (
+          <RoleHome role={role} isMobile={isMobile} />
+        ) : (
+          <HomeView isMobile={isMobile} />
+        ))}
       {showHerdr && <HerdrOverview isMobile={isMobile} />}
       {!session && !showHome && !showHerdr && <QuestionInput isMobile={isMobile} />}
       {session && viewMode === "linear" && (
         <LinearThreadView isMobile={isMobile} />
       )}
       {/* 管家会话：右栏换成「当前配置」，树浮窗让位（管家是一条线的对话，不需要树导航） */}
-      {session && viewMode === "linear" && !butler && <TreePanel />}
+      {session && viewMode === "linear" && !butler && !role && <TreePanel />}
+      {session && role && !isMobile && glanceOpen && <RoleGlancePanel role={role} />}
       {session && butler && !isMobile && <ButlerPanel refreshKey={`${session.id}:${butlerSettled}`} />}
       {session && butler && <ButlerChangesSync sessionId={session.id} />}
       {session && <SessionMap isMobile={isMobile} />}

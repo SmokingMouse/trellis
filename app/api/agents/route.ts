@@ -23,7 +23,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "expected { slug, name }" }, { status: 400 });
   }
   try {
-    const agent = createAgent(obj as unknown as AgentInput);
+    // 角色只能走 /api/roles（要建目录）；这里一律建普通 agent。
+    const agent = createAgent({ ...(obj as unknown as AgentInput), kind: "agent" });
     return Response.json({ agent }, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

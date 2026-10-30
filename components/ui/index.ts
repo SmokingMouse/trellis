@@ -78,3 +78,4 @@ export { ErrorCallout } from "./ErrorCallout";
 
 // 宿主
 export { AppProviders } from "./AppProviders";
+export { RoleAvatar, type AvatarSize } from "./Avatar";

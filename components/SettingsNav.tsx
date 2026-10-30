@@ -6,6 +6,7 @@ import {
   CalendarClock,
   ChevronRight,
   CircleArrowUp,
+  ContactRound,
   Cpu,
   FolderSync,
   KeyRound,
@@ -29,6 +30,7 @@ import {
 // Record 保证新增 key 漏配时编译失败。
 const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   bot: Bot,
+  "contact-round": ContactRound,
   "calendar-clock": CalendarClock,
   cpu: Cpu,
   "messages-square": MessagesSquare,

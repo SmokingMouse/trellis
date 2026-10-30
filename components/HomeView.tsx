@@ -1,4 +1,5 @@
 "use client";
+import { RoleHomeList } from "@/components/RoleHomeList";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -239,6 +240,8 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
           isMobile ? "pt-5" : "pt-9",
         )}
       >
+        {/* 手机首页顶部：角色（原型 09-roles.html s-mlist）。桌面的角色入口在侧栏。 */}
+        {isMobile && <RoleHomeList />}
         {/* ── 问候 + 新会话输入（原型 .greet / .greet-sub / .starts） ── */}
         <section aria-labelledby="home-greeting" className="flex flex-col">
           <h1

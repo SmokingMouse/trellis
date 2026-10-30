@@ -1,0 +1,1486 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis · 角色原型（2026-10-30）</title>
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var t = q.get("theme") || localStorage.getItem("bui-mock-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    if (t === "dark") document.documentElement.classList.add("dark");
+    var a = q.get("accent") || localStorage.getItem("bui-mock-accent") || "bui";
+    document.documentElement.dataset.accent = a;
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   Trellis × Beautiful UI 原型
+   token 取自 beautifului.dev（MIT，Shane Levine）站点样式表原值：
+   page / canvas / surface / inset 四层表面 + ink 三档 + 叠层柔阴影
+   （hairline / btn / card / raised / overlay）+ chip 6 / control 8 /
+   card 10 / window 14 圆角 + ease-out-strong 曲线。
+   与 9/28「克制工具风」的主要差别：
+   - 描边 → 1px ring + 多层极淡投影（卡片有「浮起」感，不再是纸片）
+   - 动效：进场 fade-up、chip pop-in、文字 shimmer、悬停滑块 glide
+   - 运行态有专门的视觉语言：像素格 loader、进度环、可折叠轨迹
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  --page: oklch(98.5% .001 286.376);
+  --canvas: oklch(96.1% .002 247.84);
+  --surface: oklch(100% 0 0);
+  --inset: oklch(97.9% .002 247.839);
+  --hover: oklch(97% .002 247.839);
+  --hover-2: oklch(93.3% .003 247.86);
+  --ink: oklch(24.7% .006 258.361);
+  --ink-2: oklch(50.6% .01 264.477);
+  --ink-3: oklch(69.5% .009 264.505);
+  --line: oklch(94.6% .003 264.542);
+  --line-strong: oklch(91.2% .005 258.326);
+  --field: oklch(96.1% .001 286.375);
+
+  --accent: oklch(62.6% .205 254.947);
+  --accent-ink: oklch(55.6% .187 255.617);
+  --accent-tint: oklch(96% .019 252.878);
+  --green: oklch(60.3% .155 150.883);
+  --green-tint: oklch(95.8% .017 159.118);
+  --orange: oklch(68.9% .179 49.902);
+  --orange-tint: oklch(96.4% .021 67.581);
+  --red: oklch(62.1% .192 23.042);
+  --red-tint: oklch(95.6% .017 17.462);
+  --violet: oklch(58% .11 330);
+  --violet-tint: oklch(96.5% .02 330);
+  --teal: oklch(60% .08 195);
+  --teal-tint: oklch(97% .012 195);
+
+  --tooltip-bg: oklch(27.2% .008 264.435);
+  --tooltip-fg: oklch(97.6% .002 247.839);
+
+  --shadow-xs: 0 0 4px 0 #0000000a;
+  --shadow-sm: 0 18px 47px 0 #00000008, 0 7.5px 19px 0 #00000005, 0 4px 10.5px 0 #00000005, 0 2.3px 5.8px 0 #00000003, 0 1.2px 3.1px 0 #00000003, 0 .5px 1.3px 0 #00000003;
+  --shadow-md: 0 17.54px 23.39px 0 #0000000a, 0 9.4px 12.5px 0 #00000008, 0 5.25px 7px 0 #00000005, 0 2.79px 3.72px -2px #00000003, 0 1.16px 1.5px 0 #00000003;
+  --shadow-lg: 0 25px 50px 0 #0000000d, 0 12px 24px 0 #0000000a, 0 6px 12px 0 #00000008, 0 3px 6px 0 #00000005, 0 1.5px 3px 0 #00000005;
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-btn: 0 0 0 1px var(--line-strong), var(--shadow-xs);
+  --shadow-card: 0 0 0 1px var(--line), var(--shadow-sm);
+  --shadow-raised: 0 0 0 1px var(--line), var(--shadow-md);
+  --shadow-overlay: 0 0 0 1px var(--line), var(--shadow-lg);
+  --shadow-inset-field: inset 0 1px 2px oklch(0% 0 0 / .12);
+
+  --r-chip: 6px; --r-control: 8px; --r-card: 10px; --r-window: 14px;
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  --ease-link: cubic-bezier(.16, 1, .3, 1);
+  --ease-io: cubic-bezier(.77, 0, .175, 1);
+}
+/* 对照：trellis 现行的低饱和蓝紫（9/28 裁决），切换看哪个更合适 */
+[data-accent="trellis"] {
+  --accent: oklch(52% .12 277);
+  --accent-ink: oklch(42% .1 277);
+  --accent-tint: oklch(96.5% .014 277);
+}
+.dark {
+  color-scheme: dark;
+  --page: oklch(20.9% .004 264.477);
+  --canvas: oklch(23.1% .004 264.487);
+  --surface: oklch(26% .006 271.191);
+  --inset: oklch(24.3% .004 264.492);
+  --hover: oklch(28.9% .006 271.22);
+  --hover-2: oklch(31.8% .007 274.747);
+  --ink: oklch(96.4% .002 247.839);
+  --ink-2: oklch(73.1% .008 260.731);
+  --ink-3: oklch(54.1% .01 264.484);
+  --line: oklch(30.8% .006 258.354);
+  --line-strong: oklch(35.6% .007 264.474);
+  --field: oklch(29.3% .006 271.223);
+  --accent: oklch(68% .173 253.301);
+  --accent-ink: oklch(78.8% .113 248.33);
+  --accent-tint: oklch(68% .173 253.301 / .16);
+  --green: oklch(70.5% .154 153.814);
+  --green-tint: oklch(70.5% .154 153.814 / .14);
+  --orange: oklch(74.6% .156 55.642);
+  --orange-tint: oklch(74.6% .156 55.642 / .14);
+  --red: oklch(66.6% .18 21.433);
+  --red-tint: oklch(66.6% .18 21.433 / .14);
+  --violet: oklch(70% .11 330);
+  --violet-tint: oklch(70% .11 330 / .14);
+  --teal: oklch(72% .08 195);
+  --teal-tint: oklch(72% .08 195 / .14);
+  --tooltip-bg: oklch(18.2% .004 264.459);
+  --shadow-btn: 0 0 0 1px oklch(100% 0 0 / .1), 0 1px 2px oklch(0% 0 0 / .3);
+  --shadow-card: 0 0 0 1px oklch(100% 0 0 / .11), 0 1px 2px oklch(0% 0 0 / .2), 0 2px 6px oklch(0% 0 0 / .2);
+  --shadow-raised: 0 0 0 1px oklch(100% 0 0 / .13), 0 2px 10px oklch(0% 0 0 / .22);
+  --shadow-overlay: 0 0 0 1px oklch(100% 0 0 / .15), 0 8px 28px oklch(0% 0 0 / .34);
+  --shadow-inset-field: inset 0 1px 2px oklch(0% 0 0 / .4);
+}
+.dark[data-accent="trellis"] {
+  --accent: oklch(68% .11 277);
+  --accent-ink: oklch(80% .08 277);
+  --accent-tint: oklch(68% .11 277 / .16);
+}
+
+@keyframes shimmer-text { 0% { background-position: 150% } to { background-position: -50% } }
+@keyframes fade-up { 0% { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+@keyframes fade-in { 0% { opacity: 0 } to { opacity: 1 } }
+@keyframes pop-in { 0% { opacity: 0; transform: scale(.95) } to { opacity: 1; transform: none } }
+@keyframes caret-blink { 0%, to { opacity: 1 } 50% { opacity: 0 } }
+@keyframes pixel-on { 0%, to { opacity: .15 } 18%, 42% { opacity: 1 } 62% { opacity: .15 } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes breathe { 0%, to { box-shadow: 0 0 0 0 color-mix(in oklab, var(--orange) 40%, transparent) } 50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--orange) 0%, transparent) } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+  color: var(--ink); background: var(--page);
+  -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01";
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+input, textarea { font: inherit; color: inherit; }
+.mono { font-family: var(--font-mono); }
+.tnum { font-variant-numeric: tabular-nums; }
+svg.i { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.sm { width: 14px; height: 14px; }
+svg.i.xs { width: 12px; height: 12px; stroke-width: 2.2; }
+.muted { color: var(--ink-2); } .faint { color: var(--ink-3); }
+.anim-up { animation: fade-up 380ms var(--ease) both; }
+.anim-pop { animation: pop-in 250ms var(--ease) both; }
+
+/* ── 原型操作条（不属于产品） ── */
+.proto-bar {
+  position: fixed; z-index: 100; left: 50%; bottom: 16px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px; padding: 4px;
+  background: var(--tooltip-bg); color: var(--tooltip-fg); border-radius: 999px;
+  box-shadow: 0 8px 28px oklch(0% 0 0 / .3); font-size: 12.5px;
+}
+.proto-bar button { height: 28px; padding: 0 12px; border-radius: 999px; color: oklch(80% .008 260); transition: background-color 120ms, color 120ms; }
+.proto-bar button:hover { color: #fff; background: oklch(100% 0 0 / .08); }
+.proto-bar button[aria-pressed="true"] { background: oklch(100% 0 0 / .14); color: #fff; }
+.proto-bar .sep { width: 1px; height: 16px; background: oklch(100% 0 0 / .14); margin: 0 4px; }
+.proto-bar .lbl { padding: 0 8px 0 10px; color: oklch(65% .008 260); }
+
+.screen { display: none; height: 100vh; }
+.screen.on { display: flex; }
+
+/* ──────────────────────────── 侧栏 ──────────────────────────── */
+.sidebar {
+  width: 260px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--page); padding: 8px 0 8px; position: relative;
+  transition: width 280ms var(--ease-link);
+}
+.sb-top { display: flex; align-items: center; gap: 4px; padding: 0 8px 10px; }
+.machine {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px;
+  border-radius: var(--r-control); transition: background-color 100ms, transform 100ms; text-align: left;
+}
+.machine:hover { background: var(--hover-2); }
+.machine:active { transform: scale(.99); }
+.logo {
+  width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex-shrink: 0;
+  background: var(--ink); color: var(--page);
+}
+.logo svg { width: 14px; height: 14px; }
+.machine .name { font-size: 14px; font-weight: 500; }
+.machine .sub { font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; line-height: 1.2; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex-shrink: 0; }
+.dot.green { background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); }
+.dot.orange { background: var(--orange); animation: breathe 2s ease-in-out infinite; }
+.dot.accent { background: var(--accent); }
+.icon-btn {
+  width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r-control);
+  color: var(--ink-3); transition: background-color 150ms, color 150ms, transform 100ms;
+}
+.icon-btn:hover { background: var(--hover-2); color: var(--ink); }
+.icon-btn:active { transform: scale(.96); }
+
+.menu {
+  position: absolute; z-index: 30; min-width: 232px; padding: 4px; background: var(--surface);
+  border-radius: var(--r-card); box-shadow: var(--shadow-overlay); transform-origin: top left;
+  animation: pop-in 160ms var(--ease) both; display: none;
+}
+.menu.open { display: block; }
+.menu .mi { width: 100%; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.menu .mi:hover { background: var(--hover); }
+.menu .mi .t { font-size: 13px; font-weight: 500; }
+.menu .mi .s { font-size: 11.5px; color: var(--ink-3); }
+.menu .mi .check { margin-left: auto; color: var(--accent); }
+.menu .hd { font-size: 11.5px; color: var(--ink-3); padding: 6px 8px 4px; }
+.menu hr { border: 0; height: 1px; background: var(--line); margin: 4px 0; }
+
+/* glide：一块高亮跟着指针滑动（beautifului Sidebar Nav） */
+.glide { position: relative; display: flex; flex-direction: column; gap: 1px; }
+.glide .hl {
+  position: absolute; left: 8px; right: 8px; top: 0; height: 32px; border-radius: 7px;
+  background: var(--hover-2); opacity: 0; pointer-events: none;
+  transition: transform 150ms var(--ease), height 150ms var(--ease), opacity 120ms;
+}
+.glide.hovering .hl { opacity: 1; }
+.glide.hovering .row.active { background: transparent; }
+.row {
+  position: relative; z-index: 1; margin: 0 8px; height: 32px; display: flex; align-items: center; gap: 8px;
+  padding: 0 8px; border-radius: var(--r-control); text-align: left; color: var(--ink-2);
+  transition: background-color 150ms, color 150ms, transform 100ms;
+}
+.row:active { transform: scale(.98); }
+.row.active { background: var(--hover-2); color: var(--ink); }
+.row .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; font-weight: 500; }
+.row .ct { font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.row .kbd { font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.row .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--orange-tint); color: var(--orange); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.row.sess { height: 30px; }
+.row.sess .lb { font-size: 13px; }
+.row .mode { width: 14px; height: 14px; display: grid; place-items: center; color: var(--ink-3); }
+.row .unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.row .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-strong); border-top-color: var(--ink-2); animation: spin 700ms linear infinite; }
+
+.sb-scroll { flex: 1; min-height: 0; overflow-y: auto; margin-top: 10px; scrollbar-width: none; }
+.sb-sec { display: flex; align-items: center; justify-content: space-between; margin: 0 8px 2px; padding: 0 8px; height: 30px; }
+.sb-sec .h { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.seg { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--field); box-shadow: var(--shadow-hairline); }
+.seg button { height: 22px; padding: 0 8px; border-radius: 5px; font-size: 11.5px; color: var(--ink-3); transition: background-color 120ms, color 120ms, box-shadow 120ms; }
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-btn); }
+.grp { margin: 6px 8px 0; padding: 0 8px; height: 26px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); font-weight: 500; }
+.grp .ct { margin-left: auto; font-weight: 500; }
+.grp svg { width: 12px; height: 12px; }
+.sb-foot { padding: 8px 8px 0; display: flex; align-items: center; gap: 4px; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, oklch(70% .12 254), oklch(70% .12 300)); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+
+/* ──────────────────────────── 主区 ──────────────────────────── */
+.main {
+  flex: 1; min-width: 0; margin: 8px 8px 8px 0; background: var(--surface);
+  border-radius: var(--r-window); box-shadow: var(--shadow-card);
+  display: flex; flex-direction: column; overflow: hidden; position: relative;
+}
+.topbar { height: 48px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line); }
+.topbar .title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .sp { flex: 1; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--r-chip);
+  background: var(--field); box-shadow: var(--shadow-hairline); font-size: 11.5px; color: var(--ink-2); white-space: nowrap;
+}
+.chip svg { width: 12px; height: 12px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 500; white-space: nowrap;
+}
+.pill.green { background: var(--green-tint); color: var(--green); }
+.pill.orange { background: var(--orange-tint); color: var(--orange); }
+.pill.red { background: var(--red-tint); color: var(--red); }
+.pill.gray { background: var(--field); color: var(--ink-2); }
+.pill.accent { background: var(--accent-tint); color: var(--accent-ink); }
+.pill.teal { background: var(--teal-tint); color: var(--teal); }
+.pill.violet { background: var(--violet-tint); color: var(--violet); }
+.pill .d { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px;
+  border-radius: var(--r-control); font-size: 13px; font-weight: 500; white-space: nowrap;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow-btn);
+  transition: background-color 100ms, transform 100ms, box-shadow 100ms;
+}
+.btn:hover { background: var(--hover); }
+.btn:active { transform: scale(.98); }
+.btn.primary { background: var(--ink); color: var(--page); box-shadow: inset 0 1px 0 oklch(100% 0 0 / .14), var(--shadow-xs); }
+.btn.primary:hover { background: color-mix(in oklab, var(--ink) 88%, var(--page)); }
+.btn.accent { background: var(--accent); color: #fff; box-shadow: inset 0 1px 0 oklch(100% 0 0 / .2), var(--shadow-xs); }
+.btn.ghost { background: transparent; box-shadow: none; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--hover-2); color: var(--ink); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12.5px; border-radius: 7px; }
+.btn.pillish { border-radius: 999px; }
+.btn kbd { font-family: var(--font-mono); font-size: 11px; opacity: .6; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* ──────────────────────────── 首页 ──────────────────────────── */
+.home { max-width: 760px; margin: 0 auto; padding: 72px 24px 120px; }
+.greet { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin: 0; }
+.greet-sub { margin: 6px 0 24px; color: var(--ink-2); font-size: 14px; }
+.cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+.card { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-card); overflow: hidden; }
+.card-hd { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.card-hd .ct { color: var(--ink-3); font-weight: 500; }
+.card-hd .sp { flex: 1; }
+.card-hd a { color: var(--ink-3); font-size: 12px; text-decoration: none; }
+.card-hd a:hover { color: var(--ink); }
+.trow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); transition: background-color 100ms; }
+.trow:hover { background: var(--hover); }
+.trow .tt { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .ts { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .body { flex: 1; min-width: 0; }
+.ring { width: 18px; height: 18px; flex-shrink: 0; }
+.ring circle { fill: none; stroke-width: 2.4; }
+.ring .bg { stroke: var(--line-strong); }
+.ring .fg { stroke: var(--ink-2); stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset 900ms var(--ease); }
+.ring.spinning { animation: spin 1.4s linear infinite; }
+.starts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.starts .btn { height: 28px; font-size: 12.5px; color: var(--ink-2); border-radius: 999px; }
+.starts .btn svg { color: var(--ink-3); }
+.recent { margin-top: 28px; }
+.recent-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; margin: 0 -10px; border-radius: var(--r-control); transition: background-color 100ms; }
+.recent-row:hover { background: var(--hover); }
+.recent-row .tt { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-row .meta { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.sec-h { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; font-weight: 500; color: var(--ink-3); margin-bottom: 6px; }
+
+/* ──────────────────────────── 输入框 ──────────────────────────── */
+.composer {
+  position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-window);
+  box-shadow: var(--shadow-card); transition: border-color 150ms, box-shadow 150ms;
+}
+.composer:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 10%, transparent), var(--shadow-card); }
+.composer textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; padding: 14px 16px 6px; font-size: 14.5px; line-height: 1.55; min-height: 54px; }
+.composer textarea::placeholder { color: var(--ink-3); }
+.c-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px; }
+.c-bar .sp { flex: 1; }
+.c-tool { height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 999px; font-size: 12.5px; color: var(--ink-2); transition: background-color 100ms, color 100ms; }
+.c-tool:hover { background: var(--hover-2); color: var(--ink); }
+.c-tool.icon { width: 28px; padding: 0; justify-content: center; }
+.c-tool .k { color: var(--ink-3); }
+.send { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--page); transition: transform 100ms, opacity 150ms; }
+.send:active { transform: scale(.94); }
+.send.stop { background: var(--ink); }
+.send.stop span { width: 10px; height: 10px; border-radius: 2px; background: var(--page); }
+.c-hint { display: flex; justify-content: space-between; padding: 6px 4px 0; font-size: 11.5px; color: var(--ink-3); }
+.slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); padding: 4px; background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-raised); display: none; animation: pop-in 160ms var(--ease) both; transform-origin: bottom left; }
+.slash.open { display: block; }
+.slash .mi { width: 100%; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.slash .mi.on, .slash .mi:hover { background: var(--hover); }
+.slash .mi .ic { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; background: var(--field); box-shadow: var(--shadow-hairline); color: var(--ink-2); }
+.slash .mi .t { font-size: 13px; font-weight: 500; }
+.slash .mi .s { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+
+/* ──────────────────────────── 对话 ──────────────────────────── */
+.thread { max-width: 760px; margin: 0 auto; padding: 28px 24px 24px; }
+.turn { padding: 4px 0 28px; animation: fade-up 380ms var(--ease) both; }
+.turn + .turn { border-top: 1px solid var(--line); padding-top: 24px; }
+.user-msg { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.user-msg .b { max-width: 82%; background: var(--field); border-radius: 14px 14px 4px 14px; padding: 9px 13px; font-size: 14.5px; line-height: 1.6; box-shadow: var(--shadow-hairline); }
+.answer { font-size: 15px; line-height: 1.72; }
+.answer p { margin: 0 0 12px; }
+.answer h3 { font-size: 15px; font-weight: 600; margin: 18px 0 8px; }
+.answer code.inl { font-family: var(--font-mono); font-size: 12.5px; background: var(--field); box-shadow: var(--shadow-hairline); padding: 1px 5px; border-radius: 5px; }
+.answer ul { margin: 0 0 12px; padding-left: 20px; }
+.answer li { margin: 2px 0; }
+.answer li::marker { color: var(--ink-3); }
+.caret { display: inline-block; width: 7px; height: 16px; vertical-align: -3px; background: var(--ink); border-radius: 1px; margin-left: 2px; animation: caret-blink 1s steps(1) infinite; }
+.answer-foot { display: flex; align-items: center; gap: 2px; margin-top: 4px; color: var(--ink-3); }
+.answer-foot .meta { font-size: 11.5px; margin-left: 8px; }
+.answer-foot .icon-btn { width: 28px; height: 28px; }
+
+/* 运行轨迹（Thinking + Tool Chips） */
+.trace { margin: 0 0 14px; }
+.trace-hd { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 6px; margin-left: -6px; border-radius: var(--r-control); transition: background-color 100ms; }
+.trace-hd:hover { background: var(--hover-2); }
+.trace-hd .lbl { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.shimmer { background-image: linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent !important; animation: shimmer-text 1.4s linear infinite; }
+.trace-hd .chev { color: var(--ink-3); transition: transform 300ms var(--ease); }
+.trace[data-open="false"] .trace-hd .chev { transform: rotate(-90deg); }
+.collapse { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 300ms var(--ease), opacity 300ms var(--ease); }
+.collapse > div { min-height: 0; overflow: hidden; }
+[data-open="false"] > .collapse { grid-template-rows: 0fr; opacity: 0; }
+.trace-body { position: relative; margin: 4px 0 0 6px; padding-left: 16px; }
+.trace-body::before { content: ""; position: absolute; left: 1px; top: 2px; bottom: 6px; width: 1px; background: var(--line-strong); }
+.step { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px; margin-left: -4px; border-radius: var(--r-control); transition: background-color 100ms; width: 100%; text-align: left; }
+.step:hover { background: var(--hover-2); }
+.step .ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--ink-3); position: relative; }
+.step .ico .ch { position: absolute; opacity: 0; transition: opacity 120ms, transform 150ms; transform: rotate(-90deg); }
+.step:hover .ico .base { opacity: 0; }
+.step:hover .ico .ch, .stepw[data-open="true"] .ico .ch { opacity: 1; }
+.stepw[data-open="true"] .ico .ch { transform: none; }
+.stepw[data-open="true"] .ico .base { opacity: 0; }
+.step .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.step .tg { display: inline-flex; align-items: center; height: 22px; min-width: 0; padding: 0 7px; border-radius: var(--r-chip); background: var(--field); box-shadow: var(--shadow-hairline); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step .tm { margin-left: auto; font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.stepw { animation: fade-up 300ms var(--ease) both; }
+.stepw > .collapse { transition-duration: 280ms; }
+.stepw[data-open="false"] > .collapse { grid-template-rows: 0fr; opacity: 0; }
+.detail { margin: 2px 0 6px 7px; padding: 2px 0 2px 14px; border-left: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-2); }
+.detail .add { color: var(--green); } .detail .del { color: var(--red); }
+.diffs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.diffchip { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 9px; border-radius: var(--r-chip); background: var(--surface); box-shadow: var(--shadow-btn); font-family: var(--font-mono); font-size: 11.5px; transition: background-color 100ms; animation: pop-in 250ms var(--ease) both; }
+.diffchip:hover { background: var(--hover); }
+.diffchip .a { color: var(--green); } .diffchip .r { color: var(--red); }
+
+/* 像素格 loader（beautifului Loading State · Drive） */
+.pix { display: inline-grid; grid-template-columns: repeat(3, 4px); gap: 1.5px; flex-shrink: 0; }
+.pix i { width: 4px; height: 4px; border-radius: 1px; background: var(--ink); opacity: .15; animation: pixel-on 650ms linear infinite; }
+.pix.round i { border-radius: 50%; }
+.loading { display: inline-flex; align-items: center; gap: 10px; height: 28px; }
+.loading .lbl { font-size: 13px; font-weight: 500; }
+.loading .el { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+
+/* 审批 / 提问卡（Approval Card） */
+.ask { margin: 4px 0 16px; border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow-card); overflow: hidden; animation: fade-up 380ms var(--ease) both; }
+.ask-hd { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; font-size: 12px; color: var(--ink-3); }
+.ask-hd .sp { flex: 1; }
+.ask-q { padding: 0 14px 10px; font-size: 14px; font-weight: 500; }
+.opts { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
+.opt { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px; border-radius: var(--r-control); text-align: left; transition: background-color 100ms; }
+.opt:hover { background: var(--hover); }
+.opt .n { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-family: var(--font-mono); background: var(--field); box-shadow: var(--shadow-hairline); color: var(--ink-2); flex-shrink: 0; }
+.opt .t { font-size: 13.5px; }
+.opt .s { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.opt.sel { background: var(--accent-tint); }
+.opt.sel .n { background: var(--accent); color: #fff; box-shadow: none; }
+.ask-ft { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--inset); }
+.ask-ft .sp { flex: 1; }
+.ask-ft .cmd { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); background: var(--field); box-shadow: var(--shadow-hairline); padding: 2px 6px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* 代码块（恒暗，延续现行裁决） */
+.code { margin: 12px 0 14px; border-radius: var(--r-card); overflow: hidden; background: #18181b; box-shadow: var(--shadow-card); }
+.dark .code { background: oklch(18.5% .004 264); }
+.code-hd { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px 0 12px; border-bottom: 1px solid oklch(100% 0 0 / .08); font-family: var(--font-mono); font-size: 11.5px; color: #a1a1aa; }
+.code-hd .sp { flex: 1; }
+.code-hd button { color: #a1a1aa; height: 24px; padding: 0 8px; border-radius: 6px; font-family: var(--font-sans); font-size: 12px; }
+.code-hd button:hover { background: oklch(100% 0 0 / .08); color: #fff; }
+.code pre { margin: 0; padding: 10px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; color: #e4e4e7; overflow-x: auto; }
+.code pre .ln { display: flex; padding: 0 14px 0 0; }
+.code pre .ln b { width: 38px; text-align: right; padding-right: 14px; color: #52525b; font-weight: 400; user-select: none; flex-shrink: 0; }
+.code pre .ln.add { background: rgb(46 160 67 / .16); } .code pre .ln.add b { color: #3fb950; }
+.code pre .ln.del { background: rgb(248 81 73 / .14); } .code pre .ln.del b { color: #f85149; }
+.k { color: #ff7b72; } .s { color: #a5d6ff; } .f { color: #d2a8ff; } .c { color: #6e7681; }
+
+.dock { flex-shrink: 0; padding: 0 24px 18px; }
+.dock-in { max-width: 760px; margin: 0 auto; }
+
+/* ──────────────────────────── 设置 / 任务 ──────────────────────────── */
+.settings { display: flex; height: 100%; }
+.set-nav { width: 200px; flex-shrink: 0; padding: 16px 0; border-right: 1px solid var(--line); }
+.set-nav .h { padding: 0 16px 8px; font-size: 12px; color: var(--ink-3); font-weight: 500; }
+.set-body { flex: 1; min-width: 0; overflow-y: auto; }
+.page { max-width: 880px; margin: 0 auto; padding: 28px 28px 80px; }
+.page-hd { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 18px; }
+.page-hd h1 { font-size: 20px; font-weight: 600; letter-spacing: -.015em; margin: 0; }
+.page-hd .sub { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+.page-hd .sp { flex: 1; }
+.filters { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.fchip { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; color: var(--ink-2); transition: background-color 120ms, color 120ms, box-shadow 120ms; }
+.fchip:hover { background: var(--hover-2); color: var(--ink); }
+.fchip.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-btn); }
+.fchip .n { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.filters .sp { flex: 1; }
+.search-mini { height: 28px; width: 200px; display: flex; align-items: center; gap: 6px; padding: 0 9px; border-radius: var(--r-control); background: var(--field); box-shadow: var(--shadow-inset-field); color: var(--ink-3); font-size: 12.5px; }
+.table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--ink-3); padding: 0 12px; height: 34px; border-bottom: 1px solid var(--line); background: var(--inset); }
+.table th:first-child { border-top-left-radius: var(--r-card); } .table th:last-child { border-top-right-radius: var(--r-card); }
+.table td { padding: 0 12px; height: 46px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table tr:last-child td { border-bottom: 0; }
+.table tbody tr { transition: background-color 100ms, opacity 200ms; animation: fade-up 300ms var(--ease) both; }
+.table tbody tr:hover { background: var(--hover); }
+.table .nm { font-weight: 500; }
+.table .nm small { display: block; font-size: 11.5px; color: var(--ink-3); font-weight: 400; font-family: var(--font-mono); line-height: 1.3; }
+.table .when { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.bar { width: 64px; height: 4px; border-radius: 2px; background: var(--field); box-shadow: var(--shadow-hairline); overflow: hidden; display: inline-block; vertical-align: middle; }
+.bar i { display: block; height: 100%; background: var(--green); border-radius: 2px; }
+.switch { width: 30px; height: 18px; border-radius: 999px; background: var(--line-strong); position: relative; transition: background-color 180ms var(--ease); display: inline-block; vertical-align: middle; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px oklch(0% 0 0 / .25); transition: transform 220ms var(--ease); }
+.switch.on { background: var(--green); }
+.switch.on::after { transform: translateX(12px); }
+.machines { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+.mcard { padding: 14px; }
+.mcard .top { display: flex; align-items: center; gap: 8px; }
+.mcard .top .n { font-size: 13.5px; font-weight: 600; }
+.mcard .kv { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+.mcard .kv span:nth-child(odd) { color: var(--ink-3); }
+.mcard .kv span:nth-child(even) { color: var(--ink-2); font-family: var(--font-mono); font-size: 11.5px; text-align: right; }
+.spark { display: block; width: 100%; height: 28px; margin-top: 10px; }
+
+/* ──────────────────────────── ⌘P 搜索 ──────────────────────────── */
+.scrim { position: fixed; inset: 0; z-index: 60; background: oklch(20% .004 264 / .32); backdrop-filter: blur(2px); display: none; animation: fade-in 150ms ease-out both; }
+.scrim.open { display: block; }
+.palette { position: fixed; z-index: 61; left: 50%; top: 14vh; width: 600px; max-width: calc(100vw - 32px); transform: translateX(-50%); background: var(--surface); border-radius: var(--r-window); box-shadow: var(--shadow-overlay); overflow: hidden; display: none; }
+.palette.open { display: block; animation: pop-in 180ms var(--ease) both; }
+.pal-in { display: flex; align-items: center; gap: 10px; height: 50px; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.pal-in input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 15px; color: var(--ink); }
+.pal-in input::placeholder { color: var(--ink-3); }
+.pal-list { max-height: 380px; overflow-y: auto; padding: 6px; }
+.pal-list .gh { font-size: 11.5px; color: var(--ink-3); padding: 8px 10px 4px; font-weight: 500; }
+.pal-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: var(--r-control); width: 100%; text-align: left; }
+.pal-row.on { background: var(--hover-2); }
+.pal-row .t { font-size: 13.5px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-row .t mark { background: none; color: var(--accent-ink); font-weight: 600; }
+.pal-row .m { font-size: 12px; color: var(--ink-3); }
+.pal-row .ret { opacity: 0; font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.pal-row.on .ret { opacity: 1; }
+.pal-ft { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--inset); font-size: 11.5px; color: var(--ink-3); }
+.kb { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface); box-shadow: var(--shadow-btn); color: var(--ink-2); margin-right: 4px; }
+.pal-empty { padding: 40px 0; text-align: center; color: var(--ink-3); font-size: 13px; }
+
+/* ──────────────────────────── 对照说明 ──────────────────────────── */
+.notes { max-width: 980px; margin: 0 auto; padding: 48px 28px 120px; }
+.notes h1 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 6px; }
+.notes > p { color: var(--ink-2); margin: 0 0 24px; }
+.cmp { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.cmp th, .cmp td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.cmp th { font-size: 12px; color: var(--ink-3); font-weight: 500; background: var(--inset); }
+.cmp td:first-child { font-weight: 500; white-space: nowrap; }
+.cmp td:nth-child(2) { color: var(--ink-2); }
+.cmp tr:last-child td { border-bottom: 0; }
+.swatches { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+.sw { width: 120px; }
+.sw .b { height: 56px; border-radius: var(--r-card); }
+.sw .l { font-size: 11.5px; color: var(--ink-2); margin-top: 6px; font-family: var(--font-mono); }
+
+/* ──────────────────────────── 手机 ──────────────────────────── */
+.phones { flex: 1; display: flex; align-items: center; justify-content: center; gap: 40px; background: var(--canvas); overflow: auto; padding: 24px; }
+.phone { width: 390px; height: 800px; border-radius: 48px; padding: 10px; background: #0b0b0d; box-shadow: 0 30px 60px oklch(0% 0 0 / .25); flex-shrink: 0; }
+.phone iframe { width: 100%; height: 100%; border: 0; border-radius: 38px; background: var(--page); }
+.phone-cap { text-align: center; font-size: 12.5px; color: var(--ink-3); margin-top: 12px; }
+
+@media (max-width: 640px) {
+  .sidebar { display: none; }
+  .main { margin: 0; border-radius: 0; box-shadow: none; }
+  .topbar { padding: 44px 8px 0 8px; height: 92px; border-bottom: 0; }
+  .topbar .desk { display: none; }
+  .thread { padding: 8px 16px 16px; }
+  .dock { padding: 0 10px 28px; }
+  .answer { font-size: 16px; }
+  .user-msg .b { font-size: 15.5px; }
+  .home { padding: 24px 16px 40px; }
+  .cards2 { grid-template-columns: 1fr; }
+  .c-hint { display: none; }
+  .composer { border-radius: 22px; }
+  .ask-ft .cmd { display: none; }
+}
+@media (min-width: 641px) { .mobile-only { display: none !important; } }
+
+
+/* ─────────────────────────────────────────────────────────────────────
+   09 · 角色（2026-10-30）
+   在 08 的 token 上只加角色专属件：头像、角色侧栏分区、记忆行、话题分隔、
+   夜间整理卡、一览面板、群聊消息、轮次条、@ 菜单、新建弹窗、记忆管理页。
+   ───────────────────────────────────────────────────────────────────── */
+.rav {
+  --h: 254; width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; position: relative;
+  display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff;
+  background: linear-gradient(140deg, oklch(72% .13 var(--h)), oklch(58% .15 calc(var(--h) + 40)));
+  box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .18);
+}
+.rav.xs { width: 20px; height: 20px; font-size: 10px; }
+.rav.sm { width: 24px; height: 24px; font-size: 11px; }
+.rav.lg { width: 40px; height: 40px; font-size: 16px; }
+.rav.xl { width: 64px; height: 64px; font-size: 24px; }
+.rav .st { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--page); }
+.rav .st.busy { background: var(--orange); animation: breathe 2s ease-in-out infinite; }
+.rav-stack { display: inline-flex; }
+.rav-stack .rav { box-shadow: 0 0 0 2px var(--surface); }
+.rav-stack .rav + .rav { margin-left: -7px; }
+.grav { width: 20px; height: 20px; border-radius: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; overflow: hidden; flex-shrink: 0; }
+.grav i { --h: 254; background: linear-gradient(140deg, oklch(72% .13 var(--h)), oklch(58% .15 calc(var(--h) + 40))); }
+
+/* 侧栏「角色」分区 */
+.sidebar .row .pix { width: 15px; flex: none; }
+/* 原型操作条悬浮在底部，给内容留出位置（iframe 内嵌时没有操作条） */
+body:not(.embed) .dock { padding-bottom: 64px; }
+body:not(.embed) .page { padding-bottom: 120px; }
+.row.role { height: 34px; }
+.row.role .lb { font-size: 13.5px; }
+.row.role .sn { font-size: 11.5px; color: var(--ink-3); font-weight: 400; margin-left: 6px; }
+.row.role .tm { font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.sb-sec .add { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-3); transition: background-color 120ms, color 120ms; }
+.sb-sec .add:hover { background: var(--hover-2); color: var(--ink); }
+
+/* 角色对话 */
+.rchat { flex: 1; min-height: 0; display: flex; }
+.rchat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.who { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 6px; margin-left: -6px; border-radius: var(--r-control); transition: background-color 100ms; }
+.who:hover { background: var(--hover-2); }
+.who .n { font-size: 14px; font-weight: 600; }
+.who .s { font-size: 12px; color: var(--ink-3); }
+.day { display: flex; align-items: center; gap: 12px; margin: 8px 0 20px; font-size: 11.5px; color: var(--ink-3); font-weight: 500; }
+.day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.topic { display: flex; align-items: center; gap: 8px; margin: 6px 0 22px; padding: 8px 12px; border-radius: var(--r-card); background: var(--inset); box-shadow: var(--shadow-hairline); font-size: 12px; color: var(--ink-2); }
+.topic b { font-weight: 600; color: var(--ink); }
+.topic .sp { flex: 1; }
+.rmsg { display: flex; gap: 12px; margin-bottom: 22px; animation: fade-up 380ms var(--ease) both; }
+.rmsg .body { flex: 1; min-width: 0; }
+.rmsg .hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.rmsg .hd .n { font-size: 13.5px; font-weight: 600; }
+.rmsg .hd .t { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.rmsg .answer { font-size: 14.5px; line-height: 1.7; }
+.rmsg .answer p:last-child { margin-bottom: 0; }
+.quote { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 2px 0 8px; padding: 4px 9px 4px 7px; border-radius: var(--r-chip); background: var(--field); box-shadow: var(--shadow-hairline); font-size: 12px; color: var(--ink-2); }
+.quote span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mention { color: var(--accent-ink); background: var(--accent-tint); padding: 0 4px; border-radius: 4px; font-weight: 500; }
+
+/* 记忆写入行：角色每次记下东西都当场可见、可撤销 */
+.memline {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px 6px 10px; max-width: 560px;
+  border-radius: var(--r-control); background: var(--violet-tint); color: var(--ink-2); font-size: 12.5px;
+  animation: pop-in 250ms var(--ease) both;
+}
+.memline svg { color: var(--violet); }
+.memline .tx { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.memline .tx b { color: var(--ink); font-weight: 500; }
+.memline .act { font-size: 12px; color: var(--ink-3); padding: 2px 6px; border-radius: 5px; transition: background-color 100ms, color 100ms; }
+.memline .act:hover { background: oklch(100% 0 0 / .5); color: var(--ink); }
+.dark .memline .act:hover { background: oklch(100% 0 0 / .08); }
+.memline.undone { background: var(--field); opacity: .7; }
+.memline.undone .tx { text-decoration: line-through; }
+
+/* 后台任务卡 */
+.task-card { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 12px; max-width: 560px; border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow-card); }
+.task-card .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--field); box-shadow: var(--shadow-hairline); color: var(--ink-2); flex-shrink: 0; }
+.task-card .b { flex: 1; min-width: 0; }
+.task-card .tt { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-card .ts { font-size: 11.5px; color: var(--ink-3); }
+
+/* 夜间整理卡（沿用管家改动预览卡的确认 / 撤销语义） */
+.chg { margin: 0 0 22px; border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow-card); overflow: hidden; animation: fade-up 380ms var(--ease) both; }
+.chg-hd { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px; }
+.chg-hd .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--violet-tint); color: var(--violet); }
+.chg-hd .tt { font-size: 13.5px; font-weight: 600; }
+.chg-hd .ts { font-size: 12px; color: var(--ink-3); }
+.chg-hd .sp { flex: 1; }
+.chg-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); transition: background-color 100ms, opacity 200ms; }
+.chg-row:hover { background: var(--hover); }
+.chg-row .k { width: 44px; flex-shrink: 0; }
+.chg-row .b { flex: 1; min-width: 0; }
+.chg-row .tt { font-size: 13px; }
+.chg-row .ts { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chg-row .ops { display: flex; gap: 2px; }
+.chg-row .ops .icon-btn { width: 28px; height: 28px; }
+.chg-row.ok { background: var(--green-tint); }
+.chg-row.ok .ops { display: none; }
+.chg-row.no { opacity: .45; }
+.chg-row.no .tt { text-decoration: line-through; }
+.chg-row.no .ops { display: none; }
+.chg-row .res { display: none; font-size: 12px; color: var(--ink-3); }
+.chg-row.ok .res, .chg-row.no .res { display: inline; }
+.chg-ft { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--inset); font-size: 12px; color: var(--ink-3); }
+.chg-ft .sp { flex: 1; }
+.chg-ft a, .topic a { white-space: nowrap; }
+
+/* 右侧「一览」 */
+.glance { width: 300px; flex-shrink: 0; border-left: 1px solid var(--line); overflow-y: auto; padding: 18px 16px 40px; background: var(--inset); transition: width 280ms var(--ease-link), padding 280ms var(--ease-link), opacity 200ms; }
+.glance.off { width: 0; padding-left: 0; padding-right: 0; opacity: 0; overflow: hidden; border-left: 0; }
+.gl-id { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 6px 0 16px; }
+.gl-id .n { font-size: 16px; font-weight: 600; margin-top: 4px; }
+.gl-id .s { font-size: 12.5px; color: var(--ink-2); max-width: 240px; }
+.gl-sec { margin-top: 14px; }
+.gl-sec .h { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); font-weight: 500; margin-bottom: 6px; }
+.gl-sec .h .sp { flex: 1; }
+.gl-sec .h a { color: var(--ink-3); text-decoration: none; font-size: 12px; }
+.gl-sec .h a:hover { color: var(--ink); }
+.gl-card { background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-card); overflow: hidden; }
+.gl-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 12.5px; border-top: 1px solid var(--line); }
+.gl-row:first-child { border-top: 0; }
+.gl-row .b { flex: 1; min-width: 0; }
+.gl-row .tt { line-height: 1.45; }
+.gl-row .ts { font-size: 11.5px; color: var(--ink-3); }
+.gl-persona { padding: 10px 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+
+/* 群聊 */
+.round {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 6px 8px 6px 12px;
+  border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-card); font-size: 12px; color: var(--ink-2);
+  animation: pop-in 250ms var(--ease) both;
+}
+.round .seg-bar { display: inline-flex; gap: 3px; }
+.round .seg-bar i { width: 14px; height: 4px; border-radius: 2px; background: var(--line-strong); }
+.round .seg-bar i.on { background: var(--accent); }
+.round .sp { flex: 1; }
+.limit { margin: 0 0 22px 40px; padding: 12px 14px; border-radius: var(--r-card); background: var(--inset); box-shadow: var(--shadow-hairline); display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+.limit .sp { flex: 1; }
+.typing { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; font-size: 13px; color: var(--ink-2); }
+.at-menu { position: absolute; left: 44px; bottom: calc(100% + 8px); width: 280px; padding: 4px; background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-raised); display: none; animation: pop-in 160ms var(--ease) both; transform-origin: bottom left; z-index: 5; }
+.at-menu.open { display: block; }
+.at-menu .hd { font-size: 11.5px; color: var(--ink-3); padding: 6px 8px 4px; }
+.at-menu .mi { width: 100%; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.at-menu .mi.on, .at-menu .mi:hover { background: var(--hover); }
+.at-menu .mi .t { font-size: 13px; font-weight: 500; }
+.at-menu .mi .s { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.pop { position: absolute; z-index: 30; width: 300px; padding: 12px; background: var(--surface); border-radius: var(--r-card); box-shadow: var(--shadow-overlay); display: none; animation: pop-in 160ms var(--ease) both; transform-origin: top right; }
+.pop.open { display: block; }
+.pop .h { font-size: 12px; color: var(--ink-3); font-weight: 500; margin: 0 0 6px; }
+.radio { display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: var(--r-control); cursor: pointer; }
+.radio:hover { background: var(--hover); }
+.radio .o { width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); flex-shrink: 0; margin-top: 2px; }
+.radio.on .o { box-shadow: inset 0 0 0 5px var(--accent); }
+.radio .t { font-size: 13px; font-weight: 500; }
+.radio .s { font-size: 12px; color: var(--ink-3); }
+
+/* 新建角色弹窗 */
+.modal { position: fixed; z-index: 61; inset: 0; margin: auto; height: fit-content; width: 640px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); background: var(--surface); border-radius: var(--r-window); box-shadow: var(--shadow-overlay); display: none; flex-direction: column; overflow: hidden; }
+.modal.open { display: flex; animation: pop-in 180ms var(--ease) both; }
+.modal-hd { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.modal-hd .tt { font-size: 15px; font-weight: 600; }
+.modal-hd .sp { flex: 1; }
+.modal-bd { padding: 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.modal-ft { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--inset); }
+.modal-ft .sp { flex: 1; }
+.srcs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+.src { text-align: left; padding: 12px; border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow-btn); transition: box-shadow 120ms, background-color 120ms; }
+.src:hover { background: var(--hover); }
+.src.on { box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-xs); background: var(--accent-tint); }
+.src .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--field); box-shadow: var(--shadow-hairline); color: var(--ink-2); margin-bottom: 8px; }
+.src .t { font-size: 13px; font-weight: 600; }
+.src .s { font-size: 12px; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
+.form { display: grid; grid-template-columns: 96px 1fr; gap: 14px 16px; align-items: start; }
+.form .lbl { font-size: 12.5px; color: var(--ink-2); font-weight: 500; padding-top: 7px; }
+.form .hint { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; }
+.field { width: 100%; height: 32px; padding: 0 10px; border: 0; outline: 0; border-radius: var(--r-control); background: var(--field); box-shadow: var(--shadow-inset-field); font-size: 13px; }
+textarea.field { height: auto; min-height: 84px; padding: 8px 10px; line-height: 1.55; resize: vertical; }
+.field:focus { box-shadow: var(--shadow-inset-field), 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent); }
+.avpick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.avpick .rav { cursor: pointer; transition: transform 120ms var(--ease); }
+.avpick .rav:hover { transform: scale(1.06); }
+.avpick .rav.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.fromchat { margin-top: 2px; padding: 10px 12px; border-radius: var(--r-card); background: var(--inset); box-shadow: var(--shadow-hairline); font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+
+/* 角色设置：记忆页 */
+.tabs { display: flex; gap: 2px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.tab { height: 40px; padding: 0 10px; font-size: 13px; color: var(--ink-3); position: relative; transition: color 120ms; }
+.tab:hover { color: var(--ink); }
+.tab.on { color: var(--ink); font-weight: 500; }
+.tab.on::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--ink); }
+.prof { display: flex; align-items: center; gap: 14px; padding: 20px 20px 14px; }
+.prof .n { font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.prof .s { font-size: 13px; color: var(--ink-3); }
+.prof .sp { flex: 1; }
+.user-md { padding: 12px 14px; font-size: 13px; line-height: 1.65; color: var(--ink-2); }
+.mem-grp { margin-top: 18px; }
+.mem-grp .gh { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin-bottom: 6px; }
+.mem-grp .gh .ct { color: var(--ink-3); }
+.mem { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); transition: background-color 100ms; }
+.mem:first-child { border-top: 0; }
+.mem:hover { background: var(--hover); }
+.mem .b { flex: 1; min-width: 0; }
+.mem .tt { font-size: 13px; font-weight: 500; }
+.mem .ds { font-size: 12.5px; color: var(--ink-2); margin-top: 1px; }
+.mem .src { all: unset; }
+.mem .meta { display: flex; gap: 10px; margin-top: 4px; font-size: 11.5px; color: var(--ink-3); }
+.mem .meta a { color: var(--ink-3); }
+.mem .ops { display: flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
+.mem:hover .ops { opacity: 1; }
+.mem .ops .icon-btn { width: 28px; height: 28px; }
+.mem .lk { font-family: var(--font-mono); font-size: 11px; color: var(--violet); }
+
+/* 手机：角色列表 */
+.mlist { padding: 0 14px 40px; }
+.mlist h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin: 6px 4px 14px; }
+.mrole { display: flex; align-items: center; gap: 12px; padding: 10px 6px; border-radius: 14px; }
+.mrole:active { background: var(--hover-2); }
+.mrole .b { flex: 1; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: -10px; }
+.mrole .n { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.mrole .n .t { margin-left: auto; font-size: 12px; color: var(--ink-3); font-weight: 400; }
+.mrole .ln { font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mrole .ub { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.msec { font-size: 13px; color: var(--ink-3); font-weight: 500; margin: 18px 6px 4px; }
+
+@media (max-width: 640px) {
+  .glance { display: none; }
+  .rmsg { gap: 10px; }
+  .rmsg .answer { font-size: 16px; }
+  .memline { font-size: 13px; flex-wrap: wrap; }
+  .memline .tx { white-space: normal; flex-basis: calc(100% - 30px); }
+  .limit { margin-left: 0; }
+  .who .s { display: none; }
+  .proto-bar { max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none; }
+  .proto-bar button { flex-shrink: 0; }
+  body:not(.embed) .dock { padding-bottom: 72px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3v18M5 8c3 0 7 1 7 5M19 8c-3 0-7 1-7 5M7 15c2 0 5 .5 5 3M17 15c-2 0-5 .5-5 3" /></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></symbol>
+    <symbol id="i-updown" viewBox="0 0 24 24"><path d="M8 9l4-4 4 4M8 15l4 4 4-4" /></symbol>
+    <symbol id="i-side" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M7 10l3 2-3 2M13 14h4" /></symbol>
+    <symbol id="i-butler" viewBox="0 0 24 24"><path d="M12 3l2.4 5.6L20 9.5l-4.3 3.9 1.2 5.9L12 16.4l-4.9 2.9 1.2-5.9L4 9.5l5.6-.9z" /></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8" /></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" /></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M5 17a3 3 0 0 1 3-3h11" /></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+    <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></symbol>
+    <symbol id="i-slash" viewBox="0 0 24 24"><path d="M16 4L8 20" /></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" /></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" /></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></symbol>
+    <symbol id="i-run" viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8" /></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></symbol>
+    <symbol id="i-fork" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5" /></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z" /></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.3L3 16M3 21v-5h5" /></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="12" r="2" /><path d="M6 8v8M8 6h4a4 4 0 0 1 4 4v0M8 18h4a4 4 0 0 0 4-4" /></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="8" r="2" /><path d="M6 8v8M18 10a6 6 0 0 1-6 6H8" /></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M7 7.5h.01M7 16.5h.01" /></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2" /><path d="M2 19h20" /></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" /></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0" /></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" /></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V6a2 2 0 0 0-3-2zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1" /></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" /></symbol>
+    <symbol id="i-side-r" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M15 4v16" /></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 6 6v5" /></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></symbol>
+  </defs>
+</svg>
+
+<!-- ══════════════ 01 角色对话 ══════════════ -->
+<section class="screen" id="s-role" data-title="角色对话">
+  <aside class="sidebar" data-sidebar data-active="r-laozhou"></aside>
+  <main class="main">
+    <div class="topbar">
+      <button class="icon-btn mobile-only"><svg class="i"><use href="#i-chev-l" /></svg></button>
+      <button class="who" data-go="memory">
+        <span class="rav" style="--h:35">周<span class="st"></span></span>
+        <span style="min-width:0"><span class="n">老周</span> <span class="s">代码审稿人</span></span>
+      </button>
+      <span class="sp"></span>
+      <span class="chip desk" title="跑在哪台机器、哪个目录"><svg class="i"><use href="#i-folder" /></svg>home · trellis</span>
+      <button class="chip desk" data-go="memory" style="cursor:pointer" title="它记得的东西"><svg class="i" style="color:var(--violet)"><use href="#i-brain" /></svg>记得 23 条</button>
+      <button class="icon-btn desk" data-glance-btn title="一览"><svg class="i"><use href="#i-side-r" /></svg></button>
+      <button class="icon-btn" data-go="memory" title="角色设置"><svg class="i"><use href="#i-gear" /></svg></button>
+    </div>
+    <div class="rchat">
+      <div class="rchat-main">
+        <div class="scroll">
+          <div class="thread">
+            <div class="day">10 月 28 日 周二</div>
+            <div class="user-msg"><div class="b">帮我看下 hub 网关这段超时处理，总觉得 504 和维护页的判定会打架</div></div>
+            <div class="rmsg">
+              <span class="rav" style="--h:35">周</span>
+              <div class="body">
+                <div class="hd"><span class="n">老周</span><span class="t">21:14</span></div>
+                <div class="answer">
+                  <p>会打架，而且能复现：上游 30s 超时先触发，网关回了 504；但维护页的判定看的是 <code class="inl">deploy-state</code>，部署窗口里两边同时成立，用户看到的是 504 而不是维护页。</p>
+                  <p>改法很小：维护态判定挪到超时之前。我没顺手重构那段代码，你说过不要。</p>
+                </div>
+                <div class="memline" data-memline>
+                  <svg class="i sm"><use href="#i-brain" /></svg>
+                  <span class="tx">记下了 <b>审代码只报可复现的问题，不给重构建议</b></span>
+                  <button class="act" data-undo>撤销</button><button class="act">改一下</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="day">昨天</div>
+            <div class="user-msg"><div class="b">feat/herdr-jarvis 那个分支合之前你过一遍</div></div>
+            <div class="rmsg">
+              <span class="rav" style="--h:35">周</span>
+              <div class="body">
+                <div class="hd"><span class="n">老周</span><span class="t">16:02</span></div>
+                <div class="answer"><p>量有点大（41 个文件），我开个后台任务慢慢看，完事在这儿告诉你。</p></div>
+                <div class="task-card">
+                  <span class="ic"><svg class="i sm"><use href="#i-run" /></svg></span>
+                  <div class="b"><div class="tt">审查 feat/herdr-jarvis 的改动</div><div class="ts">后台任务 · 用时 11 分 · 已完成</div></div>
+                  <span class="pill green"><span class="d"></span>3 个问题</span>
+                  <button class="btn sm">打开</button>
+                </div>
+              </div>
+            </div>
+            <div class="rmsg">
+              <span class="rav" style="--h:35">周</span>
+              <div class="body">
+                <div class="hd"><span class="n">老周</span><span class="t">16:13</span></div>
+                <div class="answer"><p>看完了，3 个能复现的问题，最要紧的是读屏 rev 在重连后没重置，会把新屏幕当旧的丢掉。详情在任务里，每条都带复现步骤。</p></div>
+              </div>
+            </div>
+
+            <div class="day">今天</div>
+            <div class="chg" data-chg>
+              <div class="chg-hd">
+                <span class="ic"><svg class="i sm"><use href="#i-moon" /></svg></span>
+                <div><div class="tt">夜间整理</div><div class="ts">03:30 · 读了 4 段新对话 · 记忆和技能各有改动</div></div>
+                <span class="sp"></span>
+                <button class="btn sm" data-chg-all>全部接受</button>
+              </div>
+              <div class="chg-row" data-chg-row>
+                <span class="k"><span class="pill green">新增</span></span>
+                <div class="b"><div class="tt">trellis 的 prod 跑在 3088，部署用 make deploy</div><div class="ts">项目 · 来自 10-29 对话</div></div>
+                <span class="res">已接受</span>
+                <span class="ops"><button class="icon-btn" title="接受" data-ok><svg class="i sm"><use href="#i-check" /></svg></button><button class="icon-btn" title="不要" data-no><svg class="i sm"><use href="#i-x" /></svg></button></span>
+              </div>
+              <div class="chg-row" data-chg-row>
+                <span class="k"><span class="pill accent">合并</span></span>
+                <div class="b"><div class="tt">「先跑类型检查」和「改完必须跑测试」合成一条</div><div class="ts">偏好 · 2 条 → 1 条</div></div>
+                <span class="res">已接受</span>
+                <span class="ops"><button class="icon-btn" title="接受" data-ok><svg class="i sm"><use href="#i-check" /></svg></button><button class="icon-btn" title="不要" data-no><svg class="i sm"><use href="#i-x" /></svg></button></span>
+              </div>
+              <div class="chg-row" data-chg-row>
+                <span class="k"><span class="pill gray">删除</span></span>
+                <div class="b"><div class="tt">「hub 还没上公网」</div><div class="ts">已过期 · 10-30 起 hub.home 已可访问</div></div>
+                <span class="res">已拒绝</span>
+                <span class="ops"><button class="icon-btn" title="接受" data-ok><svg class="i sm"><use href="#i-check" /></svg></button><button class="icon-btn" title="不要" data-no><svg class="i sm"><use href="#i-x" /></svg></button></span>
+              </div>
+              <div class="chg-row" data-chg-row>
+                <span class="k"><span class="pill violet">技能</span></span>
+                <div class="b"><div class="tt">审 diff 的固定套路 → 存成技能「review-diff」</div><div class="ts">这周用了 3 次 · 先类型检查，再挑能复现的问题，最后给复现步骤</div></div>
+                <span class="res">已接受</span>
+                <span class="ops"><button class="icon-btn" title="接受" data-ok><svg class="i sm"><use href="#i-check" /></svg></button><button class="icon-btn" title="不要" data-no><svg class="i sm"><use href="#i-x" /></svg></button></span>
+              </div>
+              <div class="chg-ft"><span>没接受的改动不会生效；已接受的 7 天内可在记忆页撤销</span><span class="sp"></span><a href="#" class="faint" style="font-size:12px">整理历史</a></div>
+            </div>
+
+            <div class="topic">
+              <svg class="i sm faint"><use href="#i-scissors" /></svg>
+              <span><b>新话题</b> · 10:12 · 从这里起上下文重新开始，记忆不受影响</span>
+              <span class="sp"></span><a href="#" class="faint" style="font-size:12px">看上一段</a>
+            </div>
+            <div class="user-msg"><div class="b">今天合的 beautiful-ui，你再扫一眼有没有能复现的回归</div></div>
+            <div class="rmsg">
+              <span class="rav" style="--h:35">周</span>
+              <div class="body">
+                <div class="hd"><span class="n">老周</span><span class="t">10:12</span></div>
+                <div class="loading"><span class="pix" data-pix></span><span class="lbl shimmer">在读 3e350f7 的改动</span><span class="el tnum">0:18</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="dock"><div class="dock-in" data-composer="role"></div></div>
+      </div>
+
+      <aside class="glance" data-glance>
+        <div class="gl-id">
+          <span class="rav xl" style="--h:35">周</span>
+          <span class="n">老周</span>
+          <span class="s">代码审稿人。冷静、讲证据，只报能复现的问题。</span>
+          <div style="display:flex;gap:6px;margin-top:4px"><span class="pill green"><span class="d"></span>在线</span><span class="pill gray">opus-5-5</span></div>
+        </div>
+        <div class="gl-sec">
+          <div class="h"><svg class="i xs"><use href="#i-brain" /></svg>最近记住的<span class="sp"></span><a href="#" data-go="memory">全部 23</a></div>
+          <div class="gl-card">
+            <div class="gl-row"><span class="pill violet" style="height:18px">偏好</span><div class="b"><div class="tt">只报可复现的问题，不给重构建议</div></div></div>
+            <div class="gl-row"><span class="pill teal" style="height:18px">项目</span><div class="b"><div class="tt">prod 在 3088，部署用 make deploy</div></div></div>
+            <div class="gl-row"><span class="pill accent" style="height:18px">关于你</span><div class="b"><div class="tt">中文交流，报告多用表格</div></div></div>
+          </div>
+        </div>
+        <div class="gl-sec">
+          <div class="h"><svg class="i xs"><use href="#i-clock" /></svg>例行<span class="sp"></span><a href="#">管理</a></div>
+          <div class="gl-card">
+            <div class="gl-row"><div class="b"><div class="tt">夜间整理</div><div class="ts">每天 03:30 · 没新对话就跳过</div></div><span class="switch on"></span></div>
+            <div class="gl-row"><div class="b"><div class="tt">巡检新合并的 PR</div><div class="ts">工作日 09:00 · 没问题不出声</div></div><span class="switch"></span></div>
+          </div>
+        </div>
+        <div class="gl-sec">
+          <div class="h"><svg class="i xs"><use href="#i-link" /></svg>渠道</div>
+          <div class="gl-card">
+            <div class="gl-row"><span class="rav xs" style="--h:200">飞</span><div class="b"><div class="tt">飞书机器人「老周」</div><div class="ts">已连接 · 群里 @ 才回</div></div></div>
+          </div>
+        </div>
+        <div class="gl-sec">
+          <div class="h"><svg class="i xs"><use href="#i-run" /></svg>后台任务</div>
+          <div class="gl-card">
+            <div class="gl-row"><div class="b"><div class="tt">审查 feat/herdr-jarvis 的改动</div><div class="ts">昨天 · 3 个问题</div></div><svg class="i sm faint"><use href="#i-chev-r" /></svg></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</section>
+
+<!-- ══════════════ 02 群聊 ══════════════ -->
+<section class="screen" id="s-group" data-title="群聊">
+  <aside class="sidebar" data-sidebar data-active="g-review"></aside>
+  <main class="main">
+    <div class="topbar">
+      <button class="icon-btn mobile-only"><svg class="i"><use href="#i-chev-l" /></svg></button>
+      <button class="who">
+        <span class="rav-stack"><span class="rav sm" style="--h:35">周</span><span class="rav sm" style="--h:300">I</span><span class="rav sm" style="--h:255">管</span></span>
+        <span style="min-width:0"><span class="n">方案评审</span> <span class="s">3 位角色 · 你</span></span>
+      </button>
+      <span class="sp"></span>
+      <span class="chip desk"><svg class="i"><use href="#i-folder" /></svg>home · trellis</span>
+      <span style="position:relative">
+        <button class="icon-btn" data-pop-btn="group-set" title="群设置"><svg class="i"><use href="#i-gear" /></svg></button>
+        <div class="pop" data-pop="group-set" style="right:0;top:38px">
+          <div class="h">没人被 @ 的时候</div>
+          <div class="radio on" data-radio><span class="o"></span><span><span class="t" style="display:block">挑最合适的一位回</span><span class="s">由路由按话题挑人，其他人不说话</span></span></div>
+          <div class="radio" data-radio><span class="o"></span><span><span class="t" style="display:block">谁有话谁说</span><span class="s">每位都看一遍，自己决定接不接话</span></span></div>
+          <div class="radio" data-radio><span class="o"></span><span><span class="t" style="display:block">只有被 @ 的回</span><span class="s">不 @ 就没人回</span></span></div>
+          <hr style="border:0;height:1px;background:var(--line);margin:8px 0">
+          <div class="h">每轮上限</div>
+          <div style="display:flex;gap:8px;font-size:12.5px;color:var(--ink-2);padding:0 8px"><span>来回 <b class="tnum">3</b> 遍</span><span class="faint">·</span><span>最多 <b class="tnum">10</b> 条</span><span class="sp" style="flex:1"></span><a href="#" class="faint">改</a></div>
+          <hr style="border:0;height:1px;background:var(--line);margin:8px 0">
+          <button class="btn ghost sm" style="width:100%;justify-content:flex-start"><svg class="i sm"><use href="#i-plus" /></svg>加角色（最多 6 位）</button>
+        </div>
+      </span>
+    </div>
+    <div class="scroll">
+      <div class="thread">
+        <div class="day">今天</div>
+        <div class="user-msg"><div class="b"><span class="mention">@Iris</span> <span class="mention">@老周</span> 群聊要不要做 Cindy 那种组织者（Organizer）？先说值不值，别急着设计</div></div>
+
+        <div class="rmsg">
+          <span class="rav" style="--h:300">I</span>
+          <div class="body">
+            <div class="hd"><span class="n">Iris</span><span class="faint" style="font-size:11.5px">研究员</span><span class="t">10:31</span></div>
+            <div class="answer">
+              <p>Cindy 的 Organizer 做三件事：拆步骤、出计划卡、每步给独立 worktree。我翻了它的验收记录，计划卡默认要点两次确认，实际体验偏重。</p>
+              <p>值不值取决于群里是不是真在干活。如果群聊主要用来讨论，组织者是多余的。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="rmsg">
+          <span class="rav" style="--h:35">周</span>
+          <div class="body">
+            <div class="hd"><span class="n">老周</span><span class="faint" style="font-size:11.5px">代码审稿人</span><span class="t">10:31</span></div>
+            <span class="quote"><svg class="i xs"><use href="#i-reply" /></svg><span>回复 Iris：值不值取决于群里是不是真在干活</span></span>
+            <div class="answer"><p>同意。补一个能验证的点：先看群聊上线两周里，有几次讨论最后落成了任务。少于 3 次就别做组织者。</p></div>
+          </div>
+        </div>
+
+        <div class="rmsg">
+          <span class="rav" style="--h:300">I</span>
+          <div class="body">
+            <div class="hd"><span class="n">Iris</span><span class="faint" style="font-size:11.5px">研究员</span><span class="t">10:32</span></div>
+            <span class="quote"><svg class="i xs"><use href="#i-reply" /></svg><span>回复 老周：少于 3 次就别做组织者</span></span>
+            <div class="answer"><p>可以。那第一版只要一个出口：讨论完 @管家 把结论建成任务，不用自动拆步骤。</p></div>
+          </div>
+        </div>
+
+        <div class="typing"><span class="rav sm" style="--h:35">周</span><span class="pix" data-pix></span><span class="shimmer" style="font-weight:500">老周 在想…</span></div>
+      </div>
+    </div>
+    <div class="dock"><div class="dock-in">
+      <div class="round">
+        <span>本轮</span>
+        <span class="seg-bar" title="来回 3 遍"><i class="on"></i><i class="on"></i><i></i></span>
+        <span class="tnum">第 2 遍 · 3 / 10 条</span>
+        <span class="sp"></span>
+        <button class="btn ghost sm">停下这一轮</button>
+      </div>
+      <div data-composer="group"></div>
+    </div></div>
+  </main>
+</section>
+
+<!-- ══════════════ 02b 群聊：到上限 ══════════════ -->
+<section class="screen" id="s-group-limit" data-title="群聊上限">
+  <aside class="sidebar" data-sidebar data-active="g-review"></aside>
+  <main class="main">
+    <div class="topbar">
+      <button class="who">
+        <span class="rav-stack"><span class="rav sm" style="--h:35">周</span><span class="rav sm" style="--h:300">I</span><span class="rav sm" style="--h:255">管</span></span>
+        <span style="min-width:0"><span class="n">方案评审</span> <span class="s">3 位角色 · 你</span></span>
+      </button>
+      <span class="sp"></span>
+      <button class="icon-btn"><svg class="i"><use href="#i-gear" /></svg></button>
+    </div>
+    <div class="scroll">
+      <div class="thread">
+        <div class="day">今天</div>
+        <div class="user-msg"><div class="b">群聊上线两周后怎么判断要不要做组织者，你们商量个标准</div></div>
+        <div class="rmsg"><span class="rav" style="--h:300">I</span><div class="body"><div class="hd"><span class="n">Iris</span><span class="t">11:02</span></div><div class="answer"><p>看「讨论落成任务」的次数，加上每次从讨论到建任务隔了多久。</p></div></div></div>
+        <div class="rmsg"><span class="rav" style="--h:35">周</span><div class="body"><div class="hd"><span class="n">老周</span><span class="t">11:02</span></div><div class="answer"><p>只看次数就够了，隔多久受你有没有空的影响，噪声太大。</p></div></div></div>
+        <div class="rmsg"><span class="rav" style="--h:300">I</span><div class="body"><div class="hd"><span class="n">Iris</span><span class="t">11:03</span></div><div class="answer"><p>那就两周里 ≥3 次落成任务才做。我没有别的补充了。</p></div></div></div>
+        <div class="limit">
+          <svg class="i sm faint"><use href="#i-pause" /></svg>
+          <span>这一轮已经来回 3 遍，先停在这。</span>
+          <span class="sp"></span>
+          <button class="btn sm">继续讨论</button>
+          <button class="btn sm primary"><span class="rav xs" style="--h:255">管</span>让管家记成任务</button>
+        </div>
+      </div>
+    </div>
+    <div class="dock"><div class="dock-in" data-composer="group"></div></div>
+  </main>
+</section>
+
+<!-- ══════════════ 03 记忆页 ══════════════ -->
+<section class="screen" id="s-memory" data-title="角色设置">
+  <aside class="sidebar" data-sidebar data-active="r-laozhou"></aside>
+  <main class="main">
+    <div class="topbar">
+      <button class="icon-btn" data-go="role" title="返回对话"><svg class="i"><use href="#i-chev-l" /></svg></button>
+      <span class="title">老周 · 设置</span><span class="sp"></span>
+      <button class="btn sm ghost"><svg class="i sm"><use href="#i-folder" /></svg>打开角色目录</button>
+    </div>
+    <div class="scroll">
+      <div class="prof">
+        <span class="rav xl" style="--h:35">周</span>
+        <div><div class="n">老周</div><div class="s">代码审稿人 · 跑在 home · 默认目录 ~/code/agent/trellis</div></div>
+        <span class="sp"></span>
+        <button class="btn sm">复制成新角色</button>
+      </div>
+      <div class="tabs">
+        <button class="tab">资料</button><button class="tab">人设</button><button class="tab on">记忆</button><button class="tab">能力</button><button class="tab">渠道</button><button class="tab">例行</button><button class="tab">高级</button>
+      </div>
+      <div class="page" style="padding-top:20px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <span class="switch on"></span><span style="font-size:13px;font-weight:500">使用记忆</span>
+          <span class="faint" style="font-size:12px">关掉后不读也不写；已有的记忆保留</span>
+          <span class="sp" style="flex:1"></span>
+          <div class="search-mini"><svg class="i sm"><use href="#i-search" /></svg>搜记忆</div>
+        </div>
+
+        <div class="card">
+          <div class="card-hd"><svg class="i sm"><use href="#i-user" /></svg>它对你的了解<span class="ct mono" style="font-size:11px">USER.md</span><span class="sp"></span><button class="btn ghost sm">编辑</button></div>
+          <div class="user-md" style="border-top:1px solid var(--line)">中文交流，术语保留英文。报告多用表格和列表。做事要先核数据再下结论；方向级取舍自己拍板，其余直接做。</div>
+        </div>
+
+        <div class="filters" style="margin-top:20px">
+          <button class="fchip on">全部 <span class="n">23</span></button>
+          <button class="fchip">关于你 <span class="n">3</span></button>
+          <button class="fchip">偏好 <span class="n">8</span></button>
+          <button class="fchip">项目 <span class="n">9</span></button>
+          <button class="fchip">参考 <span class="n">3</span></button>
+          <span class="sp"></span>
+          <button class="btn sm"><svg class="i sm"><use href="#i-plus" /></svg>手动加一条</button>
+        </div>
+
+        <div class="mem-grp">
+          <div class="gh"><span class="pill violet">偏好</span><span class="ct">8</span></div>
+          <div class="card">
+            <div class="mem"><div class="b"><div class="tt">只报可复现的问题，不给重构建议</div><div class="ds">审代码时宁可少报，每条都要有触发条件、位置和影响。</div><div class="meta"><span>来自 <a href="#">10-28 对话</a></span><span>10-28 写入</span><span class="lk">[[review-diff]]</span></div></div><div class="ops"><button class="icon-btn" title="编辑"><svg class="i sm"><use href="#i-edit" /></svg></button><button class="icon-btn" title="删除"><svg class="i sm"><use href="#i-trash" /></svg></button></div></div>
+            <div class="mem"><div class="b"><div class="tt">改完先跑类型检查，再跑相关测试</div><div class="ds">夜间整理把两条合成了这一条。</div><div class="meta"><span>夜间整理 · 今天 03:30</span><a href="#">撤销合并</a></div></div><div class="ops"><button class="icon-btn"><svg class="i sm"><use href="#i-edit" /></svg></button><button class="icon-btn"><svg class="i sm"><use href="#i-trash" /></svg></button></div></div>
+          </div>
+        </div>
+        <div class="mem-grp">
+          <div class="gh"><span class="pill teal">项目</span><span class="ct">9</span></div>
+          <div class="card">
+            <div class="mem"><div class="b"><div class="tt">trellis 的 prod 跑在 3088，部署用 make deploy</div><div class="ds">deploy 自带 smoke 和自动回滚。</div><div class="meta"><span>夜间整理 · 今天 03:30</span><span>来自 <a href="#">10-29 对话</a></span></div></div><div class="ops"><button class="icon-btn"><svg class="i sm"><use href="#i-edit" /></svg></button><button class="icon-btn"><svg class="i sm"><use href="#i-trash" /></svg></button></div></div>
+            <div class="mem"><div class="b"><div class="tt">主 checkout 常被别的 session 换分支</div><div class="ds">多步合并要在自己的 worktree 里做。</div><div class="meta"><span>来自 <a href="#">10-30 对话</a></span></div></div><div class="ops"><button class="icon-btn"><svg class="i sm"><use href="#i-edit" /></svg></button><button class="icon-btn"><svg class="i sm"><use href="#i-trash" /></svg></button></div></div>
+          </div>
+        </div>
+        <div class="mem-grp">
+          <div class="gh"><span class="pill gray">技能</span><span class="ct">2</span><span class="faint" style="font-size:12px;font-weight:400">夜间整理从反复出现的做法里提的</span></div>
+          <div class="card">
+            <div class="mem"><div class="b"><div class="tt mono" style="font-size:12.5px">review-diff</div><div class="ds">先类型检查，再挑能复现的问题，最后给复现步骤。</div><div class="meta"><span>这周用了 3 次</span><span>今天 03:30 生成</span></div></div><div class="ops"><button class="icon-btn"><svg class="i sm"><use href="#i-edit" /></svg></button><button class="icon-btn"><svg class="i sm"><use href="#i-trash" /></svg></button></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</section>
+
+<!-- ══════════════ 04 手机 ══════════════ -->
+<section class="screen" id="s-mobile" data-title="手机">
+  <div class="phones">
+    <div><div class="phone"><iframe data-src="?embed=mlist" title="手机 · 角色列表"></iframe></div><div class="phone-cap">首页顶部：角色和群聊</div></div>
+    <div><div class="phone"><iframe data-src="?embed=role" title="手机 · 角色对话"></iframe></div><div class="phone-cap">角色对话：一览收进头像</div></div>
+    <div><div class="phone"><iframe data-src="?embed=group" title="手机 · 群聊"></iframe></div><div class="phone-cap">群聊：轮次条贴着输入框</div></div>
+  </div>
+</section>
+
+<!-- 手机首页（只在 iframe 里用） -->
+<section class="screen" id="s-mlist" data-title="手机首页">
+  <main class="main" style="margin:0;border-radius:0;box-shadow:none">
+    <div class="topbar" style="border-bottom:0">
+      <button class="icon-btn"><svg class="i"><use href="#i-menu" /></svg></button>
+      <span class="sp"></span>
+      <button class="icon-btn" data-open-new><svg class="i"><use href="#i-plus" /></svg></button>
+    </div>
+    <div class="scroll"><div class="mlist">
+      <h2>角色</h2>
+      <a class="mrole" href="?embed=role" style="color:inherit;text-decoration:none"><span class="rav lg" style="--h:35">周<span class="st busy"></span></span><span class="b"><span class="n">老周<span class="t">10:12</span></span><span class="ln">在读 3e350f7 的改动…</span></span></a>
+      <a class="mrole" href="?embed=group" style="color:inherit;text-decoration:none"><span class="rav-stack" style="width:40px;flex-shrink:0;justify-content:center"><span class="rav sm" style="--h:300">I</span><span class="rav sm" style="--h:35">周</span></span><span class="b"><span class="n">方案评审<span class="t">10:32</span></span><span class="ln">Iris：第一版只要一个出口…</span></span><span class="ub">3</span></a>
+      <a class="mrole" style="color:inherit;text-decoration:none"><span class="rav lg" style="--h:255">管<span class="st"></span></span><span class="b"><span class="n">管家<span class="t">昨天</span></span><span class="ln">夜间巡检没发现问题</span></span></a>
+      <a class="mrole" style="color:inherit;text-decoration:none"><span class="rav lg" style="--h:300">I<span class="st"></span></span><span class="b"><span class="n">Iris<span class="t">周二</span></span><span class="ln">Cindy 的验收记录我整理好了</span></span></a>
+      <div class="msec">会话</div>
+      <a class="mrole" style="color:inherit;text-decoration:none"><span class="rav lg" style="--h:0;background:var(--field);color:var(--ink-2);box-shadow:var(--shadow-hairline)"><svg class="i"><use href="#i-chat" /></svg></span><span class="b"><span class="n">Trellis 多后端 Hub 架构<span class="t">5 分钟</span></span><span class="ln">trellis · 28 节</span></span></a>
+      <a class="mrole" style="color:inherit;text-decoration:none"><span class="rav lg" style="--h:0;background:var(--field);color:var(--ink-2);box-shadow:var(--shadow-hairline)"><svg class="i"><use href="#i-term" /></svg></span><span class="b"><span class="n">Herdr · 坐席 3<span class="t">12 分钟</span></span><span class="ln">等你输入</span></span></a>
+    </div></div>
+  </main>
+</section>
+
+<!-- ══════════════ 05 交互说明 ══════════════ -->
+<section class="screen" id="s-notes" data-title="交互说明" style="overflow-y:auto">
+  <div class="notes">
+    <h1>角色 · 交互设计</h1>
+    <p>角色 = 长期存在的 agent：有人设、有自己的记忆、只有一条对话。群聊 = 几个角色加上你在一个房间里。下面是每个交互点的取舍。</p>
+    <table class="cmp">
+      <thead><tr><th>交互点</th><th>做法</th><th>为什么这样定</th></tr></thead>
+      <tbody>
+        <tr><td>入口</td><td>侧栏导航下面加「角色」分区，排在会话前面；角色和群聊混排，按最近活动排序，最多显示 5 个</td><td>角色是常驻对象，得一眼看到。和会话列表分开，不然会被几百个会话淹没</td></tr>
+        <tr><td>一个角色一条对话</td><td>点角色直接进它唯一的时间线，没有「新会话」按钮；按天分隔</td><td>Cindy 的核心体验：角色是人，不是会话模板</td></tr>
+        <tr><td>新话题</td><td>输入 <code class="inl">/new</code> 或点分隔线，插一条「新话题」：从这里起上下文重开，记忆不受影响，上一段还能往回翻</td><td>长时间线迟早撑爆上下文。CLI 自己 compact 不可控，用户手动切话题更可预期</td></tr>
+        <tr><td>记忆写入</td><td>角色每记一条，就在那条回复下面出现紫色小行「记下了 …」，带撤销和改一下</td><td>记忆最怕偷偷记错。写入当场可见，用户不用去设置页翻</td></tr>
+        <tr><td>夜间整理</td><td>每天 03:30 跑；没有新对话就跳过、不调模型。结果是时间线里的一张卡：新增 / 合并 / 删除 / 技能，逐条接受或拒绝</td><td>复用管家改动卡「先预览、再落库、可撤销」的语义，不另起一套确认流程</td></tr>
+        <tr><td>一览</td><td>对话右侧 300px 面板：人设一句话、最近记住的、例行、渠道、后台任务；手机上收进头像</td><td>对应 Cindy 的 At a glance，不用离开对话就能看清「它是谁、记得什么、在干嘛」</td></tr>
+        <tr><td>大活</td><td>角色开后台任务（就是普通会话），时间线里放一张任务卡，完成后回报</td><td>长任务不该堵住聊天；后台任务在会话列表里照常可见</td></tr>
+        <tr><td>新建</td><td>三种起点：空白 / 从模板（现有 6 个预设和管家）/ <b>从一段会话提炼</b>（读那段对话，生成人设草稿和初始记忆）</td><td>第三种是 trellis 独有的：你已经有几百个会话，比从零写人设快</td></tr>
+        <tr><td>群聊发言</td><td>@ 了谁就只让谁回；没 @ 时默认由路由挑一位回（可改成谁有话谁说，或只有被 @ 的回）</td><td>默认挑一位最省 token、最不吵；Cindy 默认是 Anyone Can Reply</td></tr>
+        <tr><td>群聊刹车</td><td>输入框上方的轮次条：第几遍、多少条、停下这一轮。到上限后给两个出口：继续讨论 / 让管家记成任务</td><td>角色互相接话容易停不下来。上限照搬 Cindy：3 遍 10 条</td></tr>
+        <tr><td>群聊落地</td><td>第一版不做组织者（Organizer）；讨论结果靠 @管家 建成任务</td><td>两周里 ≥3 次讨论落成任务再做组织者</td></tr>
+        <tr><td>设置</td><td>点头像或齿轮进设置页：资料 / 人设 / 记忆 / 能力 / 渠道 / 例行 / 高级；记忆页可搜、可编辑，每条带来源对话链接</td><td>记忆能追溯到是哪次对话记下的，错了才好改</td></tr>
+      </tbody>
+    </table>
+    <h1 style="font-size:18px;margin-top:36px">和现有东西的对应</h1>
+    <table class="cmp" style="margin-top:12px">
+      <thead><tr><th>界面上的</th><th>落在哪</th></tr></thead>
+      <tbody>
+        <tr><td>角色</td><td><code class="inl">agents</code> 加 <code class="inl">kind='role'</code>、头像、介绍、<code class="inl">home_session_id</code>；管家迁成第一个内置角色</td></tr>
+        <tr><td>角色时间线</td><td>一个固定会话；「新话题」= 换一个新的 <code class="inl">claude_session_id</code>，界面上还是同一条</td></tr>
+        <tr><td>记忆 / 技能</td><td><code class="inl">~/.trellis/roles/&lt;slug&gt;/</code>：SOUL.md、USER.md、memories/、skills/，经 <code class="inl">--add-dir</code> 和 agent-pack 注入</td></tr>
+        <tr><td>夜间整理 / 例行</td><td>tasks + triggers；改动卡复用 <code class="inl">butler_changes</code></td></tr>
+        <tr><td>渠道</td><td><code class="inl">lark_bots.agent_id</code> 绑角色</td></tr>
+        <tr><td>群聊</td><td>新 <code class="inl">kind='group'</code> 会话 + 成员表；服务端编排谁发言</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════ 新建角色弹窗 ══════════════ -->
+<div class="scrim" data-scrim></div>
+<div class="modal" data-new-modal role="dialog" aria-modal="true" aria-labelledby="new-title">
+  <div class="modal-hd"><span class="tt" id="new-title">新建角色</span><span class="sp"></span><button class="icon-btn" data-close-modal aria-label="关闭"><svg class="i"><use href="#i-x" /></svg></button></div>
+  <div class="modal-bd">
+    <div class="srcs">
+      <button class="src" data-src="blank"><span class="ic"><svg class="i sm"><use href="#i-plus" /></svg></span><div class="t">空白</div><div class="s">自己写名字和性格</div></button>
+      <button class="src" data-src="tpl"><span class="ic"><svg class="i sm"><use href="#i-box" /></svg></span><div class="t">从模板</div><div class="s">费曼考官、犀利评论者、管家…</div></button>
+      <button class="src on" data-src="chat"><span class="ic"><svg class="i sm"><use href="#i-spark" /></svg></span><div class="t">从会话提炼</div><div class="s">挑一段聊得好的对话，提炼出人设和初始记忆</div></button>
+    </div>
+    <div class="form">
+      <span class="lbl">来源会话</span>
+      <div>
+        <div class="field" style="display:flex;align-items:center;gap:8px"><svg class="i sm faint"><use href="#i-chat" /></svg><span style="flex:1">Trellis 多后端 Hub 架构</span><span class="faint" style="font-size:12px">28 节 · trellis</span><svg class="i xs faint"><use href="#i-chev" /></svg></div>
+        <div class="fromchat" style="margin-top:8px"><b style="color:var(--ink)">提炼出的草稿</b>（下面都能改）：一位偏架构的审稿人，习惯先问边界再给方案；从这段对话里带走 5 条记忆，比如「hub 走网关 3200」「devbox = office」。</div>
+      </div>
+      <span class="lbl">头像</span>
+      <div class="avpick">
+        <span class="rav lg on" style="--h:35">周</span><span class="rav lg" style="--h:150">周</span><span class="rav lg" style="--h:200">周</span><span class="rav lg" style="--h:300">周</span><span class="rav lg" style="--h:0">周</span>
+        <button class="btn sm ghost">上传图片</button>
+      </div>
+      <span class="lbl">名字</span>
+      <div><input class="field" value="老周"><div class="hint">名字不能和已有角色重复；群聊里靠它 @</div></div>
+      <span class="lbl">一句话介绍</span>
+      <input class="field" value="代码审稿人。冷静、讲证据，只报能复现的问题。">
+      <span class="lbl">性格与说话方式</span>
+      <textarea class="field">严重性来自真实影响。宁可给少量可复现问题，也不堆推测性的重构意见。说话直接，不客套。</textarea>
+      <span class="lbl">跑在</span>
+      <div style="display:flex;gap:8px"><div class="field" style="display:flex;align-items:center;gap:8px;flex:1"><svg class="i sm faint"><use href="#i-server" /></svg>home<svg class="i xs faint" style="margin-left:auto"><use href="#i-chev" /></svg></div><div class="field" style="display:flex;align-items:center;gap:8px;flex:2"><svg class="i sm faint"><use href="#i-folder" /></svg><span class="mono" style="font-size:12px">~/code/agent/trellis</span></div></div>
+      <span class="lbl">模型</span>
+      <div style="display:flex;align-items:center;gap:12px"><div class="field" style="display:flex;align-items:center;gap:8px;width:200px">opus-5-5<svg class="i xs faint" style="margin-left:auto"><use href="#i-chev" /></svg></div><span class="switch on"></span><span style="font-size:13px">使用记忆</span></div>
+    </div>
+  </div>
+  <div class="modal-ft"><span class="faint" style="font-size:12px">创建后它会先打个招呼，然后就可以聊了</span><span class="sp"></span><button class="btn" data-close-modal>取消</button><button class="btn primary" data-close-modal>创建</button></div>
+</div>
+
+<div class="proto-bar" id="proto-bar">
+  <span class="lbl">角色原型</span>
+  <button data-screen="role">角色对话</button>
+  <button data-screen="group">群聊</button>
+  <button data-screen="group-limit">群聊·到上限</button>
+  <button data-screen="memory">记忆页</button>
+  <button data-new-btn>新建角色</button>
+  <button data-screen="mobile">手机</button>
+  <button data-screen="notes">交互说明</button>
+  <span class="sep"></span>
+  <button data-theme-btn>深浅色</button>
+</div>
+
+<script>
+(function () {
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var ic = function (id, cls) { return '<svg class="i ' + (cls || "") + '"><use href="#i-' + id + '"/></svg>'; };
+  var params = new URLSearchParams(location.search);
+  var embed = params.get("embed");
+
+  /* ── 侧栏：导航 + 角色分区 + 会话 ── */
+  var ROLES = [
+    { k: "r-laozhou", go: "role", av: '<span class="rav xs" style="--h:35">周</span>', n: "老周", s: "审稿人", busy: true },
+    { k: "g-review", go: "group", av: '<span class="grav"><i style="--h:35"></i><i style="--h:300"></i><i style="--h:255"></i><i style="--h:150"></i></span>', n: "方案评审", unread: true },
+    { k: "r-butler", go: "role", av: '<span class="rav xs" style="--h:255">管</span>', n: "管家", tm: "昨天" },
+    { k: "r-iris", go: "role", av: '<span class="rav xs" style="--h:300">I</span>', n: "Iris", s: "研究员", tm: "周二" },
+  ];
+  var SESS = [
+    { name: "trellis", items: ["Trellis 多后端 Hub 架构", "Beautiful UI hub 原型", "对于 project 模式，怎么 clear session"] },
+    { name: ".claude", items: ["iPad SIP 关闭", "浏览器基建 ego-lite"] },
+  ];
+  function sidebarHTML(active) {
+    var h = '<div class="sb-top"><button class="machine"><span class="logo"><svg class="i"><use href="#i-logo"/></svg></span>';
+    h += '<span style="min-width:0;flex:1"><span class="name" style="display:block">home</span><span class="sub"><span class="dot green"></span>Mac mini · 本机</span></span><span class="faint">' + ic("updown", "sm") + '</span></button>';
+    h += '<button class="icon-btn" title="收起侧栏">' + ic("side") + '</button></div>';
+    h += '<div class="glide" data-glide><span class="hl"></span>';
+    [["edit", "新会话", "⌘N"], ["search", "搜索", "⌘P"], ["term", "Herdr", ""]].forEach(function (n) {
+      h += '<button class="row">' + ic(n[0]) + '<span class="lb">' + n[1] + '</span>' + (n[2] ? '<span class="kbd">' + n[2] + '</span>' : '') + '</button>';
+    });
+    h += '</div><div class="sb-scroll">';
+    h += '<div class="sb-sec"><span class="h">' + ic("chev", "xs") + '角色</span><button class="add" data-open-new title="新建角色或群聊">' + ic("plus", "sm") + '</button></div>';
+    h += '<div class="glide" data-glide><span class="hl"></span>';
+    ROLES.forEach(function (r) {
+      h += '<button class="row role' + (r.k === active ? " active" : "") + '" data-go="' + r.go + '">' + r.av;
+      h += '<span class="lb">' + r.n + (r.s ? '<span class="sn">' + r.s + '</span>' : '') + '</span>';
+      if (r.busy) h += '<span class="pix round" data-pix></span>';
+      else if (r.unread) h += '<span class="unread"></span>';
+      else if (r.tm) h += '<span class="tm">' + r.tm + '</span>';
+      h += '</button>';
+    });
+    h += '</div>';
+    h += '<div class="sb-sec" style="margin-top:10px"><span class="h">' + ic("chev", "xs") + '会话</span><span class="seg"><button class="on">按项目</button><button>按时间</button></span></div>';
+    h += '<div class="glide" data-glide><span class="hl"></span>';
+    SESS.forEach(function (g) {
+      h += '<div class="grp">' + ic("folder") + g.name + '</div>';
+      g.items.forEach(function (t) { h += '<button class="row sess"><span class="mode"></span><span class="lb">' + t + '</span></button>'; });
+    });
+    h += '</div></div>';
+    h += '<div class="sb-foot"><div class="glide" data-glide style="flex:1"><span class="hl"></span><button class="row" style="margin:0">' + ic("gear") + '<span class="lb">设置</span></button></div>';
+    h += '<button class="icon-btn" data-theme-btn title="深浅色">' + ic("sun") + '</button><span class="avatar">SM</span></div>';
+    return h;
+  }
+  $$("[data-sidebar]").forEach(function (el) { el.innerHTML = sidebarHTML(el.dataset.active); });
+
+  /* ── 输入框：角色版去掉模式 / agent 选择，群聊版带 @ 菜单 ── */
+  function composerHTML(kind) {
+    var ph = kind === "group" ? "说点什么，@ 指定谁来回" : "跟老周说点什么，/new 开新话题";
+    var h = '<div class="composer">';
+    if (kind === "group") {
+      h += '<div class="at-menu" data-at><div class="hd">谁来回</div>';
+      [["35", "周", "老周", "代码审稿人"], ["300", "I", "Iris", "研究员"], ["255", "管", "管家", "能建任务"]].forEach(function (m, i) {
+        h += '<button class="mi' + (i === 0 ? " on" : "") + '"><span class="rav sm" style="--h:' + m[0] + '">' + m[1] + '</span><span class="t">' + m[2] + '</span><span class="s">' + m[3] + '</span></button>';
+      });
+      h += '<button class="mi"><span class="rav sm" style="--h:0;background:var(--field);color:var(--ink-2);box-shadow:var(--shadow-hairline)">' + ic("users", "xs") + '</span><span class="t">所有人</span><span class="s">每位都回</span></button></div>';
+    } else {
+      h += '<div class="slash" data-slash>';
+      [["scissors", "/new", "开新话题，记忆保留"], ["brain", "/remember", "让它记下一件事"], ["run", "/task", "开后台任务"]].forEach(function (c, i) {
+        h += '<button class="mi' + (i === 0 ? " on" : "") + '"><span class="ic">' + ic(c[0], "sm") + '</span><span class="t mono">' + c[1] + '</span><span class="s">' + c[2] + '</span></button>';
+      });
+      h += '</div>';
+    }
+    h += '<textarea rows="1" placeholder="' + ph + '" aria-label="' + ph + '"></textarea>';
+    h += '<div class="c-bar"><button class="c-tool icon" title="附件">' + ic("plus") + '</button>';
+    h += '<button class="c-tool icon" title="' + (kind === "group" ? "@ 角色" : "引用") + '" data-at-btn>' + ic("at") + '</button>';
+    h += '<button class="c-tool">' + ic("shield", "sm") + '默认权限<span class="k">' + ic("chev", "xs") + '</span></button>';
+    h += '<span class="sp"></span><button class="c-tool icon" title="听写">' + ic("mic") + '</button>';
+    h += '<button class="send" title="发送 ⌘↵">' + ic("up", "sm") + '</button></div></div>';
+    return h;
+  }
+  $$("[data-composer]").forEach(function (el) { el.innerHTML = composerHTML(el.dataset.composer); });
+  $$(".composer textarea").forEach(function (ta) {
+    var menu = ta.parentNode.querySelector("[data-slash],[data-at]");
+    var trig = menu && menu.hasAttribute("data-at") ? "@" : "/";
+    ta.addEventListener("input", function () { menu.classList.toggle("open", ta.value.slice(-1) === trig || (trig === "/" && ta.value.trim().indexOf("/") === 0)); });
+    ta.addEventListener("blur", function () { setTimeout(function () { menu.classList.remove("open"); }, 150); });
+  });
+  $$("[data-at-btn]").forEach(function (b) {
+    b.addEventListener("click", function () { var m = b.closest(".composer").querySelector("[data-at]"); if (m) m.classList.toggle("open"); });
+  });
+
+  /* ── 像素格 loader ── */
+  var CHEV = [0, 1, 2, 1, 2, 3, 2, 3, 4];
+  $$("[data-pix]").forEach(function (p) {
+    CHEV.forEach(function (d) { var i = document.createElement("i"); i.style.animationDelay = (d * 90) + "ms"; p.appendChild(i); });
+  });
+
+  /* ── 记忆行撤销 ── */
+  $$("[data-memline]").forEach(function (m) {
+    var b = $("[data-undo]", m);
+    b.addEventListener("click", function () {
+      var off = m.classList.toggle("undone");
+      b.textContent = off ? "恢复" : "撤销";
+    });
+  });
+
+  /* ── 夜间整理卡：逐条 / 全部 ── */
+  $$("[data-chg]").forEach(function (card) {
+    $$("[data-chg-row]", card).forEach(function (row) {
+      $("[data-ok]", row).addEventListener("click", function () { row.classList.add("ok"); $(".res", row).textContent = "已接受"; });
+      $("[data-no]", row).addEventListener("click", function () { row.classList.add("no"); $(".res", row).textContent = "已拒绝"; });
+    });
+    $("[data-chg-all]", card).addEventListener("click", function () {
+      $$("[data-chg-row]", card).forEach(function (row) { if (!row.classList.contains("no")) { row.classList.add("ok"); $(".res", row).textContent = "已接受"; } });
+    });
+  });
+
+  /* ── 一览面板开合 ── */
+  $$("[data-glance-btn]").forEach(function (b) {
+    b.addEventListener("click", function () { var g = b.closest(".main").querySelector("[data-glance]"); g.classList.toggle("off"); });
+  });
+
+  /* ── 弹层 ── */
+  $$("[data-pop-btn]").forEach(function (b) {
+    var p = $('[data-pop="' + b.dataset.popBtn + '"]');
+    b.addEventListener("click", function (e) { e.stopPropagation(); p.classList.toggle("open"); });
+    p.addEventListener("click", function (e) { e.stopPropagation(); });
+  });
+  document.addEventListener("click", function () { $$(".pop.open").forEach(function (p) { p.classList.remove("open"); }); });
+  $$("[data-radio]").forEach(function (r) {
+    r.addEventListener("click", function () { $$("[data-radio]", r.parentNode).forEach(function (x) { x.classList.toggle("on", x === r); }); });
+  });
+
+  /* ── 新建弹窗 ── */
+  var scrim = $("[data-scrim]"), modal = $("[data-new-modal]");
+  function openNew() { scrim.classList.add("open"); modal.classList.add("open"); }
+  function closeNew() { scrim.classList.remove("open"); modal.classList.remove("open"); }
+  $$("[data-open-new],[data-new-btn]").forEach(function (b) { b.addEventListener("click", openNew); });
+  $$("[data-close-modal]").forEach(function (b) { b.addEventListener("click", closeNew); });
+  scrim.addEventListener("click", closeNew);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeNew(); });
+  $$("[data-src]").forEach(function (s) {
+    s.addEventListener("click", function () { $$("[data-src]").forEach(function (x) { x.classList.toggle("on", x === s); }); });
+  });
+  $$(".avpick .rav").forEach(function (a) {
+    a.addEventListener("click", function () { $$(".avpick .rav").forEach(function (x) { x.classList.toggle("on", x === a); }); });
+  });
+
+  /* ── glide 高亮 ── */
+  $$("[data-glide]").forEach(function (g) {
+    var hl = $(".hl", g); if (!hl) return;
+    g.addEventListener("mousemove", function (e) {
+      var row = e.target.closest(".row"); if (!row || !g.contains(row)) return;
+      g.classList.add("hovering");
+      hl.style.transform = "translateY(" + row.offsetTop + "px)"; hl.style.height = row.offsetHeight + "px";
+    });
+    g.addEventListener("mouseleave", function () { g.classList.remove("hovering"); });
+  });
+
+  /* ── 屏幕切换 / 主题 ── */
+  function show(name) {
+    $$(".screen").forEach(function (s) { s.classList.toggle("on", s.id === "s-" + name); });
+    $$("#proto-bar [data-screen]").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.screen === name ? "true" : "false"); });
+    if (name === "mobile") $$("iframe[data-src]").forEach(function (f) {
+      if (!f.src) { var t = document.documentElement.classList.contains("dark") ? "dark" : "light"; f.src = location.pathname + f.dataset.src + "&theme=" + t; }
+    });
+    // 聊天类屏幕像真产品一样停在最底部
+    var sc = $("#s-" + name + " .scroll");
+    if (sc && /^(role|group)/.test(name)) sc.scrollTop = sc.scrollHeight;
+    if (!embed) history.replaceState(null, "", "?screen=" + name);
+  }
+  $$("#proto-bar [data-screen]").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.screen); }); });
+  $$("[data-go]").forEach(function (b) { b.addEventListener("click", function (e) { e.preventDefault(); show(b.dataset.go); }); });
+  $$("[data-theme-btn]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var dark = document.documentElement.classList.toggle("dark");
+      localStorage.setItem("bui-mock-theme", dark ? "dark" : "light");
+      $$("iframe[data-src]").forEach(function (f) { f.removeAttribute("src"); });
+      if ($("#s-mobile").classList.contains("on")) show("mobile");
+    });
+  });
+  if (embed) {
+    $("#proto-bar").style.display = "none";
+    document.body.classList.add("embed");
+    show(embed);
+  } else {
+    show(params.get("screen") || "role");
+    if (params.get("modal") === "new") openNew();
+  }
+})();
+</script>
+</body>
+</html>
