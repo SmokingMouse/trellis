@@ -795,7 +795,7 @@ export default function LarkBotsSettingsPage() {
         subtitle={loading && !bots.length ? undefined : `${connectedCount} 个已连接`}
         actions={
           <>
-            <IconButton label="刷新" onClick={doRefresh} disabled={refreshing}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={doRefresh} disabled={refreshing}>
               {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button onClick={() => create()} className="max-md:hidden">
@@ -815,7 +815,7 @@ export default function LarkBotsSettingsPage() {
       ) : (
     <div className="flex flex-col md:flex-row gap-6">
       {/* 左侧：机器人列表 */}
-      <aside className="md:w-[280px] shrink-0 flex flex-col gap-2">
+      <aside className="md:w-[360px] shrink-0 flex flex-col gap-2">
         {loading && !bots.length ? (
           <div role="status" aria-label="加载中" className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[0, 1].map((i) => (
@@ -914,7 +914,7 @@ export default function LarkBotsSettingsPage() {
       <main className="flex-1 min-w-0 flex flex-col gap-4">
         {/* 本机已发现应用推荐区（无需复制 App ID / Secret） */}
         {discovered.length > 0 && (
-          <section className="ui-enter-up rounded-card bg-accent-muted p-4 flex flex-col gap-3">
+          <section className="ui-enter-up flex flex-col gap-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 font-semibold text-ui text-ink">
                 <Icon icon={Sparkles} className="text-accent-ink" />
@@ -929,7 +929,7 @@ export default function LarkBotsSettingsPage() {
                 return (
                   <div
                     key={disc.appId}
-                    className="flex flex-col justify-between p-3 rounded-card bg-surface-raised shadow-raise gap-2.5"
+                    className="flex flex-col justify-between p-4 rounded-card bg-surface-raised shadow-raise gap-3"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
@@ -1002,7 +1002,7 @@ export default function LarkBotsSettingsPage() {
                 </Button>
               </div>
             }
-            className="ui-enter-up rounded-card bg-surface-raised shadow-raise"
+            className="ui-enter-up rounded-card bg-surface-raised shadow-raise md:py-8"
           />
         ) : (
           <div className="flex flex-col gap-4">

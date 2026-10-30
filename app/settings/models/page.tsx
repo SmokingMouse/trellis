@@ -16,12 +16,12 @@ import { Icon, IconButton, PageHeader } from "@/components/ui";
 export default function ModelsSettingsPage() {
   const [epoch, setEpoch] = useState(0);
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         title="模型与服务商"
         subtitle="本机 CLI 登录态、各服务商端点与模型列表"
         actions={
-          <IconButton label="刷新" onClick={() => setEpoch((n) => n + 1)}>
+          <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => setEpoch((n) => n + 1)}>
             <Icon icon={RefreshCw} />
           </IconButton>
         }

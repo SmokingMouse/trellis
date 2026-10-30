@@ -79,7 +79,7 @@ export default function ApprovalRulesPage() {
         countUnit="条"
         subtitle="审批卡上选「本会话 / 所有会话始终允许」后落下的规则；命中时工具调用不弹卡，调用行尾标「按规则允许」"
         actions={
-          <IconButton label="刷新" onClick={() => void load()}>
+          <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => void load()}>
             <Icon icon={RefreshCw} />
           </IconButton>
         }

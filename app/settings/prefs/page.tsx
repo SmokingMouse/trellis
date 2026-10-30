@@ -39,7 +39,7 @@ export default function PrefsSettingsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 md:max-w-[760px]">
       <PageHeader
         title="偏好"
         count={PREF_ITEMS.length}
@@ -100,7 +100,7 @@ function Row({
         ) : item.kind === "enum" ? (
           <Select
             aria-label={item.label}
-            className="md:w-44"
+            className="md:w-[280px]"
             value={raw ?? item.fallback}
             onValueChange={onChange}
             options={item.options.map((o) => ({ value: o.value, label: o.label }))}
