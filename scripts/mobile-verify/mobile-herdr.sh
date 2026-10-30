@@ -537,10 +537,16 @@ ab set viewport 1440 900
 ab open "$BASE/"
 wait_for_js "desktop offline row hidden by default" "Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-claude\"]')) && !document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
 ab screenshot "$OUT/desktop-herdr-offline-hidden.png"
-ab eval "document.querySelector('[data-sidebar-toolbar] [role=checkbox]').click(); true"
+# 2026-10-30 桌面侧栏改版：「含已归档」收进区头的筛选菜单（[data-sidebar-source-filter]）。
+# Radix 菜单按 pointerdown 打开，要用真点击（ab click），不能 element.click()。
+ab click '[data-sidebar-source-filter]'
+wait_for_js "filter menu open" "Boolean(document.querySelector('[data-sidebar-archived-filter]'))"
+ab click '[data-sidebar-archived-filter]'
 wait_for_js "offline row returns readable with its chip" "document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')?.dataset.herdrStatus === 'offline' && Boolean(document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"] [data-session-offline]'))"
 ab screenshot "$OUT/desktop-herdr-offline-chip.png"
-ab eval "document.querySelector('[data-sidebar-toolbar] [role=checkbox]').click(); true"
+ab click '[data-sidebar-source-filter]'
+wait_for_js "filter menu reopen" "Boolean(document.querySelector('[data-sidebar-archived-filter]'))"
+ab click '[data-sidebar-archived-filter]'
 wait_for_js "default list restored" "!document.querySelector('[data-sidebar-list] [data-herdr-pane=\"pane-codex\"]')"
 ab set device "iPhone 15"
 ab set viewport 390 844

@@ -814,12 +814,10 @@ export function Composer({
       }
       onPaste={att.handlePaste}
       onDropFiles={att.handleDrop}
-      chips={
-        <>
-          <ModeBadge />
-          <ModelPicker />
-        </>
-      }
+      // 原型 .c-bar：[附件][草图][展开][模式 chip（含 Agent）] … [发送到][模型][发送]，与首页输入框同一顺序
+      chipsAfterTools
+      chips={<ModeBadge />}
+      trailing={<ModelPicker />}
       tools={
         <>
           {attachButton}

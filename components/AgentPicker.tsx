@@ -12,6 +12,7 @@ import {
   agentSupported,
 } from "@/lib/run-config";
 import { providerFamily } from "@/lib/llm";
+import { COMPOSER_TOOL_PILL } from "./ComposerShell";
 
 // S88: 选下一个新会话的 Agent（人设 + 模型 + 工具 + 技能 + 隔离度）。
 //
@@ -39,7 +40,13 @@ type AgentSummary = {
   skills: unknown[];
 };
 
-export function AgentPicker() {
+export function AgentPicker({
+  variant = "default",
+}: {
+  /** toolbar = 桌面输入框底栏里的 ghost 胶囊（原型 .c-bar「默认助手 ⌄」），下拉左对齐触发钮 */
+  variant?: "default" | "toolbar";
+} = {}) {
+  const toolbar = variant === "toolbar";
   const draftMode = useSessionStore((s) => s.draftMode);
   const draftSystemPrompt = useSessionStore((s) => s.draftSystemPrompt);
   const setDraftSystemPrompt = useSessionStore((s) => s.setDraftSystemPrompt);
@@ -102,7 +109,7 @@ export function AgentPicker() {
   };
 
   return (
-    <div className="relative inline-block text-sm">
+    <div className={toolbar ? "relative inline-flex min-w-0 text-sm" : "relative inline-block text-sm"}>
       <button
         type="button"
         onClick={() => {
@@ -111,10 +118,14 @@ export function AgentPicker() {
         }}
         title="选择这个对话用哪个 Agent（人设 / 模型 / 工具 / 技能）"
         aria-expanded={open}
-        className="press h-7 max-md:min-h-11 px-2.5 rounded-full bg-surface-raised text-ink-muted shadow-btn transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink flex items-center gap-1.5 text-[12.5px]"
+        className={
+          toolbar
+            ? COMPOSER_TOOL_PILL
+            : "press h-7 max-md:min-h-11 px-2.5 rounded-full bg-surface-raised text-ink-muted shadow-btn transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink flex items-center gap-1.5 text-[12.5px]"
+        }
       >
         <Icon icon={Bot} size="sm" />
-        <span>Agent：{label}</span>
+        <span className={toolbar ? "min-w-0 truncate" : undefined}>Agent：{label}</span>
         <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
       </button>
       {open && (
@@ -122,7 +133,7 @@ export function AgentPicker() {
           {/* 点外关闭的遮罩 portal 到 body：桌面主窗外壳带 transform，fixed 不 portal 只能盖到窗内 */}
           {createPortal(<div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />, document.body)}
           {/* 注：这是锚定触发按钮的居中下拉（非标准居中弹窗），保持手写外壳。 */}
-          <div className="ui-layer absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[360px] bg-surface-raised rounded-overlay shadow-pop p-1.5 text-left">
+          <div className={`ui-layer absolute z-50 mt-2 w-[360px] ${toolbar ? "top-full left-0" : "left-1/2 -translate-x-1/2"} bg-surface-raised rounded-overlay shadow-pop p-1.5 text-left`}>
             <div className="px-2 pt-1 pb-1.5 text-label font-medium text-ink-faint">
               选一个 Agent（创建后锁定）
             </div>

@@ -546,7 +546,11 @@ ab eval --stdin <<'JS'
   assert(rightmost.getAttribute('aria-label') === '发送', `rightmost button=${rightmost.getAttribute('aria-label')}`);
   const context = composer.querySelector('[data-composer-context]');
   const cr = context?.getBoundingClientRect();
-  assert(cr && cr.width > 0 && cr.right <= rects['添加附件'].left + 1, `desktop mode/model context group missing or misplaced ${JSON.stringify(cr?.toJSON?.())}`);
+  // 2026-10-30 原型底栏顺序：[附件][草图][展开][模式] … [模型][发送]——模式组在附件之后、模型在发送之前
+  assert(cr && cr.width > 0 && cr.left >= rects['添加附件'].right - 1, `desktop mode context group missing or misplaced ${JSON.stringify(cr?.toJSON?.())}`);
+  const model = composer.querySelector('[data-model-picker-trigger]');
+  const mr = model?.getBoundingClientRect();
+  assert(mr && mr.width > 0 && mr.right <= rects['发送'].left + 1 && mr.left >= cr.right, `desktop model picker missing or misplaced ${JSON.stringify(mr?.toJSON?.())}`);
   const rr = rail.getBoundingClientRect();
   // 桌面 Composer 贴浮起主窗的底（2026-10-30 视觉改版，主窗四周 8px）
   const win = document.querySelector('[data-app-window-backdrop]')?.getBoundingClientRect();

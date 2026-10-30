@@ -96,6 +96,8 @@ export function ComposerShell({
   onDropFiles,
   chips,
   tools,
+  chipsAfterTools = false,
+  trailing,
   compactTools,
   sendTo,
   primary,
@@ -147,6 +149,10 @@ export function ComposerShell({
   chips?: ReactNode;
   /** chip 之后的工具图标（附件 / 草图） */
   tools?: ReactNode;
+  /** true = 原型 .c-bar 顺序：工具图标在前、chip 行在后（[附件][草图][展开][模式]…）。默认 chip 在最左 */
+  chipsAfterTools?: boolean;
+  /** 右侧、「发送到」之后主按钮之前的选择器（模型）；与 chips 一样手机端（mobileCompact）不显示 */
+  trailing?: ReactNode;
   /** 手机收起态里、主按钮之前的工具图标 */
   compactTools?: ReactNode;
   /** 右侧「发送到 / 发往」 */
@@ -232,6 +238,12 @@ export function ComposerShell({
     >
       <Icon icon={Maximize2} />
     </IconButton>
+  );
+
+  const chipsGroup = !mobileCompact && chips && (
+    <div className={`flex min-w-0 items-center gap-1 ${chipsAfterTools ? "ml-0.5" : "mr-0.5"}`} data-composer-context="">
+      {chips}
+    </div>
   );
 
   const closeFullscreen = (refocus: boolean) => {
@@ -357,15 +369,13 @@ export function ComposerShell({
         </div>
         {!compact && (
           <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
-            {!mobileCompact && chips && (
-              <div className="flex min-w-0 items-center gap-1 mr-0.5" data-composer-context="">
-                {chips}
-              </div>
-            )}
+            {!chipsAfterTools && chipsGroup}
             {tools}
             {expandButton}
+            {chipsAfterTools && chipsGroup}
             <span className="flex-1" />
             {sendTo}
+            {!mobileCompact && trailing}
             {primary}
           </div>
         )}

@@ -543,7 +543,8 @@ ab eval --stdin <<'JS'
   for (const required of ['搜索', '主题', '更多', '设置']) {
     assert(labels.includes(required), `desktop header missing ${required}: ${JSON.stringify(labels)}`);
   }
-  assert(controls.some((c) => c.hasAttribute('data-model-picker-trigger')), `desktop header missing model picker: ${JSON.stringify(labels)}`);
+  // 2026-10-30 桌面布局对齐 beautifului 原型：模型选择从顶栏挪进输入框底栏，顶栏不该再有可见的模型钮
+  assert(!controls.some((c) => c.hasAttribute('data-model-picker-trigger')), `desktop header still has model picker: ${JSON.stringify(labels)}`);
   controls.forEach((control) => {
     const rect = control.getBoundingClientRect();
     assert(rect.height < 44 && rect.height >= 16, `${label(control)} desktop height=${rect.height}`);

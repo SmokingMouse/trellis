@@ -10,7 +10,7 @@
 // non-permanent overlay and the content stays full-width (mobile views are
 // fullscreen-by-default and don't render the desktop rail).
 
-export const SIDEBAR_W = 210; // px — the explorer rail width.
+export const SIDEBAR_W = 260; // px — the explorer rail width（原型 08-beautiful-ui .sidebar）.
 
 // Consumers that need the offset at runtime read the CSS variable
 // `--trellis-sb` (set in app/page.tsx); the Outline rail composes it as
@@ -22,10 +22,14 @@ export const SIDEBAR_W = 210; // px — the explorer rail width.
 export const SIDEBAR_MIN = 160;
 export const SIDEBAR_MAX = 420;
 const SIDEBAR_KEY = "trellis-sidebar-width";
+const LEGACY_SIDEBAR_W = 210;
 
 export function loadSidebarWidth(): number {
   if (typeof window === "undefined") return SIDEBAR_W;
   const n = Number(window.localStorage.getItem(SIDEBAR_KEY));
+  // 2026-10-30 默认宽 210 → 260（beautifului 原型）。存着旧默认值 210 的多半只是
+  // 拖拽时碰巧落回原位、并非刻意选的宽度——按新默认处理，免得老用户永远看不到新布局。
+  if (n === LEGACY_SIDEBAR_W) return SIDEBAR_W;
   return Number.isFinite(n) && n >= SIDEBAR_MIN && n <= SIDEBAR_MAX ? n : SIDEBAR_W;
 }
 

@@ -18,7 +18,7 @@ import { NodeRefChips } from "./NodeRefChips";
 import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
 import { appendNodeRefs, MAX_NODE_REFS, removeMentionQuery, type NodeRef } from "@/lib/node-refs";
 import { ModelPicker } from "./ModelPicker";
-import { COMPOSER_TOOL_ICON } from "./ComposerShell";
+import { COMPOSER_TOOL_ICON, COMPOSER_TOOL_PILL } from "./ComposerShell";
 import {
   ArrowLeftRight,
   FileText,
@@ -142,6 +142,14 @@ export function QuestionInput({
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
+
+  // 桌面输入框随内容长高（2 行起，CSS max-h 封顶后内部滚动）；手机保持固定 4 行。
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || isMobile) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [q, isMobile]);
 
   useImperativeHandle(controlRef, () => ({
     fill: (text: string) => {
@@ -352,7 +360,10 @@ export function QuestionInput({
           想深入探索什么？任何问题都可以——后续可以选中回复里的任意文字继续追问。
         </p>
         </>}
-        {butler ? null : isMobile ? (
+        {/* 桌面：模式 / Agent / 增强模式 / 模型都在输入框底栏（原型 .c-bar）；手机仍是一行摘要 + 「更多设置」sheet。
+            S89: Agent 选择两个 mode 都出现（服务端 chat/route.ts 对 agentId 的钳制只看「claude 家族」、
+            不看 mode）。增强模式是 chat 专属。 */}
+        {!butler && isMobile && (
           <button
             type="button"
             data-mobile-target="new-session-config-summary"
@@ -373,43 +384,13 @@ export function QuestionInput({
             )}
             <span className="ml-auto shrink-0 text-accent-ink">设置 ›</span>
           </button>
-        ) : (
-          <div className="mb-3 flex justify-center">
-            <ModePicker />
-          </div>
-        )}
-        {/* S89: Agent 选择两个 mode 都出现。原来整块被 `draftMode === "chat"` 关着，
-            但服务端 chat/route.ts 对 agentId 的钳制条件只有「claude 家族」、**不看 mode**
-            —— 即 project 会话完全支持 agent，只是界面上没有入口，只能靠 @提及。
-            AgentPicker 内部仍然只在 chat 时露出自定义 system prompt 的 textarea
-            （project 的人设来自 CLAUDE.md，服务端会把 systemPrompt 钳成 null）。
-            增强模式是 chat 专属，留在下面的条件块里。 */}
-        {!butler && isMobile === false && (
-          <div className="mb-3 flex justify-center items-center gap-2 flex-wrap">
-            <AgentPicker />
-            {draftMode === "chat" && (
-              <Tooltip content={ENHANCED_HINT}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  aria-pressed={chatEnhanced}
-                  onClick={() => setChatEnhanced(!chatEnhanced)}
-                  className={`rounded-full! ${
-                    chatEnhanced
-                      ? "bg-accent-muted text-accent-ink ring-1 ring-inset ring-accent-line"
-                      : "shadow-hairline"
-                  }`}
-                >
-                  <Icon icon={Zap} size="sm" selected={chatEnhanced} />
-                  增强模式{chatEnhanced ? " · 开" : ""}
-                </Button>
-              </Tooltip>
-            )}
-          </div>
         )}
         <div
           // bui composer：浮起的 window 卡（真描边 + raise 阴影），聚焦时描边加深 + 4px accent 淡光晕。
-          className={`bg-surface border rounded-window shadow-raise overflow-hidden transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-line-strong focus-within:ring-4 focus-within:ring-focus-ring/40 max-md:rounded-[22px] ${
+          className={`bg-surface border rounded-window shadow-raise transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-line-strong focus-within:ring-4 focus-within:ring-focus-ring/40 max-md:rounded-[22px] ${
+            // 桌面底栏里的 Agent 下拉是卡内绝对定位的，不能裁；手机保持原样
+            isMobile ? "overflow-hidden" : ""
+          } ${
             dragOver
               ? "border-accent ring-4 ring-accent-line"
               : "border-line"
@@ -457,10 +438,11 @@ export function QuestionInput({
                 ? "讲讲你对某个概念的理解——AI 会复述、挑漏洞、追问你没讲清的地方。讲不清的点，选中它 ⌘K 开子节点继续深讲。"
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
             }
-            rows={4}
+            // 桌面：原型 .composer textarea——2 行起（min 54px），随内容长高到 200px；手机保持 4 行
+            rows={isMobile ? 4 : 2}
             // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 压不住，内联去掉输入框自己那一圈。
             style={{ outline: "none" }}
-            className="block w-full px-4 pt-3.5 pb-1.5 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.55]"
+            className="block w-full px-4 pt-3.5 pb-1.5 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.55] md:min-h-13.5 md:max-h-50"
             disabled={busy}
           />
           <input
@@ -503,16 +485,9 @@ export function QuestionInput({
               </Button>
             </div>
           ) : (
-          <div className="px-2 pb-2 pt-1.5 flex items-center gap-1">
-            <IconButton
-              label="专注写作"
-              title="专注写作（全屏 Markdown 编辑 + 预览）"
-              onClick={() => setZoneOpen(true)}
-              disabled={busy}
-              className={COMPOSER_TOOL_ICON}
-            >
-              <Icon icon={Maximize2} />
-            </IconButton>
+          // 原型 .c-bar：[附件][草图][专注写作][模式][Agent][增强] … [模型][发送]。
+          // 桌面不折行：挤的时候让 ModelPicker（min-w-0 wrapper）先截断，而不是整颗掉到第二行。
+          <div className="px-2 pb-2 pt-1.5 flex flex-wrap md:flex-nowrap items-center gap-1" data-question-input-toolbar="">
             <IconButton
               label="添加附件"
               title={
@@ -539,7 +514,40 @@ export function QuestionInput({
             >
               <Icon icon={PencilLine} />
             </IconButton>
+            <IconButton
+              label="专注写作"
+              title="专注写作（全屏 Markdown 编辑 + 预览）"
+              onClick={() => setZoneOpen(true)}
+              disabled={busy}
+              className={COMPOSER_TOOL_ICON}
+            >
+              <Icon icon={Maximize2} />
+            </IconButton>
+            {!butler && (
+              <div data-composer-context="" className="ml-0.5 flex min-w-0 shrink-0 flex-wrap md:flex-nowrap items-center gap-1">
+                <ModePicker variant="toolbar" />
+                <AgentPicker variant="toolbar" />
+                {draftMode === "chat" && (
+                  <Tooltip content={ENHANCED_HINT}>
+                    <button
+                      type="button"
+                      aria-pressed={chatEnhanced}
+                      onClick={() => setChatEnhanced(!chatEnhanced)}
+                      className={
+                        chatEnhanced
+                          ? "press inline-flex h-7 items-center gap-1.5 rounded-full bg-accent-muted px-2 text-[12.5px] text-accent-ink ring-1 ring-inset ring-accent-line transition-colors duration-100"
+                          : COMPOSER_TOOL_PILL
+                      }
+                    >
+                      <Icon icon={Zap} size="sm" selected={chatEnhanced} />
+                      增强模式{chatEnhanced ? " · 开" : ""}
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+            )}
             <span className="flex-1" />
+            <ModelPicker />
             <Button
               // bui send：墨色实底胶囊；文案（开始提问 / 创建…）保持原样
               variant="ink"
@@ -661,7 +669,7 @@ export function QuestionInput({
           </Button>
         </div>}
         {!embedded && isMobile === false && <div className="text-center text-xs text-ink-faint mt-4">
-          模型在右上角切换 · {currentProvider ? `默认 ${currentProvider.shortLabel}` : "使用当前默认模型"}
+          模型在输入框右下角切换 · {currentProvider ? `默认 ${currentProvider.shortLabel}` : "使用当前默认模型"}
         </div>}
       </div>
       {isMobile && moreSettingsOpen && (

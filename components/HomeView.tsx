@@ -234,7 +234,9 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
       <div
         className={cn(
           "mx-auto w-full max-w-[760px] px-6 pb-24 max-md:px-4 max-md:pb-10",
-          isMobile ? "pt-5" : "pt-16",
+          // 桌面：原型 .home padding-top 72px 是从顶栏下沿量的；这里的滚动容器已从会话 tab 条（36px）下沿起，
+          // 所以只补 36px，问候落在顶栏下 ~72px。
+          isMobile ? "pt-5" : "pt-9",
         )}
       >
         {/* ── 问候 + 新会话输入（原型 .greet / .greet-sub / .starts） ── */}

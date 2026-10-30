@@ -18,13 +18,16 @@ import {
   House,
   ConciergeBell,
   Inbox,
+  ListFilter,
   MessageSquare,
+  MessagesSquare,
   PanelLeftClose,
   Pencil,
   Pin,
   PinOff,
   Plug,
   Plus,
+  Search,
   Trash2,
   BrushCleaning,
   type LucideIcon,
@@ -34,8 +37,12 @@ import {
   Button,
   Checkbox,
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   GlideList,
@@ -78,9 +85,12 @@ import { refreshHerdrFleet, useHerdrSessionStatuses } from "@/hooks/useHerdrFlee
 import { MobileNavDrawer } from "@/components/MobileNavDrawer";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
-import { NodeSwitcher } from "./NodeSwitcher";
+import { LocalMachineCard, NodeSwitcher } from "./NodeSwitcher";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
-import { useAppMode } from "@/hooks/useAppMode";
+import { switchAppMode, useAppMode } from "@/hooks/useAppMode";
+import { useHerdrConsole } from "@/hooks/useHerdrConsole";
+import { herdrLaneCounts } from "@/lib/herdr-console";
+import type { AppMode } from "@/lib/herdr-mode";
 import { useSessionTitlesStore } from "@/stores/sessionTitlesStore";
 import { readCachedSessionList, writeCachedSessionList } from "@/lib/offline-cache";
 import { herdrStatusLabel } from "@/lib/herdr-console";
@@ -239,6 +249,7 @@ export function SessionSidebar() {
   const [archived, setArchived] = useState<Session[]>([]);
   const bookmarkCount = useSessionStore((s) => s.bookmarksTotal);
   const setBookmarksOpen = useSessionStore((s) => s.setBookmarksOpen);
+  const setSearchOpen = useSessionStore((s) => s.setSearchOpen);
   const confirm = useConfirm();
 
   // Same watch contract as SessionPicker / SessionTabs: refetch on active
@@ -982,31 +993,25 @@ export function SessionSidebar() {
   const renderPanel = (onClose: () => void, mobile = false) => (
     <>
       {!mobile && (
-        // 桌面常驻栏的头部（原型 .sb-top + 导航行）：机器切换器 / 品牌 + 收起键一行，
-        // 下面是一组 32px 导航行（GlideList 悬停滑块）。手机抽屉仍走下面原来那套按钮排布。
+        // 桌面常驻栏的头部（原型 08-beautiful-ui：.sb-top + 一列 .glide 导航 + .sb-sec 区头）：
+        // 机器卡片 + 收起键一行；下面一列 32px 导航行（新会话 / 搜索 / 首页 / 对话 / Herdr / 管家，
+        // 对话 / Herdr 取代原来的模式分段条）；再下面「会话」区头，右侧放排布分段、筛选菜单与
+        // 接入 CLI。手机抽屉仍走下面原来那套按钮排布，一处不动。
         <div className="shrink-0 px-2 pt-2">
           <div data-sidebar-top className="flex items-center gap-1 pb-2">
             <div className="min-w-0 flex-1">
-              {/* 经 hub 访问且有远端机器时是机器切换器；否则放品牌（= 回首页，原先在 Header 左上角） */}
+              {/* 经 hub 访问且有远端机器时是机器切换器；否则同款卡片画本机（点击 = 回首页，原先在 Header 左上角） */}
               <NodeSwitcher
-                fallback={
+                fallback={(current) => (
                   <Tooltip content="首页" shortcut="H">
-                    <button
-                      type="button"
+                    <LocalMachineCard
                       data-sidebar-brand
                       aria-label="回首页"
+                      name={current?.name ?? "Trellis"}
                       onClick={() => openHome()}
-                      className="flex h-9 w-full min-w-0 items-center gap-2 rounded-field px-2 text-left transition-colors duration-100 hover:bg-surface-hover"
-                    >
-                      {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，与 Header 同一裁决） */}
-                      <span
-                        aria-hidden
-                        className="size-5.5 shrink-0 rounded-chip bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24] shadow-hairline"
-                      />
-                      <span className="truncate text-[14px] font-medium tracking-tight text-ink">Trellis</span>
-                    </button>
+                    />
                   </Tooltip>
-                }
+                )}
               />
             </div>
             <IconButton
@@ -1026,6 +1031,14 @@ export function SessionSidebar() {
               title="新会话：开一棵全新的树（与「新话题」不同——后者在当前会话内清空上下文）"
             />
             <NavRow
+              icon={Search}
+              label="搜索"
+              shortcut="⌘P"
+              data-sidebar-search
+              title="搜索会话与节点内容"
+              onClick={() => setSearchOpen(true)}
+            />
+            <NavRow
               icon={House}
               label="首页"
               shortcut="H"
@@ -1035,6 +1048,7 @@ export function SessionSidebar() {
               aria-current={homeActive ? "page" : undefined}
               onClick={() => openHome()}
             />
+            <ModeNavRows mode={mode} chatActive={mode === "chat" && !homeActive && !butlerActive} />
             <NavRow
               icon={ConciergeBell}
               label="管家"
@@ -1045,19 +1059,44 @@ export function SessionSidebar() {
               aria-current={butlerActive ? "page" : undefined}
               onClick={() => void openButler()}
             />
-            <NavRow
-              icon={Plug}
-              label="接入本机 CLI 会话"
-              title="接入本机 CLI 会话（Claude Code / Codex，双向同步）"
+          </GlideList>
+          {/* 原型 .sb-sec：左「会话」，右侧控件。data-sidebar-toolbar 只在对话模式出现（同原工具条）。 */}
+          <div data-sidebar-section className="mt-2.5 flex h-7.5 items-center gap-1 pl-2">
+            <span className="min-w-0 flex-1 truncate text-label font-medium text-ink-faint">会话</span>
+            {mode === "chat" && (
+              <div data-sidebar-toolbar className="flex shrink-0 items-center gap-0.5">
+                <SegmentedControl<SidebarLayout>
+                  aria-label="会话排布"
+                  size="sm"
+                  value={layout}
+                  onValueChange={setLayout}
+                  options={[
+                    { value: "project", label: "按项目" },
+                    { value: "time", label: "按时间" },
+                  ]}
+                />
+                <SourceFilterMenu
+                  source={source}
+                  onSourceChange={setSource}
+                  includeArchived={includeArchived}
+                  onIncludeArchivedChange={setIncludeArchived}
+                />
+              </div>
+            )}
+            <IconButton
+              size="sm"
+              label="接入本机 CLI 会话（Claude Code / Codex，双向同步）"
               data-mobile-target="drawer-attach"
               onClick={() => setAttachOpen(true)}
-            />
-          </GlideList>
+            >
+              <Icon icon={Plug} size="sm" />
+            </IconButton>
+          </div>
         </div>
       )}
-      <div className={mobile ? "shrink-0 space-y-2 px-2 pb-2 pt-2" : "shrink-0 space-y-2 px-2 pb-2 pt-2.5"}>
+      {mobile && <div className="shrink-0 space-y-2 px-2 pb-2 pt-2">
         {/* 经 hub 访问且有远端机器时才出现，否则不渲染任何东西。（桌面版在上面的头部里） */}
-        {mobile && <NodeSwitcher />}
+        <NodeSwitcher />
         <div data-app-mode-switch>
           <AppModeSwitch />
         </div>
@@ -1172,7 +1211,7 @@ export function SessionSidebar() {
             </label>
           </div>
         </div>}
-      </div>
+      </div>}
 
       <PullToRefresh
         enabled={mobile}
@@ -1329,6 +1368,7 @@ function isFlat(p: ProjectSummary): boolean {
 // 三级统一行高；原先 group 24 / session 28 又是一处倒挂。
 // 2026-10-30 视觉改版：桌面行高 30px（原型 .row.sess），手机仍是 44px 热区。
 const ROW_HEIGHT_CLASS = "h-7.5 max-md:h-11";
+const GROUP_HEAD_HEIGHT_CLASS = "h-6.5 max-md:h-11";
 const PAD = (level: number) => 6 + level * 12; // 内容缩进：6 / 18 / 30
 const CHEVRON_MID = (level: number) => 4 /* mx-1 */ + PAD(level) + 5;
 
@@ -1482,7 +1522,8 @@ function GroupRow({
         data-sidebar-group
         data-glide-row={toggleable ? "" : undefined}
         {...(menuItems.length > 0 ? menu.bindTrigger(label) : {})}
-        className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 rounded-field pr-1.5 transition-colors duration-150 ${
+        // 原型 .grp：顶层分组头桌面 26px（手机仍 44px 热区），工作区行按会话行高
+        className={`${level === 0 ? GROUP_HEAD_HEIGHT_CLASS : ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 rounded-field pr-1.5 transition-colors duration-150 ${
           toggleable ? "press-row hover:bg-surface-hover" : ""
         } ${muted ? "opacity-70" : ""}`}
       >
@@ -1997,6 +2038,7 @@ function NavRow({
   icon,
   label,
   shortcut,
+  trailing,
   active = false,
   className,
   ...rest
@@ -2004,6 +2046,8 @@ function NavRow({
   icon: LucideIcon;
   label: string;
   shortcut?: string;
+  /** 行尾计数 / 角标（原型 .row .badge），在 shortcut 之前 */
+  trailing?: React.ReactNode;
   active?: boolean;
 }) {
   return (
@@ -2017,7 +2061,111 @@ function NavRow({
     >
       <Icon icon={icon} selected={active} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing}
       {shortcut && <span className="shrink-0 font-mono text-nano text-ink-faint">{shortcut}</span>}
     </button>
+  );
+}
+
+// 桌面导航列里的「对话 / Herdr」两行：取代原来顶部的 [对话 | Herdr] 分段条（AppModeSwitch，
+// 手机抽屉仍用它）。切换语义同分段条：切到 Herdr = 打开总览；切回对话 = 上次的普通会话（没有就首页）。
+// 「对话」高亮 = 对话模式下正开着一个普通会话（首页 / 管家各有自己那一行）；此时再点不动作，
+// 在首页 / 管家上点它也走 switchAppMode("chat")，回到上次的普通会话。
+// Herdr 行尾是「需要你」计数（原型 .row .badge），沿用分段条上的 data-* 钩子。
+function ModeNavRows({ mode, chatActive }: { mode: AppMode; chatActive: boolean }) {
+  const { panes, available } = useHerdrConsole();
+  const need = available ? herdrLaneCounts(panes).need : 0;
+  const herdrActive = mode === "herdr";
+  return (
+    <>
+      <NavRow
+        icon={MessagesSquare}
+        label="对话"
+        active={chatActive}
+        data-app-mode-chat
+        aria-current={chatActive ? "page" : undefined}
+        onClick={() => {
+          if (!chatActive) switchAppMode("chat");
+        }}
+      />
+      <NavRow
+        icon={Anchor}
+        label="Herdr"
+        active={herdrActive}
+        data-app-mode-herdr
+        aria-current={herdrActive ? "page" : undefined}
+        onClick={() => {
+          if (!herdrActive) switchAppMode("herdr");
+        }}
+        trailing={
+          need > 0 ? (
+            <span
+              data-herdr-need-count
+              title={`${need} 个窗格需要你`}
+              aria-label={`${need} 个需要你`}
+              className="grid h-4.5 min-w-4.5 shrink-0 place-items-center rounded-full bg-warn-muted px-1.5 text-nano font-semibold tabular-nums text-warn-ink"
+            >
+              {need}
+            </span>
+          ) : null
+        }
+      />
+    </>
+  );
+}
+
+// 「会话」区头右侧的筛选菜单：来源 + 含已归档，收成一个图标按钮（原先是工具条下面整整一行）。
+// 偏离默认（来源 ≠ 我的会话，或含已归档）时按钮上挂一颗点，提醒列表被筛过。
+function SourceFilterMenu({
+  source,
+  onSourceChange,
+  includeArchived,
+  onIncludeArchivedChange,
+}: {
+  source: SidebarSource;
+  onSourceChange: (v: SidebarSource) => void;
+  includeArchived: boolean;
+  onIncludeArchivedChange: (v: boolean) => void;
+}) {
+  const filtered = source !== "mine" || includeArchived;
+  const sourceLabel = SOURCE_OPTIONS.find((o) => o.value === source)?.label ?? "";
+  return (
+    <DropdownMenu>
+      <Tooltip content={`筛选：${sourceLabel}${includeArchived ? " · 含已归档" : ""}`}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="来源"
+            data-sidebar-source-filter
+            className="press relative inline-flex min-h-6.5 min-w-6.5 shrink-0 items-center justify-center rounded-field p-1 text-ink-muted transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink"
+          >
+            <Icon icon={ListFilter} size="sm" />
+            {filtered && (
+              <span aria-hidden className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-accent" />
+            )}
+          </button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuLabel>来源</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={source} onValueChange={(v) => onSourceChange(v as SidebarSource)}>
+          {SOURCE_OPTIONS.map((o) => (
+            <DropdownMenuRadioItem key={o.value} value={o.value}>
+              {o.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem
+          data-sidebar-archived-filter
+          title="含已归档的会话，以及 Herdr 里窗格已不存在的离线会话"
+          checked={includeArchived}
+          onCheckedChange={(v) => onIncludeArchivedChange(v === true)}
+          onSelect={(e) => e.preventDefault()}
+        >
+          含已归档
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

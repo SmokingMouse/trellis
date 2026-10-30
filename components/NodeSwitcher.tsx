@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { Check, ChevronsUpDown, Server, Settings2 } from "lucide-react";
 import {
   DropdownMenu,
@@ -24,11 +24,14 @@ import type { GwNode } from "@/lib/gw-types";
 //
 // 形态照原型 .machine（docs/ui-redesign/mockups/08-beautiful-ui.html）：墨色 logo 方块 +
 // 机器名 + 一行小字状态（在线点带光晕），右侧上下箭头；菜单里每台机器一行（方块 + 名 + 小字）。
-// `fallback`：没有远端机器（或还没拉到列表）时渲染它——桌面侧栏顶部用来放品牌 / 回首页。
+// `fallback`：没有远端机器（或还没拉到列表）时渲染它。可以是函数，拿到 hub 报的当前机器
+// （直连单人版为 null）——桌面侧栏顶部用它画同款 .machine 卡片（LocalMachineCard，点击回首页）。
 
 const POLL_MS = 30_000;
 
-export function NodeSwitcher({ fallback = null }: { fallback?: ReactNode } = {}) {
+export function NodeSwitcher({
+  fallback = null,
+}: { fallback?: ReactNode | ((current: GwNode | null) => ReactNode) } = {}) {
   const [nodes, setNodes] = useState<GwNode[] | null>(null);
 
   const load = useCallback((): Promise<void> => {
@@ -43,7 +46,10 @@ export function NodeSwitcher({ fallback = null }: { fallback?: ReactNode } = {})
     return () => clearInterval(id);
   }, [load]);
 
-  if (!nodes || !nodes.some((n) => n.kind === "remote")) return <>{fallback}</>;
+  if (!nodes || !nodes.some((n) => n.kind === "remote")) {
+    if (typeof fallback !== "function") return <>{fallback}</>;
+    return <>{fallback(nodes?.find((n) => n.current) ?? null)}</>;
+  }
   const current = nodes.find((n) => n.current) ?? nodes[0];
 
   return (
@@ -104,6 +110,32 @@ export function NodeSwitcher({ fallback = null }: { fallback?: ReactNode } = {})
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// 没有远端机器时的本机卡片：与切换器同一副 .machine 外形（墨色方块 + 名字 + 「本机 · 在线」+
+// 上下箭头），但没有菜单——点击行为由调用方给（桌面侧栏 = 回首页）。只在桌面常驻栏里出现。
+export function LocalMachineCard({
+  name,
+  className = "",
+  ...rest
+}: ComponentProps<"button"> & { name: string }) {
+  return (
+    <button
+      type="button"
+      className={`flex h-9 w-full min-w-0 items-center gap-2 rounded-field px-2 text-left text-ink transition-colors duration-100 hover:bg-surface-hover ${className}`}
+      {...rest}
+    >
+      <MachineTile />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[14px] font-medium leading-tight text-ink">{name}</span>
+        <span className="flex items-center gap-1.5 text-[11.5px] leading-tight text-ink-faint">
+          <StatusDot tone="positive" />
+          <span className="truncate">本机 · 在线</span>
+        </span>
+      </span>
+      <Icon icon={ChevronsUpDown} size="sm" className="shrink-0 text-ink-faint" />
+    </button>
   );
 }
 
