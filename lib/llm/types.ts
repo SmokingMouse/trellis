@@ -98,6 +98,10 @@ export type AgentSpawn = {
   systemPrompt?: string;
   /** Snapshot needed to make Codex's environmentSkills=false isolation explicit. */
   environmentSkillNames?: string[];
+  /** 角色记忆：额外可读写的目录（角色目录）。claude → --add-dir，codex → additionalDirs。 */
+  addDirs?: string[];
+  /** 角色记忆：追加在人设之后的系统提示（claude → --append-system-prompt）。 */
+  appendSystemPrompt?: string;
 };
 
 // A路②: interaction_required / interaction_resolved are NOT provider stream

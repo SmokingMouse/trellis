@@ -796,6 +796,25 @@ function migrate(db: Database) {
     CREATE INDEX IF NOT EXISTS agents_enabled ON agents(enabled, sort_order);
   `);
 
+  // 角色 P1（docs/roles-p1.md）：角色 = kind='role' 的 agent 行，多一句介绍、头像、
+  // 默认工作目录、记忆开关和一条固定会话。home_session_id 不挂外键 —— 会话被删/归档
+  // 时由 detachHomeSession 清指针（与 tasks.home_session_id 同一套纪律）。
+  const roleCols = [
+    { name: "kind", sql: "ALTER TABLE agents ADD COLUMN kind TEXT NOT NULL DEFAULT 'agent'" },
+    { name: "intro", sql: "ALTER TABLE agents ADD COLUMN intro TEXT NOT NULL DEFAULT ''" },
+    { name: "avatar_hue", sql: "ALTER TABLE agents ADD COLUMN avatar_hue INTEGER NOT NULL DEFAULT 254" },
+    { name: "avatar_glyph", sql: "ALTER TABLE agents ADD COLUMN avatar_glyph TEXT NOT NULL DEFAULT ''" },
+    { name: "work_dir", sql: "ALTER TABLE agents ADD COLUMN work_dir TEXT" },
+    { name: "memory_enabled", sql: "ALTER TABLE agents ADD COLUMN memory_enabled INTEGER NOT NULL DEFAULT 1" },
+    { name: "home_session_id", sql: "ALTER TABLE agents ADD COLUMN home_session_id TEXT" },
+  ];
+  for (const c of roleCols) {
+    const has = db
+      .prepare("SELECT 1 FROM pragma_table_info('agents') WHERE name = ?")
+      .get(c.name);
+    if (!has) db.exec(c.sql);
+  }
+
   seedBuiltinAgents(db);
   upgradeBuiltinPrompts(db);
 
