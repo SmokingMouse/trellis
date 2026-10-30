@@ -58,7 +58,7 @@ export function checkDispatch(db: Database, caller: RelayIdentity, target: strin
     return fail(403, `来源机器 ${source} 未允许内容外流（设置 → 机器互联 → 允许内容离开这台机器），派活会把它的上下文带出去`);
   }
   if (!nodePolicy(db, user, target).acceptDispatch) {
-    return fail(403, `目标机器 ${target} 未允许被派活（设置 → 机器互联 → 允许别的机器派活）`);
+    return fail(403, `目标机器 ${target} 未允许被派活（设置 → 机器互联 → 允许别的机器往这台派活）`);
   }
   if ("offline" in t) return fail(503, `目标机器 ${target} 离线`);
   return t;

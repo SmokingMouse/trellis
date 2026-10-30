@@ -208,11 +208,13 @@ function isNative(block: Record<string, unknown>): boolean {
   return !block.anthropic_url && !block.openai_url;
 }
 
-export function planModel(item: ModelPackItem, raw: RawEndpoints): Planned {
+export function planModel(item: ModelPackItem, raw: RawEndpoints, batch: readonly ModelPackItem[] = []): Planned {
   if (item.type === "default") {
     const base = { kind: "models" as const, key: "default", label: "默认模型", summary: item.model, warnings: [] as string[] };
     const known = Object.values(raw.providers).some((b) => b && modelNames(b).includes(item.model));
-    if (!known) base.warnings.push(`目标机器的服务商里没有模型 ${item.model}（可一并同步对应的服务商）`);
+    // 同一批里带了含这个模型的服务商（预览里就在旁边）就不再提示，免得应用后结果页还报「需手动处理」。
+    const carried = batch.some((b) => b.type !== "default" && modelNames(b.block).includes(item.model));
+    if (!known && !carried) base.warnings.push(`目标机器的服务商里没有模型 ${item.model}（可一并同步对应的服务商）`);
     if (!raw.defaultModel) return { diff: { ...base, status: "new" } };
     if (raw.defaultModel === item.model) return { diff: { ...base, status: "same", warnings: [] } };
     return { diff: { ...base, status: "conflict", changes: [`${raw.defaultModel} → ${item.model}`] } };

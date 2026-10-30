@@ -174,7 +174,7 @@ function RelaySessionDialog({ target, onClose }: { target: RelayDialogTarget; on
       <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <Icon icon={ArrowRightLeft} size="sm" className="text-ink-faint" />
-          <h2 className="truncate text-ui font-semibold text-ink-strong">接力到其他机器</h2>
+          <span aria-hidden className="truncate text-ui font-semibold text-ink-strong">接力到其他机器</span>
         </div>
         <IconButton label="关闭" size="sm" onClick={onClose}>
           <Icon icon={X} />

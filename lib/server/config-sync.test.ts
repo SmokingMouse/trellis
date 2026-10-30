@@ -290,3 +290,12 @@ describe("skills", () => {
     expect(fs.readFileSync(path.join(ext, "linked/SKILL.md"), "utf8")).toContain("external");
   });
 });
+
+test("默认模型：同批带了含该模型的服务商时不再提示缺模型", async () => {
+  const { planModel } = await import("./config-sync-models");
+  const raw = { providers: {}, defaultModel: null } as unknown as Parameters<typeof planModel>[1];
+  const def = { type: "default", model: "m-1" } as const;
+  const provider = { type: "provider", name: "p", block: { models: [{ name: "m-1" }] }, redacted: [] } as const;
+  expect(planModel(def, raw).diff.warnings.length).toBe(1);
+  expect(planModel(def, raw, [provider, def]).diff.warnings.length).toBe(0);
+});

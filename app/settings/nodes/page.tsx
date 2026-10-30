@@ -235,12 +235,14 @@ function NodeRow({
       <div className="flex flex-col gap-1.5 text-label">
         <PolicySwitch
           label="允许内容离开这台机器"
+          machine={node.name}
           hint="会话接力、配置同步、向别的机器派活时作为来源"
           checked={node.policy.shareOut}
           onChange={(v) => onPolicy({ shareOut: v })}
         />
         <PolicySwitch
           label="允许别的机器往这台派活"
+          machine={node.name}
           hint="其他机器上的 agent 可以在这台新开会话执行任务"
           checked={node.policy.acceptDispatch}
           onChange={(v) => onPolicy({ acceptDispatch: v })}
@@ -275,11 +277,13 @@ function NodeRow({
 
 function PolicySwitch({
   label,
+  machine,
   hint,
   checked,
   onChange,
 }: {
   label: string;
+  machine: string;
   hint: string;
   checked: boolean;
   onChange: (v: boolean) => void;
@@ -290,7 +294,7 @@ function PolicySwitch({
         <span className="block text-ink">{label}</span>
         <span className="block text-[11.5px] text-ink-faint">{hint}</span>
       </span>
-      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={`${machine}：${label}`} />
     </label>
   );
 }
