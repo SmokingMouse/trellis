@@ -14,6 +14,9 @@ mock.module("./auth-health", () => ({
     });
     return { claude: cli(true), codex: cli(false), checkedAt: 0 };
   },
+  // bun 的 mock 进程内共享，且只能原地改已有导出名：调度器（task-scheduler）也 import 这个，
+  // 别的测试文件 import 调度器时少了这个名字会直接链接失败。
+  checkAuthAlerts: async () => {},
 }));
 mock.module("./update", () => ({
   updateStatus: () => {

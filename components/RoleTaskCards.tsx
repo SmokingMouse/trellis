@@ -14,10 +14,17 @@ export function bgTaskHref(t: Pick<RoleBackgroundTask, "sessionId" | "nodeId">):
   return `/?session=${encodeURIComponent(t.sessionId)}&node=${encodeURIComponent(t.nodeId)}`;
 }
 
+export function bgTaskStatusLabel(t: RoleBackgroundTask): string {
+  return t.status === "streaming" ? "进行中" : t.status === "error" ? "出错了" : "已完成";
+}
+
+function minutes(t: RoleBackgroundTask): string | null {
+  return t.durationMs !== null && t.status !== "streaming" ? `用时 ${Math.max(1, Math.round(t.durationMs / 60_000))} 分` : null;
+}
+
+/** 「用时 11 分 · 已完成」（一览行用）。 */
 export function bgTaskStatusText(t: RoleBackgroundTask): string {
-  const mins = t.durationMs !== null ? Math.max(1, Math.round(t.durationMs / 60_000)) : null;
-  const status = t.status === "streaming" ? "进行中" : t.status === "error" ? "出错了" : "已完成";
-  return mins !== null && t.status !== "streaming" ? `用时 ${mins} 分 · ${status}` : status;
+  return [minutes(t), bgTaskStatusLabel(t)].filter(Boolean).join(" · ");
 }
 
 export function RoleTaskCards({ roleId, nodeId }: { roleId: string; nodeId: string }) {
@@ -37,11 +44,13 @@ export function RoleTaskCards({ roleId, nodeId }: { roleId: string; nodeId: stri
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-ui font-medium text-ink">{t.title}</div>
-            <div className="text-[11.5px] text-ink-faint">后台任务 · {bgTaskStatusText(t)}</div>
+            <div className="text-[11.5px] text-ink-faint">
+              {["后台任务", minutes(t), t.turns > 1 ? `${t.turns} 轮` : null].filter(Boolean).join(" · ")}
+            </div>
           </div>
-          <Pill tone={t.status === "error" ? "danger" : t.status === "streaming" ? "accent" : "positive"}>
+          <Pill tone={t.status === "error" ? "danger" : t.status === "streaming" ? "accent" : "positive"} className="shrink-0">
             <StatusDot tone={t.status === "error" ? "danger" : t.status === "streaming" ? "live" : "positive"} />
-            {t.status === "streaming" ? "在跑" : t.status === "error" ? "出错" : `${t.turns} 轮`}
+            {bgTaskStatusLabel(t)}
           </Pill>
           <Button asChild size="sm">
             <a href={bgTaskHref(t)}>打开</a>

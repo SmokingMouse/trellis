@@ -8,9 +8,10 @@ import path from "node:path";
 // 临时 DB + 临时 TRELLIS_ROLES_DIR，不碰真 HOME；模型调用一律换成假 runner。
 
 mock.module("server-only", () => ({}));
-// 调度 tick 顺带查授权 / 磁盘：测试里换成空函数，别真 spawn CLI。
-mock.module("./auth-health", () => ({ checkAuthAlerts: async () => {} }));
-mock.module("./disk-watch", () => ({ checkDiskAlert: async () => {} }));
+// 调度 tick 每小时 :07 顺带查授权（会 spawn CLI）：换成空函数。磁盘水位只是 statfs，不 mock
+// （mock 进程内共享，会漏给 disk-watch.test.ts）。
+// 导出名与 butler.test.ts 的同名 mock 取并集：bun 的 mock 进程内共享、只能原地改已有导出名。
+mock.module("./auth-health", () => ({ checkAuthAlerts: async () => {}, getAuthHealth: async () => null }));
 
 const testDir = fs.realpathSync(fs.mkdtempSync(path.join(tmpdir(), "trellis-roles-p2a-")));
 const prevDb = process.env.TRELLIS_DB_PATH;

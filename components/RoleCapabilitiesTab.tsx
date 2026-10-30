@@ -193,7 +193,7 @@ function CapabilitiesForm({ role, caps }: { role: Role; caps: RoleCapabilities }
         </div>
       </form>
 
-      <section className="flex flex-col gap-2">
+      <section className="mt-3 flex flex-col gap-2 border-t border-line pt-6">
         <h2 className="flex items-center gap-1.5 text-ui font-semibold text-ink-strong">
           它自己的技能
           <span className="text-label font-normal text-ink-faint tabular-nums">{caps.roleSkills.length}</span>

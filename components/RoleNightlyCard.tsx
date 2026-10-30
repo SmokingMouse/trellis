@@ -157,7 +157,8 @@ function ChangeRow({ role, change: c }: { role: Role; change: RoleChange }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className={cn("text-ui text-ink", off && "line-through")}>{roleChangeTitle(c.payload)}</div>
-        <div className="truncate text-[11.5px] text-ink-faint" title={rowSubtitle(c)}>
+        {/* 手机上窄：副标题给两行，桌面一行截断（title 里有全文） */}
+        <div className="text-[11.5px] text-ink-faint max-md:line-clamp-2 md:truncate" title={rowSubtitle(c)}>
           {c.status === "failed" && c.error ? c.error : rowSubtitle(c)}
         </div>
       </div>
@@ -167,10 +168,16 @@ function ChangeRow({ role, change: c }: { role: Role; change: RoleChange }) {
         </span>
       )}
       {done && c.revertible && (
-        <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void run("revert")} data-role-change-revert>
-          <Icon icon={Undo2} size="sm" />
-          撤销
-        </Button>
+        // 手机上收成图标按钮，把宽度让给中间两行字
+        <>
+          <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => void run("revert")} className="max-md:hidden" data-role-change-revert>
+            <Icon icon={Undo2} size="sm" />
+            撤销
+          </Button>
+          <IconButton label="撤销" size="sm" disabled={!!busy} onClick={() => void run("revert")} className="md:hidden">
+            <Icon icon={Undo2} size="sm" />
+          </IconButton>
+        </>
       )}
       {pending && (
         <span className="flex shrink-0 gap-0.5">
