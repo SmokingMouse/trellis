@@ -1,8 +1,7 @@
 import "server-only";
-import os from "node:os";
-import path from "node:path";
 import fs from "node:fs";
 import type { HerdrInputDelivery, HerdrSendRefusal } from "../herdr-input";
+import { resolveHerdrSocketPath } from "../herdr-socket-path";
 import { HERDR_CLEAR_DRAFT_KEYS, checkHerdrSend, herdrSendRefusalMessage } from "../herdr-send-guard";
 import { herdrScreenPromptWithRev, type HerdrScreenPrompt } from "../herdr-screen-parse";
 import {
@@ -153,16 +152,8 @@ export class HerdrUnavailableError extends Error {
   }
 }
 
-export function resolveHerdrSocketPath(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  if (env.HERDR_SOCKET_PATH) return path.resolve(env.HERDR_SOCKET_PATH);
-  if (env.XDG_CONFIG_HOME) {
-    return path.join(path.resolve(env.XDG_CONFIG_HOME), "herdr", "herdr.sock");
-  }
-  const home = env.HOME || os.homedir();
-  return path.join(path.resolve(home), ".config", "herdr", "herdr.sock");
-}
+// 定位逻辑挪到 lib/herdr-socket-path（大门的实时终端流也要用），这里原名转出。
+export { resolveHerdrSocketPath };
 
 function transportCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {
