@@ -1,3 +1,4 @@
+import type { BlockingSummary } from "./herdr-blocking";
 import type { HerdrInputDelivery } from "./herdr-input";
 
 export type HerdrUiStatus =
@@ -44,6 +45,8 @@ export type HerdrHookRecord = {
   interactivePrompt: unknown;
   paneKey: string | null;
   updatedAt: number;
+  /** 阻塞 hook 交互（只有 trellis 拉起的会话有）：有则走结构化作答，见 lib/herdr-blocking.ts */
+  blocking?: BlockingSummary;
 };
 
 export type HerdrSessionBinding = {
@@ -214,6 +217,9 @@ export function herdrRunLabel(pane: HerdrPaneView | null): string | null {
 export const HERDR_HOOK_TTL_MS = 5 * 60_000;
 
 function freshHook(hook: HerdrHookRecord | null | undefined, now: number): HerdrHookRecord | null {
+  // 挂着阻塞交互的记录不过期：hook 在长轮询里等人，记录本身不会再刷新（最长 30 分钟），
+  // 过了 5 分钟就丢掉的话卡片会消失、而 TUI 那边也不弹框。服务端只在 hook 仍在线时给 blocking。
+  if (hook?.blocking?.status === "pending") return hook;
   return hook && now - hook.updatedAt < HERDR_HOOK_TTL_MS ? hook : null;
 }
 

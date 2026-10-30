@@ -28,6 +28,7 @@ import {
   type TranscriptPrompt,
 } from "./agent-hooks/transcript-pending";
 import { TranscriptModelCache } from "./agent-hooks/transcript-model";
+import { claudeBlockingArgs } from "./agent-hooks/blocking-settings";
 
 // 路径规范化只此一家（./canonical-path）：fleet 这边 realpath、discover 那边
 // os.homedir() 原样，正是根因 C 的形状。差别只在 fallback —— herdr 报上来的路径
@@ -454,7 +455,7 @@ export class HerdrFleetService {
   }
 
   /** 创建一个新 Tab（可指定工作区、工作目录与标签名，默认聚焦该 Tab）。 */
-  async createTab(params: { workspaceId?: string; cwd?: string; label?: string } = {}): Promise<{
+  async createTab(params: { workspaceId?: string; cwd?: string; label?: string; agent?: "claude" } = {}): Promise<{
     tabId: string;
     paneId: string;
     workspaceId: string;
@@ -468,6 +469,15 @@ export class HerdrFleetService {
       tab: { tab_id: string; workspace_id: string; label: string };
       root_pane?: { pane_id: string; tab_id: string; workspace_id: string };
     }>("tab.create", payload);
+    // agent: "claude" = 新 Tab 里直接起一个 trellis 拉起的 claude（带阻塞 hook 的 --settings）；
+    // 不传就是普通 shell Tab，用户自己在里面敲 claude 的会话行为不变。
+    if (params.agent === "claude" && res.root_pane?.pane_id) {
+      await this.client.request("pane.send_input", {
+        pane_id: res.root_pane.pane_id,
+        text: `claude${claudeBlockingArgs()}`,
+        keys: ["Enter"],
+      });
+    }
     return {
       tabId: res.tab.tab_id,
       paneId: res.root_pane?.pane_id ?? "",
@@ -503,6 +513,8 @@ export class HerdrFleetService {
       binding.sessionId,
       binding.agentKind,
       binding.cwd ?? target.cwd ?? null,
+      // trellis 拉起的 claude 才开阻塞 hook（结构化作答）；见 agent-hooks/blocking-settings.ts
+      claudeBlockingArgs(),
     );
   }
 }

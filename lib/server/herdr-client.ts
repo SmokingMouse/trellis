@@ -551,6 +551,8 @@ export class HerdrClient {
     sessionId: string,
     agentKind: string,
     cwd: string | null,
+    /** 追加在 `claude --resume <id>` 后的参数（已做 shell 引号；阻塞 hook 的 --settings） */
+    claudeArgs = "",
   ): Promise<string> {
     const split = await this.request<Record<string, unknown>>("pane.split", {
       target_pane_id: pane.pane_id,
@@ -565,7 +567,7 @@ export class HerdrClient {
     const command =
       agentKind === "codex"
         ? `codex resume ${shellArgument(sessionId)}`
-        : `claude --resume ${shellArgument(sessionId)}`;
+        : `claude --resume ${shellArgument(sessionId)}${claudeArgs}`;
     await this.request("pane.send_input", {
       pane_id: paneId,
       text: command,

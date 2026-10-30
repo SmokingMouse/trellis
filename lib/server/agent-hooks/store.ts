@@ -2,6 +2,9 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { getDB } from "@/lib/server/sqlite";
 import { applyHookEvent, type NormalizeOptions } from "./normalize";
+import type { BlockingSummary } from "./interaction-core";
+// 循环引用（interactions 也用本文件的 getHookRecord / recordClaudeHook）只在函数体里用，安全。
+import { listBlockingSummaries } from "./interactions";
 import type { AgentHookRecord, ClaudeHookPayload, StashedState } from "./types";
 
 export const HOOK_RETENTION_MS = 24 * 60 * 60_000;
@@ -26,15 +29,23 @@ function boundedJson(value: unknown): string | null {
   return JSON.stringify({ truncated: true, preview: boundedText(json, Math.floor((HOOK_FIELD_MAX_BYTES - 64) / 6)) });
 }
 
-export type HookSummary = Pick<AgentHookRecord, "sessionId" | "state" | "toolName" | "interactivePrompt" | "paneKey" | "updatedAt">;
+export type HookSummary = Pick<AgentHookRecord, "sessionId" | "state" | "toolName" | "interactivePrompt" | "paneKey" | "updatedAt"> & {
+  /**
+   * 新增字段（不改上面那些的语义）：该会话此刻挂着的阻塞 hook 交互。只有 trellis 拉起的
+   * 会话才会有；有它时前端走结构化作答（/api/herdr/interactions/:id），没有退回发按键。
+   */
+  blocking?: BlockingSummary;
+};
 
 export function listHookSummaries(): HookSummary[] {
   pruneHookRecords();
+  const blocking = listBlockingSummaries();
   const rows = getDB().prepare(`SELECT session_id, state, tool_name, interactive_prompt, pane_key, updated_at
     FROM agent_hook_state ORDER BY updated_at DESC, session_id`).all() as Pick<Row, "session_id" | "state" | "tool_name" | "interactive_prompt" | "pane_key" | "updated_at">[];
   return rows.map(row => ({
     sessionId: row.session_id, state: row.state as AgentHookRecord["state"], toolName: row.tool_name,
     interactivePrompt: parse<unknown>(row.interactive_prompt, null), paneKey: row.pane_key, updatedAt: row.updated_at,
+    ...(blocking.has(row.session_id) ? { blocking: blocking.get(row.session_id) } : {}),
   }));
 }
 
