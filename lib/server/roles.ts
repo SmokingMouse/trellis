@@ -26,6 +26,7 @@ import {
 import type { AgentSpawn } from "@/lib/llm/types";
 import { ensureRoleSkillsLink } from "./role-changes";
 import { roleBackgroundTaskHint } from "./role-prompt-extras";
+import { BUTLER_AGENT_ID } from "@/lib/butler";
 
 // 角色 P1 的服务端（设计见 docs/roles-p1.md，共享类型见 lib/roles.ts）。
 //
@@ -346,7 +347,7 @@ export function updateRole(id: string, patch: Partial<RoleInput>): Role {
 
   // 换了工作目录：固定会话跟着搬（照 tasks.updateTask）。旧 cwd 下的 CLI 会话
   // resume 不到了，chat 路由会自愈成 fresh + DB 历史折叠。
-  if (patch.workDir !== undefined && patch.workDir !== before.workDir) {
+  if (patch.workDir !== undefined && patch.workDir !== before.workDir && roleSessionMode(after) === "project") {
     const home = aliveHomeSession(after.homeSessionId, id);
     if (home) {
       getDB()
@@ -694,9 +695,16 @@ export function roleSpawnExtras(
 
 // ---------------------------------------------------------------- chat 路由
 
+/** 角色会话的 mode。管家（P2 起是内置角色）保持它原来的增强 chat：它的全部工作靠
+ * Bash 跑 trellisctl，chat route 对它恒开增强档（scratch 工作区 + 全工具），改成 project
+ * 会动它的 cwd / resume 链路。其余角色恒为 project。 */
+export function roleSessionMode(a: Pick<AgentRecord, "id">): "chat" | "project" {
+  return a.id === BUTLER_AGENT_ID ? "chat" : "project";
+}
+
 /** 角色会话的 cwd：work_dir 还在就用它，否则（没配 / 目录没了）用角色目录。
  * 目录不存在时 spawn 抛的 ENOENT 逃得出 run-bus（见 tasks.ts），所以这里兜底。 */
-function roleWorkspacePath(a: AgentRecord): string {
+export function roleWorkspacePath(a: AgentRecord): string {
   const homeDir = roleHomeDir(a.slug);
   return a.workDir && isDirectory(a.workDir) ? a.workDir : homeDir;
 }
@@ -704,8 +712,10 @@ function roleWorkspacePath(a: AgentRecord): string {
 export type RoleNewSessionPlan = {
   role: AgentRecord;
   homeDir: string;
-  /** 新建时用的 workspace_path（不认客户端 body）。 */
-  workspacePath: string;
+  /** 新建时用的 mode（roleSessionMode）。 */
+  mode: "chat" | "project";
+  /** 新建时用的 workspace_path（不认客户端 body）；chat（管家）= null。 */
+  workspacePath: string | null;
   /** 固定会话还在 → 在它里面开新根，而不是再建一条。 */
   reuseSessionId: string | null;
 };
@@ -719,7 +729,8 @@ export function planRoleNewSession(agentId: unknown): RoleNewSessionPlan | null 
   return {
     role: a,
     homeDir,
-    workspacePath: roleWorkspacePath(a),
+    mode: roleSessionMode(a),
+    workspacePath: roleSessionMode(a) === "project" ? roleWorkspacePath(a) : null,
     reuseSessionId: aliveHomeSession(a.homeSessionId, a.id)?.id ?? null,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Brain, FolderOpen, UserRound } from "lucide-react";
+import { Brain, FolderOpen, ListChecks, UserRound } from "lucide-react";
+import { RoleFollowToggle } from "@/components/RoleFollowToggle";
 import { useRoleStore } from "@/stores/roleStore";
 import { Icon, Pill, Skeleton } from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
@@ -110,6 +111,11 @@ export function RoleGlanceContent({ role }: { role: Role }) {
               : persona
             : "还没写人设"}
         </p>
+      </Section>
+
+      {/* 角色 P4「跟进我的会话」：自包含开关（包 C），设置页「例行」tab 也挂同一个 */}
+      <Section icon={ListChecks} title="跟进">
+        <RoleFollowToggle roleId={role.id} roleName={role.name} className="px-3 py-2.5" />
       </Section>
     </div>
   );

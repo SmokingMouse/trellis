@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Clock, Moon, Play, Plus, Trash2, Undo2 } from "lucide-react";
+import { Clock, ListChecks, Moon, Play, Plus, Trash2, Undo2 } from "lucide-react";
 import {
   Button,
   Checkbox,
@@ -30,9 +30,11 @@ import {
   type RoutineTriggerKind,
 } from "@/lib/role-routines";
 import { routineSubtitle } from "./RoleGlanceBlocks";
+import { RoleFollowToggle } from "./RoleFollowToggle";
 
-// 角色设置「例行」tab：内置的夜间整理（频率、立即整理、整理历史 + 撤销）+ 这个角色的例行
-// （tasks.agent_id = 角色；开关、手动跑、删除、新建）。例行跑出来的结果落进角色的固定会话。
+// 角色设置「例行」tab：内置的夜间整理（频率、立即整理、整理历史 + 撤销）+「跟进我的会话」开关
+// （包 C；管家没有一览面板，这里是它唯一的入口）+ 这个角色的例行（tasks.agent_id = 角色；
+// 开关、手动跑、删除、新建）。例行跑出来的结果落进角色的固定会话。
 
 const FREQ_OPTIONS: { value: NightlyFrequency; label: string }[] = [
   { value: "daily", label: "每天" },
@@ -64,9 +66,24 @@ export function RoleRoutinesTab({ role }: { role: Role }) {
   return (
     <div className="flex max-w-[760px] flex-col gap-6">
       <NightlySection role={role} />
+      <FollowSection role={role} />
       <RoutineList role={role} />
       <NewRoutineForm role={role} />
     </div>
+  );
+}
+
+function FollowSection({ role }: { role: Role }) {
+  return (
+    <section className="flex flex-col gap-3" id="follow">
+      <h2 className="flex items-center gap-1.5 text-ui font-semibold text-ink-strong">
+        <Icon icon={ListChecks} size="sm" className="text-ink-faint" />
+        跟进
+      </h2>
+      <div className="rounded-card bg-surface-raised shadow-raise">
+        <RoleFollowToggle roleId={role.id} roleName={role.name} className="px-3.5 py-3" />
+      </div>
+    </section>
   );
 }
 

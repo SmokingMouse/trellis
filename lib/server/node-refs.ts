@@ -1,7 +1,10 @@
 import "server-only";
+import { notSystemNodeSql } from "@/lib/node-meta";
 import { getDB } from "./sqlite";
 import { escapeLikePattern, getNode, getSession, searchAll } from "./repo";
-import { sessionSourcePredicate, sidebarSessionKinds } from "../session-source";
+import { referableSessionKinds, referableSessionPredicate } from "../session-source";
+import { roleBadgeMap, sessionRoleTag } from "./role-badges";
+import type { SessionRoleTag } from "@/lib/role-follow";
 import {
   buildNodeRefSuffix,
   parseNodeRefs,
@@ -15,8 +18,9 @@ import {
 //   - 展开：列某会话里可引用的已完成节点；
 //   - 注入：从问题正文里解析引用 id，按 id 现取节点内容拼成上下文块。
 
-/** 侧栏可见的会话来源才可被引用（内部 / 系统会话不出现在候选里，也不允许按 id 硬引）。 */
-const VISIBLE_KINDS: ReadonlySet<string> = new Set(sidebarSessionKinds);
+/** 可引用的会话来源：侧栏可见的那几种 + 角色固定会话 + 群聊（lib/session-source.ts）。
+ * 其余内部 / 系统会话不出现在候选里，也不允许按 id 硬引。 */
+const VISIBLE_KINDS: ReadonlySet<string> = new Set(referableSessionKinds);
 
 export type RefCandidateNode = {
   nodeId: string;
@@ -33,7 +37,7 @@ export type RefCandidateSession = {
   mode: string;
   /** 默认引用的节点：该会话最新一个已完成节点；没有就 null（不可选） */
   latest: RefCandidateNode | null;
-};
+} & SessionRoleTag;
 
 type NodeLite = {
   id: string;
@@ -63,20 +67,27 @@ function latestDoneNode(sessionId: string): RefCandidateNode | null {
   const r = getDB()
     .prepare(
       `SELECT id, question, topic_label, created_at FROM nodes
-       WHERE session_id = ? AND status = 'done'
+       WHERE session_id = ? AND status = 'done' AND ${notSystemNodeSql("meta_json")}
        ORDER BY created_at DESC LIMIT 1`,
     )
     .get(sessionId) as NodeLite | undefined;
   return r ? toCandidateNode(sessionId, r) : null;
 }
 
-type SessionLite = { id: string; title: string; updated_at: number; context_mode: string };
+type SessionLite = {
+  id: string;
+  title: string;
+  updated_at: number;
+  context_mode: string;
+  kind: string | null;
+  agent_id: string | null;
+};
 
 /** `@` 候选会话：空查询 = 最近活跃；有查询 = 标题 / topic 模糊匹配（每个词都要命中）+ 全文搜索补充。 */
 export function listRefCandidates(rawQuery: string, limit = 20): RefCandidateSession[] {
   const db = getDB();
   const terms = rawQuery.trim().split(/\s+/).filter(Boolean).slice(0, 5);
-  const where: string[] = ["archived = 0", sessionSourcePredicate()];
+  const where: string[] = ["archived = 0", referableSessionPredicate()];
   const params: (string | number)[] = [];
   for (const t of terms) {
     const like = `%${escapeLikePattern(t)}%`;
@@ -87,7 +98,7 @@ export function listRefCandidates(rawQuery: string, limit = 20): RefCandidateSes
   }
   const rows = db
     .prepare(
-      `SELECT id, title, updated_at, context_mode FROM sessions
+      `SELECT id, title, updated_at, context_mode, kind, agent_id FROM sessions
        WHERE ${where.join(" AND ")}
        ORDER BY updated_at DESC LIMIT ?`,
     )
@@ -103,8 +114,8 @@ export function listRefCandidates(rawQuery: string, limit = 20): RefCandidateSes
       const marks = extraIds.map(() => "?").join(",");
       const extra = db
         .prepare(
-          `SELECT id, title, updated_at, context_mode FROM sessions
-           WHERE id IN (${marks}) AND archived = 0 AND ${sessionSourcePredicate()}
+          `SELECT id, title, updated_at, context_mode, kind, agent_id FROM sessions
+           WHERE id IN (${marks}) AND archived = 0 AND ${referableSessionPredicate()}
            ORDER BY updated_at DESC`,
         )
         .all(...extraIds) as SessionLite[];
@@ -112,12 +123,14 @@ export function listRefCandidates(rawQuery: string, limit = 20): RefCandidateSes
     }
   }
 
+  const badges = rows.some((r) => r.kind === "role") ? roleBadgeMap() : new Map();
   return rows.map((r) => ({
     sessionId: r.id,
     title: r.title,
     updatedAt: r.updated_at,
     mode: r.context_mode,
     latest: latestDoneNode(r.id),
+    ...sessionRoleTag(r.kind, r.agent_id, badges),
   }));
 }
 

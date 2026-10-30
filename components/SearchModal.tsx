@@ -25,6 +25,8 @@ import {
   cn,
 } from "@/components/ui";
 import { modeStyle } from "@/lib/mode-style";
+import { RoleAvatar } from "@/components/ui/Avatar";
+import type { RoleBadge } from "@/lib/role-follow";
 import { goHref } from "@/lib/gw-client";
 import { fanOut, groupSearch, sessionPath, type SearchGroup } from "@/lib/hub-fanout";
 import { useHubNodes, useOtherNodes } from "@/hooks/useHubNodes";
@@ -57,6 +59,9 @@ type Result = {
   sessionMode: string;
   sessionWorkspacePath: string | null;
   hits: Hit[];
+  /** 'role' = 角色固定会话（带 role）；'group' = 群聊。老版本远端机器不给。 */
+  sessionKind?: string;
+  role?: RoleBadge | null;
 };
 
 type FacetKey = "all" | "chat" | "project";
@@ -464,7 +469,16 @@ function SessionHeading({ result: r }: { result: Result }) {
   return (
     // 原型 .pal-list .gh：组头是小号 ink-faint，结果行才是主角
     <div className="px-2.5 pt-2 pb-1 flex items-center gap-1.5 text-[11.5px] font-medium text-ink-faint min-w-0">
-      <Icon icon={isProject ? FolderGit2 : MessageSquare} size="sm" className="size-3 shrink-0 text-ink-faint" />
+      {r.role ? (
+        // 角色固定会话：头像 + 角色名（一条会话装着它全部话题，标题只是首问）
+        <>
+          <RoleAvatar role={r.role} size="xs" className="size-4 text-[9px]" />
+          <span data-search-role={r.role.id} className="shrink-0 text-ink">{r.role.name}</span>
+        </>
+      ) : (
+        <Icon icon={isProject ? FolderGit2 : MessageSquare} size="sm" className="size-3 shrink-0 text-ink-faint" />
+      )}
+      {r.sessionKind === "group" && <span className="shrink-0 text-ink">群聊</span>}
       <span className="text-ink-muted truncate">{r.sessionTitle}</span>
       <span className={cn("shrink-0", st.text)}>{st.label}</span>
       {r.sessionWorkspacePath && (

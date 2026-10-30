@@ -50,3 +50,23 @@ export function isSystemNodeId(nodeId: string): boolean {
     | null;
   return isSystemNodeKind(r?.kind);
 }
+
+/** 把调用方刚建的根节点收成系统节点：done + 正文 + meta，并撤掉它在全文索引里的行（系统
+ * 节点不进搜索，同 appendSystemNode）。给「会话还不存在、连根一起建」的调用方用（跟进报告：
+ * 先 createSessionWithRoot 再调这里）。 */
+export function finishSystemNode(
+  nodeId: string,
+  sessionId: string,
+  body: string,
+  kind: SystemNodeKind,
+  meta?: Record<string, unknown>,
+): void {
+  const db = getDB();
+  const metaJson = JSON.stringify({ ...(meta ?? {}), kind });
+  dbWrite("finishSystemNode", db.transaction(() => {
+    db.prepare(
+      "UPDATE nodes SET status = 'done', response = ?, meta_json = ?, duration_ms = 0 WHERE id = ? AND session_id = ?",
+    ).run(body, metaJson, nodeId, sessionId);
+    db.prepare("DELETE FROM search_index WHERE source_id = ?").run(nodeId);
+  }));
+}

@@ -12,24 +12,26 @@ import {
   Switch,
   Textarea,
   cn,
+  toast,
 } from "@/components/ui";
 import { RoleField, RoleHuePicker, RoleModelSelect } from "@/components/RoleFields";
 import { BUILTIN_AGENT_SEEDS } from "@/lib/agent-presets";
 import { isRoleNameTaken } from "@/lib/role-manage";
 import { ROLE_AVATAR_HUES } from "@/lib/roles";
+import type { RoleDraft } from "@/lib/role-follow";
+import { RoleDistillSource } from "@/components/RoleDistillSource";
 import { useRoleStore } from "@/stores/roleStore";
 
 // 新建角色弹窗（原型 docs/ui-redesign/mockups/09-roles.html 的 [data-new-modal]）。
 // 开关在 roleStore.newRoleOpen：侧栏 ＋、设置页「新建角色」、手机首页共用这一个实例，
 // 由 NewRoleHost 在根布局挂一次——不在各入口各挂一份，免得两处同时打开叠两层。
 
-type Source = "blank" | "template";
+type Source = "blank" | "template" | "chat";
 
-const SOURCES: { id: Source | "chat"; icon: LucideIcon; title: string; desc: string }[] = [
+const SOURCES: { id: Source; icon: LucideIcon; title: string; desc: string }[] = [
   { id: "blank", icon: Plus, title: "空白", desc: "自己写名字和性格" },
-  { id: "template", icon: Box, title: "从模板", desc: "费曼考官、犀利评论者…" },
-  // P1 不做（docs/roles-p1.md 范围表），占位让人知道有这条路
-  { id: "chat", icon: Sparkles, title: "从会话提炼", desc: "即将推出" },
+  { id: "template", icon: Box, title: "从模板", desc: "费曼考官、犀利评论者、管家…" },
+  { id: "chat", icon: Sparkles, title: "从会话提炼", desc: "挑一段聊得好的对话，提炼出人设和初始记忆" },
 ];
 
 /** 根布局挂一次；关着的时候什么都不渲染（Modal 是条件渲染的）。 */
@@ -53,6 +55,9 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 从会话提炼：草稿（预填过表单）+ 提炼进行中（期间不让创建，免得建出半成品）
+  const [draft, setDraft] = useState<RoleDraft | null>(null);
+  const [distilling, setDistilling] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   // 正文可能滚在顶部，出错时把错误卡滚进视野
@@ -66,7 +71,15 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
   }, [loaded, refresh]);
 
   const nameTaken = isRoleNameTaken(name, roles);
-  const canCreate = !!name.trim() && !nameTaken && !busy;
+  const canCreate = !!name.trim() && !nameTaken && !busy && !(source === "chat" && distilling);
+
+  const applyDraft = (d: RoleDraft) => {
+    setDraft(d);
+    // 草稿就是一份预填：覆盖三栏，用户在下面接着改
+    setName(d.name);
+    setIntro(d.intro);
+    setSystemPrompt(d.systemPrompt);
+  };
 
   const pickTemplate = (slug: string) => {
     const seed = BUILTIN_AGENT_SEEDS.find((s) => s.slug === slug);
@@ -94,11 +107,24 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
       workDir: workDir.trim() || null,
       memoryEnabled,
     });
-    setBusy(false);
     if (typeof r === "string") {
+      setBusy(false);
       setError(r);
       return;
     }
+    // 从会话提炼：草稿里的初始记忆一并写进角色目录（只在「使用记忆」开着时）。
+    // 角色已经建好了，个别记忆写失败不回滚，提示一下去设置页补。
+    if (source === "chat" && draft && memoryEnabled && draft.memories.length > 0) {
+      const { saveMemory } = useRoleStore.getState();
+      const results = await Promise.all(
+        draft.memories.map((m) =>
+          saveMemory(r.id, m.file, { name: m.name, description: m.description, type: m.type, body: m.body }),
+        ),
+      );
+      const failed = results.filter((x) => typeof x === "string").length;
+      if (failed > 0) toast.error(`${failed} 条记忆没写进去，可以在设置页的记忆里补`);
+    }
+    setBusy(false);
     onClose();
     // ?role=<id> 由对话面（WP2）接管：打开角色会话或进草稿态
     router.push(`/?role=${encodeURIComponent(r.id)}`);
@@ -120,7 +146,6 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-5 py-4">
           <div role="radiogroup" aria-label="从哪里开始" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {SOURCES.map((s) => {
-              const disabled = s.id === "chat";
               const on = s.id === source;
               return (
                 <button
@@ -128,14 +153,12 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
                   type="button"
                   role="radio"
                   aria-checked={on}
-                  disabled={disabled}
-                  onClick={() => !disabled && setSource(s.id as Source)}
+                  onClick={() => setSource(s.id)}
                   className={cn(
                     "flex flex-col items-start gap-1 rounded-card p-3 text-left transition-[background-color,box-shadow] duration-100",
                     on
                       ? "bg-accent-muted ring-1 ring-inset ring-accent-line"
                       : "bg-surface-canvas shadow-hairline hover:bg-surface-hover",
-                    disabled && "cursor-not-allowed opacity-55 hover:bg-surface-canvas",
                   )}
                 >
                   <span
@@ -152,6 +175,19 @@ export function NewRoleModal({ onClose }: { onClose: () => void }) {
               );
             })}
           </div>
+
+          {source === "chat" && (
+            <RoleField inline label="来源会话">
+              {({ id }) => (
+                <RoleDistillSource
+                  id={id}
+                  draft={draft}
+                  onDraft={applyDraft}
+                  onBusyChange={setDistilling}
+                />
+              )}
+            </RoleField>
+          )}
 
           {source === "template" && (
             <div className="flex flex-col gap-1.5">

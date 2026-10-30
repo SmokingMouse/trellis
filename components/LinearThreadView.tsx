@@ -61,7 +61,9 @@ import { HerdrInteractionCard } from "./HerdrInteractionCard";
 import { HerdrDrawerToggle } from "./herdr/HerdrDrawerToggle";
 import { HerdrSessionGestures, HerdrSessionSwipeCard } from "./herdr/HerdrSessionGestures";
 import { ButlerChangeCards } from "./ButlerChangeCards";
-import { isButlerSession } from "@/lib/butler";
+import { BUTLER_AGENT_ID, isButlerSession } from "@/lib/butler";
+import { useRoleStore } from "@/stores/roleStore";
+import { RoleFollowCard } from "./RoleFollowCard";
 import { useCurrentRole } from "@/hooks/useCurrentRole";
 import { RoleMemoryLines, useRoleMemorySync } from "./RoleMemoryLines";
 import { clockLabel, dayDividerLabel, sameLocalDay } from "@/lib/role-timeline";
@@ -352,7 +354,14 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
   // 角色会话：所有根串成一条时间线 + 新话题 / 日期分隔 + 记忆行。role 为 null 时下面一律走原路。
   const role = useCurrentRole();
   const isRole = role !== null && !isHerdr;
-  useRoleMemorySync(isRole ? role.id : null);
+  // 管家（P2 起是内置角色）的固定会话也按角色时间线串：它不走 useCurrentRole（顶栏 / 输入框
+  // 保持管家版），但同样一条会话装所有话题、同样会写记忆。
+  const butlerRole = useRoleStore((s) =>
+    butler && session?.kind === "role" ? (s.roles.find((r) => r.id === BUTLER_AGENT_ID) ?? null) : null,
+  );
+  const timelineRole = isRole ? role : !isHerdr ? butlerRole : null;
+  const roleTimeline = timelineRole !== null;
+  useRoleMemorySync(timelineRole?.id ?? null);
   useRoleBackgroundTasks(isRole ? role.id : null, nodes);
   // 群聊（docs/roles-p2.md B）：所有节点按时间一条线，每条交给 GroupMessage；输入框换 GroupComposer。
   // 外壳（滚动跟随、键盘、输入框停靠）照旧。isGroup 为 false 时下面一律走原路。
@@ -430,7 +439,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     branchesByNode: Map<string, ChatNode[]>;
     topicStarts?: Set<string>;
   } => {
-    if (isRole) return roleThread(nodes, activeNodeId);
+    if (roleTimeline) return roleThread(nodes, activeNodeId);
     if (isGroup) {
       const thread = Object.values(nodes)
         .filter(isVisibleGroupNode)
@@ -474,7 +483,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
       if (branches.length > 0) branchesByNode.set(n.id, branches);
     }
     return { anchorId: anchor.id, thread, branchesByNode };
-  }, [activeNodeId, nodes, session?.rootNodeId, isRole, isGroup]);
+  }, [activeNodeId, nodes, session?.rootNodeId, roleTimeline, isGroup]);
 
   const entering = useEnteringTurns(session?.id ?? null, nodes, threadData.thread);
 
@@ -1120,7 +1129,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
             // 系统节点（夜间整理卡等）：只画卡片 + 跨天分隔，不当轮次（无分叉 / 删除 / 压缩判定）。
             const sysMeta = systemNodeMeta(node);
             if (sysMeta) {
-              const sysDayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
+              const sysDayBreak = roleTimeline && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
               return (
                 <Fragment key={node.id}>
                   {sysDayBreak && (
@@ -1142,8 +1151,10 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                     tabIndex={-1}
                     className={`scroll-mt-3 min-w-0 max-w-full outline-none ${sysDayBreak ? "pb-6" : "pt-4 pb-6"}`}
                   >
-                    {isRole && sysMeta.kind === "role-nightly" ? (
-                      <RoleNightlyCard role={role} node={node} />
+                    {timelineRole && sysMeta.kind === "role-nightly" ? (
+                      <RoleNightlyCard role={timelineRole} node={node} />
+                    ) : sysMeta.kind === "role-follow" ? (
+                      <RoleFollowCard node={node} />
                     ) : (
                       <SystemNodeCard node={node} />
                     )}
@@ -1155,8 +1166,8 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
               ? threadData.thread.slice(0, idx).findLast((n) => !isSystemNode(n))
               : prevNode;
             // 角色时间线：新话题的首轮与上一轮不在同一个 claude 会话里，不做压缩判定。
-            const topicStart = isRole && Boolean(threadData.topicStarts?.has(node.id));
-            const dayBreak = isRole && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
+            const topicStart = roleTimeline && Boolean(threadData.topicStarts?.has(node.id));
+            const dayBreak = roleTimeline && (!prevNode || !sameLocalDay(prevNode.createdAt, node.createdAt));
             const isCompacted = !topicStart && isContextCompacted(node, prevReal);
             const divided = isCompacted || topicStart || dayBreak;
             const branches = threadData.branchesByNode.get(node.id) ?? [];
@@ -1240,7 +1251,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                     mirrorRun={node.id === tipNode?.id ? mirrorRunLabel : null}
                   />
                   {butler && <ButlerChangeCards sessionId={session.id} nodeId={node.id} />}
-                  {isRole && <RoleMemoryLines role={role} node={node} />}
+                  {timelineRole && <RoleMemoryLines role={timelineRole} node={node} />}
                   {isRole && <RoleTaskCards roleId={role.id} nodeId={node.id} />}
 
                   {branches.length > 0 && (

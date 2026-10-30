@@ -13,6 +13,8 @@ import type { ChatMessage, ProviderFamily, Mode } from "@/lib/llm";
 import { sessionCwd } from "@/lib/paths";
 import { readableNodeRefs } from "@/lib/node-refs";
 import { parseNodeMeta, type NodeMeta } from "@/lib/node-meta";
+import type { SessionRoleTag } from "@/lib/role-follow";
+import { roleBadgeMap, sessionRoleTag } from "./role-badges";
 import type { RecentChainRow } from "@/lib/recent";
 import {
   BOOKMARK_QUESTION_LIMIT,
@@ -2243,7 +2245,7 @@ export type SearchResult = {
   sessionMode: string;
   sessionWorkspacePath: string | null;
   hits: SearchHit[];
-};
+} & SessionRoleTag;
 
 // trigram needs ≥ 3 chars per query token. Below that, FTS5 MATCH returns 0
 // rows, so 1–2 char queries（中文里最常见的「向量」「钱包」、英文缩写「AI」）
@@ -2316,6 +2318,8 @@ type SearchRow = {
   title: string;
   context_mode: string;
   workspace_path: string | null;
+  kind: string | null;
+  agent_id: string | null;
 };
 
 // 1–2 字查询的回退：search_index.text 上参数化 LIKE，按会话最近更新排序。
@@ -2327,7 +2331,7 @@ function searchAllLike(query: string, limit: number): SearchRow[] {
     raws = db
       .prepare(
         `SELECT si.text, si.source_kind, si.source_id, si.session_id,
-                s.title, s.context_mode, s.workspace_path
+                s.title, s.context_mode, s.workspace_path, s.kind, s.agent_id
          FROM search_index si
          JOIN sessions s ON s.id = si.session_id
          WHERE si.text LIKE ? ESCAPE '\\'
@@ -2368,7 +2372,7 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
           `SELECT si.source_kind, si.source_id, si.session_id,
                   snippet(search_index, 0, '<mark>', '</mark>', '…', 12) AS snippet,
                   snippet(search_index, 0, '', '', '', 12) AS match_text,
-                  s.title, s.context_mode, s.workspace_path,
+                  s.title, s.context_mode, s.workspace_path, s.kind, s.agent_id,
                   bm25(search_index) AS rank
            FROM search_index si
            JOIN sessions s ON s.id = si.session_id
@@ -2388,6 +2392,8 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
   // Preserve bm25 order (already ASC) when grouping. Sessions surface in
   // the order their best hit was ranked.
   const groups = new Map<string, SearchResult>();
+  // 角色固定会话（kind='role'）带上角色头像 / 名字（docs/roles-p2.md C）。
+  const badges = rows.some((r) => r.kind === "role") ? roleBadgeMap() : new Map();
   for (const r of rows) {
     let g = groups.get(r.session_id);
     if (!g) {
@@ -2396,6 +2402,7 @@ export function searchAll(rawQuery: string, limit = 80): SearchResult[] {
         sessionTitle: r.title,
         sessionMode: r.context_mode,
         sessionWorkspacePath: r.workspace_path,
+        ...sessionRoleTag(r.kind, r.agent_id, badges),
         hits: [],
       };
       groups.set(r.session_id, g);

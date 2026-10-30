@@ -3,7 +3,8 @@ import { AtSign, ChevronDown, ChevronRight, CornerDownRight, MessagesSquare, Spa
 import { Fragment, type ReactNode } from "react";
 import { Icon } from "@/components/ui";
 import type { Command } from "@/lib/commands";
-import type { RefPickItem } from "@/hooks/useNodeRefMentions";
+import { refSessionLabel, type RefPickItem } from "@/hooks/useNodeRefMentions";
+import { RoleAvatar } from "@/components/ui/Avatar";
 
 // C4/C1: shared "/" suggestion dropdown for input boxes — Trellis commands
 // (first-class, all modes) render above skills (tool-capable modes only).
@@ -189,12 +190,20 @@ export function SkillPickerList({
               onClick={() => (latest ? onPickRef?.(item) : onToggleRefExpand?.(s.sessionId))}
               className="min-w-0 flex-1 min-h-9 text-left px-2 py-1.5 flex items-center gap-2.5 max-md:min-h-11"
             >
-              <IconTile icon={MessagesSquare} />
+              {s.role ? (
+                <span className="grid size-6 shrink-0 place-items-center">
+                  <RoleAvatar role={s.role} size="sm" />
+                </span>
+              ) : (
+                <IconTile icon={MessagesSquare} />
+              )}
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-1.5 text-ui text-ink">
-                  <span className="min-w-0 truncate font-medium">{s.title || "未命名会话"}</span>
+                  <span className="min-w-0 truncate font-medium">{refSessionLabel(s)}</span>
                   {latest && <span className="shrink-0 font-mono text-label text-ink-faint tabular-nums">#{latest.index}</span>}
-                  <span className="ml-auto shrink-0 text-nano text-ink-faint">会话</span>
+                  <span className="ml-auto shrink-0 text-nano text-ink-faint">
+                    {s.sessionKind === "role" ? "角色" : s.sessionKind === "group" ? "群聊" : "会话"}
+                  </span>
                 </span>
                 <span className="block text-label text-ink-faint truncate">
                   {latest ? (latest.topicLabel ?? latest.question.replace(/\s+/g, " ")) : "还没有已完成的回答"}

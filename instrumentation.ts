@@ -75,6 +75,9 @@ export async function register() {
   installDefaultChannels();
   const { startTaskScheduler } = await import("./lib/server/task-scheduler");
   startTaskScheduler();
+  // 角色 P4「跟进我的会话」：每分钟看一眼开关，到点（15 分钟）才扫；同样受 TRELLIS_SCHEDULER 闸。
+  const { startRoleFollowScheduler } = await import("./lib/server/role-follow");
+  startRoleFollowScheduler();
   // 飞书连接同样由 instrumentation 进程持有；CRUD route 只改 DB，下一次 15s
   // 对账 tick 才连接/断开，避免跨 Next bundle 直调一个并不共享的模块 Map。
   // deploy smoke 通过 TRELLIS_LARK=off 关闸；判断留在 manager 入口，单一真源。
