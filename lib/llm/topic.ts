@@ -90,7 +90,8 @@ function cleanLabel(raw: string): string {
     .trim();
 }
 
-function runLabelSpawn(
+// 群聊路由（lib/server/groups.ts）也走这条轻量管道挑人，所以导出。
+export function runLabelSpawn(
   systemPrompt: string,
   prompt: string,
   family: ProviderFamily,

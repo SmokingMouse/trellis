@@ -124,6 +124,9 @@ export type ApiNode = {
   // 'session' = 会话人设（不挂 chip，否则每张卡都有一枚是噪音）。
   agentId: string | null;
   agentScope: "session" | "mention" | null;
+  // 结构化标记（nodes.meta_json）：系统节点的 meta.kind、群聊消息的作者 / 引用。
+  // null = 普通问答节点。
+  meta: Record<string, unknown> | null;
 };
 
 type NodeRow = {
@@ -159,6 +162,7 @@ type NodeRow = {
   hidden_at: number | null;
   agent_id: string | null;
   agent_scope: string | null;
+  meta_json: string | null;
 };
 
 const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, response,
@@ -166,7 +170,7 @@ const NODE_COLS = `id, session_id, parent_id, parent_anchor_text, question, resp
        token_cache_read, token_cache_creation, token_context, created_at, duration_ms,
        topic_label, kind, ref_source_type, ref_source_uri, ref_content_md,
        ref_fetched_at, ref_meta_json, read_at, bookmarked_at, attachments_json, tool_calls_json,
-       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope`;
+       pending_interaction_json, final_start, hidden_at, agent_id, agent_scope, meta_json`;
 
 type SessionRow = {
   kind: string;
@@ -296,7 +300,18 @@ function rowToNode(r: NodeRow): ApiNode {
     hiddenAt: r.hidden_at,
     agentId: r.agent_id,
     agentScope: r.agent_scope === "mention" ? "mention" : r.agent_scope === "session" ? "session" : null,
+    meta: parseNodeMeta(r.meta_json),
   };
+}
+
+function parseNodeMeta(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 // S1：路径 → workspace id，永不抛。归组是分组视图的锦上添花，任何失败

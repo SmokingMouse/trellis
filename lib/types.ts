@@ -275,6 +275,9 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
+  // 结构化标记（nodes.meta_json）：系统节点的 meta.kind（role-nightly / role-follow /
+  // group-round-end）、群聊消息的作者与引用（lib/groups.ts GroupNodeMeta）。null = 普通问答。
+  meta?: Record<string, unknown> | null;
 };
 
 export type Bookmark = {

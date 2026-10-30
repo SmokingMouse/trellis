@@ -280,6 +280,11 @@ async function handleChatPost(req: Request) {
     }
     return null;
   })();
+  // 群聊（docs/roles-p2.md B）不走单人问答链：一条消息要编排多位成员，入口是
+  // POST /api/groups/[id]/messages。挡在这里，免得画布 / 重试把群节点当普通节点续聊。
+  if (targetSession?.kind === "group") {
+    return Response.json({ error: "群聊消息请走 /api/groups/[id]/messages" }, { status: 409 });
+  }
   if (targetSession && hasAliveHerdrBinding(targetSession.id)) {
     return Response.json(
       { error: "Herdr sessions are read-only in Trellis; reopen them through Herdr" },
