@@ -356,7 +356,7 @@ export default function AgentsSettingsPage() {
 
       {firstLoading ? (
         <div role="status" aria-label="加载中" className="flex flex-col md:flex-row gap-6">
-          <div className="md:w-[280px] shrink-0 rounded-card border border-line bg-surface divide-y divide-line-faint">
+          <div className="md:w-[280px] shrink-0 overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[0, 1, 2].map((i) => (
               <div key={i} className="px-3.5 py-3 flex flex-col gap-2">
                 <Skeleton className="h-3.5 w-3/5" />
@@ -383,13 +383,13 @@ export default function AgentsSettingsPage() {
               新建 Agent
             </Button>
           }
-          className="rounded-card border border-line"
+          className="rounded-card bg-surface-raised shadow-raise ui-enter-up"
         />
       ) : (
     <div className="flex flex-col md:flex-row gap-6">
       {/* 左：列表 */}
       {agents.length > 0 && (
-      <div className="md:w-[280px] shrink-0 self-start w-full overflow-hidden rounded-card border border-line bg-surface divide-y divide-line-faint">
+      <div className="ui-enter-up md:w-[280px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
         {agents.map((a) => {
           const agentBots = bots.filter((b) => b.agentId === a.id);
           const active = selectedId === a.id;
@@ -400,8 +400,8 @@ export default function AgentsSettingsPage() {
               aria-current={active ? "true" : undefined}
               onClick={() => startEdit(a)}
               className={cn(
-                "relative flex w-full flex-col gap-0.5 px-3.5 py-2.5 text-left transition-colors duration-100 max-md:min-h-11",
-                active ? "bg-accent-muted" : "hover:bg-surface-hover",
+                "relative flex min-h-[46px] w-full flex-col justify-center gap-0.5 px-3 py-2 text-left transition-colors duration-100 max-md:min-h-11",
+                active ? "bg-surface-hover" : "hover:bg-surface-hover",
                 !a.enabled && "opacity-60",
               )}
             >
@@ -414,7 +414,7 @@ export default function AgentsSettingsPage() {
                 {!a.enabled && <Badge>已停用</Badge>}
               </span>
               <span className="flex items-center gap-2 min-w-0">
-                <span className="truncate font-mono text-label text-ink-muted">
+                <span className="truncate font-mono text-[11.5px] text-ink-faint">
                   @{a.slug}
                   {!a.inheritEnv && " · 隔离"}
                 </span>
@@ -434,7 +434,7 @@ export default function AgentsSettingsPage() {
       )}
 
       {/* 右：编辑器 */}
-      <div className="flex-1 min-w-0">
+      <div className="ui-enter-up flex-1 min-w-0" style={{ animationDelay: "60ms" }}>
         {!draft ? (
           <EmptyState
             compact
@@ -442,8 +442,8 @@ export default function AgentsSettingsPage() {
             description="左边选一个 Agent 编辑，或在右上角新建一个。"
           />
         ) : (
-          <div className="flex flex-col gap-4">
-            <h2 className="text-body font-semibold text-ink-strong">
+          <div className="flex flex-col gap-4 rounded-card bg-surface-raised p-4 shadow-raise md:p-5">
+            <h2 className="text-body font-semibold tracking-tight text-ink-strong">
               {selected ? `编辑「${selected.name}」` : "新建 Agent"}
             </h2>
             {error && <ErrorCallout compact error={error} title="保存没有成功" />}
@@ -516,10 +516,10 @@ export default function AgentsSettingsPage() {
                           aria-pressed={active}
                           onClick={() => setDraft({ ...draft, model: chip.value })}
                           className={cn(
-                            "px-1.5 py-0.5 text-nano rounded-md border transition-colors duration-100 max-md:min-h-11 max-md:px-2.5",
+                            "inline-flex h-6 items-center rounded-full px-2 text-nano transition-[background-color,color,box-shadow] duration-100 max-md:min-h-11 max-md:px-2.5",
                             active
-                              ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
-                              : "bg-surface text-ink-muted hover:text-ink hover:bg-surface-hover border-line",
+                              ? "bg-surface-raised text-ink font-medium shadow-btn"
+                              : "text-ink-muted hover:bg-surface-hover hover:text-ink",
                           )}
                         >
                           {chip.label}
@@ -658,7 +658,7 @@ export default function AgentsSettingsPage() {
                 placeholder="搜索技能…"
                 aria-label="搜索技能"
               />
-              <div className="max-h-[220px] overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-card border border-line bg-surface-muted">
+              <div className="max-h-[220px] overflow-y-auto flex flex-wrap gap-1.5 p-2 rounded-field bg-surface-canvas shadow-hairline">
                 {filteredSkills.map((s) => {
                   const on = draft.skills?.some((x) => x.name === s.dir) ?? false;
                   return (
@@ -669,10 +669,10 @@ export default function AgentsSettingsPage() {
                       title={s.description}
                       onClick={() => toggleSkill(s.dir)}
                       className={cn(
-                        "px-2 py-0.5 rounded-full text-label border font-mono transition-colors duration-100 max-md:min-h-11",
+                        "inline-flex h-6 items-center rounded-full px-2 text-label font-mono transition-[background-color,color,box-shadow] duration-100 max-md:min-h-11",
                         on
-                          ? "bg-accent text-accent-fg border-accent"
-                          : "bg-surface text-ink-muted border-line hover:border-line-strong hover:text-ink",
+                          ? "bg-accent-muted text-accent-ink"
+                          : "bg-surface-raised text-ink-muted shadow-hairline hover:bg-surface-hover hover:text-ink",
                       )}
                     >
                       {s.dir}
@@ -689,7 +689,7 @@ export default function AgentsSettingsPage() {
 
             {/* 渠道绑定 / 飞书机器人接入 */}
             {selected && (
-              <section className="rounded-card border border-line bg-surface p-4 flex flex-col gap-3">
+              <section className="rounded-card bg-surface-canvas shadow-hairline p-4 flex flex-col gap-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-ui font-semibold text-ink-strong flex items-center gap-2">
@@ -734,7 +734,7 @@ export default function AgentsSettingsPage() {
 
                 {/* 本机已发现应用一键接入（免输入 App ID / Secret） */}
                 {discovered.filter((d) => d.boundAgentId !== selected.id).length > 0 && (
-                  <div className="rounded-card border border-accent-line bg-accent-muted p-3 flex flex-col gap-2">
+                  <div className="rounded-card bg-accent-muted p-3 flex flex-col gap-2">
                     <div className="text-ui font-medium text-ink flex items-center gap-1.5">
                       <Icon icon={Sparkles} size="sm" className="text-accent-ink" />
                       检测到本机已配置的飞书应用（免复制凭证，一键接入并绑定）
@@ -745,14 +745,14 @@ export default function AgentsSettingsPage() {
                         .map((disc) => (
                           <div
                             key={disc.appId}
-                            className="flex items-center justify-between gap-2 p-2.5 rounded-card border border-line bg-surface"
+                            className="flex items-center justify-between gap-2 p-2.5 rounded-field bg-surface-raised shadow-btn"
                           >
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5 font-medium text-ui text-ink truncate">
                                 <Icon icon={Bot} size="sm" className="text-ink-muted" />
                                 {disc.name}
                               </div>
-                              <div className="text-nano font-mono text-ink-faint truncate">
+                              <div className="text-[11.5px] font-mono text-ink-faint truncate">
                                 {disc.appId} · {disc.source}
                               </div>
                               {disc.alreadyRegistered && disc.boundAgentName && (
@@ -811,7 +811,7 @@ export default function AgentsSettingsPage() {
                   return (
                     <div className="flex flex-col gap-3">
                       {boundBots.length === 0 ? (
-                        <div className="rounded-card border border-dashed border-line px-4 py-4 flex flex-col items-center gap-2.5 text-ui text-ink-muted">
+                        <div className="rounded-card border border-dashed border-line-strong px-4 py-4 flex flex-col items-center gap-2.5 text-ui text-ink-muted">
                           <div>这个 Agent 还没有绑定飞书机器人。</div>
                           <div className="flex flex-wrap items-center justify-center gap-2">
                             <Button
@@ -827,11 +827,11 @@ export default function AgentsSettingsPage() {
                         </div>
                       ) : (
                         <div className="flex flex-col gap-2">
-                          <div className="rounded-card border border-line divide-y divide-line-faint">
+                          <div className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
                             {boundBots.map((bot) => (
                               <div
                                 key={bot.id}
-                                className="flex items-center justify-between gap-3 px-3 py-2.5"
+                                className="flex min-h-[46px] items-center justify-between gap-3 px-3 py-2 transition-colors duration-100 hover:bg-surface-hover"
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
@@ -840,7 +840,7 @@ export default function AgentsSettingsPage() {
                                     </span>
                                     <BotStatusBadge bot={bot} />
                                   </div>
-                                  <div className="text-label text-ink-faint font-mono truncate mt-0.5">
+                                  <div className="text-[11.5px] text-ink-faint font-mono truncate mt-0.5">
                                     {bot.appId}
                                     {bot.workspacePath && ` · ${bot.workspacePath}`}
                                     {bot.lastConnectedAt &&
@@ -1020,7 +1020,7 @@ function QuickCreateBotModal({
       <div className="flex max-h-[90dvh] flex-col gap-4 overflow-y-auto p-5">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <h2 className="text-body font-semibold text-ink-strong">接入飞书机器人</h2>
+            <h2 className="text-body font-semibold tracking-tight text-ink-strong">接入飞书机器人</h2>
             <p className="text-label text-ink-muted mt-0.5">
               绑定执行人设：<span className="font-medium text-ink">{agent.name}</span> (@{agent.slug})
             </p>
@@ -1033,7 +1033,7 @@ function QuickCreateBotModal({
         {error !== null && <ErrorCallout compact error={error} title="接入没有成功" />}
 
         {/* 快捷 Launcher 引导 */}
-        <div className="rounded-card border border-line bg-surface-muted p-2.5 flex flex-wrap items-center justify-between gap-2 text-label">
+        <div className="rounded-field bg-surface-canvas shadow-hairline p-2.5 flex flex-wrap items-center justify-between gap-2 text-label">
           <span className="text-ink-muted">还没有创建飞书应用？可以用官方模板一键生成：</span>
           <div className="flex items-center gap-1.5 shrink-0">
             <Button asChild size="sm">
@@ -1054,7 +1054,7 @@ function QuickCreateBotModal({
 
         {/* 发现的本地应用免复制区 */}
         {discovered.length > 0 && (
-          <div className="rounded-card border border-accent-line bg-accent-muted p-3 flex flex-col gap-2">
+          <div className="rounded-card bg-accent-muted p-3 flex flex-col gap-2">
             <div className="flex items-center gap-1.5 text-label font-medium text-ink">
               <Icon icon={Sparkles} size="sm" className="text-accent-ink" />
               从本机已发现的应用一键接入（免填写凭证）
@@ -1063,7 +1063,7 @@ function QuickCreateBotModal({
               {discovered.map((disc) => (
                 <div
                   key={disc.appId}
-                  className="flex items-center justify-between gap-2 p-2 rounded-field bg-surface border border-line"
+                  className="flex items-center justify-between gap-2 p-2 rounded-field bg-surface-raised shadow-btn"
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 font-medium text-ui truncate text-ink">

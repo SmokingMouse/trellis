@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-import { ChevronDown, Cpu, History, Search, Settings, X } from "lucide-react";
+import { Check, ChevronDown, Cpu, History, Search, Settings, X } from "lucide-react";
 import { Button, Icon, Input, Popover, SegmentedControl } from "@/components/ui";
 import { ModelConfigModal } from "@/components/ModelConfigPanel";
+import { COMPOSER_TOOL_PILL } from "@/components/ComposerShell";
 import {
   PROVIDERS,
   FAMILY_LABELS,
@@ -153,7 +154,7 @@ export function ModelPicker() {
         open={open}
         onClose={() => setOpen(false)}
         wrapperClassName="min-w-0"
-        panelClassName="w-80 max-h-[30rem] flex flex-col text-sm overflow-hidden shadow-pop"
+        panelClassName="w-80 max-h-[30rem] flex flex-col text-ui overflow-hidden"
         trigger={
           <button
             type="button"
@@ -161,17 +162,17 @@ export function ModelPicker() {
             aria-label={`切换模型，当前 ${current.shortLabel}`}
             aria-expanded={open}
             data-model-picker-trigger
-            className="inline-flex h-7 min-w-0 max-w-56 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover"
+            className={`${COMPOSER_TOOL_PILL} max-w-56`}
           >
-            <Icon icon={Cpu} size="sm" className="text-ink-muted" />
+            <Icon icon={Cpu} size="sm" />
             <span className="text-nano text-ink-faint">{currentBadge}</span>
             <span className="min-w-0 truncate font-mono">{current.shortLabel}</span>
-            <Icon icon={ChevronDown} size="sm" className="text-ink-faint" />
+            <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
           </button>
         }
       >
         {/* 顶部搜索框 */}
-        <div className="p-2 border-b border-line shrink-0 bg-surface">
+        <div className="p-2 border-b border-line-faint shrink-0">
           <Input
             ref={inputRef}
             type="text"
@@ -214,10 +215,10 @@ export function ModelPicker() {
         </div>
 
         {/* 模型列表 */}
-        <div className="flex-1 overflow-y-auto divide-y divide-line-faint">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-1">
           {/* 无搜索且全部 Tab 时，展示最近使用 */}
           {!search && activeTab === "all" && recentProviders.length > 0 && (
-            <div className="p-2 bg-surface-muted/30 border-b border-line-faint">
+            <div className="px-1 pt-1 pb-2 mb-1 border-b border-line-faint">
               <div className="text-nano font-medium text-ink-faint px-1 mb-1.5 flex items-center gap-1">
                 <Icon icon={History} size="sm" />
                 <span>最近使用</span>
@@ -234,12 +235,12 @@ export function ModelPicker() {
                       type="button"
                       disabled={disabled}
                       onClick={() => handleSelect(rp)}
-                      className={`px-2 py-1 text-nano rounded-md border flex items-center gap-1 transition-colors ${
+                      className={`h-6.5 px-2 text-nano rounded-chip flex items-center gap-1 transition-colors duration-100 ${
                         active
-                          ? "border-accent-line bg-accent-muted text-accent-ink font-medium"
+                          ? "bg-accent-muted text-accent-ink font-medium"
                           : disabled
-                            ? "border-line/40 opacity-40 cursor-not-allowed bg-surface"
-                            : "border-line bg-surface hover:bg-surface-muted text-ink-strong"
+                            ? "bg-surface-muted shadow-hairline opacity-40 cursor-not-allowed"
+                            : "bg-surface-muted shadow-hairline hover:bg-surface-hover text-ink"
                       }`}
                     >
                       <span className="opacity-60 font-mono">[{getProviderBadge(rp.id)}]</span>
@@ -292,35 +293,33 @@ export function ModelPicker() {
                         ? "跨系会丢失本会话上下文 — 请新建会话再选"
                         : undefined
                   }
-                  className={`w-full text-left px-3 py-2 flex items-start gap-2.5 transition-colors ${
+                  className={`press-row w-full min-h-9 text-left px-2 py-1.5 rounded-[7px] flex items-center gap-2.5 transition-colors duration-100 max-md:min-h-11 ${
                     disabled
-                      ? "opacity-40 cursor-not-allowed bg-surface"
-                      : isHighlighted || active
-                        ? "bg-surface-muted"
-                        : "hover:bg-surface-muted"
+                      ? "opacity-40 cursor-not-allowed"
+                      : isHighlighted
+                        ? "bg-surface-hover"
+                        : "hover:bg-surface-hover"
                   }`}
                 >
                   <span
-                    className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
-                      active ? "bg-accent" : disabled ? "bg-line-strong" : "bg-line-strong/60"
+                    aria-hidden
+                    className={`grid size-6 shrink-0 place-items-center rounded-chip shadow-hairline ${
+                      active ? "bg-accent-muted text-accent-ink" : "bg-surface-muted text-ink-muted"
                     }`}
-                  />
+                  >
+                    <Icon icon={Cpu} size="sm" />
+                  </span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-nano font-mono px-1 py-0.5 rounded bg-surface border border-line text-ink-muted">
-                        {badge}
-                      </span>
-                      <span className="text-ui font-medium text-ink-strong truncate">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-ui font-medium text-ink truncate">
                         {p.shortLabel}
                       </span>
-                      {active && (
-                        <span className="text-nano text-accent-ink font-medium ml-auto shrink-0">
-                          当前
-                        </span>
-                      )}
+                      <span className="shrink-0 text-nano font-mono text-ink-faint">
+                        {badge}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 mt-0.5 text-label text-ink-faint truncate">
+                    <div className="flex items-center gap-1.5 text-label text-ink-faint truncate tabular-nums">
                       <span title={`上下文窗口 ~${winTokens.toLocaleString()} tokens`}>
                         上下文 {winText}
                       </span>
@@ -340,6 +339,12 @@ export function ModelPicker() {
                       )}
                     </div>
                   </div>
+                  {active && (
+                    <span className="shrink-0 inline-flex text-accent-ink">
+                      <Icon icon={Check} size="sm" />
+                      <span className="sr-only">当前</span>
+                    </span>
+                  )}
                 </button>
               );
             })
@@ -347,7 +352,7 @@ export function ModelPicker() {
         </div>
 
         {/* 底部管理入口 */}
-        <div className="p-2 border-t border-line shrink-0 bg-surface flex items-center justify-between">
+        <div className="px-2 py-1.5 border-t border-line-faint shrink-0 flex items-center justify-between">
           <div className="text-nano text-ink-faint px-1">
             共 {catalog.length} 个可用模型
           </div>

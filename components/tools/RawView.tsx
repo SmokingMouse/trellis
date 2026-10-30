@@ -23,7 +23,7 @@ export function RawView({
   return (
     <>
       <Section label="输入">
-        <pre className="text-label font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-72 overflow-auto">
+        <pre className="text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full rounded-field bg-surface-muted text-ink-muted px-2.5 py-1.5 max-h-72 overflow-auto">
           {formatInput(call.input)}
         </pre>
       </Section>
@@ -43,7 +43,7 @@ export function RawView({
 export function StderrView({ text }: { text: string }) {
   return (
     <Section label="stderr">
-      <pre className="text-label font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full bg-danger-muted border border-danger-line rounded px-2 py-1.5 max-h-48 overflow-auto text-danger-ink">
+      <pre className="text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full rounded-field bg-danger-muted border border-danger-line px-2.5 py-1.5 max-h-48 overflow-auto text-danger-ink">
         {text}
       </pre>
     </Section>
@@ -59,7 +59,7 @@ export function Section({
 }) {
   return (
     <div>
-      <div className="text-nano uppercase tracking-wider text-ink-faint mb-0.5">
+      <div className="text-nano uppercase tracking-wider text-ink-faint mb-1">
         {label}
       </div>
       {children}
@@ -77,7 +77,7 @@ export function OutputView({ text }: { text: string }) {
     expanded || !tooLong ? text : lines.slice(0, MAX_OUTPUT_LINES).join("\n");
   return (
     <div>
-      <pre className="text-label font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-96 overflow-auto">
+      <pre className="text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] max-w-full rounded-field bg-surface-muted text-ink-muted px-2.5 py-1.5 max-h-96 overflow-auto">
         {shown}
         {tooLong && !expanded && <span className="text-ink-faint">{"\n…"}</span>}
       </pre>

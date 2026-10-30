@@ -51,7 +51,7 @@ type MobileOverflowMenuProps = {
 };
 
 const rowClass =
-  "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink hover:bg-surface-hover transition-colors";
+  "press-row w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink hover:bg-surface-hover transition-colors";
 const statusRowClass =
   "w-full min-h-11 px-4 flex items-center gap-3 text-left text-sm text-ink-muted";
 
@@ -181,7 +181,7 @@ export function MobileOverflowMenu({
             type="button"
             data-mobile-target="overflow-close"
             onClick={onClose}
-            className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted"
+            className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-field text-ink-muted hover:bg-surface-muted"
             aria-label="关闭更多功能"
           >
             <Icon icon={X} size="lg" />
@@ -265,7 +265,7 @@ export function MobileOverflowMenu({
                   <button
                     type="button"
                     data-mobile-target="overflow-export-markdown"
-                    className={`${rowClass} rounded-md`}
+                    className={`${rowClass} rounded-field`}
                     onClick={() => exportCurrent("markdown")}
                   >
                     导出 Markdown
@@ -273,7 +273,7 @@ export function MobileOverflowMenu({
                   <button
                     type="button"
                     data-mobile-target="overflow-export-json"
-                    className={`${rowClass} rounded-md`}
+                    className={`${rowClass} rounded-field`}
                     onClick={() => exportCurrent("json")}
                   >
                     导出 JSON
@@ -329,7 +329,7 @@ export function MobileOverflowMenu({
                     type="button"
                     data-mobile-target="overflow-model-option"
                     disabled={disabled}
-                    className={`${rowClass} rounded-md disabled:cursor-not-allowed disabled:opacity-40`}
+                    className={`${rowClass} rounded-field disabled:cursor-not-allowed disabled:opacity-40`}
                     onClick={() => {
                       setProvider(candidate.id as ProviderId);
                       onClose();
@@ -348,7 +348,7 @@ export function MobileOverflowMenu({
               <a
                 href="/settings/models"
                 data-mobile-target="overflow-model-settings"
-                className={`${rowClass} rounded-md text-ink-muted`}
+                className={`${rowClass} rounded-field text-ink-muted`}
               >
                 管理模型…
               </a>
@@ -372,9 +372,9 @@ export function MobileOverflowMenu({
                     type="button"
                     data-mobile-target="overflow-theme-mode"
                     onClick={() => setMode(value)}
-                    className={`min-h-11 rounded-md px-2 text-ui ${
+                    className={`min-h-11 rounded-field px-2 text-ui ${
                       mode === value
-                        ? "bg-accent-muted font-medium text-accent-ink"
+                        ? "bg-surface-raised font-medium text-ink shadow-btn"
                         : "bg-surface text-ink-muted"
                     }`}
                   >
@@ -393,9 +393,9 @@ export function MobileOverflowMenu({
                     type="button"
                     data-mobile-target="overflow-theme-palette"
                     onClick={() => setPalette(candidate.id)}
-                    className={`min-h-11 rounded-md px-3 text-left text-ui ${
+                    className={`min-h-11 rounded-field px-3 text-left text-ui ${
                       palette === candidate.id
-                        ? "bg-accent-muted text-accent-ink"
+                        ? "bg-surface-raised font-medium text-ink shadow-btn"
                         : "bg-surface text-ink-muted"
                     }`}
                   >

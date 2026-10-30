@@ -59,12 +59,12 @@ function CliRow({ name, h }: { name: string; h: CliAuthHealth }) {
     <div className="py-3 flex flex-col gap-1.5">
       <div className="flex items-center gap-2.5 min-w-0">
         <span className="inline-flex w-4 justify-center">{status}</span>
-        <span className="text-ui font-semibold text-ink-strong">{name}</span>
+        <span className="font-mono text-ui font-medium text-ink-strong">{name}</span>
         <span className="text-ui text-ink-muted min-w-0 truncate">{summary}</span>
-        {h.account && <span className="text-label text-ink-muted ml-auto truncate">{h.account}</span>}
+        {h.account && <span className="font-mono text-[11.5px] text-ink-faint ml-auto truncate">{h.account}</span>}
       </div>
       {h.installed && (
-        <div className="text-label text-ink-muted flex flex-wrap gap-x-4 gap-y-0.5 pl-6.5">
+        <div className="text-label text-ink-faint tabular-nums flex flex-wrap gap-x-4 gap-y-0.5 pl-6.5">
           {h.refreshExpiresAt !== null && (
             <span>
               刷新凭证至 <span className="font-mono">{fmtTime(h.refreshExpiresAt)}</span>{" "}
@@ -86,7 +86,7 @@ function CliRow({ name, h }: { name: string; h: CliAuthHealth }) {
       {h.errors.map((e) => (
         <div
           key={e}
-          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-card border border-danger-line bg-danger-muted text-danger-ink text-label"
+          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-field bg-danger-muted text-danger-ink text-label"
         >
           <Icon icon={CircleAlert} size="sm" className="mt-px" />
           <span className="min-w-0">{e}</span>
@@ -95,7 +95,7 @@ function CliRow({ name, h }: { name: string; h: CliAuthHealth }) {
       {h.warnings.map((w) => (
         <div
           key={w}
-          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-card border border-warn-line bg-warn-muted text-ink text-label"
+          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-field bg-warn-muted text-ink text-label"
         >
           <Icon icon={TriangleAlert} size="sm" className="mt-px text-warn" />
           <span className="min-w-0">{w}</span>
@@ -130,7 +130,7 @@ export function AuthHealthCard() {
   }, [load]);
 
   return (
-    <section>
+    <section className="ui-enter-up">
       <div className="flex items-center gap-2 mb-2">
         <h2 className="text-ui font-semibold text-ink-strong">CLI 登录状态</h2>
         <span className="text-label text-ink-muted min-w-0 truncate max-md:hidden">
@@ -146,7 +146,7 @@ export function AuthHealthCard() {
           {busy ? <Spinner size="sm" label={null} /> : <Icon icon={RefreshCw} size="sm" />}
         </IconButton>
       </div>
-      <div className="rounded-card border border-line bg-surface px-4">
+      <div className="rounded-card bg-surface-raised shadow-raise px-4">
         {failed && !data && (
           <div className="py-3">
             <ErrorCallout
@@ -160,7 +160,7 @@ export function AuthHealthCard() {
         )}
         {!data && !failed && <SkeletonText lines={4} className="py-4" />}
         {data && (
-          <div className="flex flex-col divide-y divide-line-faint">
+          <div className="flex flex-col divide-y divide-line">
             <CliRow name="claude" h={data.claude} />
             <CliRow name="codex" h={data.codex} />
           </div>

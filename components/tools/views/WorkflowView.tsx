@@ -52,7 +52,7 @@ export function WorkflowView({
 
   // 整块挂在 ToolRow 那道委派竖线上 —— 阶段树不再自带第二道线。
   return (
-    <div className="px-3 pt-1 pb-2 space-y-2">
+    <div className="pl-1 pr-1 pt-1 pb-2 space-y-2">
       {/* 跑着时「当前 agent」在表头的摘要位；跑完这里说它交回了什么。
           这里露出 task_notification.summary 是有意的 —— 它对 local_workflow
           只是 'Dynamic workflow "…" completed'（facts #46），当摘要读没问题，
@@ -75,7 +75,7 @@ export function WorkflowView({
           <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
             工作流脚本
           </summary>
-          <pre className="mt-1 text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-72 overflow-auto">
+          <pre className="mt-1 text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words rounded-field bg-surface-muted text-ink-muted px-2.5 py-1.5 max-h-72 overflow-auto">
             {script}
           </pre>
         </details>
@@ -326,7 +326,7 @@ function Preview({ label, text }: { label: string; text: string }) {
       <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
         {label}
       </summary>
-      <pre className="mt-1 text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1 max-h-40 overflow-auto">
+      <pre className="mt-1 text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words rounded-field bg-surface-muted text-ink-muted px-2.5 py-1.5 max-h-40 overflow-auto">
         {text}
       </pre>
     </details>

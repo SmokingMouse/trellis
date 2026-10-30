@@ -99,7 +99,7 @@ export default function ApprovalRulesPage() {
           icon={ShieldCheck}
           title="还没有授权规则"
           description="在需审批的会话里，审批卡的「放行范围」选本会话或所有会话再允许，规则就会出现在这里。"
-          className="rounded-card border border-line"
+          className="rounded-card bg-surface-raised shadow-raise"
         />
       )}
 
@@ -108,6 +108,7 @@ export default function ApprovalRulesPage() {
           <RuleSection
             title="所有会话"
             hint="对每个需审批的会话生效，只能在这里撤销。"
+            delay={0}
             rules={globalRules}
             busyId={busyId}
             onRevoke={revoke}
@@ -115,6 +116,7 @@ export default function ApprovalRulesPage() {
           <RuleSection
             title="单个会话"
             hint="只对所属会话生效；会话删除时自动失效。"
+            delay={60}
             rules={sessionRules}
             busyId={busyId}
             onRevoke={revoke}
@@ -131,15 +133,17 @@ function RuleSection({
   rules,
   busyId,
   onRevoke,
+  delay = 0,
 }: {
   title: string;
   hint: string;
+  delay?: number;
   rules: RuleItem[];
   busyId: string | null;
   onRevoke: (rule: RuleItem) => void;
 }) {
   return (
-    <section aria-label={title}>
+    <section aria-label={title} className="ui-enter-up" style={{ animationDelay: `${delay}ms` }}>
       <h2 className="text-ui font-semibold text-ink-strong mb-1">
         {title} <span className="font-normal text-ink-faint">· {rules.length}</span>
       </h2>
@@ -147,15 +151,15 @@ function RuleSection({
       {rules.length === 0 ? (
         <p className="text-label text-ink-faint">无</p>
       ) : (
-        <ul className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+        <ul className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
           {rules.map((rule) => (
             <li
               key={rule.id}
               data-approval-rule={rule.id}
-              className="flex items-center gap-3 px-3 py-2 text-label max-md:flex-wrap"
+              className="flex min-h-[46px] items-center gap-3 px-3 py-2 text-label transition-colors duration-100 hover:bg-surface-hover max-md:flex-wrap"
             >
-              <Badge className="shrink-0 font-mono">{rule.toolKey}</Badge>
-              <span className="min-w-0 flex-1 text-ink">{describeToolKey(rule.toolKey)}</span>
+              <Badge className="shrink-0 font-mono text-[11.5px]">{rule.toolKey}</Badge>
+              <span className="min-w-0 flex-1 text-ui font-medium text-ink">{describeToolKey(rule.toolKey)}</span>
               {rule.scope === "session" && (
                 <a
                   href={rule.sessionId ? `/?session=${encodeURIComponent(rule.sessionId)}` : undefined}
@@ -165,7 +169,7 @@ function RuleSection({
                   会话：{rule.sessionTitle ?? "未命名"}
                 </a>
               )}
-              <span className="shrink-0 tabular-nums text-ink-faint">
+              <span className="shrink-0 tabular-nums text-ink-muted">
                 {rule.useCount > 0 && rule.lastUsedAt
                   ? `已自动允许 ${rule.useCount} 次 · 最近 ${formatRelativeTime(rule.lastUsedAt)}`
                   : `创建于 ${formatRelativeTime(rule.createdAt)} · 尚未命中`}

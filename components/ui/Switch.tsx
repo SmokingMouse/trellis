@@ -9,12 +9,12 @@ export function Switch({ className, ...rest }: ComponentProps<typeof SwitchPrimi
   return (
     <SwitchPrimitive.Root
       className={cn(
-        "relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-line-strong transition-colors duration-100 data-[state=checked]:bg-accent disabled:cursor-not-allowed disabled:opacity-45 max-md:after:absolute max-md:after:-inset-x-1.5 max-md:after:-inset-y-3.5",
+        "relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-line-strong transition-colors duration-200 ease-(--ease-out) data-[state=checked]:bg-positive disabled:cursor-not-allowed disabled:opacity-45 max-md:after:absolute max-md:after:-inset-x-1.5 max-md:after:-inset-y-3.5",
         className,
       )}
       {...rest}
     >
-      <SwitchPrimitive.Thumb className="pointer-events-none block size-3.5 translate-x-0.5 rounded-full bg-accent-fg shadow-sm transition-transform duration-100 data-[state=checked]:translate-x-3.5" />
+      <SwitchPrimitive.Thumb className="pointer-events-none block size-3.5 translate-x-0.5 rounded-full bg-accent-fg shadow-btn transition-transform duration-200 ease-(--ease-out) data-[state=checked]:translate-x-3.5" />
     </SwitchPrimitive.Root>
   );
 }

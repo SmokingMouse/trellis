@@ -182,7 +182,7 @@ function PanelDrawer({
               onKeyDown={trapTabKey}
               className={cn(
                 "ui-drawer absolute inset-x-0 bottom-0 flex h-[60dvh] flex-col overflow-hidden rounded-t-sheet bg-surface shadow-overlay outline-none",
-                "sm:inset-x-auto sm:bottom-2 sm:right-2 sm:top-14 sm:h-auto sm:rounded-overlay sm:border sm:border-line",
+                "sm:inset-x-auto sm:bottom-2 sm:right-2 sm:top-14 sm:h-auto sm:rounded-window",
                 widthClassName,
               )}
               style={{

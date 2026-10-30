@@ -35,9 +35,9 @@ export function OfflineBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 top-[calc(var(--trellis-header-h)+0.5rem)] md:top-[5.75rem] z-40 flex justify-center px-3"
+      className="pointer-events-none fixed inset-x-0 top-[calc(var(--trellis-header-h)+0.5rem)] md:left-(--trellis-sb) md:top-[5.75rem] z-40 flex justify-center px-3"
     >
-      <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-warn-line bg-warn-muted py-0.5 pl-3 pr-1 text-label text-warn-ink shadow-sm">
+      <div className="ui-enter-pop pointer-events-auto flex items-center gap-2 rounded-full bg-warn-muted py-0.5 pl-3 pr-1 text-label text-warn-ink shadow-[0_0_0_1px_var(--warn-line),var(--elev-raised)]">
         <Icon icon={CloudOff} size="sm" />
         <span>离线 · 显示的是本地缓存</span>
         <Button

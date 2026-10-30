@@ -62,7 +62,7 @@ export function Tooltip({
           align={align}
           sideOffset={6}
           collisionPadding={8}
-          className="ui-layer z-70 flex max-w-72 items-center gap-2 rounded-md bg-ink-strong px-2 py-1 text-label leading-snug text-surface-canvas select-none"
+          className="ui-layer z-70 flex max-w-72 items-center gap-2 rounded-[7px] bg-ink-strong px-2 py-1 shadow-pop text-label leading-snug text-surface-canvas select-none"
         >
           <span className="min-w-0">{content}</span>
           {keys && (

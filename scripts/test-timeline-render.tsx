@@ -641,7 +641,7 @@ console.log("\n── 展开规则");
   const calls = [base({ id: "1", name: "Bash", input: { command: "ls" }, output: "a\nb" })];
   check("面板：跑完默认收起", !render(calls, false).includes("输入"));
   check("面板：流式时默认展开到行级", render(calls, true).includes("ls"));
-  check("面板：收起态仍报出步数", render(calls, false).includes("1 步"));
+  check("面板：收起态仍报出步数", render(calls, false).includes("1 次工具调用"));
 }
 
 console.log(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILED\n`);

@@ -15,20 +15,23 @@ export type StatusTone =
   | "project"
   | "chat"
   | "idle"
-  | "live";
+  | "live"
+  | "attention";
 
 const TONE: Record<StatusTone, string> = {
   neutral: "bg-ink-faint",
   accent: "bg-accent",
-  positive: "bg-positive",
+  positive: "bg-positive ring-3 ring-positive-muted",
   warn: "bg-warn",
+  /** 等你处理：琥珀呼吸点 */
+  attention: "bg-warn ui-breathe-warn",
   danger: "bg-danger",
   unread: "bg-unread",
   fork: "bg-fork",
   project: "bg-mode-project",
   chat: "bg-mode-chat",
   idle: "bg-transparent ring-1 ring-inset ring-ink-faint",
-  live: "bg-accent animate-pulse motion-reduce:animate-none",
+  live: "bg-accent ui-breathe",
 };
 
 export function StatusDot({

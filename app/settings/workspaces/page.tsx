@@ -215,7 +215,7 @@ export default function WorkspacesSettingsPage() {
 
       {/* 通览：这一屏存在的理由。逐行 hover 看不出「有几个可以回收了」。 */}
       {reclaimable.length > 0 && (
-        <div className="flex items-start gap-2 px-3 py-2 rounded-card border border-positive-line bg-positive-muted text-ui text-positive-ink">
+        <div className="ui-enter-up flex items-start gap-2 px-3 py-2.5 rounded-card bg-positive-muted text-ui text-positive-ink">
           <Icon icon={Check} size="sm" className="mt-0.5" />
           <span>
             {reclaimable.length} 个 worktree 已并入主干且工作区干净，可以回收：
@@ -234,7 +234,7 @@ export default function WorkspacesSettingsPage() {
         {projects === null && loadError === null && (
           <div role="status" aria-label="加载中" className="flex flex-col gap-3">
             {[0, 1].map((i) => (
-              <div key={i} className="rounded-card border border-line p-3 flex flex-col gap-2">
+              <div key={i} className="rounded-card bg-surface-raised shadow-raise p-3 flex flex-col gap-2">
                 <Skeleton className="h-3.5 w-40" />
                 <Skeleton className="h-3 w-full" />
                 <Skeleton className="h-3 w-4/5" />
@@ -252,22 +252,28 @@ export default function WorkspacesSettingsPage() {
             icon={FolderGit2}
             title="还没有工作区"
             description="在侧栏项目行点 ＋ 新建 worktree，或打开一个目录开会话，工作区就会登记在这里。"
-            className="rounded-card border border-line"
+            className="rounded-card bg-surface-raised shadow-raise"
           />
         )}
 
         <div className="flex flex-col gap-3">
-          {(projects ?? []).map((p) => (
-            <div key={p.id}>
-              <div className="text-ui font-medium flex items-center gap-2">
-                {p.name}
+          {(projects ?? []).map((p, pi) => (
+            <div
+              key={p.id}
+              className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise"
+              style={{ animationDelay: `${Math.min(pi, 5) * 60}ms` }}
+            >
+              <div className="flex items-center gap-2 px-3 pt-2.5 pb-2 text-label font-medium text-ink-muted">
+                <Icon icon={FolderGit2} size="sm" className="shrink-0 text-ink-faint" />
+                <span className="text-ink">{p.name}</span>
+                <span className="text-ink-faint tabular-nums">{p.workspaces.length}</span>
                 {p.gitRemote && (
-                  <span className="text-nano text-ink-faint font-mono truncate max-w-[24rem]">
+                  <span className="ml-auto min-w-0 truncate max-w-[24rem] font-mono text-[11.5px] font-normal text-ink-faint">
                     {p.gitRemote}
                   </span>
                 )}
               </div>
-              <div className="mt-1.5 rounded-card border border-line bg-surface divide-y divide-line-faint">
+              <div className="border-t border-line divide-y divide-line">
                 {p.workspaces.map((w) => {
                   const g = git.get(w.id);
                   const removable =
@@ -275,12 +281,12 @@ export default function WorkspacesSettingsPage() {
                   return (
                     <div
                       key={w.id}
-                      className="px-3 py-2 flex items-center gap-3 text-label"
+                      className="min-h-[46px] px-3 py-2 flex items-center gap-3 text-label transition-colors duration-100 hover:bg-surface-hover"
                     >
-                      <span className="font-medium shrink-0">{w.name}</span>
+                      <span className="text-ui font-medium text-ink shrink-0">{w.name}</span>
                       <Badge className="shrink-0">{w.kind}</Badge>
                       {g?.branch && g.branch !== w.name && (
-                        <span className="text-nano text-ink-faint font-mono shrink-0">
+                        <span className="text-[11.5px] text-ink-faint font-mono shrink-0">
                           {g.branch}
                         </span>
                       )}
@@ -303,10 +309,10 @@ export default function WorkspacesSettingsPage() {
                           </span>
                         </Tooltip>
                       )}
-                      <span className="text-ink-faint font-mono truncate flex-1 min-w-0" title={w.path}>
+                      <span className="text-[11.5px] text-ink-faint font-mono truncate flex-1 min-w-0" title={w.path}>
                         {w.path}
                       </span>
-                      <span className="text-nano text-ink-faint shrink-0">
+                      <span className="text-nano text-ink-faint tabular-nums shrink-0">
                         {w.sessionCount} 会话
                       </span>
                       {removable ? (

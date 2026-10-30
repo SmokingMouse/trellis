@@ -113,14 +113,16 @@ function SegmentRow({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={open ? "点击收起明细" : "点击展开已自动收起的明细"}
-        className="w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors pointer-coarse:min-h-11"
+        className={STEP_CLASS + " text-ink-faint hover:text-ink-muted"}
       >
-        <Icon
-          icon={ChevronRight}
-          size="sm"
-          className={`ui-collapse-chevron ${open ? "rotate-90" : ""}`}
-        />
-        <span className="tabular-nums shrink-0 text-ink-muted inline-flex items-center gap-1.5">
+        <span className="grid size-4 shrink-0 place-items-center">
+          <Icon
+            icon={ChevronRight}
+            size="sm"
+            className={`ui-collapse-chevron ${open ? "rotate-90" : ""}`}
+          />
+        </span>
+        <span className="tabular-nums shrink-0 text-[12.5px] font-medium text-ink-muted inline-flex items-center gap-1.5">
           <span className="max-md:hidden">{nodes.length} 步</span>
           {/* 手机：「N 个步骤」+ 微型状态图标（段落里都是已完成的普通调用） */}
           <span className="md:hidden">{nodes.length} 个步骤</span>
@@ -128,14 +130,14 @@ function SegmentRow({
         </span>
         {/* 「已自动收起 / 已展开」不再常驻：chevron 的朝向已经说了，
             按钮 title 留给想确认的人。 */}
-        <span className="truncate min-w-0">{segmentSummary(nodes)}</span>
+        <span className="truncate min-w-0 text-[12.5px]">{segmentSummary(nodes)}</span>
         <span className="flex-1" />
         <span className="font-mono text-nano tabular-nums shrink-0">
           {segmentDuration(nodes)}
         </span>
       </button>
       <Collapse open={open}>
-        <div className="md:border-t md:border-line-faint md:divide-y md:divide-line-faint max-md:space-y-0.5">
+        <div>
           {nodes.map((n) => (
             <ToolRow key={n.call.id} node={n} live={live} depth={depth} />
           ))}
@@ -212,6 +214,8 @@ export function ToolRow({
 
   return (
     <div
+      // 新一步进场：上浮淡入（reduced-motion 下关闭，见 globals .ui-enter-up）
+      className="ui-enter-up"
       data-tool-row={node.kind}
       data-tool-failed={failed ? "" : undefined}
       data-workflow-card={
@@ -223,19 +227,30 @@ export function ToolRow({
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-workflow-head={workflow ? "" : undefined}
-        className="w-full min-h-7.5 px-3 flex items-center gap-2 text-ui text-left hover:bg-surface-hover transition-colors pointer-coarse:min-h-11"
+        className={STEP_CLASS}
       >
         {workflow ? (
           <WorkflowHead node={node} live={live} elapsed={elapsed} />
         ) : (
           <>
-            <ToolIcon name={rowIcon(node)} className="text-ink-faint" />
-            <span className="shrink-0 min-w-11 max-w-40 truncate font-medium text-ink">
+            {/* 行首图标位：悬停 / 展开时换成 chevron（bui Tool Chips） */}
+            <span className="relative grid size-4 shrink-0 place-items-center text-ink-faint">
+              <ToolIcon
+                name={rowIcon(node)}
+                className={`transition-opacity duration-100 group-hover/step:opacity-0 ${open ? "opacity-0" : ""}`}
+              />
+              <Icon
+                icon={ChevronRight}
+                size="sm"
+                aria-hidden
+                className={`ui-collapse-chevron absolute opacity-0 group-hover/step:opacity-100 ${open ? "rotate-90 opacity-100" : ""}`}
+              />
+            </span>
+            <span className="shrink-0 min-w-11 max-w-40 truncate text-[12.5px] font-medium text-ink">
               {rowTitle(node)}
             </span>
-            <span className="flex-1 min-w-0 truncate font-mono text-label text-ink-muted">
-              {rowSummary(node) ?? ""}
-            </span>
+            <SummaryChip node={node} />
+            <span className="flex-1" />
             <RowTail
               node={node}
               stat={statLine(node, elapsed)}
@@ -246,12 +261,12 @@ export function ToolRow({
         )}
       </button>
 
-      {open &&
-        (delegation ? (
+      <Collapse open={open}>
+        {delegation ? (
           <div
             data-tool-rail=""
-            className={`ml-[18px] mb-1 border-l ${
-              failed ? "border-danger-line" : "border-line"
+            className={`ml-[7px] mb-1 pl-2.5 border-l ${
+              failed ? "border-danger-line" : "border-line-strong"
             }`}
           >
             {Body ? (
@@ -262,19 +277,18 @@ export function ToolRow({
               // 降级：视图认不出这份数据（畸形 Workflow 快照等）→ 原始视图，
               // 子调用照样挂在同一道竖线上，不另起一套外框。
               <>
-                <div className="px-3 pt-1 pb-2 space-y-2">
+                <div className="pl-1 pt-1 pb-2 space-y-2">
                   <RawView node={node} />
                 </div>
-                {nested && (
-                  <div className="divide-y divide-line-faint">{nested}</div>
-                )}
+                {nested}
               </>
             )}
           </div>
         ) : (
+          // 明细挂在行首图标正下方的一道细线上（bui .detail）
           <div
-            className={`pr-3 pb-3 pt-1 space-y-2 ${
-              failed ? "ml-4 pl-4 border-l-2 border-danger-line" : "pl-8"
+            className={`ml-[7px] mt-0.5 mb-1.5 pl-3.5 pr-1 py-0.5 space-y-2 ${
+              failed ? "border-l-2 border-danger-line" : "border-l border-line-strong"
             }`}
           >
             {Body ? (
@@ -283,7 +297,8 @@ export function ToolRow({
               <RawView node={node} />
             )}
           </div>
-        ))}
+        )}
+      </Collapse>
     </div>
   );
 }
@@ -315,6 +330,26 @@ export function rowAutoOpen(
   if (currentTodo) return true;
   if (live) return false;
   return defaultOpen(node);
+}
+
+// 一步的行：28px 高（触屏 44px），左缘向外让出 4px 给 hover 底。
+const STEP_CLASS =
+  "group/step -ml-1 flex w-[calc(100%+0.25rem)] min-h-7 items-center gap-2 px-1 rounded-field text-ui text-left hover:bg-surface-hover transition-colors pointer-coarse:min-h-11";
+
+// 行内摘要 chip：路径 / 命令走等宽，委派的任务描述是一句话，走正文字体。
+function SummaryChip({ node }: { node: ToolNode }) {
+  const summary = rowSummary(node);
+  if (!summary) return null;
+  const prose = node.kind === "subagent" || node.kind === "workflow";
+  return (
+    <span
+      className={`min-w-0 truncate inline-flex items-center h-5.5 px-[7px] rounded-chip bg-surface-muted shadow-hairline text-[11.5px] text-ink-muted ${
+        prose ? "" : "font-mono"
+      }`}
+    >
+      <span className="truncate">{summary}</span>
+    </span>
+  );
 }
 
 function rowIcon(node: ToolNode): ToolIconKey {

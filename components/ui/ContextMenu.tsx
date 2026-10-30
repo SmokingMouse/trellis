@@ -323,7 +323,7 @@ function MenuPanel({
       role="menu"
       aria-label={label}
       data-testid="context-menu"
-      className="fixed z-[80] min-w-40 max-w-64 py-1 bg-surface-raised border border-line rounded-lg shadow-pop ui-enter-pop text-ui"
+      className="fixed z-[80] min-w-40 max-w-64 p-1 bg-surface-raised rounded-overlay shadow-pop ui-enter-pop text-ui"
       style={{ left: point.x, top: point.y, visibility: "hidden" }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -342,7 +342,7 @@ function MenuPanel({
               onClose();
               it.onSelect();
             }}
-            className={`w-full text-left px-3 py-1.5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`w-full text-left px-2 min-h-8 rounded-[7px] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
               it.danger ? "text-danger" : "text-ink"
             } ${active === i ? "bg-surface-muted" : ""}`}
           >

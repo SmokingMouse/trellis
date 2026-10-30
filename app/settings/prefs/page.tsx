@@ -47,7 +47,7 @@ export default function PrefsSettingsPage() {
         subtitle="各自都有就近入口（每行标注了在哪改），这里是一次看全的清单；存在本浏览器，换设备不同步，部分改动要刷新页面才完全生效"
       />
 
-      {GROUPS.map((g) => {
+      {GROUPS.map((g, gi) => {
         const items = PREF_ITEMS.filter((i) => i.group === g);
         if (!items.length) return null;
         // 手机推送紧跟「提醒」：同一类事（跑完 / 等你回答时叫你），但开关存服务端、
@@ -55,9 +55,9 @@ export default function PrefsSettingsPage() {
         const after = g === "提醒" ? <PushSettings /> : null;
         return (
           <Fragment key={g}>
-          <section>
+          <section className="ui-enter-up" style={{ animationDelay: `${Math.min(gi, 5) * 60}ms` }}>
             <h2 className="text-ui font-semibold text-ink-strong mb-2">{g}</h2>
-            <div className="flex flex-col divide-y divide-line-faint rounded-card border border-line bg-surface px-4">
+            <div className="flex flex-col divide-y divide-line rounded-card bg-surface-raised shadow-raise px-4">
               {items.map((it) => (
                 <Row
                   key={it.key}
@@ -89,9 +89,9 @@ function Row({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="py-3 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
+    <div className="min-h-[52px] py-2.5 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
       <div className="min-w-0 flex-1">
-        <div className="text-ui">{item.label}</div>
+        <div className="text-ui font-medium text-ink">{item.label}</div>
         <div className="text-label text-ink-faint">在这改：{item.where}</div>
       </div>
       <div className="shrink-0 max-md:w-full">
@@ -118,7 +118,7 @@ function Row({
           // 且它们要连带做一致性钳制（切 chat 清 workspace、选 agent 清 systemPrompt），
           // 这里单独写一个值只会造出不自洽的草稿。
           <span
-            className="text-label text-ink-faint font-mono truncate max-w-[16rem] max-md:max-w-full inline-block align-bottom"
+            className="text-[11.5px] text-ink-faint font-mono truncate max-w-[16rem] max-md:max-w-full inline-block align-bottom"
             title={raw ?? "未设置"}
           >
             {raw ?? "未设置"}

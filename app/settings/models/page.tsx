@@ -27,7 +27,7 @@ export default function ModelsSettingsPage() {
         }
       />
       <AuthHealthCard key={`auth-${epoch}`} />
-      <div className="rounded-card border border-line bg-surface overflow-hidden">
+      <div className="rounded-card bg-surface-raised shadow-raise overflow-hidden">
         <ModelConfigPanel key={`cfg-${epoch}`} />
       </div>
       <LabelModelCard key={`label-${epoch}`} />

@@ -60,17 +60,17 @@ export function Toaster() {
         unstyled: true,
         classNames: {
           toast:
-            "group flex w-full items-start gap-2.5 rounded-card border border-line bg-surface-raised px-3 py-2.5 text-ui text-ink shadow-overlay",
+            "group flex w-full items-start gap-2.5 rounded-card bg-surface-raised px-3 py-2.5 text-ui text-ink shadow-overlay",
           icon: "mt-0.5 flex shrink-0",
           content: "flex min-w-0 flex-1 flex-col gap-0.5",
           title: "font-medium text-ink-strong",
           description: "text-label text-ink-muted",
           actionButton:
-            "ml-2 shrink-0 self-center rounded-field bg-accent px-2 min-h-6.5 text-label font-medium text-accent-fg hover:bg-accent-strong",
+            "ml-2 shrink-0 self-center rounded-[7px] bg-accent px-2 min-h-6.5 shadow-primary text-label font-medium text-accent-fg hover:bg-accent-strong",
           cancelButton:
-            "ml-2 shrink-0 self-center rounded-field border border-line-strong px-2 min-h-6.5 text-label text-ink hover:bg-surface-hover",
+            "ml-2 shrink-0 self-center rounded-[7px] bg-surface-raised shadow-btn px-2 min-h-6.5 text-label text-ink hover:bg-surface-hover",
           closeButton:
-            "absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-surface-raised text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink max-md:opacity-100 [@media(hover:none)]:opacity-100 before:absolute before:-inset-3 before:content-['']",
+            "absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-surface-raised shadow-btn text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink max-md:opacity-100 [@media(hover:none)]:opacity-100 before:absolute before:-inset-3 before:content-['']",
           error: "border-danger-line",
           warning: "border-warn-line",
         },

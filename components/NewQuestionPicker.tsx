@@ -64,7 +64,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           </div>
           <div className="text-ui text-ink-muted mt-0.5">
             在当前会话中开启一棵独立的新树，模型不再记得现有节点（等价 CLI 的{" "}
-            <code className="px-1 rounded bg-surface-muted text-label">
+            <code className="px-1 rounded-chip bg-surface-muted font-mono text-label shadow-hairline">
               /clear
             </code>
             ）。
@@ -105,7 +105,7 @@ export function NewQuestionPicker({ onClose }: { onClose: () => void }) {
           className="px-3 py-2 max-md:h-24 resize-none"
           disabled={busy}
         />
-        <div className="text-label text-ink-faint mt-1 flex items-center gap-1">
+        <div className="text-[11.5px] text-ink-faint tabular-nums mt-1.5 flex items-center gap-1">
           <Kbd keys={["⌘", "↩"]} /> 提交 · {q.length} 字
         </div>
         {error && (

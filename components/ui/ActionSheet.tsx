@@ -92,7 +92,7 @@ export function ActionSheet({
             paddingRight: "calc(0.5rem + var(--safe-right))",
           }}
         >
-          <div className="min-h-0 overflow-y-auto overscroll-contain rounded-sheet border border-line bg-surface-raised shadow-overlay">
+          <div className="min-h-0 overflow-y-auto overscroll-contain rounded-sheet bg-surface-raised shadow-overlay">
             {title ? (
               <DialogPrimitive.Title className="border-b border-line-faint px-4 py-3 text-center text-label text-ink-faint">
                 {title}
@@ -104,7 +104,7 @@ export function ActionSheet({
           </div>
           <DialogPrimitive.Close
             data-action-sheet-cancel
-            className="press min-h-12 shrink-0 rounded-sheet border border-line bg-surface-raised text-body font-semibold text-ink shadow-overlay active:bg-surface-hover"
+            className="press min-h-12 shrink-0 rounded-sheet bg-surface-raised text-body font-semibold text-ink shadow-overlay active:bg-surface-hover"
           >
             {cancelLabel}
           </DialogPrimitive.Close>

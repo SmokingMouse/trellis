@@ -441,8 +441,12 @@ agent-browser --session "$SESSION" eval --stdin <<'DESKTOP_EOF'
   // W4 重做 Header / 侧栏必然漂移。这里只守 safe-area 本身的约束：Header 贴顶满宽、没被
   // safe-top 撑高（手机端是 95px）；Composer 贴底贴右、没被 safe-bottom 垫高。
   // W5：W3 composer 多了模式 chip + ModelPicker 工具行与脚注，实高约 137px，上限放到 200。
-  assert(near(hr.top, 0) && near(hr.width, 1280) && hr.height >= 32 && hr.height < 64, `Header 偏离桌面 safe-area 基线: ${JSON.stringify({ top: hr.top, width: hr.width, height: hr.height })}`);
-  assert(cr.left > 0 && near(cr.right, 1280) && near(cr.bottom, 800) && cr.height <= 200, `Composer 偏离桌面 safe-area 基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
+  // 2026-10-30 视觉改版：桌面内容区是一扇浮起的主窗（[data-app-window-backdrop]，四周 8px），
+  // Header 贴主窗顶、Composer 贴主窗底与右缘——基线改为相对主窗量，而不是相对视口。
+  const win = document.querySelector('[data-app-window-backdrop]')?.getBoundingClientRect();
+  assert(win, '桌面主窗 [data-app-window-backdrop] 缺失');
+  assert(near(hr.top, win.top) && near(hr.right, win.right) && hr.height >= 32 && hr.height < 64, `Header 偏离桌面 safe-area 基线: ${JSON.stringify({ top: hr.top, right: hr.right, height: hr.height, win })}`);
+  assert(cr.left > 0 && near(cr.right, win.right) && near(cr.bottom, win.bottom) && cr.height <= 200, `Composer 偏离桌面 safe-area 基线: ${JSON.stringify({ left: cr.left, top: cr.top, width: cr.width, height: cr.height, bottom: cr.bottom })}`);
   assert(near(desktopComposerFontSize, 14), `桌面 Composer 字号偏离 14px 基线: ${desktopComposerFontSize}px`);
 
   const visible = (el) => el.offsetParent !== null;

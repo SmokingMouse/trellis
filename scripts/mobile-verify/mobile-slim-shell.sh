@@ -528,7 +528,9 @@ ab eval --stdin <<'JS'
   const label = (element) => element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent?.trim().replace(/\s+/g, '').slice(0, 60);
   const header = document.querySelector('header');
   const headerRect = header.getBoundingClientRect();
-  assert(near(headerRect.top, 0) && near(headerRect.width, 1280) && near(headerRect.height, 48), `desktop header rect=${JSON.stringify(headerRect.toJSON())}`);
+  // 桌面 Header 贴浮起主窗的顶 / 右缘（2026-10-30 视觉改版，主窗四周 8px）
+  const win = document.querySelector('[data-app-window-backdrop]')?.getBoundingClientRect();
+  assert(win && near(headerRect.top, win.top) && near(headerRect.right, win.right) && near(headerRect.height, 48), `desktop header rect=${JSON.stringify(headerRect.toJSON())} window=${JSON.stringify(win)}`);
   assert(!header.hasAttribute('data-header-hidden'), `desktop header hidden=${header.dataset.headerHidden}`);
   assert(header.scrollWidth === header.clientWidth, `desktop header overflow ${header.scrollWidth}/${header.clientWidth}`);
 

@@ -13,6 +13,7 @@ export { StopButton } from "./StopButton";
 export { Tooltip, TooltipProvider, type TooltipProps } from "./Tooltip";
 export { Kbd } from "./Kbd";
 export { SearchSnippet } from "./SearchSnippet";
+export { GlideList } from "./GlideList";
 
 // 表单族
 export { Input, Textarea, type InputProps } from "./Input";
@@ -70,6 +71,7 @@ export { StatusDot, type StatusTone } from "./StatusDot";
 export { Skeleton, SkeletonText } from "./Skeleton";
 export { Spinner } from "./Spinner";
 export { Dots } from "./Dots";
+export { PixelLoader } from "./PixelLoader";
 export { EmptyState } from "./EmptyState";
 export { PageHeader } from "./PageHeader";
 export { ErrorCallout } from "./ErrorCallout";

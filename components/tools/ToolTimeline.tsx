@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ChevronRight, CircleCheck, TriangleAlert } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { Icon, Spinner, StatusDot, ToolIcon } from "@/components/ui";
 import { formatDuration } from "@/lib/format-duration";
 import { formatTokens } from "@/lib/format-tokens";
@@ -71,71 +71,71 @@ export function ToolTimeline({
   const chain = live && !open ? runningChain(tree) : [];
   const span = spanMs(tree);
 
-  // 外壳与 AsProjectControls（🔌 引擎块）同一套卡片语言：细描边 + card 圆角 +
-  // 一行表头（chevron · 摘要 · 右侧数值）+ 展开后的分隔线列表（decisions 9/15）。
-  // 手机（2026-10-30，参考 Cindy ToolGroupCard）：去掉描边卡套分隔线的重框，
-  // 改为淡底圆角卡、行间靠间距；表头说「N 个步骤」+ 一枚微型状态图标。桌面不变。
-  const headStatus: "running" | "error" | "done" =
-    live && counts.running > 0 ? "running" : display.errors > 0 ? "error" : "done";
+  // 2026-10-30 视觉改版（beautifului Thinking 块，原型 08-beautiful-ui.html .trace）：
+  // 不再套卡片。表头是一行可点的轻按钮（✦ · 状态文案 · chevron），流式中挂
+  // 文字微光「思考中…」，跑完定格为「已完成 · N 次工具调用，用时 …」；正文挂在
+  // 一道细竖线上，一行一步。手机与桌面同一套，只把热区放到 44px。
+  const finished = !live && counts.running === 0;
   return (
-    <div
-      className="mb-3 rounded-card overflow-hidden md:border md:border-line md:bg-surface-muted/60 max-md:bg-surface-muted"
-      data-tool-timeline={nodeId}
-    >
+    <div className="mb-3.5" data-tool-timeline={nodeId}>
       <button
         type="button"
         onClick={() => setUserOpen(!open)}
         aria-expanded={open}
         data-tool-timeline-head=""
-        className="w-full min-h-9 px-3 py-1.5 flex items-center gap-2 text-ui text-left text-ink-muted hover:bg-surface-hover transition-colors max-md:min-h-11"
+        className="-ml-1.5 flex max-w-[calc(100%+0.375rem)] min-h-7 items-center gap-[7px] px-1.5 rounded-field text-ui text-left text-ink-muted hover:bg-surface-hover transition-colors max-md:min-h-11"
       >
         <Icon
-          icon={ChevronRight}
+          icon={Sparkles}
           size="sm"
-          className={`ui-collapse-chevron text-ink-faint ${open ? "rotate-90" : ""}`}
+          className={`shrink-0 ${live ? "text-ink-muted" : "text-ink-faint"}`}
         />
         {chain.length > 0 ? (
           <LiveHeader
             chain={chain}
             parallel={counts.running - chain.length}
           />
+        ) : live ? (
+          <span className="shrink-0 font-medium shimmer-text">思考中…</span>
         ) : (
           <>
-            <span className="shrink-0 tabular-nums inline-flex items-center gap-1.5">
-              <b className="font-medium text-ink max-md:hidden">{display.total} 步</b>
-              <b className="font-medium text-ink md:hidden">{display.total} 个步骤</b>
-              <MicroStatus status={headStatus} />
+            <span className="min-w-0 truncate font-medium tabular-nums">
+              {finished ? "已完成" : "已中断"} · {display.total} 次工具调用
+              {delegationLine(display.subagents, display.workflows)}
+              {span !== null && `，用时 ${formatDuration(span)}`}
             </span>
-            <span className="text-ink-muted truncate min-w-0">
-              {summaryLine(tree, display.subagents, display.workflows, stats?.tools)}
+            <span className="min-w-0 truncate text-ink-faint max-md:hidden">
+              {toolNamesLine(tree, display.subagents, display.workflows, stats?.tools)}
             </span>
-            {display.errors > 0 && (
-              // 失败要醒目：红点 + 数字，常规调用保持安静。
-              <span className="shrink-0 inline-flex items-center gap-1.5 text-danger-ink">
-                <StatusDot tone="danger" />
-                {display.errors} 失败
-              </span>
-            )}
           </>
         )}
-        <span className="flex-1" />
-        {/* 流式中计时归底部 RunLine；跑完才在这里给工具段总耗时。 */}
-        {span !== null && !live && (
-          <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
-            {formatDuration(span)}
+        {display.errors > 0 && (
+          // 失败要醒目：红点 + 数字，常规调用保持安静。
+          <span className="shrink-0 inline-flex items-center gap-1.5 text-danger-ink">
+            <StatusDot tone="danger" />
+            {display.errors} 失败
           </span>
         )}
+        <Icon
+          icon={ChevronDown}
+          size="sm"
+          className={`ui-collapse-chevron shrink-0 text-ink-faint ${open ? "" : "-rotate-90"}`}
+        />
       </button>
 
       <Collapse open={open}>
         {tree.length > 0 ? (
-          <div className="md:border-t md:border-line md:divide-y md:divide-line-faint py-0.5 max-md:pb-1.5 max-md:space-y-0.5">
+          // 细竖线 = 这一轮的轨迹；行自己不再带分隔线
+          <div
+            data-tool-trace-body=""
+            className="relative mt-1 ml-1.5 pl-4 pb-0.5 before:absolute before:left-px before:top-0.5 before:bottom-1.5 before:w-px before:bg-line-strong"
+          >
             <TimelineList nodes={tree} live={live} />
           </div>
         ) : (
           // toolCalls 还在按需拉取（或拉取失败静默降级）——给一行占位，
           // 别让展开的面板空着。
-          <div className="md:border-t md:border-line px-3 py-2 text-ui text-ink-faint flex items-center gap-2">
+          <div className="mt-1 ml-1.5 pl-4 min-h-7 text-ui text-ink-faint flex items-center gap-2">
             {loading ? (
               <>
                 <Spinner size="sm" label={null} />
@@ -148,19 +148,6 @@ export function ToolTimeline({
         )}
       </Collapse>
     </div>
-  );
-}
-
-// 手机表头的微型状态图标：在跑 = 转圈，有失败 = 警示，全部完成 = 勾。
-// 只在手机出现（桌面表头保持原样）；装饰性，旁边的文字已说清楚。
-export function MicroStatus({ status }: { status: "running" | "error" | "done" }) {
-  if (status === "running") return <Spinner size="sm" label={null} className="md:hidden" />;
-  return (
-    <Icon
-      icon={status === "error" ? TriangleAlert : CircleCheck}
-      size="sm"
-      className={`md:hidden ${status === "error" ? "text-danger-ink" : "text-positive-ink"}`}
-    />
   );
 }
 
@@ -286,26 +273,29 @@ function leafDoing(leaf: ToolNode): string | null {
   return toolSummary(leaf.call);
 }
 
-function summaryLine(
+// 「 · 2 子 Agent · 1 Workflow」—— 有委派时并进状态文案。
+function delegationLine(subagents: number, workflows: number): string {
+  const parts: string[] = [];
+  if (subagents > 0) parts.push(`${subagents} 子 Agent`);
+  if (workflows > 0) parts.push(`${workflows} Workflow`);
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+}
+
+// 没有委派时在状态文案后弱色点名工具（「Bash、Read、Edit」），收着的表头
+// 仍然说得出这一轮干了什么。
+function toolNamesLine(
   tree: ToolNode[],
   subagents: number,
   workflows: number,
   // toolCalls 被剥离时（大会话 done 节点）tree 为空，用服务端预计算的
-  // 顶层工具名顶上，保住 "Bash、Read、Edit" 这行点名。
+  // 顶层工具名顶上。
   statsTools?: string[],
 ): string {
-  const parts: string[] = [];
-  if (subagents > 0) parts.push(`${subagents} 子 Agent`);
-  if (workflows > 0) parts.push(`${workflows} Workflow`);
-  if (parts.length === 0) {
-    // No delegation — name the tools instead, so the collapsed line still
-    // says something ("Bash、Read、Edit").
-    const names =
-      tree.length > 0
-        ? [...new Set(tree.map((n) => toolTitle(n.call)))]
-        : (statsTools ?? []);
-    if (names.length === 0) return "";
-    return "· " + names.slice(0, 4).join("、") + (names.length > 4 ? "…" : "");
-  }
-  return `· ${parts.join(" · ")}`;
+  if (subagents > 0 || workflows > 0) return "";
+  const names =
+    tree.length > 0
+      ? [...new Set(tree.map((n) => toolTitle(n.call)))]
+      : (statsTools ?? []);
+  if (names.length === 0) return "";
+  return names.slice(0, 4).join("、") + (names.length > 4 ? "…" : "");
 }

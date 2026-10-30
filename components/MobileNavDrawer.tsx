@@ -180,7 +180,7 @@ export function MobileNavDrawer({
         ref={panelRef}
         // 刘海 / 状态栏：抽屉贴顶，顶部留出 --safe-top（app/globals.css），否则工具条被压在状态栏下。
         // before: 向左多铺一条同色底 —— 弹簧落位有 ~4% 过冲，面板会短暂离开左缘，不能露出背后页面。
-        className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] pt-(--safe-top) bg-surface-canvas border-r border-line shadow-overlay will-change-transform before:absolute before:inset-y-0 before:right-full before:w-8 before:bg-surface-canvas"
+        className="absolute left-0 top-0 bottom-0 flex flex-col w-[82vw] max-w-[320px] pt-(--safe-top) bg-surface-canvas shadow-overlay will-change-transform before:absolute before:inset-y-0 before:right-full before:w-8 before:bg-surface-canvas"
         style={{ transform: "translate3d(-100%, 0, 0)" }}
       >
         {children}

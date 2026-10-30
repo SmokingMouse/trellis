@@ -18,6 +18,7 @@ import { NodeRefChips } from "./NodeRefChips";
 import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
 import { appendNodeRefs, MAX_NODE_REFS, removeMentionQuery, type NodeRef } from "@/lib/node-refs";
 import { ModelPicker } from "./ModelPicker";
+import { COMPOSER_TOOL_ICON } from "./ComposerShell";
 import {
   ArrowLeftRight,
   FileText,
@@ -356,7 +357,7 @@ export function QuestionInput({
             type="button"
             data-mobile-target="new-session-config-summary"
             onClick={() => setMoreSettingsOpen(true)}
-            className="mb-3 w-full min-h-11 min-w-0 rounded-field border border-line bg-surface px-3 text-left text-ui text-ink-muted flex items-center gap-2 hover:border-line-strong"
+            className="press-row mb-3 w-full min-h-11 min-w-0 rounded-card bg-surface-raised px-3 text-left text-ui text-ink-muted shadow-btn flex items-center gap-2"
             title={`${modeSummary} · ${modelSummary}${draftMode === "project" ? ` · ${draftWorkspacePath ?? "未选工作区"}` : ""}`}
           >
             <span className="shrink-0 font-medium text-ink">{modeSummary}</span>
@@ -393,10 +394,10 @@ export function QuestionInput({
                   variant="ghost"
                   aria-pressed={chatEnhanced}
                   onClick={() => setChatEnhanced(!chatEnhanced)}
-                  className={`border ${
+                  className={`rounded-full! ${
                     chatEnhanced
-                      ? "border-accent-line bg-accent-muted text-accent-ink"
-                      : "border-line"
+                      ? "bg-accent-muted text-accent-ink ring-1 ring-inset ring-accent-line"
+                      : "shadow-hairline"
                   }`}
                 >
                   <Icon icon={Zap} size="sm" selected={chatEnhanced} />
@@ -407,9 +408,10 @@ export function QuestionInput({
           </div>
         )}
         <div
-          className={`bg-surface border rounded-card shadow-raise overflow-hidden transition-colors ${
+          // bui composer：浮起的 window 卡（真描边 + raise 阴影），聚焦时描边加深 + 4px accent 淡光晕。
+          className={`bg-surface border rounded-window shadow-raise overflow-hidden transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-line-strong focus-within:ring-4 focus-within:ring-focus-ring/40 max-md:rounded-[22px] ${
             dragOver
-              ? "border-accent ring-2 ring-accent-line"
+              ? "border-accent ring-4 ring-accent-line"
               : "border-line"
           }`}
           onDragOver={(e) => {
@@ -456,7 +458,9 @@ export function QuestionInput({
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
             }
             rows={4}
-            className="w-full px-5 py-4 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint"
+            // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 压不住，内联去掉输入框自己那一圈。
+            style={{ outline: "none" }}
+            className="block w-full px-4 pt-3.5 pb-1.5 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.55]"
             disabled={busy}
           />
           <input
@@ -468,7 +472,7 @@ export function QuestionInput({
             className="hidden"
           />
           {isMobile ? (
-            <div className="border-t border-line-faint px-3 py-2 flex items-center justify-between gap-2">
+            <div className="px-2 pb-2 pt-1.5 flex items-center justify-between gap-2">
               <Button
                 type="button"
                 variant="ghost"
@@ -480,15 +484,15 @@ export function QuestionInput({
                     ? `已到 ${MAX_ATTACHMENTS} 个上限`
                     : "添加图片 / 文件（粘贴 / 拖拽 / 点击选）"
                 }
-                className="h-11"
+                className="h-11 rounded-full!"
               >
                 <Icon icon={Paperclip} />
                 附件
               </Button>
               <Button
-                variant="primary"
+                variant="ink"
                 data-mobile-target="new-session-start"
-                className="h-11 flex-1"
+                className="h-11 flex-1 rounded-full!"
                 onClick={submit}
                 disabled={submitDisabled}
                 title={
@@ -499,37 +503,13 @@ export function QuestionInput({
               </Button>
             </div>
           ) : (
-          <div className="border-t border-line-faint px-4 py-2 flex items-center justify-between gap-3">
-            <div className="text-xs text-ink-faint flex-1 min-w-0">
-              <button
-                type="button"
-                onClick={() =>
-                  setSendKey(sendKey === "enter" ? "mod-enter" : "enter")
-                }
-                title="点击切换发送快捷键（Enter / ⌘Enter）"
-                className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
-              >
-                <span>{sendHint(sendKey)}</span>
-                <Icon icon={ArrowLeftRight} size="sm" className="opacity-60" />
-              </button>
-              <span className="mx-1.5 text-ink-faint">·</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)
-                }
-                title="0 = 全发（历史存在 CLI 会话里、缓存友好、不失忆，推荐；claude 走 --fork-session，codex 走 resume+前缀 rollout）；≥1 = 窗口回退，只折叠 N 层历史进提示"
-                className="inline-flex items-center gap-1 hover:text-ink-muted transition-colors"
-              >
-                <Icon icon={History} size="sm" />
-                <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
-              </button>
-            </div>
+          <div className="px-2 pb-2 pt-1.5 flex items-center gap-1">
             <IconButton
               label="专注写作"
               title="专注写作（全屏 Markdown 编辑 + 预览）"
               onClick={() => setZoneOpen(true)}
               disabled={busy}
+              className={COMPOSER_TOOL_ICON}
             >
               <Icon icon={Maximize2} />
             </IconButton>
@@ -542,6 +522,7 @@ export function QuestionInput({
               }
               onClick={() => fileInputRef.current?.click()}
               disabled={busy || att.atLimit}
+              className={COMPOSER_TOOL_ICON}
             >
               <Icon icon={Paperclip} />
             </IconButton>
@@ -554,29 +535,60 @@ export function QuestionInput({
               }
               onClick={() => setSketchOpen(true)}
               disabled={busy || att.atLimit}
+              className={COMPOSER_TOOL_ICON}
             >
               <Icon icon={PencilLine} />
             </IconButton>
+            <span className="flex-1" />
             <Button
-              variant="primary"
+              // bui send：墨色实底胶囊；文案（开始提问 / 创建…）保持原样
+              variant="ink"
               onClick={submit}
               disabled={submitDisabled}
               title={
                 needsWorkspace ? "Project 模式需要先选择工作区" : undefined
               }
+              className="rounded-full! md:min-h-7.5"
             >
               {submitLabel}
             </Button>
           </div>
           )}
         </div>
+        {!isMobile && (
+          // bui c-hint：卡片下方一行 11.5px 弱化提示（发送键切换 · 上下文层数）
+          <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11.5px] leading-4 text-ink-faint tabular-nums">
+            <button
+              type="button"
+              onClick={() =>
+                setSendKey(sendKey === "enter" ? "mod-enter" : "enter")
+              }
+              title="点击切换发送快捷键（Enter / ⌘Enter）"
+              className="inline-flex min-w-0 items-center gap-1 rounded-chip transition-colors duration-100 hover:text-ink-muted"
+            >
+              <span>{sendHint(sendKey)}</span>
+              <Icon icon={ArrowLeftRight} size="sm" className="opacity-60" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setHistoryDepth(historyDepth >= 8 ? 0 : historyDepth + 2)
+              }
+              title="0 = 全发（历史存在 CLI 会话里、缓存友好、不失忆，推荐；claude 走 --fork-session，codex 走 resume+前缀 rollout）；≥1 = 窗口回退，只折叠 N 层历史进提示"
+              className="inline-flex min-w-0 items-center gap-1 rounded-chip transition-colors duration-100 hover:text-ink-muted"
+            >
+              <Icon icon={History} size="sm" />
+              <span>{historyDepth === 0 ? "上下文 全发" : `上下文 ${historyDepth} 层`}</span>
+            </button>
+          </div>
+        )}
         {isMobile && (
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"
               data-mobile-target="new-session-more-settings"
               onClick={() => setMoreSettingsOpen(true)}
-              className="min-h-11 flex-1 rounded-field border border-line bg-surface text-ui text-ink-muted hover:border-line-strong hover:text-ink"
+              className="press-row min-h-11 flex-1 rounded-card bg-surface-raised text-ui text-ink-muted shadow-btn"
             >
               更多设置
             </button>
@@ -594,12 +606,12 @@ export function QuestionInput({
           </div>
         )}
         {cmdNotice && (
-          <div className="mt-2 text-ui text-ink-muted bg-surface border border-line rounded-field px-3 py-2">
+          <div className="mt-2 text-ui text-ink-muted bg-surface-raised shadow-btn rounded-card px-3 py-2">
             {cmdNotice}
           </div>
         )}
         {att.notice && (
-          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-field px-3 py-2">
+          <div className="mt-2 text-ui text-warn-ink bg-warn-muted border border-warn-line rounded-card px-3 py-2">
             {att.notice}
           </div>
         )}
@@ -630,7 +642,7 @@ export function QuestionInput({
                   setQ(s);
                   ref.current?.focus();
                 }}
-                className="px-3 py-1.5 rounded-full border border-line bg-surface/60 text-ink-muted text-ui hover:border-line-strong hover:bg-surface transition-colors"
+                className="press px-3 py-1.5 rounded-full bg-surface-raised text-ink-muted text-ui shadow-btn transition-colors duration-100 hover:bg-surface-hover hover:text-ink"
               >
                 {s}
               </button>

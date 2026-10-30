@@ -147,7 +147,7 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
     <aside
       data-butler-panel
       aria-label="管家：当前配置"
-      className="fixed right-0 z-20 overflow-y-auto border-l border-line bg-surface-canvas px-4 pt-4 pb-10"
+      className="fixed right-0 z-20 overflow-y-auto border-l border-line bg-surface-canvas md:bg-surface px-4 pt-4 pb-10"
       style={{
         width: PANEL_W,
         top: "calc(5.25rem + var(--trellis-pending-h, 0px))",
@@ -155,15 +155,15 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
       }}
     >
       <div className="mb-2 flex items-center gap-2 px-0.5">
-        <h2 className="text-label font-medium text-ink-faint">当前配置</h2>
+        <h2 className="text-[12.5px] font-medium text-ink-faint">当前配置</h2>
         <IconButton label="刷新" size="sm" className="ml-auto" onClick={refresh}>
           <Icon icon={RefreshCw} size="sm" className={loading ? "animate-spin motion-reduce:animate-none" : undefined} />
         </IconButton>
       </div>
-      <div className="rounded-card border border-line bg-surface">
+      <div className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise">
         {!data && !error &&
           Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="flex h-[38px] items-center px-3 [&+&]:border-t [&+&]:border-line-faint">
+            <div key={i} className="flex h-[38px] items-center px-3 [&+&]:border-t [&+&]:border-line">
               <Skeleton className="h-3 w-full" />
             </div>
           ))}
@@ -174,24 +174,27 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
               key={r.key}
               href={r.href}
               title={r.title}
-              className="group flex h-[38px] items-center gap-2.5 px-3 text-ui text-ink hover:bg-surface-hover [&+&]:border-t [&+&]:border-line-faint"
+              className="group flex h-[38px] items-center gap-2.5 px-3 text-ui text-ink transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
             >
               <Icon icon={r.icon} size="sm" className="text-ink-faint" />
               {r.label}
               <span className="ml-auto flex min-w-0 items-center gap-1.5 text-label text-ink-muted">
                 {r.tone && <StatusDot tone={r.tone} />}
-                <span className="truncate">{r.value}</span>
-                <Icon icon={ExternalLink} size="sm" className="shrink-0 text-ink-faint opacity-0 group-hover:opacity-100" />
+                <span className="truncate tabular-nums">{r.value}</span>
+                <Icon icon={ExternalLink} size="sm" className="shrink-0 text-ink-faint opacity-0 transition-opacity duration-100 group-hover:opacity-100" />
               </span>
             </a>
           ))}
       </div>
 
-      <h2 className="mt-6 mb-2 px-0.5 text-label font-medium text-ink-faint">变更记录</h2>
+      <h2 className="mt-6 mb-2 px-0.5 text-[12.5px] font-medium text-ink-faint">变更记录</h2>
       <ChangeLog changes={recent} />
 
-      <h2 className="mt-6 mb-2 px-0.5 text-label font-medium text-ink-faint">管家的规矩</h2>
-      <div className="space-y-1 rounded-card border border-line bg-surface px-3 py-2.5 text-label leading-relaxed text-ink-muted">
+      <h2 className="mt-6 mb-2 px-0.5 text-[12.5px] font-medium text-ink-faint">管家的规矩</h2>
+      <div
+        className="ui-enter-up space-y-1 rounded-card bg-surface-raised px-3 py-2.5 text-label leading-relaxed text-ink-muted shadow-raise"
+        style={{ animationDelay: "120ms" }}
+      >
         <Rule tag="读">随便查，不打扰你</Rule>
         <Rule tag="改">出一张预览卡，你点确认才生效；能撤销</Rule>
         <Rule tag="删" tone="danger">删 Agent / 任务：输入名字二次确认，撤销不了</Rule>
@@ -199,7 +202,7 @@ export function ButlerPanel({ refreshKey }: { refreshKey: string }) {
         <Rule tag="不碰">密钥、升级回滚、删机器人：只告诉你去哪改</Rule>
       </div>
       {data && (
-        <div className="mt-3 px-0.5 text-nano text-ink-faint">
+        <div className="mt-3 px-0.5 text-nano tabular-nums text-ink-faint">
           {new Date(data.generatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新
         </div>
       )}
@@ -221,13 +224,13 @@ function ChangeLog({ changes }: { changes: ButlerChange[] }) {
   const busy = useButlerStore((s) => s.busy);
   if (changes.length === 0) {
     return (
-      <div className="rounded-card border border-line bg-surface px-3 py-3 text-label text-ink-faint">
+      <div className="ui-enter-up rounded-card bg-surface-raised px-3 py-3 text-label text-ink-faint shadow-raise" style={{ animationDelay: "60ms" }}>
         还没有经管家改过的配置
       </div>
     );
   }
   return (
-    <div className="rounded-card border border-line bg-surface">
+    <div className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise" style={{ animationDelay: "60ms" }}>
       {changes.map((c) => {
         const reverted = c.status === "reverted";
         const at = reverted ? c.revertedAt : c.decidedAt;
@@ -235,14 +238,14 @@ function ChangeLog({ changes }: { changes: ButlerChange[] }) {
           <div
             key={c.id}
             data-butler-log={c.id}
-            className="grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 px-3 py-2.5 text-ui [&+&]:border-t [&+&]:border-line-faint"
+            className="grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 px-3 py-2.5 text-ui transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
           >
             <StatusDot tone={reverted ? "idle" : "positive"} />
             <div className="min-w-0">
               <div className={reverted ? "truncate text-ink-faint line-through" : "truncate font-medium text-ink"}>
                 {CHANGE_KIND_LABEL[c.kind]}「{c.targetLabel}」
               </div>
-              <div className="text-label text-ink-faint">
+              <div className="text-[11.5px] tabular-nums text-ink-faint">
                 {at ? new Date(at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}
                 {reverted ? " · 已撤销" : ""}
               </div>

@@ -35,7 +35,7 @@ export function ErrorCallout({
     <div
       role="alert"
       className={cn(
-        "flex items-start gap-2.5 rounded-card border border-danger-line bg-surface text-ui",
+        "flex items-start gap-2.5 rounded-card border border-danger-line bg-danger-muted/40 text-ui",
         compact ? "px-3 py-2" : "px-3.5 py-3",
         className,
       )}

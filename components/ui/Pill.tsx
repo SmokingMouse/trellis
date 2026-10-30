@@ -14,13 +14,13 @@ type Tone =
   | "fork";
 
 const TINT: Record<Tone, string> = {
-  neutral: "bg-surface-muted text-ink-muted border-line",
-  accent: "bg-accent-muted text-accent-ink border-accent-line",
-  warn: "bg-warn-muted text-warn-ink border-warn-line",
-  danger: "bg-danger-muted text-danger-ink border-danger-line",
-  positive: "bg-positive-muted text-positive-ink border-positive-line",
-  unread: "bg-unread-muted text-unread-ink border-unread-line",
-  fork: "bg-fork-muted text-fork-ink border-fork-line",
+  neutral: "bg-surface-muted text-ink-muted",
+  accent: "bg-accent-muted text-accent-ink",
+  warn: "bg-warn-muted text-warn-ink",
+  danger: "bg-danger-muted text-danger-ink",
+  positive: "bg-positive-muted text-positive-ink",
+  unread: "bg-unread-muted text-unread-ink",
+  fork: "bg-fork-muted text-fork-ink",
 };
 
 const SOLID: Record<Tone, string> = {
@@ -42,7 +42,7 @@ export function Pill({
 }: HTMLAttributes<HTMLSpanElement> & { tone?: Tone; solid?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-nano font-medium ${
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-transparent text-nano font-medium ${
         solid ? SOLID[tone] : TINT[tone]
       } ${className}`}
       {...rest}

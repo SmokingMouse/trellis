@@ -26,7 +26,7 @@ export function SupersededErrorNotice({
         <Icon icon={TriangleAlert} size="sm" className="text-warn-ink" />
         <span>{aborted ? "本轮已手动停止" : "本轮中途中断"} · 后续已继续</span>
       </summary>
-      <div className="mt-1.5 p-2 rounded bg-surface-muted border border-line text-ink-muted flex items-start gap-2">
+      <div className="mt-1.5 p-2 rounded-field bg-surface-muted shadow-hairline text-ink-muted flex items-start gap-2">
         <div className="flex-1 break-words">
           {aborted ? "已停止生成" : `出错：${errorMessage}`}
         </div>

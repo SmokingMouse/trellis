@@ -67,7 +67,7 @@ export function NodeRefCards({ question }: { question: string }) {
             router.replace(`/?session=${encodeURIComponent(r.sessionId)}&node=${encodeURIComponent(r.nodeId)}`);
             void openNodeInSession(r.sessionId, r.nodeId);
           }}
-          className="inline-flex max-w-full min-w-0 min-h-7 items-center gap-1.5 rounded-field border border-line bg-surface px-2 text-label text-ink-muted transition-colors hover:border-line-strong hover:bg-surface-hover hover:text-ink max-md:min-h-11"
+          className="inline-flex max-w-full min-w-0 min-h-7 items-center gap-1.5 rounded-field bg-surface-raised shadow-btn px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink max-md:min-h-11"
         >
           <Icon icon={MessagesSquare} size="sm" className="shrink-0 text-ink-faint" />
           <span className="shrink-0 text-ink-faint">引用</span>

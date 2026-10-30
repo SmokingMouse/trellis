@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSessionStore } from "@/stores/sessionStore";
-import { Bot, ChevronDown } from "lucide-react";
+import { Bot, Check, ChevronDown } from "lucide-react";
 import { Button, Icon, Textarea } from "@/components/ui";
 import {
   AGENT_DEFAULT_HINT,
@@ -83,7 +84,7 @@ export function AgentPicker() {
     return (
       <span
         title={AGENT_UNSUPPORTED_HINT}
-        className="px-3 py-1.5 rounded-full border border-line bg-surface-muted text-ink-faint text-ui inline-flex items-center gap-1.5"
+        className="h-7 px-2.5 rounded-full bg-surface-muted text-ink-faint text-[12.5px] shadow-hairline inline-flex items-center gap-1.5"
       >
         <Icon icon={Bot} size="sm" />
         <span className="line-through">Agent：{label}</span>
@@ -109,26 +110,28 @@ export function AgentPicker() {
           setOpen((v) => !v);
         }}
         title="选择这个对话用哪个 Agent（人设 / 模型 / 工具 / 技能）"
-        className="px-3 py-1.5 rounded-full border border-line bg-surface text-ink-muted hover:border-line-strong transition-colors flex items-center gap-1.5 text-ui"
+        aria-expanded={open}
+        className="press h-7 max-md:min-h-11 px-2.5 rounded-full bg-surface-raised text-ink-muted shadow-btn transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink flex items-center gap-1.5 text-[12.5px]"
       >
         <Icon icon={Bot} size="sm" />
         <span>Agent：{label}</span>
-        <Icon icon={ChevronDown} size="sm" className="text-ink-faint" />
+        <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* 点外关闭的遮罩 portal 到 body：桌面主窗外壳带 transform，fixed 不 portal 只能盖到窗内 */}
+          {createPortal(<div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />, document.body)}
           {/* 注：这是锚定触发按钮的居中下拉（非标准居中弹窗），保持手写外壳。 */}
-          <div className="ui-layer absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[360px] bg-surface-raised border border-line rounded-overlay shadow-pop p-3 text-left">
-            <div className="text-ui text-ink-muted mb-2">
+          <div className="ui-layer absolute z-50 mt-2 left-1/2 -translate-x-1/2 w-[360px] bg-surface-raised rounded-overlay shadow-pop p-1.5 text-left">
+            <div className="px-2 pt-1 pb-1.5 text-label font-medium text-ink-faint">
               选一个 Agent（创建后锁定）
             </div>
             {providerFamily(provider) === "codex" && (
-              <div className="text-label text-ink-faint mb-2">
+              <div className="px-2 pb-1.5 text-label text-ink-faint">
                 Codex：人设、模型、静态权限、隔离、挂载技能与逐项审批生效；工具白/黑名单不支持。
               </div>
             )}
-            <div className="flex flex-col gap-1 mb-3 max-h-[240px] overflow-y-auto">
+            <div className="flex flex-col max-h-[240px] overflow-y-auto overscroll-contain">
               <AgentRow
                 name={AGENT_DEFAULT_LABEL}
                 hint={AGENT_DEFAULT_HINT}
@@ -148,7 +151,7 @@ export function AgentPicker() {
 
             {/* 自定义 system prompt：仅 chat + 未选 agent 时可用（见文件头注释）。 */}
             {draftMode === "chat" && !draftAgentId && (
-              <>
+              <div className="mt-1.5 border-t border-line-faint px-1.5 pt-2.5 pb-1">
                 <Textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
@@ -182,7 +185,7 @@ export function AgentPicker() {
                     应用
                   </Button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </>
@@ -207,18 +210,21 @@ function AgentRow({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`text-left px-2.5 py-1.5 rounded-field border transition-colors ${
-        active
-          ? "bg-accent-muted text-ink-strong border-accent-line"
-          : "bg-surface text-ink border-line hover:bg-surface-hover"
-      }`}
+      className="press-row flex min-h-9 items-center gap-2.5 text-left px-2 py-1.5 rounded-[7px] text-ink transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11"
     >
-      <div className="text-ui font-medium">{name}</div>
-      {hint && (
-        <div className="text-label text-ink-muted">
-          {hint}
-        </div>
-      )}
+      <span
+        aria-hidden
+        className={`grid size-6 shrink-0 place-items-center rounded-chip shadow-hairline ${
+          active ? "bg-accent-muted text-accent-ink" : "bg-surface-muted text-ink-muted"
+        }`}
+      >
+        <Icon icon={Bot} size="sm" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui font-medium">{name}</span>
+        {hint && <span className="block line-clamp-2 text-label text-ink-faint">{hint}</span>}
+      </span>
+      {active && <Icon icon={Check} size="sm" className="text-accent-ink" />}
     </button>
   );
 }

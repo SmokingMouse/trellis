@@ -12,7 +12,7 @@ import {
   SquareCheck,
   SquareTerminal,
 } from "lucide-react";
-import { Badge, Button, Icon, Input, cn } from "@/components/ui";
+import { Badge, Button, Icon, Input, Pill, cn } from "@/components/ui";
 import { herdrPanePrompt, type HerdrPaneView } from "@/lib/herdr-ui";
 import { refreshHerdrFleet } from "@/hooks/useHerdrFleet";
 import {
@@ -90,7 +90,7 @@ function OptionList({
   onPick: (item: OptionItem) => void;
 }) {
   return (
-    <div className={cn("mt-2 grid gap-1.5", columns && "sm:grid-cols-2 sm:gap-2")}>
+    <div className={cn("-mx-2 mt-1.5 grid gap-0.5", columns && "sm:grid-cols-2 sm:gap-1")}>
       {items.map((item) => (
         <button
           key={item.key}
@@ -102,27 +102,33 @@ function OptionList({
           onClick={() => onPick(item)}
           title={item.description ? `${item.label}\n${item.description}` : item.label}
           className={cn(
-            "flex min-h-11 min-w-0 items-start gap-2 rounded-field border px-3 py-2 text-left text-ui text-ink transition-colors hover:bg-surface-hover disabled:opacity-60 sm:min-h-9",
-            item.checked || (!multiSelect && item.recommended)
-              ? "border-accent-line"
-              : "border-line",
-            item.checked ? "bg-accent-muted" : "bg-surface",
+            // bui Approval Card 的选项行：无框，选中 = accent 淡底；推荐项靠「推荐」徽标说
+            "flex min-h-11 min-w-0 items-start gap-2.5 rounded-field px-2 py-[9px] text-left text-ui text-ink transition-colors disabled:opacity-60 sm:min-h-[38px]",
+            item.checked ? "bg-accent-muted" : "hover:bg-surface-hover",
           )}
         >
-          <span className="mt-px inline-flex w-4 shrink-0 justify-center font-mono text-label text-ink-faint">
-            {multiSelect ? (
+          {multiSelect ? (
+            <span className="grid size-5 shrink-0 place-items-center">
               <Icon
                 icon={item.checked ? SquareCheck : Square}
                 size="sm"
-                className={item.checked ? "text-accent" : undefined}
+                className={item.checked ? "text-accent" : "text-ink-faint"}
               />
-            ) : (
-              item.index
-            )}
-          </span>
+            </span>
+          ) : (
+            // 序号徽标（就是要发给终端的那个键）
+            <span
+              className={cn(
+                "grid size-5 shrink-0 place-items-center rounded-chip font-mono text-nano tabular-nums",
+                item.checked ? "bg-accent text-accent-fg" : "bg-surface-muted text-ink-muted shadow-hairline",
+              )}
+            >
+              {item.index}
+            </span>
+          )}
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 truncate font-medium">{item.label}</span>
+              <span className="min-w-0 truncate text-[13.5px] leading-5">{item.label}</span>
               {item.recommended && (
                 <Badge variant="accent" className="shrink-0">推荐</Badge>
               )}
@@ -130,7 +136,7 @@ function OptionList({
             {item.description && (
               <span
                 className={cn(
-                  "mt-0.5 block text-label text-ink-muted",
+                  "mt-0.5 block text-label text-ink-faint",
                   clampDescription && "truncate",
                 )}
               >
@@ -451,7 +457,7 @@ export function HerdrInteractionCard({
       <div
         data-herdr-card
         data-herdr-card-state="answered"
-        className={embedded ? "flex items-center gap-2 px-3.5 pb-3 text-ui text-ink-muted" : `${compact ? "mx-2 mb-2 px-3 py-2" : "px-3.5 py-2.5 max-md:px-3"} flex items-center gap-2 rounded-card border border-line bg-surface text-ui text-ink-muted`}
+        className={embedded ? "flex items-center gap-2 px-3.5 pb-3 text-ui text-ink-muted" : `${compact ? "mx-2 mb-2 px-3 py-2" : "px-3.5 py-2.5 max-md:px-3"} flex items-center gap-2 rounded-card bg-surface-raised shadow-raise text-ui text-ink-muted`}
         aria-live="polite"
       >
         <Icon icon={CircleCheck} size="sm" className="text-positive" />
@@ -526,7 +532,7 @@ export function HerdrInteractionCard({
               type="button"
               data-mobile-target="herdr-terminal-key"
               onClick={() => void sendKeys([key], false)}
-              className="min-h-11 rounded-field border border-line bg-surface font-mono text-ui text-ink transition-colors hover:bg-surface-hover"
+              className="min-h-11 rounded-field bg-surface-raised font-mono text-ui text-ink shadow-btn transition-colors hover:bg-surface-hover"
             >
               {key}
             </button>
@@ -544,7 +550,7 @@ export function HerdrInteractionCard({
           type="button"
           data-mobile-target="herdr-terminal-escape"
           onClick={() => void sendKeys(["Escape"])}
-          className="col-span-3 min-h-11 rounded-field border border-line-strong bg-surface px-2 text-ui font-medium text-ink transition-colors hover:bg-surface-hover"
+          className="col-span-3 min-h-11 rounded-field bg-surface-raised px-2 text-ui font-medium text-ink shadow-btn transition-colors hover:bg-surface-hover"
         >
           Esc
         </button>
@@ -557,7 +563,7 @@ export function HerdrInteractionCard({
       data-herdr-card
       data-herdr-card-kind={kind}
       data-herdr-card-source={cardSource}
-      className={cn("relative", embedded ? "px-3.5 pb-3 text-ink" : `${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} rounded-card border border-accent-line bg-surface text-ink`)}
+      className={cn("relative", embedded ? "px-3.5 pb-3 text-ink" : `${compact ? "mx-2 mb-2 p-2.5" : "p-3.5 max-md:p-3"} ui-enter-up rounded-card bg-surface-raised shadow-raise text-ink`)}
     >
       {/* 调试用来源角标：平时几乎看不见，悬停才显形 */}
       <span
@@ -568,20 +574,16 @@ export function HerdrInteractionCard({
         {SOURCE_BADGE[cardSource]}
       </span>
       <div className={`${embedded ? "hidden" : "flex"} items-center gap-2 text-ui`}>
-        <Icon
-          icon={showRaw ? SquareTerminal : approval ? ShieldCheck : MessageCircleQuestion}
-          className="text-accent"
-        />
-        {approval && !showRaw ? (
-          <>
-            <span className="font-medium">需要你批准</span>
-            <span className="rounded-sm border border-line-strong px-1.5 font-mono text-label">
-              {approval.tool}
-            </span>
-          </>
-        ) : (
-          <span className="font-medium">
-            {showRaw ? "终端在等你" : "Herdr 正在等你回答"}
+        <Pill tone="warn" className="h-5 px-[7px] text-[11.5px]">
+          <Icon
+            icon={showRaw ? SquareTerminal : approval ? ShieldCheck : MessageCircleQuestion}
+            size="sm"
+          />
+          {approval && !showRaw ? "需要你批准" : showRaw ? "终端在等你" : "Herdr 正在等你回答"}
+        </Pill>
+        {approval && !showRaw && (
+          <span className="inline-flex h-5.5 items-center rounded-chip bg-surface-muted px-[7px] font-mono text-[11.5px] text-ink-muted shadow-hairline">
+            {approval.tool}
           </span>
         )}
         {questions.length > 1 && !screenMode && (
@@ -716,7 +718,7 @@ export function HerdrInteractionCard({
             </div>
           )}
           {approval.summary && (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-field border border-line bg-surface-muted px-3 py-2 font-mono text-label text-ink">
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-field bg-surface-muted px-3 py-2 font-mono text-label text-ink shadow-hairline">
               {approval.summary}
             </pre>
           )}
@@ -777,7 +779,7 @@ export function HerdrInteractionCard({
             type="button"
             data-mobile-target="herdr-generic-escape"
             onClick={() => void sendKeys(["Escape"])}
-            className="min-h-11 flex-1 rounded-field border border-line-strong bg-surface px-3 text-ui font-medium text-ink transition-colors hover:bg-surface-hover"
+            className="min-h-11 flex-1 rounded-field bg-surface-raised px-3 text-ui font-medium text-ink shadow-btn transition-colors hover:bg-surface-hover"
           >
             Esc
           </button>

@@ -51,51 +51,67 @@
      unread 亮蓝紫 h268 · positive 绿 h155 · fork 兰紫 h330 ·
      warn 琥珀 h70 · mode-project 低饱和青 h195 · danger 红 h25 */
 
-  /* 中性族 —— 近单色灰（描边半透明，深浅皮肤都是约 10%） */
-  --surface-canvas: #fafafa;
-  --surface: #fff;
-  --surface-raised: #fff;
-  --surface-muted: #f3f3f4;
-  --scrim: #09090b; /* 配 /50 使用，必须是实色 */
-  --line: rgb(0 0 0 / 0.09);
-  --line-strong: rgb(0 0 0 / 0.16);
-  --line-faint: rgb(0 0 0 / 0.05);
-  --ink: #1b1b1f;
-  --ink-strong: #0b0b0d;
-  --ink-muted: #56565f; /* 7.1:1 on canvas */
-  --ink-faint: #74747e; /* 4.6:1 on canvas，满足 AA */
-  --ink-inverse: #fff;
-  /* W2 原语新增：行 hover 底 / 输入框焦点光晕 / 主按钮文字 */
-  --surface-hover: rgb(0 0 0 / 0.04);
-  --focus-ring: color-mix(in oklab, var(--accent) 35%, transparent);
+  /* ── 2026-10-30 视觉改版：取值来自 beautifului.dev（MIT），原型见
+     docs/ui-redesign/mockups/08-beautiful-ui.html ──
+     page(canvas) / surface / muted 三层表面；ink 三档；单一亮蓝 accent。
+     ⚠ ink-faint 没照搬 bui 的 ink-3（69.5%，只有 2.6:1），压到 55% 保 AA。 */
+
+  /* 中性族 */
+  --surface-canvas: oklch(98.5% 0.001 286.4); /* bui page：侧栏 / 外框 */
+  --surface: oklch(100% 0 0); /* 主窗与卡片 */
+  --surface-raised: oklch(100% 0 0);
+  --surface-muted: oklch(96.1% 0.001 286.4); /* bui field：用户消息块 / chip / 分段器 */
+  --scrim: oklch(20% 0.004 264); /* 配 /50 使用，必须是实色 */
+  --line: oklch(94.6% 0.003 264.5);
+  --line-strong: oklch(91.2% 0.005 258.3);
+  --line-faint: oklch(96.6% 0.002 264.5);
+  --ink: oklch(24.7% 0.006 258.4);
+  --ink-strong: oklch(18% 0.006 258.4);
+  --ink-muted: oklch(50.6% 0.01 264.5); /* 5.6:1 on canvas */
+  --ink-faint: oklch(55% 0.01 264.5); /* 4.6:1 on canvas，满足 AA */
+  --ink-inverse: oklch(98.5% 0.001 286.4);
+  --surface-hover: oklch(24.7% 0.006 258.4 / 0.055);
+  --focus-ring: color-mix(in oklab, var(--accent) 30%, transparent);
   --accent-fg: #fff;
 
-  /* accent —— 唯一的低饱和蓝紫（旧 indigo-600 chroma 0.262 → 0.12） */
-  --accent: oklch(52% 0.12 277);
-  --accent-strong: oklch(46% 0.12 277);
-  --accent-ink: oklch(42% 0.1 277);
-  --accent-muted: oklch(96.5% 0.014 277);
-  --accent-line: oklch(84% 0.045 277);
+  /* accent —— bui 亮蓝 h255 */
+  --accent: oklch(62.6% 0.205 254.9);
+  --accent-strong: oklch(56% 0.2 255);
+  --accent-ink: oklch(50% 0.18 255.6);
+  --accent-muted: oklch(96% 0.019 252.9);
+  --accent-line: oklch(86% 0.07 254);
 
-  /* 状态色 */
-  --warn: oklch(72% 0.14 70);
-  --warn-ink: oklch(45% 0.09 60);
-  --warn-muted: oklch(97.5% 0.02 80);
-  --warn-line: oklch(85% 0.08 75);
-  --danger: oklch(58% 0.18 25);
-  --danger-strong: oklch(52% 0.18 25);
-  --danger-ink: oklch(46% 0.14 25);
-  --danger-muted: oklch(97% 0.012 25);
-  --danger-line: oklch(86% 0.05 25);
-  --positive: oklch(62% 0.13 155);
-  --positive-ink: oklch(42% 0.08 155);
-  --positive-muted: oklch(97.5% 0.015 155);
-  --positive-line: oklch(85% 0.06 155);
-  /* unread —— 与 positive 拆开：强调同族的亮蓝紫 */
-  --unread: oklch(60% 0.13 268);
-  --unread-ink: oklch(44% 0.1 268);
-  --unread-muted: oklch(96.5% 0.016 268);
-  --unread-line: oklch(84% 0.05 268);
+  /* 状态色（bui green / orange / red） */
+  --warn: oklch(68.9% 0.179 49.9);
+  --warn-ink: oklch(50% 0.13 50);
+  --warn-muted: oklch(96.4% 0.021 67.6);
+  --warn-line: oklch(86% 0.07 60);
+  --danger: oklch(62.1% 0.192 23);
+  --danger-strong: oklch(56% 0.19 23);
+  --danger-ink: oklch(50% 0.17 23);
+  --danger-muted: oklch(95.6% 0.017 17.5);
+  --danger-line: oklch(86% 0.06 20);
+  --positive: oklch(60.3% 0.155 150.9);
+  --positive-ink: oklch(45% 0.11 151);
+  --positive-muted: oklch(95.8% 0.017 159.1);
+  --positive-line: oklch(85% 0.07 155);
+  /* unread —— 与 accent 同族 */
+  --unread: oklch(62.6% 0.205 254.9);
+  --unread-ink: oklch(50% 0.18 255.6);
+  --unread-muted: oklch(96% 0.019 252.9);
+  --unread-line: oklch(86% 0.07 254);
+
+  /* 叠层阴影（bui 原值）：1px ring + 多层极淡投影。@theme 里的
+     shadow-raise / pop / overlay / hairline / btn / inset-field 指向这些变量 */
+  --elev-xs: 0 0 4px 0 rgb(0 0 0 / 0.04);
+  --elev-hairline: 0 0 0 1px var(--line);
+  --elev-btn: 0 0 0 1px var(--line-strong), var(--elev-xs);
+  --elev-card: 0 0 0 1px var(--line), 0 18px 47px 0 rgb(0 0 0 / 0.03), 0 7.5px 19px 0 rgb(0 0 0 / 0.02), 0 4px 10.5px 0 rgb(0 0 0 / 0.02), 0 2.3px 5.8px 0 rgb(0 0 0 / 0.012), 0 1.2px 3.1px 0 rgb(0 0 0 / 0.012), 0 0.5px 1.3px 0 rgb(0 0 0 / 0.012);
+  --elev-raised: 0 0 0 1px var(--line), 0 17.5px 23.4px 0 rgb(0 0 0 / 0.04), 0 9.4px 12.5px 0 rgb(0 0 0 / 0.03), 0 5.25px 7px 0 rgb(0 0 0 / 0.02), 0 2.8px 3.7px -2px rgb(0 0 0 / 0.012), 0 1.16px 1.5px 0 rgb(0 0 0 / 0.012);
+  --elev-overlay: 0 0 0 1px var(--line), 0 25px 50px 0 rgb(0 0 0 / 0.05), 0 12px 24px 0 rgb(0 0 0 / 0.04), 0 6px 12px 0 rgb(0 0 0 / 0.03), 0 3px 6px 0 rgb(0 0 0 / 0.02), 0 1.5px 3px 0 rgb(0 0 0 / 0.02);
+  --elev-inset-field: inset 0 1px 2px rgb(0 0 0 / 0.12);
+  /* 主按钮（ink 实底）的顶部高光 */
+  --elev-primary: inset 0 1px 0 rgb(255 255 255 / 0.14), var(--elev-xs);
 
   /* fork —— 与 warn 拆开：兰紫 */
   --fork: oklch(58% 0.11 330);
@@ -117,9 +133,9 @@
 
   /* ── CSS-only 变量（不注册 utility，globals 结构性样式专用） ──
      accent-vivid：焦点环/流式光标/run-bar/dots 共用的「光效」档 */
-  --accent-vivid: oklch(56% 0.13 277);
-  --edge: oklch(84% 0.02 277); /* react-flow 连线，降到近中性 */
-  --edge-active: oklch(56% 0.12 277);
+  --accent-vivid: oklch(62.6% 0.205 254.9);
+  --edge: oklch(86% 0.02 255); /* react-flow 连线，降到近中性 */
+  --edge-active: oklch(62.6% 0.18 255);
 
   /* 代码块（恒暗，hljs 只装 github-dark）；去掉暖色 stone 与粉色行内码 */
   --code-bg: #18181b;
@@ -151,46 +167,54 @@
 .dark {
   color-scheme: dark;
 
-  --surface-canvas: #0b0b0c;
-  --surface: #111113;
-  --surface-raised: #18181b;
-  --surface-muted: #1c1c20;
+  --surface-canvas: oklch(20.9% 0.004 264.5); /* bui page */
+  --surface: oklch(23.1% 0.004 264.5); /* bui canvas：主窗 */
+  --surface-raised: oklch(26% 0.006 271.2); /* bui surface：卡片 / 弹层 */
+  --surface-muted: oklch(29.3% 0.006 271.2); /* bui field */
   --scrim: #000;
-  --line: rgb(255 255 255 / 0.09);
-  --line-strong: rgb(255 255 255 / 0.16);
-  --line-faint: rgb(255 255 255 / 0.05);
-  --ink: #e8e8eb;
-  --ink-strong: #fafafa;
-  --ink-muted: #a3a3ac; /* 8.3:1 on canvas */
-  --ink-faint: #7e7e89; /* 4.9:1 on canvas */
-  --ink-inverse: #0b0b0c;
-  --surface-hover: rgb(255 255 255 / 0.05);
-  --focus-ring: color-mix(in oklab, var(--accent-vivid) 45%, transparent);
+  --line: oklch(30.8% 0.006 258.4);
+  --line-strong: oklch(35.6% 0.007 264.5);
+  --line-faint: oklch(27.8% 0.006 258.4);
+  --ink: oklch(96.4% 0.002 247.8);
+  --ink-strong: oklch(99% 0.002 247.8);
+  --ink-muted: oklch(73.1% 0.008 260.7); /* 7.4:1 on canvas */
+  --ink-faint: oklch(64% 0.01 264.5); /* 5.3:1 on canvas（bui ink-3 只有 3.5:1） */
+  --ink-inverse: oklch(20.9% 0.004 264.5);
+  --surface-hover: oklch(100% 0 0 / 0.06);
+  --focus-ring: color-mix(in oklab, var(--accent-vivid) 40%, transparent);
   --accent-fg: #fff;
 
-  --accent: oklch(57% 0.12 277);
-  --accent-strong: oklch(62% 0.12 277); /* dark hover 变亮 */
-  --accent-ink: oklch(80% 0.08 277);
-  --accent-muted: oklch(25% 0.035 277);
-  --accent-line: oklch(42% 0.07 277);
+  --accent: oklch(62% 0.18 254); /* 白字底：比 bui 的 68% 压暗一点保对比 */
+  --accent-strong: oklch(68% 0.173 253.3);
+  --accent-ink: oklch(78.8% 0.113 248.3);
+  --accent-muted: oklch(68% 0.173 253.3 / 0.16);
+  --accent-line: oklch(68% 0.173 253.3 / 0.4);
 
-  --warn: oklch(78% 0.13 75);
-  --warn-ink: oklch(86% 0.09 85);
-  --warn-muted: oklch(25% 0.03 70);
-  --warn-line: oklch(45% 0.07 70);
-  --danger: oklch(66% 0.17 25);
-  --danger-strong: oklch(71% 0.15 25);
-  --danger-ink: oklch(84% 0.08 25);
-  --danger-muted: oklch(24% 0.04 25);
-  --danger-line: oklch(44% 0.09 25);
-  --positive: oklch(72% 0.13 155);
-  --positive-ink: oklch(85% 0.08 155);
-  --positive-muted: oklch(24% 0.03 155);
-  --positive-line: oklch(44% 0.07 155);
-  --unread: oklch(70% 0.12 268);
-  --unread-ink: oklch(84% 0.07 268);
-  --unread-muted: oklch(25% 0.035 268);
-  --unread-line: oklch(44% 0.07 268);
+  --warn: oklch(74.6% 0.156 55.6);
+  --warn-ink: oklch(84% 0.1 60);
+  --warn-muted: oklch(74.6% 0.156 55.6 / 0.14);
+  --warn-line: oklch(74.6% 0.156 55.6 / 0.4);
+  --danger: oklch(66.6% 0.18 21.4);
+  --danger-strong: oklch(71% 0.16 21.4);
+  --danger-ink: oklch(82% 0.1 21.4);
+  --danger-muted: oklch(66.6% 0.18 21.4 / 0.14);
+  --danger-line: oklch(66.6% 0.18 21.4 / 0.4);
+  --positive: oklch(70.5% 0.154 153.8);
+  --positive-ink: oklch(84% 0.1 153.8);
+  --positive-muted: oklch(70.5% 0.154 153.8 / 0.14);
+  --positive-line: oklch(70.5% 0.154 153.8 / 0.4);
+  --unread: oklch(68% 0.173 253.3);
+  --unread-ink: oklch(78.8% 0.113 248.3);
+  --unread-muted: oklch(68% 0.173 253.3 / 0.16);
+  --unread-line: oklch(68% 0.173 253.3 / 0.4);
+
+  --elev-xs: 0 0 0 0 transparent;
+  --elev-btn: 0 0 0 1px rgb(255 255 255 / 0.1), 0 1px 2px rgb(0 0 0 / 0.3);
+  --elev-card: 0 0 0 1px rgb(255 255 255 / 0.11), 0 1px 2px rgb(0 0 0 / 0.2), 0 2px 6px rgb(0 0 0 / 0.2);
+  --elev-raised: 0 0 0 1px rgb(255 255 255 / 0.13), 0 2px 10px rgb(0 0 0 / 0.22);
+  --elev-overlay: 0 0 0 1px rgb(255 255 255 / 0.15), 0 8px 28px rgb(0 0 0 / 0.34);
+  --elev-inset-field: inset 0 1px 2px rgb(0 0 0 / 0.4);
+  --elev-primary: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 1px 2px rgb(0 0 0 / 0.3);
 
   --fork: oklch(70% 0.11 330);
   --fork-ink: oklch(84% 0.07 330);
@@ -209,9 +233,9 @@
   --mode-project-line-strong: oklch(56% 0.07 195);
 
   /* CSS-only 变量的 dark 档 */
-  --accent-vivid: oklch(66% 0.12 277);
-  --edge: oklch(34% 0.03 277);
-  --edge-active: oklch(66% 0.12 277);
+  --accent-vivid: oklch(68% 0.173 253.3);
+  --edge: oklch(36% 0.02 255);
+  --edge-active: oklch(68% 0.173 253.3);
 
   --code-bg: #141416;
   --code-bar-bg: #1c1c20;
@@ -626,17 +650,24 @@
   --text-title--line-height: 1.4;
 
   /* 圆角阶梯：field=按钮/输入，card=卡片/popover，overlay=modal/sheet */
-  --radius-field: 6px;
-  --radius-card: 8px;
-  --radius-overlay: 10px;
+  --radius-chip: 6px; /* chip / 行内标签 / kbd */
+  --radius-field: 8px; /* bui control */
+  --radius-card: 10px;
+  --radius-overlay: 10px; /* 下拉 / popover / 菜单 */
+  --radius-window: 14px; /* bui window：主窗 / modal / composer / 命令面板 */
   /* 手机 sheet 顶部圆角（Drawer / Modal / ActionSheet / ConfirmDialog 贴底形态）与胶囊（grabber 等） */
   --radius-sheet: 16px;
   --radius-pill: 9999px;
 
   /* 阴影阶梯：raise=卡片，pop=dropdown/popover，overlay=modal/drawer/toast */
-  --shadow-raise: 0 0 0 0 transparent; /* 克制工具风：卡片不投影，靠 1px 描边 */
-  --shadow-pop: 0 4px 14px -6px rgb(0 0 0 / 0.14);
-  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.22);
+  /* 2026-10-30 起卡片也投影（bui 叠层阴影），值在 :root / .dark 的 --elev-* */
+  --shadow-raise: var(--elev-card);
+  --shadow-pop: var(--elev-raised);
+  --shadow-overlay: var(--elev-overlay);
+  --shadow-hairline: var(--elev-hairline);
+  --shadow-btn: var(--elev-btn);
+  --shadow-primary: var(--elev-primary);
+  --shadow-inset-field: var(--elev-inset-field);
 
   /* 动效阶梯（2026-10-30 手机质感改版，参数取自 Cindy mobile theme/tokens.ts）：
      out = 进场（快起慢收），in = 退场，move = 位移。桌面弹层仍走下方 100ms；
@@ -644,6 +675,8 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  /* bui ease-out-strong：进场 / 展开 / 弹层，比 ease-out 收得更干脆 */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   /* 轻微过冲的弹簧（damping≈30 / stiffness≈260 的近似），给 sheet 落位、按压回弹 */
   --ease-spring: linear(0, 0.18 7%, 0.56 17%, 0.86 28%, 1.01 40%, 1.04 50%, 1.02 62%, 1 78%, 1);
   --dur-instant: 80ms;
@@ -654,15 +687,15 @@
   /* 等宽字体归一：globals 声明与组件 font-mono 从此同源（原 CSS 声明
      JetBrains Mono 但从未加载、实际回退 Menlo；组件 font-mono 又是
      ui-monospace——双源不一致就此终结） */
-  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --font-sans: var(--font-geist-sans), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 html, body {
   height: 100%;
   height: 100dvh;
   overflow: hidden;
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "PingFang SC",
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Hiragino Sans GB", "Helvetica Neue", "Segoe UI", sans-serif;
   font-feature-settings: "cv11", "ss01";
   background: var(--surface-canvas);
@@ -767,9 +800,11 @@ html, body {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.md-body p { margin: 0.55em 0; line-height: 1.7; overflow-wrap: anywhere; }
-.md-body ol, .md-body ul { margin: 0.55em 0; padding-left: 1.4em; line-height: 1.75; overflow-wrap: anywhere; }
-.md-body li { margin: 0.25em 0; overflow-wrap: anywhere; }
+/* 2026-10-30 视觉改版（bui .answer）：正文 1.72 行高、段距 ~12px，列表标记退到 ink-faint */
+.md-body p { margin: 0.8em 0; line-height: 1.72; overflow-wrap: anywhere; }
+.md-body ol, .md-body ul { margin: 0.8em 0; padding-left: 1.35em; line-height: 1.72; overflow-wrap: anywhere; }
+.md-body li { margin: 0.15em 0; overflow-wrap: anywhere; }
+.md-body li::marker { color: var(--ink-faint); }
 .md-body strong { color: var(--ink-strong); font-weight: 600; }
 /* Tailwind preflight strips link styling — restore it, else links read as
    plain text. Local-file links add decoration-dotted on top (preview hint). */
@@ -782,13 +817,14 @@ html, body {
   overflow-wrap: anywhere;
 }
 .md-body a:hover { text-decoration-color: currentColor; }
+/* 行内码（bui code.inl）：field 底 + 发丝描边，正文 15px 时约 12.5px */
 .md-body code:not(pre code) {
-  /* 中性灰底：随 ink 取值，明暗主题自动跟随，不带色相 */
-  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  background: var(--surface-muted);
+  box-shadow: var(--elev-hairline);
   color: var(--code-inline-ink);
   padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 0.88em;
+  border-radius: 5px;
+  font-size: 0.835em;
   font-family: var(--font-mono);
   word-break: break-all;
   overflow-wrap: anywhere;
@@ -797,15 +833,13 @@ html, body {
 .md-body pre {
   background: var(--code-bg) !important;
   color: var(--code-ink);
-  padding: 12px 14px;
-  border-radius: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-card);
+  box-shadow: var(--elev-card);
   overflow-x: auto;
-  margin: 0.7em 0;
+  margin: 0.8em 0 0.95em;
   font-size: 12.5px;
-  line-height: 1.55;
-}
-.dark .md-body pre {
-  border: 1px solid var(--line);
+  line-height: 1.7;
 }
 .md-body pre code {
   background: transparent !important;
@@ -813,73 +847,61 @@ html, body {
   padding: 0;
   font-family: var(--font-mono);
 }
-/* Code block frame: language label + copy button bar above the <pre>.
-   The wrapper owns the rounded corners so the bar + pre read as one unit
-   (A3 copy / B2 language label). 代码块恒暗（设计决策），内部灰阶取中性
-   zinc 档（原来的 stone 暖灰已去）。指针设备上语言标签 + 复制按钮 hover /
-   聚焦时才出现；触屏常显。 */
+/* Code block frame（bui Code Block）：卡片圆角 + 叠层阴影包住「34px 标题条 + <pre>」，
+   标题条与代码同一块恒暗面，只用一道 8% 白线分开；左边语言名、右边复制。
+   代码块恒暗（设计决策），内部灰阶取中性 zinc 档。 */
 .md-body .md-codeblock {
   position: relative;
-  margin: 0.7em 0;
+  margin: 0.8em 0 0.95em;
   border-radius: var(--radius-card);
-  border: 1px solid var(--line);
+  background: var(--code-bg);
+  box-shadow: var(--elev-card);
   overflow: hidden;
 }
 .md-body .md-codeblock pre {
   margin: 0 !important;
   border-radius: 0 !important;
   border: none !important;
+  box-shadow: none;
 }
 .md-body .md-codeblock-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 4px 6px 4px 12px;
-  background: var(--code-bar-bg);
-  color: rgb(255 255 255 / 0.5); /* 恒暗代码块的内部灰阶，theme 无关 */
-  font-size: 11px;
+  min-height: 34px;
+  padding: 0 6px 0 12px;
+  background: transparent;
+  color: rgb(255 255 255 / 0.55); /* 恒暗代码块的内部灰阶，theme 无关 */
+  font-size: 11.5px;
   font-family: var(--font-mono);
-  border-bottom: 1px solid var(--code-bar-line);
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+/* 图表块的工具条在浅色预览之上，沿用 field 底（CodeBlock DiagramShell 自带 utility 类） */
+.md-body .md-codeblock-diagram .md-codeblock-bar {
+  background: var(--code-bar-bg);
+  border-bottom-color: var(--code-bar-line);
 }
 .md-body .md-codeblock-lang {
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   text-transform: lowercase;
 }
 .md-body .md-codeblock-copy {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-chip);
   color: rgb(255 255 255 / 0.62);
   font-family: var(--font-sans);
+  font-size: 12px;
   cursor: pointer;
-  transition: background-color 100ms, color 100ms, opacity 100ms;
+  transition: background-color 100ms, color 100ms;
 }
 .md-body .md-codeblock-copy:hover {
-  background: rgb(255 255 255 / 0.1);
-  color: rgb(255 255 255 / 0.92);
-}
-/* 指针设备：普通代码块的标签条收成右上角浮层，平时透明、hover / 键盘聚焦
-   才出现，不占正文高度。图表块（.md-codeblock-diagram）的工具条照常常显。 */
-@media (hover: hover) and (pointer: fine) {
-  .md-body .md-codeblock:not(.md-codeblock-diagram) .md-codeblock-bar {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    z-index: 1;
-    padding: 2px 2px 2px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: var(--code-bar-bg);
-    opacity: 0;
-    transition: opacity 100ms;
-  }
-  .md-body .md-codeblock:not(.md-codeblock-diagram):hover .md-codeblock-bar,
-  .md-body .md-codeblock:not(.md-codeblock-diagram):focus-within .md-codeblock-bar {
-    opacity: 1;
-  }
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.95);
 }
 @media (max-width: 767px) {
   .md-body .md-codeblock-copy {
@@ -1184,7 +1206,7 @@ html, body {
   to { opacity: 1; transform: none; }
 }
 .ui-enter-fade { animation: ui-fade-in 150ms ease-out; }
-.ui-enter-pop { animation: ui-pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ui-enter-pop { animation: ui-pop-in 180ms var(--ease-out-strong); }
 .ui-enter-slide-up { animation: ui-slide-up-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ui-enter-slide-left { animation: ui-slide-left-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 
@@ -1193,7 +1215,7 @@ html, body {
    的退场动画播完再卸载，所以退场帧必须 forwards。transform-origin 取 Radix
    popper 写在包裹层上的变量，缩放从锚点方向长出来。 */
 @keyframes ui-layer-in {
-  from { opacity: 0; transform: scale(0.97); }
+  from { opacity: 0; transform: scale(0.95); }
   to { opacity: 1; transform: none; }
 }
 @keyframes ui-layer-out {
@@ -1204,12 +1226,12 @@ html, body {
   from { opacity: 1; }
   to { opacity: 0; }
 }
-.ui-enter-layer { animation: ui-layer-in 100ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ui-enter-layer { animation: ui-layer-in 160ms var(--ease-out-strong); }
 .ui-layer { transform-origin: var(--radix-popper-transform-origin, center); }
 .ui-layer[data-state="open"],
 .ui-layer[data-state="delayed-open"],
 .ui-layer[data-state="instant-open"] {
-  animation: ui-layer-in 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: ui-layer-in 160ms var(--ease-out-strong);
 }
 .ui-layer[data-state="closed"] { animation: ui-layer-out 100ms ease-in forwards; }
 .ui-scrim[data-state="open"] { animation: ui-fade-in 100ms ease-out; }
@@ -1411,7 +1433,6 @@ html, body {
   ::view-transition-old(*),
   ::view-transition-new(*) { animation: none !important; }
 }
-||||||| 548de5c
 
 /* ── 手机质感改版 · 内容层（2026-10-30）────────────────────────────────
    1) .ui-collapse：展开 / 折叠的高度过渡（components/ui/Collapse.tsx）。
@@ -1423,8 +1444,8 @@ html, body {
   grid-template-rows: 0fr;
   opacity: 0;
   transition:
-    grid-template-rows var(--dur-base) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
+    grid-template-rows var(--dur-heavy) var(--ease-out-strong),
+    opacity var(--dur-base) var(--ease-out-strong);
 }
 .ui-collapse[data-open] { grid-template-rows: 1fr; opacity: 1; }
 .ui-collapse > * { min-height: 0; overflow: hidden; }
@@ -1499,4 +1520,53 @@ html, body {
     background: none;
     color: var(--ink-muted);
   }
+}
+
+
+/* ── 2026-10-30 视觉改版（beautifului.dev，原型 docs/ui-redesign/mockups/08-beautiful-ui.html）──
+   1) .ui-enter-up：内容进场，上浮 8px 淡入（卡片 / 轮次 / 列表行）；配合
+      style={{ animationDelay }} 做 40–80ms 错峰。
+   2) .ui-pixels：像素格 loader（bui Loading State · Drive）——3×3 方格，
+      斜向波前 650ms 一圈；配 components/ui/PixelLoader.tsx。
+   3) .ui-breathe / .ui-breathe-warn：状态点向外扩一圈光晕（运行中 / 等你处理）。
+   4) .ui-glide-*：悬停高亮跟着指针在行间滑动（bui Sidebar Nav）；配
+      components/ui/GlideList.tsx。                                          */
+@keyframes ui-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.ui-enter-up { animation: ui-fade-up 380ms var(--ease-out-strong) both; }
+
+@keyframes ui-pixel-on {
+  0%, 100% { opacity: 0.15; }
+  18%, 42% { opacity: 1; }
+  62% { opacity: 0.15; }
+}
+.ui-pixels { display: inline-grid; grid-template-columns: repeat(3, 4px); gap: 1.5px; flex-shrink: 0; }
+.ui-pixels > i { display: block; width: 4px; height: 4px; border-radius: 1px; background: currentColor; opacity: 0.15; animation: ui-pixel-on 650ms linear infinite; }
+.ui-pixels[data-round] > i { border-radius: 9999px; }
+.ui-pixels[data-size="sm"] { grid-template-columns: repeat(3, 3px); gap: 1px; }
+.ui-pixels[data-size="sm"] > i { width: 3px; height: 3px; }
+
+@keyframes ui-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--breathe, var(--accent)) 45%, transparent); }
+  60% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--breathe, var(--accent)) 0%, transparent); }
+}
+.ui-breathe { animation: ui-breathe 2s ease-in-out infinite; }
+.ui-breathe-warn { --breathe: var(--warn); animation: ui-breathe 2s ease-in-out infinite; }
+
+.ui-glide { position: relative; isolation: isolate; }
+.ui-glide-hl {
+  position: absolute; left: 0; top: 0; z-index: -1; pointer-events: none;
+  border-radius: 7px; background: var(--surface-hover); opacity: 0;
+  transition: transform 150ms var(--ease-out-strong), width 150ms var(--ease-out-strong), height 150ms var(--ease-out-strong), opacity 120ms ease-out;
+}
+.ui-glide[data-gliding] > .ui-glide-hl { opacity: 1; }
+/* 滑块在场时，行自身的 hover 底让位（选中态的底保留，免得跳闪） */
+.ui-glide[data-gliding] [data-glide-row]:hover { background-color: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-enter-up, .ui-pixels > i, .ui-breathe, .ui-breathe-warn { animation: none; }
+  .ui-pixels > i { opacity: 0.5; }
+  .ui-glide-hl { transition: none; }
 }

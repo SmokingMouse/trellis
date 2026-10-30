@@ -179,12 +179,14 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
           onClick={createScratch}
           disabled={scratchBusy}
           aria-busy={scratchBusy}
-          className="w-full text-left px-3 py-2 rounded-field border border-line hover:bg-surface-hover transition-colors flex items-center gap-3 disabled:opacity-60 disabled:cursor-wait"
+          className="press-row w-full text-left px-2.5 py-2 rounded-card bg-surface-raised shadow-btn hover:bg-surface-hover transition-colors duration-100 flex items-center gap-2.5 disabled:opacity-60 disabled:cursor-wait"
         >
-          <Icon icon={Sparkles} className="text-ink-faint" />
+          <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-chip bg-surface-muted text-ink-muted shadow-hairline">
+            <Icon icon={Sparkles} size="sm" />
+          </span>
           <span className="min-w-0 flex-1">
             <span className="block text-ui font-medium text-ink">空白沙箱</span>
-            <span className="block text-label text-ink-muted">
+            <span className="block text-label text-ink-faint">
               不挑目录，新建一个空目录当工作区（~/.trellis/scratch/ 下）
             </span>
           </span>
@@ -205,14 +207,16 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
                 setWtOpen((v) => !v);
               }}
               aria-expanded={wtOpen}
-              className="w-full text-left px-3 py-2 rounded-field border border-line hover:bg-surface-hover transition-colors flex items-center gap-3"
+              className="press-row w-full text-left px-2.5 py-2 rounded-card bg-surface-raised shadow-btn hover:bg-surface-hover transition-colors duration-100 flex items-center gap-2.5"
             >
-              <Icon icon={GitBranchPlus} className="text-ink-faint" />
+              <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-chip bg-surface-muted text-ink-muted shadow-hairline">
+                <Icon icon={GitBranchPlus} size="sm" />
+              </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-ui font-medium text-ink">
                   新建 worktree 并使用
                 </span>
-                <span className="block text-label text-ink-muted">
+                <span className="block text-label text-ink-faint">
                   给新分支开一个平行的工作目录，放在主仓库目录旁边
                 </span>
               </span>
@@ -220,7 +224,7 @@ export function WorkspacePicker({ currentPath, onPick, onClose }: Props) {
             </button>
 
             {wtOpen && (
-              <div className="mt-1.5 px-3 py-2 rounded-field bg-surface-muted flex flex-col gap-2">
+              <div className="mt-1.5 px-3 py-2 rounded-card bg-surface-muted shadow-inset-field flex flex-col gap-2">
                 {/* 只有一个 repo 时不给下拉 —— 一个选项的 select 是纯噪音。 */}
                 {bases.length > 1 ? (
                   <div className="flex items-center gap-2 text-label text-ink-muted">
@@ -421,25 +425,27 @@ function RecentTab({
           />
         )}
         {!loading && !error && (
-          <ul>
+          <ul className="p-1.5">
             {filtered.map((e) => {
               const active = e.path === currentPath;
               return (
                 <li key={e.path}>
                   <button
                     onClick={() => onPick(e.path)}
-                    className={`w-full text-left px-4 py-2 flex items-center gap-3 transition-colors border-b border-line-faint last:border-b-0 ${
+                    className={`press-row w-full min-h-9 text-left px-2.5 py-1.5 rounded-[7px] flex items-center gap-2.5 transition-colors duration-100 max-md:min-h-11 ${
                       active
-                        ? "bg-surface-muted"
+                        ? "bg-surface-hover"
                         : "hover:bg-surface-hover"
                     }`}
                   >
-                    <Icon icon={Folder} className="text-ink-faint" />
+                    <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-chip bg-surface-muted text-ink-muted shadow-hairline">
+                      <Icon icon={Folder} size="sm" />
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-ui font-medium text-ink truncate">
                         {e.shortName}
                       </span>
-                      <span className="block text-label text-ink-muted truncate font-mono">
+                      <span className="block text-label text-ink-faint truncate font-mono">
                         {prettifyHome(e.path)}
                       </span>
                     </span>
@@ -700,7 +706,7 @@ function BrowseTab({
             {data.parent && (
               <button
                 onClick={() => setDir(data.parent)}
-                className="w-full text-left px-4 py-2 flex items-center gap-3 text-ui text-ink-muted hover:bg-surface-hover border-b border-line-faint"
+                className="press-row mx-1.5 mt-1.5 w-[calc(100%-0.75rem)] min-h-9 text-left px-2.5 py-1.5 rounded-[7px] flex items-center gap-2.5 text-ui text-ink-muted transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11"
               >
                 <Icon icon={ArrowUp} className="text-ink-faint" />
                 <span className="truncate">上一级</span>
@@ -711,22 +717,24 @@ function BrowseTab({
                 {filter ? "没有匹配的子目录" : "这个目录下没有子目录"}
               </div>
             ) : (
-              <ul>
+              <ul className="p-1.5">
                 {filteredChildren.map((c) => {
                   const active = c.path === currentPath;
                   return (
                     <li key={c.path}>
                       <div
-                        className={`w-full flex items-stretch border-b border-line-faint last:border-b-0 ${
-                          active ? "bg-surface-muted" : ""
+                        className={`w-full flex items-stretch rounded-[7px] transition-colors duration-100 hover:bg-surface-hover ${
+                          active ? "bg-surface-hover" : ""
                         }`}
                       >
                         <button
                           onClick={() => setDir(c.path)}
-                          className="flex-1 min-w-0 text-left px-4 py-2 flex items-center gap-3 hover:bg-surface-hover transition-colors"
+                          className="press-row flex-1 min-w-0 min-h-9 text-left px-2.5 py-1.5 rounded-[7px] flex items-center gap-2.5 max-md:min-h-11"
                           title="进入这个目录"
                         >
-                          <Icon icon={Folder} className="text-ink-faint" />
+                          <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-chip bg-surface-muted text-ink-muted shadow-hairline">
+                            <Icon icon={Folder} size="sm" />
+                          </span>
                           <span className="block text-ui text-ink truncate">
                             {c.name}
                           </span>
@@ -738,7 +746,7 @@ function BrowseTab({
                         </button>
                         <button
                           onClick={() => onPick(c.path)}
-                          className="px-3 text-label text-ink-muted hover:text-accent-ink hover:bg-surface-hover border-l border-line-faint transition-colors"
+                          className="md:my-1 md:mr-1 rounded-full px-2.5 text-label text-ink-muted transition-colors duration-100 hover:bg-accent-muted hover:text-accent-ink"
                           title="直接用这个目录当工作区"
                         >
                           选用

@@ -22,7 +22,7 @@ export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 export const DropdownMenuSub = MenuPrimitive.Sub;
 
 const PANEL =
-  "ui-layer z-50 min-w-40 overflow-hidden rounded-overlay border border-line bg-surface-raised p-1 text-ui text-ink shadow-pop outline-none";
+  "ui-layer z-50 min-w-40 overflow-hidden rounded-overlay bg-surface-raised p-1 text-ui text-ink shadow-pop outline-none";
 
 export function DropdownMenuContent({
   className,
@@ -45,7 +45,7 @@ export function DropdownMenuContent({
 }
 
 const ITEM =
-  "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-md px-2 outline-none data-[highlighted]:bg-surface-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-45 max-md:min-h-11";
+  "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-[7px] px-2 outline-none data-[highlighted]:bg-surface-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-45 max-md:min-h-11";
 
 export function DropdownMenuItem({
   className,

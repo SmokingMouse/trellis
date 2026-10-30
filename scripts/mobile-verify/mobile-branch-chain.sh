@@ -538,7 +538,9 @@ ab eval --stdin <<'JS'
 (() => {
   const header = document.querySelector('header');
   const rect = header?.getBoundingClientRect();
-  if (!rect || Math.abs(rect.top) > 0.8) throw new Error('desktop header top=' + rect?.top);
+  // 桌面 Header 贴浮起主窗的顶（2026-10-30 视觉改版，主窗四周 8px）
+  const win = document.querySelector('[data-app-window-backdrop]')?.getBoundingClientRect();
+  if (!rect || !win || Math.abs(rect.top - win.top) > 0.8) throw new Error('desktop header top=' + rect?.top + ' window top=' + win?.top);
   if (header.hasAttribute('data-header-hidden')) throw new Error('desktop header unexpectedly hidden');
   return { top: rect.top, height: rect.height, canvas: Boolean(document.querySelector('[data-canvas-surface]')) };
 })()

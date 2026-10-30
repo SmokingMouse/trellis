@@ -111,20 +111,20 @@ export function PushSettings() {
   const iosNeedsInstall = !!env?.ios && !env.standalone;
 
   return (
-    <section aria-labelledby="push-settings-title">
+    <section aria-labelledby="push-settings-title" className="ui-enter-up">
       <h2 id="push-settings-title" className="text-ui font-semibold text-ink-strong mb-2">
         手机推送
       </h2>
-      <div className="flex flex-col divide-y divide-line-faint rounded-card border border-line bg-surface px-4">
+      <div className="flex flex-col divide-y divide-line rounded-card bg-surface-raised shadow-raise px-4">
         {iosNeedsInstall && (
           <p className="py-3 text-ui text-warn-ink" role="note">
             iPhone / iPad 要先在 Safari 点「分享 → 添加到主屏幕」，再从主屏幕图标打开 Trellis，回到这里开启推送（Safari 网页里收不到推送）。
           </p>
         )}
 
-        <div className="py-3 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
+        <div className="min-h-[52px] py-2.5 flex items-center gap-3 max-md:flex-col max-md:items-stretch">
           <div className="min-w-0 flex-1">
-            <div className="text-ui">本浏览器</div>
+            <div className="text-ui font-medium text-ink">本浏览器</div>
             <div className="text-label text-ink-faint" aria-live="polite">
               {!ready ? "检测中…" : statusText(env, permission, sub, subscribed, iosNeedsInstall)}
             </div>
@@ -215,9 +215,9 @@ function ToggleRow({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="py-3 flex items-center gap-3">
+    <div className="min-h-[52px] py-2.5 flex items-center gap-3">
       <div className="min-w-0 flex-1">
-        <div className="text-ui">{label}</div>
+        <div className="text-ui font-medium text-ink">{label}</div>
         <div className="text-label text-ink-faint">{hint}</div>
       </div>
       <div className="shrink-0">

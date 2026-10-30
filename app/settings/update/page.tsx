@@ -201,7 +201,7 @@ export default function SettingsPage() {
             </>
           }
         />
-        <section className="rounded-card border border-line bg-surface p-5">
+        <section className="ui-enter-up rounded-card bg-surface-raised shadow-raise p-5">
           {loadError && (
             <ErrorCallout
               className="mb-4"
@@ -216,8 +216,8 @@ export default function SettingsPage() {
 
           {/* 当前版本 */}
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-ui mb-4">
-            <dt className="text-ink-muted">当前版本</dt>
-            <dd className="font-mono">
+            <dt className="text-ink-faint">当前版本</dt>
+            <dd className="font-mono text-[12.5px] text-ink">
               {st?.current?.sha ?? "未知"}
               {st?.current?.builtAt && (
                 <span className="ml-2 font-sans text-label text-ink-faint">
@@ -227,15 +227,15 @@ export default function SettingsPage() {
             </dd>
             {st?.current?.ref && (
               <>
-                <dt className="text-ink-muted">提交</dt>
-                <dd className="truncate" title={st.current.ref}>{st.current.ref}</dd>
+                <dt className="text-ink-faint">提交</dt>
+                <dd className="truncate text-ink-muted" title={st.current.ref}>{st.current.ref}</dd>
               </>
             )}
           </dl>
 
           {/* 仓库没配好时，把话说全：按钮为什么点不了、该往哪儿加什么 */}
           {!repoOk && st && (
-            <div className="mb-4 rounded-card border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink">
+            <div className="mb-4 rounded-field bg-warn-muted px-3 py-2.5 text-label text-warn-ink">
               <div className="flex items-center gap-1.5 font-medium">
                 <Icon icon={TriangleAlert} size="sm" />
                 无法从界面更新
@@ -277,10 +277,13 @@ export default function SettingsPage() {
 
           {/* 落后的 commit */}
           {st && st.commits.length > 0 && (
-            <ul className="mb-4 rounded-card border border-line divide-y divide-line-faint">
+            <ul className="mb-4 overflow-hidden rounded-card shadow-hairline divide-y divide-line">
               {st.commits.map((c) => (
-                <li key={c.sha} className="px-3 py-1.5 text-label flex gap-3">
-                  <span className="font-mono text-ink-faint shrink-0">{c.sha}</span>
+                <li
+                  key={c.sha}
+                  className="flex min-h-9 items-center gap-3 px-3 py-1.5 text-label transition-colors duration-100 hover:bg-surface-hover"
+                >
+                  <span className="font-mono text-[11.5px] text-ink-faint shrink-0">{c.sha}</span>
                   <span className="truncate" title={c.subject}>{c.subject}</span>
                 </li>
               ))}
@@ -289,7 +292,7 @@ export default function SettingsPage() {
 
           {/* 正在生成的会话 —— 切换会掐断它们，得先说清楚再让人勾 */}
           {st && st.activeRuns > 0 && !st.running && (
-            <label className="mb-4 flex items-start gap-2 rounded-card border border-warn-line bg-warn-muted px-3 py-2 text-label text-warn-ink cursor-pointer">
+            <label className="mb-4 flex items-start gap-2 rounded-field bg-warn-muted px-3 py-2.5 text-label text-warn-ink cursor-pointer">
               <Checkbox
                 checked={force}
                 onCheckedChange={(v) => setForce(v === true)}
@@ -314,7 +317,7 @@ export default function SettingsPage() {
 
           {/* 部署进度 */}
           {showDeploy && st?.deploy && (
-            <div className="mt-5 pt-4 border-t border-line-faint">
+            <div className="mt-5 pt-4 border-t border-line">
               <div className="flex items-center gap-2 text-ui">
                 <span
                   className={
@@ -341,7 +344,7 @@ export default function SettingsPage() {
                     <div
                       key={p}
                       title={PHASE_TEXT[p]}
-                      className={`h-1 flex-1 rounded-full ${done ? "bg-accent" : "bg-surface-muted"}`}
+                      className={`h-1 flex-1 rounded-full transition-colors duration-300 ${done ? "bg-positive" : "bg-surface-muted shadow-hairline"}`}
                     />
                   );
                 })}
@@ -354,7 +357,7 @@ export default function SettingsPage() {
               )}
 
               {st.logTail && (
-                <pre className="mt-3 max-h-64 overflow-auto rounded-card bg-surface-canvas border border-line p-3 text-nano font-mono whitespace-pre-wrap">
+                <pre className="mt-3 max-h-64 overflow-auto rounded-field bg-surface-canvas shadow-hairline p-3 text-nano font-mono whitespace-pre-wrap">
                   {st.logTail}
                 </pre>
               )}
