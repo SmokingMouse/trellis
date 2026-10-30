@@ -106,7 +106,7 @@ export function ComposerFullscreen({
             }}
             onInteractOutside={(e) => e.preventDefault()}
             onKeyDown={trapTabKey}
-            className="flex h-full w-full flex-col bg-surface outline-none md:h-[min(80vh,760px)] md:max-w-3xl md:overflow-hidden md:rounded-overlay md:border md:border-line md:shadow-overlay ui-enter-layer"
+            className="flex h-full w-full flex-col bg-surface outline-none md:h-[min(80vh,760px)] md:max-w-3xl md:overflow-hidden md:rounded-window md:shadow-overlay ui-enter-layer"
             style={{
               // 手机全屏：顶部让出刘海；键盘弹起时底部是键盘，不再留 Home 条安全区。
               paddingTop: "var(--safe-top)",
@@ -124,13 +124,13 @@ export function ComposerFullscreen({
                 {value.length > 0 ? `${value.length} 字` : ""}
               </span>
               <Button
-                variant="primary"
+                variant="ink"
                 size="md"
                 aria-label={submitLabel}
                 data-composer-fullscreen-send=""
                 onClick={submit}
                 disabled={submitDisabled}
-                className="shrink-0"
+                className="shrink-0 rounded-full! pl-2.5"
               >
                 <Icon icon={ArrowUp} size="sm" selected />
                 {submitLabel}
@@ -150,9 +150,9 @@ export function ComposerFullscreen({
               onPaste={onPaste}
               placeholder={placeholder}
               style={{ outline: "none" }}
-              className="block min-h-0 w-full flex-1 resize-none bg-transparent px-4 py-3 text-body leading-relaxed text-ink-strong placeholder:text-ink-faint"
+              className="block min-h-0 w-full flex-1 resize-none bg-transparent px-4 py-3.5 text-body leading-relaxed text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.6]"
             />
-            <div className="shrink-0 px-4 pb-2 pt-1 text-label text-ink-faint max-md:hidden">
+            <div className="shrink-0 px-4 pb-2.5 pt-1 text-[11.5px] tabular-nums text-ink-faint max-md:hidden">
               {sendHint(sendKey)} · Esc 收起
             </div>
           </DialogPrimitive.Content>

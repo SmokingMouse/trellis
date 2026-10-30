@@ -10,7 +10,7 @@ export function Checkbox({ className, ...rest }: ComponentProps<typeof CheckboxP
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        "peer relative inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-line-strong bg-surface text-accent-fg transition-colors duration-100 data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent disabled:cursor-not-allowed disabled:opacity-45 max-md:after:absolute max-md:after:-inset-3.5",
+        "peer relative inline-flex size-4 shrink-0 items-center justify-center rounded-[5px] border border-line-strong bg-surface-raised shadow-xs text-accent-fg transition-colors duration-100 data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent disabled:cursor-not-allowed disabled:opacity-45 max-md:after:absolute max-md:after:-inset-3.5",
         className,
       )}
       {...rest}

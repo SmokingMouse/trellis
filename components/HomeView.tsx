@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Code,
+  Folder,
   FolderGit2,
   History,
   Lightbulb,
@@ -18,15 +19,16 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { QuestionInput, type QuestionInputHandle } from "@/components/QuestionInput";
 import { CliAttachPicker } from "@/components/CliAttachPicker";
 import {
+  Badge,
   Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-  Dots,
   Icon,
   Input,
+  PixelLoader,
   Skeleton,
   StatusDot,
   Tooltip,
@@ -215,6 +217,8 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
     });
   };
 
+  const bothCards = totalPending > 0 && totalRunning > 0;
+
   return (
     <main
       data-home
@@ -229,29 +233,39 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
     >
       <div
         className={cn(
-          "mx-auto w-full max-w-[880px] px-6 pb-16 max-md:px-4",
-          isMobile ? "pt-5" : "pt-12",
+          "mx-auto w-full max-w-[760px] px-6 pb-24 max-md:px-4 max-md:pb-10",
+          isMobile ? "pt-5" : "pt-16",
         )}
       >
-        {/* ── 问候 + 新会话输入 ── */}
-        <section aria-labelledby="home-greeting" className="flex flex-col items-center">
+        {/* ── 问候 + 新会话输入（原型 .greet / .greet-sub / .starts） ── */}
+        <section aria-labelledby="home-greeting" className="flex flex-col">
           <h1
             id="home-greeting"
             data-home-greeting
-            className="text-title font-semibold tracking-tight text-ink-strong max-md:text-reading"
+            className="ui-enter-up text-[26px] leading-tight font-semibold tracking-[-0.02em] text-ink-strong max-md:text-title"
           >
             {greetingFor(now)}
           </h1>
-          <p className="mt-1 mb-5 text-center text-ui text-ink-muted max-md:mb-3">
+          <p
+            className="ui-enter-up mt-1.5 mb-6 text-body text-ink-muted max-md:mb-3 max-md:text-ui"
+            style={{ animationDelay: "40ms" }}
+          >
             {isEmpty
               ? "问一个问题开始第一棵树——回答里的任意一段都能选中接着追问。"
               : "从一个新问题开始，或接着处理下面的事。"}
           </p>
-          <QuestionInput isMobile={isMobile} variant="home" autoFocus={!isMobile} controlRef={inputRef} />
-          <div data-home-quick className="mt-3 flex w-full max-w-2xl flex-wrap justify-center gap-2 max-md:grid max-md:grid-cols-2">
+          <div className="ui-enter-up" style={{ animationDelay: "80ms" }}>
+            <QuestionInput isMobile={isMobile} variant="home" autoFocus={!isMobile} controlRef={inputRef} />
+          </div>
+          <div
+            data-home-quick
+            className="ui-enter-up mt-3 flex w-full flex-wrap gap-1.5 max-md:grid max-md:grid-cols-2"
+            style={{ animationDelay: "120ms" }}
+          >
             <Button
               size="sm"
               variant="secondary"
+              className={START_BTN}
               data-home-quick-item="chat"
               onClick={() => {
                 setDraftMode("chat");
@@ -264,7 +278,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
             {workspaces.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="secondary" data-home-quick-item="project">
+                  <Button size="sm" variant="secondary" className={START_BTN} data-home-quick-item="project">
                     <Icon icon={FolderGit2} size="sm" className="text-ink-faint" />
                     在工作区开 Project
                     <Icon icon={ChevronDown} size="sm" className="text-ink-faint" />
@@ -288,13 +302,25 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <Button size="sm" variant="secondary" data-home-quick-item="attach" onClick={() => setAttachOpen(true)}>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={START_BTN}
+              data-home-quick-item="attach"
+              onClick={() => setAttachOpen(true)}
+            >
               <Icon icon={Plug} size="sm" className="text-ink-faint" />
               接入 CLI 会话
             </Button>
             {recent[0] && (
               <Tooltip content={recent[0].title}>
-                <Button size="sm" variant="secondary" data-home-quick-item="last" onClick={() => open(recent[0].id)}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={START_BTN}
+                  data-home-quick-item="last"
+                  onClick={() => open(recent[0].id)}
+                >
                   <Icon icon={History} size="sm" className="text-ink-faint" />
                   打开最近会话
                 </Button>
@@ -306,122 +332,163 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
         {!loaded ? (
           <div className="mt-10 space-y-2" aria-hidden>
             <Skeleton className="h-3 w-20" />
-            <Skeleton className="h-36 w-full" />
+            <Skeleton className="h-36 w-full rounded-card" />
           </div>
         ) : isEmpty ? (
           <Welcome onPick={(text) => inputRef.current?.fill(text)} />
         ) : (
           <>
-            {totalPending > 0 && (
-              <HomeSection id="pending" title="等你处理" count={totalPending} tone="warn">
-                {pending.map((item) => (
-                  <li
-                    key={pendingKey(item)}
-                    data-home-pending={pendingKey(item)}
-                    className="flex min-h-9 items-center gap-2.5 rounded-md px-2 py-1 max-md:flex-wrap max-md:py-2"
+            {(totalPending > 0 || totalRunning > 0) && (
+              // 原型 .cards2：两张都有时桌面并排，否则单张占满
+              <div className={cn("mt-7 grid items-start gap-3 max-md:mt-6", bothCards && "lg:grid-cols-2")}>
+                {totalPending > 0 && (
+                  <HomeCard
+                    id="pending"
+                    title="等你处理"
+                    count={totalPending}
+                    lead={<StatusDot tone="attention" />}
+                    delay={160}
                   >
-                    <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano text-warn-ink font-medium">
-                      {item.kind === "approval" ? "审批" : "提问"}
-                    </span>
-                    <span className="max-w-48 shrink-0 truncate text-ui font-medium text-ink" title={item.sessionTitle}>
-                      {item.sessionTitle}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-ui text-ink-muted max-md:basis-full" title={item.summary}>
-                      {item.summary}
-                    </span>
-                    <span className="shrink-0 text-label tabular-nums text-ink-faint">
-                      {formatRelativeTimeShort(item.createdAt, now.getTime())}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">
-                      <Button size="sm" variant="ghost" onClick={() => void jump(item)}>去处理</Button>
-                      {item.kind === "approval" && (
-                        <>
-                          <Button size="sm" variant="primary" onClick={() => void decide(item, true)}>允许一次</Button>
-                          <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
-                        </>
-                      )}
-                    </span>
-                  </li>
-                ))}
-                {waitingHerdrPanes.map((pane) => (
-                  <HomeHerdrPendingItem key={pane.key} pane={pane} now={now.getTime()} />
-                ))}
-                {pendingError && <li role="alert" className="px-2 py-1.5 text-ui text-danger-ink">{pendingError}</li>}
-              </HomeSection>
-            )}
+                    {pending.map((item) => (
+                      <li
+                        key={pendingKey(item)}
+                        data-home-pending={pendingKey(item)}
+                        className={cn(TROW, "flex-wrap gap-y-2")}
+                      >
+                        <Badge variant={item.kind === "approval" ? "accent" : "warn"} dot={false}>
+                          {item.kind === "approval" ? "审批" : "提问"}
+                        </Badge>
+                        <span className="min-w-0 flex-1">
+                          <span className={ROW_TITLE} title={item.summary}>{item.summary}</span>
+                          <span className={ROW_SUB} title={item.sessionTitle}>
+                            {item.sessionTitle}
+                            <span className="tabular-nums"> · {formatRelativeTimeShort(item.createdAt, now.getTime())}</span>
+                          </span>
+                        </span>
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                          <Button size="sm" variant={item.kind === "approval" ? "ghost" : "secondary"} onClick={() => void jump(item)}>
+                            去处理
+                          </Button>
+                          {item.kind === "approval" && (
+                            <>
+                              <Button size="sm" variant="primary" onClick={() => void decide(item, true)}>允许一次</Button>
+                              <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
+                            </>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                    {waitingHerdrPanes.map((pane) => (
+                      <HomeHerdrPendingItem key={pane.key} pane={pane} now={now.getTime()} />
+                    ))}
+                    {pendingError && <li role="alert" className="px-3 py-2.5 text-ui text-danger-ink">{pendingError}</li>}
+                  </HomeCard>
+                )}
 
-            {totalRunning > 0 && (
-              <HomeSection
-                id="running"
-                title="正在运行"
-                count={totalRunning}
-                action={idlePaneCount > 0 ? <Meta className="px-2">另有 {idlePaneCount} 个 Herdr 坐席在线空闲</Meta> : undefined}
-              >
-                {runningSessions.map((s) => (
-                  <RowButton key={s.id} data-home-running={s.id} onClick={() => open(s.id)}>
-                    <span className="grid w-4 shrink-0 place-items-center"><Dots label="生成中" /></span>
-                    <span className="min-w-0 flex-1 truncate text-ui text-ink">{s.title}</span>
-                    <Meta className="max-md:hidden">{sessionPlace(s, labels)}</Meta>
-                    <Meta className="w-14 text-right">生成中</Meta>
-                  </RowButton>
-                ))}
-                {runningHerdrPanes.map((pane) => {
-                  const target = pane.sessionId && byId.has(pane.sessionId) ? pane.sessionId : null;
-                  const body = (
-                    <>
-                      <span className="grid w-4 shrink-0 place-items-center">
-                        <StatusDot tone="live" label="工作中" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{target ? byId.get(target)!.title : pane.title}</span>
-                      <Meta className="max-md:hidden">Herdr · {pane.workspaceLabel} · {pane.tabLabel}</Meta>
-                      <Meta className="w-14 text-right">工作中</Meta>
-                    </>
-                  );
-                  return (
-                    <RowButton key={pane.key} data-home-herdr={pane.paneId} onClick={() => openHerdrConsolePane(pane)}>
-                      {body}
-                    </RowButton>
-                  );
-                })}
-              </HomeSection>
+                {totalRunning > 0 && (
+                  <HomeCard
+                    id="running"
+                    title="正在运行"
+                    count={totalRunning}
+                    lead={<PixelLoader size="sm" label={null} />}
+                    delay={bothCards ? 200 : 160}
+                    action={
+                      idlePaneCount > 0 ? (
+                        <span className="truncate text-label text-ink-faint">另有 {idlePaneCount} 个 Herdr 坐席在线空闲</span>
+                      ) : undefined
+                    }
+                  >
+                    {runningSessions.map((s) => (
+                      <RowButton key={s.id} data-home-running={s.id} onClick={() => open(s.id)}>
+                        <span className="grid w-4 shrink-0 place-items-center">
+                          <PixelLoader size="sm" round label="生成中" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className={ROW_TITLE}>{s.title}</span>
+                          <span className={ROW_SUB}>{sessionPlace(s, labels)}</span>
+                        </span>
+                        <span className="shrink-0 text-[11.5px] text-ink-faint">生成中</span>
+                      </RowButton>
+                    ))}
+                    {runningHerdrPanes.map((pane) => {
+                      const target = pane.sessionId && byId.has(pane.sessionId) ? pane.sessionId : null;
+                      return (
+                        <RowButton key={pane.key} data-home-herdr={pane.paneId} onClick={() => openHerdrConsolePane(pane)}>
+                          <span className="grid w-4 shrink-0 place-items-center">
+                            <PixelLoader size="sm" round label="工作中" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={ROW_TITLE}>{target ? byId.get(target)!.title : pane.title}</span>
+                            <span className={ROW_SUB}>Herdr · {pane.workspaceLabel} · {pane.tabLabel}</span>
+                          </span>
+                          <span className="shrink-0 text-[11.5px] text-ink-faint">工作中</span>
+                        </RowButton>
+                      );
+                    })}
+                  </HomeCard>
+                )}
+              </div>
             )}
 
             {recent.length > 0 && (
-              <HomeSection
-                id="recent"
-                title="最近会话"
-                action={
-                  <Button size="sm" variant="ghost" data-home-show-all onClick={showAll}>
+              <section
+                data-home-section="recent"
+                aria-labelledby="home-recent"
+                className="ui-enter-up mt-7 max-md:mt-6"
+                style={{ animationDelay: "240ms" }}
+              >
+                <div className="mb-1.5 flex min-h-6.5 items-center justify-between">
+                  <h2 id="home-recent" className="text-[12.5px] font-medium text-ink-faint">最近会话</h2>
+                  <Button size="sm" variant="ghost" className="-mr-2.5 text-ink-faint" data-home-show-all onClick={showAll}>
                     查看全部
                     <Icon icon={ChevronRight} size="sm" />
                   </Button>
-                }
-              >
-                {recent.map((s) => {
-                  const status = sessionStatus(s.id, runningIds, waitingSessionIds, unreadIds);
-                  return (
-                    <RowButton key={s.id} data-home-recent={s.id} onClick={() => open(s.id)}>
-                      <span className="grid w-4 shrink-0 place-items-center">
-                        {status && <StatusDot tone={status.tone} label={status.label} />}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{s.title}</span>
-                      <Meta className="max-w-44 truncate max-md:hidden">{sessionPlace(s, labels)}</Meta>
-                      {typeof s.nodeCount === "number" && (
-                        <Meta className="w-12 text-right tabular-nums">{s.nodeCount} 节</Meta>
-                      )}
-                      <Meta className="w-12 text-right tabular-nums">{formatRelativeTimeShort(s.updatedAt, now.getTime())}</Meta>
-                    </RowButton>
-                  );
-                })}
-              </HomeSection>
+                </div>
+                <ul className="-mx-2.5">
+                  {recent.map((s) => {
+                    const status = sessionStatus(s.id, runningIds, waitingSessionIds, unreadIds);
+                    return (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          data-home-recent={s.id}
+                          onClick={() => open(s.id)}
+                          className="flex h-[38px] w-full items-center gap-2.5 rounded-field px-2.5 text-left transition-colors duration-100 hover:bg-surface-hover max-md:h-11"
+                        >
+                          <span className="grid w-4 shrink-0 place-items-center">
+                            {status?.tone === "live" ? (
+                              <PixelLoader size="sm" round label={status.label} />
+                            ) : status ? (
+                              <StatusDot tone={status.tone} label={status.label} />
+                            ) : (
+                              <Icon icon={s.mode === "project" ? FolderGit2 : MessageSquare} size="sm" className="text-ink-faint" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{s.title}</span>
+                          <span className="inline-flex h-[22px] max-w-44 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline max-md:hidden">
+                            <Icon icon={Folder} size="sm" className="size-3 shrink-0 text-ink-faint" />
+                            <span className="truncate">{sessionPlace(s, labels)}</span>
+                          </span>
+                          <span className="shrink-0 text-label tabular-nums text-ink-faint">
+                            {typeof s.nodeCount === "number" && <>{s.nodeCount} 节 · </>}
+                            {formatRelativeTimeShort(s.updatedAt, now.getTime())}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
             )}
 
             {(tasks ?? []).length > 0 && (
-              <HomeSection
+              <HomeCard
                 id="tasks"
                 title="自动化任务"
+                delay={280}
+                className="mt-7 max-md:mt-6"
                 action={
-                  <Button size="sm" variant="ghost" asChild>
+                  <Button size="sm" variant="ghost" className="-mr-1.5 text-ink-faint" asChild>
                     {/* 设置页整页导航（既定裁决），不走客户端路由 */}
                     <a href="/settings/tasks" data-home-tasks-link>
                       管理任务
@@ -431,19 +498,19 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                 }
               >
                 {upcoming.length === 0 && (
-                  <li className={cn(ROW_CLASS, "text-ui text-ink-faint")}>
+                  <li className={cn(TROW, "text-ui text-ink-faint hover:bg-transparent")}>
                     <span className="w-4 shrink-0" />
                     暂无排定的运行（任务已停用或只手动运行）
                   </li>
                 )}
                 {upcoming.map(({ task, at }) => (
                   <li key={task.id} data-home-task={task.id}>
-                    <a href="/settings/tasks" className={cn(ROW_CLASS, "hover:bg-surface-hover")}>
+                    <a href="/settings/tasks" className={TROW}>
                       <span className="grid w-4 shrink-0 place-items-center">
                         <StatusDot tone="idle" label="等待下一次运行" />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{task.name}</span>
-                      <Meta className="tabular-nums">下次 {formatWhen(at, now)}</Meta>
+                      <span className={cn(ROW_TITLE, "min-w-0 flex-1")}>{task.name}</span>
+                      <span className="shrink-0 text-label tabular-nums text-ink-faint">下次 {formatWhen(at, now)}</span>
                     </a>
                   </li>
                 ))}
@@ -455,7 +522,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                           ? `/?session=${encodeURIComponent(problem.run.sessionId)}${problem.run.nodeId ? `&node=${encodeURIComponent(problem.run.nodeId)}` : ""}`
                           : "/settings/tasks"
                       }
-                      className={cn(ROW_CLASS, "hover:bg-surface-hover")}
+                      className={TROW}
                     >
                       <span className="grid w-4 shrink-0 place-items-center">
                         {/* interrupted 必须灰（服务重启收尸，不是任务失败）；真失败才红 */}
@@ -464,16 +531,21 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                           label={runProblemText(problem.run)}
                         />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-ui text-ink">{problem.task.name}</span>
-                      <Meta className={isInterruptedRun(problem.run) ? "text-ink-muted" : "text-danger-ink"}>
+                      <span className={cn(ROW_TITLE, "min-w-0 flex-1")}>{problem.task.name}</span>
+                      <span
+                        className={cn(
+                          "shrink-0 text-label tabular-nums",
+                          isInterruptedRun(problem.run) ? "text-ink-muted" : "text-danger-ink",
+                        )}
+                      >
                         最近一次{runProblemText(problem.run)}
                         {" · "}
                         {formatRelativeTimeShort(problem.run.endedAt ?? problem.run.startedAt ?? problem.run.createdAt, now.getTime())}
-                      </Meta>
+                      </span>
                     </a>
                   </li>
                 )}
-              </HomeSection>
+              </HomeCard>
             )}
           </>
         )}
@@ -485,65 +557,71 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
   );
 }
 
-// 行：高度与侧栏行一致（桌面 28px / 手机 44px 热区），状态只占行首一个槽位。
-const ROW_CLASS =
-  "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left transition-colors duration-100 max-md:h-11";
+// 原型 .starts：胶囊次级按钮，字色降一档，图标再降一档（手机 44px 热区由 Button 兜底）
+const START_BTN = "min-h-7 rounded-full px-3 text-[12.5px] text-ink-muted hover:text-ink";
+
+// 原型 .trow：卡内分隔行（分隔线由 HomeCard 的 divide-y 画），两行文字 + 行尾动作
+const TROW =
+  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11";
+const ROW_TITLE = "block truncate text-ui font-medium text-ink";
+const ROW_SUB = "block truncate text-[11.5px] leading-snug text-ink-faint";
 
 function RowButton({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void } & Record<`data-${string}`, string>) {
   return (
     <li>
-      <button type="button" onClick={onClick} className={cn(ROW_CLASS, "hover:bg-surface-hover")} {...rest}>
+      <button type="button" onClick={onClick} className={TROW} {...rest}>
         {children}
       </button>
     </li>
   );
 }
 
-function Meta({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cn("shrink-0 text-label text-ink-faint", className)}>{children}</span>;
-}
-
-function HomeSection({
+// 原型 .card + .card-hd：小号卡头（状态点 / loader · 标题 · 计数 · 右侧链接），下面是分隔行。
+function HomeCard({
   id,
   title,
   count,
-  tone,
+  lead,
   action,
+  delay = 0,
+  className,
   children,
 }: {
   id: string;
   title: string;
   count?: number;
-  tone?: "warn";
+  lead?: ReactNode;
   action?: ReactNode;
+  delay?: number;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section data-home-section={id} aria-labelledby={`home-${id}`} className="mt-8 max-md:mt-6">
-      <div className="mb-1.5 flex min-h-6.5 items-center justify-between px-2">
-        <h2 id={`home-${id}`} className="text-label font-medium text-ink-faint">
+    <section
+      data-home-section={id}
+      aria-labelledby={`home-${id}`}
+      className={cn("ui-enter-up min-w-0 overflow-hidden rounded-card bg-surface-raised shadow-raise", className)}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="flex min-h-9 items-center gap-2 px-3 pt-2 pb-1.5">
+        {lead && <span className="grid w-4 shrink-0 place-items-center">{lead}</span>}
+        <h2 id={`home-${id}`} className="shrink-0 text-[12.5px] font-medium text-ink-muted">
           {title}
-          {typeof count === "number" && <span className="ml-1.5 tabular-nums">{count}</span>}
+          {typeof count === "number" && <span className="ml-1.5 tabular-nums text-ink-faint">{count}</span>}
         </h2>
+        <span className="min-w-0 flex-1" />
         {action}
       </div>
-      <ul
-        className={cn(
-          "rounded-card border bg-surface p-1",
-          tone === "warn" ? "border-warn-line" : "border-line",
-        )}
-      >
-        {children}
-      </ul>
+      <ul className="divide-y divide-line border-t border-line">{children}</ul>
     </section>
   );
 }
 
 function Welcome({ onPick }: { onPick: (text: string) => void }) {
   return (
-    <section data-home-welcome aria-labelledby="home-welcome" className="mx-auto mt-12 w-full max-w-2xl max-md:mt-8">
-      <div className="flex flex-col items-center text-center">
-        <div className="mb-3 grid size-9 place-items-center rounded-card border border-line text-ink-faint">
+    <section data-home-welcome aria-labelledby="home-welcome" className="mt-12 w-full max-md:mt-8">
+      <div className="ui-enter-up flex flex-col items-center text-center" style={{ animationDelay: "160ms" }}>
+        <div className="mb-3 grid size-9 place-items-center rounded-card bg-surface-raised text-ink-faint shadow-raise">
           <Icon icon={Sprout} />
         </div>
         <h2 id="home-welcome" className="text-ui font-medium text-ink">还没有会话</h2>
@@ -551,17 +629,18 @@ function Welcome({ onPick }: { onPick: (text: string) => void }) {
           可以从下面挑一个起点：点一下只会填进输入框，改好再发。
         </p>
       </div>
-      <div className="mt-6 grid gap-2.5 sm:grid-cols-2">
-        {STARTERS.map((s) => (
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        {STARTERS.map((s, i) => (
           <button
             key={s.title}
             type="button"
             data-home-starter
             onClick={() => onPick(s.prompt)}
-            className="group min-h-[72px] rounded-card border border-line bg-surface px-3.5 py-3 text-left transition-colors hover:border-line-strong hover:bg-surface-hover"
+            className="ui-enter-up group min-h-[72px] rounded-card bg-surface-raised px-3.5 py-3 text-left shadow-raise transition-colors duration-100 hover:bg-surface-hover"
+            style={{ animationDelay: `${200 + i * 50}ms` }}
           >
             <span className="flex items-start gap-3">
-              <Icon icon={s.icon} className="mt-0.5 shrink-0 text-ink-faint group-hover:text-ink" />
+              <Icon icon={s.icon} className="mt-0.5 shrink-0 text-ink-faint transition-colors group-hover:text-ink" />
               <span className="min-w-0">
                 <span className="block truncate text-ui font-medium text-ink">{s.title}</span>
                 <span className="mt-0.5 line-clamp-2 block text-label text-ink-muted">{s.prompt.trim()}</span>
@@ -580,7 +659,7 @@ function sessionStatus(
   waiting: Set<string>,
   unread: Set<string>,
 ): { tone: StatusTone; label: string } | null {
-  if (waiting.has(id)) return { tone: "warn", label: "等你处理" };
+  if (waiting.has(id)) return { tone: "attention", label: "等你处理" };
   if (running.has(id)) return { tone: "live", label: "生成中" };
   if (unread.has(id)) return { tone: "unread", label: "完成·未读" };
   return null;
@@ -627,32 +706,28 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
     useHerdrConsoleStore.getState().openDrawer(pane.paneId);
   };
 
+
   return (
-    <li
-      data-home-herdr-pending={pane.paneId}
-      className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 transition-colors duration-100 hover:bg-surface-hover/40 max-md:py-2.5"
-    >
-      <div className="flex min-h-7 items-center gap-2.5 max-md:flex-wrap">
-        <span className="shrink-0 rounded-field border border-warn-line px-1.5 py-0.5 text-nano font-medium text-warn-ink">
+    <li data-home-herdr-pending={pane.paneId} className="flex flex-col transition-colors duration-100 hover:bg-surface-hover">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3 py-2.5">
+        <Badge variant={kind === "approval" ? "accent" : "warn"} dot={false}>
           {kind === "approval" ? "审批" : "提问"}
-        </span>
+        </Badge>
         <button
           type="button"
           onClick={() => openHerdrConsolePane(pane)}
-          className="max-w-48 shrink-0 truncate text-left text-ui font-medium text-ink hover:underline"
+          className="min-w-0 flex-1 text-left max-md:min-h-11"
           title={`${pane.title} (${pane.workspaceLabel} · ${pane.tabLabel})`}
         >
-          {pane.title}
-        </button>
-        <span className="min-w-0 flex-1 truncate text-ui text-ink-muted max-md:basis-full" title={text}>
-          {text}
-        </span>
-        {pane.activityAt && (
-          <span className="shrink-0 text-label tabular-nums text-warn-ink/80">
-            {formatRelativeTimeShort(pane.activityAt, now)}
+          <span className={ROW_TITLE} title={text}>{text}</span>
+          <span className={cn(ROW_SUB, "font-mono")}>
+            {pane.title}
+            {pane.activityAt && (
+              <span className="font-sans tabular-nums text-warn-ink"> · {formatRelativeTimeShort(pane.activityAt, now)}</span>
+            )}
           </span>
-        )}
-        <span className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">
+        </button>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button
             size="sm"
             variant="ghost"
@@ -667,12 +742,12 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
             onClick={handleOpenTerminal}
             title="在终端抽屉中打开"
           >
-            <Icon icon={Terminal} size="sm" className="mr-1 text-ink-faint" />
+            <Icon icon={Terminal} size="sm" className="text-ink-faint" />
             终端
           </Button>
           <Button
             size="sm"
-            variant="primary"
+            variant="secondary"
             onClick={() => openHerdrConsolePane(pane)}
           >
             {pane.sessionId ? "去处理" : "直达"}
@@ -685,14 +760,15 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
             e.preventDefault();
             void send();
           }}
-          className="flex items-center gap-2 pb-1 pl-7 pr-1 pt-0.5"
+          className="ui-enter-up flex items-center gap-2 px-3 pb-2.5"
         >
-          <input
+          <Input
             ref={inputRef}
+            size="sm"
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             placeholder={`回复 ${pane.workspaceLabel} · ${pane.tabLabel}，回车直接发送...`}
-            className="flex-1 rounded-md border border-line bg-surface px-2.5 py-1 text-ui text-ink outline-none transition-colors focus:border-accent"
+            className="flex-1 max-md:min-h-11"
             disabled={sending}
           />
           <Button size="sm" variant="primary" type="submit" disabled={!replyText.trim() || sending}>

@@ -29,7 +29,7 @@ export function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "inline-flex w-full min-w-0 items-center justify-between gap-2 rounded-field border border-line-strong bg-surface text-ink transition-colors duration-100 hover:bg-surface-hover outline-none focus-visible:outline-none focus:border-accent-line focus:ring-2 focus:ring-focus-ring data-[placeholder]:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11",
+        "inline-flex w-full min-w-0 items-center justify-between gap-2 rounded-field bg-surface-raised text-ink shadow-btn transition-colors duration-100 hover:bg-surface-hover outline-none focus-visible:outline-none focus:border-accent-line focus:ring-2 focus:ring-focus-ring data-[placeholder]:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50 max-md:min-h-11",
         TRIGGER_SIZE[size],
         className,
       )}
@@ -57,7 +57,7 @@ export function SelectContent({
         sideOffset={4}
         collisionPadding={8}
         className={cn(
-          "ui-layer z-50 min-w-(--radix-select-trigger-width) max-h-(--radix-select-content-available-height) overflow-hidden rounded-overlay border border-line bg-surface-raised text-ui text-ink shadow-pop",
+          "ui-layer z-50 min-w-(--radix-select-trigger-width) max-h-(--radix-select-content-available-height) overflow-hidden rounded-overlay bg-surface-raised text-ui text-ink shadow-pop",
           className,
         )}
         {...rest}
@@ -77,7 +77,7 @@ export function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-md py-1 pl-2 pr-7 outline-none data-[highlighted]:bg-surface-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-45 max-md:min-h-11",
+        "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-[7px] py-1 pl-2 pr-7 outline-none data-[highlighted]:bg-surface-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-45 max-md:min-h-11",
         className,
       )}
       {...rest}

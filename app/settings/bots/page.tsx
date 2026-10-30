@@ -660,7 +660,7 @@ export default function LarkBotsSettingsPage() {
           placeholder="/absolute/path/to/project"
         />
       </Field>
-      <label className="flex items-start gap-2.5 cursor-pointer rounded-card border border-line px-3 py-2.5">
+      <label className="flex items-start gap-2.5 cursor-pointer rounded-field bg-surface-canvas shadow-hairline px-3 py-2.5">
         <Checkbox
           className="mt-0.5"
           checked={d.enabled}
@@ -772,8 +772,8 @@ export default function LarkBotsSettingsPage() {
     </Field>
   );
 
-  const card = "rounded-card border border-line bg-surface p-4 flex flex-col gap-3";
-  const cardTitle = "text-ui font-semibold text-ink-strong";
+  const card = "ui-enter-up rounded-card bg-surface-raised shadow-raise p-4 flex flex-col gap-3";
+  const cardTitle = "text-ui font-semibold tracking-tight text-ink-strong";
 
   return (
     <div className="flex flex-col gap-5">
@@ -817,7 +817,7 @@ export default function LarkBotsSettingsPage() {
       {/* 左侧：机器人列表 */}
       <aside className="md:w-[280px] shrink-0 flex flex-col gap-2">
         {loading && !bots.length ? (
-          <div role="status" aria-label="加载中" className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+          <div role="status" aria-label="加载中" className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[0, 1].map((i) => (
               <div key={i} className="px-3.5 py-3 flex flex-col gap-2">
                 <Skeleton className="h-3.5 w-3/5" />
@@ -837,10 +837,10 @@ export default function LarkBotsSettingsPage() {
                 扫码创建
               </Button>
             }
-            className="rounded-card border border-line"
+            className="rounded-card bg-surface-raised shadow-raise"
           />
         ) : (
-          <div className="overflow-hidden rounded-card border border-line bg-surface divide-y divide-line-faint">
+          <div className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {bots.map((bot) => {
               const botAgent = agents.find((a) => a.id === bot.agentId);
               const isSelected = selectedId === bot.id;
@@ -850,8 +850,8 @@ export default function LarkBotsSettingsPage() {
                 <div
                   key={bot.id}
                   className={cn(
-                    "relative flex flex-col gap-1.5 px-3.5 py-3 transition-colors duration-100",
-                    isSelected ? "bg-accent-muted" : "hover:bg-surface-hover",
+                    "relative flex flex-col gap-1.5 px-3 py-2.5 transition-colors duration-100",
+                    isSelected ? "bg-surface-hover" : "hover:bg-surface-hover",
                     !bot.enabled && "opacity-60",
                   )}
                 >
@@ -870,7 +870,7 @@ export default function LarkBotsSettingsPage() {
                       </span>
                       <StatusBadge bot={bot} />
                     </span>
-                    <span className="text-label font-mono text-ink-faint truncate">{bot.appId}</span>
+                    <span className="text-[11.5px] font-mono text-ink-faint truncate">{bot.appId}</span>
                     <span className="flex items-center gap-1 text-label truncate text-ink-muted">
                       <Icon icon={Bot} size="sm" className="text-ink-faint" />
                       {botAgent ? botAgent.name : "默认助手"}
@@ -879,7 +879,7 @@ export default function LarkBotsSettingsPage() {
 
                   {/* 缺权限提示 */}
                   {hasMissingScopes && (
-                    <div className="px-2 py-1.5 rounded-field bg-warn-muted border border-warn-line text-warn-ink text-label leading-snug">
+                    <div className="px-2 py-1.5 rounded-field bg-warn-muted text-warn-ink text-label leading-snug">
                       <div className="font-medium flex items-center gap-1">
                         <Icon icon={TriangleAlert} size="sm" />
                         缺少权限
@@ -914,7 +914,7 @@ export default function LarkBotsSettingsPage() {
       <main className="flex-1 min-w-0 flex flex-col gap-4">
         {/* 本机已发现应用推荐区（无需复制 App ID / Secret） */}
         {discovered.length > 0 && (
-          <section className="rounded-card border border-accent-line bg-accent-muted p-4 flex flex-col gap-3">
+          <section className="ui-enter-up rounded-card bg-accent-muted p-4 flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 font-semibold text-ui text-ink">
                 <Icon icon={Sparkles} className="text-accent-ink" />
@@ -929,7 +929,7 @@ export default function LarkBotsSettingsPage() {
                 return (
                   <div
                     key={disc.appId}
-                    className="flex flex-col justify-between p-3 rounded-card border border-line bg-surface gap-2.5"
+                    className="flex flex-col justify-between p-3 rounded-card bg-surface-raised shadow-raise gap-2.5"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
@@ -941,7 +941,7 @@ export default function LarkBotsSettingsPage() {
                           <Badge variant="danger" className="shrink-0">离线</Badge>
                         )}
                       </div>
-                      <div className="text-label font-mono text-ink-faint truncate mt-0.5">{disc.appId}</div>
+                      <div className="text-[11.5px] font-mono text-ink-faint truncate mt-0.5">{disc.appId}</div>
                       <div className="text-label text-ink-faint truncate mt-0.5">
                         来源 {disc.source}
                         {disc.alreadyRegistered && disc.boundAgentName && (
@@ -950,7 +950,7 @@ export default function LarkBotsSettingsPage() {
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-line-faint">
+                    <div className="pt-2 border-t border-line">
                       {disc.alreadyRegistered && disc.registeredBotId ? (
                         <Button
                           type="button"
@@ -1002,13 +1002,13 @@ export default function LarkBotsSettingsPage() {
                 </Button>
               </div>
             }
-            className="rounded-card border border-line"
+            className="ui-enter-up rounded-card bg-surface-raised shadow-raise"
           />
         ) : (
           <div className="flex flex-col gap-4">
             {/* 选中机器人且有 missingScopes 时在编辑区顶部提示 */}
             {selected && selected.missingScopes && selected.missingScopes.length > 0 && (
-              <div className="p-4 rounded-card border border-warn-line bg-warn-muted text-warn-ink flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="ui-enter-up p-4 rounded-card bg-warn-muted text-warn-ink flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-semibold text-ui flex items-center gap-1.5">
                     <Icon icon={TriangleAlert} size="sm" />
@@ -1032,8 +1032,8 @@ export default function LarkBotsSettingsPage() {
 
             {/* 新建模式下：折叠式「手动接入已有应用」外壳 */}
             {!selected ? (
-              <details open className="group rounded-card border border-line bg-surface overflow-hidden">
-                <summary className="px-4 py-3 cursor-pointer select-none font-semibold text-ui text-ink flex items-center justify-between hover:bg-surface-hover transition-colors duration-100 max-md:min-h-11">
+              <details open className="ui-enter-up group rounded-card bg-surface-raised shadow-raise overflow-hidden">
+                <summary className="px-4 py-3 cursor-pointer select-none font-semibold tracking-tight text-ui text-ink flex items-center justify-between hover:bg-surface-hover transition-colors duration-100 max-md:min-h-11">
                   <span className="flex items-center gap-2">
                     <Icon icon={Settings2} className="text-ink-muted" />
                     手动接入已有应用
@@ -1044,7 +1044,7 @@ export default function LarkBotsSettingsPage() {
 
                 <div className="p-4 pt-3 border-t border-line flex flex-col gap-5">
                   {/* 指南卡片与一键创建链接 */}
-                  <div className="rounded-card border border-line bg-surface-muted p-4">
+                  <div className="rounded-card bg-surface-canvas shadow-hairline p-4">
                     <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
                       <div>
                         <div className="text-ui font-semibold text-ink">飞书 / Lark 应用一键创建与接入</div>
@@ -1055,7 +1055,7 @@ export default function LarkBotsSettingsPage() {
                           </li>
                           <li>
                             若本机已安装并登录{" "}
-                            <code className="px-1 py-0.5 bg-surface rounded font-mono text-nano">feishu-cli</code>
+                            <code className="px-1 py-0.5 bg-surface-muted rounded-chip font-mono text-nano">feishu-cli</code>
                             ，上方会<b>自动识别</b>，直接一键接入即可。
                           </li>
                         </ol>
@@ -1125,7 +1125,7 @@ export default function LarkBotsSettingsPage() {
                         options={agentOptions}
                       />
                     ) : (
-                      <div className="p-3 rounded-card border border-line flex flex-col gap-3">
+                      <div className="p-3 rounded-card bg-surface-canvas shadow-hairline flex flex-col gap-3">
                         <div className="text-label text-ink-muted">
                           在这里定义新人设，创建后自动与这个机器人绑定。
                         </div>
@@ -1233,7 +1233,7 @@ export default function LarkBotsSettingsPage() {
                 </section>
 
                 {/* 2. 绑定 Agent 策略（Agent-first 体验） */}
-                <section className={card}>
+                <section className={card} style={{ animationDelay: "60ms" }}>
                   <div>
                     <div className={cardTitle}>2. 绑定执行 Agent（人设、技能与工具）</div>
                     <div className="text-label text-ink-muted mt-0.5">
@@ -1261,26 +1261,26 @@ export default function LarkBotsSettingsPage() {
                 </section>
 
                 {/* 3. 运行选项与工作目录 */}
-                <section className={card}>
+                <section className={card} style={{ animationDelay: "120ms" }}>
                   <div className={cardTitle}>3. 运行目录与连接控制</div>
                   {renderRunOptions(draft)}
                 </section>
 
                 {/* 4. 群聊行为 */}
-                <section className={card}>
+                <section className={card} style={{ animationDelay: "180ms" }}>
                   <div className={cardTitle}>4. 群聊行为</div>
                   {renderGroupBehavior(draft)}
                 </section>
 
                 {/* 5. 对话权限 */}
-                <section className={card}>
+                <section className={card} style={{ animationDelay: "240ms" }}>
                   <div className={cardTitle}>5. 对话权限控制</div>
                   {renderAccessMode(draft)}
 
                   {draft.accessMode === "approval" && (
                     <div className="flex flex-col gap-4 pt-2">
                       {members.filter((m) => m.role === "admin" && m.status === "approved").length === 0 && (
-                        <div className="p-3 rounded-card border border-accent-line bg-accent-muted text-ui leading-relaxed">
+                        <div className="p-3 rounded-card bg-accent-muted text-ui leading-relaxed">
                           <div className="font-semibold text-accent-ink flex items-center gap-1.5 mb-1">
                             <Icon icon={Lightbulb} size="sm" />
                             先配置第一个管理员
@@ -1293,7 +1293,7 @@ export default function LarkBotsSettingsPage() {
                       )}
 
                       {/* 预先放行表单 */}
-                      <div className="p-3 rounded-card border border-line flex flex-col gap-2">
+                      <div className="p-3 rounded-card bg-surface-canvas shadow-hairline flex flex-col gap-2">
                         <div className="text-label font-medium text-ink">按 open_id 手动预先放行</div>
                         <div className="flex flex-col sm:flex-row gap-2">
                           <Input
@@ -1340,10 +1340,10 @@ export default function LarkBotsSettingsPage() {
                             icon={Users}
                             title="还没有成员或申请"
                             description="有人私聊机器人后，申请会出现在这里等你审批。"
-                            className="rounded-card border border-dashed border-line"
+                            className="rounded-card border border-dashed border-line-strong"
                           />
                         ) : (
-                          <div className="divide-y divide-line-faint border border-line rounded-card overflow-hidden">
+                          <div className="divide-y divide-line rounded-card bg-surface-raised shadow-raise overflow-hidden">
                             {members.map((m) => {
                               const isPending = m.status === "pending";
                               const isApproved = m.status === "approved";
@@ -1354,7 +1354,7 @@ export default function LarkBotsSettingsPage() {
                               return (
                                 <div
                                   key={m.id}
-                                  className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-ui"
+                                  className="px-3 py-2.5 min-h-[46px] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-ui transition-colors duration-100 hover:bg-surface-hover"
                                 >
                                   <div className="min-w-0 flex flex-col gap-1">
                                     <div className="flex flex-wrap items-center gap-1.5">
@@ -1473,7 +1473,7 @@ export default function LarkBotsSettingsPage() {
                 </section>
 
                 {/* 连接状态与会话明细（编辑模式） */}
-                <section className="rounded-card border border-line bg-surface overflow-hidden">
+                <section className="ui-enter-up rounded-card bg-surface-raised shadow-raise overflow-hidden" style={{ animationDelay: "300ms" }}>
                   <div className="px-4 py-3 border-b border-line flex items-center gap-2">
                     <div className={cardTitle}>连接状态</div>
                     <StatusBadge bot={selected} />
@@ -1495,7 +1495,7 @@ export default function LarkBotsSettingsPage() {
                         还没有收到消息。在飞书里给机器人发一条私聊开始对话。
                       </div>
                     ) : (
-                      <div className="rounded-card border border-line divide-y divide-line-faint overflow-hidden">
+                      <div className="rounded-card bg-surface-raised shadow-raise divide-y divide-line overflow-hidden">
                         {selected.chats.map((chat) => (
                           <a
                             key={chat.id}
@@ -1505,7 +1505,7 @@ export default function LarkBotsSettingsPage() {
                                 : undefined
                             }
                             aria-disabled={!chat.sessionId}
-                            className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hover transition-colors duration-100 aria-disabled:opacity-50 max-md:min-h-11"
+                            className="flex min-h-[46px] items-center gap-3 px-3 py-1.5 hover:bg-surface-hover transition-colors duration-100 aria-disabled:opacity-50 max-md:min-h-11"
                           >
                             <Icon
                               icon={chat.chatType === "group" ? Users : User}
@@ -1514,9 +1514,9 @@ export default function LarkBotsSettingsPage() {
                             />
                             <span className="min-w-0 flex-1">
                               <span className="block text-ui text-ink truncate">{chat.title || chat.chatId}</span>
-                              <span className="block text-label text-ink-faint font-mono truncate">{chat.chatId}</span>
+                              <span className="block text-[11.5px] text-ink-faint font-mono truncate">{chat.chatId}</span>
                             </span>
-                            <span className="text-label text-ink-faint shrink-0">
+                            <span className="text-label text-ink-faint tabular-nums shrink-0">
                               {chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleString() : ""}
                             </span>
                           </a>

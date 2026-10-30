@@ -128,7 +128,7 @@ export function SessionTabs() {
   // 功能重叠，还吃掉 2.25rem 纵向空间——手机上会话切换走抽屉。
   return (
     <div
-      className="hidden md:flex fixed top-12 right-0 z-30 h-9 bg-surface-canvas border-b border-line"
+      className="hidden md:flex fixed top-12 right-0 z-30 h-9 bg-surface border-b border-line"
       data-tab-row={mode}
       style={{ left: "var(--trellis-sb, 0px)", top: "calc(3rem + var(--trellis-pending-h, 0px))" }}
     >
@@ -226,9 +226,10 @@ function Tab({
       }
       data-session-tab={session.id}
       data-tab-status={running ? "streaming" : unread ? "unread" : "done"}
-      className={`group relative self-center flex items-center gap-1.5 h-7 pl-2.5 pr-1 rounded-md text-ui shrink-0 max-w-[13rem] cursor-pointer transition-colors ${
+      // 原型 .fchip：当前标签 = surface 底 + 按钮环（浮起一层），其余只是 ink-muted 文字，悬停才铺 hover 底。
+      className={`group relative self-center flex items-center gap-1.5 h-6.5 pl-2.5 pr-1 rounded-field text-[12.5px] shrink-0 max-w-[13rem] cursor-pointer transition-[background-color,color,box-shadow] duration-150 ${
         active
-          ? "bg-surface-muted text-ink-strong"
+          ? "bg-surface-raised text-ink shadow-btn"
           : "text-ink-muted hover:bg-surface-hover hover:text-ink"
       } ${unread && !running ? "font-medium" : ""}`}
     >
@@ -245,10 +246,6 @@ function Tab({
       <span className={`truncate ${preview ? "italic" : ""}`}>
         {session.title}
       </span>
-      {/* 当前标签顶部一道主色细条（强调色点缀，2026-09-29）；运行条在底部，互不打架。 */}
-      {active && (
-        <span aria-hidden className="absolute inset-x-2 -top-1 h-0.5 rounded-full bg-accent" />
-      )}
       {/* Accent sliding underline bar — peripheral "this one is running" cue. */}
       {running && <span className="trellis-run-bar" aria-hidden />}
       {/* × close — always present, dims until hover to avoid noise. */}
@@ -260,7 +257,7 @@ function Tab({
         onDoubleClick={(e) => e.stopPropagation()}
         title="关闭标签"
         aria-label="关闭标签"
-        className={`shrink-0 size-5 flex items-center justify-center rounded-sm text-ink-faint group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-hover hover:text-ink transition-opacity ${
+        className={`shrink-0 size-5 flex items-center justify-center rounded-[5px] text-ink-faint group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:bg-surface-hover hover:text-ink transition-opacity ${
           active ? "opacity-100" : "opacity-0"
         }`}
       >

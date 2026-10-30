@@ -16,13 +16,13 @@ import { StatusDot } from "./StatusDot";
 export type BadgeVariant = "neutral" | "accent" | "positive" | "warn" | "danger" | "fork" | "unread";
 
 const BORDER: Record<BadgeVariant, string> = {
-  neutral: "border-line text-ink-muted",
-  accent: "border-accent-line bg-accent-muted text-accent-ink",
-  positive: "border-positive-line text-ink-muted",
-  warn: "border-warn-line text-ink-muted",
-  danger: "border-danger-line text-danger-ink",
-  fork: "border-fork-line text-ink-muted",
-  unread: "border-unread-line text-unread-ink",
+  neutral: "bg-surface-muted text-ink-muted shadow-hairline",
+  accent: "bg-accent-muted text-accent-ink",
+  positive: "bg-positive-muted text-positive-ink",
+  warn: "bg-warn-muted text-warn-ink",
+  danger: "bg-danger-muted text-danger-ink",
+  fork: "bg-fork-muted text-fork-ink",
+  unread: "bg-unread-muted text-unread-ink",
 };
 
 const DOT: Partial<Record<BadgeVariant, "positive" | "warn" | "danger" | "fork" | "unread">> = {
@@ -49,7 +49,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-1.5 text-label leading-none tabular-nums",
+        "inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-label font-medium leading-none tabular-nums",
         BORDER[variant],
         className,
       )}

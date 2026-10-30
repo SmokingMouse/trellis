@@ -67,18 +67,19 @@ const themeScript = `
 })();
 `;
 
-// Geist（OFL，app/fonts/Geist-OFL.txt）本地托管：不依赖外网字体 CDN。
-// 只覆盖拉丁字符，中文按 globals.css 的 font-family 回退到 PingFang。
-const geistSans = localFont({
-  src: "./fonts/Geist-Variable.woff2",
-  variable: "--font-geist-sans",
+// Inter / JetBrains Mono（均 OFL，app/fonts/*-OFL.txt）本地托管：不依赖外网字体 CDN。
+// 与 beautifului.dev 同款字体（2026-10-30 视觉改版）。只含拉丁子集，中文按
+// globals.css 的 font-family 回退到 PingFang。
+const interSans = localFont({
+  src: "./fonts/Inter-Variable.woff2",
+  variable: "--font-inter",
   weight: "100 900",
   display: "swap",
 });
-const geistMono = localFont({
-  src: "./fonts/GeistMono-Variable.woff2",
-  variable: "--font-geist-mono",
-  weight: "100 900",
+const jetbrainsMono = localFont({
+  src: "./fonts/JetBrainsMono-Variable.woff2",
+  variable: "--font-jetbrains-mono",
+  weight: "100 800",
   display: "swap",
 });
 
@@ -88,7 +89,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className={`h-full antialiased ${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
+    <html lang="zh-CN" className={`h-full antialiased ${interSans.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

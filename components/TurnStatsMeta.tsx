@@ -59,8 +59,9 @@ export function TurnStatsMeta({
     ? output / llmDurationSec
     : null;
 
-  const baseCls = "tabular-nums whitespace-nowrap font-mono";
-  const sizeCls = variant === "compact" ? "text-nano" : "text-label";
+  const baseCls = "tabular-nums whitespace-nowrap";
+  // full = 线性视图的答复脚注（bui .answer-foot .meta：11.5px 等宽数字）；compact = 画布卡片角标
+  const sizeCls = variant === "compact" ? "font-mono text-nano" : "text-[11.5px]";
 
   if (!isStreaming && !hasTokens && !effectiveDuration) {
     return (

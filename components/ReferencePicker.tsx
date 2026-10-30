@@ -193,7 +193,7 @@ export function ReferencePicker({ onClose }: { onClose: () => void }) {
             </>
           )}
           {error && (
-            <div role="alert" className="mt-3 flex items-start gap-2 rounded-field border border-danger-line bg-surface px-2.5 py-1.5 text-ui text-danger-ink">
+            <div role="alert" className="mt-3 flex items-start gap-2 rounded-card border border-danger-line bg-danger-muted px-2.5 py-1.5 text-ui text-danger-ink">
               <Icon icon={CircleAlert} size="sm" className="mt-0.5" />
               <span className="min-w-0 break-words">{error}</span>
             </div>

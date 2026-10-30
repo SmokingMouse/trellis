@@ -63,13 +63,18 @@ export function ModeBadge() {
         role="status"
         tabIndex={0}
         data-mode-badge={mode}
-        className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink"
+        // bui chip：Chat = 中性 surface-muted + hairline；Project = mode-project 低饱和青淡底 + 内描边。
+        className={`inline-flex h-6.5 max-w-64 items-center gap-1.5 rounded-chip px-2 text-[11.5px] ${
+          mode === "project"
+            ? "bg-mode-project-muted text-mode-project-ink ring-1 ring-inset ring-mode-project-line"
+            : "bg-surface-muted text-ink shadow-hairline"
+        }`}
       >
         <StatusDot tone={mode === "project" ? "project" : "chat"} />
         {/* 手机上只留圆点省空间；桌面写出模式名。 */}
         <span className="hidden sm:inline font-medium">{cfg.label}</span>
         {shortName && (
-          <span className="min-w-0 truncate font-mono text-ink-muted max-w-[6rem] sm:max-w-[9rem]">
+          <span className={`min-w-0 truncate font-mono max-w-[6rem] sm:max-w-[9rem] ${mode === "project" ? "opacity-75" : "text-ink-muted"}`}>
             {shortName}
           </span>
         )}
@@ -80,7 +85,7 @@ export function ModeBadge() {
           <span
             role="img"
             aria-label="需确认：执行命令、写文件等操作前先弹卡等你允许"
-            className="inline-flex text-ink-muted"
+            className="inline-flex opacity-75"
           >
             <Icon icon={ShieldCheck} size="sm" />
           </span>
@@ -96,7 +101,7 @@ function AgentChip({ name, model }: { name: string; model: string | null }) {
   return (
     <span
       aria-label={inactive ? `${name}：${AGENT_UNSUPPORTED_HINT}` : `Agent：${name}（会话创建时锁定）`}
-      className={`inline-flex min-w-0 items-center gap-1 border-l border-line pl-1.5 text-ink-muted ${inactive ? "text-ink-faint line-through" : ""}`}
+      className={`inline-flex min-w-0 items-center gap-1 border-l border-line pl-1.5 ${inactive ? "text-ink-faint line-through" : "opacity-80"}`}
     >
       <Icon icon={Bot} size="sm" />
       <span className="truncate max-w-[7rem]">{name}</span>

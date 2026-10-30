@@ -355,7 +355,7 @@ export function RegisterBotModal({
             icon={step === 3 ? CircleCheck : mode === "update" ? RefreshCw : QrCode}
             className={step === 3 ? "text-positive" : "text-ink-muted"}
           />
-          <span className="font-semibold text-ui text-ink-strong truncate">
+          <span className="font-semibold tracking-tight text-ui text-ink-strong truncate">
             {mode === "update"
               ? step === 3
                 ? "配置已更新"
@@ -401,7 +401,7 @@ export function RegisterBotModal({
               </Field>
 
               {/* 绑定 Agent */}
-              <div className="rounded-card border border-line p-3.5 space-y-3">
+              <div className="rounded-card bg-surface-canvas shadow-hairline p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-ui font-medium text-ink">绑定执行 Agent</div>
@@ -522,7 +522,7 @@ export function RegisterBotModal({
           <div className="flex flex-col items-center text-center space-y-4 py-2">
             {/* Update 模式缺权限提醒 */}
             {mode === "update" && bot?.missingScopes && bot.missingScopes.length > 0 && (
-              <div className="w-full text-left p-3 rounded-card border border-warn-line bg-warn-muted text-warn-ink text-ui leading-relaxed">
+              <div className="w-full text-left p-3 rounded-card bg-warn-muted text-warn-ink text-ui leading-relaxed">
                 <div className="font-semibold flex items-center gap-1.5 mb-0.5">
                   <Icon icon={TriangleAlert} size="sm" />
                   待补充的飞书应用权限
@@ -541,32 +541,32 @@ export function RegisterBotModal({
             {/* 状态与倒计时徽标 */}
             <div className="flex flex-wrap items-center justify-center gap-2">
               {session?.status === "binding" ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-muted text-accent-ink border border-accent-line text-ui font-medium">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent-muted text-accent-ink text-ui font-medium">
                   <Spinner size="sm" label={null} />
                   已确认，正在连接…
                 </span>
               ) : isExpired ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink border border-danger-line text-ui font-medium">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink text-ui font-medium">
                   <Icon icon={Hourglass} size="sm" />
                   二维码已过期
                 </span>
               ) : isDenied ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink border border-danger-line text-ui font-medium">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink text-ui font-medium">
                   <Icon icon={Ban} size="sm" />
                   你在飞书取消了
                 </span>
               ) : isError ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink border border-danger-line text-ui font-medium">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-danger-muted text-danger-ink text-ui font-medium">
                   <Icon icon={CircleAlert} size="sm" />
                   发生错误
                 </span>
               ) : (
                 <>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-muted text-ink-muted border border-line text-ui">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-muted text-ink-muted text-ui">
                     <StatusDot tone="live" />
                     等待你在飞书确认
                   </span>
-                  <span className="px-2.5 py-1 rounded-full border border-line bg-surface text-label font-mono text-ink-faint tabular-nums">
+                  <span className="px-2.5 py-1 rounded-full bg-surface-raised shadow-hairline text-label font-mono text-ink-faint tabular-nums">
                     剩余 {formatCountdown(timeLeft)}
                   </span>
                 </>
@@ -575,7 +575,7 @@ export function RegisterBotModal({
 
             {/* 二维码卡片容器（适配手机宽度：移动端以链接为主，二维码居中展示）。
                 刻意用 bg-white 而非 surface：二维码必须白底黑码才扫得出，深色皮肤下也一样。 */}
-            <div className="relative p-4 rounded-card border border-line bg-white flex flex-col items-center justify-center min-h-[220px] min-w-[220px]">
+            <div className="relative p-4 rounded-card shadow-raise bg-white flex flex-col items-center justify-center min-h-[220px] min-w-[220px]">
               {starting ? (
                 <div className="flex flex-col items-center justify-center py-8 text-ink-muted gap-2 text-ui">
                   <Spinner label={null} />
@@ -631,7 +631,7 @@ export function RegisterBotModal({
         {/* ── 第 3 步：完成状态（Done） ── */}
         {step === 3 && (
           <div className="space-y-4 py-2">
-            <div className="p-4 rounded-card border border-positive-line bg-positive-muted space-y-3">
+            <div className="p-4 rounded-card bg-positive-muted space-y-3">
               <div className="flex items-center gap-2 text-ui font-semibold text-positive-ink">
                 <Icon icon={CircleCheck} />
                 <span>
@@ -640,8 +640,8 @@ export function RegisterBotModal({
               </div>
 
               {/* 逐项打勾状态列表 */}
-              <div className="divide-y divide-line-faint rounded-card border border-line bg-surface overflow-hidden">
-                <div className="px-3.5 py-2.5 flex items-center justify-between text-ui">
+              <div className="divide-y divide-line rounded-card bg-surface-raised shadow-raise overflow-hidden">
+                <div className="px-3.5 min-h-[46px] py-2 flex items-center justify-between text-ui">
                   <span className="text-ink font-medium">长连接就绪</span>
                   {session?.connected ? (
                     <span className="text-positive-ink font-medium flex items-center gap-1 text-label">
@@ -656,7 +656,7 @@ export function RegisterBotModal({
                   )}
                 </div>
 
-                <div className="px-3.5 py-2.5 flex items-center justify-between text-ui">
+                <div className="px-3.5 min-h-[46px] py-2 flex items-center justify-between text-ui">
                   <span className="text-ink font-medium">管理员权限</span>
                   {session?.adminBound ? (
                     <span className="text-positive-ink font-medium flex items-center gap-1 text-label">
@@ -670,7 +670,7 @@ export function RegisterBotModal({
                   )}
                 </div>
 
-                <div className="px-3.5 py-2.5 flex items-center justify-between text-ui">
+                <div className="px-3.5 min-h-[46px] py-2 flex items-center justify-between text-ui">
                   <span className="text-ink font-medium">初始私聊验证</span>
                   {session?.welcomeSent ? (
                     <span className="text-positive-ink font-medium flex items-center gap-1 text-label">
@@ -687,7 +687,7 @@ export function RegisterBotModal({
             </div>
 
             {/* 下一步操作指引 */}
-            <div className="p-3.5 rounded-card border border-line bg-surface-muted text-ui space-y-1.5 leading-relaxed">
+            <div className="p-3.5 rounded-card bg-surface-canvas shadow-hairline text-ui space-y-1.5 leading-relaxed">
               <div className="font-semibold text-ink flex items-center gap-1.5">
                 <Icon icon={Lightbulb} size="sm" />
                 下一步

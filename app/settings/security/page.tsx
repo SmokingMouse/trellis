@@ -132,7 +132,7 @@ export default function SecuritySettingsPage() {
         }
       />
 
-      <section aria-labelledby="passkey-add-title" className="rounded-card border border-line bg-surface p-4 flex flex-col gap-3">
+      <section aria-labelledby="passkey-add-title" className="ui-enter-up rounded-card bg-surface-raised shadow-raise p-4 flex flex-col gap-3">
         <h2 id="passkey-add-title" className="text-ui font-semibold text-ink-strong">
           添加 Passkey
         </h2>
@@ -186,25 +186,29 @@ export default function SecuritySettingsPage() {
           icon={KeyRound}
           title="还没有 Passkey"
           description="在上面添加一把，之后在登录页点「用 Passkey 登录」即可。"
-          className="rounded-card border border-line"
+          className="rounded-card bg-surface-raised shadow-raise"
         />
       )}
 
       {items && items.length > 0 && (
-        <ul aria-label="已添加的 Passkey" className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+        <ul
+          aria-label="已添加的 Passkey"
+          className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line"
+          style={{ animationDelay: "60ms" }}
+        >
           {items.map((item) => (
             <li
               key={item.id}
               data-passkey-id={item.id}
-              className="flex items-center gap-3 px-3 py-2 text-label max-md:flex-wrap"
+              className="flex min-h-[46px] items-center gap-3 px-3 py-2 text-label transition-colors duration-100 hover:bg-surface-hover max-md:flex-wrap"
             >
-              <Icon icon={KeyRound} className="shrink-0 text-ink-muted" />
-              <span className="min-w-0 flex-1 truncate text-ink" title={item.name}>
+              <Icon icon={KeyRound} className="shrink-0 text-ink-faint" />
+              <span className="min-w-0 flex-1 truncate text-ui font-medium text-ink" title={item.name}>
                 {item.name}
               </span>
-              <Badge className="shrink-0 font-mono">{item.rpId}</Badge>
-              {item.backedUp && <Badge className="shrink-0">已同步</Badge>}
-              <span className="shrink-0 tabular-nums text-ink-faint">
+              <Badge className="shrink-0 font-mono text-[11.5px]">{item.rpId}</Badge>
+              {item.backedUp && <Badge variant="positive" className="shrink-0">已同步</Badge>}
+              <span className="shrink-0 tabular-nums text-ink-muted">
                 创建于 {formatRelativeTime(item.createdAt)} ·{" "}
                 {item.lastUsedAt ? `最近使用 ${formatRelativeTime(item.lastUsedAt)}` : "尚未使用"}
               </span>

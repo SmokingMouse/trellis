@@ -247,7 +247,7 @@ export function CliAttachPicker({
     projectKey: string | null;
     showCwd: boolean;
   }) => (
-    <div className="group flex items-center gap-2 px-2 py-1 min-h-8 rounded-field hover:bg-surface-hover">
+    <div className="group flex items-center gap-2 px-2 py-1 min-h-9 rounded-[7px] transition-colors duration-100 hover:bg-surface-hover">
       <div className="flex-1 min-w-0">
         <div className="truncate text-ui text-ink" title={s.title}>
           {s.title}
@@ -348,13 +348,13 @@ export function CliAttachPicker({
         {/* 已接入 */}
         {attached.length > 0 && (
           <div className="px-2 py-2 border-b border-line-faint">
-            <div className="px-2 pb-1 text-label font-medium text-ink-muted">
+            <div className="px-2 pb-1 text-label font-medium text-ink-faint">
               已接入（{attached.length}）
             </div>
             {attached.map((a) => (
               <div
                 key={a.id}
-                className="group flex items-center gap-2 px-2 min-h-8 rounded-field hover:bg-surface-hover"
+                className="group flex items-center gap-2 px-2 min-h-9 rounded-[7px] transition-colors duration-100 hover:bg-surface-hover"
               >
                 <StatusDot tone="positive" />
                 <span className="shrink-0 text-nano uppercase text-ink-faint">{a.provider}</span>
@@ -407,7 +407,7 @@ export function CliAttachPicker({
                     type="button"
                     onClick={() => expandDir(p.key)}
                     aria-expanded={openDir === p.key}
-                    className="w-full flex items-center gap-2 px-2 min-h-8 rounded-field hover:bg-surface-hover text-left"
+                    className="press-row w-full flex items-center gap-2 px-2 min-h-9 rounded-[7px] transition-colors duration-100 hover:bg-surface-hover text-left max-md:min-h-11"
                   >
                     <Icon
                       icon={openDir === p.key ? ChevronDown : ChevronRight}

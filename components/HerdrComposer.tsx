@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { Anchor, ArrowUp, Cpu, Paperclip, Square } from "lucide-react";
 import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
-import { ComposerShell, type ComposerQueueItem } from "./ComposerShell";
+import { COMPOSER_TOOL_ICON, ComposerShell, type ComposerQueueItem } from "./ComposerShell";
 import { SkillPickerList } from "./SkillPickerList";
 import { uploadAttachment } from "./AttachmentPreview";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -301,7 +301,8 @@ export function HerdrComposer({
       side="top"
     >
       <Button
-        variant={working ? "secondary" : "primary"}
+        // bui send：空闲 = 30px 墨色圆钮；在跑时它退到停止左边当「排队发送」，降成次要外观。
+        variant={working ? "secondary" : "ink"}
         size="icon"
         aria-label={working ? "排队发送到 Herdr" : "发送到 Herdr"}
         data-composer-primary={uploading > 0 || sending ? "loading" : "send"}
@@ -309,7 +310,7 @@ export function HerdrComposer({
         data-mobile-target="herdr-send"
         onClick={() => void submit()}
         disabled={!canSend}
-        className="shrink-0"
+        className="shrink-0 rounded-full! md:min-h-7.5 md:min-w-7.5"
       >
         {uploading > 0 || sending ? (
           <Spinner size="sm" label={null} className="text-current" />
@@ -322,19 +323,19 @@ export function HerdrComposer({
   const stopButton = (
     <Tooltip content="打断窗格（发送 Esc）" side="top">
       <Button
-        variant="secondary"
+        variant="ink"
         size="icon"
         aria-label="打断窗格"
         data-composer-primary={interrupting ? "loading" : "stop"}
         data-herdr-stop=""
         onClick={() => void interrupt()}
         disabled={interrupting}
-        className="shrink-0"
+        className="shrink-0 rounded-full! md:min-h-7.5 md:min-w-7.5"
       >
         {interrupting ? (
-          <Spinner size="sm" label={null} />
+          <Spinner size="sm" label={null} className="text-current" />
         ) : (
-          <Square size={11} strokeWidth={0} fill="currentColor" aria-hidden />
+          <Square size={10} strokeWidth={0} fill="currentColor" aria-hidden />
         )}
       </Button>
     </Tooltip>
@@ -356,6 +357,7 @@ export function HerdrComposer({
       onClick={() => fileInputRef.current?.click()}
       disabled={!online}
       data-composer-attach=""
+      className={COMPOSER_TOOL_ICON}
     >
       <Icon icon={Paperclip} />
     </IconButton>
@@ -442,9 +444,9 @@ export function HerdrComposer({
             <span
               tabIndex={0}
               data-herdr-model=""
-              className="inline-flex h-7 min-w-0 max-w-56 items-center gap-1.5 rounded-field border border-line px-2 text-label text-ink"
+              className="inline-flex h-6.5 min-w-0 max-w-56 items-center gap-1.5 rounded-chip bg-surface-muted px-2 text-[11.5px] text-ink-muted shadow-hairline"
             >
-              <Icon icon={Cpu} size="sm" className="text-ink-muted" />
+              <Icon icon={Cpu} size="sm" />
               <span className="min-w-0 truncate font-mono">{model}</span>
             </span>
           </Tooltip>
@@ -459,7 +461,7 @@ export function HerdrComposer({
               tabIndex={0}
               data-composer-send-to=""
               data-herdr-send-to=""
-              className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 text-label text-ink-faint"
+              className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 px-1 text-[12.5px] text-ink-faint"
             >
               <span className="shrink-0">发往</span>
               <Icon icon={Anchor} size="sm" />

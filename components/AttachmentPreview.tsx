@@ -122,8 +122,8 @@ export function AttachmentPreview(props: Props) {
           return (
             <div
               key={it.key}
-              className={`group/att relative w-20 h-20 rounded-field overflow-hidden border ${
-                it.status === "error" ? "border-danger-line" : "border-line"
+              className={`group/att relative w-20 h-20 rounded-card overflow-hidden ${
+                it.status === "error" ? "ring-1 ring-danger-line" : "shadow-hairline"
               } bg-surface-muted`}
             >
               <button
@@ -191,7 +191,7 @@ export function AttachmentPreview(props: Props) {
                   onClick={() => onRemove(it.localId)}
                   aria-label="移除附件"
                   title="移除"
-                  className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-scrim/60 hover:bg-scrim/80 text-white flex items-center justify-center"
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-scrim/60 hover:bg-scrim/80 text-white flex items-center justify-center transition-colors duration-100"
                 >
                   <Icon icon={X} size="sm" />
                 </button>

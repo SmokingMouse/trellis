@@ -47,26 +47,32 @@ export function ButlerHome({ isMobile }: { isMobile: boolean }) {
     >
       <div className={cn("mx-auto w-full max-w-[720px] px-6 pb-16 max-md:px-4", isMobile ? "pt-5" : "pt-16")}>
         <section className="flex flex-col items-center text-center">
-          <div className="mb-3.5 grid size-11 place-items-center rounded-card bg-accent-muted text-accent-ink">
+          <div className="ui-enter-up mb-4 grid size-11 place-items-center rounded-card bg-accent-muted text-accent-ink shadow-hairline">
             <Icon icon={ConciergeBell} size="lg" />
           </div>
-          <h1 className="text-title font-semibold tracking-tight text-ink-strong">跟管家说你想怎么配 Trellis</h1>
-          <p className="mt-1.5 mb-6 max-w-md text-ui text-ink-muted">
+          <h1
+            className="ui-enter-up text-[26px] leading-tight font-semibold tracking-[-0.02em] text-ink-strong max-md:text-title"
+            style={{ animationDelay: "40ms" }}
+          >跟管家说你想怎么配 Trellis</h1>
+          <p className="ui-enter-up mt-1.5 mb-6 max-w-md text-body text-ink-muted max-md:text-ui" style={{ animationDelay: "80ms" }}>
             Agent、定时任务都能用一句话建和改；模型、机器人、版本这些先能查。动手之前管家会先把要改什么讲给你听。
           </p>
-          <QuestionInput isMobile={isMobile} variant="home" butler autoFocus={!isMobile} controlRef={inputRef} />
+          <div className="ui-enter-up w-full" style={{ animationDelay: "120ms" }}>
+            <QuestionInput isMobile={isMobile} variant="home" butler autoFocus={!isMobile} controlRef={inputRef} />
+          </div>
         </section>
-        <div className="mt-8 grid gap-2.5 sm:grid-cols-2">
-          {STARTERS.map((s) => (
+        <div className="mt-8 grid gap-3 sm:grid-cols-2">
+          {STARTERS.map((s, i) => (
             <button
               key={s.title}
               type="button"
               data-butler-starter
               onClick={() => inputRef.current?.fill(s.prompt)}
-              className="group rounded-card border border-line bg-surface px-3.5 py-3 text-left transition-colors hover:border-line-strong hover:bg-surface-hover"
+              className="ui-enter-up group rounded-card bg-surface-raised px-3.5 py-3 text-left shadow-raise transition-colors duration-100 hover:bg-surface-hover"
+              style={{ animationDelay: `${160 + i * 50}ms` }}
             >
               <span className="flex items-center gap-2 text-ui font-medium text-ink">
-                <Icon icon={s.icon} size="sm" className="text-ink-faint group-hover:text-ink" />
+                <Icon icon={s.icon} size="sm" className="text-ink-faint transition-colors group-hover:text-ink" />
                 {s.title}
               </span>
               <span className="mt-1 block text-label text-ink-faint">{s.hint}</span>

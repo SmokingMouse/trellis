@@ -78,7 +78,7 @@ export function Popover({
             }
           }}
           className={cn(
-            "ui-layer z-50 overflow-hidden rounded-overlay border border-line bg-surface-raised text-ui text-ink shadow-pop outline-none",
+            "ui-layer z-50 overflow-hidden rounded-overlay bg-surface-raised text-ui text-ink shadow-pop outline-none",
             panelClassName,
           )}
         >

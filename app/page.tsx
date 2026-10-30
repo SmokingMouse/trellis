@@ -245,16 +245,35 @@ export default function Home() {
 
   return (
     <ScrollHideProvider>
+      <SessionSidebar />
+      {/* 桌面主窗（2026-10-30 视觉改版，原型 docs/ui-redesign/mockups/08-beautiful-ui.html .main）：
+          侧栏直接铺在 canvas 上，右侧内容区是一扇浮起的窗——上 / 右 / 下留 8px，14px 圆角，
+          surface 底 + 叠层阴影。各视图都是 position:fixed 自己定位的，所以这里不改它们：
+          - 底板（data-app-window-backdrop）只负责画窗的底色与阴影；
+          - 外壳（data-app-window）用 transform 成为 fixed 后代的包含块：上 / 右 / 下各收 8px，
+            视图里的 right:0 / bottom:0 / top:3rem 自动落在窗内；左边不收（侧栏展开时外壳从 x=0 起，
+            视图仍按 --trellis-sb 定位，坐标与原来一致），左缘与圆角由 clip-path 在 --trellis-sb 处裁出；
+            侧栏收起时外壳整体右移 8px 留出左边距。
+          手机（max-md）两层都不产生盒子（contents / hidden），布局与原来完全一样。 */}
+      <div
+        aria-hidden
+        data-app-window-backdrop
+        className="pointer-events-none fixed top-2 right-2 bottom-2 hidden rounded-window bg-surface shadow-raise md:block"
+        style={{ left: "max(var(--trellis-sb, 0px), 0.5rem)" }}
+      />
+      <div
+        data-app-window
+        className="max-md:contents md:fixed md:top-2 md:right-2 md:bottom-2 md:left-[calc(max(var(--trellis-sb,0px),0.5rem)_-_var(--trellis-sb,0px))] md:overflow-hidden md:[transform:translateZ(0)] md:[clip-path:inset(0_0_0_var(--trellis-sb,0px)_round_var(--radius-window))]"
+      >
       <Header isMobile={isMobile} />
       {/* 首页自带「等你处理」列表，顶部待办条让位，不重复出现两份 */}
       {!isMobile && !showHome && !showHerdr && <PendingBar />}
       {isMobile && !session && !showHome && !showHerdr && <div className="fixed inset-x-0 top-[var(--trellis-header-h)] z-30"><PendingBar mobile /></div>}
-      <SessionSidebar />
       <SessionTabs />
       {hydrateError && (
         <div
           role="alert"
-          className="fixed top-[var(--trellis-header-h)] md:top-[5.25rem] inset-x-0 z-40 flex items-center gap-2 bg-warn-muted border-b border-warn-line px-4 py-2 text-label text-warn-ink"
+          className="fixed top-[var(--trellis-header-h)] md:top-[5.25rem] inset-x-0 md:left-(--trellis-sb) z-40 flex items-center gap-2 bg-warn-muted border-b border-warn-line px-4 py-2 text-label text-warn-ink"
         >
           <Icon icon={TriangleAlert} size="sm" />
           <span>本地存储不可用，可以继续问答，但刷新后历史会丢失。</span>
@@ -290,6 +309,11 @@ export default function Home() {
           </button>
         </>
       )}
+      {/* S1 P1：工作区终端。自己判断有没有 workspace（chat 会话直接返回 null），
+          所以不在这里加条件 —— 它还要负责在没打开时渲染右下角那个「▲ 终端」把手。
+          放在主窗里：它的 bottom / right 与线性 thread 让出的 --trellis-term-h 同一坐标系。 */}
+      {session && <TerminalPanel />}
+      </div>
       {session && composeRootOpen && (
         <NewQuestionPicker onClose={() => setComposeRootOpen(false)} />
       )}
@@ -303,9 +327,6 @@ export default function Home() {
       <HerdrFleetPickerSheet />
       <HerdrMobileWorkbench />
       <MobileEdgeSwipe />
-      {/* S1 P1：工作区终端。自己判断有没有 workspace（chat 会话直接返回 null），
-          所以不在这里加条件 —— 它还要负责在没打开时渲染右下角那个「▲ 终端」把手。 */}
-      {session && <TerminalPanel />}
       <NotesDrawer />
       <WorkspaceFilesDrawer />
       <SearchModal />

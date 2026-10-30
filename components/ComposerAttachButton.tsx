@@ -10,6 +10,7 @@ import {
   IconButton,
 } from "@/components/ui";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { COMPOSER_TOOL_ICON } from "./ComposerShell";
 
 // 输入框的「添加附件」入口。
 //   - 桌面：点一下直接开文件选择（老行为）；
@@ -77,7 +78,7 @@ export function ComposerAttachButton({
 
   if (!isMobile) {
     return (
-      <IconButton label="添加附件" title={title} onClick={openFiles} disabled={disabled} data-composer-attach="">
+      <IconButton label="添加附件" title={title} onClick={openFiles} disabled={disabled} data-composer-attach="" className={COMPOSER_TOOL_ICON}>
         <Icon icon={Paperclip} />
       </IconButton>
     );
@@ -86,7 +87,7 @@ export function ComposerAttachButton({
   return (
     <DropdownMenu onOpenChange={onMenuOpenChange}>
       <DropdownMenuTrigger asChild disabled={disabled}>
-        <IconButton label="添加附件" title={title} tooltip={false} disabled={disabled} data-composer-attach="">
+        <IconButton label="添加附件" title={title} tooltip={false} disabled={disabled} data-composer-attach="" className={COMPOSER_TOOL_ICON}>
           <Icon icon={Paperclip} />
         </IconButton>
       </DropdownMenuTrigger>

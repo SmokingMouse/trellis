@@ -65,7 +65,7 @@ export default function MachineResourcesPage() {
       {loading && error === null && !snapshot && (
         <div role="status" aria-label="正在采集资源状态" className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-card border border-line bg-surface p-4 flex flex-col gap-2.5">
+            <div key={i} className="rounded-card bg-surface-raised shadow-raise p-4 flex flex-col gap-2.5">
               <Skeleton className="h-3.5 w-12" />
               <Skeleton className="h-7 w-20" />
               <Skeleton className="h-3 w-28" />
@@ -78,23 +78,29 @@ export default function MachineResourcesPage() {
       {snapshot && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <ResourceCard label="CPU" percent={snapshot.cpu.usagePercent} detail="当前使用率" />
+            <ResourceCard label="CPU" percent={snapshot.cpu.usagePercent} detail="当前使用率" delay={0} />
             <ResourceCard
               label="内存"
               percent={snapshot.memory.usagePercent}
               detail={`${formatBytes(snapshot.memory.usedBytes)} / ${formatBytes(snapshot.memory.totalBytes)}`}
+              delay={60}
             />
             <ResourceCard
               label="磁盘"
               percent={snapshot.disk.usagePercent}
               detail={`${formatBytes(snapshot.disk.usedBytes)} / ${formatBytes(snapshot.disk.totalBytes)}`}
+              delay={120}
             />
           </div>
-          <div className="rounded-card border border-line px-3 py-2 text-label text-ink-muted">
-            <div>更新时间：{new Date(snapshot.sampledAt).toLocaleString("zh-CN")}</div>
-            <div className="mt-1 truncate font-mono text-nano" title={snapshot.disk.path}>
-              磁盘文件系统取自工作目录：{snapshot.disk.path}
-            </div>
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-card bg-surface-raised px-4 py-3 text-label shadow-raise">
+            <span className="text-ink-faint">更新时间：</span>
+            <span className="text-right font-mono text-[11.5px] tabular-nums text-ink-muted">
+              {new Date(snapshot.sampledAt).toLocaleString("zh-CN")}
+            </span>
+            <span className="text-ink-faint">磁盘文件系统取自工作目录：</span>
+            <span className="truncate text-right font-mono text-[11.5px] text-ink-muted" title={snapshot.disk.path}>
+              {snapshot.disk.path}
+            </span>
           </div>
         </>
       )}
@@ -102,15 +108,31 @@ export default function MachineResourcesPage() {
   );
 }
 
-function ResourceCard({ label, percent, detail }: { label: string; percent: number; detail: string }) {
+function ResourceCard({
+  label,
+  percent,
+  detail,
+  delay = 0,
+}: {
+  label: string;
+  percent: number;
+  detail: string;
+  delay?: number;
+}) {
   const safe = Math.max(0, Math.min(100, percent));
   return (
-    <section className="rounded-card border border-line bg-surface p-4">
-      <div className="text-ui text-ink-muted">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums text-ink-strong">{percent.toFixed(1)}%</div>
-      <div className="mt-1 text-label text-ink-muted">{detail}</div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-muted" aria-hidden>
-        <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${safe}%` }} />
+    <section
+      className="ui-enter-up rounded-card bg-surface-raised p-4 shadow-raise"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="text-label font-medium text-ink-muted">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-ink-strong">{percent.toFixed(1)}%</div>
+      <div className="mt-1 font-mono text-[11.5px] tabular-nums text-ink-faint">{detail}</div>
+      <div className="mt-3 h-1 overflow-hidden rounded-full bg-surface-muted shadow-hairline" aria-hidden>
+        <div
+          className="h-full rounded-full bg-positive transition-[width] duration-700 ease-[var(--ease-out-strong)]"
+          style={{ width: `${safe}%` }}
+        />
       </div>
     </section>
   );

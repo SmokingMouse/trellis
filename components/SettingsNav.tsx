@@ -16,7 +16,7 @@ import {
   SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
-import { Icon, cn } from "@/components/ui";
+import { GlideList, Icon, cn } from "@/components/ui";
 import {
   SETTINGS_TABS,
   SETTINGS_TAB_GROUPS,
@@ -52,6 +52,9 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
 //
 // W4：桌面按 SETTINGS_TAB_GROUPS 分三组（组标题 + 图标 + 选中态）；手机仍是一条横向可滚的
 // 平铺条，组标题不渲染（横条里插小标题只会占宽度）。
+//
+// 2026-10-30 视觉改版（原型 .set-nav）：桌面是设置浮窗里带右侧分隔线的竖栏，组标题小号
+// ink-faint，每组一块 GlideList 悬停滑块；选中行 = hover 底 + ink（不再用 accent 底）。
 export function SettingsNav() {
   const segment = useSelectedLayoutSegment();
 
@@ -62,21 +65,22 @@ export function SettingsNav() {
       // 否则滚到尽头时最后一个 tab 会被 padding 卡住看着像截断了）。
       className="
         flex flex-row gap-1 overflow-x-auto -mx-4 px-4 pb-2
-        md:flex-col md:gap-0.5 md:overflow-visible md:mx-0 md:px-0 md:pb-0 md:w-[220px] md:shrink-0
-        md:sticky md:top-[76px] md:self-start
+        md:flex-col md:gap-0 md:overflow-y-auto md:mx-0 md:px-2 md:py-4 md:w-[208px] md:shrink-0
+        md:border-r md:border-line
       "
     >
       {SETTINGS_TAB_GROUPS.map((g, gi) => (
-        <div key={g.id} role="group" aria-label={g.label} className="contents md:flex md:flex-col md:gap-0.5">
+        <div key={g.id} role="group" aria-label={g.label} className="contents md:flex md:flex-col">
           <div
             aria-hidden
             className={cn(
-              "hidden md:block px-2.5 pb-1.5 text-label text-ink-faint",
+              "hidden md:block px-2 pb-2 text-label font-medium text-ink-faint",
               gi === 0 ? "pt-0" : "pt-3.5",
             )}
           >
             {g.label}
           </div>
+          <GlideList className="contents md:flex md:flex-col md:gap-px max-md:[&>.ui-glide-hl]:hidden">
           {SETTINGS_TABS.filter((t) => t.group === g.id).map((t) => {
             const active = t.segment === segment;
             return (
@@ -85,22 +89,24 @@ export function SettingsNav() {
                 href={`/settings/${t.segment}`}
                 title={t.title}
                 aria-current={active ? "page" : undefined}
+                data-glide-row
                 className={cn(
-                  "shrink-0 flex items-center gap-2.5 px-2.5 h-8 rounded-field text-ui whitespace-nowrap transition-colors duration-100 max-md:min-h-11",
+                  "press-row shrink-0 flex items-center gap-2 px-2 h-8 rounded-field text-ui md:text-[13.5px] md:font-medium whitespace-nowrap transition-colors duration-150 max-md:min-h-11",
                   active
-                    ? "bg-accent-muted text-accent-ink font-medium"
+                    ? "bg-surface-hover text-ink"
                     : "text-ink-muted hover:text-ink hover:bg-surface-hover",
                 )}
               >
                 <Icon
                   icon={TAB_ICONS[t.icon]}
                   selected={active}
-                  className={active ? "text-accent-ink" : "text-ink-faint"}
+                  className={cn("md:size-3.5", active ? "text-ink" : "text-ink-faint")}
                 />
                 {t.label}
               </Link>
             );
           })}
+          </GlideList>
         </div>
       ))}
     </nav>

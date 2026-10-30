@@ -36,6 +36,14 @@ import type { SendKey } from "@/lib/send-key";
 
 const FULLSCREEN_MIN_LINES = 3;
 
+// bui composer 底栏的两种工具按钮外观（Composer / HerdrComposer / ModelPicker 共用）：
+//   - COMPOSER_TOOL_ICON：叠在 IconButton 上，桌面收成 28px 圆形 ghost；手机仍是 IconButton 的 44px 热区。
+//     IconButton 基础类自带 rounded-field / min-h-8 / p-1.5，这里用 md: 档和 ! 覆盖（cn 没有 tailwind-merge）。
+//   - COMPOSER_TOOL_PILL：选择器触发钮（图标 + 文字 + chevron），28px 胶囊 ghost、12.5px ink-muted。
+export const COMPOSER_TOOL_ICON = "rounded-full! md:min-h-7 md:min-w-7 md:p-1";
+export const COMPOSER_TOOL_PILL =
+  "press inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full px-2 text-[12.5px] leading-none text-ink-muted transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink disabled:cursor-not-allowed disabled:opacity-45";
+
 /** 输入框按当前宽度折行后的行数（先撑回 auto 再量，autosize effect 随后会重设高度）。 */
 function countLines(el: HTMLTextAreaElement): number {
   const style = getComputedStyle(el);
@@ -220,6 +228,7 @@ export function ComposerShell({
       onClick={() => setFullscreenOpen(true)}
       disabled={disabled}
       data-composer-fullscreen-open=""
+      className={COMPOSER_TOOL_ICON}
     >
       <Icon icon={Maximize2} />
     </IconButton>
@@ -278,8 +287,9 @@ export function ComposerShell({
       {queue && queue.length > 0 && queueOpen !== false && <ComposerQueueList items={queue} header={queueHeader} />}
       <div
         data-composer-card=""
-        className={`rounded-card border bg-surface transition-[border-color,box-shadow] duration-100 focus-within:border-accent-line focus-within:ring-3 focus-within:ring-focus-ring ${
-          dragOver ? "border-accent ring-3 ring-accent-line" : "border-line-strong"
+        // bui composer：浮起的 window 卡（真描边 + raise 阴影），聚焦时描边加深 + 4px accent 淡光晕。
+        className={`rounded-window border bg-surface shadow-raise transition-[border-color,box-shadow] duration-150 ease-out focus-within:border-line-strong focus-within:ring-4 focus-within:ring-focus-ring/40 max-md:rounded-[22px] ${
+          dragOver ? "border-accent ring-4 ring-accent-line" : "border-line"
         }`}
         onDragOver={(e) => {
           // Only react to file drags (Files type), ignore text drags.
@@ -335,7 +345,7 @@ export function ComposerShell({
             className={`block w-full min-w-0 resize-none bg-transparent text-body text-ink-strong outline-none placeholder:text-ink-faint disabled:opacity-50 ${
               compact
                 ? "flex-1 h-11 min-h-11 max-h-11 px-3 py-2.5"
-                : "min-h-12 max-h-40 px-3.5 pt-3 pb-1 leading-relaxed max-md:min-h-18"
+                : "min-h-13.5 max-h-40 px-4 pt-3.5 pb-1.5 leading-[1.55] md:text-[14.5px] max-md:min-h-18"
             }`}
           />
           {compact && (
@@ -346,9 +356,9 @@ export function ComposerShell({
           )}
         </div>
         {!compact && (
-          <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+          <div className="flex items-center gap-1 px-2 pb-2 pt-1.5">
             {!mobileCompact && chips && (
-              <div className="flex min-w-0 items-center gap-1.5 mr-1" data-composer-context="">
+              <div className="flex min-w-0 items-center gap-1 mr-0.5" data-composer-context="">
                 {chips}
               </div>
             )}
@@ -382,7 +392,7 @@ export function ComposerShell({
       {!compact && (
         <div
           data-composer-hint=""
-          className="mt-1.5 flex items-center justify-between gap-3 px-1 text-label text-ink-faint max-md:hidden"
+          className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11.5px] leading-4 text-ink-faint tabular-nums max-md:hidden"
         >
           <span className="min-w-0 truncate">{hintLeft}</span>
           <span className="shrink-0">{hintRight}</span>
@@ -400,7 +410,7 @@ function ComposerQueueList({ items, header }: { items: ComposerQueueItem[]; head
   return (
     <div
       data-composer-queue=""
-      className="mb-1.5 rounded-card border border-line bg-surface p-1"
+      className="ui-enter-pop mb-2 origin-bottom rounded-card bg-surface-raised p-1 shadow-raise"
     >
       {header}
       <ul aria-label="排队中的消息" className="space-y-0.5">
@@ -422,7 +432,7 @@ function ComposerQueueList({ items, header }: { items: ComposerQueueItem[]; head
             <li
               key={item.id}
               data-composer-queue-item={item.id}
-              className="flex min-h-8 items-center gap-2 rounded-field pl-2 pr-0.5 text-ui max-md:min-h-11"
+              className="flex min-h-8 items-center gap-2 rounded-[7px] pl-2 pr-0.5 text-ui max-md:min-h-11"
             >
               <Icon icon={Clock3} size="sm" className="shrink-0 text-ink-faint" />
               <span className="shrink-0 text-label text-ink-faint">{item.label ?? "排队中"}</span>
@@ -508,7 +518,7 @@ function QueueItemEditor({
           }
         }}
         style={{ outline: "none" }}
-        className="block w-full min-w-0 resize-none rounded-field border border-line-strong bg-surface px-2.5 py-1.5 text-ui text-ink-strong focus:border-accent-line max-h-40"
+        className="block w-full min-w-0 resize-none rounded-field bg-surface-muted px-2.5 py-1.5 text-ui text-ink-strong shadow-inset-field transition-shadow duration-100 focus:ring-3 focus:ring-focus-ring max-h-40"
       />
       <div className="flex justify-end gap-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>

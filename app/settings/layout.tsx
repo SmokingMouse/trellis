@@ -21,27 +21,35 @@ export default function SettingsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="h-dvh overflow-y-auto bg-surface-canvas text-ink">
-      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface-canvas px-4 md:px-5">
-        {/* 返回用 <Link>（三张页原本就都是 Link）。「用 <a> 硬导航」那条规矩只管**出去**
-            的方向 —— Header 上点设置时要让浏览器真换一页，别背着一整棵 React Flow 走；
-            回来时画布本来就没在跑，没有东西要丢，用不着再赔一次整页加载。 */}
-        <Link
-          href="/"
-          className="-ml-1.5 inline-flex items-center gap-1.5 rounded-field px-1.5 h-8 text-ui text-ink-muted transition-colors duration-100 hover:bg-surface-hover hover:text-ink max-md:min-h-11"
-        >
-          <Icon icon={ArrowLeft} />
-          返回工作台
-        </Link>
-        <span aria-hidden className="h-4.5 w-px bg-line" />
-        <span className="text-ui font-semibold text-ink-strong">设置</span>
-      </header>
+    // 2026-10-30 视觉改版（原型 docs/ui-redesign/mockups/08-beautiful-ui.html「设置」屏）：
+    // 桌面是 canvas 上四边各留 8px 的一扇浮窗（14px 圆角 + 叠层阴影），窗内顶栏 48px、左侧
+    // 分组导航带竖分隔线、右侧内容区自己滚动。手机仍是原来的整页单滚动容器 + sticky 顶栏 +
+    // 横向 tab 条（md: 以外的类与原来一致）。
+    <div className="h-dvh overflow-y-auto bg-surface-canvas text-ink md:overflow-hidden md:p-2">
+      <div className="md:flex md:h-full md:flex-col md:overflow-hidden md:rounded-window md:bg-surface md:shadow-raise">
+        <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-surface-canvas px-4 md:static md:shrink-0 md:gap-2.5 md:bg-surface md:pl-3 md:pr-4">
+          {/* 返回用 <Link>（三张页原本就都是 Link）。「用 <a> 硬导航」那条规矩只管**出去**
+              的方向 —— Header 上点设置时要让浏览器真换一页，别背着一整棵 React Flow 走；
+              回来时画布本来就没在跑，没有东西要丢，用不着再赔一次整页加载。 */}
+          <Link
+            href="/"
+            className="-ml-1.5 inline-flex items-center gap-1.5 rounded-field px-1.5 h-8 text-ui text-ink-muted transition-colors duration-100 hover:bg-surface-hover hover:text-ink max-md:min-h-11 md:ml-0 md:px-2"
+          >
+            <Icon icon={ArrowLeft} />
+            返回工作台
+          </Link>
+          <span aria-hidden className="h-4 w-px bg-line" />
+          <span className="text-ui font-semibold text-ink-strong md:text-[14px] md:font-medium md:text-ink">设置</span>
+        </header>
 
-      {/* W4 统一 PageShell：左 220px 分组导航 + 右内容区，内容区一律 max-w-[880px]
-          （原来各页自带 612 / 770 / 900 三种宽度，子页不再自己设最大宽度）。 */}
-      <div className="mx-auto flex max-w-[1180px] flex-col gap-4 p-4 pb-24 md:flex-row md:gap-10 md:px-8 md:pt-7">
-        <SettingsNav />
-        <div className="min-w-0 flex-1 md:max-w-[880px]">{children}</div>
+        {/* W4 统一 PageShell：左侧分组导航 + 右内容区，内容区一律 max-w-[880px]
+            （原来各页自带 612 / 770 / 900 三种宽度，子页不再自己设最大宽度）。 */}
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-4 p-4 pb-24 md:mx-0 md:min-h-0 md:max-w-none md:flex-1 md:flex-row md:gap-0 md:p-0">
+          <SettingsNav />
+          <div className="min-w-0 flex-1 md:overflow-y-auto">
+            <div className="md:mx-auto md:max-w-[880px] md:px-7 md:pb-20 md:pt-7">{children}</div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -9,9 +9,9 @@ import { cn } from "./cn";
 // 有它们时外层是带边框的 div，input 本身无框。
 
 const FIELD =
-  "rounded-field border border-line-strong bg-surface text-ui text-ink transition-colors duration-100 placeholder:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50";
+  "rounded-field border border-line-strong bg-surface-muted shadow-inset-field text-ui text-ink transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-ink-faint disabled:cursor-not-allowed disabled:opacity-50";
 const FOCUS =
-  "outline-none focus-visible:outline-none focus:border-accent-line focus:ring-2 focus:ring-focus-ring";
+  "outline-none focus-visible:outline-none focus:border-accent-line focus:bg-surface focus:ring-4 focus:ring-focus-ring/50";
 const INVALID = "border-danger-line focus:border-danger-line";
 
 const SIZE = { sm: "min-h-6.5 px-2", md: "min-h-8 px-2.5" } as const;

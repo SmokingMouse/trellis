@@ -90,7 +90,7 @@ export function RelatedHints({ query }: { query: string }) {
   };
 
   return (
-    <div className="mt-2 border border-line rounded-lg bg-surface/80 overflow-hidden">
+    <div className="mt-2 rounded-card bg-surface-raised shadow-raise overflow-hidden">
       <div className="px-3 pt-2 pb-1 flex items-center gap-1.5 text-label text-ink-faint">
         <Icon icon={GitBranch} size="sm" />
         <span>之前聊过相关的 —— 点行去原树续聊，不理会就是新开</span>
@@ -108,7 +108,7 @@ export function RelatedHints({ query }: { query: string }) {
           key={h.sessionId}
           type="button"
           onClick={() => onJump(h)}
-          className="w-full text-left px-3 py-2 border-t border-line-faint hover:bg-surface-muted transition-colors flex items-baseline gap-2"
+          className="w-full text-left px-3 py-2 border-t border-line-faint hover:bg-surface-hover transition-colors flex items-baseline gap-2"
         >
           <span className="text-ui text-ink font-medium shrink-0 max-w-[38%] truncate">
             {h.sessionTitle}

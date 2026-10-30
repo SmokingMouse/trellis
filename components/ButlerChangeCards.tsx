@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Check, CircleCheck, FileDiff, ShieldAlert, TriangleAlert, Undo2 } from "lucide-react";
-import { Button, Icon, Input, StatusDot, cn } from "@/components/ui";
+import { Badge, Button, Icon, Input, cn } from "@/components/ui";
 import { useButlerStore } from "@/stores/butlerStore";
 import { describeCron } from "@/lib/cron";
 import {
@@ -92,24 +92,18 @@ function ChangeCard({ change: c }: { change: ButlerChange }) {
       data-butler-change={c.id}
       data-status={c.status}
       className={cn(
-        "overflow-hidden rounded-card border bg-surface",
-        high && pending ? "border-danger-line" : "border-line-strong",
+        "ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise",
+        high && pending && "ring-1 ring-danger-line",
         !pending && "opacity-95",
       )}
     >
-      <div className="flex items-center gap-2 border-b border-line-faint px-3.5 py-2.5">
+      <div className="flex items-center gap-2 border-b border-line px-3.5 py-2.5">
         <Icon icon={high ? ShieldAlert : FileDiff} size="sm" className={high ? "text-danger" : "text-ink-faint"} />
         <span className="text-ui font-semibold text-ink">{CHANGE_KIND_LABEL[c.kind]}</span>
         <span className="min-w-0 truncate text-ui text-ink-muted">{c.targetLabel}</span>
-        <span
-          className={cn(
-            "ml-auto inline-flex h-5 shrink-0 items-center gap-1.5 rounded-[5px] border px-1.5 text-label text-ink-muted",
-            high ? "border-danger-line" : "border-line",
-          )}
-        >
-          <StatusDot tone={high ? "danger" : "neutral"} />
+        <Badge variant={high ? "danger" : "neutral"} dot className="ml-auto">
           {high ? "高危 · 不可撤销" : "可撤销"}
-        </span>
+        </Badge>
       </div>
 
       <div
@@ -131,22 +125,22 @@ function ChangeCard({ change: c }: { change: ButlerChange }) {
       </div>
 
       {high && pending && (
-        <div className="flex items-start gap-2 border-t border-line-faint px-3.5 py-2.5 text-label text-ink-muted">
+        <div className="flex items-start gap-2 border-t border-line px-3.5 py-2.5 text-label text-ink-muted">
           <Icon icon={TriangleAlert} size="sm" className="mt-px text-danger" />
           删除连带清掉它的运行记录与触发器，撤销不了。只是不想看到它的话，让管家改成停用就行。
         </div>
       )}
       {(err || c.error) && (
-        <div className="border-t border-line-faint px-3.5 py-2 text-label text-danger-ink">{err ?? c.error}</div>
+        <div className="border-t border-line px-3.5 py-2 text-label text-danger-ink">{err ?? c.error}</div>
       )}
 
       <div
         className={cn(
-          "flex flex-wrap items-center gap-2 border-t border-line-faint px-3.5 py-2.5",
+          "flex flex-wrap items-center gap-2 border-t border-line px-3.5 py-2.5",
           c.status === "applied" ? "bg-positive-muted" : "bg-surface-canvas",
         )}
       >
-        <span className="min-w-0 truncate font-mono text-nano text-ink-faint">
+        <span className="min-w-0 truncate font-mono text-[11.5px] text-ink-faint">
           {c.method} {c.path.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ":id")}
         </span>
         <span className="ml-auto" />
@@ -203,8 +197,8 @@ function ChangeCard({ change: c }: { change: ButlerChange }) {
 }
 
 function DiffCells({ row, mode }: { row: DiffRow; mode: "create" | "update" | "delete" }) {
-  const cell = "min-w-0 whitespace-pre-wrap break-words border-t border-line-faint px-3.5 py-2";
-  const label = <div className="border-t border-line-faint px-3.5 py-2 text-ink-faint">{FIELD_LABEL[row.key] ?? row.key}</div>;
+  const cell = "min-w-0 whitespace-pre-wrap break-words border-t border-line px-3.5 py-2";
+  const label = <div className="border-t border-line px-3.5 py-2 text-ink-faint">{FIELD_LABEL[row.key] ?? row.key}</div>;
   if (mode === "update") {
     const same = row.before === row.after;
     return (

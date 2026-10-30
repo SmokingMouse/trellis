@@ -8,7 +8,7 @@ test("审批动作主次明确：允许一次为主按钮、作用域是次级�
   expect(button("allow")).toContain("bg-accent ");
   expect(button("allow")).toContain("允许一次");
   expect(button("allow")).toContain('data-scope="once"');
-  expect(button("deny")).toContain("border-line-strong");
+  expect(button("deny")).toContain("shadow-btn");
   for (const name of ["allow", "deny"]) expect(button(name)).toContain("min-h-11");
   // 作用域：radiogroup 三档，缺省「仅本次」，每档手机 44px
   const scope = html.match(/<div[^>]*data-mobile-target="permission-scope"[\s\S]*?<\/div><\/div>/)?.[0] ?? "";

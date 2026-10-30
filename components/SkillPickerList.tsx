@@ -92,20 +92,18 @@ export function SkillPickerList({
       ref={active ? activeRef : undefined}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className={`w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors max-md:min-h-11 ${
+      className={`press-row w-full min-h-9 text-left px-2 py-1.5 rounded-[7px] flex items-center gap-2.5 transition-colors duration-100 max-md:min-h-11 ${
         active ? "bg-surface-hover" : "hover:bg-surface-hover"
       }`}
     >
-      <Icon icon={icon} size="sm" className="mt-0.5 text-ink-faint" />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-1.5 text-ui text-ink">
-          <span className="font-mono">{name}</span>
-          {extra}
-          <span className="ml-auto shrink-0 text-label text-ink-faint">{kind}</span>
-        </span>
+      <IconTile icon={icon} />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2 text-ui">
+        <span className="shrink-0 font-mono font-medium text-ink">{name}</span>
+        {extra}
         {description && (
-          <span className="block text-label text-ink-muted truncate">{description}</span>
+          <span className="min-w-0 flex-1 truncate text-label text-ink-faint">{description}</span>
         )}
+        <span className="ml-auto shrink-0 pl-1 text-nano text-ink-faint">{kind}</span>
       </span>
     </button>
   );
@@ -114,8 +112,8 @@ export function SkillPickerList({
       role="listbox"
       aria-label="命令与技能"
       className={`${
-        placement === "above" ? "absolute bottom-full inset-x-0 mb-1 z-10" : "mt-2"
-      } border border-line rounded-card bg-surface shadow-pop p-1 max-h-64 max-md:max-h-[min(18rem,40svh)] overflow-y-auto overscroll-contain`}
+        placement === "above" ? "absolute bottom-full inset-x-0 mb-2 z-10 origin-bottom-left" : "mt-2 origin-top-left"
+      } ui-enter-pop rounded-card bg-surface-raised shadow-pop p-1 max-h-72 max-md:max-h-[min(18rem,40svh)] overflow-y-auto overscroll-contain`}
     >
       {commands.map((c, i) =>
         row({
@@ -124,7 +122,7 @@ export function SkillPickerList({
           onClick: () => onPickCommand?.(c),
           icon: SquareSlash,
           name: `/${c.name}`,
-          extra: c.hint ? <span className="font-mono text-ink-faint">{c.hint}</span> : undefined,
+          extra: c.hint ? <span className="shrink-0 font-mono text-label text-ink-faint">{c.hint}</span> : undefined,
           kind: "命令",
           description: c.description,
         }),
@@ -136,13 +134,13 @@ export function SkillPickerList({
           onClick: () => onPickAgent?.(a.slug),
           icon: AtSign,
           name: `@${a.slug}`,
-          extra: <span className="text-ink-faint">{a.name}</span>,
+          extra: <span className="shrink-0 text-label text-ink-muted">{a.name}</span>,
           kind: "单轮 Agent",
           description: a.description,
         }),
       )}
       {refItems.length > 0 && agents.length > 0 && (
-        <div role="presentation" className="px-2.5 pt-1.5 pb-0.5 text-nano text-ink-faint">
+        <div role="presentation" className="px-2 pt-2 pb-1 text-nano font-medium text-ink-faint">
           引用会话作为上下文
         </div>
       )}
@@ -160,13 +158,13 @@ export function SkillPickerList({
               data-node-ref-option={n.nodeId}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onPickRef?.(item)}
-              className={`w-full text-left pl-8 pr-2.5 py-1.5 rounded-field flex items-start gap-2 transition-colors max-md:min-h-11 ${
+              className={`press-row w-full min-h-9 text-left pl-10 pr-2 py-1.5 rounded-[7px] flex items-center gap-2 transition-colors duration-100 max-md:min-h-11 ${
                 active ? "bg-surface-hover" : "hover:bg-surface-hover"
               }`}
             >
-              <Icon icon={CornerDownRight} size="sm" className="mt-0.5 text-ink-faint" />
-              <span className="min-w-0 flex-1 text-ui text-ink">
-                <span className="font-mono text-ink-faint tabular-nums mr-1.5">#{n.index}</span>
+              <Icon icon={CornerDownRight} size="sm" className="text-ink-faint" />
+              <span className="min-w-0 flex-1 truncate text-ui text-ink">
+                <span className="font-mono text-label text-ink-faint tabular-nums mr-1.5">#{n.index}</span>
                 <span className="truncate">{n.topicLabel ?? n.question.replace(/\s+/g, " ")}</span>
               </span>
             </button>
@@ -178,7 +176,7 @@ export function SkillPickerList({
         return (
           <Fragment key={`ref-session-${s.sessionId}`}>
           <div
-            className={`flex items-stretch rounded-field transition-colors ${active ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
+            className={`flex items-stretch rounded-[7px] transition-colors duration-100 ${active ? "bg-surface-hover" : "hover:bg-surface-hover"}`}
           >
             <button
               type="button"
@@ -189,16 +187,16 @@ export function SkillPickerList({
               data-node-ref-session={s.sessionId}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => (latest ? onPickRef?.(item) : onToggleRefExpand?.(s.sessionId))}
-              className="min-w-0 flex-1 text-left px-2.5 py-1.5 flex items-start gap-2.5 max-md:min-h-11"
+              className="min-w-0 flex-1 min-h-9 text-left px-2 py-1.5 flex items-center gap-2.5 max-md:min-h-11"
             >
-              <Icon icon={MessagesSquare} size="sm" className="mt-0.5 text-ink-faint" />
+              <IconTile icon={MessagesSquare} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-1.5 text-ui text-ink">
-                  <span className="min-w-0 truncate">{s.title || "未命名会话"}</span>
-                  {latest && <span className="shrink-0 font-mono text-ink-faint tabular-nums">#{latest.index}</span>}
-                  <span className="ml-auto shrink-0 text-label text-ink-faint">会话</span>
+                  <span className="min-w-0 truncate font-medium">{s.title || "未命名会话"}</span>
+                  {latest && <span className="shrink-0 font-mono text-label text-ink-faint tabular-nums">#{latest.index}</span>}
+                  <span className="ml-auto shrink-0 text-nano text-ink-faint">会话</span>
                 </span>
-                <span className="block text-label text-ink-muted truncate">
+                <span className="block text-label text-ink-faint truncate">
                   {latest ? (latest.topicLabel ?? latest.question.replace(/\s+/g, " ")) : "还没有已完成的回答"}
                 </span>
               </span>
@@ -210,13 +208,13 @@ export function SkillPickerList({
               title={expanded ? "收起" : "改选具体节点"}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onToggleRefExpand?.(s.sessionId)}
-              className="shrink-0 inline-flex w-8 items-center justify-center rounded-field text-ink-faint hover:text-ink max-md:w-11"
+              className="shrink-0 inline-flex w-8 items-center justify-center rounded-[7px] text-ink-faint transition-colors duration-100 hover:text-ink max-md:w-11"
             >
               <Icon icon={expanded ? ChevronDown : ChevronRight} size="sm" />
             </button>
           </div>
           {expanded && refExpandedLoading && (
-            <div role="presentation" className="pl-8 py-1.5 text-label text-ink-faint">
+            <div role="presentation" className="pl-10 py-1.5 text-label text-ink-faint">
               载入节点…
             </div>
           )}
@@ -246,5 +244,17 @@ export function SkillPickerList({
         }),
       )}
     </div>
+  );
+}
+
+/** bui 菜单行首的图标小方块：24px、surface-muted 底 + hairline。 */
+function IconTile({ icon }: { icon: LucideIcon }) {
+  return (
+    <span
+      aria-hidden
+      className="grid size-6 shrink-0 place-items-center rounded-chip bg-surface-muted text-ink-muted shadow-hairline"
+    >
+      <Icon icon={icon} size="sm" />
+    </span>
   );
 }

@@ -33,7 +33,7 @@ import { useSlashNav } from "@/hooks/useSlashNav";
 import { useAttachmentUploads } from "@/hooks/useAttachmentUploads";
 import { SkillPickerList } from "./SkillPickerList";
 import { AttachmentPreview } from "./AttachmentPreview";
-import { ComposerShell } from "./ComposerShell";
+import { COMPOSER_TOOL_ICON, ComposerShell } from "./ComposerShell";
 import { SketchModal } from "./SketchModal";
 import { isOptimisticNodeId } from "@/stores/sessionStore";
 import { Button, Icon, IconButton, Spinner, Tooltip } from "@/components/ui";
@@ -666,7 +666,8 @@ export function Composer({
       side="top"
     >
       <Button
-        variant={stopNow ? "secondary" : "primary"}
+        // bui send：30px 墨色圆钮；停止态同一颗、同一位置，换成方块。
+        variant="ink"
         size="icon"
         aria-label={stopNow ? "停止生成" : streaming ? busyMeta[busyPrimary].aria : "发送"}
         data-composer-primary={
@@ -675,11 +676,11 @@ export function Composer({
         data-composer-busy-send={streaming && !stopNow ? busyPrimary : undefined}
         onClick={() => (stopNow ? abortStream(targetNode!.id) : submit(streaming ? busyPrimary : undefined))}
         disabled={stopNow ? isPending : !canSend}
-        className="shrink-0"
+        className="shrink-0 rounded-full! md:min-h-7.5 md:min-w-7.5"
       >
         <span className="morph-icon" aria-hidden>
           <Icon icon={ArrowUp} size="md" selected data-active={mainIcon === "send" ? "" : undefined} />
-          <Square size={11} strokeWidth={0} fill="currentColor" data-active={mainIcon === "stop" ? "" : undefined} />
+          <Square size={10} strokeWidth={0} fill="currentColor" data-active={mainIcon === "stop" ? "" : undefined} />
           <Icon icon={ListPlus} size="md" selected data-active={mainIcon === "queue" ? "" : undefined} />
           <Icon icon={CornerDownRight} size="md" selected data-active={mainIcon === "steer" ? "" : undefined} />
           {/* 转圈只在加载态挂（常驻会一直跑 animate-spin） */}
@@ -702,7 +703,7 @@ export function Composer({
         data-composer-stop-slot=""
         onClick={() => abortStream(targetNode!.id)}
         disabled={isPending}
-        className="shrink-0 md:order-last max-md:border-0 max-md:bg-transparent max-md:active:bg-transparent"
+        className="shrink-0 rounded-full! md:order-last md:min-h-7.5 md:min-w-7.5 max-md:bg-transparent max-md:shadow-none max-md:active:bg-transparent"
       >
         <span className="md:contents max-md:grid max-md:size-9 max-md:place-items-center max-md:rounded-full max-md:border max-md:border-line-strong max-md:bg-surface">
           {isPending ? (
@@ -723,7 +724,7 @@ export function Composer({
         data-composer-busy-send={busySecondary}
         onClick={() => submit(busySecondary)}
         disabled={!canSend || !!steerBlocked(busySecondary)}
-        className="shrink-0"
+        className="shrink-0 rounded-full! md:min-h-7 md:text-[12.5px]"
       >
         <Icon icon={busyMeta[busySecondary].icon} size="sm" />
         {busyMeta[busySecondary].label}
@@ -827,6 +828,7 @@ export function Composer({
             title={att.atLimit ? "已到附件上限" : "画个草图（导出为图片附件）"}
             onClick={() => setSketchOpen(true)}
             disabled={noTarget || att.atLimit}
+            className={COMPOSER_TOOL_ICON}
           >
             <Icon icon={PenLine} />
           </IconButton>
@@ -839,7 +841,7 @@ export function Composer({
             <span
               tabIndex={0}
               data-composer-send-to=""
-              className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 text-label text-ink-faint"
+              className="hidden sm:inline-flex min-w-0 max-w-64 items-center gap-1 mr-1.5 rounded-full px-1 text-[12.5px] text-ink-faint"
             >
               <Icon icon={GitBranch} size="sm" className={fork ? "text-fork" : undefined} />
               <span className="shrink-0">发送到：</span>

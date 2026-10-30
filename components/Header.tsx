@@ -535,7 +535,9 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     <header
       data-safe-area="header"
       data-header
-      className="fixed top-0 inset-x-0 h-12 bg-surface-canvas/85 backdrop-blur border-b border-line flex items-center px-2 sm:px-3 md:pl-0 z-40 gap-3"
+      // 桌面：顶栏住在主窗里（app/page.tsx data-app-window），从侧栏右缘起排，surface 实底 +
+      // 一道发丝线（原型 .topbar：48px 单行）。md 以下（手机「转桌面版」）沿用原来的磨砂通栏。
+      className="fixed top-0 inset-x-0 md:left-(--trellis-sb) h-12 bg-surface-canvas/85 backdrop-blur md:bg-surface md:backdrop-blur-none border-b border-line flex items-center px-2 sm:px-3 md:pl-4 md:pr-2.5 z-40 gap-2"
       style={{
         height: "var(--trellis-header-h)",
         paddingTop: "var(--safe-top)",
@@ -543,13 +545,11 @@ export function Header({ isMobile }: { isMobile: boolean }) {
     >
       {/* ── 左：导航 ── */}
       <div data-header-group="nav" className="flex min-w-0 shrink items-center gap-2 md:self-stretch">
-        {/* 品牌格：侧栏展开时宽度 = 侧栏宽度并接上侧栏右边线，面包屑从边线起排，
-            与下方标签条、正文列同一条竖线（照 mockups/01-workbench.html）。 */}
+        {/* 品牌格：桌面侧栏展开时，品牌 / 回首页挪到侧栏顶部（机器切换器那一行），这里整格让位，
+            标题从主窗左缘起排；侧栏收起后这里放展开键 + 品牌。 */}
         <div
           data-header-brand
-          className={`flex shrink-0 items-center gap-1.5 md:self-stretch md:pl-3 ${
-            sidebarOpen ? "md:w-(--trellis-sb) md:border-r md:border-line" : ""
-          }`}
+          className={`flex shrink-0 items-center gap-1 ${sidebarOpen ? "md:hidden" : "md:-ml-1.5"}`}
         >
         {/* 手机以外的窄屏也可能走到这里（md 以下的「转桌面版」）：侧栏不常驻，
             汉堡键打开会话抽屉。 */}
@@ -580,14 +580,14 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             data-header-home
             aria-label="回首页"
             onClick={openHome}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-field px-1 transition-colors hover:bg-surface-hover max-md:min-h-11 max-md:min-w-11 max-md:justify-center"
+            className="flex h-8 shrink-0 items-center gap-2 rounded-field px-1.5 transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11 max-md:min-w-11 max-md:justify-center"
           >
             {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，刻意裁决） */}
             <span
               aria-hidden
-              className="size-5 shrink-0 rounded-md bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24]"
+              className="size-5 shrink-0 rounded-chip bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24] shadow-hairline"
             />
-            <span className="hidden text-ui font-semibold tracking-tight text-ink-strong lg:inline">
+            <span className="hidden text-[14px] font-medium tracking-tight text-ink lg:inline">
               Trellis
             </span>
           </button>
@@ -600,24 +600,26 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             className="flex min-w-0 items-center gap-1 text-ui text-ink-muted"
           >
             {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
+            {/* 工作区 = 小 chip（原型 .chip：6px 圆角、muted 底、发丝环、11.5px） */}
             {workspaceName ? (
               <Tooltip content={`${session.workspacePath}（点击浏览工作区文件）`}>
                 <button
                   type="button"
                   onClick={() => setWorkspaceFilesOpen(true)}
-                  className="max-w-40 shrink-0 truncate rounded-md px-1 hover:bg-surface-hover hover:text-ink"
+                  className="inline-flex h-5.5 max-w-40 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline transition-colors duration-100 hover:bg-surface-hover hover:text-ink"
                 >
-                  {workspaceName}
+                  <Icon icon={FolderOpen} size="sm" className="size-3 shrink-0 text-ink-faint" />
+                  <span className="truncate">{workspaceName}</span>
                 </button>
               </Tooltip>
             ) : (
-              <span className="shrink-0 px-1">对话</span>
+              <span className="inline-flex h-5.5 shrink-0 items-center rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline">对话</span>
             )}
-            <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />
+            <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint" />
             <Tooltip content={sessionTitle}>
               <span
                 tabIndex={0}
-                className="min-w-0 truncate px-1 font-medium text-ink-strong"
+                className="min-w-0 truncate px-1 text-[14px] font-medium text-ink"
               >
                 {sessionTitle}
               </span>
@@ -627,7 +629,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
         {!session && herdrOpen && (
           <nav aria-label="当前位置" data-header-breadcrumb className="flex min-w-0 items-center gap-1 text-ui text-ink-muted">
             {!sidebarOpen && <Icon icon={ChevronRight} size="sm" className="text-ink-faint" />}
-            <span className="inline-flex items-center gap-1.5 px-1 font-medium text-ink-strong">
+            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] font-medium text-ink">
               <Icon icon={LayoutGrid} size="sm" className="text-ink-muted" />
               Herdr 总览
             </span>
@@ -638,7 +640,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
       {/* ── 中：会话语境 ── */}
       {/* 窄屏（手机用户手动「转桌面版」）下这一组可以收缩：模式 chip 让位，模型名截断，
           不能盖住左侧的汉堡键。 */}
-      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5 md:shrink-0 md:border-l md:border-line-faint md:pl-3">
+      <div data-header-group="context" className="flex min-w-0 shrink items-center gap-1.5 md:shrink-0">
         <div className="contents max-md:hidden">
           <ModeBadge />
         </div>
@@ -660,7 +662,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                     // 文案被 mobile-safe-area 当钩子用；百分比在按钮可见文字里，读屏照样念到。
                     ctx ? "上下文占用，点击查看详情" : "用量，点击查看详情"
                   }
-                  className="hidden h-7 items-center gap-2 whitespace-nowrap rounded-field px-2 text-label text-ink-muted transition-colors hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
+                  className="hidden h-6 items-center gap-2 whitespace-nowrap rounded-chip px-2 text-[11.5px] text-ink-muted transition-colors duration-100 hover:bg-surface-hover aria-expanded:bg-surface-hover md:inline-flex"
                 >
                   {ctx ? (
                     <ContextMeter percent={ctx.percent} />
@@ -695,7 +697,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
             type="button"
             aria-label="搜索"
             onClick={() => setSearchOpen(true)}
-            className="hidden h-8 w-44 items-center gap-2 rounded-field border border-line bg-surface px-2.5 text-ui text-ink-faint transition-colors hover:bg-surface-hover hover:text-ink-muted lg:inline-flex"
+            className="mr-1 hidden h-7 w-44 items-center gap-1.5 rounded-field bg-surface-muted px-2.5 text-[12.5px] text-ink-faint shadow-inset-field transition-colors duration-100 hover:text-ink-muted lg:inline-flex"
           >
             <Icon icon={Search} size="sm" />
             <span className="flex-1 text-left">搜索</span>
@@ -718,7 +720,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 type="button"
                 aria-label="更多"
                 data-header-more
-                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink"
+                className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-faint transition-colors duration-150 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink"
               >
                 <Icon icon={Ellipsis} />
               </button>
@@ -821,7 +823,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
           <a
             href="/settings"
             aria-label="设置"
-            className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+            className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-field p-1.5 text-ink-faint transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
           >
             <Icon icon={Settings} />
           </a>
@@ -836,7 +838,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
               setDesktopModeOverride(false);
               window.location.reload();
             }}
-            className="fixed right-1 top-1 z-50 flex h-10 items-center rounded-md border border-line bg-surface px-3 text-sm font-medium text-ink shadow-raise hover:bg-surface-muted"
+            className="fixed right-1 top-1 z-50 flex h-10 items-center rounded-field bg-surface-raised px-3 text-sm font-medium text-ink shadow-pop hover:bg-surface-muted"
           >
             回手机版
           </button>

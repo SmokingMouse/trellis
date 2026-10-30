@@ -33,7 +33,7 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
   if (files.length === 0) return null;
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+    <div className="mt-3 pt-2.5 flex flex-wrap items-center gap-1.5 border-t border-line">
       <span className="text-label text-ink-faint mr-0.5">本轮生成</span>
       {files.map((file) => (
         <button
@@ -41,7 +41,8 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
           type="button"
           onClick={() => openFilePreview(file.absPath)}
           title={file.absPath}
-          className="nodrag inline-flex items-center gap-1.5 min-h-6.5 px-2 rounded-field border border-line bg-surface text-label text-ink-muted hover:bg-surface-hover hover:text-ink transition-colors max-md:min-h-11"
+          // 文件 chip（bui Tool Chips 的 diff chip）：浮起的小按钮 + 等宽文件名，弹入
+          className="nodrag ui-enter-pop inline-flex items-center gap-1.5 min-h-7 px-[9px] rounded-chip bg-surface-raised shadow-btn text-[11.5px] text-ink-muted hover:bg-surface-hover hover:text-ink transition-colors max-md:min-h-11"
         >
           <Icon icon={KIND_ICON[previewKind(file.name)] ?? File} size="sm" className="text-ink-faint" />
           <span className="truncate max-w-48 font-mono">{file.name}</span>
@@ -52,7 +53,7 @@ export function GeneratedFilesBar({ node }: { node: ChatNode }) {
           type="button"
           onClick={() => openReview({ sessionId: node.sessionId, scope: "turn", turnNodeId: node.id })}
           title="审阅这一轮改过的文件的 diff，可逐行评论"
-          className="nodrag inline-flex items-center gap-1.5 min-h-6.5 px-2 rounded-field text-label text-accent-ink hover:bg-surface-hover transition-colors max-md:min-h-11"
+          className="nodrag inline-flex items-center gap-1.5 min-h-7 px-2 rounded-chip text-[11.5px] font-medium text-accent-ink hover:bg-surface-hover transition-colors max-md:min-h-11"
         >
           <Icon icon={FileDiff} size="sm" />
           审阅 {files.length} 个文件改动

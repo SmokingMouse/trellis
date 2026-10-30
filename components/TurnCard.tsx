@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import {
   AtSign,
   Brain,
-  ChevronRight,
+  ChevronDown,
   CircleCheck,
   CircleDot,
   Copy,
@@ -49,6 +49,7 @@ import {
   Icon,
   IconButton,
   Kbd,
+  PixelLoader,
   Spinner,
   StatusDot,
   StopButton,
@@ -176,7 +177,7 @@ export const TurnCard = memo(function TurnCard({
           work nests under the call that spawned it rather than being pulled
           out into a parallel panel. 大会话的 toolCalls 不随载荷下发，展开时
           由 ToolTimeline 自己按需拉取（折叠态用 stats 渲染）。 */}
-      <div className="mt-3 empty:hidden">
+      <div className="mt-4.5 empty:hidden">
         <ToolTimeline
           nodeId={node.id}
           toolCalls={node.toolCalls}
@@ -247,9 +248,10 @@ function RunLine({ node, label: override }: { node: ChatNode; label?: string }) 
     <div
       data-turn-runline=""
       role="status"
-      className="mt-3 flex items-center gap-2 text-ui text-ink-muted"
+      className="mt-3 flex min-h-7 items-center gap-2.5 text-ui font-medium text-ink-muted"
     >
-      <StatusDot tone={waiting ? "warn" : "accent"} />
+      {/* 在干活 = 像素格 loader（bui Loading State）；等你处理 = 琥珀呼吸点 */}
+      {waiting ? <StatusDot tone="attention" /> : <PixelLoader label={null} />}
       {/* 新旧两条叠在同一格里交接；读屏只读当前那条 */}
       <span className="grid min-w-0">
         {shown.prev !== null && (
@@ -275,7 +277,7 @@ function RunLine({ node, label: override }: { node: ChatNode; label?: string }) 
         </span>
       </span>
       {elapsed !== null && (
-        <span className="shrink-0 font-mono text-label tabular-nums text-ink-faint">
+        <span className="shrink-0 font-mono text-[11.5px] font-normal tabular-nums text-ink-faint">
           {formatDuration(elapsed)}
         </span>
       )}
@@ -347,7 +349,8 @@ function TurnToolbar({
   return (
     <div
       data-turn-toolbar=""
-      className="mt-2 -ml-1.5 flex min-h-7 flex-wrap items-center gap-0.5 transition-opacity duration-100 md:pointer-fine:opacity-40 md:pointer-fine:group-hover/turn:opacity-100 md:pointer-fine:focus-within:opacity-100"
+      // 答复脚注（bui .answer-foot）：图标动作常显但退到 ink-faint，悬停才回到正常墨色
+      className="mt-1 -ml-1.5 flex min-h-7 flex-wrap items-center gap-0.5 md:[&_button:not(:hover)]:text-ink-faint"
     >
       {hasResponse && <CopyIconButton text={node.response} />}
       {showBranch && (
@@ -396,7 +399,7 @@ function TurnToolbar({
           createdAt={node.createdAt}
           toolCalls={node.toolCalls}
           isStreaming={false}
-          className="ml-2 max-md:hidden"
+          className="ml-2 text-ink-faint max-md:hidden"
         />
       )}
       <span className="flex-1" />
@@ -589,7 +592,7 @@ function QuestionBlock({
 
   if (editing) {
     return (
-      <div className="rounded-card border border-accent-line bg-surface p-2.5">
+      <div className="rounded-card bg-surface-raised p-2.5 shadow-pop ring-1 ring-accent-line">
         <textarea
           value={text}
           autoFocus
@@ -605,7 +608,7 @@ function QuestionBlock({
             }
           }}
           rows={3}
-          className="w-full resize-none px-1.5 py-1 bg-transparent text-reading text-ink-strong outline-none leading-relaxed"
+          className="w-full resize-none px-1.5 py-1 bg-transparent text-[14.5px] leading-[1.6] text-ink outline-none max-md:text-[15.5px]"
         />
         <div className="flex items-center justify-between gap-2 mt-1.5">
           <span className="text-label text-ink-faint min-w-0 truncate">
@@ -631,15 +634,15 @@ function QuestionBlock({
   }
 
   const questionText = parseNodeRefs(question).text;
+  // 用户消息 = 靠右的气泡（bui Chat）：field 底 + 发丝描边，右下角收成 4px。
+  // 序号 / 未读点仍在正文列左侧的槽位；编辑按钮挂在气泡左边，桌面悬停才出现。
   return (
     <div
       data-turn-question=""
-      className="group/q relative w-full max-w-full min-w-0 rounded-card bg-surface-muted pl-4.5 pr-10 py-2.5"
+      className="group/q relative flex w-full max-w-full min-w-0 items-start justify-end gap-1"
     >
-      {/* 提问的主色竖条：和助手正文一眼分开（强调色点缀，2026-09-29）。 */}
-      <span aria-hidden className="absolute left-1.5 top-2.5 bottom-2.5 w-0.75 rounded-full bg-accent" />
       {/* 左侧槽位：未读点常显；序号 hover / 当前锚点时显示（手机端没有槽位，只留点）。 */}
-      <span className="absolute right-full top-3 mr-2 flex items-center gap-1.5 whitespace-nowrap">
+      <span className="absolute right-full top-2.5 mr-2 flex items-center gap-1.5 whitespace-nowrap">
         {index !== undefined && (
           <span
             className={`font-mono text-nano tabular-nums max-md:hidden transition-opacity ${
@@ -653,16 +656,6 @@ function QuestionBlock({
         )}
         {unread && <StatusDot tone="unread" label="未读" />}
       </span>
-      <div className="text-reading text-ink-strong leading-relaxed whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] min-w-0">
-        {questionText}
-      </div>
-      {/* `@` 引用其他会话 / 节点：正文里的标记剥掉，渲染成可点击的引用卡 */}
-      <NodeRefCards question={question} />
-      {attachments.length > 0 && (
-        <div className="mt-2">
-          <AttachmentPreview attachments={attachments} readOnly />
-        </div>
-      )}
       {!readOnly && (
         <IconButton
           size="sm"
@@ -672,11 +665,23 @@ function QuestionBlock({
             setText(question);
             setEditing(true);
           }}
-          className="absolute right-1.5 top-1.5 md:pointer-fine:opacity-0 md:pointer-fine:group-hover/q:opacity-100 md:pointer-fine:focus-visible:opacity-100"
+          className="mt-1 text-ink-faint md:pointer-fine:opacity-0 md:pointer-fine:group-hover/q:opacity-100 md:pointer-fine:focus-visible:opacity-100"
         >
           <Icon icon={Pencil} size="sm" />
         </IconButton>
       )}
+      <div className="min-w-0 max-w-[82%] rounded-[14px_14px_4px_14px] bg-surface-muted px-[13px] py-[9px] shadow-hairline max-md:max-w-[88%]">
+        <div className="text-[14.5px] leading-[1.6] text-ink whitespace-pre-wrap break-words break-all [overflow-wrap:anywhere] min-w-0 max-md:text-[15.5px]">
+          {questionText}
+        </div>
+        {/* `@` 引用其他会话 / 节点：正文里的标记剥掉，渲染成可点击的引用卡 */}
+        <NodeRefCards question={question} />
+        {attachments.length > 0 && (
+          <div className="mt-2">
+            <AttachmentPreview attachments={attachments} readOnly />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -726,24 +731,24 @@ function ThinkingBlock({ text, answering }: { text: string; answering: boolean }
         aria-expanded={open}
         onClick={() => setUserOpen(!open)}
         title={`思考过程 ${text.length} 字`}
-        className="-ml-1 inline-flex items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted transition-colors max-md:min-h-11"
+        className="-ml-1.5 inline-flex items-center gap-[7px] min-h-7 px-1.5 rounded-field text-ui font-medium text-ink-muted hover:bg-surface-hover transition-colors max-md:min-h-11"
       >
-        <Icon
-          icon={ChevronRight}
-          size="sm"
-          className={`ui-collapse-chevron ${open ? "rotate-90" : ""}`}
-        />
-        <Icon icon={Brain} size="sm" />
+        <Icon icon={Brain} size="sm" className="text-ink-faint" />
         <span className={answering ? undefined : "shimmer-text"}>
           {answering ? "已思考" : "思考中"}
         </span>
-        <span data-turn-thinking-time="" className="font-mono text-label tabular-nums">
+        <span data-turn-thinking-time="" className="font-mono text-[11.5px] font-normal tabular-nums text-ink-faint">
           {formatThinkSeconds(ms, done)}
         </span>
+        <Icon
+          icon={ChevronDown}
+          size="sm"
+          className={`ui-collapse-chevron text-ink-faint ${open ? "" : "-rotate-90"}`}
+        />
       </button>
-      <Collapse open={open} className="ml-2">
+      <Collapse open={open} className="ml-1.5">
         {/* 外边距放在被裁切的内层里，收起时一起压到 0 */}
-        <div className="mt-1.5 pl-3.5 border-l border-line-strong">
+        <div className="mt-1 pl-4 border-l border-line-strong">
           <ThinkingScroll text={text} />
         </div>
       </Collapse>
@@ -756,7 +761,7 @@ function ThinkingBlock({ text, answering }: { text: string; answering: boolean }
 // agent 会让历史节点渲染出一片空白。语义（这轮不是主线人格答的）已经传达到了。
 function MentionChip() {
   return (
-    <div className="mb-2 inline-flex items-center gap-1.5 min-h-6 px-2 rounded-field border border-line text-label text-ink-muted">
+    <div className="mb-2 inline-flex items-center gap-1.5 min-h-5.5 px-[7px] rounded-chip bg-surface-muted shadow-hairline text-[11.5px] text-ink-muted">
       <Icon icon={AtSign} size="sm" className="text-ink-faint" />
       <span>这一轮由 @提及的 Agent 单独作答（主线人格不变）</span>
     </div>
@@ -859,7 +864,7 @@ function ResponseBody({
       ref={bodyRef}
       data-chat-node-id={node.id}
       onClick={onMarkClick}
-      className="md-body mt-3 text-reading text-ink leading-relaxed w-full max-w-full min-w-0"
+      className="md-body mt-3.5 text-reading text-ink leading-[1.72] w-full max-w-full min-w-0"
     >
       {/* S88 @提及：这一轮是外援答的，标出来 —— 否则读者会以为主线人格变了。
           会话级人设（agentScope==='session'）刻意不挂 chip：每张卡都挂一枚是
@@ -980,15 +985,15 @@ function SegmentedResponse({ node }: { node: ChatNode }) {
         // <details> 不受控，与思考折叠同一心智模型。展开后弱化字号/墨色 ——
         // 过程叙述是「它当时在干嘛」，不该和答复争阅读权重。
         <details className="group/pre mb-3">
-          <summary className="-ml-1 inline-flex cursor-pointer select-none items-center gap-1.5 min-h-6.5 px-1 rounded-field text-ui text-ink-faint hover:bg-surface-hover hover:text-ink-muted list-none [&::-webkit-details-marker]:hidden">
-            <Icon
-              icon={ChevronRight}
-              size="sm"
-              className="transition-transform motion-reduce:transition-none group-open/pre:rotate-90"
-            />
+          <summary className="-ml-1.5 inline-flex cursor-pointer select-none items-center gap-[7px] min-h-7 px-1.5 rounded-field text-ui font-medium text-ink-muted hover:bg-surface-hover list-none max-md:min-h-11 [&::-webkit-details-marker]:hidden">
             过程叙述（{preamble.length} 字）
+            <Icon
+              icon={ChevronDown}
+              size="sm"
+              className="text-ink-faint -rotate-90 transition-[rotate] duration-200 motion-reduce:transition-none group-open/pre:rotate-0"
+            />
           </summary>
-          <div className="mt-1.5 ml-2 pl-3.5 border-l border-line-strong text-ui text-ink-muted [&_.md-body]:text-ui">
+          <div className="mt-1 ml-1.5 pl-4 border-l border-line-strong text-ui text-ink-muted [&_.md-body]:text-ui">
             <MarkdownBody cacheKey={`${node.id}:pre`} content={preamble} />
           </div>
         </details>
@@ -1034,7 +1039,7 @@ function ReferenceFullBody({ node }: { node: ChatNode }) {
 
   return (
     <>
-      <div className="mb-3 px-3.5 py-2.5 rounded-card border border-line bg-surface-muted text-ui flex items-start gap-2.5">
+      <div className="mb-3 px-3.5 py-2.5 rounded-card bg-surface-raised shadow-raise text-ui flex items-start gap-2.5">
         <span className="mt-0.5 shrink-0 inline-flex text-ink-faint" aria-hidden>
           {isStreaming ? (
             <Spinner size="sm" label={null} />

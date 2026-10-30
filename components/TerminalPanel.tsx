@@ -377,8 +377,8 @@ export function TerminalPanel() {
     <div
       className={
         pinned
-          ? "hidden md:flex fixed bottom-0 right-0 z-40 flex-col bg-surface-canvas border-t border-line"
-          : "hidden md:flex fixed z-40 flex-col bg-surface-canvas border border-line rounded-lg shadow-overlay overflow-hidden"
+          ? "hidden md:flex fixed bottom-0 right-0 z-40 flex-col bg-surface border-t border-line"
+          : "hidden md:flex fixed z-40 flex-col bg-surface-raised rounded-window shadow-overlay overflow-hidden"
       }
       style={
         pinned
@@ -408,7 +408,7 @@ export function TerminalPanel() {
       {/* 标题栏。**它必须常显** —— 焦点一旦进了 iframe，⌃` 和 Esc 都到不了
           父文档（S70 那套 [data-keys-yield] 对 iframe 无效），所以这一栏上的
           ✕ 是唯一可靠的关法。 */}
-      <div className="shrink-0 flex items-center gap-1 h-8 px-2 border-b border-line-faint bg-surface-canvas">
+      <div className="shrink-0 flex items-center gap-1 h-8 px-2 border-b border-line-faint bg-surface-muted/60">
         {(terminals ?? []).map((t) => (
           <div
             key={t.session}

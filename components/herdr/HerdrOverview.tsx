@@ -72,7 +72,7 @@ export function HerdrOverview({ isMobile }: { isMobile: boolean }) {
   return (
     <main
       data-herdr-overview
-      className="fixed inset-x-0 bottom-0 overflow-y-auto overscroll-contain bg-surface-canvas"
+      className="fixed inset-x-0 bottom-0 overflow-y-auto overscroll-contain bg-surface-canvas md:bg-surface"
       style={
         isMobile
           ? { top: "var(--trellis-header-h)", paddingBottom: "var(--safe-bottom)" }

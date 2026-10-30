@@ -1,5 +1,6 @@
 "use client";
 import { useSessionStore } from "@/stores/sessionStore";
+import { PixelLoader } from "@/components/ui";
 
 // 「不在流式、response 又是空」时该显示什么。
 //
@@ -23,9 +24,9 @@ export function EmptyResponseNotice({
 
   if (mirrorLive) {
     return (
-      <div className="text-ink-faint italic flex items-center gap-2">
-        <span className="w-1.5 h-1.5 bg-positive rounded-full animate-pulse" />
-        CLI 正在生成…（镜像会话，落盘后同步）
+      <div className="flex min-h-7 items-center gap-2.5 text-ui font-medium text-ink-muted">
+        <PixelLoader label={null} />
+        <span className="shimmer-text">CLI 正在生成…（镜像会话，落盘后同步）</span>
       </div>
     );
   }

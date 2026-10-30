@@ -37,7 +37,7 @@ export function TargetChip({
     </>
   );
   return (
-    <div className="mt-2 -mb-1 flex items-center gap-2 px-3 py-1.5 rounded-field border border-accent-line bg-accent-muted text-label text-accent-ink">
+    <div className="mt-2 -mb-1 flex min-h-8 items-center gap-2 px-2.5 py-1 rounded-field bg-accent-muted text-label text-accent-ink ring-1 ring-inset ring-accent-line">
       {typeof icon !== "string" ? (
         <Icon icon={icon} size="sm" />
       ) : LEGACY_ICONS[icon] ? (
@@ -49,7 +49,7 @@ export function TargetChip({
         <button
           type="button"
           onClick={onLabelClick}
-          className="min-w-0 flex-1 text-left truncate hover:underline"
+          className="min-w-0 flex-1 text-left truncate underline-offset-2 hover:underline"
           title="定位到该节点"
         >
           {body}
@@ -66,7 +66,7 @@ export function TargetChip({
         <button
           type="button"
           onClick={onClear}
-          className="shrink-0 inline-flex rounded-sm p-0.5 hover:bg-accent-line/40"
+          className="shrink-0 inline-flex rounded-chip p-1 transition-colors duration-100 hover:bg-accent-line/40"
           title="取消 (Esc)"
           aria-label="取消"
         >

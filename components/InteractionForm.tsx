@@ -8,7 +8,7 @@ import {
   MARKDOWN_REMARK_PLUGINS,
 } from "@/lib/markdown-plugins";
 import { Check, CircleAlert, ListChecks, MessageCircleQuestion, ShieldCheck, type LucideIcon } from "lucide-react";
-import { Button, Icon, SegmentedControl, Textarea, cn, type SegmentOption } from "@/components/ui";
+import { Button, Icon, Pill, SegmentedControl, Textarea, cn, type SegmentOption } from "@/components/ui";
 import type { PendingInteraction } from "@/lib/types";
 import { allowLabel, approvalToolKey, describeToolKey, type ApprovalScope } from "@/lib/approval-rules";
 
@@ -69,8 +69,9 @@ export function InteractionForm({
   );
 }
 
-// 「模型在等你」的容器：描边卡（accent 细描边 + surface 底，不投影、不铺大底）
-// —— 与稿子 .approve 同一语言。头部一行：图标 · 标题 · 工具名标签 · 描述。
+// 「模型在等你」的容器 —— bui Approval Card：浮起的卡片（card 圆角 + 叠层阴影），
+// 头部一行：琥珀标签（图标 · 标题）· 工具名 chip · 描述；正文（CardBody）在下，
+// 动作条（CardFooter）贴底、压一层内凹底色。
 function InteractionShell({
   children,
   icon,
@@ -87,13 +88,15 @@ function InteractionShell({
   return (
     <div
       data-mobile-interaction
-      className="mt-4 rounded-card border border-accent-line bg-surface p-3.5 max-md:p-3"
+      className="ui-enter-up mt-4 overflow-hidden rounded-card bg-surface-raised shadow-raise"
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui text-ink">
-        <Icon icon={icon} className="text-accent" />
-        <span className="font-medium">{title}</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3.5 pt-3 pb-2 text-ui text-ink">
+        <Pill tone="warn" className="h-5 px-[7px] text-[11.5px]">
+          <Icon icon={icon} size="sm" />
+          {title}
+        </Pill>
         {tool && (
-          <span className="rounded-sm border border-line-strong px-1.5 font-mono text-label text-ink">
+          <span className="inline-flex h-5.5 items-center rounded-chip bg-surface-muted px-[7px] font-mono text-[11.5px] text-ink-muted shadow-hairline">
             {tool}
           </span>
         )}
@@ -101,7 +104,21 @@ function InteractionShell({
           <span className="min-w-0 break-words text-ink-muted">{description}</span>
         )}
       </div>
-      <div className="mt-2.5">{children}</div>
+      {children}
+    </div>
+  );
+}
+
+function CardBody({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn("flex flex-col gap-3 px-3.5 pb-3", className)}>{children}</div>;
+}
+
+// 动作条：桌面靠右排、主按钮在最右（DOM 里主按钮在前，md:flex-row-reverse 翻过来，
+// 手机纵向堆叠时主按钮仍在最上）；左侧可放一句提示（加 md:mr-auto）。
+function CardFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-canvas/60 px-3 py-2.5 md:flex-row-reverse md:justify-start max-md:flex-col max-md:items-stretch max-md:gap-3">
+      {children}
     </div>
   );
 }
@@ -115,25 +132,24 @@ function StaleNotice() {
   );
 }
 
-// 选项行的单选 / 多选标记。选中 = accent 实底 + 勾；未选 = 中性描边。
-function ChoiceMark({ active, multi }: { active: boolean; multi: boolean }) {
+// 选项行首的序号徽标（bui .opt .n）。选中 = accent 实底；多选题选中时换成勾，
+// 和单选区分开（题干旁另有「可多选」）。
+function KeyBadge({ n, active, multi }: { n: number; active: boolean; multi: boolean }) {
   return (
     <span
-      className={`mt-0.5 shrink-0 w-4 h-4 flex items-center justify-center border ${
-        multi ? "rounded-sm" : "rounded-full"
-      } ${active ? "bg-accent border-accent text-accent-fg" : "border-line-strong bg-surface"}`}
+      className={`grid size-5 shrink-0 place-items-center rounded-chip font-mono text-nano tabular-nums ${
+        active ? "bg-accent text-accent-fg" : "bg-surface-muted text-ink-muted shadow-hairline"
+      }`}
       aria-hidden
     >
-      {active && <Check size={11} strokeWidth={3} />}
+      {active && multi ? <Check size={12} strokeWidth={3} /> : n}
     </span>
   );
 }
 
 const optionRowClass = (active: boolean) =>
-  `w-full max-md:min-h-11 text-left px-3 py-2 rounded-field border transition-colors flex items-start gap-2.5 disabled:opacity-60 ${
-    active
-      ? "border-accent-line bg-accent-muted"
-      : "border-line bg-surface hover:bg-surface-hover"
+  `flex w-full min-h-[38px] max-md:min-h-11 items-start gap-2.5 px-2 py-[9px] rounded-field text-left transition-colors disabled:opacity-60 ${
+    active ? "bg-accent-muted" : "hover:bg-surface-hover"
   }`;
 
 // ── AskUserQuestion ──────────────────────────────────────────────────────
@@ -215,114 +231,127 @@ function AskUserQuestionForm({
     return <StaleNotice />;
   }
 
+  const total = questions.length;
   return (
-    <div className="flex flex-col gap-4">
-      {questions.map((q, qi) => {
-        const multi = !!q.multiSelect;
-        const chosen = selections[qi] ?? [];
-        return (
-          <div key={qi} className="flex flex-col gap-2">
-            {q.header && (
-              <div className="text-label font-medium text-ink-faint">
-                {q.header}
-              </div>
-            )}
-            <div className="text-body font-medium text-ink-strong">
-              {q.question}
-              {multi && (
-                <span className="ml-1.5 text-ui font-normal text-ink-muted">
-                  （可多选）
-                </span>
-              )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              {(q.options ?? []).map((opt, oi) => {
-                const active = chosen.includes(opt.label);
-                return (
-                  <button
-                    key={oi}
-                    type="button"
-                    data-mobile-target="ask-option"
-                    aria-pressed={active}
-                    disabled={submitting}
-                    onClick={() => toggle(qi, opt.label, multi)}
-                    className={optionRowClass(active)}
-                  >
-                    <ChoiceMark active={active} multi={multi} />
-                    <span className="min-w-0">
-                      <span className="block text-body font-medium text-ink">
-                        {opt.label}
-                      </span>
-                      {opt.description && (
-                        <span className="block text-ui text-ink-muted mt-0.5">
-                          {opt.description}
-                        </span>
-                      )}
+    <>
+      <CardBody className="gap-4">
+        {questions.map((q, qi) => {
+          const multi = !!q.multiSelect;
+          const chosen = selections[qi] ?? [];
+          const options = q.options ?? [];
+          return (
+            <div key={qi} className="flex flex-col gap-1.5">
+              {(q.header || total > 1) && (
+                <div className="flex items-center gap-2 text-label text-ink-faint">
+                  {q.header && <span className="font-medium">{q.header}</span>}
+                  {total > 1 && (
+                    <span className="ml-auto tabular-nums">
+                      {qi + 1} / {total}
                     </span>
-                  </button>
-                );
-              })}
-              {/* 「其他」自定义回答——schema 约定该选项由 UI 提供，模型的
-                  options 里永远没有它。多选下可与预设项叠加。 */}
-              <button
-                type="button"
-                data-mobile-target="ask-option"
-                aria-pressed={!!customOn[qi]}
-                disabled={submitting}
-                onClick={() => toggleCustom(qi, multi)}
-                className={optionRowClass(!!customOn[qi])}
-              >
-                <ChoiceMark active={!!customOn[qi]} multi={multi} />
-                <span className="min-w-0">
-                  <span className="block text-body font-medium text-ink">
-                    其他
-                  </span>
-                  <span className="block text-ui text-ink-muted mt-0.5">
-                    输入自定义回答
-                  </span>
-                </span>
-              </button>
-              {customOn[qi] && (
-                <Textarea
-                  autoFocus
-                  value={customs[qi] ?? ""}
-                  onChange={(e) =>
-                    setCustoms((prev) => ({ ...prev, [qi]: e.target.value }))
-                  }
-                  placeholder="输入你的回答……"
-                  disabled={submitting}
-                  rows={2}
-                  className="resize-y"
-                />
+                  )}
+                </div>
               )}
+              <div className="text-body font-medium text-ink-strong">
+                {q.question}
+                {multi && (
+                  <span className="ml-1.5 text-ui font-normal text-ink-muted">
+                    （可多选）
+                  </span>
+                )}
+              </div>
+              <div className="-mx-2 flex flex-col gap-0.5">
+                {options.map((opt, oi) => {
+                  const active = chosen.includes(opt.label);
+                  return (
+                    <button
+                      key={oi}
+                      type="button"
+                      data-mobile-target="ask-option"
+                      aria-pressed={active}
+                      disabled={submitting}
+                      onClick={() => toggle(qi, opt.label, multi)}
+                      className={optionRowClass(active)}
+                    >
+                      <KeyBadge n={oi + 1} active={active} multi={multi} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13.5px] leading-5 text-ink">
+                          {opt.label}
+                        </span>
+                        {opt.description && (
+                          <span className="block text-label text-ink-faint mt-0.5">
+                            {opt.description}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+                {/* 「其他」自定义回答——schema 约定该选项由 UI 提供，模型的
+                    options 里永远没有它。多选下可与预设项叠加。 */}
+                <button
+                  type="button"
+                  data-mobile-target="ask-option"
+                  aria-pressed={!!customOn[qi]}
+                  disabled={submitting}
+                  onClick={() => toggleCustom(qi, multi)}
+                  className={optionRowClass(!!customOn[qi])}
+                >
+                  <KeyBadge n={options.length + 1} active={!!customOn[qi]} multi={multi} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13.5px] leading-5 text-ink">
+                      其他
+                    </span>
+                    <span className="block text-label text-ink-faint mt-0.5">
+                      输入自定义回答
+                    </span>
+                  </span>
+                </button>
+                {customOn[qi] && (
+                  <div className="px-2 pt-1">
+                    <Textarea
+                      autoFocus
+                      value={customs[qi] ?? ""}
+                      onChange={(e) =>
+                        setCustoms((prev) => ({ ...prev, [qi]: e.target.value }))
+                      }
+                      placeholder="输入你的回答……"
+                      disabled={submitting}
+                      rows={2}
+                      className="resize-y"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </CardBody>
 
-      {stale ? (
-        <StaleNotice />
-      ) : (
-        <div className="flex items-center gap-3 max-md:flex-col max-md:items-stretch">
-          <Button
-            type="button"
-            data-mobile-target="ask-submit"
-            variant="primary"
-            className="max-md:w-full"
-            onClick={onSubmit}
-            disabled={!allAnswered}
-            loading={submitting}
-          >
-            提交
-          </Button>
-          {!allAnswered && (
-            <span className="text-ui text-ink-muted">
-              请回答全部问题
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+      <CardFooter>
+        {stale ? (
+          <StaleNotice />
+        ) : (
+          <>
+            <Button
+              type="button"
+              data-mobile-target="ask-submit"
+              variant="primary"
+              className="max-md:w-full"
+              onClick={onSubmit}
+              disabled={!allAnswered}
+              loading={submitting}
+            >
+              提交
+            </Button>
+            {!allAnswered && (
+              <span className="text-ui text-ink-muted md:mr-auto">
+                请回答全部问题
+              </span>
+            )}
+          </>
+        )}
+      </CardFooter>
+    </>
   );
 }
 
@@ -392,64 +421,66 @@ function PermissionForm({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      {command ? (
-        <pre className="text-ui font-mono leading-relaxed whitespace-pre-wrap break-all rounded-field border border-line bg-surface-muted px-3 py-2 max-h-64 overflow-y-auto text-ink">
-          {command}
-        </pre>
-      ) : (
-        inputJson &&
-        inputJson !== "{}" && (
-          <pre className="text-ui font-mono leading-relaxed whitespace-pre-wrap break-all rounded-field border border-line bg-surface-muted px-3 py-2 max-h-64 overflow-y-auto text-ink-muted">
-            {inputJson}
+    <>
+      <CardBody>
+        {command ? (
+          <pre className="text-[12.5px] font-mono leading-[1.6] whitespace-pre-wrap break-all rounded-field bg-surface-muted shadow-hairline px-3 py-2 max-h-64 overflow-y-auto text-ink">
+            {command}
           </pre>
-        )
-      )}
+        ) : (
+          inputJson &&
+          inputJson !== "{}" && (
+            <pre className="text-[12.5px] font-mono leading-[1.6] whitespace-pre-wrap break-all rounded-field bg-surface-muted shadow-hairline px-3 py-2 max-h-64 overflow-y-auto text-ink-muted">
+              {inputJson}
+            </pre>
+          )
+        )}
 
-      {stale ? (
-        <StaleNotice />
-      ) : (
-        <>
-          {showDeny && (
-            <Textarea
-              autoFocus
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="拒绝理由（可选）— 会传给模型，让它换个做法"
-              disabled={submitting !== null}
-              rows={2}
-              className="resize-y"
-            />
-          )}
-          {toolKey && (
-            <div data-mobile-target="permission-scope" className="flex flex-col gap-1.5">
-              <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch">
-                <span className="text-label text-ink-muted">放行范围</span>
-                <SegmentedControl
-                  aria-label="放行范围"
-                  value={scope}
-                  onValueChange={setScope}
-                  options={SCOPE_OPTIONS}
-                  // 手机整宽三等分（每档 44px 高），桌面按内容宽度紧凑排在标签右侧。
-                  className="max-md:flex max-md:w-full max-md:[&>button]:flex-1 [&>button]:whitespace-nowrap"
-                />
-              </div>
-              {scope !== "once" && (
-                <p
-                  data-approval-rule-preview
-                  className={cn("text-label", scope === "global" ? "text-warn-ink" : "text-ink-muted")}
-                >
-                  将放行 {describeToolKey(toolKey)}
-                  {scope === "session"
-                    ? "（仅本会话，会话删除即失效）"
-                    : "（所有需审批的会话，可在 设置 › 已授权规则 撤销）"}
-                </p>
-              )}
+        {!stale && showDeny && (
+          <Textarea
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="拒绝理由（可选）— 会传给模型，让它换个做法"
+            disabled={submitting !== null}
+            rows={2}
+            className="resize-y"
+          />
+        )}
+        {!stale && toolKey && (
+          <div data-mobile-target="permission-scope" className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch">
+              <span className="text-label text-ink-muted">放行范围</span>
+              <SegmentedControl
+                aria-label="放行范围"
+                value={scope}
+                onValueChange={setScope}
+                options={SCOPE_OPTIONS}
+                // 手机整宽三等分（每档 44px 高），桌面按内容宽度紧凑排在标签右侧。
+                className="max-md:flex max-md:w-full max-md:[&>button]:flex-1 [&>button]:whitespace-nowrap"
+              />
             </div>
-          )}
-          {/* 权重铁律：允许 = 主按钮（最宽，文案随作用域）；拒绝 = 描边，点后出理由
-              框再确认。手机端纵向堆叠，主按钮整宽、加高在最上。 */}
-          <div className="flex flex-wrap items-center gap-2 max-md:flex-col max-md:items-stretch max-md:gap-3">
+            {scope !== "once" && (
+              <p
+                data-approval-rule-preview
+                className={cn("text-label", scope === "global" ? "text-warn-ink" : "text-ink-muted")}
+              >
+                将放行 {describeToolKey(toolKey)}
+                {scope === "session"
+                  ? "（仅本会话，会话删除即失效）"
+                  : "（所有需审批的会话，可在 设置 › 已授权规则 撤销）"}
+              </p>
+            )}
+          </div>
+        )}
+      </CardBody>
+      {/* 权重铁律：允许 = 主按钮（最宽，文案随作用域）；拒绝 = 描边，点后出理由
+          框再确认。手机端纵向堆叠，主按钮整宽、加高在最上。 */}
+      <CardFooter>
+        {stale ? (
+          <StaleNotice />
+        ) : (
+          <>
             <Button
               type="button"
               variant="primary"
@@ -486,10 +517,10 @@ function PermissionForm({
                 拒绝
               </Button>
             )}
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </CardFooter>
+    </>
   );
 }
 
@@ -528,36 +559,38 @@ function ExitPlanModeForm({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      {plan && (
-        <div className="md-body text-body text-ink leading-relaxed max-h-96 overflow-y-auto rounded-field border border-line bg-surface-muted px-4 py-3">
-          <ReactMarkdown
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-            components={MD_COMPONENTS}
-            urlTransform={MD_URL_TRANSFORM}
-          >
-            {plan}
-          </ReactMarkdown>
-        </div>
-      )}
+    <>
+      <CardBody>
+        {plan && (
+          <div className="md-body text-body text-ink leading-relaxed max-h-96 overflow-y-auto rounded-field bg-surface-muted shadow-hairline px-4 py-3">
+            <ReactMarkdown
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+              components={MD_COMPONENTS}
+              urlTransform={MD_URL_TRANSFORM}
+            >
+              {plan}
+            </ReactMarkdown>
+          </div>
+        )}
 
-      {stale ? (
-        <StaleNotice />
-      ) : (
-        <>
-          {showDeny && (
-            <Textarea
-              autoFocus
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="拒绝理由（可选）— 会传给模型，让它调整计划"
-              disabled={submitting !== null}
-              rows={3}
-              className="resize-y"
-            />
-          )}
-          <div className="flex items-center gap-2 max-md:flex-col max-md:items-stretch max-md:gap-3">
+        {!stale && showDeny && (
+          <Textarea
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="拒绝理由（可选）— 会传给模型，让它调整计划"
+            disabled={submitting !== null}
+            rows={3}
+            className="resize-y"
+          />
+        )}
+      </CardBody>
+      <CardFooter>
+        {stale ? (
+          <StaleNotice />
+        ) : (
+          <>
             <Button
               type="button"
               data-mobile-target="plan-allow"
@@ -593,9 +626,9 @@ function ExitPlanModeForm({
                 拒绝
               </Button>
             )}
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </CardFooter>
+    </>
   );
 }

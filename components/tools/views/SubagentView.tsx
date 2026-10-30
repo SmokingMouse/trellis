@@ -23,26 +23,26 @@ export function SubagentView({
   return (
     <>
       {meta.prompt && (
-        <details className="px-3 pt-1 pb-0.5">
+        <details className="pl-1 pr-1 pt-1 pb-0.5">
           <summary className="cursor-pointer select-none text-nano uppercase tracking-wider text-ink-faint hover:text-ink-muted">
             交给它的任务
           </summary>
-          <pre className="mt-1 text-label font-mono whitespace-pre-wrap break-words bg-surface-canvas border border-line rounded px-2 py-1.5 max-h-60 overflow-auto">
+          <pre className="mt-1 text-[11.5px] leading-[1.7] font-mono whitespace-pre-wrap break-words rounded-field bg-surface-muted text-ink-muted px-2.5 py-1.5 max-h-60 overflow-auto">
             {meta.prompt}
           </pre>
         </details>
       )}
 
       {node.children.length > 0 ? (
-        <div className="divide-y divide-line-faint">{children}</div>
+        <div>{children}</div>
       ) : (
-        <div className="px-3 py-1 text-label text-ink-faint italic">
+        <div className="pl-1 pr-1 py-1 text-label text-ink-faint italic">
           {node.running ? "还没开始调工具…" : "没有调用工具"}
         </div>
       )}
 
       {(node.report || node.call.stderr) && (
-        <div className="px-3 pt-1 pb-2 space-y-2">
+        <div className="pl-1 pr-1 pt-1 pb-2 space-y-2">
           {node.report && (
             <Section label="它交回的报告">
               <OutputView text={node.report} />

@@ -102,19 +102,15 @@ export function ModePicker() {
       <div
         role="radiogroup"
         aria-label="Context mode"
-        className="inline-flex h-7 max-md:h-12 max-md:w-full rounded-md border border-line-strong bg-surface overflow-hidden shrink-0"
+        // bui segmented：surface-muted 凹槽轨道，选中段浮起（surface-raised + shadow-btn），文字取模式色
+        className="inline-flex h-7 max-md:h-12 max-md:w-full gap-0.5 rounded-full bg-surface-muted p-0.5 shadow-inset-field shrink-0"
       >
         {OPTIONS.map((opt) => {
           const active = mode === opt.id;
           const Icon = ICONS[opt.id];
           const style = modeStyle(opt.id);
-          const activeColor =
-            opt.id === "chat"
-              ? // chat 的中性淡底贴着外层 surface 对比不足（历史：muted 灰
-                // 对纯白底近乎不可见），补一圈 inset ring 给它与 project
-                // 同级的视觉重量；色值全走 mode-chat token。
-                `${style.activeBg} ${style.text} ring-1 ring-inset ring-mode-chat-line-strong/40`
-              : `${style.activeBg} ${style.text}`;
+          // 选中段统一浮起；模式身份由图标 + mode-* 文字色承担（色值全走 mode token）。
+          const activeColor = `bg-surface-raised shadow-btn ${style.text}`;
           return (
             <button
               key={opt.id}
@@ -123,10 +119,10 @@ export function ModePicker() {
               aria-checked={active}
               title={opt.title}
               onClick={() => handleSelect(opt.id)}
-              className={`px-2 max-md:flex-1 max-md:justify-center text-label font-medium transition-colors inline-flex items-center gap-1.5 border-l border-line-strong first:border-l-0 ${
+              className={`press px-2.5 max-md:flex-1 max-md:justify-center rounded-full text-[12.5px] font-medium transition-[background-color,color,box-shadow] duration-150 ease-out inline-flex items-center gap-1.5 ${
                 active
                   ? activeColor
-                  : "text-ink-muted hover:bg-surface-muted"
+                  : "text-ink-muted hover:text-ink"
               }`}
             >
               <Icon />
@@ -152,10 +148,10 @@ export function ModePicker() {
           type="button"
           onClick={() => setRequireApproval(!requireApproval)}
           title={approval.title}
-          className={`inline-flex items-center gap-1.5 h-7 max-md:min-h-11 max-md:w-full max-md:justify-center px-2 rounded-md border text-label font-medium transition-colors ${
+          className={`press inline-flex items-center gap-1.5 h-7 max-md:min-h-11 max-md:w-full max-md:justify-center px-2.5 rounded-full text-[12.5px] font-medium transition-colors duration-100 ${
             requireApproval
-              ? "border-accent-line bg-accent-muted text-accent-ink"
-              : "border-line-strong bg-surface text-ink-faint hover:bg-surface-muted"
+              ? "bg-accent-muted text-accent-ink ring-1 ring-inset ring-accent-line"
+              : "bg-surface-raised text-ink-muted shadow-btn hover:bg-surface-hover hover:text-ink"
           }`}
         >
           <Icon icon={approval.icon === "shield" ? ShieldCheck : Zap} size="sm" />

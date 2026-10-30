@@ -111,7 +111,7 @@ function CardModal({
               }}
               onKeyDown={trapTabKey}
               className={cn(
-                "w-full overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay outline-none ui-enter-layer",
+                "w-full overflow-hidden rounded-window bg-surface-raised shadow-overlay outline-none ui-enter-layer",
                 size === "full" ? "h-[calc(100%-2rem)]" : size === "lg" ? "max-w-2xl" : "max-w-xl",
                 panelClassName,
               )}
@@ -236,7 +236,7 @@ function SheetModal({
                 restoreFocus(opener);
               }}
               onKeyDown={trapTabKey}
-              className="ui-sheet relative flex max-h-full w-full flex-col rounded-t-sheet border-t border-line bg-surface shadow-overlay outline-none"
+              className="ui-sheet relative flex max-h-full w-full flex-col rounded-t-sheet border-t border-line bg-surface-raised shadow-overlay outline-none"
               style={{
                 paddingBottom: "var(--safe-bottom)",
                 paddingLeft: "var(--safe-left)",

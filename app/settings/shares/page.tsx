@@ -284,9 +284,9 @@ export default function SharesSettingsPage() {
         : "指定";
 
   const listSkeleton = (
-    <div role="status" aria-label="加载中" className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+    <div role="status" aria-label="加载中" className="rounded-card bg-surface-raised shadow-raise divide-y divide-line">
       {[0, 1].map((i) => (
-        <div key={i} className="px-4 py-3 flex flex-col gap-2">
+        <div key={i} className="px-3 py-3 flex flex-col gap-2">
           <Skeleton className="h-3.5 w-2/5" />
           <Skeleton className="h-3 w-3/5" />
         </div>
@@ -315,7 +315,7 @@ export default function SharesSettingsPage() {
       />
 
       {/* 永久明示安全警示卡片 */}
-      <div className="rounded-card border border-warn-line bg-warn-muted px-3.5 py-3 text-ui text-warn-ink flex items-start gap-2.5">
+      <div className="ui-enter-up rounded-card border border-warn-line bg-warn-muted px-3.5 py-3 text-ui text-warn-ink flex items-start gap-2.5">
         <Icon icon={TriangleAlert} className="mt-0.5" />
         <div className="leading-relaxed">
           <span className="font-semibold">安全须知：共享 = 交出。</span>
@@ -329,7 +329,7 @@ export default function SharesSettingsPage() {
           icon={Unplug}
           title="单人版不提供共享池"
           description="模型与凭证共享只在经多租户网关访问时可用；当前是直连的单人版。"
-          className="rounded-card border border-line"
+          className="rounded-card bg-surface-raised shadow-raise"
         />
       )}
 
@@ -345,10 +345,10 @@ export default function SharesSettingsPage() {
       {gatewayError === null && (
         <>
           {/* Section 1: 可用共享 */}
-          <section>
+          <section className="ui-enter-up" style={{ animationDelay: "60ms" }}>
             <div className="mb-2">
               <h2 className="text-ui font-semibold text-ink-strong">可用共享（他人发布）</h2>
-              <p className="text-label text-ink-muted">其他成员共享给你的 Claude Token 或 API 端点</p>
+              <p className="text-label text-ink-faint">其他成员共享给你的 Claude Token 或 API 端点</p>
             </div>
 
             {loading && !data ? (
@@ -359,16 +359,16 @@ export default function SharesSettingsPage() {
                 icon={Share2}
                 title="还没有对你可见的共享"
                 description="其他成员发布并对你可见后，会出现在这里。"
-                className="rounded-card border border-line"
+                className="rounded-card bg-surface-raised shadow-raise"
               />
             ) : (
-              <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+              <div className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
                 {data?.available.map((item) => {
                   const busy = actionBusyId === item.id;
                   return (
                     <div
                       key={item.id}
-                      className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="min-h-[46px] px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors duration-100 hover:bg-surface-hover"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -378,11 +378,11 @@ export default function SharesSettingsPage() {
                           </Badge>
                           {item.subscribed && <Badge variant="positive">已订阅</Badge>}
                         </div>
-                        <div className="text-label text-ink-muted mt-1 flex items-center gap-x-2 flex-wrap">
+                        <div className="text-label text-ink-faint mt-0.5 flex items-center gap-x-2 flex-wrap">
                           <span>发布者 {item.owner}</span>
-                          <span className="text-ink-faint">·</span>
+                          <span aria-hidden>·</span>
                           <span>可见范围 {visibilityText(item.visibility, false)}</span>
-                          <span className="text-ink-faint">·</span>
+                          <span aria-hidden>·</span>
                           <span className="tabular-nums">{item.subscriberCount} 人订阅</span>
                         </div>
                       </div>
@@ -411,10 +411,10 @@ export default function SharesSettingsPage() {
           </section>
 
           {/* Section 2: 我发布的 */}
-          <section>
+          <section className="ui-enter-up" style={{ animationDelay: "120ms" }}>
             <div className="mb-2">
               <h2 className="text-ui font-semibold text-ink-strong">我发布的共享</h2>
-              <p className="text-label text-ink-muted">你提供给团队成员使用的凭证（凭证明文绝不回显）</p>
+              <p className="text-label text-ink-faint">你提供给团队成员使用的凭证（凭证明文绝不回显）</p>
             </div>
 
             {loading && !data ? (
@@ -431,16 +431,16 @@ export default function SharesSettingsPage() {
                     发布共享
                   </Button>
                 }
-                className="rounded-card border border-line"
+                className="rounded-card bg-surface-raised shadow-raise"
               />
             ) : (
-              <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+              <div className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
                 {data?.published.map((item) => {
                   const busy = actionBusyId === item.id;
                   return (
                     <div
                       key={item.id}
-                      className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="min-h-[46px] px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors duration-100 hover:bg-surface-hover"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -449,9 +449,9 @@ export default function SharesSettingsPage() {
                             {item.type === "claude-token" ? "Claude Token" : "API 端点"}
                           </Badge>
                         </div>
-                        <div className="text-label text-ink-muted mt-1 flex items-center gap-x-2 flex-wrap">
+                        <div className="text-label text-ink-faint mt-0.5 flex items-center gap-x-2 flex-wrap">
                           <span>{visibilityText(item.visibility, true)}</span>
-                          <span className="text-ink-faint">·</span>
+                          <span aria-hidden>·</span>
                           <span className="tabular-nums">{item.subscriberCount} 人订阅</span>
                         </div>
                       </div>
@@ -535,10 +535,10 @@ export default function SharesSettingsPage() {
                       role="radio"
                       aria-checked={on}
                       onClick={() => setShareType(opt.value)}
-                      className={`p-3 rounded-card border text-left transition-colors duration-100 ${
+                      className={`p-3 rounded-card border text-left transition-[background-color,border-color,box-shadow] duration-100 ${
                         on
                           ? "border-accent-line bg-accent-muted text-accent-ink"
-                          : "border-line bg-surface hover:bg-surface-hover text-ink"
+                          : "border-transparent bg-surface-raised shadow-btn hover:bg-surface-hover text-ink"
                       }`}
                     >
                       <div className="text-ui font-semibold flex items-center gap-1.5">
@@ -554,7 +554,7 @@ export default function SharesSettingsPage() {
 
             {/* Type 1: Claude Token */}
             {shareType === "claude-token" && (
-              <div className="rounded-card border border-line p-3.5 flex flex-col gap-2">
+              <div className="rounded-card bg-surface-canvas shadow-hairline p-3.5 flex flex-col gap-2">
                 <FormField label="OAuth Token" required>
                   <Input
                     type="password"
@@ -574,7 +574,7 @@ export default function SharesSettingsPage() {
 
             {/* Type 2: API Endpoint */}
             {shareType === "endpoint" && (
-              <div className="rounded-card border border-line p-3.5 flex flex-col gap-3">
+              <div className="rounded-card bg-surface-canvas shadow-hairline p-3.5 flex flex-col gap-3">
                 <div className="grid sm:grid-cols-2 gap-3">
                   <FormField label="服务商名称" required>
                     <Input

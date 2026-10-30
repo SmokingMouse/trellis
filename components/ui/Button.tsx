@@ -22,19 +22,21 @@ import { Spinner } from "./Spinner";
 // pointer: coarse）给 0.97 按压 + 弹簧回弹，外加 active 底色。
 
 export const buttonVariants = cva(
-  "press inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-field font-medium select-none transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
+  "press inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-field font-medium select-none transition-[background-color,color,box-shadow] duration-100 disabled:cursor-not-allowed disabled:opacity-45 max-md:min-h-11 max-md:min-w-11",
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-fg hover:bg-accent-strong active:bg-accent-strong",
-        secondary: "border border-line-strong bg-surface text-ink hover:bg-surface-hover active:bg-surface-hover",
+        primary: "bg-accent text-accent-fg shadow-primary hover:bg-accent-strong active:bg-accent-strong",
+        /** 墨色实底主按钮（bui Continue）：页面级主操作，比 accent 更沉 */
+        ink: "bg-ink text-ink-inverse shadow-primary hover:bg-ink/88 active:bg-ink/88",
+        secondary: "bg-surface-raised text-ink shadow-btn hover:bg-surface-hover active:bg-surface-hover",
         ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink active:bg-surface-hover active:text-ink",
         danger: "border border-danger-line text-danger-ink hover:bg-danger-muted active:bg-danger-muted",
-        "danger-solid": "bg-danger text-accent-fg hover:bg-danger-strong active:bg-danger-strong",
+        "danger-solid": "bg-danger text-accent-fg shadow-primary hover:bg-danger-strong active:bg-danger-strong",
         link: "text-accent-ink underline-offset-2 hover:underline",
       },
       size: {
-        sm: "min-h-6.5 px-2 text-label",
+        sm: "min-h-6.5 rounded-[7px] px-2.5 text-label",
         md: "min-h-8 px-3 text-ui",
         icon: "min-h-8 min-w-8 px-0 text-ui",
       },

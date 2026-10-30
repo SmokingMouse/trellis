@@ -831,7 +831,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
     // floating mid-screen instead of docked at the bottom.
     <div
       data-safe-area="linear-thread"
-      className="fixed inset-0 pt-[var(--trellis-header-h)] md:pt-[5.25rem] flex flex-col bg-surface-canvas"
+      className="fixed inset-0 pt-[var(--trellis-header-h)] md:pt-[5.25rem] flex flex-col bg-surface-canvas md:bg-surface"
       data-active-session-id={session?.id}
       data-active-node-id={activeNodeId ?? ""}
       // S1 P1: bottom 让出终端面板的高度。--trellis-term-h 由 TerminalPanel
@@ -1004,7 +1004,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
                   // Faint rule between turns so where one answer ends is
                   // visible without bringing card frames back. 手机上减线：
                   // 轮次之间只靠间距分开（用户消息自带浅灰块，足够当分隔）。
-                  className={`group/turn scroll-mt-3 py-4 max-md:py-5 outline-none min-w-0 max-w-full${idx > 0 && !isCompacted ? " md:border-t md:border-line" : ""}`}
+                  className={`group/turn scroll-mt-3 pb-7 max-md:pb-6 outline-none min-w-0 max-w-full ${idx > 0 && !isCompacted ? "pt-6 max-md:pt-4 md:border-t md:border-line" : "pt-1"}`}
                 >
                   <TurnCard
                     node={node}
@@ -1083,7 +1083,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
           data-jump-to-bottom
           onClick={jumpToBottom}
           aria-label={tipStreamingId ? "回到底部，正在生成" : "回到底部"}
-          className="absolute right-4 md:right-8 z-30 flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface-raised/95 px-3 text-ui text-ink shadow-md backdrop-blur transition-[bottom,background-color] duration-200 motion-reduce:transition-none hover:bg-surface-hover max-md:h-11 max-md:px-3.5"
+          className="absolute right-4 md:right-8 z-30 flex h-9 items-center gap-1.5 rounded-full bg-surface-raised/95 px-3 text-ui text-ink shadow-pop backdrop-blur transition-[bottom,background-color] duration-200 motion-reduce:transition-none hover:bg-surface-hover max-md:h-11 max-md:px-3.5"
           // 输入框随下滑收起时浮钮落到底边，不跟着消失。
           style={{
             bottom: composerIsHidden
@@ -1101,7 +1101,7 @@ export function LinearThreadView({ isMobile }: { isMobile: boolean }) {
         ref={composerRef}
         data-safe-area="linear-composer"
         data-composer-hidden={composerIsHidden ? "true" : "false"}
-        className={`shrink-0 z-20 bg-surface-canvas/95 transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:border-t max-md:border-line max-md:backdrop-blur ${
+        className={`shrink-0 z-20 bg-surface-canvas/95 md:bg-surface/95 transition-transform duration-200 motion-reduce:transition-none max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:border-t max-md:border-line max-md:backdrop-blur ${
           composerIsHidden ? "max-md:translate-y-full max-md:pointer-events-none" : "translate-y-0"
         }`}
         style={{

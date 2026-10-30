@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Check, ChevronsUpDown, Server, Settings2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,10 +21,14 @@ import type { GwNode } from "@/lib/gw-types";
 // Next 返回 404，这里静默不渲染，单机用户看不到多余的东西。
 // 切换 = 整页导航到 /__gw/go/<node>/：换的是整个后端，客户端状态必须清干净；
 // 落到对方首页而不是同路径——会话 id 只在各自机器上有意义。
+//
+// 形态照原型 .machine（docs/ui-redesign/mockups/08-beautiful-ui.html）：墨色 logo 方块 +
+// 机器名 + 一行小字状态（在线点带光晕），右侧上下箭头；菜单里每台机器一行（方块 + 名 + 小字）。
+// `fallback`：没有远端机器（或还没拉到列表）时渲染它——桌面侧栏顶部用来放品牌 / 回首页。
 
 const POLL_MS = 30_000;
 
-export function NodeSwitcher() {
+export function NodeSwitcher({ fallback = null }: { fallback?: ReactNode } = {}) {
   const [nodes, setNodes] = useState<GwNode[] | null>(null);
 
   const load = useCallback((): Promise<void> => {
@@ -39,7 +43,7 @@ export function NodeSwitcher() {
     return () => clearInterval(id);
   }, [load]);
 
-  if (!nodes || !nodes.some((n) => n.kind === "remote")) return null;
+  if (!nodes || !nodes.some((n) => n.kind === "remote")) return <>{fallback}</>;
   const current = nodes.find((n) => n.current) ?? nodes[0];
 
   return (
@@ -49,14 +53,20 @@ export function NodeSwitcher() {
           type="button"
           data-node-switcher
           aria-label={`当前机器：${current.name}，点击切换`}
-          className="flex w-full min-h-8 items-center gap-2 rounded-field border border-line bg-surface px-2 text-ui text-ink transition-colors hover:bg-surface-hover max-md:min-h-11"
+          className="press flex h-9 w-full min-w-0 items-center gap-2 rounded-field px-2 text-left text-ink transition-colors duration-100 hover:bg-surface-hover aria-expanded:bg-surface-hover max-md:h-auto max-md:min-h-11"
         >
-          <StatusDot tone={current.online ? "positive" : "neutral"} />
-          <span className="text-label text-ink-muted">机器</span>
-          <span className="min-w-0 flex-1 truncate text-left font-mono font-medium text-ink-strong">
-            {current.name}
+          <MachineTile />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[14px] font-medium leading-tight text-ink">{current.name}</span>
+            <span className="flex items-center gap-1.5 text-[11.5px] leading-tight text-ink-faint">
+              <StatusDot tone={current.online ? "positive" : "neutral"} />
+              <span className="truncate">
+                {current.online ? "在线" : "离线"}
+                {current.kind === "home" ? " · hub 本机" : ""}
+              </span>
+            </span>
           </span>
-          <Icon icon={ChevronsUpDown} size="sm" className="text-ink-faint" />
+          <Icon icon={ChevronsUpDown} size="sm" className="shrink-0 text-ink-faint" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
@@ -65,7 +75,8 @@ export function NodeSwitcher() {
           <DropdownMenuItem
             key={node.name}
             disabled={!node.online && !node.current}
-            icon={<StatusDot tone={node.online ? "positive" : "neutral"} />}
+            className="h-10 max-md:h-auto"
+            icon={<MachineTile muted={!node.current} online={node.online} />}
             shortcut={
               node.current ? (
                 <Icon icon={Check} size="sm" className="text-accent-ink" />
@@ -79,7 +90,7 @@ export function NodeSwitcher() {
               if (!node.current) window.location.href = `/__gw/go/${encodeURIComponent(node.name)}/`;
             }}
           >
-            <span className="font-mono">{node.name}</span>
+            <span className="font-medium">{node.name}</span>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
@@ -93,5 +104,22 @@ export function NodeSwitcher() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// 机器方块：当前机器 = 墨色实底；菜单里的其它机器 = muted 底 + 发丝环，在线时角上一颗绿点。
+function MachineTile({ muted = false, online = true }: { muted?: boolean; online?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`relative grid size-5.5 shrink-0 place-items-center rounded-chip ${
+        muted ? "bg-surface-muted text-ink-muted shadow-hairline" : "bg-ink text-ink-inverse"
+      }`}
+    >
+      <Icon icon={Server} size="sm" className="size-3.5" />
+      {muted && online && (
+        <span className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-positive ring-2 ring-surface-raised" />
+      )}
+    </span>
   );
 }

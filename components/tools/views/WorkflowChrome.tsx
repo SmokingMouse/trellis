@@ -133,9 +133,11 @@ export function WorkflowHead({
   const current = node.running && live ? currentStep(vm.phases) : null;
   return (
     <>
-      <ToolIcon name="workflow" className="text-ink-faint" />
+      <span className="grid size-4 shrink-0 place-items-center text-ink-faint">
+        <ToolIcon name="workflow" />
+      </span>
       <span
-        className="shrink-0 min-w-11 max-w-60 truncate font-medium text-ink"
+        className="shrink-0 min-w-11 max-w-60 truncate text-[12.5px] font-medium text-ink"
         title={`Workflow · ${name}`}
       >
         {name}

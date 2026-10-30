@@ -548,7 +548,9 @@ ab eval --stdin <<'JS'
   const cr = context?.getBoundingClientRect();
   assert(cr && cr.width > 0 && cr.right <= rects['添加附件'].left + 1, `desktop mode/model context group missing or misplaced ${JSON.stringify(cr?.toJSON?.())}`);
   const rr = rail.getBoundingClientRect();
-  assert(Math.abs(rr.bottom - innerHeight) <= 1, `desktop Composer not docked: bottom=${rr.bottom} viewport=${innerHeight}`);
+  // 桌面 Composer 贴浮起主窗的底（2026-10-30 视觉改版，主窗四周 8px）
+  const win = document.querySelector('[data-app-window-backdrop]')?.getBoundingClientRect();
+  assert(win && Math.abs(rr.bottom - win.bottom) <= 1, `desktop Composer not docked: bottom=${rr.bottom} window bottom=${win?.bottom}`);
   assert(rr.width >= 600 && rr.right <= innerWidth + 0.5, `desktop Composer width=${rr.width} right=${rr.right}`);
   assert(rr.height >= 56 && rr.height <= 200, `desktop Composer height=${rr.height}`);
   const font = parseFloat(getComputedStyle(input).fontSize);

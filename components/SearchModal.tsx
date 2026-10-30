@@ -231,11 +231,12 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       size="lg"
       closeOnEsc={false}
       title="搜索"
-      panelClassName="flex flex-col max-h-[80vh]"
+      // 命令面板形态（原型 .palette）：桌面贴在视口上方 14vh 处而不是正中，结果多了只往下长
+      panelClassName="flex flex-col max-h-[80vh] md:self-start md:mt-[14vh] md:max-h-[min(80vh,560px)]"
     >
       {/* Input */}
-      <div className="flex items-center gap-2.5 px-4 min-h-12 border-b border-line">
-        <Icon icon={Search} className="text-ink-faint" />
+      <div className="flex items-center gap-2.5 px-4 min-h-[50px] border-b border-line">
+        <Icon icon={Search} className="shrink-0 text-ink-faint" />
         <input
           ref={inputRef}
           value={query}
@@ -243,14 +244,14 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           onKeyDown={onInputKey}
           placeholder="搜索会话里的提问、回复、参考材料和笔记…"
           aria-label="搜索"
-          className="flex-1 min-w-0 bg-transparent outline-none text-body text-ink-strong placeholder:text-ink-faint"
+          className="flex-1 min-w-0 bg-transparent outline-none text-[15px] text-ink placeholder:text-ink-faint"
         />
         {loading ? <Spinner size="sm" label="搜索中" /> : null}
         <Kbd>Esc</Kbd>
       </div>
 
       {/* Facets */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-line-faint">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
         <SegmentedControl
           size="sm"
           aria-label="按会话类型筛选"
@@ -261,7 +262,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Results */}
-      <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
+      <div ref={listRef} className="flex-1 overflow-y-auto p-1.5">
         {!debounced && (
           <EmptyState
             compact
@@ -293,7 +294,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
           />
         )}
         {filtered.map((r, ri) => (
-          <div key={r.sessionId} className="px-1.5 pb-1">
+          <div key={r.sessionId} className="pb-1">
             <SessionHeading result={r} />
             {r.hits.map((h, hi) => {
               const flatIdx = flatHits.findIndex(
@@ -308,17 +309,27 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
                   data-cursor={flatIdx}
                   onMouseEnter={() => setCursor(flatIdx)}
                   onClick={() => onJump(r, h)}
+                  // 原型 .pal-row：高亮行 = hover 底 + 行尾 ↵ 提示；光标跟着指针走（onMouseEnter）
                   className={cn(
-                    "w-full text-left px-2.5 py-1.5 rounded-field flex items-start gap-2.5 transition-colors duration-100",
+                    "press-row w-full text-left px-2.5 py-2 min-h-[38px] rounded-field flex items-start gap-2.5 transition-colors duration-100",
                     active ? "bg-surface-hover" : "hover:bg-surface-hover",
                   )}
                 >
-                  <Icon icon={kind.icon} className="mt-0.5 text-ink-faint" />
+                  <Icon icon={kind.icon} size="sm" className="mt-0.5 shrink-0 text-ink-faint" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-ui text-ink leading-relaxed line-clamp-2">
+                    <span className="block text-[13.5px] text-ink leading-relaxed line-clamp-2">
                       <SearchSnippet html={h.snippet} />
                     </span>
                     <span className="block text-label text-ink-faint">{kind.label}</span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "mt-0.5 shrink-0 font-mono text-nano text-ink-faint transition-opacity duration-100 max-md:hidden",
+                      active ? "opacity-100" : "opacity-0",
+                    )}
+                  >
+                    ↵
                   </span>
                 </button>
               );
@@ -328,7 +339,7 @@ function SearchModalBody({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Footer hints */}
-      <div className="px-4 py-2 border-t border-line-faint text-label text-ink-faint flex items-center gap-4">
+      <div className="px-3.5 py-2 border-t border-line bg-surface-muted/60 dark:bg-surface text-[11.5px] text-ink-faint flex items-center gap-3.5">
         <span className="flex items-center gap-1">
           <Kbd>↑</Kbd>
           <Kbd>↓</Kbd> 选择
@@ -351,9 +362,10 @@ function SessionHeading({ result: r }: { result: Result }) {
   const st = modeStyle(r.sessionMode);
   const isProject = r.sessionMode === "project";
   return (
-    <div className="px-2.5 pt-2.5 pb-1 flex items-center gap-2 text-label min-w-0">
-      <Icon icon={isProject ? FolderGit2 : MessageSquare} size="sm" className="text-ink-faint" />
-      <span className="text-ink font-medium truncate">{r.sessionTitle}</span>
+    // 原型 .pal-list .gh：组头是小号 ink-faint，结果行才是主角
+    <div className="px-2.5 pt-2 pb-1 flex items-center gap-1.5 text-[11.5px] font-medium text-ink-faint min-w-0">
+      <Icon icon={isProject ? FolderGit2 : MessageSquare} size="sm" className="size-3 shrink-0 text-ink-faint" />
+      <span className="text-ink-muted truncate">{r.sessionTitle}</span>
       <span className={cn("shrink-0", st.text)}>{st.label}</span>
       {r.sessionWorkspacePath && (
         <span className="text-ink-faint truncate">{basename(r.sessionWorkspacePath)}</span>

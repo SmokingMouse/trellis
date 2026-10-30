@@ -31,7 +31,7 @@ export function EmptyState({
       )}
     >
       {icon && (
-        <div className="mb-1 grid size-9 place-items-center rounded-card border border-line text-ink-faint">
+        <div className="mb-1 grid size-9 place-items-center rounded-card bg-surface-raised shadow-btn text-ink-faint">
           <Icon icon={icon} />
         </div>
       )}

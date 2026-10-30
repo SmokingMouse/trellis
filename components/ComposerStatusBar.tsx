@@ -18,12 +18,12 @@ import type { ContextUsage } from "@/lib/context-usage";
 // 手机端可点的 pill 都是 44px 热区（max-md:min-h-11）；一行放不下就横向滚动，不换行。
 
 const TONE = {
-  neutral: "border-line bg-surface text-ink-muted hover:bg-surface-hover hover:text-ink",
+  neutral: "border-transparent bg-surface-raised text-ink-muted shadow-btn hover:bg-surface-hover hover:text-ink",
   warn: "border-warn-line bg-warn-muted text-warn-ink hover:bg-warn-muted",
 } as const;
 
 const PILL =
-  "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 text-label transition-colors max-md:h-11 max-md:px-3";
+  "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 text-label tabular-nums transition-colors duration-100 max-md:h-11 max-md:px-3";
 
 export function ComposerStatusBar({
   pills,
@@ -43,7 +43,8 @@ export function ComposerStatusBar({
   return (
     <div
       data-composer-status=""
-      className="mb-1.5 flex items-center gap-1.5 overflow-x-auto px-0.5 [scrollbar-width:none]"
+      // py-0.5：横向滚动容器会把 shadow-btn 的上下边裁掉
+      className="mb-1 flex items-center gap-1.5 overflow-x-auto px-0.5 py-0.5 [scrollbar-width:none]"
     >
       {pills.map((pill) => {
         if (pill.kind === "queue") {
@@ -125,7 +126,7 @@ export function ComposerStatusBar({
             role="status"
             data-composer-status-pill="background"
             aria-label={pill.ariaLabel}
-            className={`${PILL} border-line bg-surface text-ink-muted max-md:h-8`}
+            className={`${PILL} border-transparent bg-surface-raised text-ink-muted shadow-btn max-md:h-8`}
           >
             <Icon icon={TerminalSquare} size="sm" />
             <span className="relative inline-flex size-1.5" aria-hidden>

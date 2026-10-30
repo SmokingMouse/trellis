@@ -13,8 +13,8 @@ import { cn } from "./cn";
 // 收起中的内容 inert：不可聚焦、不可点，读屏跳过。
 // 箭头用 .ui-collapse-chevron 与之同步旋转。
 
-const CLOSE_MS = 220;
-const SETTLE_MS = 220;
+const CLOSE_MS = 300;
+const SETTLE_MS = 300;
 
 type DataAttributes = { [key: `data-${string}`]: string | undefined };
 

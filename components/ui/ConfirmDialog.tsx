@@ -78,7 +78,7 @@ export function ConfirmDialog({
               paddingRight: "calc(0.5rem + var(--safe-right))",
             }}
           >
-            <div className="overflow-hidden rounded-sheet border border-line bg-surface-raised shadow-overlay">
+            <div className="overflow-hidden rounded-sheet bg-surface-raised shadow-overlay">
               <div className="px-4 pb-3 pt-4 text-center">
                 {titleEl}
                 {descriptionEl}
@@ -96,7 +96,7 @@ export function ConfirmDialog({
                 </AlertDialogPrimitive.Action>
               </div>
             </div>
-            <AlertDialogPrimitive.Cancel className="press min-h-12 shrink-0 rounded-sheet border border-line bg-surface-raised text-body font-semibold text-ink shadow-overlay active:bg-surface-hover">
+            <AlertDialogPrimitive.Cancel className="press min-h-12 shrink-0 rounded-sheet bg-surface-raised text-body font-semibold text-ink shadow-overlay active:bg-surface-hover">
               {cancelLabel}
             </AlertDialogPrimitive.Cancel>
           </AlertDialogPrimitive.Content>
@@ -120,7 +120,7 @@ export function ConfirmDialog({
         >
           <AlertDialogPrimitive.Content
             data-confirm-dialog
-            className="ui-layer pointer-events-auto w-full max-w-sm rounded-overlay border border-line bg-surface p-5 shadow-overlay outline-none"
+            className="ui-layer pointer-events-auto w-full max-w-sm rounded-window bg-surface-raised p-5 shadow-overlay outline-none"
           >
             {titleEl}
             {descriptionEl}

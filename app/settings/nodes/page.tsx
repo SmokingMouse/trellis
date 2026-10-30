@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Network, Plus, RefreshCw, Unplug, X } from "lucide-react";
+import { Copy, Laptop, Network, Plus, RefreshCw, Server, Unplug, X } from "lucide-react";
 import {
   Badge,
   Button,
@@ -123,7 +123,7 @@ export default function NodesSettingsPage() {
             icon={Unplug}
             title="当前不是经 hub 访问"
             description="机器列表由 hub（多租户网关）提供。要把这台机器挂到某个 hub 上，用下面的「本机接入 hub」。"
-            className="rounded-card border border-line"
+            className="rounded-card bg-surface-raised shadow-raise"
           />
         )}
 
@@ -137,9 +137,9 @@ export default function NodesSettingsPage() {
         )}
 
         {gwError === null && loading && !nodes && (
-          <div role="status" aria-label="加载中" className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+          <div role="status" aria-label="加载中" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[0, 1].map((i) => (
-              <div key={i} className="px-4 py-3 flex flex-col gap-2">
+              <div key={i} className="rounded-card bg-surface-raised p-3.5 shadow-raise flex flex-col gap-2">
                 <Skeleton className="h-3.5 w-1/3" />
                 <Skeleton className="h-3 w-1/2" />
               </div>
@@ -148,10 +148,11 @@ export default function NodesSettingsPage() {
         )}
 
         {gwError === null && nodes && (
-          <ul className="rounded-card border border-line bg-surface divide-y divide-line-faint">
-            {nodes.map((node) => (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {nodes.map((node, i) => (
               <NodeRow
                 key={node.name}
+                index={i}
                 node={node}
                 busy={busyName === node.name}
                 onRevoke={() => void handleRevoke(node)}
@@ -174,55 +175,72 @@ export default function NodesSettingsPage() {
   );
 }
 
-function NodeRow({ node, busy, onRevoke }: { node: GwNode; busy: boolean; onRevoke: () => void }) {
-  const detail = node.online
+function NodeRow({
+  node,
+  index,
+  busy,
+  onRevoke,
+}: {
+  node: GwNode;
+  index: number;
+  busy: boolean;
+  onRevoke: () => void;
+}) {
+  const sha = shortSha(node.version);
+  // .mcard：键值对（版本 / 连上于 / 最后心跳），值用 mono；没有的数据不编。
+  const kv: [string, string][] = node.online
     ? [
-        "在线",
-        node.kind === "home" ? "hub 本机" : null,
-        shortSha(node.version) ? `版本 ${shortSha(node.version)}` : null,
-        node.connectedAt ? `连上于 ${formatRelativeTime(node.connectedAt)}` : null,
+        ...(sha ? ([["版本", sha]] as [string, string][]) : []),
+        ...(node.connectedAt ? ([["连上于", formatRelativeTime(node.connectedAt)]] as [string, string][]) : []),
       ]
-    : ["离线", node.lastSeenAt ? `最后心跳 ${formatRelativeTime(node.lastSeenAt)}` : "从未连上"];
+    : [["最后心跳", node.lastSeenAt ? formatRelativeTime(node.lastSeenAt) : "从未连上"]];
 
   return (
-    <li className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <StatusDot tone={node.online ? "positive" : "neutral"} label={node.online ? "在线" : "离线"} />
-          <span className="text-ui font-medium text-ink-strong font-mono">{node.name}</span>
-          {node.kind === "home" && <Badge>本机</Badge>}
-          {node.current && <Badge variant="accent">当前</Badge>}
-        </div>
-        <div className="text-label text-ink-muted mt-1 flex items-center gap-x-2 flex-wrap">
-          {detail.filter(Boolean).map((part, i) => (
-            <span key={i} className="flex items-center gap-x-2">
-              {i > 0 && <span className="text-ink-faint">·</span>}
-              <span className="tabular-nums">{part}</span>
-            </span>
-          ))}
-        </div>
+    <li
+      className="ui-enter-up flex flex-col gap-3 rounded-card bg-surface-raised p-3.5 shadow-raise"
+      style={{ animationDelay: `${Math.min(index, 5) * 60}ms` }}
+    >
+      <div className="flex items-center gap-2">
+        <Icon icon={node.kind === "home" ? Server : Laptop} className="text-ink-muted" />
+        <span className="min-w-0 truncate font-mono text-[13.5px] font-semibold text-ink-strong">{node.name}</span>
+        {node.current && <Badge variant="accent">当前</Badge>}
+        <span className="flex-1" />
+        {node.kind === "home" && <Badge>本机</Badge>}
+        <Badge variant={node.online ? "positive" : "neutral"}>{node.online ? "在线" : "离线"}</Badge>
       </div>
-      <div className="shrink-0 flex items-center gap-2">
-        {!node.current &&
-          (node.online ? (
-            // 整页导航而不是 router.push：切 node 换的是整个后端，客户端状态必须清干净。
-            <a
-              href={`/__gw/go/${encodeURIComponent(node.name)}/settings/nodes`}
-              className={buttonVariants({ variant: "secondary", size: "sm" })}
-            >
-              切换到这台
-            </a>
-          ) : (
-            <Button size="sm" disabled>
-              切换到这台
+      {kv.length > 0 && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-label">
+          {kv.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-ink-faint">{k}</dt>
+              <dd className="truncate text-right font-mono text-[11.5px] tabular-nums text-ink-muted">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {(!node.current || node.kind === "remote") && (
+        <div className="mt-auto flex items-center gap-2">
+          {!node.current &&
+            (node.online ? (
+              // 整页导航而不是 router.push：切 node 换的是整个后端，客户端状态必须清干净。
+              <a
+                href={`/__gw/go/${encodeURIComponent(node.name)}/settings/nodes`}
+                className={buttonVariants({ variant: "secondary", size: "sm" })}
+              >
+                切换到这台
+              </a>
+            ) : (
+              <Button size="sm" disabled>
+                切换到这台
+              </Button>
+            ))}
+          {node.kind === "remote" && (
+            <Button size="sm" variant="danger" className="ml-auto" onClick={onRevoke} loading={busy}>
+              撤销
             </Button>
-          ))}
-        {node.kind === "remote" && (
-          <Button size="sm" variant="danger" onClick={onRevoke} loading={busy}>
-            撤销
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </li>
   );
 }
@@ -342,7 +360,7 @@ function AddNodeModal({
             </Button>
           </div>
 
-          <div className="rounded-card border border-line px-3 py-2.5 text-label text-ink-muted leading-relaxed flex flex-col gap-1.5">
+          <div className="rounded-card bg-surface-canvas shadow-hairline px-3 py-2.5 text-label text-ink-muted leading-relaxed flex flex-col gap-1.5">
             <div className="text-ink font-medium">在新机器上二选一：</div>
             <div>① 打开那台机器自己的 trellis →「设置 → 机器互联 → 本机接入 hub」，粘贴连接串</div>
             <div>
@@ -451,13 +469,13 @@ function LocalHubSection() {
       )}
 
       {error === null && !state && (
-        <div className="rounded-card border border-line bg-surface px-4 py-3">
+        <div className="rounded-card bg-surface-raised shadow-raise px-4 py-3">
           <Skeleton className="h-3.5 w-1/3" />
         </div>
       )}
 
       {state?.configured && (
-        <div className="rounded-card border border-line bg-surface px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="ui-enter-up rounded-card bg-surface-raised shadow-raise px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap text-ui">
               <StatusDot tone={state.connected ? "positive" : "warn"} label={state.connected ? "已连上" : "未连上"} />
@@ -479,9 +497,9 @@ function LocalHubSection() {
       )}
 
       {state && !state.configured && (
-        <form onSubmit={connect} className="rounded-card border border-line bg-surface px-4 py-3 flex flex-col gap-3">
+        <form onSubmit={connect} className="ui-enter-up rounded-card bg-surface-raised shadow-raise p-4 flex flex-col gap-3">
           <div className="flex items-start gap-2.5 text-ui text-ink-muted">
-            <Icon icon={Network} className="mt-0.5" />
+            <Icon icon={Network} className="mt-0.5 text-ink-faint" />
             <span>在 hub 的「机器互联 → 添加机器」里生成连接串，粘贴到这里。</span>
           </div>
           <Textarea

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import {
   Anchor,
@@ -33,18 +33,20 @@ import { CliAttachPicker } from "@/components/CliAttachPicker";
 import {
   Button,
   Checkbox,
-  Dots,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  GlideList,
   Icon,
   IconButton,
   Input,
+  PixelLoader,
   SegmentedControl,
   Select,
   StatusDot,
+  Tooltip,
   toast,
   useConfirm,
 } from "@/components/ui";
@@ -101,7 +103,7 @@ const isSource = (v: unknown): v is SidebarSource => ["mine", "all", "web", "her
 //    判定与行首状态槽同源（lib/attention）。它是最顶层，下方置顶组 / 树都对它去重。
 //  - 置顶（= 常驻标签，服务端 sessions.pinned_at）：列表顶部「置顶」组，两种排布共用；
 //    置顶的会话从下方分组里去重，不重复出现。
-//    状态只用行首一个槽位（生成中 Dots / 等你回答 / 出错点 / 未读点），行尾是
+//    状态只用行首一个槽位（生成中像素格 / 等你回答 / 出错点 / 未读点），行尾是
 //    中性小字 meta；hover 时 meta 让位给「更多」按钮，但**占位不变**，行内容不闪。
 //
 // 对话 / Herdr 两个模式（2026-09-30，推翻 sidebar-tree-ia.md「Herdr 并进项目树」）：
@@ -979,13 +981,87 @@ export function SessionSidebar() {
   // `onClose` 接到当前容器的收起动作（收起常驻栏 / 关抽屉）。
   const renderPanel = (onClose: () => void, mobile = false) => (
     <>
-      <div className="shrink-0 space-y-2 px-2 pb-2 pt-2">
-        {/* 经 hub 访问且有远端机器时才出现，否则不渲染任何东西。 */}
-        <NodeSwitcher />
+      {!mobile && (
+        // 桌面常驻栏的头部（原型 .sb-top + 导航行）：机器切换器 / 品牌 + 收起键一行，
+        // 下面是一组 32px 导航行（GlideList 悬停滑块）。手机抽屉仍走下面原来那套按钮排布。
+        <div className="shrink-0 px-2 pt-2">
+          <div data-sidebar-top className="flex items-center gap-1 pb-2">
+            <div className="min-w-0 flex-1">
+              {/* 经 hub 访问且有远端机器时是机器切换器；否则放品牌（= 回首页，原先在 Header 左上角） */}
+              <NodeSwitcher
+                fallback={
+                  <Tooltip content="首页" shortcut="H">
+                    <button
+                      type="button"
+                      data-sidebar-brand
+                      aria-label="回首页"
+                      onClick={() => openHome()}
+                      className="flex h-9 w-full min-w-0 items-center gap-2 rounded-field px-2 text-left transition-colors duration-100 hover:bg-surface-hover"
+                    >
+                      {/* ui-guard-allow(hex): 品牌渐变固定色（不随主题换肤，与 Header 同一裁决） */}
+                      <span
+                        aria-hidden
+                        className="size-5.5 shrink-0 rounded-chip bg-gradient-to-br from-[#6366f1] via-[#d946ef] to-[#fbbf24] shadow-hairline"
+                      />
+                      <span className="truncate text-[14px] font-medium tracking-tight text-ink">Trellis</span>
+                    </button>
+                  </Tooltip>
+                }
+              />
+            </div>
+            <IconButton
+              label="收起侧栏"
+              data-mobile-target="drawer-close"
+              onClick={onClose}
+            >
+              <Icon icon={PanelLeftClose} />
+            </IconButton>
+          </div>
+          <GlideList className="flex flex-col gap-px">
+            <NavRow
+              icon={Plus}
+              label="新会话"
+              data-mobile-target="drawer-new-session"
+              onClick={onNew}
+              title="新会话：开一棵全新的树（与「新话题」不同——后者在当前会话内清空上下文）"
+            />
+            <NavRow
+              icon={House}
+              label="首页"
+              shortcut="H"
+              active={homeActive}
+              data-sidebar-home
+              data-mobile-target="drawer-home"
+              aria-current={homeActive ? "page" : undefined}
+              onClick={() => openHome()}
+            />
+            <NavRow
+              icon={ConciergeBell}
+              label="管家"
+              active={butlerActive}
+              title="管家：用对话配置 Trellis"
+              data-sidebar-butler
+              data-mobile-target="drawer-butler"
+              aria-current={butlerActive ? "page" : undefined}
+              onClick={() => void openButler()}
+            />
+            <NavRow
+              icon={Plug}
+              label="接入本机 CLI 会话"
+              title="接入本机 CLI 会话（Claude Code / Codex，双向同步）"
+              data-mobile-target="drawer-attach"
+              onClick={() => setAttachOpen(true)}
+            />
+          </GlideList>
+        </div>
+      )}
+      <div className={mobile ? "shrink-0 space-y-2 px-2 pb-2 pt-2" : "shrink-0 space-y-2 px-2 pb-2 pt-2.5"}>
+        {/* 经 hub 访问且有远端机器时才出现，否则不渲染任何东西。（桌面版在上面的头部里） */}
+        {mobile && <NodeSwitcher />}
         <div data-app-mode-switch>
           <AppModeSwitch />
         </div>
-        <div className="flex items-center gap-1.5">
+        {mobile && <div className="flex items-center gap-1.5">
           <Button
             variant="primary"
             data-mobile-target="drawer-new-session"
@@ -1033,7 +1109,7 @@ export function SessionSidebar() {
           >
             <Icon icon={PanelLeftClose} />
           </IconButton>
-        </div>
+        </div>}
 
         <div className="md:hidden">
           <button
@@ -1065,6 +1141,7 @@ export function SessionSidebar() {
         {mode === "chat" && <div data-sidebar-toolbar className="space-y-1.5">
           <SegmentedControl<SidebarLayout>
             aria-label="会话排布"
+            size={mobile ? undefined : "sm"}
             fullWidth
             value={layout}
             onValueChange={setLayout}
@@ -1103,8 +1180,11 @@ export function SessionSidebar() {
         data-sidebar-list
         data-sidebar-layout={layout}
         data-sidebar-mode={mode}
-        className="overflow-y-auto border-t border-line-faint py-1.5"
+        className="overflow-y-auto border-t border-line-faint py-1.5 md:border-t-0 md:px-1 md:pt-0.5"
       >
+        {/* 整棵树一块悬停滑块（GlideList）：会话行与可折叠的分组行挂 data-glide-row。
+            只认鼠标 / 触控板，触屏照旧走 .press-row。 */}
+        <GlideList>
         {mode === "herdr" ? (
           <HerdrModeSidebar pinned={<>{renderAttention()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
@@ -1128,9 +1208,10 @@ export function SessionSidebar() {
         )}
         </>
         )}
+        </GlideList>
       </PullToRefresh>
 
-      <div className="flex shrink-0 items-center gap-1 border-t border-line-faint px-2 py-1.5 max-md:hidden">
+      <div className="flex shrink-0 items-center gap-1 px-2 py-2 max-md:hidden">
         <Button
           variant="ghost"
           size="sm"
@@ -1167,14 +1248,15 @@ export function SessionSidebar() {
       {sidebarOpen ? (
         <aside
           data-sidebar
-          className="hidden md:flex fixed left-0 top-12 bottom-0 z-30 flex-col bg-surface-canvas border-r border-line"
+          // 直接铺在 canvas 上、贴顶到底：右侧主窗（app/page.tsx data-app-window）浮在旁边，不再画分隔线
+          className="hidden md:flex fixed left-0 top-0 bottom-0 z-30 flex-col bg-surface-canvas"
           style={{ width }}
         >
           {renderPanel(() => setSidebarOpen(false))}
           {/* 右边缘拖拽调宽 */}
           <div
             onMouseDown={() => setResizing(true)}
-            className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-accent/40"
+            className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize transition-colors duration-150 hover:bg-line-strong"
             aria-hidden
           />
         </aside>
@@ -1245,7 +1327,8 @@ function isFlat(p: ProjectSummary): boolean {
 // 行一律通栏 pill（mx-1 + 圆角），只有内容缩进 —— 这样 hover / 选中高亮不会
 // 随层级越缩越窄，长标题也不会在深层被挤没。
 // 三级统一行高；原先 group 24 / session 28 又是一处倒挂。
-const ROW_HEIGHT_CLASS = "h-7 max-md:h-11";
+// 2026-10-30 视觉改版：桌面行高 30px（原型 .row.sess），手机仍是 44px 热区。
+const ROW_HEIGHT_CLASS = "h-7.5 max-md:h-11";
 const PAD = (level: number) => 6 + level * 12; // 内容缩进：6 / 18 / 30
 const CHEVRON_MID = (level: number) => 4 /* mx-1 */ + PAD(level) + 5;
 
@@ -1326,7 +1409,7 @@ const META_FADE = "transition-opacity duration-100 md:group-hover:opacity-0 md:g
 // 同时丢掉 hover / focus-within，trigger 一旦 display:none，菜单就被连带关掉，
 // 点击落到下面那一行上（实测：点「置顶」却切到了下一个会话）。
 const ACTIONS_OVERLAY =
-  "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-surface-hover pl-1 md:group-hover:flex md:group-focus-within:flex md:has-[[aria-expanded=true]]:flex";
+  "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-field bg-surface-hover pl-1 md:group-hover:flex md:group-focus-within:flex md:has-[[aria-expanded=true]]:flex";
 
 // Project / Workspace 的分组行。两级共用一个组件，靠 level 调缩进与字重 ——
 // 项目行是这棵树的骨架（强），工作区行是它的分支（弱）。外层刻意是 div 而非
@@ -1397,9 +1480,10 @@ function GroupRow({
     <>
       <div
         data-sidebar-group
+        data-glide-row={toggleable ? "" : undefined}
         {...(menuItems.length > 0 ? menu.bindTrigger(label) : {})}
-        className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 rounded-md pr-1.5 ${
-          toggleable ? "hover:bg-surface-hover" : ""
+        className={`${ROW_HEIGHT_CLASS} group relative mx-1 flex items-center gap-1 rounded-field pr-1.5 transition-colors duration-150 ${
+          toggleable ? "press-row hover:bg-surface-hover" : ""
         } ${muted ? "opacity-70" : ""}`}
       >
         <button
@@ -1407,9 +1491,11 @@ function GroupRow({
           aria-expanded={toggleable ? !collapsed : undefined}
           title={title}
           style={{ paddingLeft: PAD(level) }}
-          className={`flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-ui ${
+          // 原型 .grp：顶层分组头是小号 ink-faint（12px / medium），层次靠缩进与引导线；
+          // 工作区行（level ≥ 1）是可操作的条目，按会话行的字号走。
+          className={`flex h-full min-w-0 flex-1 items-center gap-1.5 text-left ${
             toggleable ? "" : "cursor-default"
-          } ${level === 0 ? "font-medium text-ink-strong" : "text-ink"}`}
+          } ${level === 0 ? "text-label font-medium text-ink-faint" : "text-ui text-ink-muted"}`}
         >
           <Icon
             icon={ChevronRight}
@@ -1418,7 +1504,7 @@ function GroupRow({
               collapsed ? "" : "rotate-90"
             } ${toggleable ? "" : "opacity-0"}`}
           />
-          {icon && <Icon icon={icon} size="sm" className="text-ink-muted" />}
+          {icon && <Icon icon={icon} size="sm" className={level === 0 ? "size-3 text-ink-faint" : "text-ink-faint"} />}
           <span className="min-w-8 flex-1 truncate">{label}</span>
         </button>
         <span className={`flex min-w-0 shrink items-center gap-1.5 ${hasActions ? META_FADE : ""}`}>
@@ -1428,7 +1514,7 @@ function GroupRow({
             </span>
           )}
           {git && <GitBadge git={git} onInspectDiff={onInspectDiff} />}
-          {badge && <span className="text-nano tabular-nums text-ink-faint">{badge}</span>}
+          {badge && <span className="text-label font-medium tabular-nums text-ink-faint">{badge}</span>}
         </span>
         {hasActions && (
           <div className={`${ACTIONS_OVERLAY} pointer-coarse:static pointer-coarse:flex pointer-coarse:bg-transparent`}>
@@ -1477,7 +1563,8 @@ function StatusSlot({ status }: { status: RecentChainStatus | "done" }) {
       {status === "waiting" ? (
         <Icon icon={CircleHelp} size="sm" className="text-accent-ink" aria-label="等你回答" />
       ) : status === "streaming" ? (
-        <Dots />
+        // 长时间运行的视觉语言：像素格 loader（行的 title 已有「生成中…」，读屏不重复）
+        <PixelLoader size="sm" label={null} />
       ) : status === "error" ? (
         <StatusDot tone="danger" label="出错" />
       ) : status === "unread" ? (
@@ -1676,7 +1763,7 @@ function SidebarRow({
       meta.push(
         <span
           key="ws"
-          className="max-w-[5rem] truncate rounded bg-surface-muted px-1 font-mono"
+          className="max-w-[5rem] truncate rounded-[4px] bg-surface-muted px-1 font-mono shadow-hairline"
           title={`工作区：${workspaceTag}`}
         >
           {workspaceTag}
@@ -1717,21 +1804,19 @@ function SidebarRow({
         data-session-status={indicatorStatus}
         data-herdr-pane={herdr?.paneId || undefined}
         data-herdr-status={herdr ? herdr.alive ? herdr.status : "offline" : undefined}
+        data-glide-row
         aria-current={active ? "true" : undefined}
         {...(editing ? {} : menu.bindTrigger(session))}
-        className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} group relative flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-md pr-1.5 transition-colors ${
+        // 原型 .row.sess：13px / medium / ink-muted，当前会话 = hover 底 + ink（不再用 accent 底与左缘竖线）
+        className={`${location ? "h-11" : ROW_HEIGHT_CLASS} ${session.archived || offline ? "opacity-55" : ""} press-row group relative flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-field pr-1.5 font-medium transition-colors duration-150 ${
           active
-            ? "bg-accent-muted text-ink-strong"
-            : "text-ink hover:bg-surface-hover"
-        } ${indicatorStatus === "unread" ? "font-medium" : ""}`}
+            ? "bg-surface-hover text-ink"
+            : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+        }`}
         onClick={editing ? undefined : onPreview}
         onDoubleClick={editing ? undefined : onPin}
         title={`${session.title}${statusTitle ? `\n${statusTitle}` : ""}\n单击预览 · 双击置顶`}
       >
-        {/* 当前会话：左缘一条强调色竖线（与 mockup 一致），不再给运行中的行整行染色。 */}
-        {active && (
-          <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent" aria-hidden />
-        )}
         <StatusSlot status={indicatorStatus} />
 
         {editing ? (
@@ -1757,7 +1842,7 @@ function SidebarRow({
           />
         ) : (
           <span
-            className={`min-w-0 flex-1 truncate text-ui ${
+            className={`min-w-0 flex-1 truncate text-ui ${indicatorStatus === "unread" && !active ? "text-ink" : ""} ${
               // 预览（未置顶、临时）的会话读作斜体，同 VSCode。
               preview ? "italic" : ""
             } ${preview && !active ? "text-ink-muted" : ""}`}
@@ -1778,7 +1863,7 @@ function SidebarRow({
         )}
 
         {!editing && (
-          <div className={`${ACTIONS_OVERLAY} ${active ? "bg-accent-muted" : ""} max-md:!hidden`}>
+          <div className={`${ACTIONS_OVERLAY} max-md:!hidden`}>
             <SessionRowMenu
               isPinned={Boolean(isPinned)}
               archived={session.archived}
@@ -1850,7 +1935,7 @@ function SessionRowMenu({
           data-session-row-more
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
-          className="inline-flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-muted hover:text-ink aria-expanded:bg-surface-muted"
+          className="inline-flex size-6 items-center justify-center rounded-[5px] text-ink-muted hover:bg-surface-muted hover:text-ink aria-expanded:bg-surface-muted"
         >
           <Icon icon={Ellipsis} size="sm" />
         </button>
@@ -1895,13 +1980,44 @@ function RowIconButton({
       onDoubleClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
-      className={`inline-flex size-6 items-center justify-center rounded-sm max-md:size-11 ${
+      className={`inline-flex size-6 items-center justify-center rounded-[5px] max-md:size-11 ${
         danger
           ? "text-ink-muted hover:bg-danger-muted hover:text-danger-ink"
           : "text-ink-muted hover:bg-surface-muted hover:text-ink"
       }`}
     >
       <Icon icon={icon} size="sm" />
+    </button>
+  );
+}
+
+// 桌面侧栏头部的导航行（原型 .row：32px、13.5px / medium、ink-muted；当前页 = hover 底 + ink）。
+// 挂 data-glide-row，放在 GlideList 里由滑块接管悬停底色。只在桌面常驻栏里出现。
+function NavRow({
+  icon,
+  label,
+  shortcut,
+  active = false,
+  className,
+  ...rest
+}: ComponentProps<"button"> & {
+  icon: LucideIcon;
+  label: string;
+  shortcut?: string;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      data-glide-row
+      className={`flex h-8 w-full min-w-0 items-center gap-2 rounded-field px-2 text-left text-[13.5px] font-medium transition-colors duration-150 ${
+        active ? "bg-surface-hover text-ink" : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+      } ${className ?? ""}`}
+      {...rest}
+    >
+      <Icon icon={icon} selected={active} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {shortcut && <span className="shrink-0 font-mono text-nano text-ink-faint">{shortcut}</span>}
     </button>
   );
 }

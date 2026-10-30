@@ -24,6 +24,7 @@ import {
   IconButton,
   Input,
   PageHeader,
+  PixelLoader,
   Select,
   Skeleton,
   StatusDot as UiStatusDot,
@@ -362,7 +363,7 @@ export default function TasksPage() {
         <ErrorCallout error={loadError} title="任务列表加载失败" onRetry={refresh} />
       ) : tasks === null ? (
         <div role="status" aria-label="加载中" className="flex flex-col md:flex-row gap-6">
-          <div className="md:w-[300px] shrink-0 rounded-card border border-line bg-surface divide-y divide-line-faint">
+          <div className="md:w-[300px] shrink-0 rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[60, 45, 55].map((w) => (
               <div key={w} className="flex gap-2.5 px-3.5 py-3">
                 <Skeleton className="mt-1 size-2 rounded-full" />
@@ -391,13 +392,13 @@ export default function TasksPage() {
               新建任务
             </Button>
           }
-          className="rounded-card border border-line"
+          className="ui-enter-up rounded-card bg-surface-raised shadow-raise"
         />
       ) : (
       <div className="flex flex-col md:flex-row gap-6">
         {/* 左：任务列表 */}
         {taskList.length > 0 && (
-        <div className="md:w-[300px] shrink-0 self-start w-full overflow-hidden rounded-card border border-line bg-surface divide-y divide-line-faint">
+        <div className="ui-enter-up md:w-[300px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
           {taskList.map((t) => {
             const active = selectedId === t.id;
             return (
@@ -410,24 +411,24 @@ export default function TasksPage() {
                   if (editing && editing.id !== t.id) setEditing(null);
                 }}
                 className={cn(
-                  "relative flex w-full items-start gap-2.5 px-3.5 py-3 text-left transition-colors duration-100 max-md:min-h-11",
-                  active ? "bg-accent-muted" : "hover:bg-surface-hover",
+                  "relative flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors duration-100 max-md:min-h-11",
+                  active ? "bg-surface-hover" : "hover:bg-surface-hover",
                   !t.enabled && "opacity-60",
                 )}
               >
                 {active && (
-                  <span aria-hidden className="absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-full bg-accent" />
+                  <span aria-hidden className="absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-full bg-ink" />
                 )}
                 <span className="mt-1.5">
                   <StatusDot run={t.lastRun} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui font-medium text-ink-strong">{t.name}</span>
-                  <span className="block truncate text-label text-ink-muted">
+                  <span className="block truncate font-mono text-[11.5px] text-ink-faint">
                     {agents.find((a) => a.id === t.agentId)?.name ?? AGENT_DEFAULT_LABEL}
                     {t.workspacePath ? ` · ${t.workspacePath}` : ""}
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1 text-label text-ink-faint">
+                  <span className="mt-0.5 flex items-center gap-1 text-label tabular-nums text-ink-muted">
                     <Icon icon={Clock} size="sm" />
                     {nextFireText(t.triggers)}
                     {!t.enabled && " · 已停用"}
@@ -440,10 +441,10 @@ export default function TasksPage() {
         )}
 
         {/* 右：编辑器 or 详情 + 运行历史 */}
-        <div className="flex-1 min-w-0">
+        <div className="ui-enter-up flex-1 min-w-0" style={{ animationDelay: "60ms" }}>
           {editing ? (
-            <div className="flex flex-col gap-4">
-              <h2 className="text-body font-semibold text-ink-strong">{editing.id ? "编辑任务" : "新建任务"}</h2>
+            <div className="flex flex-col gap-4 rounded-card bg-surface-raised p-4 shadow-raise md:p-5">
+              <h2 className="text-body font-semibold tracking-tight text-ink-strong">{editing.id ? "编辑任务" : "新建任务"}</h2>
               <Field label="任务名">
                 <Input
                   placeholder="例如：每日 git 变更摘要"
@@ -641,7 +642,7 @@ export default function TasksPage() {
             <div className="flex flex-col gap-6">
               {/* 详情头：名称 + 动作 */}
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="min-w-0 truncate text-body font-semibold text-ink-strong">{selected.name}</h2>
+                <h2 className="min-w-0 truncate text-body font-semibold tracking-tight text-ink-strong">{selected.name}</h2>
                 {!selected.enabled && <Badge>已停用</Badge>}
                 <div className="ml-auto flex items-center gap-1.5">
                   <Button type="button" onClick={() => void runNow(selected.id)}>
@@ -657,16 +658,16 @@ export default function TasksPage() {
 
               {/* 触发器 */}
               <section>
-                <div className="mb-2 flex items-baseline gap-2">
+                <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <h3 className="text-ui font-semibold text-ink-strong">定时触发</h3>
-                  <span className="text-label text-ink-muted">
+                  <span className="text-label text-ink-faint">
                     按服务器本地时间；没有触发器 = 只能手动运行，那也是合法的用法
                   </span>
                 </div>
-                <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+                <div className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
                   {selected.triggers.map((tr) => (
-                    <div key={tr.id} className="flex items-center gap-2.5 px-3.5 py-2 text-ui">
-                      <code className="rounded-md bg-surface-muted px-1.5 py-0.5 font-mono text-label">
+                    <div key={tr.id} className="flex min-h-[46px] items-center gap-2.5 px-3 py-1.5 text-ui transition-colors duration-100 hover:bg-surface-hover">
+                      <code className="rounded-chip bg-surface-muted px-1.5 py-0.5 font-mono text-[11.5px] text-ink">
                         {String(tr.config.expr ?? tr.kind)}
                       </code>
                       <span className="text-ink">
@@ -683,9 +684,9 @@ export default function TasksPage() {
                     </div>
                   ))}
                   {!selected.triggers.length && (
-                    <div className="px-3.5 py-2.5 text-label text-ink-faint">没有触发器，仅手动运行</div>
+                    <div className="flex min-h-[46px] items-center px-3 text-label text-ink-faint">没有触发器，仅手动运行</div>
                   )}
-                  <div className="flex flex-wrap items-center gap-1.5 px-3.5 py-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5 border-b-transparent bg-surface-canvas px-3 pt-2.5 pb-2">
                     <Select
                       aria-label="常用定时"
                       size="sm"
@@ -719,7 +720,7 @@ export default function TasksPage() {
                     </Button>
                   </div>
                   {/* ★ 双回显。裸 cron 串的问题不是难写，是写错了不知道。 */}
-                  <div className="px-3.5 pb-2.5 -mt-1.5 text-label text-ink-faint">
+                  <div className="bg-surface-canvas px-3 pb-2.5 text-label tabular-nums text-ink-faint">
                     {describeCron(cronExpr)}
                     {parseCron(cronExpr) && ` · 下次：${fmtNext(cronExpr)}`}
                   </div>
@@ -735,24 +736,26 @@ export default function TasksPage() {
                     icon={Play}
                     title="还没有执行过"
                     description="点上面的「立即运行」试一次，或等定时触发。"
-                    className="rounded-card border border-line"
+                    className="rounded-card bg-surface-raised shadow-raise"
                   />
                 ) : (
-                  <div className="rounded-card border border-line bg-surface divide-y divide-line-faint">
+                  <div className="overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
                     {/* S89: 行从一整个 <button> 拆成 div + 两个子按钮 —— 中止按钮嵌不进
                         button 里。深链仍是主动作（点一条 run 回主 SPA 看完整渲染）。 */}
                     {runs.map((r) => {
                       const live = r.status === "running" || r.status === "pending";
                       const interrupted = isInterrupted(r);
                       return (
-                        <div key={r.id} className="px-3.5 py-2.5 flex flex-col gap-1">
-                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-ui">
-                            <RunStatus run={r} />
-                            <span className="font-mono text-label text-ink-muted tabular-nums">
+                        <div key={r.id} className="flex min-h-[46px] flex-col justify-center gap-1 px-3 py-2 transition-colors duration-100 hover:bg-surface-hover">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui">
+                            <span className="inline-flex min-w-[8.5rem]">
+                              <RunStatus run={r} />
+                            </span>
+                            <span className="font-mono text-[11.5px] text-ink-muted tabular-nums">
                               {new Date(r.createdAt).toLocaleString()}
                             </span>
                             {r.startedAt && r.endedAt ? (
-                              <span className="font-mono text-label text-ink-muted tabular-nums">
+                              <span className="font-mono text-[11.5px] text-ink-muted tabular-nums">
                                 {Math.round((r.endedAt - r.startedAt) / 1000)}s
                               </span>
                             ) : null}
@@ -862,45 +865,50 @@ function StatusDot({ run }: { run?: Run | null }) {
   return <UiStatusDot tone="danger" label={statusText(run)} />;
 }
 
-/** 运行记录行首：状态图标 + 文案。中断（服务重启）整行灰色，带说明提示。 */
+/** 运行记录行首：状态 pill。中断（服务重启）保持灰色（neutral），带说明提示。 */
 function RunStatus({ run }: { run: Run }) {
   const text = statusText(run);
   if (isInterrupted(run)) {
     return (
       <Tooltip content="服务器重启时被收尾，不是任务本身失败">
-        <span tabIndex={0} className="inline-flex min-w-[8.5rem] items-center gap-1.5 text-ink-muted">
-          <StatusDot run={run} />
-          {text}
+        <span tabIndex={0} className="inline-flex rounded-full">
+          <Badge variant="neutral">
+            <UiStatusDot tone="neutral" />
+            {text}
+          </Badge>
         </span>
       </Tooltip>
     );
   }
   if (run.status === "done")
     return (
-      <span className="inline-flex min-w-[8.5rem] items-center gap-1.5 text-ink">
-        <Icon icon={Check} size="sm" className="text-ink-muted" />
+      <Badge variant="positive" dot={false}>
+        <Icon icon={Check} size="sm" />
         {text}
-      </span>
+      </Badge>
     );
   if (run.status === "skipped")
     return (
-      <span className="inline-flex min-w-[8.5rem] items-center gap-1.5 text-ink-muted">
+      <Badge variant="neutral">
         <Icon icon={SkipForward} size="sm" />
         {text}
-      </span>
+      </Badge>
     );
-  const failed = !(run.status === "running" || run.status === "pending" || run.status === "aborted");
-  return (
-    <span
-      className={cn(
-        "inline-flex min-w-[8.5rem] items-center gap-1.5",
-        failed ? "text-danger-ink" : run.status === "aborted" ? "text-ink-muted" : "text-ink",
-      )}
-    >
-      <StatusDot run={run} />
-      {text}
-    </span>
-  );
+  if (run.status === "running" || run.status === "pending")
+    return (
+      <Badge variant="accent">
+        <PixelLoader size="sm" label={null} className="text-accent-ink" />
+        {text}
+      </Badge>
+    );
+  if (run.status === "aborted")
+    return (
+      <Badge variant="neutral">
+        <UiStatusDot tone="neutral" />
+        {text}
+      </Badge>
+    );
+  return <Badge variant="danger">{text}</Badge>;
 }
 
 function statusText(r: Run): string {
