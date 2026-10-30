@@ -13,12 +13,13 @@ export const CONFIG_PACKAGE_VERSION = 1;
 /** 打码占位：导出包里凡是密钥值都换成它，导入时按路径从目标已有配置里取回。 */
 export const REDACTED = "__trellis_redacted__";
 
-export const CONFIG_KINDS = ["skills", "agents", "approval-rules", "models", "settings"] as const;
+export const CONFIG_KINDS = ["skills", "agents", "roles", "approval-rules", "models", "settings"] as const;
 export type ConfigKind = (typeof CONFIG_KINDS)[number];
 
 export const CONFIG_KIND_META: Record<ConfigKind, { label: string; hint: string }> = {
   skills: { label: "技能", hint: "~/.claude/skills 下的技能目录（含脚本），敏感文件不同步" },
   agents: { label: "自定义 Agent", hint: "按 slug 对齐；内置 Agent 不同步" },
+  roles: { label: "角色", hint: "按 slug 对齐：资料、人设、USER.md 与记忆；内置角色（管家）与会话不同步" },
   "approval-rules": { label: "审批规则", hint: "只同步「所有会话」规则；会话规则绑定本机会话，不同步" },
   models: { label: "模型与服务商", hint: "endpoints.yaml 的服务商块与默认模型；API Key 不同步" },
   settings: { label: "服务端偏好", hint: "打标 / 起题模型等；推送开关是每台机器自己的，不同步" },
@@ -81,6 +82,30 @@ export type AgentPackItem = {
   sortOrder: number;
 };
 
+/** 角色（docs/roles-p2.md C）：agents 行里角色那几列 + 角色目录的 USER.md 与 memories/*.md。
+ * 固定会话（聊天记录）不进包。 */
+export type RolePackItem = {
+  slug: string;
+  name: string;
+  intro: string;
+  systemPrompt: string;
+  avatarHue: number;
+  avatarGlyph: string;
+  model: string | null;
+  /** 来源机器的绝对路径；目标机器上不存在就置空（用角色目录本身） */
+  workDir: string | null;
+  memoryEnabled: boolean;
+  enabled: boolean;
+  userMd: string;
+  memories: {
+    file: string;
+    name: string;
+    description: string;
+    type: "user" | "feedback" | "project" | "reference";
+    body: string;
+  }[];
+};
+
 export type ApprovalRulePackItem = { toolKey: string };
 
 export type ModelPackItem =
@@ -103,6 +128,7 @@ export type ConfigPackage = {
   kinds: ConfigKind[];
   skills?: SkillPackItem[];
   agents?: AgentPackItem[];
+  roles?: RolePackItem[];
   approvalRules?: ApprovalRulePackItem[];
   models?: ModelPackItem[];
   settings?: SettingPackItem[];
