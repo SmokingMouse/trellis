@@ -37,6 +37,7 @@ import {
 import type { SessionUser } from "./auth";
 import { handleNodesAPI, handlePair, ownsNode } from "./nodes-api";
 import { exportBlocked, parseVia, targetFor, type Target } from "./node-targets";
+import { RELAY_DISPATCH_PREFIX, RELAY_MACHINES_PATH, handleRelayDispatch, relayOnlyBlocked } from "./relay-dispatch";
 import { GATEWAY_PUSH_PATHS, handleGatewayPush, handleRelayPush } from "./push";
 
 const PORT = Number(process.env.TRELLIS_GW_PORT) || 3200;
@@ -230,6 +231,14 @@ function startGateway(): void {
         return new Response("upgrade failed", { status: 400 });
       }
       if (url.pathname === "/__gw/pair") return handlePair(req, db, clientIP(req));
+      // 机器 → hub 的中继（跨机派活）：调用方是某台实例的服务端，用机器凭证认证（relay-auth.ts）。
+      if (
+        url.pathname === RELAY_MACHINES_PATH ||
+        url.pathname === RELAY_DISPATCH_PREFIX ||
+        url.pathname.startsWith(`${RELAY_DISPATCH_PREFIX}/`)
+      ) {
+        return handleRelayDispatch(req, url, db);
+      }
       // 机器 → hub 推送中继：机器凭证认证（relay-auth.ts），不走用户 session。
       if (url.pathname === "/__gw/relay/push") return handleRelayPush(req, db);
       if (url.pathname === "/__gw/login") {
@@ -331,7 +340,7 @@ function startGateway(): void {
         const target = targetFor(db, user, via.name);
         if (!target) return Response.json({ error: "unknown node" }, { status: 404 });
         if ("offline" in target) return Response.json({ error: `机器 ${via.name} 离线`, offline: true }, { status: 503 });
-        const blocked = exportBlocked(db, user, via.name, via.path);
+        const blocked = exportBlocked(db, user, via.name, via.path) ?? relayOnlyBlocked(via.path);
         if (blocked) return blocked;
         const upstreamURL = new URL(url);
         upstreamURL.pathname = via.path;
@@ -351,7 +360,7 @@ function startGateway(): void {
       if (!target) return maintenancePage();
       if ("offline" in target) return nodeOfflinePage(target.offline, user.tenant);
       const { tenant } = target;
-      const blocked = exportBlocked(db, user, tenant.name, url.pathname);
+      const blocked = exportBlocked(db, user, tenant.name, url.pathname) ?? relayOnlyBlocked(url.pathname);
       if (blocked) return blocked;
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const protocols = (req.headers.get("sec-websocket-protocol") || "")
