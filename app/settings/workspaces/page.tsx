@@ -192,7 +192,7 @@ export default function WorkspacesSettingsPage() {
         }
         actions={
           <>
-            <IconButton label="刷新" onClick={refresh} disabled={refreshing}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={refresh} disabled={refreshing}>
               {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={() => setAttachOpen(true)}>
@@ -263,7 +263,7 @@ export default function WorkspacesSettingsPage() {
               className="ui-enter-up overflow-hidden rounded-card bg-surface-raised shadow-raise"
               style={{ animationDelay: `${Math.min(pi, 5) * 60}ms` }}
             >
-              <div className="flex items-center gap-2 px-3 pt-2.5 pb-2 text-label font-medium text-ink-muted">
+              <div className="flex items-center gap-2 px-3 pt-2.5 pb-2 md:px-4 text-label font-medium text-ink-muted">
                 <Icon icon={FolderGit2} size="sm" className="shrink-0 text-ink-faint" />
                 <span className="text-ink">{p.name}</span>
                 <span className="text-ink-faint tabular-nums">{p.workspaces.length}</span>
@@ -281,12 +281,17 @@ export default function WorkspacesSettingsPage() {
                   return (
                     <div
                       key={w.id}
-                      className="min-h-[46px] px-3 py-2 flex items-center gap-3 text-label transition-colors duration-100 hover:bg-surface-hover"
+                      className="min-h-[46px] px-3 py-2 md:min-h-[42px] md:px-4 md:py-1.5 flex items-center gap-3 text-label transition-colors duration-100 hover:bg-surface-hover"
                     >
-                      <span className="text-ui font-medium text-ink shrink-0">{w.name}</span>
+                      {/* 桌面按列对齐：名称+类型 / 分支+状态 / 路径（弹性、截断）/ 会话数 / 操作。
+                          手机端两个分组是 contents，排布与原来一致。 */}
+                      <span className="contents md:flex md:w-[200px] md:shrink-0 md:min-w-0 md:items-center md:gap-2">
+                      <span className="text-ui font-medium text-ink shrink-0 md:shrink md:min-w-0 md:truncate" title={w.name}>{w.name}</span>
                       <Badge className="shrink-0">{w.kind}</Badge>
+                      </span>
+                      <span className="contents md:flex md:w-[220px] md:shrink-0 md:min-w-0 md:items-center md:gap-2 md:overflow-hidden">
                       {g?.branch && g.branch !== w.name && (
-                        <span className="text-[11.5px] text-ink-faint font-mono shrink-0">
+                        <span className="text-[11.5px] text-ink-faint font-mono shrink-0 md:shrink md:min-w-0 md:truncate">
                           {g.branch}
                         </span>
                       )}
@@ -309,10 +314,11 @@ export default function WorkspacesSettingsPage() {
                           </span>
                         </Tooltip>
                       )}
+                      </span>
                       <span className="text-[11.5px] text-ink-faint font-mono truncate flex-1 min-w-0" title={w.path}>
                         {w.path}
                       </span>
-                      <span className="text-nano text-ink-faint tabular-nums shrink-0">
+                      <span className="text-nano text-ink-faint tabular-nums shrink-0 md:w-14 md:text-right">
                         {w.sessionCount} 会话
                       </span>
                       {removable ? (

@@ -303,7 +303,7 @@ export default function SharesSettingsPage() {
         subtitle={data ? `我发布了 ${data.published.length} 个` : "发布与订阅 Claude Token 或大模型 API 端点"}
         actions={
           <>
-            <IconButton label="刷新" onClick={refresh} disabled={refreshing || loading}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={refresh} disabled={refreshing || loading}>
               {refreshing ? <Spinner label={null} /> : <Icon icon={RefreshCw} />}
             </IconButton>
             <Button variant="primary" onClick={handleOpenPublish} disabled={gatewayError !== null}>

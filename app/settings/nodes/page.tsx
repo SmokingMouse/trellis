@@ -111,7 +111,7 @@ export default function NodesSettingsPage() {
         subtitle="一个入口访问多台机器：执行和数据都留在各自机器上，hub 只做转发"
         actions={
           <>
-            <IconButton label="刷新" onClick={() => void load()} disabled={loading}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => void load()} disabled={loading}>
               <Icon icon={RefreshCw} />
             </IconButton>
             <Button variant="primary" onClick={() => setAdding(true)} disabled={gwError !== null}>
@@ -133,7 +133,7 @@ export default function NodesSettingsPage() {
             icon={Unplug}
             title="当前不是经 hub 访问"
             description="机器列表由 hub（多租户网关）提供。要把这台机器挂到某个 hub 上，用下面的「本机接入 hub」。"
-            className="rounded-card bg-surface-raised shadow-raise"
+            className="rounded-card bg-surface-raised shadow-raise md:py-8"
           />
         )}
 
@@ -235,12 +235,14 @@ function NodeRow({
       <div className="flex flex-col gap-1.5 text-label">
         <PolicySwitch
           label="允许内容离开这台机器"
+          machine={node.name}
           hint="会话接力、配置同步、向别的机器派活时作为来源"
           checked={node.policy.shareOut}
           onChange={(v) => onPolicy({ shareOut: v })}
         />
         <PolicySwitch
           label="允许别的机器往这台派活"
+          machine={node.name}
           hint="其他机器上的 agent 可以在这台新开会话执行任务"
           checked={node.policy.acceptDispatch}
           onChange={(v) => onPolicy({ acceptDispatch: v })}
@@ -275,11 +277,13 @@ function NodeRow({
 
 function PolicySwitch({
   label,
+  machine,
   hint,
   checked,
   onChange,
 }: {
   label: string;
+  machine: string;
   hint: string;
   checked: boolean;
   onChange: (v: boolean) => void;
@@ -290,7 +294,7 @@ function PolicySwitch({
         <span className="block text-ink">{label}</span>
         <span className="block text-[11.5px] text-ink-faint">{hint}</span>
       </span>
-      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={`${machine}：${label}`} />
     </label>
   );
 }
@@ -557,7 +561,7 @@ function LocalHubSection() {
             value={conn}
             onChange={(e) => setConn(e.target.value)}
             placeholder="trellis://v1/…"
-            className="font-mono text-nano"
+            className="font-mono text-nano resize-none"
             aria-label="连接串"
             aria-invalid={formError ? true : undefined}
           />

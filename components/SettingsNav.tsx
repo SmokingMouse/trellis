@@ -4,8 +4,10 @@ import { useSelectedLayoutSegment } from "next/navigation";
 import {
   Bot,
   CalendarClock,
+  ChevronRight,
   CircleArrowUp,
   Cpu,
+  FolderSync,
   KeyRound,
   MessagesSquare,
   Network,
@@ -38,6 +40,7 @@ const TAB_ICONS: Record<SettingsTabIconKey, LucideIcon> = {
   "key-round": KeyRound,
   "circle-arrow-up": CircleArrowUp,
   network: Network,
+  "folder-sync": FolderSync,
 };
 
 // S89: 管理台的 tab 导航。
@@ -110,5 +113,25 @@ export function SettingsNav() {
         </div>
       ))}
     </nav>
+  );
+}
+
+// 2026-10-30 设置顶栏面包屑「设置 › <页面名>」：和 SettingsNav 一样得在客户端读段
+// （layout 在 tab 间不重渲染）。手机顶栏只显示「设置」，与原来一致。
+export function SettingsBreadcrumb() {
+  const segment = useSelectedLayoutSegment();
+  const tab = SETTINGS_TABS.find((t) => t.segment === segment);
+  return (
+    <div className="flex min-w-0 items-center gap-1 text-ui md:text-[13px]">
+      <span className="font-semibold text-ink-strong md:font-normal md:text-ink-muted">设置</span>
+      {tab && (
+        <>
+          <Icon icon={ChevronRight} size="sm" className="hidden text-ink-faint md:inline-flex" />
+          <span aria-current="page" className="hidden truncate font-medium text-ink md:inline">
+            {tab.label}
+          </span>
+        </>
+      )}
+    </div>
   );
 }

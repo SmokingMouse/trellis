@@ -27,6 +27,7 @@ import { SearchModal } from "@/components/SearchModal";
 import { FilePreview } from "@/components/FilePreview";
 import { BookmarksDrawer } from "@/components/BookmarksDrawer";
 import { KeyboardHelp } from "@/components/KeyboardHelp";
+import { RelaySessionHost } from "@/components/RelaySessionDialog";
 import { HomeView } from "@/components/HomeView";
 import { ButlerHome } from "@/components/ButlerHome";
 import { ButlerPanel } from "@/components/ButlerPanel";
@@ -335,6 +336,8 @@ export default function Home() {
       <FilePreview />
       <BookmarksDrawer />
       <KeyboardHelp />
+      {/* 会话接力弹窗：顶栏 / 手机溢出菜单 / 侧栏行菜单都经 openRelayDialog 打开它 */}
+      <RelaySessionHost />
     </ScrollHideProvider>
   );
 }

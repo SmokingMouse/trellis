@@ -116,7 +116,8 @@ export function AgentPicker({
           setText(draftSystemPrompt ?? "");
           setOpen((v) => !v);
         }}
-        title="选择这个对话用哪个 Agent（人设 / 模型 / 工具 / 技能）"
+        title={`Agent：${label} · 选择这个对话用哪个 Agent（人设 / 模型 / 工具 / 技能）`}
+        aria-label={toolbar ? `Agent：${label}` : undefined}
         aria-expanded={open}
         className={
           toolbar
@@ -124,8 +125,9 @@ export function AgentPicker({
             : "press h-7 max-md:min-h-11 px-2.5 rounded-full bg-surface-raised text-ink-muted shadow-btn transition-colors duration-100 hover:bg-surface-hover hover:text-ink aria-expanded:bg-surface-hover aria-expanded:text-ink flex items-center gap-1.5 text-[12.5px]"
         }
       >
-        <Icon icon={Bot} size="sm" />
-        <span className={toolbar ? "min-w-0 truncate" : undefined}>Agent：{label}</span>
+        {/* toolbar：原型 .c-bar 只显示 Agent 名（「默认助手 ⌄」），「Agent」留在 aria-label / title */}
+        {!toolbar && <Icon icon={Bot} size="sm" />}
+        <span className={toolbar ? "min-w-0 truncate" : undefined}>{toolbar ? label : `Agent：${label}`}</span>
         <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
       </button>
       {open && (

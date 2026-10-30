@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowRightLeft,
   Bookmark,
   CalendarClock,
   ChevronDown,
@@ -46,6 +47,8 @@ import {
   toast,
 } from "@/components/ui";
 import { MobileOverflowMenu } from "@/components/MobileOverflowMenu";
+import { openRelayForSession } from "@/components/RelaySessionDialog";
+import { useCanRelay } from "@/hooks/useHubNodes";
 import {
   setDesktopModeOverride,
   useIsNarrowViewport,
@@ -295,6 +298,7 @@ export function Header({ isMobile }: { isMobile: boolean }) {
   // Session 53 批过的反模式）；<50% 只做只读解释，≥50% 附「开新话题」动作。
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const [mobileOverflowOpen, setMobileOverflowOpen] = useState(false);
+  const canRelay = useCanRelay();
   const ctxActionable = ctx != null && ctx.percent >= 50;
   const startFresh = () => {
     setCtxPopoverOpen(false);
@@ -785,6 +789,15 @@ export function Header({ isMobile }: { isMobile: boolean }) {
                 >
                   导出为 JSON（可往返）
                 </DropdownMenuItem>
+                {/* 会话接力：只在经 hub 且有别的在线机器时出现 */}
+                {canRelay && (
+                  <DropdownMenuItem
+                    icon={<Icon icon={ArrowRightLeft} />}
+                    onSelect={() => openRelayForSession(session)}
+                  >
+                    接力到其他机器…
+                  </DropdownMenuItem>
+                )}
               </>
             )}
             <DropdownMenuSeparator />

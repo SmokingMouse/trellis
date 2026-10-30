@@ -86,7 +86,7 @@ function CliRow({ name, h }: { name: string; h: CliAuthHealth }) {
       {h.errors.map((e) => (
         <div
           key={e}
-          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-field bg-danger-muted text-danger-ink text-label"
+          className="ml-6.5 flex items-start gap-2 px-3 py-1.5 rounded-field bg-danger-muted text-danger-ink text-label"
         >
           <Icon icon={CircleAlert} size="sm" className="mt-px" />
           <span className="min-w-0">{e}</span>
@@ -95,7 +95,7 @@ function CliRow({ name, h }: { name: string; h: CliAuthHealth }) {
       {h.warnings.map((w) => (
         <div
           key={w}
-          className="ml-6.5 flex items-start gap-2 px-3 py-2 rounded-field bg-warn-muted text-ink text-label"
+          className="ml-6.5 flex items-start gap-2 px-3 py-1.5 rounded-field bg-warn-muted text-ink text-label"
         >
           <Icon icon={TriangleAlert} size="sm" className="mt-px text-warn" />
           <span className="min-w-0">{w}</span>

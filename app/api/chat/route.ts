@@ -48,6 +48,7 @@ import { getAdoption } from "@/lib/server/as-adopt";
 import { isAgentServerEnabled } from "@/lib/as-config";
 import { getDB } from "@/lib/server/sqlite";
 import { DbWriteError } from "@/lib/server/db-error";
+import { buildRelayHistory } from "@/lib/server/session-relay";
 import { PermissionSchema } from "@smokingmouse/agent-server/protocol";
 import {
   resolveBlobPath,
@@ -835,6 +836,16 @@ async function handleChatPost(req: Request) {
     if (history.length === 0) {
       history = buildHistoryForNode(nodeId, { maxDepth: 4 });
     }
+  }
+
+  // 会话接力（lib/server/session-relay.ts）：从别的机器导入的节点没有任何 CLI resume id，
+  // 在它们后面续聊的那一轮必然 fresh —— chat B-fork / project 会以为「历史在 CLI session
+  // 里」而什么都不折，其余路径也只折 depth=4。这里只要本轮不 resume，就把根→父整条
+  // 接力链（含工具摘要）折进上下文；之后的轮次 resume 本轮建起的 session，不会再进来。
+  // 非接力会话 / 祖先链上没有导入节点 → null，行为一字不变。
+  if (!claudeSessionId) {
+    const relayHistory = buildRelayHistory(nodeId);
+    if (relayHistory) history = relayHistory;
   }
 
   // Stage 17: spawn ownership now lives in run-bus, not this handler.
