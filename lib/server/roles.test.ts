@@ -343,8 +343,9 @@ describe("固定会话", () => {
     expect(p1.reuseSessionId).toBeNull();
     expect(p1.workspacePath).toBe(r.homeDir);
     expect(p1.homeDir).toBe(r.homeDir);
+    expect(p1.mode).toBe("project");
 
-    seedSession("s-home", r.id, p1.workspacePath);
+    seedSession("s-home", r.id, p1.workspacePath!);
     roles.adoptRoleHomeSession(r.id, "s-home");
     expect(repo.getSession("s-home")!.kind).toBe("role");
     expect(roles.planRoleNewSession(r.id)!.reuseSessionId).toBe("s-home");

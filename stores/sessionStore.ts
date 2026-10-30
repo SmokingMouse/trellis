@@ -1202,6 +1202,8 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   },
 
   openRole: async (roleId) => {
+    // 管家（P2 起是内置角色）保留自己的一套体验：管家草稿首页、ButlerPanel、改动卡。
+    if (roleId === BUTLER_AGENT_ID) return get().openButler();
     // /open 只回 home 会话 id（还在就给，归档 / 没聊过 = null），不建会话 ——
     // 第一句话发出去才建，免得点一下就多一条空会话。
     const r = await useRoleStore.getState().open(roleId);

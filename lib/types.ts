@@ -1,3 +1,4 @@
+import type { SystemNodeMeta } from "./system-node-meta";
 export type NodeStatus = "streaming" | "done" | "error";
 
 // "qa" — original question/answer node. "reference" — passive material
@@ -275,6 +276,9 @@ export type ChatNode = {
   // 'session' = 会话人设（不挂 chip —— 每张卡都挂一枚是噪音，会话级显示在 Header）。
   agentId?: string | null;
   agentScope?: "session" | "mention" | null;
+  // 角色 P2 系统节点（跟进报告 / 夜间整理 / 群聊轮次结束）：非空就按 meta.kind 换渲染，
+  // 且不当作输入框的续聊落点。见 lib/system-node-meta.ts。
+  meta?: SystemNodeMeta | null;
 };
 
 export type Bookmark = {

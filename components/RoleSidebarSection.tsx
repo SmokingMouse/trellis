@@ -5,7 +5,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import { useRoleStore } from "@/stores/roleStore";
 import { Icon, IconButton, PixelLoader, StatusDot, cn } from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
-import { isButlerSession } from "@/lib/butler";
+import { BUTLER_AGENT_ID, isButlerSession } from "@/lib/butler";
 import { formatRelativeTimeShort } from "@/lib/relative-time";
 import type { Role } from "@/lib/roles";
 
@@ -13,13 +13,11 @@ import type { Role } from "@/lib/roles";
 // 排在导航和「会话」之间；角色是常驻对象，不该被几百个会话淹没。
 //   - 顺序沿用 GET /api/roles（最近活动降序，没聊过的按 sortOrder），最多露 5 行，其余收进「全部 N」；
 //   - 行尾一个槽：固定会话在跑 = 像素格、完成未读 = 点、否则相对时间；
-//   - 末尾一行「管家」：管家暂不迁成角色（docs/roles-p1.md），点了走原来的 openButler。
+//   - 管家（P2 起是内置角色，docs/roles-p2.md C）是普通的一行，只是点了走 openButler
+//     （管家草稿首页 / ButlerPanel / 改动卡那一套），高亮也按管家会话 / 管家草稿算。
 // 桌面常驻栏与手机抽屉共用，mobile 只换行高（44px 触控）与按压反馈。
 
 const VISIBLE = 5;
-
-/** 管家行的头像：借 RoleAvatar 画同款圆，色相取原型里的 255。 */
-const BUTLER_AVATAR = { avatarHue: 255, avatarGlyph: "管", name: "管家" };
 
 /** 侧栏副标题只要一小截：介绍按标点截第一句，再限长。 */
 function shortIntro(intro: string): string {
@@ -90,7 +88,8 @@ export function RoleSidebarSection({ mobile = false }: { mobile?: boolean }) {
       </div>
       <div className="flex flex-col gap-px">
         {visible.map((r) => {
-          const active = activeRoleId === r.id;
+          const isButler = r.id === BUTLER_AGENT_ID;
+          const active = isButler ? butlerActive : activeRoleId === r.id;
           const status = statusOf(r);
           const sub = shortIntro(r.intro);
           return (
@@ -99,9 +98,11 @@ export function RoleSidebarSection({ mobile = false }: { mobile?: boolean }) {
               type="button"
               data-glide-row
               data-sidebar-role={r.id}
+              data-sidebar-butler={isButler || undefined}
+              data-mobile-target={isButler ? "drawer-butler" : undefined}
               aria-current={active ? "page" : undefined}
               title={r.intro ? `${r.name} · ${r.intro}` : r.name}
-              onClick={() => void openRole(r.id)}
+              onClick={() => void (isButler ? openButler() : openRole(r.id))}
               className={rowClass(active)}
             >
               <RoleAvatar role={r} size={mobile ? "sm" : "xs"} />
@@ -135,22 +136,6 @@ export function RoleSidebarSection({ mobile = false }: { mobile?: boolean }) {
             <span className="min-w-0 flex-1 truncate">全部 {roles.length}</span>
           </button>
         )}
-        <button
-          type="button"
-          data-glide-row
-          data-sidebar-butler
-          data-mobile-target="drawer-butler"
-          aria-current={butlerActive ? "page" : undefined}
-          title="管家：用对话配置 Trellis"
-          onClick={() => void openButler()}
-          className={rowClass(butlerActive)}
-        >
-          <RoleAvatar role={BUTLER_AVATAR} size={mobile ? "sm" : "xs"} />
-          <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
-            <span className="truncate">管家</span>
-            <span className="shrink-0 truncate text-nano font-normal text-ink-faint">配置 Trellis</span>
-          </span>
-        </button>
       </div>
     </div>
   );

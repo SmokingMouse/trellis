@@ -363,7 +363,7 @@ async function handleChatPost(req: Request) {
           : { type: "created", node };
       } else {
         // New session — body picks the mode + workspace, then locks them.
-        resolvedMode = rolePlan ? "project" : isMode(body.mode) ? body.mode : "chat";
+        resolvedMode = rolePlan ? rolePlan.mode : isMode(body.mode) ? body.mode : "chat";
         const wp =
           typeof body.workspacePath === "string" && body.workspacePath.trim()
             ? body.workspacePath
@@ -390,7 +390,7 @@ async function handleChatPost(req: Request) {
               { status: 400 },
             );
           }
-          resolvedWorkspacePath = rolePlan ? rolePlan.workspacePath : wp;
+          resolvedWorkspacePath = rolePlan?.workspacePath ?? wp;
         }
         // 权限确认钳制：claude / codex 的 project 可开（chat 无文件工具；mock
         // 无审批概念）。codex 走 app-server 审批协议（agent@0.7.0 起），与 claude

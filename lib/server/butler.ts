@@ -99,14 +99,16 @@ export async function butlerOverview(): Promise<ButlerOverview> {
   return { agents, tasks, models, auth, bots, version, generatedAt: Date.now() };
 }
 
-// 最近一条管家会话（未归档）。没有就返回 null —— 会话连同根节点一起建，
-// 不存在「空会话」，所以新开由前端走普通 streamRoot 并带上管家 agentId。
+// 管家会话：P2 起管家是内置角色（docs/roles-p2.md C），打开它 = 打开它的固定会话
+// （agents.home_session_id，迁移时指向最近一条管家会话，kind='role'）。固定会话
+// 不在了（归档 / 删掉 / 从没聊过）就返回 null —— 前端落管家草稿，发第一句时 chat
+// 路由按角色规则建出新会话并认作固定会话。其余历史管家会话（kind='user'）照旧在
+// 会话列表里，不再被这里捡回来：捡回来的会话不是固定会话，下一轮也不会被认领。
 export function latestButlerSessionId(): string | null {
   const row = getDB()
     .prepare(
-      `SELECT id FROM sessions
-        WHERE agent_id = ? AND archived = 0 AND kind = 'user'
-        ORDER BY updated_at DESC LIMIT 1`,
+      `SELECT s.id FROM agents a JOIN sessions s ON s.id = a.home_session_id
+        WHERE a.id = ? AND s.archived = 0 AND s.agent_id = a.id`,
     )
     .get(BUTLER_AGENT_ID) as { id: string } | undefined;
   return row?.id ?? null;
