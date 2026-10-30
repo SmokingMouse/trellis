@@ -633,7 +633,8 @@ ab eval --stdin <<'JS'
   const deny = document.querySelector('[data-mobile-target=permission-deny]');
   assert(primary.textContent.trim() === '允许一次', 'primary copy');
   assert(primary.getBoundingClientRect().width > deny.getBoundingClientRect().width, 'primary is wider');
-  assert(primary.className.includes('bg-accent ') && !deny.className.includes('bg-accent'), 'action hierarchy');
+  // 2026-10-30 起 Button primary = 墨色实底（beautifului 原型 .btn.primary），不再是 accent
+  assert(primary.className.includes('bg-ink ') && !deny.className.includes('bg-ink '), 'action hierarchy');
   assert(document.querySelector('[data-pending-bar=desktop]'), 'desktop pending bar missing');
   return true;
 })()

@@ -47,7 +47,7 @@ export default function MachineResourcesPage() {
         title="机器资源"
         subtitle="当前 Trellis 服务进程所在机器；每 5 秒自动重新采集"
         actions={
-          <IconButton label="刷新" onClick={() => void load()} disabled={loading}>
+          <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => void load()} disabled={loading}>
             <Icon icon={RefreshCw} />
           </IconButton>
         }

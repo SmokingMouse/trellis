@@ -46,7 +46,20 @@ function recordRecentModel(id: ProviderId) {
 
 type FilterTab = "all" | "recent" | "claude" | "codex" | "third_party";
 
-export function ModelPicker() {
+/** 底栏紧凑名：去掉与厂商徽标重复的前缀（Claude · claude-opus-5-5 → opus-5-5）；去完为空就保留原名。 */
+export function compactModelName(shortLabel: string, badge: string): string {
+  const prefix = `${badge.toLowerCase()}-`;
+  if (!shortLabel.toLowerCase().startsWith(prefix)) return shortLabel;
+  const rest = shortLabel.slice(prefix.length);
+  return rest || shortLabel;
+}
+
+export function ModelPicker({
+  compact = false,
+}: {
+  /** compact = 桌面新会话底栏（原型 .c-bar「opus-5-5 ⌄」）：只显示去重后的短模型名，厂商与全名进 aria-label / title */
+  compact?: boolean;
+} = {}) {
   const provider = useSessionStore((s) => s.provider);
   const setProvider = useSessionStore((s) => s.setProvider);
   const catalog = useSessionStore((s) => s.providerCatalog);
@@ -160,15 +173,22 @@ export function ModelPicker() {
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-label={`切换模型，当前 ${current.shortLabel}`}
+            title={compact ? `${currentBadge} · ${current.shortLabel}` : undefined}
             aria-expanded={open}
             data-model-picker-trigger
             // 宽度由外层 wrapper 约束（max-w-56）：底栏挤时 wrapper 被 flex 压窄，按钮跟着截断，
             // 不能自己再撑一个 max-w——否则会溢出 wrapper 盖住右边的发送钮。
             className={`${COMPOSER_TOOL_PILL} max-w-full`}
           >
-            <Icon icon={Cpu} size="sm" />
-            <span className="text-nano text-ink-faint">{currentBadge}</span>
-            <span className="min-w-0 truncate font-mono">{current.shortLabel}</span>
+            {compact ? (
+              <span className="min-w-0 truncate">{compactModelName(current.shortLabel, currentBadge)}</span>
+            ) : (
+              <>
+                <Icon icon={Cpu} size="sm" />
+                <span className="text-nano text-ink-faint">{currentBadge}</span>
+                <span className="min-w-0 truncate font-mono">{current.shortLabel}</span>
+              </>
+            )}
             <ChevronDown size={12} strokeWidth={2} aria-hidden className="shrink-0 text-ink-faint" />
           </button>
         }

@@ -111,7 +111,7 @@ export default function NodesSettingsPage() {
         subtitle="一个入口访问多台机器：执行和数据都留在各自机器上，hub 只做转发"
         actions={
           <>
-            <IconButton label="刷新" onClick={() => void load()} disabled={loading}>
+            <IconButton label="刷新" className="md:bg-surface-raised md:shadow-btn" onClick={() => void load()} disabled={loading}>
               <Icon icon={RefreshCw} />
             </IconButton>
             <Button variant="primary" onClick={() => setAdding(true)} disabled={gwError !== null}>
@@ -133,7 +133,7 @@ export default function NodesSettingsPage() {
             icon={Unplug}
             title="当前不是经 hub 访问"
             description="机器列表由 hub（多租户网关）提供。要把这台机器挂到某个 hub 上，用下面的「本机接入 hub」。"
-            className="rounded-card bg-surface-raised shadow-raise"
+            className="rounded-card bg-surface-raised shadow-raise md:py-8"
           />
         )}
 
@@ -561,7 +561,7 @@ function LocalHubSection() {
             value={conn}
             onChange={(e) => setConn(e.target.value)}
             placeholder="trellis://v1/…"
-            className="font-mono text-nano"
+            className="font-mono text-nano resize-none"
             aria-label="连接串"
             aria-invalid={formError ? true : undefined}
           />

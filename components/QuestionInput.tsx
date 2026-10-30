@@ -18,18 +18,20 @@ import { NodeRefChips } from "./NodeRefChips";
 import { refFromItem, useNodeRefMentions, type RefPickItem } from "@/hooks/useNodeRefMentions";
 import { appendNodeRefs, MAX_NODE_REFS, removeMentionQuery, type NodeRef } from "@/lib/node-refs";
 import { ModelPicker } from "./ModelPicker";
-import { COMPOSER_TOOL_ICON, COMPOSER_TOOL_PILL } from "./ComposerShell";
+import { COMPOSER_TOOL_ICON } from "./ComposerShell";
 import {
   ArrowLeftRight,
+  ArrowUp,
   FileText,
   History,
   Maximize2,
   Paperclip,
   PencilLine,
+  Plus,
   X,
   Zap,
 } from "lucide-react";
-import { Button, Drawer, Icon, IconButton, Tooltip } from "@/components/ui";
+import { Button, Drawer, Icon, IconButton, Tooltip, cn } from "@/components/ui";
 import { setDesktopModeOverride } from "@/hooks/useIsMobile";
 import { middleEllipsisPath } from "@/lib/run-config";
 import {
@@ -348,7 +350,7 @@ export function QuestionInput({
       // the explorer sidebar). var from page.tsx; 0 on mobile / collapsed.
       style={embedded ? undefined : { paddingLeft: "var(--trellis-sb, 0px)" }}
     >
-      <div className="w-full max-w-2xl">
+      <div className={embedded ? "w-full max-w-2xl md:max-w-none" : "w-full max-w-2xl"}>
         {!embedded && <>
         <div className="flex items-center gap-3 mb-8 max-md:mb-3 justify-center">
           {/* 品牌渐变固定色（indigo → fuchsia → amber 原始 hex），不随主题换肤 */}
@@ -438,11 +440,11 @@ export function QuestionInput({
                 ? "讲讲你对某个概念的理解——AI 会复述、挑漏洞、追问你没讲清的地方。讲不清的点，选中它 ⌘K 开子节点继续深讲。"
                 : "例如：Rust 的 ownership 系统在汇编层面是怎么实现的？粘贴图片 / 文件可加入提问。"
             }
-            // 桌面：原型 .composer textarea——2 行起（min 54px），随内容长高到 200px；手机保持 4 行
+            // 桌面：原型 .composer textarea——2 行起（padding 16/16/6，min 80px 让卡片落在 ~126px 不显挤），随内容长高到 200px；手机保持 4 行
             rows={isMobile ? 4 : 2}
             // 焦点环画在外层卡片上（focus-within）；全局 :focus-visible 压不住，内联去掉输入框自己那一圈。
             style={{ outline: "none" }}
-            className="block w-full px-4 pt-3.5 pb-1.5 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.55] md:min-h-13.5 md:max-h-50"
+            className="block w-full px-4 pt-3.5 pb-1.5 md:pt-4 outline-none resize-none text-reading leading-relaxed bg-transparent text-ink-strong placeholder:text-ink-faint md:text-[14.5px] md:leading-[1.55] md:min-h-20 md:max-h-50"
             disabled={busy}
           />
           <input
@@ -485,7 +487,8 @@ export function QuestionInput({
               </Button>
             </div>
           ) : (
-          // 原型 .c-bar：[附件][草图][专注写作][模式][Agent][增强] … [模型][发送]。
+          // 原型 .c-bar：[+][模式 ⌄][Agent ⌄][增强][草图][专注写作] … [模型 ⌄][发送 ●]。
+          // 左侧只留文字胶囊给模式 / Agent，其余一律 28px 圆形图标钮（文案进 tooltip / aria-label）；
           // 桌面不折行：挤的时候让 ModelPicker（min-w-0 wrapper）先截断，而不是整颗掉到第二行。
           <div className="px-2 pb-2 pt-1.5 flex flex-wrap md:flex-nowrap items-center gap-1" data-question-input-toolbar="">
             <IconButton
@@ -499,8 +502,28 @@ export function QuestionInput({
               disabled={busy || att.atLimit}
               className={COMPOSER_TOOL_ICON}
             >
-              <Icon icon={Paperclip} />
+              <Icon icon={Plus} />
             </IconButton>
+            {!butler && (
+              <div data-composer-context="" className="flex min-w-0 shrink-0 flex-wrap md:flex-nowrap items-center gap-1">
+                <ModePicker variant="toolbar" />
+                <AgentPicker variant="toolbar" />
+                {draftMode === "chat" && (
+                  <IconButton
+                    label="增强模式"
+                    title={`${chatEnhanced ? "增强模式 · 开" : "增强模式 · 关"}｜${ENHANCED_HINT}`}
+                    aria-pressed={chatEnhanced}
+                    onClick={() => setChatEnhanced(!chatEnhanced)}
+                    className={cn(
+                      COMPOSER_TOOL_ICON,
+                      chatEnhanced && "bg-accent-muted text-accent-ink ring-1 ring-inset ring-accent-line hover:bg-accent-muted hover:text-accent-ink",
+                    )}
+                  >
+                    <Icon icon={Zap} selected={chatEnhanced} />
+                  </IconButton>
+                )}
+              </div>
+            )}
             <IconButton
               label="画个草图"
               title={
@@ -523,43 +546,21 @@ export function QuestionInput({
             >
               <Icon icon={Maximize2} />
             </IconButton>
-            {!butler && (
-              <div data-composer-context="" className="ml-0.5 flex min-w-0 shrink-0 flex-wrap md:flex-nowrap items-center gap-1">
-                <ModePicker variant="toolbar" />
-                <AgentPicker variant="toolbar" />
-                {draftMode === "chat" && (
-                  <Tooltip content={ENHANCED_HINT}>
-                    <button
-                      type="button"
-                      aria-pressed={chatEnhanced}
-                      onClick={() => setChatEnhanced(!chatEnhanced)}
-                      className={
-                        chatEnhanced
-                          ? "press inline-flex h-7 items-center gap-1.5 rounded-full bg-accent-muted px-2 text-[12.5px] text-accent-ink ring-1 ring-inset ring-accent-line transition-colors duration-100"
-                          : COMPOSER_TOOL_PILL
-                      }
-                    >
-                      <Icon icon={Zap} size="sm" selected={chatEnhanced} />
-                      增强模式{chatEnhanced ? " · 开" : ""}
-                    </button>
-                  </Tooltip>
-                )}
-              </div>
-            )}
-            <span className="flex-1" />
-            <ModelPicker />
-            <Button
-              // bui send：墨色实底胶囊；文案（开始提问 / 创建…）保持原样
-              variant="ink"
-              onClick={submit}
-              disabled={submitDisabled}
-              title={
-                needsWorkspace ? "Project 模式需要先选择工作区" : undefined
-              }
-              className="rounded-full! md:min-h-7.5"
-            >
-              {submitLabel}
-            </Button>
+            <span className="min-w-2 flex-1" />
+            <ModelPicker compact />
+            <Tooltip content={needsWorkspace ? "Project 模式需要先选择工作区" : submitLabel}>
+              <button
+                type="button"
+                // bui .send：30px 墨色圆钮 + 上箭头；文案（开始探索 / 先选工作区…）进 aria-label + tooltip
+                aria-label={submitLabel}
+                data-question-input-submit=""
+                onClick={submit}
+                disabled={submitDisabled}
+                className="press ml-0.5 grid size-7.5 shrink-0 place-items-center rounded-full bg-ink text-ink-inverse shadow-primary transition-[background-color,opacity] duration-150 hover:bg-ink/88 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-ink"
+              >
+                <Icon icon={ArrowUp} size="sm" />
+              </button>
+            </Tooltip>
           </div>
           )}
         </div>

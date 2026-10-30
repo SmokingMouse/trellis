@@ -338,6 +338,7 @@ export default function AgentsSettingsPage() {
           <>
             <IconButton
               label="刷新"
+              className="md:bg-surface-raised md:shadow-btn"
               onClick={() => {
                 void refresh();
                 void refreshBots();
@@ -356,7 +357,7 @@ export default function AgentsSettingsPage() {
 
       {firstLoading ? (
         <div role="status" aria-label="加载中" className="flex flex-col md:flex-row gap-6">
-          <div className="md:w-[280px] shrink-0 overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
+          <div className="md:w-[360px] shrink-0 overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
             {[0, 1, 2].map((i) => (
               <div key={i} className="px-3.5 py-3 flex flex-col gap-2">
                 <Skeleton className="h-3.5 w-3/5" />
@@ -389,7 +390,7 @@ export default function AgentsSettingsPage() {
     <div className="flex flex-col md:flex-row gap-6">
       {/* 左：列表 */}
       {agents.length > 0 && (
-      <div className="ui-enter-up md:w-[280px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
+      <div className="ui-enter-up md:w-[360px] shrink-0 self-start w-full overflow-hidden rounded-card bg-surface-raised shadow-raise divide-y divide-line">
         {agents.map((a) => {
           const agentBots = bots.filter((b) => b.agentId === a.id);
           const active = selectedId === a.id;
@@ -438,6 +439,8 @@ export default function AgentsSettingsPage() {
         {!draft ? (
           <EmptyState
             compact
+            icon={Bot}
+            className="md:h-full md:min-h-[160px] md:rounded-card md:border md:border-dashed md:border-line"
             title="选一个 Agent 编辑"
             description="左边选一个 Agent 编辑，或在右上角新建一个。"
           />

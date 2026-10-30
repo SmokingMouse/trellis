@@ -310,7 +310,7 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
           </div>
         </div>
         {state?.defaultModel && (
-          <div className="text-label text-ink-muted bg-surface-muted px-2.5 py-1 rounded-field border border-line flex items-center gap-1.5">
+          <div className="shrink-0 whitespace-nowrap text-label text-ink-muted bg-surface-muted h-6 px-2.5 rounded-full shadow-hairline inline-flex items-center gap-1.5">
             <Icon icon={Star} size="sm" className="text-accent-ink" />
             <span>默认模型：</span>
             <span className="font-mono text-ink-strong">{state.defaultModel}</span>
@@ -544,11 +544,11 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
               />
             )}
 
-            <div className="space-y-3">
+            <div className={`-mx-5 -mb-4 divide-y divide-line ${loadError || state?.providers.length === 0 ? "" : "-mt-4"}`}>
               {state?.providers.map((p) => (
                 <div
                   key={p.name}
-                  className="border border-line rounded-card p-3.5 bg-surface flex flex-col sm:flex-row sm:items-start gap-3 justify-between"
+                  className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-start gap-3 justify-between"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -576,10 +576,10 @@ export function ModelConfigPanel({ onClose }: { onClose?: () => void }) {
                         return (
                           <span
                             key={m}
-                            className={`text-nano font-mono px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                            className={`inline-flex h-[22px] items-center gap-1 rounded-[5px] border px-1.5 font-mono text-[11.5px] leading-none ${
                               isDefault
                                 ? "bg-accent-muted text-accent-ink border-accent-line font-medium"
-                                : "bg-surface-muted text-ink-strong border-line"
+                                : "bg-surface-muted text-ink-muted border-line-faint"
                             }`}
                           >
                             {isDefault && <Icon icon={Star} size="sm" aria-label="默认模型" />}
