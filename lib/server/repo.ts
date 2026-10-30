@@ -2749,3 +2749,149 @@ function refTitleOf(metaJson: string | null): string | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 会话接力（lib/server/session-relay.ts）：把别的机器导出的一条根→叶消息链落成本机
+// 的一个新会话。只管写库（一个事务：sessions 行 + 链上每个节点 + FTS），校验 /
+// 格式转换在 session-relay.ts。导入的节点一律是终态（done / error），不带任何
+// CLI resume id —— 续聊时历史由 chat 路由按 relay_json 折叠进上下文。
+// ---------------------------------------------------------------------------
+
+export type RelayNodeInsert = {
+  id: string;
+  parentId: string | null;
+  kind: "qa" | "reference";
+  question: string;
+  response: string;
+  status: "done" | "error";
+  errorMessage: string | null;
+  createdAt: number;
+  parentAnchorText: string | null;
+  topicLabel: string | null;
+  toolCallsJson: string | null;
+  reference: {
+    sourceType: RefSourceType;
+    sourceUri: string | null;
+    contentMd: string;
+    metaJson: string;
+  } | null;
+};
+
+export function createRelaySession(args: {
+  sessionId: string;
+  title: string;
+  now: number;
+  mode: "chat" | "project";
+  workspacePath: string | null;
+  systemPrompt: string | null;
+  model: string | null;
+  requireApproval: boolean;
+  agentId: string | null;
+  relayJson: string;
+  nodes: RelayNodeInsert[];
+}): ApiSession {
+  if (args.nodes.length === 0) throw new Error("relay session needs at least one node");
+  const db = getDB();
+  const workspaceId = args.workspacePath ? resolveWorkspaceId(args.workspacePath) : null;
+  const tx = db.transaction(() => {
+    // binding_type 恒 legacy：接力来的会话不绑 Agent 服务线程；title_source='user'
+    // 锁住标题，自动命名不会把「接力自 <机器>」后缀冲掉。
+    db.prepare(
+      `INSERT INTO sessions (id, title, title_source, root_node_id, created_at, updated_at,
+                             context_mode, workspace_path, workspace_id,
+                             system_prompt, model, lineage_isolation, require_approval,
+                             agent_id, binding_type, relay_json)
+       VALUES (?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'legacy', ?)`,
+    ).run(
+      args.sessionId,
+      args.title,
+      args.nodes[0].id,
+      args.now,
+      args.now,
+      args.mode,
+      args.workspacePath,
+      workspaceId,
+      args.systemPrompt,
+      args.model,
+      args.mode === "project" ? 1 : 0,
+      args.requireApproval ? 1 : 0,
+      args.agentId,
+      args.relayJson,
+    );
+    const insert = db.prepare(
+      `INSERT INTO nodes (id, session_id, parent_id, parent_anchor_text, question, response,
+                          status, error_message, sibling_index, created_at, read_at,
+                          topic_label, kind, tool_calls_json,
+                          ref_source_type, ref_source_uri, ref_content_md, ref_fetched_at, ref_meta_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const n of args.nodes) {
+      insert.run(
+        n.id,
+        args.sessionId,
+        n.parentId,
+        n.parentAnchorText,
+        n.question,
+        n.response,
+        n.status,
+        n.errorMessage,
+        n.createdAt,
+        args.now, // 导入即已读：别让整条历史在侧栏亮未读点
+        n.topicLabel,
+        n.kind,
+        n.toolCallsJson,
+        n.reference?.sourceType ?? null,
+        n.reference?.sourceUri ?? null,
+        n.reference?.contentMd ?? null,
+        n.reference ? n.createdAt : null,
+        n.reference?.metaJson ?? null,
+      );
+      if (n.kind === "reference") {
+        ftsUpsert(db, "node_reference", n.id, args.sessionId, n.reference?.contentMd ?? "");
+      } else {
+        ftsUpsert(db, "node_question", n.id, args.sessionId, n.question);
+        if (n.status === "done") ftsUpsert(db, "node_response", n.id, args.sessionId, n.response);
+      }
+    }
+  });
+  dbWrite("createRelaySession", tx);
+  return getSession(args.sessionId)!;
+}
+
+/** 会话的接力来源（relay_json 原文）；本机原生会话 / 解析失败返回 null。 */
+export function getSessionRelayJson(sessionId: string): unknown {
+  const row = getDB()
+    .prepare("SELECT relay_json FROM sessions WHERE id = ?")
+    .get(sessionId) as { relay_json: string | null } | undefined;
+  if (!row?.relay_json) return null;
+  try {
+    return JSON.parse(row.relay_json);
+  } catch {
+    return null;
+  }
+}
+
+/** 从 nodeId 沿 parent 走到根，返回根→nodeId 的节点（含自身）。断链 / 环防护：上限 5000 步。 */
+export function getNodeChain(nodeId: string): ApiNode[] {
+  const db = getDB();
+  const stmt = db.prepare(`SELECT ${NODE_COLS} FROM nodes WHERE id = ?`);
+  const chain: ApiNode[] = [];
+  const seen = new Set<string>();
+  let cur: string | null = nodeId;
+  while (cur && !seen.has(cur) && chain.length < 5000) {
+    seen.add(cur);
+    const row = stmt.get(cur) as NodeRow | undefined;
+    if (!row) break;
+    chain.push(rowToNode(row));
+    cur = row.parent_id;
+  }
+  return chain.reverse();
+}
+
+/** 会话里最近一次活动的节点（created_at 最大）——导出时没指定叶节点的默认值。 */
+export function latestNodeIdInSession(sessionId: string): string | null {
+  const row = getDB()
+    .prepare("SELECT id FROM nodes WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1")
+    .get(sessionId) as { id: string } | undefined;
+  return row?.id ?? null;
+}

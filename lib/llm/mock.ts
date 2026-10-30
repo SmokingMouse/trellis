@@ -18,11 +18,17 @@ export const mockProvider: LLMProvider = {
     const refAt = question.indexOf(NODE_REF_LEAD);
     const ownQuestion = refAt >= 0 ? question.slice(0, refAt) : question;
     const refTitles = [...question.matchAll(/<referenced_node [^>]*title="([^"]*)"/g)].map((m) => m[1]);
+    // 同理回显折叠历史的条数 + 首条开头（会话接力 / lineage 降级时验证历史真的进了上下文）。
+    const historyEcho =
+      history.length > 0
+        ? `\n\n（mock：本轮带 ${history.length} 条折叠历史，首条：「${history[0].content.slice(0, 40)}」）`
+        : "";
     const response =
       pickResponse(ownQuestion, history, parentAnchor) +
       (refTitles.length > 0
         ? `\n\n（mock：本轮收到 ${refTitles.length} 个引用节点上下文：${refTitles.join("、")}）`
-        : "");
+        : "") +
+      historyEcho;
     let outputChars = 0;
 
     for (const chunk of chunkText(response, CHUNK_MIN, CHUNK_MAX)) {

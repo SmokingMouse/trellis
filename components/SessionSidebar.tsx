@@ -4,6 +4,7 @@ import { useSessionStore } from "@/stores/sessionStore";
 import {
   Anchor,
   Archive,
+  ArrowRightLeft,
   BellDot,
   ArchiveRestore,
   Bookmark,
@@ -86,6 +87,8 @@ import { MobileNavDrawer } from "@/components/MobileNavDrawer";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { LocalMachineCard, NodeSwitcher } from "./NodeSwitcher";
+import { openRelayForSession } from "./RelaySessionDialog";
+import { useCanRelay } from "@/hooks/useHubNodes";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { switchAppMode, useAppMode } from "@/hooks/useAppMode";
 import { useHerdrConsole } from "@/hooks/useHerdrConsole";
@@ -137,6 +140,8 @@ export function SessionSidebar() {
   // Herdr 会话搬去了 Herdr 模式，来源筛选里不再有「Herdr」；旧偏好落回「我的会话」。
   const source: SidebarSource = storedSource === "herdr" ? "mine" : storedSource;
   const mode = useAppMode();
+  // 会话接力入口：只在经 hub 且有别的在线机器时出现在行菜单里。
+  const canRelay = useCanRelay();
   const [includeArchived, setIncludeArchived] = useSidebarPreference("include-archived", false, isBoolean);
   const { statuses: herdrStatus, available: herdrAvailable } = useHerdrSessionStatuses();
   const fleetSessionKey = [...herdrStatus.keys()].sort().join(",");
@@ -672,6 +677,14 @@ export function SessionSidebar() {
             }
           }}
           onArchive={toggleArchive}
+          onRelay={
+            canRelay
+              ? () => {
+                  setMobileNavOpen(false);
+                  openRelayForSession(s);
+                }
+              : undefined
+          }
           swipe={
             swipeGestures
               ? {
@@ -1637,6 +1650,7 @@ function SidebarRow({
   onCancelEdit,
   onCommit,
   onArchive,
+  onRelay,
   onDelete,
   swipe,
 }: {
@@ -1665,6 +1679,8 @@ function SidebarRow({
   onCancelEdit: () => void;
   onCommit: (title: string) => void | Promise<void>;
   onArchive: () => void;
+  /** 接力到其他机器；不传 = 菜单里不出现（不在 hub 后面 / 没有别的在线机器） */
+  onRelay?: () => void;
   onDelete: () => void;
   /** 手机 / 触屏的左右滑动操作；不传 = 不启用（桌面） */
   swipe?: {
@@ -1706,8 +1722,9 @@ function SidebarRow({
     },
     { label: "重命名", onSelect: onStartEdit },
     { label: session.archived ? "恢复（取消归档）" : "归档", onSelect: onArchive },
+    ...(onRelay ? [{ label: "接力到其他机器…", onSelect: onRelay }] : []),
     { label: "删除…", danger: true, onSelect: onDelete },
-  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onDelete]);
+  ], [isPinned, onUnpin, onPin, session.archived, onStartEdit, onArchive, onRelay, onDelete]);
 
   useEffect(() => {
     if (editing) {
@@ -1912,6 +1929,7 @@ function SidebarRow({
               onUnpin={onUnpin ?? onPin}
               onRename={onStartEdit}
               onArchive={onArchive}
+              onRelay={onRelay}
               onDelete={onDelete}
             />
           </div>
@@ -1956,6 +1974,7 @@ function SessionRowMenu({
   onUnpin,
   onRename,
   onArchive,
+  onRelay,
   onDelete,
 }: {
   isPinned: boolean;
@@ -1964,6 +1983,7 @@ function SessionRowMenu({
   onUnpin: () => void;
   onRename: () => void;
   onArchive: () => void;
+  onRelay?: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -1991,6 +2011,11 @@ function SessionRowMenu({
         <DropdownMenuItem icon={<Icon icon={archived ? ArchiveRestore : Archive} />} onSelect={onArchive}>
           {archived ? "恢复（取消归档）" : "归档"}
         </DropdownMenuItem>
+        {onRelay && (
+          <DropdownMenuItem icon={<Icon icon={ArrowRightLeft} />} onSelect={onRelay}>
+            接力到其他机器…
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem danger icon={<Icon icon={Trash2} />} onSelect={onDelete}>
           删除…
