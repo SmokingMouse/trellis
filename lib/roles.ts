@@ -113,3 +113,9 @@ export function isRoleMemoryPath(homeDir: string, filePath: string): boolean {
 export function memoryFileName(filePath: string): string {
   return filePath.split("/").pop() ?? filePath;
 }
+
+/** 一条记忆给人看的标题。frontmatter 的 name 按约定是 kebab 短 slug（target-ielts-7），
+ * 那句人话在 description 里（目标雅思成绩 7 分），所以优先 description，没有再退回 name。 */
+export function memoryTitle(m: Pick<RoleMemory, "name" | "description">): string {
+  return m.description.trim() || m.name.trim();
+}

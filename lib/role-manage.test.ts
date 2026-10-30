@@ -5,6 +5,7 @@ import {
   countMemories,
   groupMemories,
   isRoleNameTaken,
+  memoryExcerpt,
   memoryFileFromName,
   searchMemories,
 } from "./role-manage";
@@ -90,5 +91,14 @@ describe("名字", () => {
     expect(isRoleNameTaken(" 老周 ", roles)).toBe(true);
     expect(isRoleNameTaken("老周", roles, "1")).toBe(false);
     expect(isRoleNameTaken("", roles)).toBe(false);
+  });
+});
+
+describe("memoryExcerpt", () => {
+  test("列表记号换成 •、去掉标题记号和空行，只留前几行", () => {
+    const body = "用户的听力和口语最薄弱：\n\n- 口语痛点：开不了口\n- 听力痛点：跟不上\n## 计划\n* 每天精听";
+    expect(memoryExcerpt(body)).toBe("用户的听力和口语最薄弱：\n• 口语痛点：开不了口\n• 听力痛点：跟不上");
+    expect(memoryExcerpt(body, 5)).toBe("用户的听力和口语最薄弱：\n• 口语痛点：开不了口\n• 听力痛点：跟不上\n计划\n• 每天精听");
+    expect(memoryExcerpt("   \n\n")).toBe("");
   });
 });

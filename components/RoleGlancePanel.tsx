@@ -5,7 +5,7 @@ import { RoleFollowToggle } from "@/components/RoleFollowToggle";
 import { useRoleStore } from "@/stores/roleStore";
 import { Icon, Pill, Skeleton } from "@/components/ui";
 import { RoleAvatar } from "@/components/ui/Avatar";
-import { MEMORY_TYPE_LABEL, type MemoryType, type Role } from "@/lib/roles";
+import { MEMORY_TYPE_LABEL, memoryTitle, type MemoryType, type Role } from "@/lib/roles";
 import { RoleGlanceBlocks } from "./RoleGlanceBlocks";
 
 // 角色一览（原型 09-roles.html 的 .glance，对应 Cindy 的 At a glance）：不离开对话就能看清
@@ -72,13 +72,13 @@ export function RoleGlanceContent({ role }: { role: Role }) {
             <a
               key={m.file}
               href={roleSettingsHref(role.id, "memory")}
-              title={m.description || m.name}
+              title={m.file}
               className="flex items-start gap-2 px-3 py-2 text-ui text-ink transition-colors duration-100 hover:bg-surface-hover [&+&]:border-t [&+&]:border-line"
             >
               <Pill tone={TYPE_TONE[m.type] ?? "neutral"} className="mt-px shrink-0">
                 {MEMORY_TYPE_LABEL[m.type] ?? m.type}
               </Pill>
-              <span className="line-clamp-2 min-w-0 flex-1 leading-snug">{m.name}</span>
+              <span className="line-clamp-2 min-w-0 flex-1 leading-snug">{memoryTitle(m)}</span>
             </a>
           ))
         )}
