@@ -1,5 +1,6 @@
 import "server-only";
 import { getDB } from "./sqlite";
+import type { AgentKind } from "@/lib/roles";
 
 // 自定义 Agent 的仓储层。刻意不放进 repo.ts —— 那个文件已经 1900 行，且 agent 与
 // session/node 的读写路径完全不相交（agent 只在 spawn 前被读一次）。
@@ -35,6 +36,14 @@ export type AgentRecord = {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
+  /** 角色 P1：'role' = 角色（docs/roles-p1.md），其余字段只对角色有意义。 */
+  kind: AgentKind;
+  intro: string;
+  avatarHue: number;
+  avatarGlyph: string;
+  workDir: string | null;
+  memoryEnabled: boolean;
+  homeSessionId: string | null;
 };
 
 export type AgentInput = {
@@ -51,6 +60,12 @@ export type AgentInput = {
   requireApproval?: boolean | null;
   enabled?: boolean;
   sortOrder?: number;
+  kind?: AgentKind;
+  intro?: string;
+  avatarHue?: number;
+  avatarGlyph?: string;
+  workDir?: string | null;
+  memoryEnabled?: boolean;
 };
 
 type AgentRow = {
@@ -71,11 +86,19 @@ type AgentRow = {
   sort_order: number;
   created_at: number;
   updated_at: number;
+  kind: string;
+  intro: string;
+  avatar_hue: number;
+  avatar_glyph: string;
+  work_dir: string | null;
+  memory_enabled: number;
+  home_session_id: string | null;
 };
 
 const AGENT_COLS = `id, slug, name, description, system_prompt, model, tools_json,
        disallowed_tools_json, skills_json, inherit_env, permission, require_approval,
-       builtin, enabled, sort_order, created_at, updated_at`;
+       builtin, enabled, sort_order, created_at, updated_at,
+       kind, intro, avatar_hue, avatar_glyph, work_dir, memory_enabled, home_session_id`;
 
 /** slug 同时是 claude `--agent` 的值、pack 里 agents/<slug>.md 的文件名、未来 @提及的名字。
  * 三者都要求它是安全的路径片段 —— 校验放在唯一入口，别指望调用方自觉。 */
@@ -115,12 +138,23 @@ function rowToAgent(r: AgentRow): AgentRecord {
     sortOrder: r.sort_order,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    kind: r.kind === "role" ? "role" : "agent",
+    intro: r.intro,
+    avatarHue: r.avatar_hue,
+    avatarGlyph: r.avatar_glyph,
+    workDir: r.work_dir,
+    memoryEnabled: r.memory_enabled === 1,
+    homeSessionId: r.home_session_id,
   };
 }
 
-export function listAgents(opts?: { enabledOnly?: boolean }): AgentRecord[] {
+/** 默认只列普通 agent：角色（kind='role'）不进设置 → Agent 页、AgentPicker、
+ * 管家概览和配置导出；角色有自己的 /api/roles。 */
+export function listAgents(opts?: { enabledOnly?: boolean; kind?: AgentKind }): AgentRecord[] {
   const db = getDB();
-  const where = opts?.enabledOnly ? "WHERE enabled = 1" : "";
+  const conds = [opts?.kind === "role" ? "kind = 'role'" : "kind <> 'role'"];
+  if (opts?.enabledOnly) conds.push("enabled = 1");
+  const where = `WHERE ${conds.join(" AND ")}`;
   const rows = db
     .query(`SELECT ${AGENT_COLS} FROM agents ${where} ORDER BY sort_order ASC, created_at ASC`)
     .all() as AgentRow[];
@@ -162,8 +196,9 @@ export function createAgent(input: AgentInput): AgentRecord {
     `INSERT INTO agents
        (id, slug, name, description, system_prompt, model, tools_json,
         disallowed_tools_json, skills_json, inherit_env, permission, require_approval,
-        builtin, enabled, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+        builtin, enabled, sort_order, created_at, updated_at,
+        kind, intro, avatar_hue, avatar_glyph, work_dir, memory_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.slug,
@@ -187,6 +222,12 @@ export function createAgent(input: AgentInput): AgentRecord {
     input.sortOrder ?? 100,
     now,
     now,
+    input.kind === "role" ? "role" : "agent",
+    input.intro ?? "",
+    input.avatarHue ?? 254,
+    input.avatarGlyph ?? "",
+    input.workDir ?? null,
+    input.memoryEnabled === false ? 0 : 1,
   );
   return getAgent(id)!;
 }
@@ -228,6 +269,12 @@ export function updateAgent(id: string, patch: Partial<AgentInput>): AgentRecord
   }
   if (patch.enabled !== undefined) put("enabled", patch.enabled ? 1 : 0);
   if (patch.sortOrder !== undefined) put("sort_order", patch.sortOrder);
+  // kind 不可改：agent ↔ 角色互转会让固定会话 / 角色目录悬空，P1 不支持。
+  if (patch.intro !== undefined) put("intro", patch.intro);
+  if (patch.avatarHue !== undefined) put("avatar_hue", patch.avatarHue);
+  if (patch.avatarGlyph !== undefined) put("avatar_glyph", patch.avatarGlyph);
+  if (patch.workDir !== undefined) put("work_dir", patch.workDir);
+  if (patch.memoryEnabled !== undefined) put("memory_enabled", patch.memoryEnabled ? 1 : 0);
   if (!sets.length) return existing;
   put("updated_at", Date.now());
   vals.push(id);
