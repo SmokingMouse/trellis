@@ -65,24 +65,14 @@ function MemoryLine({
 
   const undo = async () => {
     setState("busy");
-    try {
-      const res = await fetch(
-        `/api/roles/${encodeURIComponent(role.id)}/memories/${encodeURIComponent(write.file)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `HTTP ${res.status}`);
-      }
-      setState("undone");
-      // 一览面板的「最近记住的」、顶栏「记得 N 条」都跟着变。
-      const store = useRoleStore.getState();
-      void store.loadMemories(role.id);
-      void store.refresh();
-    } catch (e) {
+    // roleStore.deleteMemory 顺带更新记忆缓存与 memoryCount：一览「最近记住的」、顶栏「记得 N 条」跟着变。
+    const err = await useRoleStore.getState().deleteMemory(role.id, write.file);
+    if (err) {
       setState("idle");
-      toast.error(`撤销失败：${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`撤销失败：${err}`);
+      return;
     }
+    setState("undone");
   };
 
   return (
