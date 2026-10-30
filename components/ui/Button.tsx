@@ -26,9 +26,12 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-fg shadow-primary hover:bg-accent-strong active:bg-accent-strong",
-        /** 墨色实底主按钮（bui Continue）：页面级主操作，比 accent 更沉 */
+        /** 主操作：墨色实底（beautifului 原型 .btn.primary）。强调色只留给选中 / 焦点 / 链接 */
+        primary: "bg-ink text-ink-inverse shadow-primary hover:bg-ink/88 active:bg-ink/88",
+        /** 同 primary（历史别名，个别调用点显式写了 ink） */
         ink: "bg-ink text-ink-inverse shadow-primary hover:bg-ink/88 active:bg-ink/88",
+        /** 强调色实底：确需「亮蓝」的少数场景（原型 .btn.accent） */
+        accent: "bg-accent text-accent-fg shadow-primary hover:bg-accent-strong active:bg-accent-strong",
         secondary: "bg-surface-raised text-ink shadow-btn hover:bg-surface-hover active:bg-surface-hover",
         ghost: "text-ink-muted hover:bg-surface-hover hover:text-ink active:bg-surface-hover active:text-ink",
         danger: "border border-danger-line text-danger-ink hover:bg-danger-muted active:bg-danger-muted",
