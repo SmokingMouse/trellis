@@ -161,3 +161,19 @@ export function useHubInbox(): InboxNode[] | null {
   return othersKey ? inbox : null;
 }
 
+
+// ── 会话接力 ─────────────────────────────────────────────────────────────────
+
+/** 当前机器 + 其余在线机器；不在 hub 后面 / 没有别的在线机器时 others 为空。 */
+export function relayTargetsOf(list: GwNode[] | null): { current: GwNode | null; others: GwNode[] } {
+  if (!list) return { current: null, others: [] };
+  const current = list.find((n) => n.current) ?? null;
+  return { current, others: list.filter((n) => !n.current && n.online) };
+}
+
+/** 「接力到其他机器…」菜单项是否该出现：经 hub、且至少有一台别的在线机器。 */
+export function useCanRelay(): boolean {
+  const list = useHubNodes();
+  const { current, others } = relayTargetsOf(list);
+  return !!current && others.length > 0;
+}

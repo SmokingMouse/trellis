@@ -376,7 +376,7 @@ function planAll(pkg: ConfigPackage, env: SyncEnv): Plan[] {
   if (pkg.models?.length) {
     const raw = readRawEndpointsForSync();
     for (const item of pkg.models) {
-      const planned = planModel(item, raw);
+      const planned = planModel(item, raw, pkg.models);
       plans.push({ diff: planned.diff, apply: () => applyModel(item, planned) });
     }
   }
