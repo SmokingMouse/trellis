@@ -762,7 +762,7 @@ async function routeOne(ctx: RoundCtx, text: string, members: GroupMember[]): Pr
 }
 // ---------------------------------------------------------------- 一轮
 
-function excerpt(text: string, n = 40): string {
+function excerpt(text: string, n = 28): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
