@@ -1,6 +1,6 @@
 ---
 name: trellis-admin
-description: 操作与配置 Trellis 平台。两个面：①平台操作——列会话、看某棵树/某个节点的运行情况（在跑/停着等回答/失败）、读它的回答正文、在某个节点下追问（分支）、在某会话里开平行新树、开全新会话（可带工作目录）、守着一个节点跑完、叫停、回答它停下来等的审批卡/提问卡；②后台配置——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「看看 trellis 上那棵树/那个会话跑得怎么样」「在那棵树上接着问一句」「给 trellis 开棵新树/新会话」「替我盯着它跑完」「它停在审批上了帮我处理」「把那个 run 停了」「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「这个跑完之后自动做 Y」「这个任务上次为什么失败」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「读写这台机器上 Trellis 里的会话/树/节点」或「让某个 agent 定时地、被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、那棵树、隔壁的树、开新树、树的运行情况、盯着跑完、停掉那个节点、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、任务失败、run 历史、看看任务。它同时是 Trellis 的平台内置技能：enhanced chat / project 会话里的 agent 默认就有，且被注入 TRELLIS_ENV/TRELLIS_SESSION_ID/TRELLIS_NODE_ID 而能自我感知——「我是哪个会话的哪个节点」（whoami）、「看我这个画布上别的树」（sessions get .）、「在我自己的会话里开棵平行树」（ask --session .）这类平台内自指操作也归它。边界：操作 Trellis 的会话/节点与 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；跨设备派活给别的机器是 harbor skill，不是这个。
+description: 操作与配置 Trellis 平台。两个面：①平台操作——列会话、看某棵树/某个节点的运行情况（在跑/停着等回答/失败）、读它的回答正文、在某个节点下追问（分支）、在某会话里开平行新树、开全新会话（可带工作目录）、守着一个节点跑完、叫停、回答它停下来等的审批卡/提问卡；②后台配置——建/改自定义 Agent（人设、模型、工具白名单、绑本机技能、隔离度），建自动化任务并挂 cron / 文件变更 / git 推送 / 会话结束触发器，手动跑一次任务，查运行历史与失败原因。凡是用户说「看看 trellis 上那棵树/那个会话跑得怎么样」「在那棵树上接着问一句」「给 trellis 开棵新树/新会话」「替我盯着它跑完」「它停在审批上了帮我处理」「把那个 run 停了」「给 trellis 建个 agent」「加个定时任务」「每天早上自动跑 X」「这个跑完之后自动做 Y」「这个任务上次为什么失败」，都用这个 skill——即使没提到 trellis 三个字，只要意图是「读写这台机器上 Trellis 里的会话/树/节点」或「让某个 agent 定时地、被事件触发地替我干活」就触发；**「长任务跑完后接着做 X」的接续编排也归这里**（正解是触发器，不是让 agent 口头承诺）。触发词：trellis、trellisctl、那棵树、隔壁的树、开新树、树的运行情况、盯着跑完、停掉那个节点、建个 agent、配 agent、自定义 agent、自动化任务、定时任务、cron、每天自动、定时跑、跑完之后、完成后接着、任务失败、run 历史、看看任务。它同时是 Trellis 的平台内置技能：enhanced chat / project 会话里的 agent 默认就有，且被注入 TRELLIS_ENV/TRELLIS_SESSION_ID/TRELLIS_NODE_ID 而能自我感知——「我是哪个会话的哪个节点」（whoami）、「看我这个画布上别的树」（sessions get .）、「在我自己的会话里开棵平行树」（ask --session .）这类平台内自指操作也归它。**跨机派活**也归这里：「让 office / devbox 那台机器上的 Trellis 去跑 X」「把这件事派到另一台机器、跑完把结果拿回来」用 `trellisctl machines` / `dispatch --machine` / `dispatch-status`（同一 hub 用户名下的 Trellis 机器之间）。边界：操作 Trellis 的会话/节点与 agents / tasks 配置，不改 Trellis 自身代码（那是普通仓库改动）；派活给不跑 Trellis 的设备（harbor 坐席）是 harbor skill，不是这个。
 ---
 
 # Trellis 平台操作与后台配置
@@ -65,6 +65,22 @@ bun <skill目录>/scripts/trellisctl.ts whoami   # 我是哪个会话的哪个�
 - `retry <nodeId>` —— 失败节点原地重跑（复用同一节点，不新建）。
 
 与任务面的分工：`ask` 是「现在、替我问一句 / 干一件」，`tasks` 是「反复、无人值守」。一次性的事不建任务。组合技：`ask --new` 跑长活拿到 sessionId，再建任务挂 `session_done` 触发器 = 「那个会话跑完后自动做 X」。
+
+## 跨机派活：同一 hub 下的别的 Trellis 机器
+
+多台 Trellis 经 hub 连在一起时（设置 → 机器互联），可以把一件事派到另一台机器上**新开会话**执行，再把回答取回来。链路：本机 `/api/hub/dispatch` → hub `/__gw/relay/dispatch`（本机用自己的机器凭证）→ 目标机器建会话开跑一轮。目标会话标题带 `[由 <来源> 派来]`。
+
+```bash
+bun .../trellisctl.ts machines                                  # 有哪些机器、在不在线、能不能派
+bun .../trellisctl.ts dispatch "在 ~/proj 跑一下测试，失败的贴出来" --machine office --workspace /home/me/proj --wait
+bun .../trellisctl.ts dispatch-status office/<会话id>/<节点id>     # 没 --wait 时事后取结果
+```
+
+- **两道策略闸，hub 判**：来源机器要开「允许内容离开这台机器」（prompt 会把这边的上下文带出去），目标机器要开「允许别的机器派活」。远端机器默认都关。被拒时 hub 给的原因原样打出来 —— 告诉用户去设置 → 机器互联开哪个，不要绕路（不要改用 via / 直连目标机器的 /api/chat）。
+- **prompt 要自足**：目标机器看不到你的会话，只看得到这段 prompt（上限 32000 字符）。路径写目标机器上的；大段材料让它自己去读，别塞进 prompt。
+- **它真花钱、真改文件**：`--workspace` = 在目标机器那个目录里以 project 会话跑（工具全放行）；不给 = 增强对话（scratch 目录 + 全工具）。派之前把「派到哪台、在哪个目录、干什么」给用户看一眼。
+- **`--wait` 轮询有上限**（默认 600s，最多 1800s），超时不是失败：拿回显的句柄 `dispatch-status <句柄>` 接着查。状态 `waiting` = 目标机器上停在审批/提问卡上，跨机回不了，让用户点回显里的链接去那台机器上处理。
+- 只能取**自己派出去的那一轮**；读目标机器上别的会话不归这条路。
 
 ## 配置只读面：模型 / 登录 / 机器人 / 版本
 

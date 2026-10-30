@@ -1271,6 +1271,117 @@ async function cmdRespond() {
   console.log(`✓ 已回（${allow ? "allow" : "deny"}）—— run 继续。守它：trellisctl wait ${nodeId}`);
 }
 
+// ---------------------------------------------------------------------------
+// 跨机派活（hub 名下的别的机器）：本机 /api/hub/* → hub /__gw/relay/* → 目标机器。
+// 形状见 lib/hub-dispatch.ts（这里刻意不 import，脚本要能在仓库外独立跑）。
+// ---------------------------------------------------------------------------
+
+const MAX_DISPATCH_PROMPT = 32_000;
+const MAX_WAIT_S = 1800;
+
+type DispatchStatusBody = {
+  machine: string;
+  status: "running" | "waiting" | "done" | "error";
+  response?: string;
+  truncated?: boolean;
+  errorMessage?: string | null;
+  pendingTool?: string | null;
+  url: string;
+};
+type MachineRow = { name: string; self: boolean; online: boolean; shareOut: boolean; acceptDispatch: boolean };
+
+/** 派活句柄：<机器>/<会话id>/<节点id>，dispatch 回显的就是它，dispatch-status 收它。 */
+function parseHandle(args: string[]): { machine: string; sessionId: string; nodeId: string } {
+  const parts = args.length >= 3 ? args.slice(0, 3) : (args[0] ?? "").split("/");
+  const [machine, sessionId, nodeId] = parts;
+  if (!machine || !sessionId || !nodeId) {
+    die(`要派活句柄 <机器>/<会话id>/<节点id>（dispatch 的回显里有），或三个参数分开写`);
+  }
+  return { machine, sessionId, nodeId };
+}
+
+async function cmdMachines() {
+  const { body } = await api("GET", "/api/hub/machines");
+  if (has("--json")) return out(body);
+  for (const m of body.machines ?? []) {
+    const flags = [
+      m.self ? "本机" : "",
+      m.online ? "在线" : "离线",
+      m.acceptDispatch ? "可派活" : "不收派活",
+      m.shareOut ? "可外流" : "不外流",
+    ].filter(Boolean);
+    console.log(`${m.self ? "●" : m.online && m.acceptDispatch ? "○" : "·"} ${pad(m.name, 20)} ${flags.join(" · ")}`);
+  }
+  const self = ((body.machines ?? []) as MachineRow[]).find((m) => m.self);
+  if (self && !self.shareOut) {
+    console.log(`\n本机未允许内容外流 —— 派活会被 hub 拒绝（设置 → 机器互联里开）。`);
+  }
+}
+
+async function pollDispatch(
+  h: { machine: string; sessionId: string; nodeId: string },
+  timeoutS: number,
+): Promise<DispatchStatusBody> {
+  const deadline = Date.now() + Math.min(timeoutS, MAX_WAIT_S) * 1000;
+  let delay = 2000;
+  for (;;) {
+    const { body } = await api("GET", `/api/hub/dispatch/${h.machine}/${h.sessionId}/${h.nodeId}`);
+    if (body.status === "done" || body.status === "error" || body.status === "waiting") return body;
+    if (Date.now() + delay > deadline) return body;
+    await Bun.sleep(delay);
+    delay = Math.min(delay * 1.5, 10_000);
+  }
+}
+
+function printDispatchStatus(s: DispatchStatusBody, handle: string) {
+  if (has("--json")) return out(s);
+  if (s.status === "done") {
+    console.log(`✓ ${s.machine} 跑完了\n`);
+    console.log(s.response || "（空回答）");
+    if (s.truncated) console.log(`\n（回答太长已截断 —— 去 ${s.machine} 上看全文：${s.url}）`);
+    return;
+  }
+  if (s.status === "error") die(`${s.machine} 上以 error 收场：${s.errorMessage ?? "（无错误信息）"}\n  界面：${s.url}`);
+  if (s.status === "waiting") {
+    console.log(`⏸ ${s.machine} 上停在 ${s.pendingTool ?? "交互工具"} 等人回答 —— 跨机回不了，请去界面处理：${s.url}`);
+    return;
+  }
+  console.log(`… 还在 ${s.machine} 上跑（已吐 ${(s.response ?? "").length} 字符）。接着查：trellisctl dispatch-status ${handle}`);
+}
+
+async function cmdDispatch() {
+  const prompt = readTextArg(pos[1], "要派的任务");
+  if (prompt.length > MAX_DISPATCH_PROMPT) {
+    die(`prompt ${prompt.length} 字符，上限 ${MAX_DISPATCH_PROMPT} —— 大段材料让目标机器自己去读`);
+  }
+  const machine = flagVal("--machine") ?? die("要 --machine <机器名>（trellisctl machines 看有哪些）");
+  const payload: Record<string, string> = { machine, prompt };
+  const ws = flagVal("--workspace");
+  if (ws) payload.workspace = ws; // 目标机器上的路径，本机不校验存在性
+  const provider = flagVal("--provider");
+  if (provider) payload.provider = provider;
+  const { body } = await api("POST", "/api/hub/dispatch", payload);
+  const handle = `${body.machine}/${body.sessionId}/${body.nodeId}`;
+  console.log(`▶ 派到 ${body.machine} 了  session=${body.sessionId}  node=${body.nodeId}`);
+  console.log(`  句柄：${handle}`);
+  console.log(`  界面（经 hub）：${body.url}`);
+  if (!has("--wait")) {
+    console.log(`  未带 --wait，先撤了（run 在 ${body.machine} 上继续）。取结果：trellisctl dispatch-status ${handle}`);
+    return;
+  }
+  const s = await pollDispatch(body, Number(flagVal("--timeout") ?? 600));
+  printDispatchStatus(s, handle);
+}
+
+async function cmdDispatchStatus() {
+  const h = parseHandle(pos.slice(1));
+  const handle = `${h.machine}/${h.sessionId}/${h.nodeId}`;
+  const s = has("--wait")
+    ? await pollDispatch(h, Number(flagVal("--timeout") ?? 600))
+    : (await api("GET", `/api/hub/dispatch/${h.machine}/${h.sessionId}/${h.nodeId}`)).body;
+  printDispatchStatus(s, handle);
+}
+
 const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
 
 自我感知（跑在 Trellis 会话里时，平台注入 TRELLIS_ENV/SESSION_ID/NODE_ID/URL）：
@@ -1301,6 +1412,13 @@ const USAGE = `trellisctl —— Trellis 平台操作 + 后台配置
   abort <nodeId>                           叫停在跑的节点
   respond <nodeId> --allow|--deny          回答暂停中的审批卡 / 提问卡
     [--answers '{"问":"选项"}'] [--input <json>] [--message <文本>] [--always]
+
+跨机派活（hub 名下的别的机器；策略在设置 → 机器互联）：
+  machines [--json]                        同一用户名下的机器：在线、可不可派活、可不可外流
+  dispatch <任务|@file|-> --machine <名>    派到那台机器上新开会话跑一轮（真 spawn、花钱）
+    [--workspace <那台机器上的目录>]        project 模式；缺省 = 增强对话
+    [--provider <id>] [--wait [--timeout 秒=600，上限 1800]]
+  dispatch-status <机器/会话id/节点id> [--wait] [--json]   取结果：running / waiting / done / error
 
 后台配置（agents / tasks / triggers）：
   health                                   探活：连的是哪个实例、认证拿到没
@@ -1372,6 +1490,9 @@ async function main() {
     case "abort": return cmdAbort();
     case "wait": return cmdWait();
     case "respond": return cmdRespond();
+    case "machines": return cmdMachines();
+    case "dispatch": return cmdDispatch();
+    case "dispatch-status": return cmdDispatchStatus();
     default:
       console.log(USAGE);
       process.exit(cmd ? 1 : 0);
