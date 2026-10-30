@@ -61,10 +61,11 @@ export function topicFor(tag: string): string {
   return crypto.createHash("sha256").update(tag).digest("base64url").slice(0, 32);
 }
 
-/** 按 payload.kind 定 TTL / urgency：「等你回答」一直有效到被处理；「完成」过了几小时再收到没意义。 */
+/** 按 payload.kind 定 TTL / urgency：「等你回答」一直有效到被处理；「完成」过了几小时再收到没意义；
+ *  收回（resolved）与「等你回答」同 TTL——它靠同一个 Topic 顶掉手机离线时还没送达的那条。 */
 export function sendOptionsFor(kind: string, tag: string): PushSendOptions {
   return {
-    TTL: kind === "waiting" ? 24 * 3600 : 6 * 3600,
+    TTL: kind === "waiting" || kind === "resolved" ? 24 * 3600 : 6 * 3600,
     urgency: kind === "waiting" ? "high" : "normal",
     topic: topicFor(tag),
   };

@@ -121,7 +121,8 @@ export async function sendToUser(
 
 // ── 中继 payload 改写 ───────────────────────────────────────────────────────
 
-const KINDS = new Set(["done", "waiting", "test"]);
+// resolved：收回同 tag 的「需要你」（node 侧 lib/server/herdr-push.ts 发，SW 静默替换后关掉）。
+const KINDS = new Set(["done", "waiting", "test", "resolved"]);
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s);
 
 /** node 发来的 JSON → 校验后的 PushPayload；不合法返回 null。 */

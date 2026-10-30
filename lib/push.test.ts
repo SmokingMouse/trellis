@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildHerdrPushPayload,
   buildPushPayload,
   dedupeKey,
   isGoneStatus,
@@ -168,7 +169,28 @@ describe("parseSubscription", () => {
   });
 });
 
+describe("buildHerdrPushPayload", () => {
+  test("需要你：标题带 workspace · tab，url 直达窗格（绑了会话进会话、没绑进总览），tag 按窗格", () => {
+    const p = buildHerdrPushPayload({ kind: "waiting", paneId: "w1:p1", sessionId: "s1", where: "trellis · review", text: "提问：用哪个分支？" });
+    expect(p).toMatchObject({ kind: "waiting", title: "需要你 · trellis · review", body: "提问：用哪个分支？", tag: "trellis:herdr:w1:p1", url: "/?session=s1&pane=w1%3Ap1" });
+    expect(buildHerdrPushPayload({ kind: "waiting", paneId: "w1:p1", sessionId: null, where: "x" }).url).toBe("/?view=herdr&pane=w1%3Ap1");
+  });
+  test("已完成 / 收回与「需要你」同 tag（原地替换）", () => {
+    const done = buildHerdrPushPayload({ kind: "done", paneId: "w1:p1", sessionId: "s1", where: "trellis · review", text: "**好了**" });
+    expect(done).toMatchObject({ title: "已完成 · trellis · review", body: "好了", tag: "trellis:herdr:w1:p1", url: "/?session=s1" });
+    const resolved = buildHerdrPushPayload({ kind: "resolved", paneId: "w1:p1", sessionId: null, where: "trellis · review" });
+    expect(resolved).toMatchObject({ kind: "resolved", title: "已处理 · trellis · review", tag: "trellis:herdr:w1:p1" });
+  });
+  test("自起会话的「等你回答」url 带 focus=pending（落地滚到待处理卡）", () => {
+    expect(buildPushPayload({ kind: "waiting", sessionId: "s1", nodeId: "n1" }).url).toBe("/?session=s1&node=n1&focus=pending");
+    expect(buildPushPayload({ kind: "done", sessionId: "s1", nodeId: "n1" }).url).toBe("/?session=s1&node=n1");
+  });
+});
+
 describe("waitingBadgeCount", () => {
+  test("Herdr「需要你」的窗格也算；绑定的会话已在快照里的不重复算", () => {
+    expect(waitingBadgeCount([{ sessionId: "a" }], [{ paneId: "p1", sessionId: "a" }, { paneId: "p2", sessionId: null }, { paneId: "p3", sessionId: "b" }])).toBe(3);
+  });
   test("按会话去重计数", () => {
     expect(waitingBadgeCount([])).toBe(0);
     expect(waitingBadgeCount([{ sessionId: "a" }, { sessionId: "a" }, { sessionId: "b" }])).toBe(2);

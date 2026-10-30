@@ -23,9 +23,16 @@ sqlite.resetDBForTests();
 const push = await import("./push");
 const { persistPendingInteraction } = await import("./repo");
 const relayClient = await import("../hub-relay-client");
+const { FakeTimers } = await import("../__fixtures__/fake-timers");
+// 「已完成」的 60s 延迟、去重窗口、前台心跳都走 push.ts 的可注入时钟。整个文件共用一只、只往前走
+// （去重 / 心跳表是进程级的，时间倒退会把上一个用例的记录误判成「窗口内」）。
+const clock = new FakeTimers(Date.now());
+push.setPushTimersForTests(clock);
+const DELAY = 60_000;
 
 afterAll(() => {
   push.setPushSenderForTests(null);
+  push.setPushTimersForTests(null);
   sqlite.resetDBForTests();
   if (prevDb === undefined) delete process.env.TRELLIS_DB_PATH;
   else process.env.TRELLIS_DB_PATH = prevDb;
@@ -97,32 +104,79 @@ test("订阅 upsert 按 endpoint 唯一；发送 404/410 自动删、其它错�
   expect(only.sent).toBe(1);
 });
 
-test("pushTurnDone：带 payload 发出；同会话 30s 内去重；前台在看则不推；开关关闭不推", async () => {
+test("pushTurnDone：60s 后才推，带 payload；延迟内重复结束只推一次；开关关闭不推", async () => {
   push.saveSubscription(sub("p"), null);
   const a = seedSession();
   push.pushTurnDone(a.nodeId);
   push.pushTurnDone(a.nodeId);
+  clock.advance(DELAY - 1);
+  await flush();
+  expect(sent.length).toBe(0);
+  clock.advance(1);
   await flush();
   expect(sent.length).toBe(1);
   expect(sent[0].payload).toMatchObject({ kind: "done", title: `已完成 · 会话${seq}`, body: "答完了", tag: `trellis:${a.sessionId}`, url: `/?session=${a.sessionId}&node=${a.nodeId}` });
   expect(sent[0].opts.urgency).toBe("normal");
   expect(sent[0].opts.topic?.length).toBe(32);
-
-  const b = seedSession();
-  push.reportPresence("client-1", b.sessionId, true);
-  push.pushTurnDone(b.nodeId);
+  clock.advance(DELAY * 2);
   await flush();
   expect(sent.length).toBe(1);
-  push.reportPresence("client-1", b.sessionId, false);
-  push.pushTurnDone(b.nodeId);
-  await flush();
-  expect(sent.length).toBe(2);
 
   const c = seedSession();
   sqlite.getDB().prepare("INSERT INTO app_settings(key,value,updated_at) VALUES ('push_done','0',1)").run();
   push.pushTurnDone(c.nodeId);
+  clock.advance(DELAY);
   await flush();
-  expect(sent.length).toBe(2);
+  expect(sent.length).toBe(1);
+});
+
+test("pushTurnDone：延迟窗口里在前台看过（哪怕之后切走）、或已读，就不推", async () => {
+  push.saveSubscription(sub("seen"), null);
+  const b = seedSession();
+  push.pushTurnDone(b.nodeId);
+  clock.advance(10_000);
+  push.reportPresence("client-1", b.sessionId, true);
+  clock.advance(10_000);
+  push.reportPresence("client-1", b.sessionId, false);
+  clock.advance(DELAY);
+  await flush();
+  expect(sent.length).toBe(0);
+
+  // 结束时就在前台、到点前切走：也算看过
+  const c = seedSession();
+  push.reportPresence("client-2", c.sessionId, true);
+  push.pushTurnDone(c.nodeId);
+  push.reportPresence("client-2", c.sessionId, true);
+  push.reportPresence("client-2", c.sessionId, false);
+  clock.advance(DELAY);
+  await flush();
+  expect(sent.length).toBe(0);
+
+  // 已读标记（/api/nodes/[id]/read）
+  const d = seedSession();
+  push.pushTurnDone(d.nodeId);
+  sqlite.getDB().prepare("UPDATE nodes SET read_at = ? WHERE id = ?").run(clock.now(), d.nodeId);
+  clock.advance(DELAY);
+  await flush();
+  expect(sent.length).toBe(0);
+
+  // 没人看：照推
+  const e = seedSession();
+  push.pushTurnDone(e.nodeId);
+  clock.advance(DELAY);
+  await flush();
+  expect(sent.map((x) => x.payload.sessionId)).toEqual([e.sessionId]);
+});
+
+test("pushTurnDone：延迟窗口里会话又开始干活（新节点），这一轮不推", async () => {
+  push.saveSubscription(sub("again"), null);
+  const a = seedSession();
+  push.pushTurnDone(a.nodeId);
+  clock.advance(5_000);
+  sqlite.getDB().prepare("INSERT INTO nodes(id,session_id,question,response,status,created_at) VALUES (?,?,'q2','','streaming',2)").run(`${a.nodeId}-next`, a.sessionId);
+  clock.advance(DELAY);
+  await flush();
+  expect(sent.length).toBe(0);
 });
 
 test("没有订阅时触发点什么都不做", async () => {
@@ -166,6 +220,7 @@ test("挂在 hub 下：本机没有订阅也照样交给 hub 中继（tenant 凭
   try {
     const a = seedSession();
     push.pushTurnDone(a.nodeId);
+    clock.advance(DELAY);
     await flush();
     expect(sent.length).toBe(0);
     expect(posted.length).toBe(1);
@@ -178,6 +233,7 @@ test("挂在 hub 下：本机没有订阅也照样交给 hub 中继（tenant 凭
     push.saveSubscription(sub("direct"), null);
     const b = seedSession();
     push.pushTurnDone(b.nodeId);
+    clock.advance(DELAY);
     await flush();
     expect(sent.map((s) => s.endpoint)).toEqual([sub("direct").endpoint]);
     expect(posted.length).toBe(2);
