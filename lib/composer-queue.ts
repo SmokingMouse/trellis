@@ -19,6 +19,7 @@
 // 原样恢复；follow / paused 一起存，刷新落回同一分支末端时照常续发。
 
 import type { NodeAttachment, NodeStatus } from "@/lib/types";
+import { uuid } from "@/lib/uuid";
 
 // ── 偏好：运行中发送的默认方式 ────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ function shift(q: ComposerQueue, targetId: string): QueueStep {
 }
 
 export function newQueuedMessage(text: string, attachments: NodeAttachment[], now = Date.now()): QueuedMessage {
-  return { id: crypto.randomUUID(), text, attachments, createdAt: now };
+  return { id: uuid(), text, attachments, createdAt: now };
 }
 
 /** 运行中发送 → 入队。队列原本为空时从当前目标开始跟随。 */

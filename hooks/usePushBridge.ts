@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { PRESENCE_BEAT_MS } from "@/lib/push";
 import { registerPushWorker } from "@/lib/push-client";
+import { uuid } from "@/lib/uuid";
 
 // 主界面与 Web Push 的两条桥：
 //
@@ -34,7 +35,7 @@ export function usePushBridge(): void {
   }, []);
 
   useEffect(() => {
-    clientIdRef.current ??= crypto.randomUUID();
+    clientIdRef.current ??= uuid();
     const clientId = clientIdRef.current;
     const report = (visible: boolean, beacon = false) => {
       const body = JSON.stringify({ clientId, sessionId, visible });
