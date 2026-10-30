@@ -25,10 +25,12 @@ const TIMEOUT_MS = 180_000;
 
 // ── 来源会话 ──────────────────────────────────────────────────────────────
 
-/** 最近 50 个普通会话（kind='user'、未归档、至少一轮已完成），q 按标题模糊匹配。 */
+/** 最近 50 个普通会话（kind='user'、未归档、至少一轮已完成），q 按标题模糊匹配。
+ * 外部线程镜像（origin='external'，Agent 服务的 claude / codex 线程）不算：真库里它们多是
+ * 自动化 / 测试线程，标题清一色「claude 外部会话」，会把用户自己聊的会话挤出前 50。 */
 export function listDistillSources(q = ""): DistillSource[] {
   const terms = q.trim().split(/\s+/).filter(Boolean).slice(0, 5);
-  const where = ["s.kind = 'user'", "s.archived = 0"];
+  const where = ["s.kind = 'user'", "s.archived = 0", "s.origin <> 'external'"];
   const params: string[] = [];
   for (const t of terms) {
     where.push("s.title LIKE ? ESCAPE '\\'");

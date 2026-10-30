@@ -99,11 +99,13 @@ describe("parseDistillOutput", () => {
 });
 
 describe("来源与正文", () => {
-  test("listDistillSources：只列 kind=user、未归档、有已完成回答的，按最近更新，可按标题搜", () => {
+  test("listDistillSources：只列 kind=user、非外部线程、未归档、有已完成回答的，按最近更新，可按标题搜", () => {
     seed("a", [["q1", "a1"], ["q2", "a2"]], { updatedAt: 3000, workspace: testDir });
     seed("b", [["q", "a"]], { updatedAt: 4000 });
     seed("t", [["q", "a"]], { kind: "task", updatedAt: 5000 });
     seed("r", [["q", "a"]], { kind: "role", updatedAt: 6000 });
+    seed("ext", [["q", "a"]], { updatedAt: 7000 });
+    sqlite.getDB().prepare("UPDATE sessions SET origin = 'external' WHERE id = 'ext'").run();
     const list = distill.listDistillSources();
     expect(list.map((s) => s.sessionId)).toEqual(["b", "a"]);
     expect(list[1]).toMatchObject({ title: "会话 a", nodeCount: 2, workspace: path.basename(testDir) });
