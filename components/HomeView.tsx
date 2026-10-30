@@ -244,7 +244,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
           <h1
             id="home-greeting"
             data-home-greeting
-            className="ui-enter-up text-[26px] leading-tight font-semibold tracking-[-0.02em] text-ink-strong max-md:text-title"
+            className="ui-enter-up text-[26px] leading-tight md:leading-[1.5] font-semibold tracking-[-0.02em] text-ink-strong max-md:text-title"
           >
             {greetingFor(now)}
           </h1>
@@ -355,7 +355,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                       <li
                         key={pendingKey(item)}
                         data-home-pending={pendingKey(item)}
-                        className={cn(TROW, "flex-wrap gap-y-2")}
+                        className={cn(TROW, "group flex-wrap gap-y-2 md:flex-nowrap md:focus-within:bg-surface-hover")}
                       >
                         <Badge variant={item.kind === "approval" ? "accent" : "warn"} dot={false}>
                           {item.kind === "approval" ? "审批" : "提问"}
@@ -367,15 +367,21 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                             <span className="tabular-nums"> · {formatRelativeTimeShort(item.createdAt, now.getTime())}</span>
                           </span>
                         </span>
-                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                          <Button size="sm" variant={item.kind === "approval" ? "ghost" : "secondary"} onClick={() => void jump(item)}>
-                            去处理
-                          </Button>
-                          {item.kind === "approval" && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5 md:relative">
+                          {/* 桌面原型 .trow 行尾只留一个常显主操作：审批行是「允许一次」（9/28 裁决：允许一次为主按钮，
+                              不能藏进 hover），提问行是「去处理」；其余（拒绝 / 去处理）收进行 hover / focus-within。手机照旧全显。 */}
+                          {item.kind === "approval" ? (
                             <>
+                              <span className={ROW_SECONDARY}>
+                                <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
+                                <Button size="sm" variant="ghost" onClick={() => void jump(item)}>去处理</Button>
+                              </span>
                               <Button size="sm" variant="primary" onClick={() => void decide(item, true)}>允许一次</Button>
-                              <Button size="sm" variant="secondary" onClick={() => void decide(item, false)}>拒绝</Button>
                             </>
+                          ) : (
+                            <Button size="sm" variant="secondary" onClick={() => void jump(item)}>
+                              去处理
+                            </Button>
                           )}
                         </span>
                       </li>
@@ -467,7 +473,7 @@ export function HomeView({ isMobile }: { isMobile: boolean }) {
                             )}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{s.title}</span>
-                          <span className="inline-flex h-[22px] max-w-44 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11.5px] text-ink-muted shadow-hairline max-md:hidden">
+                          <span className="inline-flex h-5 max-w-44 shrink-0 items-center gap-1 rounded-chip bg-surface-muted px-1.5 text-[11px] text-ink-muted shadow-hairline max-md:hidden">
                             <Icon icon={Folder} size="sm" className="size-3 shrink-0 text-ink-faint" />
                             <span className="truncate">{sessionPlace(s, labels)}</span>
                           </span>
@@ -564,9 +570,14 @@ const START_BTN = "min-h-7 rounded-full px-3 text-[12.5px] text-ink-muted hover:
 
 // 原型 .trow：卡内分隔行（分隔线由 HomeCard 的 divide-y 画），两行文字 + 行尾动作
 const TROW =
-  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11";
+  "flex w-full items-center gap-2.5 px-3 py-2.5 md:py-[11px] text-left transition-colors duration-100 hover:bg-surface-hover max-md:min-h-11";
 const ROW_TITLE = "block truncate text-ui font-medium text-ink";
 const ROW_SUB = "block truncate text-[11.5px] leading-snug text-ink-faint";
+// 行内次要动作：手机 contents（照旧和主动作并排），桌面平时收起、行 hover / 键盘焦点进行内时才出现——
+// Tab 先落到行内标题按钮，focus-within 展开后下一跳就能进到这些按钮，键盘可达。
+// 桌面展开时浮在主动作左侧（盖住标题末尾、底色同行 hover 色），不挤压标题、不引起重排。
+const ROW_SECONDARY =
+  "contents md:absolute md:inset-y-0 md:right-full md:hidden md:items-center md:gap-1.5 md:bg-surface-hover md:pr-1.5 md:pl-3 md:group-hover:flex md:group-focus-within:flex";
 
 function RowButton({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void } & Record<`data-${string}`, string>) {
   return (
@@ -710,8 +721,8 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
 
 
   return (
-    <li data-home-herdr-pending={pane.paneId} className="flex flex-col transition-colors duration-100 hover:bg-surface-hover">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3 py-2.5">
+    <li data-home-herdr-pending={pane.paneId} className="group flex flex-col transition-colors duration-100 hover:bg-surface-hover md:focus-within:bg-surface-hover">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3 py-2.5 md:flex-nowrap md:py-[11px]">
         <Badge variant={kind === "approval" ? "accent" : "warn"} dot={false}>
           {kind === "approval" ? "审批" : "提问"}
         </Badge>
@@ -729,7 +740,9 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
             )}
           </span>
         </button>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 md:relative">
+          {/* 回复 / 终端：桌面收进 hover / focus-within（行内回复展开时常显，好收起） */}
+          <span className={replying ? "contents" : ROW_SECONDARY}>
           <Button
             size="sm"
             variant="ghost"
@@ -747,6 +760,7 @@ function HomeHerdrPendingItem({ pane, now }: { pane: HerdrConsolePane; now: numb
             <Icon icon={Terminal} size="sm" className="text-ink-faint" />
             终端
           </Button>
+          </span>
           <Button
             size="sm"
             variant="secondary"
