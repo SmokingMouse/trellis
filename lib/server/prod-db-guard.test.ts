@@ -70,6 +70,13 @@ describe("prodDbGuardError", () => {
     expect(prodDbGuardError({ ...base(), dirs: [worktree], dbPath: tmpDb, dbIsDeployed: false })).toBeNull();
   });
 
+  test("测试进程在主 checkout 里也不许碰 prod 库；临时库照旧", () => {
+    expect(prodDbGuardError({ ...base(), dirs: [mainCheckout], isTest: true })).toContain("TRELLIS_DB_PATH");
+    expect(prodDbGuardError({ ...base(), dirs: [release], isTest: true })).not.toBeNull();
+    expect(prodDbGuardError({ ...base(), dirs: [mainCheckout], isTest: true, dbIsDeployed: false })).toBeNull();
+    expect(prodDbGuardError({ ...base(), dirs: [mainCheckout], isTest: true, explicitDbPath: "/tmp/t.db" })).toBeNull();
+  });
+
   test("isDeployedDb 认 deploy.ts 的发布布局（current / releases）", () => {
     expect(isDeployedDb(prodDb)).toBe(true);
   });

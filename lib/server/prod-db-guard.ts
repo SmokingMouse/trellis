@@ -12,6 +12,10 @@ import path from "node:path";
 // 主 checkout 的 .git 是目录，都照旧放行；只覆盖了 HOME 的隔离实例连的是临时库（旁边没有
 // current / releases 这套发布布局），也放行。
 // 真要拿 worktree 里的代码连 prod 库，显式设 TRELLIS_ALLOW_PROD_DB=1。
+//
+// 测试进程（bun test 会设 NODE_ENV=test）不分 checkout 一律不许碰 prod 库：测试之间靠
+// TRELLIS_DB_PATH 共享一个 getDB() 单例，某个文件收尾时清掉环境变量、下一个文件恰好没
+// 自己设，就会悄悄落到默认库——这种顺序相关的泄漏时有时无，主 checkout 里跑一样会中。
 
 /** 从 dir 往上找第一个 .git，返回它是文件（链接 worktree）、目录（主 checkout）还是没有。 */
 export function gitMarkerKind(dir: string): "file" | "dir" | null {
@@ -48,10 +52,18 @@ export function prodDbGuardError(opts: {
   dbPath: string;
   /** dbPath 是否在部署出来的 trellis 家目录里（isDeployedDb） */
   dbIsDeployed: boolean;
+  /** bun test 进程（NODE_ENV=test） */
+  isTest?: boolean;
 }): string | null {
   if (opts.explicitDbPath) return null;
   if (opts.allowFlag === "1") return null;
   if (!opts.dbIsDeployed) return null;
+  if (opts.isTest) {
+    return (
+      `测试进程拒绝打开 prod 库 ${opts.dbPath}：用到库的测试文件要在开头把 ` +
+      "TRELLIS_DB_PATH 设成临时路径（并在 afterAll 里 resetDBForTests）。"
+    );
+  }
   const inWorktree = opts.dirs.find((d) => gitMarkerKind(d) === "file");
   if (!inWorktree) return null;
   return (
@@ -71,6 +83,7 @@ export function assertProdDbAccessAllowed(dbPath: string, codeDir?: string): voi
     dirs,
     dbPath,
     dbIsDeployed: isDeployedDb(dbPath),
+    isTest: process.env.NODE_ENV === "test",
   });
   if (err) throw new Error(err);
 }
