@@ -28,6 +28,7 @@ import {
   Plug,
   Plus,
   Search,
+  Server,
   Trash2,
   BrushCleaning,
   type LucideIcon,
@@ -86,6 +87,9 @@ import { MobileNavDrawer } from "@/components/MobileNavDrawer";
 import { PullToRefresh } from "@/components/PullToRefresh";
 import { AppModeSwitch } from "@/components/herdr/AppModeSwitch";
 import { LocalMachineCard, NodeSwitcher } from "./NodeSwitcher";
+import { HubInboxRows } from "@/components/HubInbox";
+import { useHubInbox } from "@/hooks/useHubNodes";
+import { mergeInbox } from "@/lib/hub-fanout";
 import { HerdrModeSidebar } from "@/components/herdr/HerdrModeSidebar";
 import { switchAppMode, useAppMode } from "@/hooks/useAppMode";
 import { useHerdrConsole } from "@/hooks/useHerdrConsole";
@@ -765,6 +769,43 @@ export function SessionSidebar() {
     );
   };
 
+  // 「其他机器」区（hub 多机互联）：别的机器上等你回答 / 在跑 / 刚完成的会话，紧跟「等你处理」。
+  // 当前机器自己的这些已在上面「等你处理」与行首状态槽里，这里只列其他机器，不重复。
+  // 不是多机（直连单人版 / 只有 hub 本机）时 hubInbox 为 null，整组不画；有远端但全空也不画，
+  // 只剩离线机器时仍画灰行（让人知道那台看不到，而不是没事）。点行整页切到那台机器的会话。
+  const hubInbox = useHubInbox();
+  const hubMerged = useMemo(() => (hubInbox ? mergeInbox(hubInbox) : null), [hubInbox]);
+  const renderHubInbox = () => {
+    if (!hubMerged || (hubMerged.items.length === 0 && hubMerged.unavailable.length === 0)) return null;
+    const id = "__hub_inbox";
+    const isCollapsed = collapsed.has(id);
+    const { items, unavailable } = hubMerged;
+    const count = (s: string) => items.filter((i) => i.status === s).length;
+    return (
+      <div data-sidebar-hub-inbox className="mb-1.5">
+        <GroupRow
+          level={0}
+          icon={Server}
+          collapsed={isCollapsed}
+          label="其他机器"
+          title={`其他机器 · ${[
+            count("waiting") ? `${count("waiting")} 个等你回答` : "",
+            count("running") ? `${count("running")} 个在跑` : "",
+            count("done") ? `${count("done")} 个刚完成` : "",
+            unavailable.length ? `${unavailable.length} 台连不上` : "",
+          ].filter(Boolean).join(" · ") || "暂无"}（点击切到那台机器打开）`}
+          badge={items.length ? String(items.length) : null}
+          onToggle={() => toggleCollapsed(id)}
+        />
+        {!isCollapsed && (
+          <IndentGuide level={0}>
+            <HubInboxRows items={items} unavailable={unavailable} padLeft={PAD(1)} />
+          </IndentGuide>
+        )}
+      </div>
+    );
+  };
+
   // Chat 也可折叠。用合成 id 走 projects 那套同一个 collapsed 集合，
   // 复用扁平分组状态。
   const renderGroup = (id: string, label: string, list: Session[], icon?: LucideIcon) => {
@@ -1225,10 +1266,11 @@ export function SessionSidebar() {
             只认鼠标 / 触控板，触屏照旧走 .press-row。 */}
         <GlideList>
         {mode === "herdr" ? (
-          <HerdrModeSidebar pinned={<>{renderAttention()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
+          <HerdrModeSidebar pinned={<>{renderAttention()}{renderHubInbox()}{renderPinned()}</>} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
         <>
         {renderAttention()}
+        {renderHubInbox()}
         {renderPinned()}
         {visibleSessions.length === 0 ? (
           pinnedSessions.length > 0 || attentionRows.length > 0 ? null : <div className="px-3 py-6 text-center text-label text-ink-faint">
