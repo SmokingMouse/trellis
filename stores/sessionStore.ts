@@ -48,6 +48,7 @@ import {
 import { type TreePanelView, isTreePanelView } from "@/lib/tree-panel";
 import { uuid } from "@/lib/uuid";
 import { BUTLER_AGENT_ID } from "@/lib/butler";
+import { useRoleStore } from "@/stores/roleStore";
 import { loadStartupView, PREF_KEYS } from "@/lib/prefs";
 
 // Phase A reference creation payloads. Mirrors the server's CreateRequest
@@ -638,6 +639,10 @@ type State = {
   // 钉成内置管家、mode 钉成 chat。不落 localStorage —— 它是一次性的入口态，
   // 不能污染用户自己选的 draftAgentId。任何 newConversation / 切会话都清掉。
   butlerDraft: boolean;
+  // 角色草稿（照 butlerDraft）：值 = 角色 id。角色还没有固定会话时点它落到这里，
+  // 首页换成「跟 X 说」的空对话；下一次 streamRoot 带上角色的 agentId / 目录建会话，
+  // 服务端认出角色后回写 home_session_id。newConversation / 切会话都清掉。
+  roleDraft: string | null;
   // Herdr 操作台总览（/herdr）：和首页一样是 session 为空时的一个视图。进任何会话
   // 后自然让位；newConversation / openHome 清掉。
   herdrOpen: boolean;
@@ -657,6 +662,8 @@ type Actions = {
   openHome: () => void;
   // /butler 入口：有管家会话就打开最近那条，没有就落到管家草稿首页。
   openButler: () => Promise<void>;
+  // 侧栏点角色：有固定会话就打开它，没有就落到角色草稿（roleDraft）。
+  openRole: (roleId: string) => Promise<void>;
   // /herdr 入口：清空当前会话（同 openHome），亮出 Herdr 总览。
   openHerdr: () => void;
   // ── Workbench Wave 4: VSCode tab management ─────────────────────────
@@ -1026,6 +1033,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
   homeOpen: false,
   homeFocusNonce: 0,
   butlerDraft: false,
+  roleDraft: null,
   herdrOpen: false,
 
   hydrate: async (sessionId) => {
@@ -1103,7 +1111,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     set(s => ({ navigationVersion: s.navigationVersion + 1 }));
     const loaded = await loadSessionInternal(sessionId, set);
     if (!loaded) return;
-    if (get().butlerDraft) set({ butlerDraft: false });
+    if (get().butlerDraft || get().roleDraft) set({ butlerDraft: false, roleDraft: null });
     // Wave 4: landing on a session clears its "finished while away" badge.
     set((s) => {
       if (!s.unreadSessionIds.has(sessionId)) return s;
@@ -1154,6 +1162,7 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       // orphan italic tab pointing at nothing.
       previewSessionId: null,
       butlerDraft: false,
+      roleDraft: null,
       herdrOpen: false,
     });
     set((s) => ({ homeOpen: true, homeFocusNonce: s.homeFocusNonce + 1 }));
@@ -1190,6 +1199,19 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
     }
     get().newConversation();
     set({ butlerDraft: true, homeOpen: true, mobileNavOpen: false });
+  },
+
+  openRole: async (roleId) => {
+    // /open 只回 home 会话 id（还在就给，归档 / 没聊过 = null），不建会话 ——
+    // 第一句话发出去才建，免得点一下就多一条空会话。
+    const r = await useRoleStore.getState().open(roleId);
+    if (r?.sessionId) {
+      await get().previewSession(r.sessionId);
+      set({ mobileNavOpen: false });
+      return;
+    }
+    get().newConversation();
+    set({ roleDraft: roleId, homeOpen: true, mobileNavOpen: false });
   },
 
   // ── Workbench Wave 4: VSCode tab management ───────────────────────────
@@ -1701,14 +1723,25 @@ export const useSessionStore = create<State & Actions>((set, get) => ({
       draftSystemPrompt,
       draftAgentId,
       butlerDraft,
+      roleDraft,
       session,
     } = get();
     const sessionId = opts?.attachToCurrentSession ? session?.id : undefined;
+    // 角色草稿：mode / agent / 目录都按角色钉死（服务端会再强制一遍），不吃用户的草稿偏好。
+    const draftRole = !sessionId && roleDraft
+      ? useRoleStore.getState().roles.find((r) => r.id === roleDraft) ?? null
+      : null;
     // Mode + workspace + systemPrompt are only sent when creating a new
     // session. When attaching to an existing session, the server reads them
     // from the locked session row. systemPrompt only applies to chat mode.
     const modeFields = sessionId
       ? {}
+      : roleDraft
+        ? {
+          mode: "project" as const,
+          agentId: roleDraft,
+          ...(draftRole ? { workspacePath: draftRole.workDir ?? draftRole.homeDir } : {}),
+        }
       : butlerDraft
         ? { mode: "chat" as const, agentId: BUTLER_AGENT_ID }
         : {
