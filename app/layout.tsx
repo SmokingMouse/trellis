@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { PREF_KEYS } from "@/lib/prefs";
 import { AppProviders } from "@/components/ui/AppProviders";
+import { NewRoleHost } from "@/components/NewRoleModal";
 import { splashStartupImages } from "@/lib/pwa-splash";
 
 export const metadata: Metadata = {
@@ -94,7 +95,11 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="min-h-full">
-        <AppProviders>{children}</AppProviders>
+        <AppProviders>
+          {children}
+          {/* 新建角色弹窗：侧栏 ＋ 和设置页都开这一个（开关在 roleStore），挂在根上两边都够得着 */}
+          <NewRoleHost />
+        </AppProviders>
       </body>
     </html>
   );

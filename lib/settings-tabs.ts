@@ -12,6 +12,7 @@
 // 用 Record 保证新增 key 漏配时编译失败（同 lib/tool-registry.ts 的做法）。
 export type SettingsTabIconKey =
   | "bot"
+  | "contact-round"
   | "calendar-clock"
   | "cpu"
   | "messages-square"
@@ -54,6 +55,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
     group: "automation",
     icon: "bot",
     title: "自定义人设：系统提示词、技能、模型、工具白/黑名单",
+  },
+  {
+    segment: "roles",
+    label: "角色",
+    group: "automation",
+    icon: "contact-round",
+    title: "有名字、有记忆的长期搭档：资料、人设、记忆（USER.md 与 memories）",
   },
   {
     segment: "tasks",
