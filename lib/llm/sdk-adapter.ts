@@ -43,14 +43,23 @@ const APPROVAL_ASK_TOOLS = "all" as const;
  * workspace / cwd / resume / forkSession / persistence / attachments / env /
  * onCanUseTool 一概不动 —— 那几个字段撑着 chat B-fork 和 project 的 per-lineage
  * isolation 两套本来就很脆的机制，agent 掺一脚必炸。 */
-function applyAgent(base: RunOptions, a: AgentSpawn): RunOptions {
+export function applyAgent(base: RunOptions, a: AgentSpawn): RunOptions {
   const out: RunOptions = { ...base };
+
+  // 角色记忆（docs/roles-p1.md）：角色目录挂成额外工作区。合并而不是覆盖 ——
+  // additionalWorkspaces 只在 workspace 在场时生效，角色会话恒为 project 所以总在场。
+  if (a.addDirs?.length) {
+    out.additionalWorkspaces = [...(base.additionalWorkspaces ?? []), ...a.addDirs];
+  }
 
   if (a.runtime === "codex") {
     // Codex has no --agent registry. Preserve the same product-level persona
     // by replacing the mode prompt with the resolved agent prompt. Selected
     // skills have already been inlined by agent-pack.ts.
-    out.systemPrompt = a.systemPrompt;
+    // 角色记忆提示没有 --append-system-prompt 可走，直接接在人设后面。
+    out.systemPrompt = a.appendSystemPrompt
+      ? [a.systemPrompt, a.appendSystemPrompt].filter(Boolean).join("\n\n---\n\n")
+      : a.systemPrompt;
     if (!a.inheritEnv) {
       out.environmentSkills = false;
       out.environmentSkillNames = a.environmentSkillNames;
@@ -69,6 +78,11 @@ function applyAgent(base: RunOptions, a: AgentSpawn): RunOptions {
   out.agent = a.slug;
   if (a.pluginDir) out.pluginDirs = [a.pluginDir];
   if (a.agentsJson) out.agents = a.agentsJson;
+  // --append-system-prompt 与 --agent 可同给（真 CLI 实测）：人设仍来自 agent，
+  // 记忆说明追加在后。与已有 extraArgs（任务的 --max-budget-usd）合并。
+  if (a.appendSystemPrompt) {
+    out.extraArgs = [...(base.extraArgs ?? []), "--append-system-prompt", a.appendSystemPrompt];
+  }
 
   if (!a.inheritEnv) {
     // 隔离 = 不读本机 CLAUDE.md / settings / skill。**连 MCP 一起没了**
